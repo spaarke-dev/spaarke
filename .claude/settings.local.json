@@ -9,7 +9,12 @@
       "Bash(git remote add:*)",
       "Bash(git push:*)",
       "Bash(git ls-tree:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(xargs git add)",
+      "Read(//c/code_files/spaarke spe/spe-infrastructure/**)",
+      "Bash(dotnet restore:*)",
+      "Bash(dotnet build:*)",
+      "Bash(dotnet publish:*)"
     ],
     "deny": [],
     "ask": []

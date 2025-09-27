@@ -62,6 +62,12 @@ manifest*.xml.bak
 appsettings.Development.json
 appsettings.Local.json
 
+# Local configuration files
+*-config.local.json
+*-registrations.local.json
+sharepoint-config.local.json
+functions-config.local.json
+
 # AI workspace temporary files
 dev/ai-workspace/active-context/*.tmp
 dev/ai-workspace/sessions/*/temp/
