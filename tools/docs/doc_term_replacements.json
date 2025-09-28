@@ -1,0 +1,52 @@
+{
+  "rules": [
+    {
+      "find": "Function App",
+      "replace": "App Service (Minimal API + Workers)"
+    },
+    {
+      "find": "HTTP trigger",
+      "replace": "Minimal API endpoint"
+    },
+    {
+      "find": "ServiceBus trigger",
+      "replace": "BackgroundService worker (Service Bus subscriber)"
+    },
+    {
+      "find": "Durable Function",
+      "replace": "queue-based sequencing via BackgroundService worker"
+    },
+    {
+      "find": "DocumentAuthorizationMiddleware",
+      "replace": "DocumentAuthorizationFilter (endpoint filter)"
+    },
+    {
+      "find": "UacAuthorizationMiddleware",
+      "replace": "DocumentAuthorizationFilter (endpoint filter)"
+    },
+    {
+      "find": "DataverseSecurityContextMiddleware",
+      "replace": "SpaarkeContextMiddleware"
+    },
+    {
+      "find": "IResourceStore",
+      "replace": "SpeFileStore"
+    },
+    {
+      "find": "SpeResourceStore",
+      "replace": "SpeFileStore"
+    },
+    {
+      "find": "HybridCacheService",
+      "replace": "IDistributedCache helpers (Redis-only)"
+    },
+    {
+      "find": "IMemoryCache",
+      "replace": "IDistributedCache (Redis)"
+    },
+    {
+      "find": "Microsoft.NET.Sdk.Functions",
+      "replace": "Microsoft.NET.Sdk.Web"
+    }
+  ]
+}
