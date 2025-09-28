@@ -9,9 +9,9 @@ public sealed class SecurityHeadersMiddleware
     {
         var h = ctx.Response.Headers;
         if (!h.ContainsKey("X-Content-Type-Options")) h.Append("X-Content-Type-Options", "nosniff");
-        if (!h.ContainsKey("Referrer-Policy"))       h.Append("Referrer-Policy", "no-referrer");
-        if (!h.ContainsKey("X-Frame-Options"))       h.Append("X-Frame-Options", "DENY");
-        if (!h.ContainsKey("X-XSS-Protection"))      h.Append("X-XSS-Protection", "0");
+        if (!h.ContainsKey("Referrer-Policy")) h.Append("Referrer-Policy", "no-referrer");
+        if (!h.ContainsKey("X-Frame-Options")) h.Append("X-Frame-Options", "DENY");
+        if (!h.ContainsKey("X-XSS-Protection")) h.Append("X-XSS-Protection", "0");
         if (!h.ContainsKey("Strict-Transport-Security"))
             h.Append("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
         // Locked-down CSP for API responses (safe for JSON/file responses)

@@ -14,7 +14,12 @@
       "Read(//c/code_files/spaarke spe/spe-infrastructure/**)",
       "Bash(dotnet restore:*)",
       "Bash(dotnet build:*)",
-      "Bash(dotnet publish:*)"
+      "Bash(dotnet publish:*)",
+      "Bash(dotnet test:*)",
+      "Bash(git pull:*)",
+      "Bash(dotnet format:*)",
+      "Bash(pwsh:*)",
+      "Bash(dotnet sln add:*)"
     ],
     "deny": [],
     "ask": []

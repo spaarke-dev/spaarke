@@ -15,7 +15,7 @@ public class CustomWebAppFactory : WebApplicationFactory<Program>
     {
         builder.ConfigureAppConfiguration((ctx, cfg) =>
         {
-            var dict = new Dictionary<string,string?>
+            var dict = new Dictionary<string, string?>
             {
                 ["Cors:AllowedOrigins"] = "https://localhost:5173",
                 ["UAMI_CLIENT_ID"] = "test-client-id",

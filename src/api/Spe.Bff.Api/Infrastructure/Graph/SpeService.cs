@@ -61,7 +61,7 @@ public sealed class SpeService : ISpeService
         return drive;
     }
 
-    public async Task<DriveItem?> UploadSmallAsync(string containerId, string path, Stream content, CancellationToken ct = default)
+    public Task<DriveItem?> UploadSmallAsync(string containerId, string path, Stream content, CancellationToken ct = default)
     {
         using var activity = System.Diagnostics.Activity.Current;
         activity?.SetTag("operation", "UploadSmall");
@@ -79,7 +79,7 @@ public sealed class SpeService : ISpeService
 
         _logger.LogInformation("Successfully uploaded file {ItemId} to container {ContainerId}",
             item?.Id, containerId);
-        return item;
+        return Task.FromResult(item);
     }
 
     public async Task<IList<FileStorageContainer>?> ListContainersAsync(Guid containerTypeId)
@@ -102,7 +102,7 @@ public sealed class SpeService : ISpeService
         return response?.Value;
     }
 
-    public async Task<IList<DriveItem>> ListChildrenAsync(string driveId, string? itemId = null, CancellationToken ct = default)
+    public Task<IList<DriveItem>> ListChildrenAsync(string driveId, string? itemId = null, CancellationToken ct = default)
     {
         using var activity = System.Diagnostics.Activity.Current;
         activity?.SetTag("operation", "ListChildren");
@@ -120,10 +120,10 @@ public sealed class SpeService : ISpeService
 
         var result = page?.Value ?? new List<DriveItem>();
         _logger.LogInformation("Found {Count} children in drive {DriveId}", result.Count, driveId);
-        return result;
+        return Task.FromResult<IList<DriveItem>>(result);
     }
 
-    public async Task<UploadSession?> CreateUploadSessionAsync(string containerId, string path, CancellationToken ct = default)
+    public Task<UploadSession?> CreateUploadSessionAsync(string containerId, string path, CancellationToken ct = default)
     {
         using var activity = System.Diagnostics.Activity.Current;
         activity?.SetTag("operation", "CreateUploadSession");
@@ -152,7 +152,7 @@ public sealed class SpeService : ISpeService
 
         _logger.LogInformation("Created upload session {UploadUrl} for file {Path}",
             session?.UploadUrl, path);
-        return session;
+        return Task.FromResult(session);
     }
 
     public async Task<HttpResponseMessage> UploadChunkAsync(UploadSession session, Stream file, long start, long length, CancellationToken ct = default)
