@@ -5,7 +5,7 @@ using Microsoft.Graph.Models;
 using Services;
 using Spe.Bff.Api.Models;
 
-namespace Api;
+namespace Spe.Bff.Api.Api;
 
 public static class OBOEndpoints
 {
@@ -41,7 +41,7 @@ public static class OBOEndpoints
             {
                 return ProblemDetailsHelper.FromGraphException(ex);
             }
-        }).RequireRateLimiting("graph-read");
+        }); // TODO: .RequireRateLimiting("graph-read");
 
 
         // PUT: small upload (as user)
@@ -67,7 +67,7 @@ public static class OBOEndpoints
             {
                 return ProblemDetailsHelper.FromGraphException(ex);
             }
-        }).RequireRateLimiting("graph-write");
+        }); // TODO: .RequireRateLimiting("graph-write");
 
 
         // POST: create upload session (as user)
@@ -100,7 +100,7 @@ public static class OBOEndpoints
             {
                 return ProblemDetailsHelper.FromGraphException(ex);
             }
-        }).RequireRateLimiting("graph-write");
+        }); // TODO: .RequireRateLimiting("graph-write");
 
         // PUT: upload chunk (as user)
         app.MapPut("/api/obo/upload-session/chunk", async (
@@ -159,7 +159,7 @@ public static class OBOEndpoints
             {
                 return Results.Problem(statusCode: 500, title: "Upload chunk failed");
             }
-        }).RequireRateLimiting("graph-write");
+        }); // TODO: .RequireRateLimiting("graph-write");
 
         // PATCH: update item (rename/move)
         app.MapPatch("/api/obo/drives/{driveId}/items/{itemId}", async (
@@ -195,7 +195,7 @@ public static class OBOEndpoints
             {
                 return ProblemDetailsHelper.FromGraphException(ex);
             }
-        }).RequireRateLimiting("graph-write");
+        }); // TODO: .RequireRateLimiting("graph-write");
 
 
         // GET: download content with range support (enhanced)
@@ -263,7 +263,7 @@ public static class OBOEndpoints
             {
                 return Results.Problem(statusCode: 500, title: "Download failed");
             }
-        }).RequireRateLimiting("graph-read");
+        }); // TODO: .RequireRateLimiting("graph-read");
 
         // DELETE: delete item (as user)
         app.MapDelete("/api/obo/drives/{driveId}/items/{itemId}", async (
@@ -292,7 +292,7 @@ public static class OBOEndpoints
             {
                 return Results.Problem(statusCode: 500, title: "Delete failed");
             }
-        }).RequireRateLimiting("graph-write");
+        }); // TODO: .RequireRateLimiting("graph-write");
 
         return app;
     }
