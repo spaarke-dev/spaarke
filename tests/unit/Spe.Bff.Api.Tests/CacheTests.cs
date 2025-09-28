@@ -158,7 +158,7 @@ public class DistributedCacheExtensionsTests
         result.Should().Be("versioned-value");
 
         // Should be able to retrieve with the same version
-        var result2 = await memoryCache.GetOrCreateAsync<string>("test-key", "v1", async () =>
+        var result2 = await memoryCache.GetOrCreateAsync<string>("test-key", "v1", () =>
         {
             throw new InvalidOperationException("Should not call factory");
         }, TimeSpan.FromMinutes(5));
@@ -197,10 +197,10 @@ public class DistributedCacheExtensionsTests
 
         await Assert.ThrowsAsync<OperationCanceledException>(async () =>
         {
-            await memoryCache.GetOrCreateAsync<string>("test-key", async (ct) =>
+            await memoryCache.GetOrCreateAsync<string>("test-key", (ct) =>
             {
                 ct.ThrowIfCancellationRequested();
-                return "value";
+                return Task.FromResult("value");
             }, TimeSpan.FromMinutes(5), cts.Token);
         });
     }

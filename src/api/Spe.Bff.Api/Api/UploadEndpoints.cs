@@ -125,7 +125,7 @@ public static class UploadEndpoints
         .RequireAuthorization("canwritefiles");
 
         // PUT /api/upload-session/chunk - Upload file chunk
-        app.MapPut("/api/upload-session/chunk", async (
+        app.MapPut("/api/upload-session/chunk", (
             HttpRequest req,
             ILogger<Program> logger,
             HttpContext context,

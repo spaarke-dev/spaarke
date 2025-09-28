@@ -1,0 +1,23 @@
+# Global ownership
+* @spaarke-dev
+
+# Power Platform specific files
+power-platform/ @spaarke-dev @power-platform-team
+docs/adr/ADR-002-no-heavy-plugins.md @spaarke-dev @power-platform-team
+
+# API and core services
+src/api/ @spaarke-dev @api-team
+src/shared/ @spaarke-dev @api-team
+
+# CI/CD and infrastructure
+.github/ @spaarke-dev @devops-team
+scripts/ @spaarke-dev @devops-team
+Directory.Packages.props @spaarke-dev @devops-team
+
+# Security and architecture decisions
+docs/adr/ @spaarke-dev @architecture-team
+.github/workflows/ @spaarke-dev @devops-team
+
+# Documentation
+docs/ @spaarke-dev @docs-team
+README.md @spaarke-dev @docs-team

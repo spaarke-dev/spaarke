@@ -1,0 +1,39 @@
+version: 2
+updates:
+  # Enable version updates for .NET packages
+  - package-ecosystem: "nuget"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "spaarke-dev"
+    assignees:
+      - "spaarke-dev"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    ignore:
+      # Ignore major version updates for stable packages
+      - dependency-name: "Microsoft.CrmSdk.*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "Microsoft.Graph"
+        update-types: ["version-update:semver-major"]
+
+  # Enable security updates for GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "spaarke-dev"
+    assignees:
+      - "spaarke-dev"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
