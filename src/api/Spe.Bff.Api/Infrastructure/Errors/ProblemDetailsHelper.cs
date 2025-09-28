@@ -53,6 +53,19 @@ public static class ProblemDetailsHelper
         );
     }
 
+    public static IResult Forbidden(string reasonCode)
+    {
+        return Results.Problem(
+            title: "Forbidden",
+            statusCode: 403,
+            detail: "Access denied",
+            extensions: new Dictionary<string, object?>
+            {
+                ["reasonCode"] = reasonCode
+            }
+        );
+    }
+
     private static string GetErrorCode(ServiceException ex)
     {
         return ex.Message?.Contains("Authorization_RequestDenied") == true ? "Authorization_RequestDenied" :

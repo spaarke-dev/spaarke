@@ -23,5 +23,10 @@
     <PackageReference Include="Polly" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\..\shared\Spaarke.Core\Spaarke.Core.csproj" />
+    <ProjectReference Include="..\..\shared\Spaarke.Dataverse\Spaarke.Dataverse.csproj" />
+  </ItemGroup>
+
 
 </Project>
