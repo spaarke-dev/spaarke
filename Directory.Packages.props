@@ -35,6 +35,7 @@
     <PackageVersion Include="Newtonsoft.Json" Version="13.0.1" />
 
     <!-- Microsoft Extensions packages -->
+    <PackageVersion Include="Microsoft.Extensions.Caching.Abstractions" Version="8.0.0" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.0" />
 

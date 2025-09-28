@@ -3,6 +3,7 @@ using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
 using Spaarke.Core.Auth;
 using Spaarke.Core.Auth.Rules;
+using Spaarke.Core.Cache;
 using Spaarke.Dataverse;
 
 namespace Spe.Bff.Api.Infrastructure.DI;
@@ -26,20 +27,5 @@ public static class SpaarkeCore
         services.AddScoped<RequestCache>();
 
         return services;
-    }
-}
-
-public class RequestCache
-{
-    private readonly Dictionary<string, object> _cache = new();
-
-    public T? Get<T>(string key) where T : class
-    {
-        return _cache.TryGetValue(key, out var value) ? value as T : null;
-    }
-
-    public void Set<T>(string key, T value) where T : class
-    {
-        _cache[key] = value;
     }
 }
