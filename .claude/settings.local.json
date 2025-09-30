@@ -20,7 +20,19 @@
       "Bash(dotnet format:*)",
       "Bash(pwsh:*)",
       "Bash(dotnet sln add:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(rm:*)",
+      "Bash(rmdir:*)",
+      "Bash(cat:*)",
+      "Bash(xargs cat:*)",
+      "Bash(az keyvault secret set:*)",
+      "Bash(az keyvault secret list:*)",
+      "Bash(dotnet run:*)",
+      "Bash(curl:*)",
+      "Bash(pac:*)",
+      "Bash(findstr:*)",
+      "Bash(dir:*)",
+      "Bash(git rm:*)"
     ],
     "deny": [],
     "ask": []

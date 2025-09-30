@@ -68,6 +68,20 @@ appsettings.Local.json
 sharepoint-config.local.json
 functions-config.local.json
 
+# Configuration files with sensitive data
+docs/CONFIGURATION_REQUIREMENTS.md
+**/appsettings.json
+**/appsettings.*.json
+!**/appsettings.Development.json.template
+!**/appsettings.Production.json.template
+
+# Secrets and keys
+*.secret
+*.key
+*.pem
+*.pfx
+clientsecret.txt
+
 # AI workspace temporary files
 dev/ai-workspace/active-context/*.tmp
 dev/ai-workspace/sessions/*/temp/

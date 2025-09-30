@@ -8,6 +8,7 @@ using Spe.Bff.Api.Api;
 using System.Threading.RateLimiting;
 using Microsoft.Graph;
 using Polly;
+using Spaarke.Dataverse;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -42,6 +43,9 @@ builder.Services.AddMemoryCache(); // Temporary fallback
 
 // Singleton GraphServiceClient factory
 builder.Services.AddSingleton<IGraphClientFactory, Spe.Bff.Api.Infrastructure.Graph.GraphClientFactory>();
+
+// Dataverse service
+builder.Services.AddScoped<IDataverseService, DataverseService>();
 
 // Health checks
 builder.Services.AddHealthChecks();
@@ -109,6 +113,64 @@ app.UseAuthorization();
 
 // Health checks endpoints
 app.MapHealthChecks("/healthz");
+
+// Dataverse connection test endpoint
+app.MapGet("/healthz/dataverse", async (IDataverseService dataverseService) =>
+{
+    try
+    {
+        var isConnected = await dataverseService.TestConnectionAsync();
+        if (isConnected)
+        {
+            return Results.Ok(new { status = "healthy", message = "Dataverse connection successful" });
+        }
+        else
+        {
+            return Results.Problem(
+                detail: "Dataverse connection test failed",
+                statusCode: 503,
+                title: "Service Unavailable"
+            );
+        }
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(
+            detail: ex.Message,
+            statusCode: 503,
+            title: "Dataverse Connection Error"
+        );
+    }
+});
+
+// Dataverse CRUD operations test endpoint
+app.MapGet("/healthz/dataverse/crud", async (IDataverseService dataverseService) =>
+{
+    try
+    {
+        var testPassed = await dataverseService.TestDocumentOperationsAsync();
+        if (testPassed)
+        {
+            return Results.Ok(new { status = "healthy", message = "Dataverse CRUD operations successful" });
+        }
+        else
+        {
+            return Results.Problem(
+                detail: "Dataverse CRUD operations test failed",
+                statusCode: 503,
+                title: "Service Unavailable"
+            );
+        }
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(
+            detail: ex.Message,
+            statusCode: 503,
+            title: "Dataverse CRUD Test Error"
+        );
+    }
+});
 
 // Detailed ping endpoint
 app.MapGet("/ping", (HttpContext context) =>

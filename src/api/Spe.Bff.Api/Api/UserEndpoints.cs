@@ -1,5 +1,6 @@
 using Spe.Bff.Api.Infrastructure.Errors;
 using Services;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Spe.Bff.Api.Api;
 
@@ -14,8 +15,8 @@ public static class UserEndpoints
         // GET /api/me - Get current user info
         app.MapGet("/api/me", async (
             HttpContext ctx,
-            IOboSpeService oboSvc,
-            ILogger<Program> logger,
+            [FromServices] IOboSpeService oboSvc,
+            [FromServices] ILogger<Program> logger,
             CancellationToken ct) =>
         {
             var traceId = ctx.TraceIdentifier;
@@ -63,8 +64,8 @@ public static class UserEndpoints
         app.MapGet("/api/me/capabilities", async (
             string? containerId,
             HttpContext ctx,
-            IOboSpeService oboSvc,
-            ILogger<Program> logger,
+            [FromServices] IOboSpeService oboSvc,
+            [FromServices] ILogger<Program> logger,
             CancellationToken ct) =>
         {
             var traceId = ctx.TraceIdentifier;

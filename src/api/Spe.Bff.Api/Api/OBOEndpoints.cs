@@ -4,6 +4,7 @@ using Microsoft.Graph;
 using Microsoft.Graph.Models;
 using Services;
 using Spe.Bff.Api.Models;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Spe.Bff.Api.Api;
 
@@ -19,7 +20,7 @@ public static class OBOEndpoints
             string? orderBy,
             string? orderDir,
             HttpContext ctx,
-            IOboSpeService oboSvc,
+            [FromServices] IOboSpeService oboSvc,
             CancellationToken ct) =>
         {
             var bearer = GetBearer(ctx);
@@ -47,7 +48,7 @@ public static class OBOEndpoints
         // PUT: small upload (as user)
         app.MapPut("/api/obo/containers/{id}/files/{*path}", async (
             string id, string path, HttpRequest req, HttpContext ctx,
-            IOboSpeService oboSvc,
+            [FromServices] IOboSpeService oboSvc,
             CancellationToken ct) =>
         {
             var (ok, err) = ValidatePathForOBO(path);
@@ -76,7 +77,7 @@ public static class OBOEndpoints
             string path,
             string? conflictBehavior,
             HttpContext ctx,
-            IOboSpeService oboSvc,
+            [FromServices] IOboSpeService oboSvc,
             CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(path))
@@ -106,7 +107,7 @@ public static class OBOEndpoints
         app.MapPut("/api/obo/upload-session/chunk", async (
             HttpRequest request,
             HttpContext ctx,
-            IOboSpeService oboSvc,
+            [FromServices] IOboSpeService oboSvc,
             CancellationToken ct) =>
         {
             var bearer = GetBearer(ctx);
@@ -167,7 +168,7 @@ public static class OBOEndpoints
             string itemId,
             UpdateFileRequest request,
             HttpContext ctx,
-            IOboSpeService oboSvc,
+            [FromServices] IOboSpeService oboSvc,
             CancellationToken ct) =>
         {
             var bearer = GetBearer(ctx);
@@ -204,7 +205,7 @@ public static class OBOEndpoints
             string itemId,
             HttpRequest request,
             HttpContext ctx,
-            IOboSpeService oboSvc,
+            [FromServices] IOboSpeService oboSvc,
             CancellationToken ct) =>
         {
             var bearer = GetBearer(ctx);
@@ -270,7 +271,7 @@ public static class OBOEndpoints
             string driveId,
             string itemId,
             HttpContext ctx,
-            IOboSpeService oboSpeService,
+            [FromServices] IOboSpeService oboSpeService,
             CancellationToken ct) =>
         {
             var bearer = GetBearer(ctx);
