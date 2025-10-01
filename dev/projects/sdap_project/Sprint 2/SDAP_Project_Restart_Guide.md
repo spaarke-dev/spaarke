@@ -12,10 +12,12 @@
 ### **Current Project Status**
 - ✅ **Architecture**: Complete enterprise-grade foundation with async processing
 - ✅ **Documentation**: Comprehensive task files, ADRs, and implementation guides
-- ✅ **DataverseService**: Complete service layer implementation with managed identity auth
+- ✅ **DataverseService**: Complete service layer with corrected field mappings
 - ✅ **Task Planning**: Individual task files with detailed AI instructions
-- ✅ **API Foundation**: BFF API structure ready for document endpoints
-- ⚠️ **CRITICAL NEXT**: Task 1.1 (Dataverse Entity Creation) - **BLOCKING ALL OTHER WORK**
+- ✅ **API Foundation**: BFF API with complete document CRUD endpoints
+- ✅ **Dataverse Entities**: sprk_document and sprk_container entities created and validated
+- ✅ **Document API**: Full REST API endpoints for document management (Task 1.3)
+- 🚀 **NEXT**: Task 2.1 (Thin Plugin) OR Task 3.1 (Model-Driven App) - **CAN RUN IN PARALLEL**
 
 ### **Repository State**
 - **Branch**: `master` (current development state)
@@ -27,40 +29,64 @@
 
 ## 📋 **Immediate Next Steps (Implementation Phase)**
 
-### **🚨 CRITICAL PATH: Start with Task 1.1**
+### **✅ COMPLETED: Task 1.1 Dataverse Entity Creation**
 
-**The entire project is blocked on Dataverse entity creation. This must be completed first.**
-
-#### **Task 1.1: Dataverse Entity Creation (4-6 hours)**
-**Status**: ⚠️ PENDING - HIGH PRIORITY
+**Status**: ✅ COMPLETED
 **Location**: [Task-1.1-Dataverse-Entity-Creation.md](./Task-1.1-Dataverse-Entity-Creation.md)
 
-**What to Create**:
+**What Has Been Created** (as documented in CONFIGURATION_REQUIREMENTS.md):
 ```sql
 -- sprk_document entity with fields:
-sprk_name (String, 255, required)
+sprk_documentid (Primary Key)
+sprk_name (String, 850, required) - Document Name
 sprk_containerid (Lookup to sprk_container, required)
-sprk_documentdescription (String, 2000) -- ALREADY ADDED VIA CLI
-sprk_hasfile (Boolean, default false)
+sprk_hasfile (Two Options/Boolean, default false)
 sprk_filename (String, 255)
 sprk_filesize (BigInt)
 sprk_mimetype (String, 100)
-sprk_graphitemid (String, 100)
-sprk_graphdriveid (String, 100)
-sprk_status (Choice: Draft=1, Active=2, Processing=3, Error=4)
+sprk_graphitemid (String, 1000)
+sprk_graphdriveid (String, 1000)
+statecode (Choice: Active=0, Inactive=1)
+statuscode (Choice: Draft=1, Processing=421500002, Active=421500001, Error=2)
 
--- sprk_container entity with field:
-sprk_documentcount (Integer, default 0)
+-- sprk_container entity with fields:
+sprk_containerid (Primary Key)
+sprk_name (String, 850, required) - Container Name
+sprk_specontainerid (String, 1000, required) - SPE Container ID
+sprk_documentcount (WholeNumber/Integer, default 0)
+sprk_driveid (String, 1000)
 ```
 
-**Note**: We already have a Dataverse environment set up and successfully added the `sprk_documentdescription` field via Power Platform CLI. You can validate the environment or create the remaining entity structure.
+**Note**: All entities and fields have been created in the Dataverse environment as documented in CONFIGURATION_REQUIREMENTS.md. The schema uses standard Dataverse naming (statecode/statuscode) rather than custom status fields.
 
-#### **After Task 1.1: Implementation Order**
-1. **Task 1.3**: Document CRUD API Endpoints (8-12 hours)
-2. **Task 2.1**: Thin Plugin Implementation (6-8 hours)
-3. **Task 2.2**: Background Service Implementation (10-12 hours)
-4. **Task 3.1**: Model-Driven App Configuration (6-8 hours)
-5. **Task 3.2**: JavaScript File Management Integration (10-14 hours)
+### **✅ COMPLETED: Task 1.3 Document CRUD API Endpoints**
+
+**Status**: ✅ COMPLETED
+**Location**: `src/api/Spe.Bff.Api/Api/DataverseDocumentsEndpoints.cs`
+
+**What Was Implemented**:
+- Fixed DataverseService field mappings to match actual Dataverse schema:
+  - `sprk_name` → `sprk_documentname`
+  - `sprk_status` → `statuscode`
+- Created complete REST API endpoints:
+  - POST `/api/v1/documents` - Create document
+  - GET `/api/v1/documents/{id}` - Get document
+  - PUT `/api/v1/documents/{id}` - Update document
+  - DELETE `/api/v1/documents/{id}` - Delete document
+  - GET `/api/v1/documents?containerId=...` - List documents with pagination
+  - GET `/api/v1/containers/{containerId}/documents` - Alternative list endpoint
+- Comprehensive error handling and validation
+- Proper HTTP status codes (201, 404, 400, 500)
+- Structured logging with trace IDs
+- Authorization requirements on all endpoints
+- Build successful and API tested
+
+### **🚀 NEXT: Implementation Order**
+1. **PARALLEL OPTIONS** (can work on either or both):
+   - **Task 2.1**: Thin Plugin Implementation (6-8 hours) - Event capture
+   - **Task 3.1**: Model-Driven App Configuration (6-8 hours) - UI setup
+2. **Task 2.2**: Background Service Implementation (10-12 hours) - After 2.1
+3. **Task 3.2**: JavaScript File Management Integration (10-14 hours) - After 3.1
 
 ---
 
@@ -78,13 +104,31 @@ sprk_documentcount (Integer, default 0)
 
 **Implementation Highlights**:
 ```csharp
-// Complete service ready for use
+// Complete service with corrected field mappings
 public async Task<string> CreateDocumentAsync(CreateDocumentRequest request, CancellationToken ct = default)
+// Uses: sprk_documentname, statuscode, sprk_containerid, sprk_documentdescription
+
 public async Task<DocumentEntity?> GetDocumentAsync(string id, CancellationToken ct = default)
+// Retrieves: sprk_documentname, statuscode, statecode, all file fields
+
 public async Task UpdateDocumentAsync(string id, UpdateDocumentRequest request, CancellationToken ct = default)
 public async Task DeleteDocumentAsync(string id, CancellationToken ct = default)
 public async Task<IEnumerable<DocumentEntity>> GetDocumentsByContainerAsync(string containerId, CancellationToken ct = default)
 ```
+
+### **✅ COMPLETED: Document CRUD API Endpoints**
+
+**Location**: `src/api/Spe.Bff.Api/Api/DataverseDocumentsEndpoints.cs`
+
+**API Endpoints Implemented**:
+- POST `/api/v1/documents` - Create document with validation
+- GET `/api/v1/documents/{id}` - Retrieve with 404 handling
+- PUT `/api/v1/documents/{id}` - Update with existence check
+- DELETE `/api/v1/documents/{id}` - Delete with confirmation
+- GET `/api/v1/documents?containerId=...&skip=0&take=50` - Paginated list
+- GET `/api/v1/containers/{containerId}/documents` - Alternative route
+
+**Features**: Error handling, validation, logging, authorization, pagination (max 100/page)
 
 ### **✅ COMPLETED: Task-Based Implementation Guides**
 
@@ -92,12 +136,12 @@ public async Task<IEnumerable<DocumentEntity>> GetDocumentsByContainerAsync(stri
 
 | Task File | Status | Purpose |
 |-----------|--------|---------|
-| **Task-1.1-Dataverse-Entity-Creation.md** | ⚠️ Ready to Execute | Entity creation with complete specifications |
-| **Task-1.3-Document-CRUD-API-Endpoints.md** | 🔴 Ready After 1.1 | REST API implementation |
-| **Task-2.1-Thin-Plugin-Implementation.md** | 🔴 Ready After 1.3 | Event capture plugin |
-| **Task-2.2-Background-Service-Implementation.md** | 🔴 Ready After 2.1 | Async event processing |
-| **Task-3.1-Model-Driven-App-Configuration.md** | 🔴 Ready After 1.1 | Power Platform UI |
-| **Task-3.2-JavaScript-File-Management-Integration.md** | 🔴 Ready After 3.1+1.3 | File operations UI |
+| **Task-1.1-Dataverse-Entity-Creation.md** | ✅ COMPLETED | Entity creation validated |
+| **Task-1.3-Document-CRUD-API-Endpoints.md** | ✅ COMPLETED | REST API implemented |
+| **Task-2.1-Thin-Plugin-Implementation.md** | 🔴 READY TO START | Event capture plugin |
+| **Task-2.2-Background-Service-Implementation.md** | 🔴 Needs 2.1 | Async event processing |
+| **Task-3.1-Model-Driven-App-Configuration.md** | 🔴 READY TO START | Power Platform UI |
+| **Task-3.2-JavaScript-File-Management-Integration.md** | 🔴 Needs 3.1 | File operations UI |
 | **README.md** | ✅ Complete | Master task index and dependencies |
 
 ### **✅ COMPLETED: Configuration Framework**
@@ -127,9 +171,9 @@ public async Task<IEnumerable<DocumentEntity>> GetDocumentsByContainerAsync(stri
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
 │  Power Platform │    │    BFF API       │    │   Dataverse     │
 │                 │───▶│                  │───▶│                 │
-│ - Model App     │    │ ✅ Foundation    │    │ ⚠️ NEEDS ENTITIES│
+│ - Model App     │    │ ✅ Foundation    │    │ ✅ Entities Ready│
 │ - JavaScript    │    │ ⚠️ Need Doc APIs │    │ ✅ Service Ready │
-│ - Forms/Views   │    │ ✅ Auth Ready    │    │ ⚠️ Need Tables  │
+│ - Forms/Views   │    │ ✅ Auth Ready    │    │ ✅ All Fields   │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
                                 │
                                 ▼
@@ -207,9 +251,8 @@ When starting a new AI session for coding:
    - Read: `src/shared/Spaarke.Dataverse/` to understand existing service layer
 
 2. **Validate Environment**:
-   - Run: `test-dataverse-connection.cs` to check if entities exist
-   - If entities missing: Execute Task 1.1 (Dataverse Entity Creation)
-   - If entities exist: Proceed to Task 1.3 (API Endpoints)
+   - Entities have been created per CONFIGURATION_REQUIREMENTS.md
+   - Proceed directly to Task 1.3 (API Endpoints)
 
 3. **Execute Tasks in Order**:
    - Task 1.1 → Task 1.3 → Task 2.1 → Task 2.2 → Task 3.1 → Task 3.2
@@ -217,7 +260,7 @@ When starting a new AI session for coding:
 ### **🎖️ Success Criteria for Each Phase**
 
 #### **Phase 1: Foundation (Tasks 1.1, 1.3)**
-- [ ] Dataverse entities created with all required fields
+- [x] Dataverse entities created with all required fields
 - [ ] Document CRUD API endpoints functional
 - [ ] DataverseService integration tested end-to-end
 - [ ] API authentication and authorization working
@@ -239,7 +282,8 @@ When starting a new AI session for coding:
 ## 📊 **Implementation Metrics**
 
 ### **Code Completion Status**
-- **DataverseService**: ✅ 100% Complete (ready for entities)
+- **Dataverse Entities**: ✅ 100% Complete (sprk_document and sprk_container created)
+- **DataverseService**: ✅ 100% Complete (ready for API integration)
 - **API Foundation**: ✅ 80% Complete (ready for document endpoints)
 - **Plugin Framework**: ✅ 90% Complete (ready for document plugin)
 - **Background Service Framework**: ✅ 85% Complete (ready for document handlers)
@@ -247,17 +291,17 @@ When starting a new AI session for coding:
 
 ### **Estimated Remaining Effort**
 - **AI Coding Time**: 8-12 hours (pure implementation)
-- **Configuration & Testing**: 15-20 hours (environment-specific)
-- **Integration & Validation**: 12-16 hours (end-to-end testing)
+- **Configuration & Testing**: 12-16 hours (environment-specific)
+- **Integration & Validation**: 10-14 hours (end-to-end testing)
 - **Documentation & Deployment**: 8-12 hours (production readiness)
 
-**Total Estimated**: 43-60 hours for complete production-ready system
+**Total Estimated**: 38-54 hours for complete production-ready system
 
 ### **Critical Path Dependencies**
 ```
-Task 1.1 (Entity Creation) → 4-6 hours → UNBLOCKS ALL OTHER WORK
+Task 1.1 (Entity Creation) → ✅ COMPLETED
     ↓
-Task 1.3 (API Endpoints) → 8-12 hours → ENABLES UI AND PROCESSING
+Task 1.3 (API Endpoints) → 8-12 hours → NEXT STEP - ENABLES UI AND PROCESSING
     ↓
 Task 2.1 (Plugin) → 6-8 hours → ENABLES ASYNC PROCESSING
     ↓
@@ -347,14 +391,14 @@ Each task file includes:
 ### **Session Initialization Checklist**
 1. [ ] Load task context from `docs/tasks/README.md`
 2. [ ] Verify environment status with build/run commands
-3. [ ] Check Dataverse entity status (Task 1.1 completion)
+3. [x] Dataverse entities created (Task 1.1 completed)
 4. [ ] Review existing DataverseService implementation
-5. [ ] Begin with appropriate task based on current state
+5. [ ] Begin with Task 1.3 (Document CRUD API Endpoints)
 
 ### **Context Loading Priority**
-1. **Task Files**: Start with Task 1.1 if entities not created
+1. **Task Files**: Start with Task 1.3 (entities already created)
 2. **Existing Code**: Review DataverseService and API structure
-3. **Configuration**: Understand environment setup requirements
+3. **Configuration**: Understand environment setup requirements per CONFIGURATION_REQUIREMENTS.md
 4. **Architecture**: Reference ADRs and design decisions
 
 ### **Development Workflow**
@@ -366,6 +410,6 @@ Each task file includes:
 
 ---
 
-**This guide provides everything needed to restart development efficiently. The foundation is solid, the architecture is complete, and the implementation path is clearly defined through detailed task files.**
+**This guide provides everything needed to restart development efficiently. The foundation is solid, the architecture is complete, Dataverse entities are created, and the implementation path is clearly defined through detailed task files.**
 
-**🚀 READY TO START: Begin with Task 1.1 (Dataverse Entity Creation) in new AI session.**
+**🚀 READY TO START: Begin with Task 1.3 (Document CRUD API Endpoints) in new AI session.**

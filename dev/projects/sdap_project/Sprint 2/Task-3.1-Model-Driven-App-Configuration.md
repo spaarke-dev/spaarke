@@ -1,10 +1,11 @@
 # Task 3.1: Model-Driven App Configuration
 
 **PHASE:** Power Platform Integration (Days 11-16)
-**STATUS:** 🔴 READY TO START
+**STATUS:** ✅ READY TO START (Schema Verified 2025-09-30)
 **DEPENDENCIES:** Task 1.1 (Entity Creation), Task 2.2 (Background Service)
 **ESTIMATED TIME:** 6-8 hours
 **PRIORITY:** HIGH - User interface foundation
+**SCHEMA REFERENCE:** [docs/dataverse/ACTUAL-ENTITY-SCHEMA.md](../../../docs/dataverse/ACTUAL-ENTITY-SCHEMA.md)
 
 ---
 
@@ -151,9 +152,10 @@ You are implementing the user interface layer that provides business users with 
       <sections>
         <section name="basic_info" label="Basic Information" columns="2">
           <fields>
-            <field name="sprk_name" required="true" />
+            <field name="sprk_documentname" required="true" />
             <field name="sprk_containerid" required="true" />
-            <field name="sprk_status" />
+            <field name="statuscode" />
+            <field name="statecode" />
             <field name="sprk_documentdescription" />
           </fields>
         </section>
@@ -206,7 +208,7 @@ You are implementing the user interface layer that provides business users with 
   <fetchxml>
     <fetch version="1.0" output-format="xml-platform" mapping="logical" distinct="false">
       <entity name="sprk_document">
-        <attribute name="sprk_name" />
+        <attribute name="sprk_documentname" />
         <attribute name="sprk_containerid" />
         <attribute name="sprk_hasfile" />
         <attribute name="sprk_filename" />
@@ -215,15 +217,15 @@ You are implementing the user interface layer that provides business users with 
         <attribute name="sprk_documentid" />
         <order attribute="modifiedon" descending="true" />
         <filter type="and">
-          <condition attribute="sprk_status" operator="eq" value="2" />
+          <condition attribute="statuscode" operator="eq" value="421500001" />
         </filter>
       </entity>
     </fetch>
   </fetchxml>
   <layoutxml>
-    <grid name="resultset" object="sprk_document" jump="sprk_name" select="1" icon="1" preview="1">
+    <grid name="resultset" object="sprk_document" jump="sprk_documentname" select="1" icon="1" preview="1">
       <row name="result" id="sprk_documentid">
-        <cell name="sprk_name" width="200" />
+        <cell name="sprk_documentname" width="200" />
         <cell name="sprk_containerid" width="150" />
         <cell name="sprk_hasfile" width="100" />
         <cell name="sprk_filename" width="200" />
@@ -243,9 +245,10 @@ You are implementing the user interface layer that provides business users with 
   <fetchxml>
     <fetch version="1.0" output-format="xml-platform" mapping="logical" distinct="false">
       <entity name="sprk_document">
-        <attribute name="sprk_name" />
+        <attribute name="sprk_documentname" />
         <attribute name="sprk_containerid" />
-        <attribute name="sprk_status" />
+        <attribute name="statuscode" />
+        <attribute name="statecode" />
         <attribute name="sprk_hasfile" />
         <attribute name="modifiedon" />
         <attribute name="sprk_documentid" />
@@ -254,11 +257,11 @@ You are implementing the user interface layer that provides business users with 
     </fetch>
   </fetchxml>
   <layoutxml>
-    <grid name="resultset" object="sprk_document" jump="sprk_name" select="1" icon="1" preview="1">
+    <grid name="resultset" object="sprk_document" jump="sprk_documentname" select="1" icon="1" preview="1">
       <row name="result" id="sprk_documentid">
-        <cell name="sprk_name" width="200" />
+        <cell name="sprk_documentname" width="200" />
         <cell name="sprk_containerid" width="150" />
-        <cell name="sprk_status" width="100" />
+        <cell name="statuscode" width="100" />
         <cell name="sprk_hasfile" width="100" />
         <cell name="modifiedon" width="150" />
       </row>
@@ -801,6 +804,76 @@ You are implementing the user interface layer that provides business users with 
   </tabs>
 </form>
 ```
+
+---
+
+## ⚠️ KNOWN LIMITATIONS FOR SPRINT 2
+
+**IMPORTANT:** This section documents Sprint 2 scope boundaries and dependencies.
+
+### **Container Management**
+- ✅ Container entity exists in Dataverse with full schema
+- ⚠️ **Container management is READ-ONLY in Sprint 2**
+- ❌ No container CRUD APIs available in BFF
+- ✅ Container views/forms are for display and reference only
+- 📋 Full container management will be added in future sprint
+
+**Impact on UI:**
+- Users can view containers and their document counts
+- Users cannot create/update/delete containers via the app
+- Document creation requires selecting from existing containers
+
+### **Ribbon Commands and File Operations**
+- ✅ Ribbon button definitions included in Task 3.1
+- ⚠️ **File operation buttons will be NON-FUNCTIONAL until Task 3.2**
+- 📋 JavaScript implementation is Task 3.2 dependency
+- ⚠️ Buttons can appear but will show "Not Implemented" messages
+
+**Affected Commands:**
+- Upload File button
+- Download File button
+- Replace File button
+- Delete File button
+
+**Recommendation:** Either hide these buttons initially OR show them with disabled state until Task 3.2 completes.
+
+### **Matter Field**
+- ✅ `sprk_matter` lookup field exists in Dataverse entity
+- ❌ **Matter field is NOT implemented in API or documented in CONFIGURATION_REQUIREMENTS.md**
+- ⚠️ Field is out of scope for Sprint 2
+- 📋 Can be hidden on forms OR left visible for future use
+
+**Impact:** If visible, users can set the matter relationship but no matter-specific functionality exists yet.
+
+### **Field-Level Security**
+- ✅ `sprk_filename` field has `IsSecured=1` in Dataverse
+- ⚠️ **Field Security Profiles MUST be manually configured**
+- 📋 Profiles are NOT automatically created by this task
+
+**Required Manual Steps:**
+1. Create "Document Manager Field Security" profile in Dataverse
+2. Grant Read/Update access to `sprk_filename` field
+3. Create "Document User Field Security" profile
+4. Deny access to `sprk_filename` field
+5. Assign profiles to appropriate users
+
+**Impact:** Without field security profile configuration, either all users see the field OR no users see it (depending on field's default behavior).
+
+### **Status Code Values**
+
+**VERIFIED:** Task 3.1 uses correct Dataverse status code values per CONFIGURATION_REQUIREMENTS.md:
+
+| Value | Label | Usage in Views/Charts |
+|-------|-------|----------------------|
+| 1 | Draft | `<condition attribute="statuscode" operator="eq" value="1" />` |
+| 2 | Error | `<condition attribute="statuscode" operator="eq" value="2" />` |
+| 421500001 | Active | `<condition attribute="statuscode" operator="eq" value="421500001" />` |
+| 421500002 | Processing | `<condition attribute="statuscode" operator="eq" value="421500002" />` |
+
+**Code Alignment:**
+- ✅ C# DocumentStatus enum updated to match these values (Models.cs:52-57)
+- ✅ Background service handlers updated (Processing, Error, Draft, Active)
+- ✅ DataverseWebApiService uses correct status codes
 
 ---
 

@@ -1,3 +1,4 @@
+using Azure.Core;
 using Azure.Identity;
 using Microsoft.Graph;
 using Microsoft.Identity.Client;
@@ -13,12 +14,20 @@ namespace Spe.Bff.Api.Infrastructure.Graph;
 public sealed class GraphClientFactory : IGraphClientFactory
 {
     private readonly string _uamiClientId;
+    private readonly string? _tenantId;
+    private readonly string? _clientId;
+    private readonly string? _clientSecret;
     private readonly IConfidentialClientApplication _cca;
 
     public GraphClientFactory(IConfiguration configuration)
     {
         _uamiClientId = configuration["UAMI_CLIENT_ID"] ??
             throw new InvalidOperationException("UAMI_CLIENT_ID not configured");
+
+        // For local dev: read from user secrets or environment variables
+        _tenantId = configuration["AZURE_TENANT_ID"] ?? configuration["TENANT_ID"];
+        _clientId = configuration["AZURE_CLIENT_ID"] ?? configuration["API_APP_ID"];
+        _clientSecret = configuration["AZURE_CLIENT_SECRET"] ?? configuration["API_CLIENT_SECRET"];
 
         var tenantId = configuration["TENANT_ID"] ??
             throw new InvalidOperationException("TENANT_ID not configured");
@@ -37,16 +46,34 @@ public sealed class GraphClientFactory : IGraphClientFactory
     }
 
     /// <summary>
-    /// Creates Graph client using User-Assigned Managed Identity.
+    /// Creates Graph client using User-Assigned Managed Identity (Azure) or Client Credentials (local dev).
     /// For app-only operations (platform/admin tasks).
     /// Uses Graph SDK v5 with TokenCredentialAuthenticationProvider.
     /// </summary>
     public GraphServiceClient CreateAppOnlyClient()
     {
-        var credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions
+        TokenCredential credential;
+
+        // For local dev with client secret, use ClientSecretCredential directly
+        // This ensures the owning app makes the call (required for SPE)
+        if (!string.IsNullOrWhiteSpace(_clientSecret) &&
+            !string.IsNullOrWhiteSpace(_tenantId) &&
+            !string.IsNullOrWhiteSpace(_clientId))
         {
-            ManagedIdentityClientId = _uamiClientId
-        });
+            credential = new ClientSecretCredential(_tenantId, _clientId, _clientSecret);
+        }
+        else
+        {
+            // In Azure, use DefaultAzureCredential for Managed Identity
+            credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions
+            {
+                ManagedIdentityClientId = _uamiClientId,
+                ExcludeInteractiveBrowserCredential = true,
+                ExcludeSharedTokenCacheCredential = true,
+                ExcludeVisualStudioCodeCredential = true,
+                ExcludeVisualStudioCredential = true
+            });
+        }
 
         var authProvider = new AzureIdentityAuthenticationProvider(
             credential,

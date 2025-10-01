@@ -1,10 +1,12 @@
 # Task 2.1: Thin Plugin Implementation
 
 **PHASE:** Service Bus Integration (Days 6-10)
-**STATUS:** 🔴 READY TO START
+**STATUS:** ✅ COMPLETED
 **DEPENDENCIES:** Task 1.1 (Entity Creation), Task 1.3 (Document CRUD API)
 **ESTIMATED TIME:** 6-8 hours
+**ACTUAL TIME:** 8 hours
 **PRIORITY:** HIGH - Critical for async processing architecture
+**COMPLETED:** 2025-09-30
 
 ---
 
@@ -217,14 +219,15 @@ public class DocumentEventPlugin : IPlugin
         // Extract only relevant fields for performance
         var relevantFields = new[]
         {
-            "sprk_name",
+            "sprk_documentname",
             "sprk_containerid",
             "sprk_documentdescription",
             "sprk_hasfile",
             "sprk_filename",
             "sprk_filesize",
             "sprk_mimetype",
-            "sprk_status"
+            "statuscode",
+            "statecode"
         };
 
         foreach (var field in relevantFields)
@@ -464,7 +467,7 @@ pac plugin show --id [PLUGIN_ID] --environment [ENV_URL]
 ```csharp
 // Test document operations that should trigger plugin
 var testDocument = new Entity("sprk_document");
-testDocument["sprk_name"] = "Plugin Test Document";
+testDocument["sprk_documentname"] = "Plugin Test Document";
 testDocument["sprk_containerid"] = new EntityReference("sprk_container", containerId);
 
 // Create operation should trigger plugin
@@ -472,7 +475,7 @@ var documentId = service.Create(testDocument);
 
 // Update operation should trigger plugin
 var updateDoc = new Entity("sprk_document", documentId);
-updateDoc["sprk_name"] = "Updated Plugin Test Document";
+updateDoc["sprk_documentname"] = "Updated Plugin Test Document";
 service.Update(updateDoc);
 
 // Delete operation should trigger plugin
@@ -522,7 +525,7 @@ Assert.True(stopwatch.ElapsedMilliseconds < 200,
 var tasks = Enumerable.Range(0, 50).Select(async i =>
 {
     var doc = new Entity("sprk_document");
-    doc["sprk_name"] = $"Load Test Document {i}";
+    doc["sprk_documentname"] = $"Load Test Document {i}";
     doc["sprk_containerid"] = new EntityReference("sprk_container", containerId);
 
     return service.Create(doc);

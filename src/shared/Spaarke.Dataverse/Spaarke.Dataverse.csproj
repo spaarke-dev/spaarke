@@ -17,6 +17,7 @@
     <PackageReference Include="Microsoft.CrmSdk.CoreAssemblies" />
     <PackageReference Include="System.ServiceModel.Primitives" />
     <PackageReference Include="System.ServiceModel.Http" />
+    <PackageReference Include="System.ServiceModel.Security" />
   </ItemGroup>
 
 </Project>

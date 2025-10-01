@@ -32,20 +32,26 @@ builder.Services.AddAuthorization(options =>
 builder.Services.AddDocumentsModule();
 
 // Workers module (Service Bus + BackgroundService)
-builder.Services.AddWorkersModule();
+builder.Services.AddWorkersModule(builder.Configuration);
 
-// Redis distributed cache (placeholder - requires Microsoft.Extensions.Caching.StackExchangeRedis package)
+// Distributed cache for idempotency tracking (ADR-004)
+// Production: Use Redis - requires Microsoft.Extensions.Caching.StackExchangeRedis package
 // builder.Services.AddStackExchangeRedisCache(options =>
 // {
 //     options.Configuration = builder.Configuration.GetConnectionString("Redis");
 // });
-builder.Services.AddMemoryCache(); // Temporary fallback
+// Development: Use distributed memory cache
+builder.Services.AddDistributedMemoryCache();
+builder.Services.AddMemoryCache();
 
 // Singleton GraphServiceClient factory
 builder.Services.AddSingleton<IGraphClientFactory, Spe.Bff.Api.Infrastructure.Graph.GraphClientFactory>();
 
-// Dataverse service
-builder.Services.AddScoped<IDataverseService, DataverseService>();
+// Dataverse service - using Web API for .NET 8.0 compatibility with IHttpClientFactory
+builder.Services.AddHttpClient<IDataverseService, DataverseWebApiService>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(30);
+});
 
 // Health checks
 builder.Services.AddHealthChecks();
@@ -57,9 +63,14 @@ builder.Services.AddCors(o =>
     o.AddPolicy("spa", p =>
     {
         if (!string.IsNullOrWhiteSpace(allowed))
-            p.WithOrigins(allowed.Split(',', StringSplitOptions.RemoveEmptyEntries));
+        {
+            p.WithOrigins(allowed.Split(',', StringSplitOptions.RemoveEmptyEntries))
+             .AllowCredentials(); // Required for credentials: 'include' in JavaScript
+        }
         else
-            p.AllowAnyOrigin(); // dev fallback
+        {
+            p.AllowAnyOrigin(); // dev fallback (cannot use AllowCredentials with AllowAnyOrigin)
+        }
         p.AllowAnyHeader().AllowAnyMethod();
         p.WithExposedHeaders("request-id", "client-request-id", "traceparent");
     });
@@ -189,7 +200,10 @@ app.MapGet("/ping", (HttpContext context) =>
 // User identity and capabilities endpoints
 app.MapUserEndpoints();
 
-// Document and container management endpoints
+// Dataverse document CRUD endpoints (Task 1.3)
+app.MapDataverseDocumentsEndpoints();
+
+// Document and container management endpoints (SharePoint Embedded)
 app.MapDocumentsEndpoints();
 
 // Upload endpoints for file operations

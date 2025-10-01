@@ -110,10 +110,10 @@ public class DataverseService : IDataverseService, IDisposable
                 request.Name, request.ContainerId);
 
             var document = new Entity("sprk_document");
-            document["sprk_name"] = request.Name;
+            document["sprk_documentname"] = request.Name;
             document["sprk_containerid"] = new EntityReference("sprk_container", Guid.Parse(request.ContainerId));
             document["sprk_hasfile"] = false;
-            document["sprk_status"] = new OptionSetValue(1); // Draft
+            document["statuscode"] = new OptionSetValue(1); // Draft
 
             if (!string.IsNullOrEmpty(request.Description))
                 document["sprk_documentdescription"] = request.Description;
@@ -137,9 +137,9 @@ public class DataverseService : IDataverseService, IDisposable
             _logger.LogDebug("Retrieving document: {DocumentId}", id);
 
             var entity = await _serviceClient.RetrieveAsync("sprk_document", Guid.Parse(id),
-                new ColumnSet("sprk_name", "sprk_documentdescription", "sprk_containerid", "sprk_hasfile", "sprk_filename",
+                new ColumnSet("sprk_documentname", "sprk_documentdescription", "sprk_containerid", "sprk_hasfile", "sprk_filename",
                              "sprk_filesize", "sprk_mimetype", "sprk_graphitemid", "sprk_graphdriveid",
-                             "sprk_status", "createdon", "modifiedon"));
+                             "statuscode", "statecode", "createdon", "modifiedon"));
 
             if (entity == null)
             {
@@ -150,7 +150,7 @@ public class DataverseService : IDataverseService, IDisposable
             var document = new DocumentEntity
             {
                 Id = entity.Id.ToString(),
-                Name = entity.GetAttributeValue<string>("sprk_name"),
+                Name = entity.GetAttributeValue<string>("sprk_documentname"),
                 Description = entity.GetAttributeValue<string>("sprk_documentdescription"),
                 ContainerId = entity.GetAttributeValue<EntityReference>("sprk_containerid")?.Id.ToString(),
                 HasFile = entity.GetAttributeValue<bool>("sprk_hasfile"),
@@ -159,7 +159,7 @@ public class DataverseService : IDataverseService, IDisposable
                 MimeType = entity.GetAttributeValue<string>("sprk_mimetype"),
                 GraphItemId = entity.GetAttributeValue<string>("sprk_graphitemid"),
                 GraphDriveId = entity.GetAttributeValue<string>("sprk_graphdriveid"),
-                Status = (DocumentStatus)(entity.GetAttributeValue<OptionSetValue>("sprk_status")?.Value ?? 1),
+                Status = (DocumentStatus)(entity.GetAttributeValue<OptionSetValue>("statuscode")?.Value ?? 1),
                 CreatedOn = entity.GetAttributeValue<DateTime?>("createdon") ?? DateTime.UtcNow,
                 ModifiedOn = entity.GetAttributeValue<DateTime?>("modifiedon") ?? DateTime.UtcNow
             };
@@ -184,7 +184,7 @@ public class DataverseService : IDataverseService, IDisposable
             document.Id = Guid.Parse(id);
 
             if (!string.IsNullOrEmpty(request.Name))
-                document["sprk_name"] = request.Name;
+                document["sprk_documentname"] = request.Name;
 
             if (!string.IsNullOrEmpty(request.Description))
                 document["sprk_documentdescription"] = request.Description;
@@ -208,7 +208,7 @@ public class DataverseService : IDataverseService, IDisposable
                 document["sprk_hasfile"] = request.HasFile.Value;
 
             if (request.Status.HasValue)
-                document["sprk_status"] = new OptionSetValue((int)request.Status.Value);
+                document["statuscode"] = new OptionSetValue((int)request.Status.Value);
 
             await _serviceClient.UpdateAsync(document);
 
@@ -246,8 +246,8 @@ public class DataverseService : IDataverseService, IDisposable
 
             var query = new QueryExpression("sprk_document")
             {
-                ColumnSet = new ColumnSet("sprk_name", "sprk_containerid", "sprk_hasfile", "sprk_filename",
-                                         "sprk_filesize", "sprk_status", "createdon", "modifiedon"),
+                ColumnSet = new ColumnSet("sprk_documentname", "sprk_containerid", "sprk_hasfile", "sprk_filename",
+                                         "sprk_filesize", "statuscode", "createdon", "modifiedon"),
                 Criteria = new FilterExpression
                 {
                     Conditions =
@@ -265,12 +265,12 @@ public class DataverseService : IDataverseService, IDisposable
             var documents = results.Entities.Select(entity => new DocumentEntity
             {
                 Id = entity.Id.ToString(),
-                Name = entity.GetAttributeValue<string>("sprk_name"),
+                Name = entity.GetAttributeValue<string>("sprk_documentname"),
                 ContainerId = containerId,
                 HasFile = entity.GetAttributeValue<bool>("sprk_hasfile"),
                 FileName = entity.GetAttributeValue<string>("sprk_filename"),
                 FileSize = entity.GetAttributeValue<long?>("sprk_filesize"),
-                Status = (DocumentStatus)(entity.GetAttributeValue<OptionSetValue>("sprk_status")?.Value ?? 1),
+                Status = (DocumentStatus)(entity.GetAttributeValue<OptionSetValue>("statuscode")?.Value ?? 1),
                 CreatedOn = entity.GetAttributeValue<DateTime?>("createdon") ?? DateTime.UtcNow,
                 ModifiedOn = entity.GetAttributeValue<DateTime?>("modifiedon") ?? DateTime.UtcNow
             });

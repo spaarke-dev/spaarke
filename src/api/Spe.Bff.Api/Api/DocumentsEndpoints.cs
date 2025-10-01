@@ -113,6 +113,7 @@ public static class DocumentsEndpoints
         .RequireAuthorization("canmanagecontainers");
 
         // GET /api/containers/{id}/drive - Get container drive (MI)
+        // NOTE: This endpoint expects the SPE Container ID, not the Dataverse Container GUID
         app.MapGet("/api/containers/{containerId}/drive", async (
             string containerId,
             SpeFileStore speFileStore,
@@ -128,7 +129,7 @@ public static class DocumentsEndpoints
                     return ProblemDetailsHelper.ValidationError("containerId is required");
                 }
 
-                logger.LogInformation("Getting drive for container {ContainerId}", containerId);
+                logger.LogInformation("Getting drive for SPE container {ContainerId}", containerId);
 
                 var pipeline = RetryPolicies.GraphTransient<ContainerDto?>();
                 var result = await pipeline.ExecuteAsync(async () =>
@@ -200,6 +201,237 @@ public static class DocumentsEndpoints
         })
         // TODO: .RequireRateLimiting("graph-read")
         .RequireAuthorization("canmanagecontainers");
+
+        // GET /api/drives/{driveId}/items/{itemId} - Get file metadata (MI)
+        app.MapGet("/api/drives/{driveId}/items/{itemId}", async (
+            string driveId,
+            string itemId,
+            SpeFileStore speFileStore,
+            ILogger<Program> logger,
+            HttpContext context) =>
+        {
+            var traceId = context.TraceIdentifier;
+
+            try
+            {
+                if (string.IsNullOrWhiteSpace(driveId))
+                {
+                    return ProblemDetailsHelper.ValidationError("driveId is required");
+                }
+
+                if (string.IsNullOrWhiteSpace(itemId))
+                {
+                    return ProblemDetailsHelper.ValidationError("itemId is required");
+                }
+
+                logger.LogInformation("Getting metadata for file {ItemId} in drive {DriveId}", itemId, driveId);
+
+                var pipeline = RetryPolicies.GraphTransient<FileHandleDto?>();
+                var result = await pipeline.ExecuteAsync(async () =>
+                {
+                    return await speFileStore.GetFileMetadataAsync(driveId, itemId);
+                });
+
+                if (result == null)
+                {
+                    return Results.NotFound();
+                }
+
+                return Results.Ok(result);
+            }
+            catch (ServiceException ex)
+            {
+                logger.LogError(ex, "Failed to get file metadata");
+                return ProblemDetailsHelper.FromGraphException(ex);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Unexpected error getting file metadata");
+                return Results.Problem(
+                    statusCode: 500,
+                    title: "Internal Server Error",
+                    detail: "An unexpected error occurred while getting file metadata",
+                    extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+            }
+        })
+        // TODO: .RequireRateLimiting("graph-read")
+        .RequireAuthorization("canmanagecontainers");
+
+        // GET /api/drives/{driveId}/items/{itemId}/content - Download file (MI)
+        app.MapGet("/api/drives/{driveId}/items/{itemId}/content", async (
+            string driveId,
+            string itemId,
+            SpeFileStore speFileStore,
+            ILogger<Program> logger,
+            HttpContext context) =>
+        {
+            var traceId = context.TraceIdentifier;
+
+            try
+            {
+                if (string.IsNullOrWhiteSpace(driveId))
+                {
+                    return ProblemDetailsHelper.ValidationError("driveId is required");
+                }
+
+                if (string.IsNullOrWhiteSpace(itemId))
+                {
+                    return ProblemDetailsHelper.ValidationError("itemId is required");
+                }
+
+                logger.LogInformation("Downloading file {ItemId} from drive {DriveId}", itemId, driveId);
+
+                var pipeline = RetryPolicies.GraphTransient<Stream?>();
+                var stream = await pipeline.ExecuteAsync(async () =>
+                {
+                    return await speFileStore.DownloadFileAsync(driveId, itemId);
+                });
+
+                if (stream == null)
+                {
+                    return Results.NotFound();
+                }
+
+                // Get file metadata to determine content type and filename
+                var metadata = await speFileStore.GetFileMetadataAsync(driveId, itemId);
+                var fileName = metadata?.Name ?? "download";
+
+                return Results.File(stream, "application/octet-stream", fileName);
+            }
+            catch (ServiceException ex)
+            {
+                logger.LogError(ex, "Failed to download file");
+                return ProblemDetailsHelper.FromGraphException(ex);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Unexpected error downloading file");
+                return Results.Problem(
+                    statusCode: 500,
+                    title: "Internal Server Error",
+                    detail: "An unexpected error occurred while downloading the file",
+                    extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+            }
+        })
+        // TODO: .RequireRateLimiting("graph-read")
+        .RequireAuthorization("canmanagecontainers");
+
+        // PUT /api/drives/{driveId}/upload - Upload file (MI)
+        app.MapPut("/api/drives/{driveId}/upload", async (
+            string driveId,
+            string fileName,
+            HttpRequest request,
+            SpeFileStore speFileStore,
+            ILogger<Program> logger,
+            HttpContext context) =>
+        {
+            var traceId = context.TraceIdentifier;
+
+            try
+            {
+                if (string.IsNullOrWhiteSpace(driveId))
+                {
+                    return ProblemDetailsHelper.ValidationError("driveId is required");
+                }
+
+                if (string.IsNullOrWhiteSpace(fileName))
+                {
+                    return ProblemDetailsHelper.ValidationError("fileName is required");
+                }
+
+                logger.LogInformation("Uploading file {FileName} to drive {DriveId}", fileName, driveId);
+
+                using var stream = request.Body;
+
+                var pipeline = RetryPolicies.GraphTransient<FileHandleDto?>();
+                var result = await pipeline.ExecuteAsync(async () =>
+                {
+                    return await speFileStore.UploadSmallAsync(driveId, fileName, stream);
+                });
+
+                if (result == null)
+                {
+                    return Results.Problem(
+                        statusCode: 500,
+                        title: "Upload Failed",
+                        detail: "Failed to upload file to SPE",
+                        extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+                }
+
+                return Results.Created($"/api/drives/{driveId}/items/{result.Id}", result);
+            }
+            catch (ServiceException ex)
+            {
+                logger.LogError(ex, "Failed to upload file");
+                return ProblemDetailsHelper.FromGraphException(ex);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Unexpected error uploading file");
+                return Results.Problem(
+                    statusCode: 500,
+                    title: "Internal Server Error",
+                    detail: "An unexpected error occurred while uploading the file",
+                    extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+            }
+        })
+        // TODO: .RequireRateLimiting("graph-write")
+        .RequireAuthorization("canwritefiles");
+
+        // DELETE /api/drives/{driveId}/items/{itemId} - Delete file (MI)
+        app.MapDelete("/api/drives/{driveId}/items/{itemId}", async (
+            string driveId,
+            string itemId,
+            SpeFileStore speFileStore,
+            ILogger<Program> logger,
+            HttpContext context) =>
+        {
+            var traceId = context.TraceIdentifier;
+
+            try
+            {
+                if (string.IsNullOrWhiteSpace(driveId))
+                {
+                    return ProblemDetailsHelper.ValidationError("driveId is required");
+                }
+
+                if (string.IsNullOrWhiteSpace(itemId))
+                {
+                    return ProblemDetailsHelper.ValidationError("itemId is required");
+                }
+
+                logger.LogInformation("Deleting file {ItemId} from drive {DriveId}", itemId, driveId);
+
+                var pipeline = RetryPolicies.GraphTransient<bool>();
+                var deleted = await pipeline.ExecuteAsync(async () =>
+                {
+                    return await speFileStore.DeleteFileAsync(driveId, itemId);
+                });
+
+                if (!deleted)
+                {
+                    return Results.NotFound();
+                }
+
+                return Results.NoContent();
+            }
+            catch (ServiceException ex)
+            {
+                logger.LogError(ex, "Failed to delete file");
+                return ProblemDetailsHelper.FromGraphException(ex);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Unexpected error deleting file");
+                return Results.Problem(
+                    statusCode: 500,
+                    title: "Internal Server Error",
+                    detail: "An unexpected error occurred while deleting the file",
+                    extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+            }
+        })
+        // TODO: .RequireRateLimiting("graph-write")
+        .RequireAuthorization("canwritefiles");
 
         return app;
     }

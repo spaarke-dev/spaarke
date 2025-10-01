@@ -47,13 +47,14 @@ public class DocumentEntity
 }
 
 /// <summary>
-/// Document status enumeration
+/// Document status enumeration (matches Dataverse statuscode values)
 /// </summary>
 public enum DocumentStatus
 {
     Draft = 1,
-    Active = 2,
-    Inactive = 3
+    Error = 2,
+    Active = 421500001,
+    Processing = 421500002
 }
 
 /// <summary>
