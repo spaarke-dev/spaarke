@@ -36,7 +36,7 @@
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.3" />
     <!-- Dataverse packages -->
     <PackageVersion Include="Microsoft.CrmSdk.CoreAssemblies" Version="9.0.2.56" />
-    <PackageVersion Include="Microsoft.CrmSdk.Workflow" Version="9.0.2.56" />
+    <PackageVersion Include="Microsoft.CrmSdk.Workflow" Version="9.0.2.59" />
     <PackageVersion Include="Microsoft.PowerPlatform.Dataverse.Client" Version="1.1.32" />
     <PackageVersion Include="System.ServiceModel.Primitives" Version="6.2.0" />
     <PackageVersion Include="System.ServiceModel.Http" Version="6.2.0" />
