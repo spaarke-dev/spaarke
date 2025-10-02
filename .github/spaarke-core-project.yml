@@ -1,0 +1,75 @@
+# GitHub Project (beta) configuration for org: spaarke-dev
+# Usage:
+#   gh project create --owner spaarke-dev --template ./spaarke-core-project.yml
+
+name: "Spaarke Core"
+description: >
+  Core engineering project for Spaarke.
+  Tracks product ideas, epics, sprints, and work items.
+public: false
+
+fields:
+  - name: Status
+    dataType: SINGLE_SELECT
+    options: ["Todo", "In Progress", "In Review", "Done"]
+
+  - name: Type
+    dataType: SINGLE_SELECT
+    options: ["Idea", "Epic", "Story", "Task", "Bug", "Spike"]
+
+  - name: Priority
+    dataType: SINGLE_SELECT
+    options: ["P0 - Critical", "P1 - High", "P2 - Medium", "P3 - Low"]
+
+  - name: Sprint
+    dataType: ITERATION
+    configuration:
+      duration: 14
+      startDate: 2025-10-06
+      timezone: "America/New_York"
+
+  - name: Assignee
+    dataType: USER
+    options:
+      - "ralph.schroeder@spaarke.com"
+      - "admin-dev@spaarke.com"
+
+  - name: Start Date
+    dataType: DATE
+
+  - name: Target Date
+    dataType: DATE
+
+  - name: Area
+    dataType: SINGLE_SELECT
+    options: ["Documents", "UAC", "BFF/API", "Platform"]
+
+  - name: Release
+    dataType: TEXT
+
+views:
+  - name: "Backlog (Ideas)"
+    layout: TABLE
+    filters:
+      Type: ["Idea"]
+    groupBy: Priority
+    sortBy: ["Priority"]
+
+  - name: "Epics Roadmap"
+    layout: ROADMAP
+    filters:
+      Type: ["Epic"]
+    dateFields:
+      start: "Start Date"
+      end: "Target Date"
+
+  - name: "Sprint Board"
+    layout: BOARD
+    filters:
+      Sprint: "@current"
+    groupBy: Status
+
+  - name: "All Work Items"
+    layout: TABLE
+    groupBy: Sprint
+    columns: ["Type", "Status", "Assignee", "Start Date", "Target Date", "Priority"]

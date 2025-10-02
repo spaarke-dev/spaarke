@@ -14,7 +14,7 @@ var configuration = new ConfigurationBuilder()
 var services = new ServiceCollection();
 services.AddLogging(builder => builder.AddConsole().SetMinimumLevel(LogLevel.Information));
 services.AddSingleton<IConfiguration>(configuration);
-services.AddScoped<IDataverseService, DataverseService>();
+services.AddHttpClient<IDataverseService, DataverseWebApiService>();
 
 var serviceProvider = services.BuildServiceProvider();
 var dataverseService = serviceProvider.GetRequiredService<IDataverseService>();

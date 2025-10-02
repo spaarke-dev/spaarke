@@ -1,10 +1,11 @@
 using Spe.Bff.Api.Infrastructure.Graph;
 using Microsoft.Graph.Models;
+using Microsoft.Graph;
 using Spe.Bff.Api.Models;
 using Microsoft.Extensions.Caching.Memory;
 using System.Text;
 
-namespace Services;
+namespace Spe.Bff.Api.Services;
 
 public sealed class OboSpeService : IOboSpeService
 {
@@ -41,14 +42,65 @@ public sealed class OboSpeService : IOboSpeService
 
     public async Task<DriveItem?> UploadSmallAsync(string userBearer, string containerId, string path, Stream content, CancellationToken ct)
     {
-        var graph = await _factory.CreateOnBehalfOfClientAsync(userBearer);
-        var drive = await graph.Storage.FileStorage.Containers[containerId].Drive.GetAsync(cancellationToken: ct);
-        if (drive?.Id is null) return null;
+        try
+        {
+            var graph = await _factory.CreateOnBehalfOfClientAsync(userBearer);
 
-        // Simplified upload - API temporarily disabled due to Graph SDK v5 changes
-        DriveItem? item = null; // Would upload via Graph API
+            // Get drive ID
+            var drive = await graph.Storage.FileStorage.Containers[containerId].Drive
+                .GetAsync(cancellationToken: ct);
 
-        return item;
+            if (drive?.Id is null)
+            {
+                _logger.LogWarning("Drive not found for container {ContainerId}", containerId);
+                return null;
+            }
+
+            // Validate content size (small upload < 4MB)
+            if (content.CanSeek && content.Length > 4 * 1024 * 1024)
+            {
+                _logger.LogWarning("Content too large for small upload: {Size} bytes (max 4MB)", content.Length);
+                throw new ArgumentException("Content size exceeds 4MB limit for small uploads. Use chunked upload instead.");
+            }
+
+            // Upload file using PUT to drive item path
+            var uploadedItem = await graph.Drives[drive.Id].Root
+                .ItemWithPath(path)
+                .Content
+                .PutAsync(content, cancellationToken: ct);
+
+            if (uploadedItem == null)
+            {
+                _logger.LogError("Upload failed for path {Path} in container {ContainerId}", path, containerId);
+                return null;
+            }
+
+            _logger.LogInformation("Successfully uploaded file to {Path} in container {ContainerId}, item ID: {ItemId}",
+                path, containerId, uploadedItem.Id);
+
+            return uploadedItem;
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == 403)
+        {
+            _logger.LogWarning("Access denied uploading to container {ContainerId}: {Error}", containerId, ex.Message);
+            throw new UnauthorizedAccessException($"Access denied to container {containerId}", ex);
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == 413)
+        {
+            _logger.LogWarning("Content too large for path {Path}", path);
+            throw new ArgumentException("Content size exceeds limit. Use chunked upload for large files.", ex);
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == 429)
+        {
+            _logger.LogWarning("Graph API throttling, retry after {RetryAfter}s",
+                ex.ResponseHeaders?.RetryAfter?.Delta?.TotalSeconds ?? 60);
+            throw new InvalidOperationException("Service temporarily unavailable due to rate limiting", ex);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to upload to path {Path} in container {ContainerId}", path, containerId);
+            throw;
+        }
     }
 
     public async Task<UserInfoResponse?> GetUserInfoAsync(string userBearer, CancellationToken ct)
@@ -135,110 +187,87 @@ public sealed class OboSpeService : IOboSpeService
         try
         {
             var graph = await _factory.CreateOnBehalfOfClientAsync(userBearer);
-            var drive = await graph.Storage.FileStorage.Containers[containerId].Drive.GetAsync(cancellationToken: ct);
+
+            // Get the drive for the container
+            var drive = await graph.Storage.FileStorage.Containers[containerId].Drive
+                .GetAsync(cancellationToken: ct);
+
             if (drive?.Id is null)
+            {
+                _logger.LogWarning("Drive not found for container {ContainerId}", containerId);
+                return new ListingResponse(new List<DriveItemDto>(), null);
+            }
+
+            // Call Graph API to list root items with OData query parameters
+            var children = await graph.Drives[drive.Id].Items
+                .GetAsync(requestConfiguration =>
+                {
+                    requestConfiguration.QueryParameters.Filter = "parentReference/path eq '/drive/root:'";
+                    requestConfiguration.QueryParameters.Top = parameters.ValidatedTop;
+                    requestConfiguration.QueryParameters.Skip = parameters.ValidatedSkip;
+
+                    // Apply ordering (OData $orderby)
+                    var orderField = parameters.ValidatedOrderBy.ToLowerInvariant() switch
+                    {
+                        "name" => "name",
+                        "lastmodifieddatetime" => "lastModifiedDateTime",
+                        "size" => "size",
+                        _ => "name"
+                    };
+                    var orderDirection = parameters.ValidatedOrderDir == "desc" ? " desc" : " asc";
+                    requestConfiguration.QueryParameters.Orderby = new[] { orderField + orderDirection };
+                }, cancellationToken: ct);
+
+            if (children?.Value == null)
             {
                 return new ListingResponse(new List<DriveItemDto>(), null);
             }
 
-            // For now, create sample data since Graph SDK v5 API is disabled
-            // In real implementation, this would call Microsoft Graph with proper pagination and ordering
-            var sampleItems = GenerateSampleItems(parameters.ValidatedTop + parameters.ValidatedSkip + 10); // Generate more for pagination demo
+            // Map Graph DriveItem to DriveItemDto
+            var items = children.Value.Select(item => new DriveItemDto(
+                Id: item.Id!,
+                Name: item.Name!,
+                Size: item.Size,
+                ETag: item.ETag,
+                LastModifiedDateTime: item.LastModifiedDateTime ?? DateTimeOffset.UtcNow,
+                ContentType: item.File?.MimeType,
+                Folder: item.Folder != null ? new FolderDto(item.Folder.ChildCount) : null
+            )).ToList();
 
-            // Apply sorting
-            var sortedItems = ApplySorting(sampleItems, parameters.ValidatedOrderBy, parameters.ValidatedOrderDir);
-
-            // Apply pagination
-            var pagedItems = sortedItems.Skip(parameters.ValidatedSkip).Take(parameters.ValidatedTop).ToList();
-
-            // Generate nextLink if there are more items
+            // Handle pagination (@odata.nextLink)
             string? nextLink = null;
-            if (sortedItems.Count > parameters.ValidatedSkip + parameters.ValidatedTop)
+            if (!string.IsNullOrEmpty(children.OdataNextLink))
             {
+                // Extract skip token from nextLink
                 var nextSkip = parameters.ValidatedSkip + parameters.ValidatedTop;
                 nextLink = $"/api/obo/containers/{containerId}/children?top={parameters.ValidatedTop}&skip={nextSkip}&orderBy={parameters.ValidatedOrderBy}&orderDir={parameters.ValidatedOrderDir}";
             }
 
-            _logger.LogInformation("Listed {Count} items for container {ContainerId} (top={Top}, skip={Skip}, orderBy={OrderBy}, orderDir={OrderDir})",
-                pagedItems.Count, containerId, parameters.ValidatedTop, parameters.ValidatedSkip, parameters.ValidatedOrderBy, parameters.ValidatedOrderDir);
+            _logger.LogInformation("Listed {Count} items for container {ContainerId}", items.Count, containerId);
 
-            return new ListingResponse(pagedItems, nextLink);
+            return new ListingResponse(items, nextLink);
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == 404)
+        {
+            _logger.LogWarning("Container or drive not found: {ContainerId}", containerId);
+            return new ListingResponse(new List<DriveItemDto>(), null);
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == 403)
+        {
+            _logger.LogWarning("Access denied to container {ContainerId}: {Error}", containerId, ex.Message);
+            throw new UnauthorizedAccessException($"Access denied to container {containerId}", ex);
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == 429)
+        {
+            _logger.LogWarning("Graph API throttling for container {ContainerId}, retry after {RetryAfter}s",
+                containerId, ex.ResponseHeaders?.RetryAfter?.Delta?.TotalSeconds ?? 60);
+            throw new InvalidOperationException("Service temporarily unavailable due to rate limiting", ex);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to list children for container {ContainerId}", containerId);
-            return new ListingResponse(new List<DriveItemDto>(), null);
+            throw;
         }
-    }
-
-    private static List<DriveItemDto> GenerateSampleItems(int count)
-    {
-        var items = new List<DriveItemDto>();
-        var random = new Random(42); // Fixed seed for consistent results
-
-        for (int i = 0; i < count; i++)
-        {
-            var isFolder = random.Next(0, 4) == 0; // 25% chance of folder
-            var name = isFolder ? $"Folder_{i:D3}" : $"Document_{i:D3}.{GetRandomExtension(random)}";
-            var size = isFolder ? (long?)null : random.Next(1024, 50 * 1024 * 1024); // 1KB to 50MB
-            var childCount = isFolder ? random.Next(0, 20) : (int?)null;
-
-            items.Add(new DriveItemDto(
-                Id: $"item_{i:D3}",
-                Name: name,
-                Size: size,
-                ETag: $"etag_{i}",
-                LastModifiedDateTime: DateTimeOffset.UtcNow.AddDays(-random.Next(0, 365)),
-                ContentType: isFolder ? null : GetContentType(name),
-                Folder: isFolder ? new FolderDto(childCount) : null
-            ));
-        }
-
-        return items;
-    }
-
-    private static string GetRandomExtension(Random random)
-    {
-        var extensions = new[] { "txt", "docx", "pdf", "xlsx", "pptx", "png", "jpg", "mp4" };
-        return extensions[random.Next(extensions.Length)];
-    }
-
-    private static string GetContentType(string fileName)
-    {
-        var extension = Path.GetExtension(fileName).ToLowerInvariant();
-        return extension switch
-        {
-            ".txt" => "text/plain",
-            ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            ".pdf" => "application/pdf",
-            ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            ".pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            ".png" => "image/png",
-            ".jpg" => "image/jpeg",
-            ".mp4" => "video/mp4",
-            _ => "application/octet-stream"
-        };
-    }
-
-    private static List<DriveItemDto> ApplySorting(List<DriveItemDto> items, string orderBy, string orderDir)
-    {
-        var query = items.AsQueryable();
-
-        query = orderBy.ToLowerInvariant() switch
-        {
-            "name" => orderDir == "desc"
-                ? query.OrderByDescending(x => x.Name)
-                : query.OrderBy(x => x.Name),
-            "lastmodifieddatetime" => orderDir == "desc"
-                ? query.OrderByDescending(x => x.LastModifiedDateTime)
-                : query.OrderBy(x => x.LastModifiedDateTime),
-            "size" => orderDir == "desc"
-                ? query.OrderByDescending(x => x.Size ?? 0)
-                : query.OrderBy(x => x.Size ?? 0),
-            _ => query.OrderBy(x => x.Name)
-        };
-
-        return query.ToList();
     }
 
     public async Task<UploadSessionResponse?> CreateUploadSessionAsync(string userBearer, string driveId, string path, ConflictBehavior conflictBehavior, CancellationToken ct)
@@ -247,21 +276,47 @@ public sealed class OboSpeService : IOboSpeService
         {
             var graph = await _factory.CreateOnBehalfOfClientAsync(userBearer);
 
-            // In real implementation, this would call Microsoft Graph to create upload session
-            // For now, simulate the response since Graph SDK v5 API is disabled
-            var sessionId = Guid.NewGuid().ToString("N");
-            var uploadUrl = $"https://graph.microsoft.com/v1.0/me/drive/items/{sessionId}/uploadSession";
-            var expirationDateTime = DateTimeOffset.UtcNow.AddHours(1); // Sessions typically expire in 1 hour
+            // Create upload session request
+            var uploadSessionRequest = new Microsoft.Graph.Drives.Item.Items.Item.CreateUploadSession.CreateUploadSessionPostRequestBody
+            {
+                Item = new DriveItemUploadableProperties
+                {
+                    AdditionalData = new Dictionary<string, object>
+                    {
+                        ["@microsoft.graph.conflictBehavior"] = conflictBehavior.ToString().ToLowerInvariant()
+                    }
+                }
+            };
 
-            _logger.LogInformation("Created upload session for drive {DriveId}, path {Path}, conflict behavior {ConflictBehavior}",
-                driveId, path, conflictBehavior);
+            // Create upload session via Graph API
+            var session = await graph.Drives[driveId].Root
+                .ItemWithPath(path)
+                .CreateUploadSession
+                .PostAsync(uploadSessionRequest, cancellationToken: ct);
 
-            return new UploadSessionResponse(uploadUrl, expirationDateTime);
+            if (session == null || string.IsNullOrEmpty(session.UploadUrl))
+            {
+                _logger.LogError("Failed to create upload session for path {Path}", path);
+                return null;
+            }
+
+            _logger.LogInformation("Created upload session for drive {DriveId}, path {Path}, conflict behavior {ConflictBehavior}, expires at {ExpirationDateTime}",
+                driveId, path, conflictBehavior, session.ExpirationDateTime);
+
+            return new UploadSessionResponse(
+                session.UploadUrl,
+                session.ExpirationDateTime ?? DateTimeOffset.UtcNow.AddHours(1)
+            );
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == 403)
+        {
+            _logger.LogWarning("Access denied creating upload session: {Error}", ex.Message);
+            throw new UnauthorizedAccessException("Access denied", ex);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to create upload session for drive {DriveId}, path {Path}", driveId, path);
-            return null;
+            throw;
         }
     }
 
@@ -273,93 +328,93 @@ public sealed class OboSpeService : IOboSpeService
             if (range == null || !range.IsValid)
             {
                 _logger.LogWarning("Invalid Content-Range header: {ContentRange}", contentRange);
-                return new ChunkUploadResponse(400); // Bad Request
+                return new ChunkUploadResponse(400);
             }
 
-            // Validate chunk size (8-10 MiB as per requirements)
-            const long minChunkSize = 8 * 1024 * 1024; // 8 MiB
-            const long maxChunkSize = 10 * 1024 * 1024; // 10 MiB
+            // Validate chunk size (8-10 MiB as per Graph API requirements)
+            const long minChunkSize = 8 * 1024 * 1024;
+            const long maxChunkSize = 10 * 1024 * 1024;
 
-            if (chunkData.Length < minChunkSize || chunkData.Length > maxChunkSize)
+            if (chunkData.Length < minChunkSize && (!range.Total.HasValue || range.End + 1 < range.Total.Value))
             {
-                if (range.Total.HasValue && range.End + 1 == range.Total.Value)
-                {
-                    // Final chunk can be smaller
-                    if (chunkData.Length > maxChunkSize)
-                    {
-                        _logger.LogWarning("Chunk size {Size} exceeds maximum {MaxSize}", chunkData.Length, maxChunkSize);
-                        return new ChunkUploadResponse(413); // Payload Too Large
-                    }
-                }
-                else if (chunkData.Length < minChunkSize)
-                {
-                    _logger.LogWarning("Chunk size {Size} below minimum {MinSize}", chunkData.Length, minChunkSize);
-                    return new ChunkUploadResponse(400); // Bad Request
-                }
+                _logger.LogWarning("Chunk size {Size} below minimum {MinSize} (not final chunk)", chunkData.Length, minChunkSize);
+                return new ChunkUploadResponse(400);
             }
 
-            // Verify chunk size matches Content-Range
+            if (chunkData.Length > maxChunkSize)
+            {
+                _logger.LogWarning("Chunk size {Size} exceeds maximum {MaxSize}", chunkData.Length, maxChunkSize);
+                return new ChunkUploadResponse(413);
+            }
+
             if (chunkData.Length != range.ChunkSize)
             {
                 _logger.LogWarning("Chunk data length {ActualSize} does not match Content-Range size {ExpectedSize}",
                     chunkData.Length, range.ChunkSize);
-                return new ChunkUploadResponse(400); // Bad Request
+                return new ChunkUploadResponse(400);
             }
 
-            var graph = await _factory.CreateOnBehalfOfClientAsync(userBearer);
+            // Upload chunk to Graph API using raw HTTP (SDK doesn't expose chunked upload directly)
+            using var httpClient = new HttpClient();
+            using var content = new ByteArrayContent(chunkData);
+            content.Headers.Add("Content-Range", contentRange);
+            content.Headers.ContentLength = chunkData.Length;
 
-            // In real implementation, this would upload the chunk to Microsoft Graph
-            // and handle resumable upload logic with proper retry handling
-            await Task.Delay(100, ct); // Simulate network delay
+            var response = await httpClient.PutAsync(uploadSessionUrl, content, ct);
 
-            // Check if this is the final chunk
-            bool isLastChunk = range.Total.HasValue && (range.End + 1 >= range.Total.Value);
-
-            if (isLastChunk)
-            {
-                // Simulate completed upload - return the final DriveItem
-                var completedItem = new DriveItemDto(
-                    Id: $"upload_{Guid.NewGuid():N}",
-                    Name: ExtractFileNameFromUploadUrl(uploadSessionUrl),
-                    Size: range.Total ?? range.End + 1,
-                    ETag: $"etag_{DateTimeOffset.UtcNow.Ticks}",
-                    LastModifiedDateTime: DateTimeOffset.UtcNow,
-                    ContentType: "application/octet-stream", // Would be detected from file extension
-                    Folder: null
-                );
-
-                _logger.LogInformation("Completed upload session {UploadUrl}, final item: {ItemId}",
-                    uploadSessionUrl, completedItem.Id);
-
-                return new ChunkUploadResponse(201, completedItem); // Created
-            }
-            else
+            // Handle response based on status code
+            if (response.StatusCode == System.Net.HttpStatusCode.Accepted) // 202 - more chunks expected
             {
                 _logger.LogInformation("Uploaded chunk {Start}-{End} for session {UploadUrl}",
                     range.Start, range.End, uploadSessionUrl);
+                return new ChunkUploadResponse(202);
+            }
+            else if (response.StatusCode == System.Net.HttpStatusCode.Created ||
+                     response.StatusCode == System.Net.HttpStatusCode.OK) // 201/200 - upload complete
+            {
+                var responseContent = await response.Content.ReadAsStringAsync(ct);
+                var driveItem = System.Text.Json.JsonSerializer.Deserialize<DriveItem>(responseContent, new System.Text.Json.JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
 
-                return new ChunkUploadResponse(202); // Accepted (more chunks expected)
+                if (driveItem == null)
+                {
+                    _logger.LogError("Failed to deserialize completed upload response");
+                    return new ChunkUploadResponse(500);
+                }
+
+                var completedItemDto = new DriveItemDto(
+                    Id: driveItem.Id!,
+                    Name: driveItem.Name!,
+                    Size: driveItem.Size,
+                    ETag: driveItem.ETag,
+                    LastModifiedDateTime: driveItem.LastModifiedDateTime ?? DateTimeOffset.UtcNow,
+                    ContentType: driveItem.File?.MimeType,
+                    Folder: null
+                );
+
+                _logger.LogInformation("Completed upload session {UploadUrl}, item ID: {ItemId}",
+                    uploadSessionUrl, completedItemDto.Id);
+
+                return new ChunkUploadResponse(201, completedItemDto);
+            }
+            else
+            {
+                _logger.LogWarning("Unexpected response from chunked upload: {StatusCode}", response.StatusCode);
+                return new ChunkUploadResponse((int)response.StatusCode);
             }
         }
         catch (OperationCanceledException)
         {
-            _logger.LogWarning("Upload chunk operation was cancelled for session {UploadUrl}", uploadSessionUrl);
-            return new ChunkUploadResponse(499); // Client Closed Request
+            _logger.LogWarning("Upload chunk operation was cancelled");
+            return new ChunkUploadResponse(499);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to upload chunk for session {UploadUrl}", uploadSessionUrl);
-            return new ChunkUploadResponse(500); // Internal Server Error
+            return new ChunkUploadResponse(500);
         }
-    }
-
-    private static string ExtractFileNameFromUploadUrl(string uploadUrl)
-    {
-        // Extract a reasonable filename from the upload session URL
-        // In real implementation, this would be tracked properly
-        var uri = new Uri(uploadUrl);
-        var segments = uri.Segments;
-        return segments.Length > 2 ? $"uploaded_file_{segments[^2].Trim('/')}.bin" : "uploaded_file.bin";
     }
 
     public async Task<DriveItemDto?> UpdateItemAsync(string userBearer, string driveId, string itemId, UpdateFileRequest request, CancellationToken ct)
@@ -380,35 +435,59 @@ public sealed class OboSpeService : IOboSpeService
 
             var graph = await _factory.CreateOnBehalfOfClientAsync(userBearer);
 
-            // In real implementation, this would call Microsoft Graph to update the item
-            // For now, simulate the response since Graph SDK v5 API is disabled
+            // Build update request
+            var driveItemUpdate = new DriveItem();
 
-            // Simulate finding the existing item
-            var existingItem = GenerateSampleItems(1).FirstOrDefault();
-            if (existingItem == null)
+            if (!string.IsNullOrEmpty(request.Name))
             {
-                _logger.LogWarning("Item not found: {ItemId}", itemId);
+                driveItemUpdate.Name = request.Name;
+            }
+
+            if (!string.IsNullOrEmpty(request.ParentReferenceId))
+            {
+                driveItemUpdate.ParentReference = new ItemReference
+                {
+                    Id = request.ParentReferenceId
+                };
+            }
+
+            // Execute update via Graph API
+            var updatedItem = await graph.Drives[driveId].Items[itemId]
+                .PatchAsync(driveItemUpdate, cancellationToken: ct);
+
+            if (updatedItem == null)
+            {
+                _logger.LogWarning("Item not found or update failed: {ItemId}", itemId);
                 return null;
             }
 
-            // Apply updates
-            var updatedName = request.Name ?? existingItem.Name;
-            var updatedItem = existingItem with
-            {
-                Name = updatedName,
-                LastModifiedDateTime = DateTimeOffset.UtcNow,
-                ETag = $"etag_{DateTimeOffset.UtcNow.Ticks}"
-            };
-
             _logger.LogInformation("Updated item {ItemId}: name={Name}, parentRef={ParentRef}",
-                itemId, request.Name, request.ParentReferenceId);
+                itemId, updatedItem.Name, request.ParentReferenceId);
 
-            return updatedItem;
+            return new DriveItemDto(
+                Id: updatedItem.Id!,
+                Name: updatedItem.Name!,
+                Size: updatedItem.Size,
+                ETag: updatedItem.ETag,
+                LastModifiedDateTime: updatedItem.LastModifiedDateTime ?? DateTimeOffset.UtcNow,
+                ContentType: updatedItem.File?.MimeType,
+                Folder: updatedItem.Folder != null ? new FolderDto(updatedItem.Folder.ChildCount) : null
+            );
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == 404)
+        {
+            _logger.LogWarning("Item not found: {ItemId}", itemId);
+            return null;
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == 403)
+        {
+            _logger.LogWarning("Access denied updating item {ItemId}: {Error}", itemId, ex.Message);
+            throw new UnauthorizedAccessException($"Access denied to item {itemId}", ex);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to update item {ItemId} in drive {DriveId}", itemId, driveId);
-            return null;
+            _logger.LogError(ex, "Failed to update item {ItemId}", itemId);
+            throw;
         }
     }
 
@@ -424,17 +503,27 @@ public sealed class OboSpeService : IOboSpeService
 
             var graph = await _factory.CreateOnBehalfOfClientAsync(userBearer);
 
-            // In real implementation, this would call Microsoft Graph to delete the item
-            // For now, simulate successful deletion
-            await Task.Delay(50, ct); // Simulate API call
+            // Delete item via Graph API
+            await graph.Drives[driveId].Items[itemId]
+                .DeleteAsync(cancellationToken: ct);
 
             _logger.LogInformation("Deleted item {ItemId} from drive {DriveId}", itemId, driveId);
             return true;
         }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == 404)
+        {
+            _logger.LogWarning("Item not found (may already be deleted): {ItemId}", itemId);
+            return false;
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == 403)
+        {
+            _logger.LogWarning("Access denied deleting item {ItemId}: {Error}", itemId, ex.Message);
+            throw new UnauthorizedAccessException($"Access denied to item {itemId}", ex);
+        }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to delete item {ItemId} from drive {DriveId}", itemId, driveId);
-            return false;
+            _logger.LogError(ex, "Failed to delete item {ItemId}", itemId);
+            throw;
         }
     }
 
@@ -450,110 +539,119 @@ public sealed class OboSpeService : IOboSpeService
 
             var graph = await _factory.CreateOnBehalfOfClientAsync(userBearer);
 
-            // In real implementation, this would call Microsoft Graph to get the file
-            // For now, simulate file content generation
+            // First, get item metadata to check ETag and size
+            var item = await graph.Drives[driveId].Items[itemId]
+                .GetAsync(cancellationToken: ct);
 
-            // Generate sample file content
-            var sampleContent = GenerateSampleFileContent(itemId);
-            var totalSize = sampleContent.Length;
-            var currentETag = $"etag_{itemId}_{totalSize}";
+            if (item == null)
+            {
+                _logger.LogWarning("Item not found: {ItemId}", itemId);
+                return null;
+            }
 
             // Handle If-None-Match (ETag-based caching)
-            if (!string.IsNullOrEmpty(ifNoneMatch) && ifNoneMatch.Trim('"') == currentETag.Trim('"'))
+            if (!string.IsNullOrEmpty(ifNoneMatch) &&
+                !string.IsNullOrEmpty(item.ETag) &&
+                ifNoneMatch.Trim('"') == item.ETag.Trim('"'))
             {
                 _logger.LogInformation("ETag match for item {ItemId}, returning 304 Not Modified", itemId);
                 return new FileContentResponse(
                     Content: Stream.Null,
                     ContentLength: 0,
-                    ContentType: "application/octet-stream",
-                    ETag: currentETag
+                    ContentType: item.File?.MimeType ?? "application/octet-stream",
+                    ETag: item.ETag
                 );
             }
 
+            var totalSize = item.Size ?? 0;
+            var contentType = item.File?.MimeType ?? "application/octet-stream";
+
+            // Download content with optional range
             Stream contentStream;
             long contentLength;
             long? rangeStart = null;
             long? rangeEnd = null;
 
-            if (range != null && range.IsValid)
+            if (range != null && range.IsValid && totalSize > 0)
             {
-                // Handle range request
+                // Handle partial content (HTTP 206)
                 var actualEnd = Math.Min(range.End, totalSize - 1);
                 var actualStart = Math.Min(range.Start, actualEnd);
 
                 if (actualStart >= totalSize)
                 {
-                    // Range not satisfiable
+                    // Range not satisfiable (HTTP 416)
+                    _logger.LogWarning("Range not satisfiable for item {ItemId}: {Start}-{End}/{TotalSize}",
+                        itemId, actualStart, actualEnd, totalSize);
                     return null;
                 }
 
-                var rangeLength = actualEnd - actualStart + 1;
-                var rangeData = new byte[rangeLength];
-                Array.Copy(sampleContent, actualStart, rangeData, 0, rangeLength);
+                // Use Graph API to download specific range
+                contentStream = await graph.Drives[driveId].Items[itemId].Content
+                    .GetAsync(requestConfiguration =>
+                    {
+                        requestConfiguration.Headers.Add("Range", $"bytes={actualStart}-{actualEnd}");
+                    }, cancellationToken: ct);
 
-                contentStream = new MemoryStream(rangeData);
-                contentLength = rangeLength;
+                if (contentStream == null)
+                {
+                    _logger.LogError("Failed to download range content for item {ItemId}", itemId);
+                    return null;
+                }
+
+                contentLength = actualEnd - actualStart + 1;
                 rangeStart = actualStart;
                 rangeEnd = actualEnd;
 
-                _logger.LogInformation("Serving range {Start}-{End} of item {ItemId} (total size: {TotalSize})",
+                _logger.LogInformation("Serving range {Start}-{End} of item {ItemId} (total: {TotalSize})",
                     actualStart, actualEnd, itemId, totalSize);
             }
             else
             {
-                // Serve full content
-                contentStream = new MemoryStream(sampleContent);
-                contentLength = totalSize;
+                // Download full content
+                contentStream = await graph.Drives[driveId].Items[itemId].Content
+                    .GetAsync(cancellationToken: ct);
 
+                if (contentStream == null)
+                {
+                    _logger.LogError("Failed to download content for item {ItemId}", itemId);
+                    return null;
+                }
+
+                contentLength = totalSize;
                 _logger.LogInformation("Serving full content of item {ItemId} (size: {Size})", itemId, totalSize);
             }
-
-            var contentType = GetContentTypeFromItemId(itemId);
 
             return new FileContentResponse(
                 Content: contentStream,
                 ContentLength: contentLength,
                 ContentType: contentType,
-                ETag: currentETag,
+                ETag: item.ETag,
                 RangeStart: rangeStart,
                 RangeEnd: rangeEnd,
                 TotalSize: totalSize
             );
         }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == 404)
+        {
+            _logger.LogWarning("Item not found: {ItemId}", itemId);
+            return null;
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == 403)
+        {
+            _logger.LogWarning("Access denied to item {ItemId}: {Error}", itemId, ex.Message);
+            throw new UnauthorizedAccessException($"Access denied to item {itemId}", ex);
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == 416)
+        {
+            _logger.LogWarning("Range not satisfiable for item {ItemId}", itemId);
+            return null;
+        }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to download content for item {ItemId} from drive {DriveId}", itemId, driveId);
-            return null;
+            _logger.LogError(ex, "Failed to download content for item {ItemId}", itemId);
+            throw;
         }
     }
 
-    private static byte[] GenerateSampleFileContent(string itemId)
-    {
-        // Generate deterministic sample content based on item ID
-        var size = Math.Abs(itemId.GetHashCode()) % (5 * 1024 * 1024) + (1024 * 1024); // 1-5 MB
-        var content = new byte[size];
-        var random = new Random(itemId.GetHashCode()); // Deterministic based on item ID
-        random.NextBytes(content);
-
-        // Add some identifiable patterns for testing
-        var header = Encoding.UTF8.GetBytes($"SAMPLE_FILE_{itemId}_");
-        Array.Copy(header, content, Math.Min(header.Length, content.Length));
-
-        return content;
-    }
-
-    private static string GetContentTypeFromItemId(string itemId)
-    {
-        // Simulate content type detection based on item ID patterns
-        if (itemId.Contains("image", StringComparison.OrdinalIgnoreCase))
-            return "image/jpeg";
-        if (itemId.Contains("video", StringComparison.OrdinalIgnoreCase))
-            return "video/mp4";
-        if (itemId.Contains("document", StringComparison.OrdinalIgnoreCase))
-            return "application/pdf";
-        if (itemId.Contains("text", StringComparison.OrdinalIgnoreCase))
-            return "text/plain";
-
-        return "application/octet-stream";
-    }
 }

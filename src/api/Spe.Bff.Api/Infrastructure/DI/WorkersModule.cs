@@ -1,4 +1,6 @@
 using Azure.Messaging.ServiceBus;
+using Microsoft.Extensions.Options;
+using Spe.Bff.Api.Configuration;
 using Spe.Bff.Api.Services.BackgroundServices;
 using Spe.Bff.Api.Services.Jobs;
 using Spe.Bff.Api.Services.Jobs.Handlers;
@@ -9,42 +11,31 @@ public static class WorkersModule
 {
     public static IServiceCollection AddWorkersModule(this IServiceCollection services, IConfiguration configuration)
     {
-        // Register job processor background service (for in-memory job processing)
-        services.AddHostedService<JobProcessor>();
+        // NOTE: Job processing (JobProcessor, ServiceBusJobProcessor, JobSubmissionService) is registered in Program.cs
+        // based on Jobs:UseServiceBus configuration. This module only handles DocumentEventProcessor.
 
-        // Register job handlers (scan for IJobHandler implementations)
-        var assembly = typeof(WorkersModule).Assembly;
-        var handlerTypes = assembly.GetTypes()
-            .Where(t => t.IsClass && !t.IsAbstract && typeof(IJobHandler).IsAssignableFrom(t));
-
-        foreach (var handlerType in handlerTypes)
+        // Register Service Bus client for DocumentEventProcessor (only if connection string is configured)
+        var serviceBusConnectionString = configuration.GetValue<string>("ServiceBus:ConnectionString");
+        if (!string.IsNullOrWhiteSpace(serviceBusConnectionString))
         {
-            services.AddScoped(typeof(IJobHandler), handlerType);
+            services.AddSingleton(sp => new ServiceBusClient(serviceBusConnectionString));
         }
 
-        // Register Service Bus document event processing
-        var serviceBusConnectionString = configuration.GetConnectionString("ServiceBus");
-        if (!string.IsNullOrEmpty(serviceBusConnectionString))
+        // Register document event processor options
+        services.Configure<DocumentEventProcessorOptions>(
+            configuration.GetSection("DocumentEventProcessor"));
+
+        // Register idempotency service for event deduplication (ADR-004)
+        services.AddScoped<IIdempotencyService, IdempotencyService>();
+
+        // Register document event processor background service (only if Service Bus is configured)
+        if (!string.IsNullOrWhiteSpace(serviceBusConnectionString))
         {
-            // Register Service Bus client
-            services.AddSingleton(provider =>
-            {
-                return new ServiceBusClient(serviceBusConnectionString);
-            });
-
-            // Register document event processor options
-            services.Configure<DocumentEventProcessorOptions>(
-                configuration.GetSection("DocumentEventProcessor"));
-
-            // Register idempotency service for event deduplication (ADR-004)
-            services.AddScoped<IIdempotencyService, IdempotencyService>();
-
-            // Register document event processor background service
             services.AddHostedService<DocumentEventProcessor>();
-
-            // Register document event handler
-            services.AddScoped<IDocumentEventHandler, DocumentEventHandler>();
         }
+
+        // Register document event handler
+        services.AddScoped<IDocumentEventHandler, DocumentEventHandler>();
 
         return services;
     }

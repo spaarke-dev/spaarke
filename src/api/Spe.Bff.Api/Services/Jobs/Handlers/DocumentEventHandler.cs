@@ -1,4 +1,3 @@
-using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Spe.Bff.Api.Infrastructure.Graph;
 using System.Text.Json;

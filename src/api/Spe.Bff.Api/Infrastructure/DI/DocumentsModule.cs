@@ -8,7 +8,12 @@ public static class DocumentsModule
 {
     public static IServiceCollection AddDocumentsModule(this IServiceCollection services)
     {
-        // SPE file store facade
+        // SPE specialized operation classes (Task 3.2)
+        services.AddScoped<ContainerOperations>();
+        services.AddScoped<DriveItemOperations>();
+        services.AddScoped<UploadSessionManager>();
+
+        // SPE file store facade (delegates to specialized classes)
         services.AddScoped<SpeFileStore>();
 
         // Document authorization filters

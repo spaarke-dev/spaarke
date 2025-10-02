@@ -7,7 +7,11 @@ namespace Spe.Bff.Api.Services.Jobs;
 
 /// <summary>
 /// Background service that processes document events from Azure Service Bus.
-/// Implements the async processing pipeline for document operations.
+/// Implements the async processing pipeline for document operations from Dataverse plugins.
+///
+/// NOTE: This processor is SPECIFIC to Document events from Dataverse plugins.
+/// For general job processing, use ServiceBusJobProcessor with ADR-004 JobContract.
+/// Both processors can coexist - this handles document-events queue, ServiceBusJobProcessor handles sdap-jobs queue.
 /// </summary>
 public class DocumentEventProcessor : BackgroundService
 {

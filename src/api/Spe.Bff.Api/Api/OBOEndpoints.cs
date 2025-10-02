@@ -2,7 +2,7 @@ using Spe.Bff.Api.Infrastructure.Graph;
 using Spe.Bff.Api.Infrastructure.Errors;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
-using Services;
+using Spe.Bff.Api.Services;
 using Spe.Bff.Api.Models;
 using Microsoft.AspNetCore.Mvc;
 

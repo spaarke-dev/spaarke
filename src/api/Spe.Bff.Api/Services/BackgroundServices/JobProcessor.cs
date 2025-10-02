@@ -8,8 +8,13 @@ using System.Diagnostics;
 namespace Spe.Bff.Api.Services.BackgroundServices;
 
 /// <summary>
-/// Background service that processes jobs using the ADR-004 job contract.
+/// In-memory background service that processes jobs using the ADR-004 job contract.
 /// Provides idempotent processing, retry logic, and poison queue handling.
+///
+/// ⚠️ DEVELOPMENT ONLY: This processor uses an in-memory queue and is NOT durable.
+/// Jobs are lost on application restart. Use ServiceBusJobProcessor for production.
+///
+/// Enable via configuration: Jobs:UseServiceBus = false
 /// </summary>
 public class JobProcessor : BackgroundService
 {

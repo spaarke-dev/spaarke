@@ -1,7 +1,7 @@
 using Microsoft.Graph.Models;
 using Spe.Bff.Api.Models;
 
-namespace Services;
+namespace Spe.Bff.Api.Services;
 
 public interface IOboSpeService
 {

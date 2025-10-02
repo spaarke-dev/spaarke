@@ -1,8 +1,14 @@
 using Microsoft.Extensions.Logging;
 using Spaarke.Dataverse;
+using System.Diagnostics;
 
 namespace Spaarke.Core.Auth;
 
+/// <summary>
+/// Evaluates authorization requests against an ordered chain of IAuthorizationRule policies.
+/// Queries user access data from Dataverse via IAccessDataSource.
+/// Implements comprehensive audit logging for security compliance.
+/// </summary>
 public class AuthorizationService
 {
     private readonly IAccessDataSource _accessDataSource;
@@ -21,37 +27,97 @@ public class AuthorizationService
 
     public async Task<AuthorizationResult> AuthorizeAsync(AuthorizationContext context, CancellationToken ct = default)
     {
-        _logger.LogDebug("Evaluating authorization for user {UserId} on resource {ResourceId} operation {Operation}",
-            context.UserId, context.ResourceId, context.Operation);
+        ArgumentNullException.ThrowIfNull(context);
 
-        var accessSnapshot = await _accessDataSource.GetUserAccessAsync(context.UserId, context.ResourceId, ct);
+        using var activity = new Activity("AuthorizationCheck").Start();
+        activity.SetTag("userId", context.UserId);
+        activity.SetTag("resourceId", context.ResourceId);
+        activity.SetTag("operation", context.Operation);
+        activity.SetTag("correlationId", context.CorrelationId);
 
-        foreach (var rule in _rules)
+        var stopwatch = Stopwatch.StartNew();
+
+        try
         {
-            var result = await rule.EvaluateAsync(context, accessSnapshot, ct);
-            if (result.Decision != AuthorizationDecision.Continue)
+            _logger.LogDebug("Evaluating authorization for user {UserId} on resource {ResourceId} operation {Operation}",
+                context.UserId, context.ResourceId, context.Operation);
+
+            // Fetch user access snapshot from Dataverse
+            var accessSnapshot = await _accessDataSource.GetUserAccessAsync(context.UserId, context.ResourceId, ct);
+
+            activity.SetTag("accessRights", accessSnapshot.AccessRights.ToString());
+            activity.SetTag("teamCount", accessSnapshot.TeamMemberships.Count());
+
+            // Evaluate rules in order
+            foreach (var rule in _rules)
             {
-                _logger.LogInformation("Authorization {Decision} by rule {RuleType} for user {UserId}: {Reason}",
-                    result.Decision, rule.GetType().Name, context.UserId, result.ReasonCode);
-
-                return new AuthorizationResult
+                var result = await rule.EvaluateAsync(context, accessSnapshot, ct);
+                if (result.Decision != AuthorizationDecision.Continue)
                 {
-                    IsAllowed = result.Decision == AuthorizationDecision.Allow,
-                    ReasonCode = result.ReasonCode,
-                    RuleName = rule.GetType().Name
-                };
+                    stopwatch.Stop();
+                    activity.SetTag("result", result.Decision.ToString());
+                    activity.SetTag("ruleName", rule.GetType().Name);
+                    activity.SetTag("durationMs", stopwatch.ElapsedMilliseconds);
+
+                    var authResult = new AuthorizationResult
+                    {
+                        IsAllowed = result.Decision == AuthorizationDecision.Allow,
+                        ReasonCode = result.ReasonCode,
+                        RuleName = rule.GetType().Name
+                    };
+
+                    // Audit log
+                    if (authResult.IsAllowed)
+                    {
+                        _logger.LogInformation(
+                            "AUTHORIZATION GRANTED: User {UserId} granted {Operation} on {ResourceId} by {RuleName} - Reason: {Reason} (AccessRights: {AccessRights}, Duration: {DurationMs}ms)",
+                            context.UserId, context.Operation, context.ResourceId, authResult.RuleName, authResult.ReasonCode, accessSnapshot.AccessRights, stopwatch.ElapsedMilliseconds);
+                    }
+                    else
+                    {
+                        _logger.LogWarning(
+                            "AUTHORIZATION DENIED: User {UserId} denied {Operation} on {ResourceId} by {RuleName} - Reason: {Reason} (AccessRights: {AccessRights}, Duration: {DurationMs}ms)",
+                            context.UserId, context.Operation, context.ResourceId, authResult.RuleName, authResult.ReasonCode, accessSnapshot.AccessRights, stopwatch.ElapsedMilliseconds);
+                    }
+
+                    return authResult;
+                }
             }
+
+            // No rule made a decision - default deny (fail-closed)
+            stopwatch.Stop();
+            activity.SetTag("result", "DefaultDeny");
+            activity.SetTag("durationMs", stopwatch.ElapsedMilliseconds);
+
+            _logger.LogWarning(
+                "AUTHORIZATION DENIED: No rule made a decision for user {UserId} on resource {ResourceId} operation {Operation} - Defaulting to DENY (Duration: {DurationMs}ms)",
+                context.UserId, context.ResourceId, context.Operation, stopwatch.ElapsedMilliseconds);
+
+            return new AuthorizationResult
+            {
+                IsAllowed = false,
+                ReasonCode = "sdap.access.deny.no_rule",
+                RuleName = "DefaultDeny"
+            };
         }
-
-        _logger.LogWarning("No authorization rule made a decision for user {UserId} on resource {ResourceId}",
-            context.UserId, context.ResourceId);
-
-        return new AuthorizationResult
+        catch (Exception ex)
         {
-            IsAllowed = false,
-            ReasonCode = "sdap.access.deny.no_rule",
-            RuleName = "DefaultDeny"
-        };
+            stopwatch.Stop();
+            activity.SetTag("result", "Error");
+            activity.SetTag("durationMs", stopwatch.ElapsedMilliseconds);
+
+            _logger.LogError(ex,
+                "AUTHORIZATION ERROR: Failed to evaluate authorization for user {UserId} on resource {ResourceId} operation {Operation} - Fail-closed: DENY (Duration: {DurationMs}ms)",
+                context.UserId, context.ResourceId, context.Operation, stopwatch.ElapsedMilliseconds);
+
+            // Fail-closed: Deny on errors
+            return new AuthorizationResult
+            {
+                IsAllowed = false,
+                ReasonCode = "sdap.access.error.system_failure",
+                RuleName = "SystemError"
+            };
+        }
     }
 }
 
