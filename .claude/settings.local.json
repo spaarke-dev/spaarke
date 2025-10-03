@@ -15,7 +15,9 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git push:*)",
-      "Bash(git filter-branch:*)"
+      "Bash(git filter-branch:*)",
+      "Bash(git branch:*)",
+      "Bash($env:FILTER_BRANCH_SQUELCH_WARNING=1)"
     ],
     "deny": [],
     "ask": []
