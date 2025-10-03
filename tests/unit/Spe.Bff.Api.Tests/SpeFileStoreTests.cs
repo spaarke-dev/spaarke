@@ -15,9 +15,17 @@ public class SpeFileStoreTests
     public SpeFileStoreTests()
     {
         var mockFactory = new TestGraphClientFactory();
-        var mockLogger = new TestLogger<SpeFileStore>();
+        var mockContainerLogger = new TestLogger<ContainerOperations>();
+        var mockDriveItemLogger = new TestLogger<DriveItemOperations>();
+        var mockUploadLogger = new TestLogger<UploadSessionManager>();
+        var mockUserLogger = new TestLogger<UserOperations>();
 
-        _sut = new SpeFileStore(mockFactory, mockLogger);
+        var containerOps = new ContainerOperations(mockFactory, mockContainerLogger);
+        var driveItemOps = new DriveItemOperations(mockFactory, mockDriveItemLogger);
+        var uploadManager = new UploadSessionManager(mockFactory, mockUploadLogger);
+        var userOps = new UserOperations(mockFactory, mockUserLogger);
+
+        _sut = new SpeFileStore(containerOps, driveItemOps, uploadManager, userOps);
     }
 
     private class TestGraphClientFactory : IGraphClientFactory

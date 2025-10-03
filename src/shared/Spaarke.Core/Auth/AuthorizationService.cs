@@ -1,6 +1,6 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Spaarke.Dataverse;
-using System.Diagnostics;
 
 namespace Spaarke.Core.Auth;
 

@@ -1,4 +1,4 @@
-namespace Api;
+namespace Spe.Bff.Api.Api;
 
 public sealed class SecurityHeadersMiddleware
 {

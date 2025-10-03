@@ -1,7 +1,6 @@
 using Microsoft.Graph;
 using Spe.Bff.Api.Infrastructure.Errors;
 using Spe.Bff.Api.Infrastructure.Graph;
-using Spe.Bff.Api.Infrastructure.Resilience;
 using Spe.Bff.Api.Infrastructure.Validation;
 
 namespace Spe.Bff.Api.Api;
@@ -51,10 +50,9 @@ public static class UploadEndpoints
                 await req.Body.CopyToAsync(ms, ct);
                 ms.Position = 0;
 
-                var item = await RetryPolicies.GraphTransient().ExecuteAsync(() =>
-                    speFileStore.UploadSmallAsync(containerId, path, ms, ct));
+                var item = await speFileStore.UploadSmallAsync(containerId, path, ms, ct);
 
-                return Results.Ok(item);
+                return TypedResults.Ok(item);
             }
             catch (ServiceException ex)
             {
@@ -64,14 +62,14 @@ public static class UploadEndpoints
             catch (Exception ex)
             {
                 logger.LogError(ex, "Unexpected error uploading file");
-                return Results.Problem(
+                return TypedResults.Problem(
                     statusCode: 500,
                     title: "Internal Server Error",
                     detail: "An unexpected error occurred while uploading the file",
                     extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
             }
         })
-        // TODO: .RequireRateLimiting("graph-write")
+        .RequireRateLimiting("upload-heavy")
         .RequireAuthorization("canwritefiles");
 
         // POST /api/containers/{containerId}/upload - Create upload session (MI)
@@ -101,10 +99,9 @@ public static class UploadEndpoints
 
                 logger.LogInformation("Creating upload session for {Path} in container {ContainerId}", path, containerId);
 
-                var session = await RetryPolicies.GraphTransient().ExecuteAsync(() =>
-                    speFileStore.CreateUploadSessionAsync(containerId, path, ct));
+                var session = await speFileStore.CreateUploadSessionAsync(containerId, path, ct);
 
-                return Results.Ok(session);
+                return TypedResults.Ok(session);
             }
             catch (ServiceException ex)
             {
@@ -114,14 +111,14 @@ public static class UploadEndpoints
             catch (Exception ex)
             {
                 logger.LogError(ex, "Unexpected error creating upload session");
-                return Results.Problem(
+                return TypedResults.Problem(
                     statusCode: 500,
                     title: "Internal Server Error",
                     detail: "An unexpected error occurred while creating the upload session",
                     extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
             }
         })
-        // TODO: .RequireRateLimiting("graph-write")
+        .RequireRateLimiting("upload-heavy")
         .RequireAuthorization("canwritefiles");
 
         // PUT /api/upload-session/chunk - Upload file chunk
@@ -160,7 +157,7 @@ public static class UploadEndpoints
 
                 // For now, return a placeholder response
                 // In a real implementation, this would use the Graph SDK to upload the chunk
-                return Results.Json(new
+                return TypedResults.Json(new
                 {
                     ExpirationDateTime = DateTimeOffset.UtcNow.AddHours(1),
                     NextExpectedRanges = new[] { $"{req.ContentLength}-" }
@@ -169,14 +166,14 @@ public static class UploadEndpoints
             catch (Exception ex)
             {
                 logger.LogError(ex, "Unexpected error uploading chunk");
-                return Results.Problem(
+                return TypedResults.Problem(
                     statusCode: 500,
                     title: "Internal Server Error",
                     detail: "An unexpected error occurred while uploading the chunk",
                     extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
             }
         })
-        // TODO: .RequireRateLimiting("graph-write")
+        .RequireRateLimiting("upload-heavy")
         .RequireAuthorization("canwritefiles");
 
         return app;

@@ -1,19 +1,21 @@
-using Spe.Bff.Api.Infrastructure.Graph;
-using Spe.Bff.Api.Infrastructure.Errors;
-using Spe.Bff.Api.Infrastructure.Resilience;
-using Spe.Bff.Api.Infrastructure.Validation;
-using Spe.Bff.Api.Infrastructure.DI;
-using Spe.Bff.Api.Infrastructure.Authorization;
-using Spe.Bff.Api.Infrastructure.Startup;
-using Spe.Bff.Api.Configuration;
-using Spe.Bff.Api.Models;
-using Spe.Bff.Api.Api;
 using System.Threading.RateLimiting;
-using Microsoft.Graph;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
+using Microsoft.Graph;
+using Microsoft.Identity.Web;
 using Polly;
 using Spaarke.Dataverse;
+using Spe.Bff.Api.Api;
+using Spe.Bff.Api.Configuration;
+using Spe.Bff.Api.Infrastructure.Authorization;
+using Spe.Bff.Api.Infrastructure.DI;
+using Spe.Bff.Api.Infrastructure.Errors;
+using Spe.Bff.Api.Infrastructure.Graph;
+using Spe.Bff.Api.Infrastructure.Startup;
+using Spe.Bff.Api.Infrastructure.Validation;
+using Spe.Bff.Api.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -58,6 +60,12 @@ builder.Services.AddHostedService<StartupValidationService>();
 
 // Core module (AuthorizationService, RequestCache)
 builder.Services.AddSpaarkeCore();
+
+// ============================================================================
+// AUTHENTICATION - Azure AD JWT Bearer Token Validation
+// ============================================================================
+builder.Services.AddAuthentication(Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerDefaults.AuthenticationScheme)
+    .AddMicrosoftIdentityWebApi(builder.Configuration.GetSection("AzureAd"));
 
 // Register authorization handler (Scoped to match AuthorizationService dependency)
 builder.Services.AddScoped<IAuthorizationHandler, ResourceAccessHandler>();
@@ -175,17 +183,71 @@ builder.Services.AddDocumentsModule();
 // Workers module (Service Bus + BackgroundService)
 builder.Services.AddWorkersModule(builder.Configuration);
 
-// Distributed cache for idempotency tracking (ADR-004)
-// Production: Use Redis - requires Microsoft.Extensions.Caching.StackExchangeRedis package
-// builder.Services.AddStackExchangeRedisCache(options =>
-// {
-//     options.Configuration = builder.Configuration.GetConnectionString("Redis");
-// });
-// Development: Use distributed memory cache
-builder.Services.AddDistributedMemoryCache();
+// ============================================================================
+// DISTRIBUTED CACHE - Redis for production, in-memory for local dev (ADR-004, ADR-009)
+// ============================================================================
+var redisEnabled = builder.Configuration.GetValue<bool>("Redis:Enabled");
+if (redisEnabled)
+{
+    var redisConnectionString = builder.Configuration.GetConnectionString("Redis")
+        ?? builder.Configuration["Redis:ConnectionString"];
+
+    if (string.IsNullOrWhiteSpace(redisConnectionString))
+    {
+        throw new InvalidOperationException(
+            "Redis is enabled but no connection string found. " +
+            "Set 'ConnectionStrings:Redis' or 'Redis:ConnectionString' in configuration.");
+    }
+
+    builder.Services.AddStackExchangeRedisCache(options =>
+    {
+        options.Configuration = redisConnectionString;
+        options.InstanceName = builder.Configuration["Redis:InstanceName"] ?? "sdap:";
+    });
+
+    builder.Logging.AddSimpleConsole().Services.Configure<Microsoft.Extensions.Logging.Console.SimpleConsoleFormatterOptions>(options =>
+    {
+        options.TimestampFormat = "HH:mm:ss ";
+    });
+
+    var logger = LoggerFactory.Create(config => config.AddConsole()).CreateLogger("Program");
+    logger.LogInformation(
+        "Distributed cache: Redis enabled with instance name '{InstanceName}'",
+        builder.Configuration["Redis:InstanceName"] ?? "sdap:");
+}
+else
+{
+    // Use in-memory cache for local development only
+    builder.Services.AddDistributedMemoryCache();
+
+    var logger = LoggerFactory.Create(config => config.AddConsole()).CreateLogger("Program");
+    logger.LogWarning(
+        "Distributed cache: Using in-memory cache (not distributed). " +
+        "This should ONLY be used in local development.");
+}
+
 builder.Services.AddMemoryCache();
 
-// Singleton GraphServiceClient factory
+// Graph API Resilience Configuration (Task 4.1)
+builder.Services
+    .AddOptions<Spe.Bff.Api.Configuration.GraphResilienceOptions>()
+    .Bind(builder.Configuration.GetSection(Spe.Bff.Api.Configuration.GraphResilienceOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+
+// Register GraphHttpMessageHandler for centralized resilience (retry, circuit breaker, timeout)
+builder.Services.AddTransient<Spe.Bff.Api.Infrastructure.Http.GraphHttpMessageHandler>();
+
+// Configure named HttpClient for Graph API with resilience handler
+builder.Services.AddHttpClient("GraphApiClient")
+    .AddHttpMessageHandler<Spe.Bff.Api.Infrastructure.Http.GraphHttpMessageHandler>()
+    .ConfigureHttpClient(client =>
+    {
+        client.BaseAddress = new Uri("https://graph.microsoft.com/v1.0/");
+        client.DefaultRequestHeaders.Add("Accept", "application/json");
+    });
+
+// Singleton GraphServiceClient factory (now uses IHttpClientFactory with resilience handler)
 builder.Services.AddSingleton<IGraphClientFactory, Spe.Bff.Api.Infrastructure.Graph.GraphClientFactory>();
 
 // Dataverse service - using Web API for .NET 8.0 compatibility with IHttpClientFactory
@@ -234,51 +296,228 @@ else
 // Health checks
 builder.Services.AddHealthChecks();
 
-// CORS for SPA
-var allowed = builder.Configuration.GetValue<string>("Cors:AllowedOrigins") ?? "";
-builder.Services.AddCors(o =>
+// ============================================================================
+// CORS - Secure, fail-closed configuration
+// ============================================================================
+var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>();
+
+// Validate configuration
+if (allowedOrigins == null || allowedOrigins.Length == 0)
 {
-    o.AddPolicy("spa", p =>
+    // In development, allow localhost as fallback
+    if (builder.Environment.IsDevelopment())
     {
-        if (!string.IsNullOrWhiteSpace(allowed))
+        var logger = LoggerFactory.Create(config => config.AddConsole()).CreateLogger("Program");
+        logger.LogWarning(
+            "CORS: No allowed origins configured. Falling back to localhost (development only).");
+
+        allowedOrigins = new[]
         {
-            p.WithOrigins(allowed.Split(',', StringSplitOptions.RemoveEmptyEntries))
-             .AllowCredentials(); // Required for credentials: 'include' in JavaScript
-        }
-        else
-        {
-            p.AllowAnyOrigin(); // dev fallback (cannot use AllowCredentials with AllowAnyOrigin)
-        }
-        p.AllowAnyHeader().AllowAnyMethod();
-        p.WithExposedHeaders("request-id", "client-request-id", "traceparent");
+            "http://localhost:3000",
+            "http://localhost:3001",
+            "http://127.0.0.1:3000"
+        };
+    }
+    else
+    {
+        // FAIL-CLOSED: Throw exception in non-development environments
+        throw new InvalidOperationException(
+            $"CORS configuration is missing or empty in {builder.Environment.EnvironmentName} environment. " +
+            "Configure 'Cors:AllowedOrigins' with explicit origin URLs. " +
+            "CORS will NOT fall back to AllowAnyOrigin for security reasons.");
+    }
+}
+
+// Reject wildcard configuration (security violation)
+if (allowedOrigins.Contains("*"))
+{
+    throw new InvalidOperationException(
+        "CORS: Wildcard origin '*' is not allowed. " +
+        "Configure explicit origin URLs in 'Cors:AllowedOrigins'.");
+}
+
+// Validate origin URLs
+foreach (var origin in allowedOrigins)
+{
+    if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+    {
+        throw new InvalidOperationException(
+            $"CORS: Invalid origin URL '{origin}'. Must be absolute URL (e.g., https://example.com).");
+    }
+
+    if (uri.Scheme != "https" && !builder.Environment.IsDevelopment())
+    {
+        throw new InvalidOperationException(
+            $"CORS: Non-HTTPS origin '{origin}' is not allowed in {builder.Environment.EnvironmentName} environment. " +
+            "Use HTTPS URLs for security.");
+    }
+}
+
+// Log allowed origins for audit trail
+{
+    var logger = LoggerFactory.Create(config => config.AddConsole()).CreateLogger("Program");
+    logger.LogInformation(
+        "CORS: Configured with {OriginCount} allowed origins: {Origins}",
+        allowedOrigins.Length,
+        string.Join(", ", allowedOrigins));
+}
+
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+    {
+        policy.WithOrigins(allowedOrigins)
+              .AllowCredentials()
+              .AllowAnyMethod()
+              .WithHeaders(
+                  "Authorization",
+                  "Content-Type",
+                  "Accept",
+                  "X-Requested-With")
+              .WithExposedHeaders(
+                  "request-id",
+                  "client-request-id",
+                  "traceparent",
+                  "X-Pagination-TotalCount",
+                  "X-Pagination-HasMore")
+              .SetPreflightMaxAge(TimeSpan.FromMinutes(10));
     });
 });
 
-// TODO: Rate limiting - API needs to be updated for .NET 8
-// builder.Services.AddRateLimiter(options =>
-// {
-//     options.AddTokenBucketLimiter("graph-write", limiter =>
-//     {
-//         limiter.TokenLimit = 10;
-//         limiter.TokensPerPeriod = 10;
-//         limiter.ReplenishmentPeriod = TimeSpan.FromSeconds(10);
-//         limiter.QueueLimit = 5;
-//     });
+// ============================================================================
+// RATE LIMITING - Per-user/per-IP traffic control (ADR-009)
+// ============================================================================
+builder.Services.AddRateLimiter(options =>
+{
+    // 1. Graph Read Operations - High volume, sliding window
+    options.AddPolicy("graph-read", context =>
+    {
+        var userId = context.User?.FindFirst("oid")?.Value
+                     ?? context.User?.FindFirst("sub")?.Value
+                     ?? context.Connection.RemoteIpAddress?.ToString()
+                     ?? "unknown";
 
-//     options.AddTokenBucketLimiter("graph-read", limiter =>
-//     {
-//         limiter.TokenLimit = 100;
-//         limiter.TokensPerPeriod = 100;
-//         limiter.ReplenishmentPeriod = TimeSpan.FromSeconds(10);
-//         limiter.QueueLimit = 10;
-//     });
+        return RateLimitPartition.GetSlidingWindowLimiter(userId, _ => new SlidingWindowRateLimiterOptions
+        {
+            Window = TimeSpan.FromMinutes(1),
+            PermitLimit = 100,
+            QueueLimit = 10,
+            SegmentsPerWindow = 6 // 10-second segments
+        });
+    });
 
-//     options.OnRejected = async (context, ct) =>
-//     {
-//         context.HttpContext.Response.StatusCode = 429;
-//         await context.HttpContext.Response.WriteAsync("Rate limit exceeded", ct);
-//     };
-// });
+    // 2. Graph Write Operations - Lower volume, token bucket for burst
+    options.AddPolicy("graph-write", context =>
+    {
+        var userId = context.User?.FindFirst("oid")?.Value
+                     ?? context.User?.FindFirst("sub")?.Value
+                     ?? context.Connection.RemoteIpAddress?.ToString()
+                     ?? "unknown";
+
+        return RateLimitPartition.GetTokenBucketLimiter(userId, _ => new TokenBucketRateLimiterOptions
+        {
+            TokenLimit = 20,
+            TokensPerPeriod = 10,
+            ReplenishmentPeriod = TimeSpan.FromMinutes(1),
+            QueueLimit = 5
+        });
+    });
+
+    // 3. Dataverse Query Operations - Moderate volume, sliding window
+    options.AddPolicy("dataverse-query", context =>
+    {
+        var userId = context.User?.FindFirst("oid")?.Value
+                     ?? context.User?.FindFirst("sub")?.Value
+                     ?? context.Connection.RemoteIpAddress?.ToString()
+                     ?? "unknown";
+
+        return RateLimitPartition.GetSlidingWindowLimiter(userId, _ => new SlidingWindowRateLimiterOptions
+        {
+            Window = TimeSpan.FromMinutes(1),
+            PermitLimit = 50,
+            QueueLimit = 5,
+            SegmentsPerWindow = 4 // 15-second segments
+        });
+    });
+
+    // 4. Heavy Operations - File uploads, strict concurrency
+    options.AddPolicy("upload-heavy", context =>
+    {
+        var userId = context.User?.FindFirst("oid")?.Value
+                     ?? context.User?.FindFirst("sub")?.Value
+                     ?? context.Connection.RemoteIpAddress?.ToString()
+                     ?? "unknown";
+
+        return RateLimitPartition.GetConcurrencyLimiter(userId, _ => new ConcurrencyLimiterOptions
+        {
+            PermitLimit = 5,
+            QueueLimit = 10
+        });
+    });
+
+    // 5. Job Submission - Rate-sensitive, fixed window
+    options.AddPolicy("job-submission", context =>
+    {
+        var userId = context.User?.FindFirst("oid")?.Value
+                     ?? context.User?.FindFirst("sub")?.Value
+                     ?? context.Connection.RemoteIpAddress?.ToString()
+                     ?? "unknown";
+
+        return RateLimitPartition.GetFixedWindowLimiter(userId, _ => new FixedWindowRateLimiterOptions
+        {
+            Window = TimeSpan.FromMinutes(1),
+            PermitLimit = 10,
+            QueueLimit = 2
+        });
+    });
+
+    // 6. Anonymous/Unauthenticated - Very restrictive, fixed window
+    options.AddPolicy("anonymous", context =>
+    {
+        var ipAddress = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+        return RateLimitPartition.GetFixedWindowLimiter(ipAddress, _ => new FixedWindowRateLimiterOptions
+        {
+            Window = TimeSpan.FromMinutes(1),
+            PermitLimit = 10,
+            QueueLimit = 0 // No queueing for anonymous
+        });
+    });
+
+    // ProblemDetails JSON response for rate limit rejections
+    options.OnRejected = async (context, cancellationToken) =>
+    {
+        context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        context.HttpContext.Response.ContentType = "application/problem+json";
+
+        var retryAfter = context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfterValue)
+            ? retryAfterValue.TotalSeconds
+            : 60;
+
+        context.HttpContext.Response.Headers.RetryAfter = retryAfter.ToString();
+
+        var problemDetails = new
+        {
+            type = "https://tools.ietf.org/html/rfc6585#section-4",
+            title = "Too Many Requests",
+            status = 429,
+            detail = "Rate limit exceeded. Please retry after the specified duration.",
+            instance = context.HttpContext.Request.Path.Value,
+            retryAfter = $"{retryAfter} seconds"
+        };
+
+        await context.HttpContext.Response.WriteAsJsonAsync(problemDetails, cancellationToken);
+
+        // Log rate limit rejection for monitoring
+        var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
+        logger.LogWarning(
+            "Rate limit exceeded for {Path} by {User} (IP: {IP}). Retry after {RetryAfter}s",
+            context.HttpContext.Request.Path,
+            context.HttpContext.User?.Identity?.Name ?? "anonymous",
+            context.HttpContext.Connection.RemoteIpAddress,
+            retryAfter);
+    };
+});
 
 // TODO: OpenTelemetry - API needs to be updated for .NET 8
 // builder.Services.AddOpenTelemetry()
@@ -293,78 +532,37 @@ var app = builder.Build();
 // ---- Middleware Pipeline ----
 
 // Cross-cutting: CORS
-app.UseCors("spa");
-// TODO: app.UseRateLimiter(); // Disabled until rate limiting API is fixed
-app.UseMiddleware<Api.SecurityHeadersMiddleware>();
+app.UseCors();
+app.UseMiddleware<Spe.Bff.Api.Api.SecurityHeadersMiddleware>();
+
+// ============================================================================
+// AUTHENTICATION & AUTHORIZATION
+// ============================================================================
+// CRITICAL: Authentication must come before Authorization
+app.UseAuthentication();
 app.UseAuthorization();
+
+// ============================================================================
+// RATE LIMITING
+// ============================================================================
+// CRITICAL: Rate limiting must come after Authentication (to access User claims for partitioning)
+app.UseRateLimiter();
 
 // ---- Health Endpoints ----
 
-// Health checks endpoints
-app.MapHealthChecks("/healthz");
+// Health checks endpoints (anonymous for monitoring)
+app.MapHealthChecks("/healthz").AllowAnonymous();
 
 // Dataverse connection test endpoint
-app.MapGet("/healthz/dataverse", async (IDataverseService dataverseService) =>
-{
-    try
-    {
-        var isConnected = await dataverseService.TestConnectionAsync();
-        if (isConnected)
-        {
-            return Results.Ok(new { status = "healthy", message = "Dataverse connection successful" });
-        }
-        else
-        {
-            return Results.Problem(
-                detail: "Dataverse connection test failed",
-                statusCode: 503,
-                title: "Service Unavailable"
-            );
-        }
-    }
-    catch (Exception ex)
-    {
-        return Results.Problem(
-            detail: ex.Message,
-            statusCode: 503,
-            title: "Dataverse Connection Error"
-        );
-    }
-});
+app.MapGet("/healthz/dataverse", TestDataverseConnectionAsync);
 
 // Dataverse CRUD operations test endpoint
-app.MapGet("/healthz/dataverse/crud", async (IDataverseService dataverseService) =>
-{
-    try
-    {
-        var testPassed = await dataverseService.TestDocumentOperationsAsync();
-        if (testPassed)
-        {
-            return Results.Ok(new { status = "healthy", message = "Dataverse CRUD operations successful" });
-        }
-        else
-        {
-            return Results.Problem(
-                detail: "Dataverse CRUD operations test failed",
-                statusCode: 503,
-                title: "Service Unavailable"
-            );
-        }
-    }
-    catch (Exception ex)
-    {
-        return Results.Problem(
-            detail: ex.Message,
-            statusCode: 503,
-            title: "Dataverse CRUD Test Error"
-        );
-    }
-});
+app.MapGet("/healthz/dataverse/crud", TestDataverseCrudOperationsAsync);
 
 // Detailed ping endpoint
 app.MapGet("/ping", (HttpContext context) =>
 {
-    return Results.Json(new
+    return TypedResults.Json(new
     {
         service = "Spe.Bff.Api",
         version = "1.0.0",
@@ -394,6 +592,63 @@ app.MapUploadEndpoints();
 app.MapOBOEndpoints();
 
 app.Run();
+
+// Health check endpoint handlers
+static async Task<IResult> TestDataverseConnectionAsync(IDataverseService dataverseService)
+{
+    try
+    {
+        var isConnected = await dataverseService.TestConnectionAsync();
+        if (isConnected)
+        {
+            return TypedResults.Ok(new { status = "healthy", message = "Dataverse connection successful" });
+        }
+        else
+        {
+            return TypedResults.Problem(
+                detail: "Dataverse connection test failed",
+                statusCode: 503,
+                title: "Service Unavailable"
+            );
+        }
+    }
+    catch (Exception ex)
+    {
+        return TypedResults.Problem(
+            detail: ex.Message,
+            statusCode: 503,
+            title: "Dataverse Connection Error"
+        );
+    }
+}
+
+static async Task<IResult> TestDataverseCrudOperationsAsync(IDataverseService dataverseService)
+{
+    try
+    {
+        var testPassed = await dataverseService.TestDocumentOperationsAsync();
+        if (testPassed)
+        {
+            return TypedResults.Ok(new { status = "healthy", message = "Dataverse CRUD operations successful" });
+        }
+        else
+        {
+            return TypedResults.Problem(
+                detail: "Dataverse CRUD operations test failed",
+                statusCode: 503,
+                title: "Service Unavailable"
+            );
+        }
+    }
+    catch (Exception ex)
+    {
+        return TypedResults.Problem(
+            detail: ex.Message,
+            statusCode: 503,
+            title: "Dataverse CRUD Test Error"
+        );
+    }
+}
 
 // expose Program for WebApplicationFactory in tests
 public partial class Program

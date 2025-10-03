@@ -1,12 +1,12 @@
-using Microsoft.Extensions.Logging;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 
 namespace Spaarke.Dataverse;
 
 /// <summary>
 /// Queries Dataverse for user access permissions and team memberships.
-/// Implements fail-closed security: returns AccessLevel.None on errors.
+/// Implements fail-closed security: returns AccessRights.None on errors.
 /// </summary>
 public class DataverseAccessDataSource : IAccessDataSource
 {

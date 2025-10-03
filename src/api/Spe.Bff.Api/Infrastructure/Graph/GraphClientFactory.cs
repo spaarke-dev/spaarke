@@ -10,17 +10,26 @@ namespace Spe.Bff.Api.Infrastructure.Graph;
 /// <summary>
 /// Factory implementation for creating Microsoft Graph clients.
 /// Implements MI-first pattern with OBO support for user operations.
+/// Updated for Task 4.1: Uses IHttpClientFactory for centralized resilience via GraphHttpMessageHandler.
 /// </summary>
 public sealed class GraphClientFactory : IGraphClientFactory
 {
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly ILogger<GraphClientFactory> _logger;
     private readonly string _uamiClientId;
     private readonly string? _tenantId;
     private readonly string? _clientId;
     private readonly string? _clientSecret;
     private readonly IConfidentialClientApplication _cca;
 
-    public GraphClientFactory(IConfiguration configuration)
+    public GraphClientFactory(
+        IHttpClientFactory httpClientFactory,
+        ILogger<GraphClientFactory> logger,
+        IConfiguration configuration)
     {
+        _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
         _uamiClientId = configuration["UAMI_CLIENT_ID"] ??
             throw new InvalidOperationException("UAMI_CLIENT_ID not configured");
 
@@ -49,6 +58,7 @@ public sealed class GraphClientFactory : IGraphClientFactory
     /// Creates Graph client using User-Assigned Managed Identity (Azure) or Client Credentials (local dev).
     /// For app-only operations (platform/admin tasks).
     /// Uses Graph SDK v5 with TokenCredentialAuthenticationProvider.
+    /// Task 4.1: Now uses named HttpClient with GraphHttpMessageHandler for centralized resilience.
     /// </summary>
     public GraphServiceClient CreateAppOnlyClient()
     {
@@ -61,6 +71,7 @@ public sealed class GraphClientFactory : IGraphClientFactory
             !string.IsNullOrWhiteSpace(_clientId))
         {
             credential = new ClientSecretCredential(_tenantId, _clientId, _clientSecret);
+            _logger.LogDebug("Creating app-only Graph client with ClientSecretCredential");
         }
         else
         {
@@ -73,6 +84,7 @@ public sealed class GraphClientFactory : IGraphClientFactory
                 ExcludeVisualStudioCodeCredential = true,
                 ExcludeVisualStudioCredential = true
             });
+            _logger.LogDebug("Creating app-only Graph client with DefaultAzureCredential (Managed Identity)");
         }
 
         var authProvider = new AzureIdentityAuthenticationProvider(
@@ -80,13 +92,19 @@ public sealed class GraphClientFactory : IGraphClientFactory
             scopes: new[] { "https://graph.microsoft.com/.default" }
         );
 
-        return new GraphServiceClient(authProvider);
+        // Get HttpClient with GraphHttpMessageHandler (retry, circuit breaker, timeout)
+        var httpClient = _httpClientFactory.CreateClient("GraphApiClient");
+
+        _logger.LogInformation("Created app-only Graph client with centralized resilience handler");
+
+        return new GraphServiceClient(httpClient, authProvider);
     }
 
     /// <summary>
     /// Creates Graph client using On-Behalf-Of flow.
     /// For user context operations where SPE must enforce user permissions.
     /// Uses Graph SDK v5 with TokenCredentialAuthenticationProvider.
+    /// Task 4.1: Now uses named HttpClient with GraphHttpMessageHandler for centralized resilience.
     /// </summary>
     public async Task<GraphServiceClient> CreateOnBehalfOfClientAsync(string userAccessToken)
     {
@@ -103,6 +121,11 @@ public sealed class GraphClientFactory : IGraphClientFactory
             scopes: new[] { "https://graph.microsoft.com/.default" }
         );
 
-        return new GraphServiceClient(authProvider);
+        // Get HttpClient with GraphHttpMessageHandler (retry, circuit breaker, timeout)
+        var httpClient = _httpClientFactory.CreateClient("GraphApiClient");
+
+        _logger.LogDebug("Created OBO Graph client with centralized resilience handler");
+
+        return new GraphServiceClient(httpClient, authProvider);
     }
 }

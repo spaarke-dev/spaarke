@@ -1,3 +1,4 @@
+using System.Net.Http.Headers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
@@ -6,7 +7,6 @@ using Spaarke.Core.Auth;
 using Spaarke.Core.Auth.Rules;
 using Spaarke.Core.Cache;
 using Spaarke.Dataverse;
-using System.Net.Http.Headers;
 
 namespace Spe.Bff.Api.Infrastructure.DI;
 

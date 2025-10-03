@@ -247,4 +247,404 @@ public class DriveItemOperations
             throw;
         }
     }
+
+    // =============================================================================
+    // USER CONTEXT METHODS (OBO Flow)
+    // =============================================================================
+
+    /// <summary>
+    /// Lists drive children as the user (OBO flow) with paging and ordering.
+    /// </summary>
+    public async Task<ListingResponse> ListChildrenAsUserAsync(
+        string userToken,
+        string containerId,
+        ListingParameters parameters,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(userToken))
+            throw new ArgumentException("User access token required", nameof(userToken));
+
+        using var activity = Activity.Current;
+        activity?.SetTag("operation", "ListChildrenAsUser");
+        activity?.SetTag("containerId", containerId);
+
+        _logger.LogInformation("Listing children for container {ContainerId} (user context)", containerId);
+
+        try
+        {
+            var graphClient = await _factory.CreateOnBehalfOfClientAsync(userToken);
+
+            // Get the drive for the container
+            var drive = await graphClient.Storage.FileStorage.Containers[containerId].Drive
+                .GetAsync(cancellationToken: ct);
+
+            if (drive?.Id is null)
+            {
+                _logger.LogWarning("Drive not found for container {ContainerId}", containerId);
+                return new ListingResponse(new List<DriveItemDto>(), null);
+            }
+
+            // Call Graph API to list root items with OData query parameters
+            var children = await graphClient.Drives[drive.Id].Items
+                .GetAsync(requestConfiguration =>
+                {
+                    requestConfiguration.QueryParameters.Filter = "parentReference/path eq '/drive/root:'";
+                    requestConfiguration.QueryParameters.Top = parameters.ValidatedTop;
+                    requestConfiguration.QueryParameters.Skip = parameters.ValidatedSkip;
+
+                    // Apply ordering (OData $orderby)
+                    var orderField = parameters.ValidatedOrderBy.ToLowerInvariant() switch
+                    {
+                        "name" => "name",
+                        "lastmodifieddatetime" => "lastModifiedDateTime",
+                        "size" => "size",
+                        _ => "name"
+                    };
+                    var orderDirection = parameters.ValidatedOrderDir == "desc" ? " desc" : " asc";
+                    requestConfiguration.QueryParameters.Orderby = new[] { orderField + orderDirection };
+                }, cancellationToken: ct);
+
+            if (children?.Value == null)
+            {
+                return new ListingResponse(new List<DriveItemDto>(), null);
+            }
+
+            // Map Graph DriveItem to DriveItemDto
+            var items = children.Value.Select(item => new DriveItemDto(
+                Id: item.Id!,
+                Name: item.Name!,
+                Size: item.Size,
+                ETag: item.ETag,
+                LastModifiedDateTime: item.LastModifiedDateTime ?? DateTimeOffset.UtcNow,
+                ContentType: item.File?.MimeType,
+                Folder: item.Folder != null ? new FolderDto(item.Folder.ChildCount) : null
+            )).ToList();
+
+            // Handle pagination (@odata.nextLink)
+            string? nextLink = null;
+            if (!string.IsNullOrEmpty(children.OdataNextLink))
+            {
+                // Extract skip token from nextLink
+                var nextSkip = parameters.ValidatedSkip + parameters.ValidatedTop;
+                nextLink = $"/api/obo/containers/{containerId}/children?top={parameters.ValidatedTop}&skip={nextSkip}&orderBy={parameters.ValidatedOrderBy}&orderDir={parameters.ValidatedOrderDir}";
+            }
+
+            _logger.LogInformation("Listed {Count} items for container {ContainerId}", items.Count, containerId);
+
+            return new ListingResponse(items, nextLink);
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == 404)
+        {
+            _logger.LogWarning("Container or drive not found: {ContainerId}", containerId);
+            return new ListingResponse(new List<DriveItemDto>(), null);
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == 403)
+        {
+            _logger.LogWarning("Access denied to container {ContainerId}: {Error}", containerId, ex.Message);
+            throw new UnauthorizedAccessException($"Access denied to container {containerId}", ex);
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == 429)
+        {
+            _logger.LogWarning("Graph API throttling for container {ContainerId}, retry after {RetryAfter}s",
+                containerId, ex.ResponseHeaders?.RetryAfter?.Delta?.TotalSeconds ?? 60);
+            throw new InvalidOperationException("Service temporarily unavailable due to rate limiting", ex);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to list children for container {ContainerId}", containerId);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Downloads file with range support as the user (OBO flow).
+    /// Supports partial content (206) and conditional requests (304).
+    /// </summary>
+    public async Task<FileContentResponse?> DownloadFileWithRangeAsUserAsync(
+        string userToken,
+        string driveId,
+        string itemId,
+        RangeHeader? range,
+        string? ifNoneMatch,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(userToken))
+            throw new ArgumentException("User access token required", nameof(userToken));
+
+        if (!FileOperationExtensions.IsValidItemId(itemId))
+        {
+            _logger.LogWarning("Invalid item ID: {ItemId}", itemId);
+            return null;
+        }
+
+        using var activity = Activity.Current;
+        activity?.SetTag("operation", "DownloadFileWithRangeAsUser");
+        activity?.SetTag("driveId", driveId);
+        activity?.SetTag("itemId", itemId);
+
+        _logger.LogInformation("Downloading file {DriveId}/{ItemId} (user context)", driveId, itemId);
+
+        try
+        {
+            var graphClient = await _factory.CreateOnBehalfOfClientAsync(userToken);
+
+            // First, get item metadata to check ETag and size
+            var item = await graphClient.Drives[driveId].Items[itemId]
+                .GetAsync(cancellationToken: ct);
+
+            if (item == null)
+            {
+                _logger.LogWarning("Item not found: {ItemId}", itemId);
+                return null;
+            }
+
+            // Handle If-None-Match (ETag-based caching)
+            if (!string.IsNullOrEmpty(ifNoneMatch) &&
+                !string.IsNullOrEmpty(item.ETag) &&
+                ifNoneMatch.Trim('"') == item.ETag.Trim('"'))
+            {
+                _logger.LogInformation("ETag match for item {ItemId}, returning 304 Not Modified", itemId);
+                return new FileContentResponse(
+                    Content: Stream.Null,
+                    ContentLength: 0,
+                    ContentType: item.File?.MimeType ?? "application/octet-stream",
+                    ETag: item.ETag
+                );
+            }
+
+            var totalSize = item.Size ?? 0;
+            var contentType = item.File?.MimeType ?? "application/octet-stream";
+
+            // Download content with optional range
+            Stream contentStream;
+            long contentLength;
+            long? rangeStart = null;
+            long? rangeEnd = null;
+
+            if (range != null && range.IsValid && totalSize > 0)
+            {
+                // Handle partial content (HTTP 206)
+                var actualEnd = Math.Min(range.End, totalSize - 1);
+                var actualStart = Math.Min(range.Start, actualEnd);
+
+                if (actualStart >= totalSize)
+                {
+                    // Range not satisfiable (HTTP 416)
+                    _logger.LogWarning("Range not satisfiable for item {ItemId}: {Start}-{End}/{TotalSize}",
+                        itemId, actualStart, actualEnd, totalSize);
+                    return null;
+                }
+
+                // Use Graph API to download specific range
+                contentStream = await graphClient.Drives[driveId].Items[itemId].Content
+                    .GetAsync(requestConfiguration =>
+                    {
+                        requestConfiguration.Headers.Add("Range", $"bytes={actualStart}-{actualEnd}");
+                    }, cancellationToken: ct);
+
+                if (contentStream == null)
+                {
+                    _logger.LogError("Failed to download range content for item {ItemId}", itemId);
+                    return null;
+                }
+
+                contentLength = actualEnd - actualStart + 1;
+                rangeStart = actualStart;
+                rangeEnd = actualEnd;
+
+                _logger.LogInformation("Serving range {Start}-{End} of item {ItemId} (total: {TotalSize})",
+                    actualStart, actualEnd, itemId, totalSize);
+            }
+            else
+            {
+                // Download full content
+                contentStream = await graphClient.Drives[driveId].Items[itemId].Content
+                    .GetAsync(cancellationToken: ct);
+
+                if (contentStream == null)
+                {
+                    _logger.LogError("Failed to download content for item {ItemId}", itemId);
+                    return null;
+                }
+
+                contentLength = totalSize;
+                _logger.LogInformation("Serving full content of item {ItemId} (size: {Size})", itemId, totalSize);
+            }
+
+            return new FileContentResponse(
+                Content: contentStream,
+                ContentLength: contentLength,
+                ContentType: contentType,
+                ETag: item.ETag,
+                RangeStart: rangeStart,
+                RangeEnd: rangeEnd,
+                TotalSize: totalSize
+            );
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == 404)
+        {
+            _logger.LogWarning("Item not found: {ItemId}", itemId);
+            return null;
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == 403)
+        {
+            _logger.LogWarning("Access denied to item {ItemId}: {Error}", itemId, ex.Message);
+            throw new UnauthorizedAccessException($"Access denied to item {itemId}", ex);
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == 416)
+        {
+            _logger.LogWarning("Range not satisfiable for item {ItemId}", itemId);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to download content for item {ItemId}", itemId);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Updates drive item (rename/move) as the user (OBO flow).
+    /// </summary>
+    public async Task<DriveItemDto?> UpdateItemAsUserAsync(
+        string userToken,
+        string driveId,
+        string itemId,
+        UpdateFileRequest request,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(userToken))
+            throw new ArgumentException("User access token required", nameof(userToken));
+
+        if (!FileOperationExtensions.IsValidItemId(itemId))
+        {
+            _logger.LogWarning("Invalid item ID: {ItemId}", itemId);
+            return null;
+        }
+
+        if (!string.IsNullOrEmpty(request.Name) && !FileOperationExtensions.IsValidFileName(request.Name))
+        {
+            _logger.LogWarning("Invalid file name: {Name}", request.Name);
+            return null;
+        }
+
+        using var activity = Activity.Current;
+        activity?.SetTag("operation", "UpdateItemAsUser");
+        activity?.SetTag("driveId", driveId);
+        activity?.SetTag("itemId", itemId);
+
+        _logger.LogInformation("Updating item {DriveId}/{ItemId} (user context)", driveId, itemId);
+
+        try
+        {
+            var graphClient = await _factory.CreateOnBehalfOfClientAsync(userToken);
+
+            // Build update request
+            var driveItemUpdate = new DriveItem();
+
+            if (!string.IsNullOrEmpty(request.Name))
+            {
+                driveItemUpdate.Name = request.Name;
+            }
+
+            if (!string.IsNullOrEmpty(request.ParentReferenceId))
+            {
+                driveItemUpdate.ParentReference = new ItemReference
+                {
+                    Id = request.ParentReferenceId
+                };
+            }
+
+            // Execute update via Graph API
+            var updatedItem = await graphClient.Drives[driveId].Items[itemId]
+                .PatchAsync(driveItemUpdate, cancellationToken: ct);
+
+            if (updatedItem == null)
+            {
+                _logger.LogWarning("Item not found or update failed: {ItemId}", itemId);
+                return null;
+            }
+
+            _logger.LogInformation("Updated item {ItemId}: name={Name}, parentRef={ParentRef}",
+                itemId, updatedItem.Name, request.ParentReferenceId);
+
+            return new DriveItemDto(
+                Id: updatedItem.Id!,
+                Name: updatedItem.Name!,
+                Size: updatedItem.Size,
+                ETag: updatedItem.ETag,
+                LastModifiedDateTime: updatedItem.LastModifiedDateTime ?? DateTimeOffset.UtcNow,
+                ContentType: updatedItem.File?.MimeType,
+                Folder: updatedItem.Folder != null ? new FolderDto(updatedItem.Folder.ChildCount) : null
+            );
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == 404)
+        {
+            _logger.LogWarning("Item not found: {ItemId}", itemId);
+            return null;
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == 403)
+        {
+            _logger.LogWarning("Access denied updating item {ItemId}: {Error}", itemId, ex.Message);
+            throw new UnauthorizedAccessException($"Access denied to item {itemId}", ex);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update item {ItemId}", itemId);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Deletes drive item as the user (OBO flow).
+    /// </summary>
+    public async Task<bool> DeleteItemAsUserAsync(
+        string userToken,
+        string driveId,
+        string itemId,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(userToken))
+            throw new ArgumentException("User access token required", nameof(userToken));
+
+        if (!FileOperationExtensions.IsValidItemId(itemId))
+        {
+            _logger.LogWarning("Invalid item ID: {ItemId}", itemId);
+            return false;
+        }
+
+        using var activity = Activity.Current;
+        activity?.SetTag("operation", "DeleteItemAsUser");
+        activity?.SetTag("driveId", driveId);
+        activity?.SetTag("itemId", itemId);
+
+        _logger.LogInformation("Deleting item {DriveId}/{ItemId} (user context)", driveId, itemId);
+
+        try
+        {
+            var graphClient = await _factory.CreateOnBehalfOfClientAsync(userToken);
+
+            // Delete item via Graph API
+            await graphClient.Drives[driveId].Items[itemId]
+                .DeleteAsync(cancellationToken: ct);
+
+            _logger.LogInformation("Deleted item {ItemId} from drive {DriveId}", itemId, driveId);
+            return true;
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == 404)
+        {
+            _logger.LogWarning("Item not found (may already be deleted): {ItemId}", itemId);
+            return false;
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == 403)
+        {
+            _logger.LogWarning("Access denied deleting item {ItemId}: {Error}", itemId, ex.Message);
+            throw new UnauthorizedAccessException($"Access denied to item {itemId}", ex);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to delete item {ItemId}", itemId);
+            throw;
+        }
+    }
 }

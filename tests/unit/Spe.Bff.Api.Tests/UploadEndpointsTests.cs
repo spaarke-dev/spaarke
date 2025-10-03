@@ -1,8 +1,8 @@
-using Microsoft.AspNetCore.Mvc.Testing;
-using System.Net.Http.Headers;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Text;
 using FluentAssertions;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Newtonsoft.Json;
 using Spe.Bff.Api.Models;
 using Xunit;

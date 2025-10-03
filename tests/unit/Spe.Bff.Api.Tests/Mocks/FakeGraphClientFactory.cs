@@ -1,6 +1,6 @@
-using Spe.Bff.Api.Infrastructure.Graph;
 using Microsoft.Graph;
 using Microsoft.Kiota.Abstractions.Authentication;
+using Spe.Bff.Api.Infrastructure.Graph;
 
 namespace Spe.Bff.Api.Tests.Mocks;
 

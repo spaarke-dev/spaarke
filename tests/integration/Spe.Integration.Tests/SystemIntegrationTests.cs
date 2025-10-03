@@ -1,7 +1,7 @@
-using FluentAssertions;
-using Microsoft.Extensions.Configuration;
 using System.Net;
 using System.Text.Json;
+using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Xunit;
 
 namespace Spe.Integration.Tests;

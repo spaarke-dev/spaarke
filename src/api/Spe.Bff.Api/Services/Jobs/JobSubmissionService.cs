@@ -1,6 +1,6 @@
+using System.Text.Json;
 using Azure.Messaging.ServiceBus;
 using Spe.Bff.Api.Services.BackgroundServices;
-using System.Text.Json;
 
 namespace Spe.Bff.Api.Services.Jobs;
 

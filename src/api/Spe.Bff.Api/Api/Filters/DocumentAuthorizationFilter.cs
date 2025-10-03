@@ -1,7 +1,7 @@
-using Microsoft.AspNetCore.Http.HttpResults;
-using Spe.Bff.Api.Infrastructure.Errors;
-using Spaarke.Core.Auth;
 using System.Security.Claims;
+using Microsoft.AspNetCore.Http.HttpResults;
+using Spaarke.Core.Auth;
+using Spe.Bff.Api.Infrastructure.Errors;
 
 namespace Spe.Bff.Api.Api.Filters;
 

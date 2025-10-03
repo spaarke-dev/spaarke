@@ -1,9 +1,9 @@
-using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Extensions.DependencyInjection;
 using System.Net;
 using System.Text.Json;
-using Xunit;
 using FluentAssertions;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
+using Xunit;
 
 namespace Spe.Bff.Api.Tests;
 

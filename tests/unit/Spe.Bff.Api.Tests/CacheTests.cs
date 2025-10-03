@@ -1,11 +1,11 @@
+using System.Text;
+using System.Text.Json;
+using FluentAssertions;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using Spaarke.Core.Cache;
-using System.Text;
-using System.Text.Json;
 using Xunit;
-using FluentAssertions;
 
 namespace Spe.Bff.Api.Tests;
 

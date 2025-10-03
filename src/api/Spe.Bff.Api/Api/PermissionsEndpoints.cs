@@ -1,8 +1,8 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
-using Spe.Bff.Api.Models;
 using Spaarke.Core.Auth;
 using Spaarke.Dataverse;
-using System.Security.Claims;
+using Spe.Bff.Api.Models;
 
 namespace Spe.Bff.Api.Api;
 
@@ -19,6 +19,7 @@ public static class PermissionsEndpoints
     {
         var group = app.MapGroup("/api/documents")
             .WithTags("Permissions")
+            .RequireRateLimiting("dataverse-query")
             .RequireAuthorization(); // All endpoints require authentication
 
         // GET /api/documents/{documentId}/permissions
@@ -63,7 +64,7 @@ public static class PermissionsEndpoints
         if (string.IsNullOrEmpty(userId))
         {
             logger.LogWarning("Cannot determine user ID from claims for permissions check");
-            return Results.Unauthorized();
+            return TypedResults.Unauthorized();
         }
 
         logger.LogInformation("Retrieving permissions for user {UserId} on document {DocumentId}", userId, documentId);
@@ -80,14 +81,14 @@ public static class PermissionsEndpoints
                 "Permissions retrieved for document {DocumentId}: AccessRights={AccessRights}, CanPreview={CanPreview}, CanDownload={CanDownload}",
                 documentId, snapshot.AccessRights, capabilities.CanPreview, capabilities.CanDownload);
 
-            return Results.Ok(capabilities);
+            return TypedResults.Ok(capabilities);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Error retrieving permissions for document {DocumentId}", documentId);
 
             // Fail-closed: Return no permissions on error
-            return Results.Ok(new DocumentCapabilities
+            return TypedResults.Ok(new DocumentCapabilities
             {
                 DocumentId = documentId,
                 UserId = userId,
@@ -118,14 +119,14 @@ public static class PermissionsEndpoints
         // Validate request
         if (request.DocumentIds == null || request.DocumentIds.Count == 0)
         {
-            return Results.BadRequest(new { error = "DocumentIds cannot be empty" });
+            return TypedResults.BadRequest(new { error = "DocumentIds cannot be empty" });
         }
 
         // Limit batch size to prevent abuse
         const int MaxBatchSize = 100;
         if (request.DocumentIds.Count > MaxBatchSize)
         {
-            return Results.BadRequest(new { error = $"Maximum batch size is {MaxBatchSize} documents" });
+            return TypedResults.BadRequest(new { error = $"Maximum batch size is {MaxBatchSize} documents" });
         }
 
         // Extract user ID
@@ -136,7 +137,7 @@ public static class PermissionsEndpoints
         if (string.IsNullOrEmpty(userId))
         {
             logger.LogWarning("Cannot determine user ID from claims for batch permissions check");
-            return Results.Unauthorized();
+            return TypedResults.Unauthorized();
         }
 
         logger.LogInformation(
@@ -148,8 +149,7 @@ public static class PermissionsEndpoints
         var successCount = 0;
         var errorCount = 0;
 
-        // Process each document
-        // TODO: Optimize with parallel processing if needed (be mindful of Dataverse throttling)
+        // Process each document sequentially to avoid Dataverse throttling
         foreach (var documentId in request.DocumentIds)
         {
             try
@@ -197,7 +197,7 @@ public static class PermissionsEndpoints
             "Batch permissions retrieved: {SuccessCount} successful, {ErrorCount} errors",
             successCount, errorCount);
 
-        return Results.Ok(response);
+        return TypedResults.Ok(response);
     }
 
     /// <summary>

@@ -1,14 +1,14 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Net;
+using System.Net.Http.Headers;
+using System.Security.Claims;
+using System.Text;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 using Spaarke.Dataverse;
-using System.IdentityModel.Tokens.Jwt;
-using System.Net;
-using System.Net.Http.Headers;
-using System.Security.Claims;
-using System.Text;
 using Xunit;
 
 namespace Spe.Integration.Tests;
@@ -46,7 +46,7 @@ public class AuthorizationIntegrationTests : IClassFixture<AuthorizationTestFixt
     {
         // Arrange
         var userId = "user-with-no-access";
-        var client = _fixture.CreateClientWithMockedAccess(AccessLevel.None);
+        var client = _fixture.CreateClientWithMockedAccess(AccessRights.None);
         var token = GenerateMockJwt(userId);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
@@ -63,7 +63,7 @@ public class AuthorizationIntegrationTests : IClassFixture<AuthorizationTestFixt
     {
         // Arrange
         var userId = "user-with-grant-access";
-        var client = _fixture.CreateClientWithMockedAccess(AccessLevel.Grant);
+        var client = _fixture.CreateClientWithMockedAccess(AccessRights.Read | AccessRights.Write);
         var token = GenerateMockJwt(userId);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
@@ -75,14 +75,14 @@ public class AuthorizationIntegrationTests : IClassFixture<AuthorizationTestFixt
     }
 
     [Theory]
-    [InlineData(AccessLevel.None, HttpStatusCode.Forbidden)]
-    [InlineData(AccessLevel.Deny, HttpStatusCode.Forbidden)]
-    [InlineData(AccessLevel.Grant, HttpStatusCode.OK)]
-    public async Task Authorization_EnforcesAccessLevels(AccessLevel accessLevel, HttpStatusCode expectedStatus)
+    [InlineData(AccessRights.None, HttpStatusCode.Forbidden)]
+    [InlineData(AccessRights.Read, HttpStatusCode.OK)]
+    [InlineData(AccessRights.Read | AccessRights.Write, HttpStatusCode.OK)]
+    public async Task Authorization_EnforcesAccessRights(AccessRights accessRights, HttpStatusCode expectedStatus)
     {
         // Arrange
-        var userId = $"user-with-{accessLevel}";
-        var client = _fixture.CreateClientWithMockedAccess(accessLevel);
+        var userId = $"user-with-{accessRights}";
+        var client = _fixture.CreateClientWithMockedAccess(accessRights);
         var token = GenerateMockJwt(userId);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
@@ -118,11 +118,11 @@ public class AuthorizationIntegrationTests : IClassFixture<AuthorizationTestFixt
     }
 
     [Fact]
-    public async Task Authorization_DenyAccessLevel_AlwaysReturns_403()
+    public async Task Authorization_NoAccessRights_Returns_403()
     {
-        // Arrange - User has explicit Deny
-        var userId = "user-with-explicit-deny";
-        var client = _fixture.CreateClientWithMockedAccess(AccessLevel.Deny);
+        // Arrange - User has no access rights
+        var userId = "user-with-no-access";
+        var client = _fixture.CreateClientWithMockedAccess(AccessRights.None);
         var token = GenerateMockJwt(userId);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
@@ -139,7 +139,7 @@ public class AuthorizationIntegrationTests : IClassFixture<AuthorizationTestFixt
         // Arrange
         var userId = "user-with-team-membership";
         var teamId = "team-with-access";
-        var client = _fixture.CreateClientWithMockedAccess(AccessLevel.Grant, teamMemberships: new[] { teamId });
+        var client = _fixture.CreateClientWithMockedAccess(AccessRights.Read | AccessRights.Write, teamMemberships: new[] { teamId });
         var token = GenerateMockJwt(userId);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
@@ -151,13 +151,13 @@ public class AuthorizationIntegrationTests : IClassFixture<AuthorizationTestFixt
     }
 
     [Theory]
-    [InlineData("/api/containers", "canmanagecontainers")]
-    [InlineData("/api/drives/test/children", "canreadfiles")]
-    public async Task Authorization_ChecksDifferentPolicies_PerEndpoint(string endpoint, string expectedPolicy)
+    [InlineData("/api/containers")]
+    [InlineData("/api/drives/test/children")]
+    public async Task Authorization_ChecksDifferentPolicies_PerEndpoint(string endpoint)
     {
         // Arrange
         var userId = "test-user";
-        var client = _fixture.CreateClientWithMockedAccess(AccessLevel.Grant);
+        var client = _fixture.CreateClientWithMockedAccess(AccessRights.Read | AccessRights.Write);
         var token = GenerateMockJwt(userId);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
@@ -204,17 +204,17 @@ public class AuthorizationIntegrationTests : IClassFixture<AuthorizationTestFixt
 /// </summary>
 public class AuthorizationTestFixture : WebApplicationFactory<Program>
 {
-    private AccessLevel _accessLevel = AccessLevel.None;
+    private AccessRights _accessRights = AccessRights.None;
     private IEnumerable<string> _teamMemberships = Array.Empty<string>();
     private IEnumerable<string> _roles = Array.Empty<string>();
     private string? _expectedUserId = null;
 
     public HttpClient CreateClientWithMockedAccess(
-        AccessLevel accessLevel,
+        AccessRights accessRights,
         IEnumerable<string>? teamMemberships = null,
         IEnumerable<string>? roles = null)
     {
-        _accessLevel = accessLevel;
+        _accessRights = accessRights;
         _teamMemberships = teamMemberships ?? Array.Empty<string>();
         _roles = roles ?? Array.Empty<string>();
         _expectedUserId = null;
@@ -225,7 +225,7 @@ public class AuthorizationTestFixture : WebApplicationFactory<Program>
     public HttpClient CreateClientWithAccessValidator(string expectedUserId)
     {
         _expectedUserId = expectedUserId;
-        _accessLevel = AccessLevel.Grant;
+        _accessRights = AccessRights.Read | AccessRights.Write;
 
         return CreateClient();
     }
@@ -243,7 +243,7 @@ public class AuthorizationTestFixture : WebApplicationFactory<Program>
 
             // Register mock IAccessDataSource
             services.AddScoped<IAccessDataSource>(sp => new MockAccessDataSource(
-                _accessLevel,
+                _accessRights,
                 _teamMemberships,
                 _roles,
                 _expectedUserId));
@@ -259,22 +259,22 @@ public class AuthorizationTestFixture : WebApplicationFactory<Program>
 
 /// <summary>
 /// Mock implementation of IAccessDataSource for integration testing.
-/// Returns configurable access levels and memberships.
+/// Returns configurable access rights and memberships.
 /// </summary>
 internal class MockAccessDataSource : IAccessDataSource
 {
-    private readonly AccessLevel _accessLevel;
+    private readonly AccessRights _accessRights;
     private readonly IEnumerable<string> _teamMemberships;
     private readonly IEnumerable<string> _roles;
     private readonly string? _expectedUserId;
 
     public MockAccessDataSource(
-        AccessLevel accessLevel,
+        AccessRights accessRights,
         IEnumerable<string> teamMemberships,
         IEnumerable<string> roles,
         string? expectedUserId = null)
     {
-        _accessLevel = accessLevel;
+        _accessRights = accessRights;
         _teamMemberships = teamMemberships;
         _roles = roles;
         _expectedUserId = expectedUserId;
@@ -292,7 +292,7 @@ internal class MockAccessDataSource : IAccessDataSource
         {
             UserId = userId,
             ResourceId = resourceId,
-            AccessLevel = _accessLevel,
+            AccessRights = _accessRights,
             TeamMemberships = _teamMemberships,
             Roles = _roles,
             CachedAt = DateTimeOffset.UtcNow

@@ -1,6 +1,8 @@
-using Spe.Bff.Api.Infrastructure.Errors;
-using Spe.Bff.Api.Services;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
+using Spe.Bff.Api.Infrastructure.Auth;
+using Spe.Bff.Api.Infrastructure.Errors;
+using Spe.Bff.Api.Infrastructure.Graph;
 
 namespace Spe.Bff.Api.Api;
 
@@ -13,58 +15,14 @@ public static class UserEndpoints
     public static IEndpointRouteBuilder MapUserEndpoints(this IEndpointRouteBuilder app)
     {
         // GET /api/me - Get current user info
-        app.MapGet("/api/me", async (
-            HttpContext ctx,
-            [FromServices] IOboSpeService oboSvc,
-            [FromServices] ILogger<Program> logger,
-            CancellationToken ct) =>
-        {
-            var traceId = ctx.TraceIdentifier;
-            var bearer = GetBearer(ctx);
-
-            if (string.IsNullOrEmpty(bearer))
-            {
-                return Results.Problem(
-                    statusCode: 401,
-                    title: "Unauthorized",
-                    detail: "Bearer token is required",
-                    type: "https://tools.ietf.org/html/rfc7235#section-3.1",
-                    extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
-            }
-
-            try
-            {
-                logger.LogInformation("Getting user information");
-                var userInfo = await oboSvc.GetUserInfoAsync(bearer, ct);
-
-                if (userInfo == null)
-                {
-                    return Results.Problem(
-                        statusCode: 401,
-                        title: "Unauthorized",
-                        detail: "Invalid or expired token",
-                        type: "https://tools.ietf.org/html/rfc7235#section-3.1",
-                        extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
-                }
-
-                return Results.Ok(userInfo);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Failed to retrieve user information");
-                return Results.Problem(
-                    statusCode: 500,
-                    title: "Internal Server Error",
-                    detail: "An unexpected error occurred while retrieving user information",
-                    extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
-            }
-        }); // TODO: .RequireRateLimiting("graph-read");
+        app.MapGet("/api/me", GetCurrentUserAsync)
+            .RequireRateLimiting("graph-read");
 
         // GET /api/me/capabilities?containerId={containerId} - Get user capabilities for container
         app.MapGet("/api/me/capabilities", async (
             string? containerId,
             HttpContext ctx,
-            [FromServices] IOboSpeService oboSvc,
+            [FromServices] SpeFileStore speFileStore,
             [FromServices] ILogger<Program> logger,
             CancellationToken ct) =>
         {
@@ -78,43 +36,80 @@ public static class UserEndpoints
                 });
             }
 
-            var bearer = GetBearer(ctx);
-            if (string.IsNullOrEmpty(bearer))
+            try
             {
-                return Results.Problem(
+                var userToken = TokenHelper.ExtractBearerToken(ctx);
+                logger.LogInformation("Getting user capabilities for container {ContainerId}", containerId);
+                var capabilities = await speFileStore.GetUserCapabilitiesAsync(userToken, containerId, ct);
+                return TypedResults.Ok(capabilities);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return TypedResults.Problem(
                     statusCode: 401,
                     title: "Unauthorized",
                     detail: "Bearer token is required",
                     type: "https://tools.ietf.org/html/rfc7235#section-3.1",
                     extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
             }
-
-            try
-            {
-                logger.LogInformation("Getting user capabilities for container {ContainerId}", containerId);
-                var capabilities = await oboSvc.GetUserCapabilitiesAsync(bearer, containerId, ct);
-                return Results.Ok(capabilities);
-            }
             catch (Exception ex)
             {
                 logger.LogError(ex, "Failed to retrieve user capabilities");
-                return Results.Problem(
+                return TypedResults.Problem(
                     statusCode: 500,
                     title: "Internal Server Error",
                     detail: "An unexpected error occurred while retrieving user capabilities",
                     extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
             }
-        }); // TODO: .RequireRateLimiting("graph-read");
+        })
+        .RequireRateLimiting("graph-read");
 
         return app;
     }
 
-    private static string? GetBearer(HttpContext ctx)
+    private static async Task<IResult> GetCurrentUserAsync(
+        HttpContext ctx,
+        SpeFileStore speFileStore,
+        ILogger<Program> logger,
+        CancellationToken ct)
     {
-        var h = ctx.Request.Headers.Authorization.ToString();
-        const string p = "Bearer ";
-        return !string.IsNullOrWhiteSpace(h) && h.StartsWith(p, StringComparison.OrdinalIgnoreCase)
-            ? h[p.Length..].Trim()
-            : null;
+        var traceId = ctx.TraceIdentifier;
+
+        try
+        {
+            var userToken = TokenHelper.ExtractBearerToken(ctx);
+            logger.LogInformation("Getting user information");
+            var userInfo = await speFileStore.GetUserInfoAsync(userToken, ct);
+
+            if (userInfo == null)
+            {
+                return TypedResults.Problem(
+                    statusCode: 401,
+                    title: "Unauthorized",
+                    detail: "Invalid or expired token",
+                    type: "https://tools.ietf.org/html/rfc7235#section-3.1",
+                    extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+            }
+
+            return TypedResults.Ok(userInfo);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return TypedResults.Problem(
+                statusCode: 401,
+                title: "Unauthorized",
+                detail: "Bearer token is required",
+                type: "https://tools.ietf.org/html/rfc7235#section-3.1",
+                extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to retrieve user information");
+            return TypedResults.Problem(
+                statusCode: 500,
+                title: "Internal Server Error",
+                detail: "An unexpected error occurred while retrieving user information",
+                extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+        }
     }
 }

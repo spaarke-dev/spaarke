@@ -1,11 +1,11 @@
-using Microsoft.Extensions.Logging;
+using System.Text.Json;
+using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Spe.Bff.Api.Services.BackgroundServices;
 using Spe.Bff.Api.Services.Jobs;
-using System.Text.Json;
 using Xunit;
-using FluentAssertions;
 
 namespace Spe.Bff.Api.Tests;
 

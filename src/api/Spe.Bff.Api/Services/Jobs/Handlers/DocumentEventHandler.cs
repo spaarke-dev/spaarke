@@ -1,6 +1,6 @@
+using System.Text.Json;
 using Spaarke.Dataverse;
 using Spe.Bff.Api.Infrastructure.Graph;
-using System.Text.Json;
 
 namespace Spe.Bff.Api.Services.Jobs.Handlers;
 

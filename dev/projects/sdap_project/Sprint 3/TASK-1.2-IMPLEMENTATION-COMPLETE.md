@@ -197,11 +197,11 @@ Application started.
 ```bash
 dotnet user-secrets list
 # Output:
-Graph:ClientSecret = test-secret-for-local-dev
-Dataverse:ClientSecret = test-secret-for-dataverse
-AZURE_TENANT_ID = a221a95e-6abc-4434-aecc-e48338a1b2f2
+Graph:ClientSecret = [REDACTED - Use Azure Key Vault or User Secrets]
+Dataverse:ClientSecret = [REDACTED - Use Azure Key Vault or User Secrets]
+AZURE_TENANT_ID = [REDACTED]
 AZURE_CLIENT_SECRET = [REDACTED]
-AZURE_CLIENT_ID = 170c98e1-d486-4355-bcbe-170454e0207c
+AZURE_CLIENT_ID = [REDACTED]
 API_CLIENT_SECRET = [REDACTED]
 ```
 

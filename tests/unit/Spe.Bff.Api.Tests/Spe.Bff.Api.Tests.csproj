@@ -19,6 +19,8 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Newtonsoft.Json" />
+    <PackageReference Include="Moq" />
+    <PackageReference Include="WireMock.Net" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\api\Spe.Bff.Api\Spe.Bff.Api.csproj" />

@@ -8,6 +8,10 @@ using Xunit;
 
 namespace Spe.Bff.Api.Tests;
 
+/// <summary>
+/// Tests for the authorization system using the granular AccessRights model.
+/// These tests verify that authorization rules correctly evaluate user permissions.
+/// </summary>
 public class AuthorizationTests
 {
     private readonly AuthorizationService _authService;
@@ -28,7 +32,7 @@ public class AuthorizationTests
     }
 
     [Fact]
-    public async Task AuthorizeAsync_WithExplicitGrant_ShouldAllow()
+    public async Task AuthorizeAsync_WithReadAccess_ShouldAllow()
     {
         // Arrange
         var context = new AuthorizationContext
@@ -38,7 +42,7 @@ public class AuthorizationTests
             Operation = "read"
         };
 
-        _testDataSource.SetUserAccess("user1", "resource1", AccessLevel.Grant);
+        _testDataSource.SetUserAccess("user1", "resource1", AccessRights.Read);
 
         // Act
         var result = await _authService.AuthorizeAsync(context);
@@ -48,7 +52,7 @@ public class AuthorizationTests
     }
 
     [Fact]
-    public async Task AuthorizeAsync_WithExplicitDeny_ShouldDeny()
+    public async Task AuthorizeAsync_WithNoAccess_ShouldDeny()
     {
         // Arrange
         var context = new AuthorizationContext
@@ -58,35 +62,54 @@ public class AuthorizationTests
             Operation = "read"
         };
 
-        _testDataSource.SetUserAccess("user1", "resource1", AccessLevel.Deny);
+        _testDataSource.SetUserAccess("user1", "resource1", AccessRights.None);
 
         // Act
         var result = await _authService.AuthorizeAsync(context);
 
         // Assert
         result.IsAllowed.Should().BeFalse();
-        result.ReasonCode.Should().Be("sdap.access.deny.explicit");
+    }
+
+    [Fact]
+    public async Task AuthorizeAsync_WithCombinedRights_ShouldAllow()
+    {
+        // Arrange
+        var context = new AuthorizationContext
+        {
+            UserId = "user1",
+            ResourceId = "resource1",
+            Operation = "write"
+        };
+
+        _testDataSource.SetUserAccess("user1", "resource1", AccessRights.Read | AccessRights.Write);
+
+        // Act
+        var result = await _authService.AuthorizeAsync(context);
+
+        // Assert
+        result.IsAllowed.Should().BeTrue();
     }
 
     private class TestAccessDataSource : IAccessDataSource
     {
-        private readonly Dictionary<string, AccessLevel> _userAccess = new();
+        private readonly Dictionary<string, AccessRights> _userAccess = new();
 
-        public void SetUserAccess(string userId, string resourceId, AccessLevel level)
+        public void SetUserAccess(string userId, string resourceId, AccessRights rights)
         {
-            _userAccess[$"{userId}:{resourceId}"] = level;
+            _userAccess[$"{userId}:{resourceId}"] = rights;
         }
 
         public Task<AccessSnapshot> GetUserAccessAsync(string userId, string resourceId, CancellationToken ct = default)
         {
             var key = $"{userId}:{resourceId}";
-            var level = _userAccess.TryGetValue(key, out var value) ? value : AccessLevel.None;
+            var rights = _userAccess.TryGetValue(key, out var value) ? value : AccessRights.None;
 
             var snapshot = new AccessSnapshot
             {
                 UserId = userId,
                 ResourceId = resourceId,
-                AccessLevel = level,
+                AccessRights = rights,
                 TeamMemberships = new[] { "team1" },
                 Roles = new[] { "reader" }
             };

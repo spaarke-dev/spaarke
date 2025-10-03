@@ -1,6 +1,6 @@
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Spe.Bff.Api.Infrastructure.Graph;
-using System.Text.Json;
 
 namespace Spe.Bff.Api.Services.Jobs.Handlers;
 

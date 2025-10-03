@@ -47,26 +47,26 @@ public class AccessSnapshot
 public enum AccessRights
 {
     /// <summary>No access permissions</summary>
-    None         = 0,        // 0000000 - No access
+    None = 0,        // 0000000 - No access
 
     /// <summary>Can view/read the resource (preview only)</summary>
-    Read         = 1 << 0,   // 0000001 - Bit 0
+    Read = 1 << 0,   // 0000001 - Bit 0
 
     /// <summary>Can update/modify the resource (includes download for files)</summary>
-    Write        = 1 << 1,   // 0000010 - Bit 1
+    Write = 1 << 1,   // 0000010 - Bit 1
 
     /// <summary>Can delete the resource</summary>
-    Delete       = 1 << 2,   // 0000100 - Bit 2
+    Delete = 1 << 2,   // 0000100 - Bit 2
 
     /// <summary>Can create new records of this type</summary>
-    Create       = 1 << 3,   // 0001000 - Bit 3
+    Create = 1 << 3,   // 0001000 - Bit 3
 
     /// <summary>Can attach this record to other records</summary>
-    Append       = 1 << 4,   // 0010000 - Bit 4
+    Append = 1 << 4,   // 0010000 - Bit 4
 
     /// <summary>Other records can be attached to this record</summary>
-    AppendTo     = 1 << 5,   // 0100000 - Bit 5
+    AppendTo = 1 << 5,   // 0100000 - Bit 5
 
     /// <summary>Can share this record with other users</summary>
-    Share        = 1 << 6    // 1000000 - Bit 6
+    Share = 1 << 6    // 1000000 - Bit 6
 }

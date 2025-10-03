@@ -1,12 +1,19 @@
 {
   "permissions": {
     "allow": [
-      "Bash(Stop-Process -Force)",
-      "Bash(Graph__ClientSecret=\"test-secret\" Dataverse__ClientSecret=\"test-secret\" dotnet run --no-build)",
-      "Bash(timeout:*)",
-      "Bash(Where-Object {$_rocessName -eq \"dotnet\"})",
-      "Bash(ForEach-Object { Stop-Process -Id $_d -Force -ErrorAction SilentlyContinue })",
-      "Bash(Graph__ClientSecret=test-secret Dataverse__ClientSecret=test-secret timeout 5 dotnet run --no-build)"
+      "Bash(Stop-Process -Force -ErrorAction SilentlyContinue)",
+      "Bash(/dev/null)",
+      "Bash(dotnet test:*)",
+      "Bash(test:*)",
+      "Bash(dotnet build:*)",
+      "Bash(dotnet restore:*)",
+      "Bash(az:*)",
+      "Bash(git diff:*)",
+      "Bash(git checkout:*)",
+      "Bash(dotnet clean:*)",
+      "Bash(git log:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []

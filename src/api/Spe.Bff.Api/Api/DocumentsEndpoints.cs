@@ -1,7 +1,6 @@
 using Microsoft.Graph;
 using Spe.Bff.Api.Infrastructure.Errors;
 using Spe.Bff.Api.Infrastructure.Graph;
-using Spe.Bff.Api.Infrastructure.Resilience;
 using Spe.Bff.Api.Models;
 
 namespace Spe.Bff.Api.Api;
@@ -35,17 +34,12 @@ public static class DocumentsEndpoints
                 logger.LogInformation("Creating container {DisplayName} with type {ContainerTypeId}",
                     request.DisplayName, request.ContainerTypeId);
 
-                // Execute with retry policy
-                var pipeline = RetryPolicies.GraphTransient<ContainerDto?>();
-                var result = await pipeline.ExecuteAsync(async () =>
-                {
-                    return await speFileStore.CreateContainerAsync(
-                        request.ContainerTypeId,
-                        request.DisplayName,
-                        request.Description);
-                });
+                var result = await speFileStore.CreateContainerAsync(
+                    request.ContainerTypeId,
+                    request.DisplayName,
+                    request.Description);
 
-                return Results.Created($"/api/containers/{result?.Id}", result);
+                return TypedResults.Created($"/api/containers/{result?.Id}", result);
             }
             catch (ServiceException ex)
             {
@@ -55,14 +49,14 @@ public static class DocumentsEndpoints
             catch (Exception ex)
             {
                 logger.LogError(ex, "Unexpected error creating container");
-                return Results.Problem(
+                return TypedResults.Problem(
                     statusCode: 500,
                     title: "Internal Server Error",
                     detail: "An unexpected error occurred while creating the container",
                     extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
             }
         })
-        // TODO: .RequireRateLimiting("graph-write")
+        .RequireRateLimiting("graph-write")
         .RequireAuthorization("canmanagecontainers");
 
         // GET /api/containers?containerTypeId= - List containers (MI)
@@ -86,13 +80,9 @@ public static class DocumentsEndpoints
 
                 logger.LogInformation("Listing containers for type {ContainerTypeId}", containerTypeId.Value);
 
-                var pipeline = RetryPolicies.GraphTransient<IList<ContainerDto>?>();
-                var result = await pipeline.ExecuteAsync(async () =>
-                {
-                    return await speFileStore.ListContainersAsync(containerTypeId.Value);
-                });
+                var result = await speFileStore.ListContainersAsync(containerTypeId.Value);
 
-                return Results.Ok(result);
+                return TypedResults.Ok(result);
             }
             catch (ServiceException ex)
             {
@@ -102,14 +92,14 @@ public static class DocumentsEndpoints
             catch (Exception ex)
             {
                 logger.LogError(ex, "Unexpected error listing containers");
-                return Results.Problem(
+                return TypedResults.Problem(
                     statusCode: 500,
                     title: "Internal Server Error",
                     detail: "An unexpected error occurred while listing containers",
                     extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
             }
         })
-        // TODO: .RequireRateLimiting("graph-read")
+        .RequireRateLimiting("graph-read")
         .RequireAuthorization("canmanagecontainers");
 
         // GET /api/containers/{id}/drive - Get container drive (MI)
@@ -131,13 +121,9 @@ public static class DocumentsEndpoints
 
                 logger.LogInformation("Getting drive for SPE container {ContainerId}", containerId);
 
-                var pipeline = RetryPolicies.GraphTransient<ContainerDto?>();
-                var result = await pipeline.ExecuteAsync(async () =>
-                {
-                    return await speFileStore.GetContainerDriveAsync(containerId);
-                });
+                var result = await speFileStore.GetContainerDriveAsync(containerId);
 
-                return Results.Ok(result);
+                return TypedResults.Ok(result);
             }
             catch (ServiceException ex)
             {
@@ -147,14 +133,14 @@ public static class DocumentsEndpoints
             catch (Exception ex)
             {
                 logger.LogError(ex, "Unexpected error getting container drive");
-                return Results.Problem(
+                return TypedResults.Problem(
                     statusCode: 500,
                     title: "Internal Server Error",
                     detail: "An unexpected error occurred while getting the container drive",
                     extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
             }
         })
-        // TODO: .RequireRateLimiting("graph-read")
+        .RequireRateLimiting("graph-read")
         .RequireAuthorization("canmanagecontainers");
 
         // GET /api/drives/{driveId}/children - List drive children (MI)
@@ -176,13 +162,9 @@ public static class DocumentsEndpoints
 
                 logger.LogInformation("Listing children for drive {DriveId}, item {ItemId}", driveId, itemId);
 
-                var pipeline = RetryPolicies.GraphTransient<IList<FileHandleDto>?>();
-                var result = await pipeline.ExecuteAsync(async () =>
-                {
-                    return await speFileStore.ListChildrenAsync(driveId, itemId);
-                });
+                var result = await speFileStore.ListChildrenAsync(driveId, itemId);
 
-                return Results.Ok(result);
+                return TypedResults.Ok(result);
             }
             catch (ServiceException ex)
             {
@@ -192,14 +174,14 @@ public static class DocumentsEndpoints
             catch (Exception ex)
             {
                 logger.LogError(ex, "Unexpected error listing drive children");
-                return Results.Problem(
+                return TypedResults.Problem(
                     statusCode: 500,
                     title: "Internal Server Error",
                     detail: "An unexpected error occurred while listing drive children",
                     extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
             }
         })
-        // TODO: .RequireRateLimiting("graph-read")
+        .RequireRateLimiting("graph-read")
         .RequireAuthorization("canmanagecontainers");
 
         // GET /api/drives/{driveId}/items/{itemId} - Get file metadata (MI)
@@ -226,18 +208,14 @@ public static class DocumentsEndpoints
 
                 logger.LogInformation("Getting metadata for file {ItemId} in drive {DriveId}", itemId, driveId);
 
-                var pipeline = RetryPolicies.GraphTransient<FileHandleDto?>();
-                var result = await pipeline.ExecuteAsync(async () =>
-                {
-                    return await speFileStore.GetFileMetadataAsync(driveId, itemId);
-                });
+                var result = await speFileStore.GetFileMetadataAsync(driveId, itemId);
 
                 if (result == null)
                 {
-                    return Results.NotFound();
+                    return TypedResults.NotFound();
                 }
 
-                return Results.Ok(result);
+                return TypedResults.Ok(result);
             }
             catch (ServiceException ex)
             {
@@ -247,14 +225,14 @@ public static class DocumentsEndpoints
             catch (Exception ex)
             {
                 logger.LogError(ex, "Unexpected error getting file metadata");
-                return Results.Problem(
+                return TypedResults.Problem(
                     statusCode: 500,
                     title: "Internal Server Error",
                     detail: "An unexpected error occurred while getting file metadata",
                     extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
             }
         })
-        // TODO: .RequireRateLimiting("graph-read")
+        .RequireRateLimiting("graph-read")
         .RequireAuthorization("canmanagecontainers");
 
         // GET /api/drives/{driveId}/items/{itemId}/content - Download file (MI)
@@ -281,22 +259,18 @@ public static class DocumentsEndpoints
 
                 logger.LogInformation("Downloading file {ItemId} from drive {DriveId}", itemId, driveId);
 
-                var pipeline = RetryPolicies.GraphTransient<Stream?>();
-                var stream = await pipeline.ExecuteAsync(async () =>
-                {
-                    return await speFileStore.DownloadFileAsync(driveId, itemId);
-                });
+                var stream = await speFileStore.DownloadFileAsync(driveId, itemId);
 
                 if (stream == null)
                 {
-                    return Results.NotFound();
+                    return TypedResults.NotFound();
                 }
 
                 // Get file metadata to determine content type and filename
                 var metadata = await speFileStore.GetFileMetadataAsync(driveId, itemId);
                 var fileName = metadata?.Name ?? "download";
 
-                return Results.File(stream, "application/octet-stream", fileName);
+                return TypedResults.File(stream, "application/octet-stream", fileName);
             }
             catch (ServiceException ex)
             {
@@ -306,14 +280,14 @@ public static class DocumentsEndpoints
             catch (Exception ex)
             {
                 logger.LogError(ex, "Unexpected error downloading file");
-                return Results.Problem(
+                return TypedResults.Problem(
                     statusCode: 500,
                     title: "Internal Server Error",
                     detail: "An unexpected error occurred while downloading the file",
                     extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
             }
         })
-        // TODO: .RequireRateLimiting("graph-read")
+        .RequireRateLimiting("graph-read")
         .RequireAuthorization("canmanagecontainers");
 
         // PUT /api/drives/{driveId}/upload - Upload file (MI)
@@ -343,22 +317,18 @@ public static class DocumentsEndpoints
 
                 using var stream = request.Body;
 
-                var pipeline = RetryPolicies.GraphTransient<FileHandleDto?>();
-                var result = await pipeline.ExecuteAsync(async () =>
-                {
-                    return await speFileStore.UploadSmallAsync(driveId, fileName, stream);
-                });
+                var result = await speFileStore.UploadSmallAsync(driveId, fileName, stream);
 
                 if (result == null)
                 {
-                    return Results.Problem(
+                    return TypedResults.Problem(
                         statusCode: 500,
                         title: "Upload Failed",
                         detail: "Failed to upload file to SPE",
                         extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
                 }
 
-                return Results.Created($"/api/drives/{driveId}/items/{result.Id}", result);
+                return TypedResults.Created($"/api/drives/{driveId}/items/{result.Id}", result);
             }
             catch (ServiceException ex)
             {
@@ -368,14 +338,14 @@ public static class DocumentsEndpoints
             catch (Exception ex)
             {
                 logger.LogError(ex, "Unexpected error uploading file");
-                return Results.Problem(
+                return TypedResults.Problem(
                     statusCode: 500,
                     title: "Internal Server Error",
                     detail: "An unexpected error occurred while uploading the file",
                     extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
             }
         })
-        // TODO: .RequireRateLimiting("graph-write")
+        .RequireRateLimiting("graph-write")
         .RequireAuthorization("canwritefiles");
 
         // DELETE /api/drives/{driveId}/items/{itemId} - Delete file (MI)
@@ -402,18 +372,14 @@ public static class DocumentsEndpoints
 
                 logger.LogInformation("Deleting file {ItemId} from drive {DriveId}", itemId, driveId);
 
-                var pipeline = RetryPolicies.GraphTransient<bool>();
-                var deleted = await pipeline.ExecuteAsync(async () =>
-                {
-                    return await speFileStore.DeleteFileAsync(driveId, itemId);
-                });
+                var deleted = await speFileStore.DeleteFileAsync(driveId, itemId);
 
                 if (!deleted)
                 {
-                    return Results.NotFound();
+                    return TypedResults.NotFound();
                 }
 
-                return Results.NoContent();
+                return TypedResults.NoContent();
             }
             catch (ServiceException ex)
             {
@@ -423,14 +389,14 @@ public static class DocumentsEndpoints
             catch (Exception ex)
             {
                 logger.LogError(ex, "Unexpected error deleting file");
-                return Results.Problem(
+                return TypedResults.Problem(
                     statusCode: 500,
                     title: "Internal Server Error",
                     detail: "An unexpected error occurred while deleting the file",
                     extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
             }
         })
-        // TODO: .RequireRateLimiting("graph-write")
+        .RequireRateLimiting("graph-write")
         .RequireAuthorization("canwritefiles");
 
         return app;

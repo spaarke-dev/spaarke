@@ -1,7 +1,7 @@
+using System.Diagnostics;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
 using Spe.Bff.Api.Models;
-using System.Diagnostics;
 
 namespace Spe.Bff.Api.Infrastructure.Graph;
 
@@ -179,6 +179,78 @@ public class ContainerOperations
         catch (Exception ex)
         {
             _logger.LogError(ex, "Unexpected error listing containers: {Error}", ex.Message);
+            throw;
+        }
+    }
+
+    // =============================================================================
+    // USER CONTEXT METHODS (OBO Flow)
+    // =============================================================================
+
+    /// <summary>
+    /// Lists containers accessible to the user (OBO flow).
+    /// </summary>
+    /// <param name="userToken">User's bearer token for OBO flow</param>
+    public async Task<IList<ContainerDto>> ListContainersAsUserAsync(
+        string userToken,
+        Guid containerTypeId,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(userToken))
+        {
+            throw new ArgumentException("User access token is required for OBO operations", nameof(userToken));
+        }
+
+        using var activity = Activity.Current;
+        activity?.SetTag("operation", "ListContainersAsUser");
+        activity?.SetTag("containerTypeId", containerTypeId.ToString());
+
+        _logger.LogInformation("Listing containers for type {ContainerTypeId} (user context)", containerTypeId);
+
+        try
+        {
+            // Create Graph client with user token (OBO flow)
+            var graphClient = await _factory.CreateOnBehalfOfClientAsync(userToken);
+
+            // Query containers with user's permissions
+            var containers = await graphClient.Storage.FileStorage.Containers
+                .GetAsync(requestConfig =>
+                {
+                    requestConfig.QueryParameters.Filter = $"containerTypeId eq {containerTypeId}";
+                }, ct);
+
+            if (containers?.Value == null)
+            {
+                _logger.LogInformation("No containers found for containerTypeId {ContainerTypeId} (user context)", containerTypeId);
+                return new List<ContainerDto>();
+            }
+
+            var result = containers.Value
+                .Select(c => new ContainerDto(
+                    c.Id ?? string.Empty,
+                    c.DisplayName ?? string.Empty,
+                    c.Description,
+                    c.CreatedDateTime ?? DateTimeOffset.MinValue))
+                .ToList();
+
+            _logger.LogInformation("Listed {Count} containers for containerTypeId {ContainerTypeId} (user context)",
+                result.Count, containerTypeId);
+
+            return result;
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.TooManyRequests)
+        {
+            _logger.LogWarning("Graph API throttling encountered for user context, retry with backoff: {Error}", ex.Message);
+            throw new InvalidOperationException("Service temporarily unavailable due to rate limiting", ex);
+        }
+        catch (ServiceException ex)
+        {
+            _logger.LogError(ex, "Failed to list containers for user (containerTypeId: {ContainerTypeId})", containerTypeId);
+            throw new InvalidOperationException($"Failed to list containers for user: {ex.Message}", ex);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error listing containers for user: {Error}", ex.Message);
             throw;
         }
     }

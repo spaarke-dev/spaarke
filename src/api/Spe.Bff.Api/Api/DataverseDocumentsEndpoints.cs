@@ -1,7 +1,7 @@
+using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Mvc;
 using Spaarke.Dataverse;
 using Spe.Bff.Api.Infrastructure.Errors;
-using System.ComponentModel.DataAnnotations;
 
 namespace Spe.Bff.Api.Api;
 
@@ -14,7 +14,8 @@ public static class DataverseDocumentsEndpoints
     public static IEndpointRouteBuilder MapDataverseDocumentsEndpoints(this IEndpointRouteBuilder app)
     {
         var documentsGroup = app.MapGroup("/api/v1/documents")
-            .WithTags("Documents");
+            .WithTags("Documents")
+            .RequireRateLimiting("dataverse-query");
 
         // POST /api/v1/documents - Create new document
         documentsGroup.MapPost("/", async (
@@ -36,7 +37,7 @@ public static class DataverseDocumentsEndpoints
 
                 logger.LogInformation("Document created successfully with ID: {DocumentId}", documentId);
 
-                return Results.Created($"/api/v1/documents/{documentId}", new
+                return TypedResults.Created($"/api/v1/documents/{documentId}", new
                 {
                     data = createdDocument,
                     metadata = new
@@ -55,7 +56,7 @@ public static class DataverseDocumentsEndpoints
             catch (Exception ex)
             {
                 logger.LogError(ex, "Failed to create document");
-                return Results.Problem(
+                return TypedResults.Problem(
                     statusCode: 500,
                     title: "Internal Server Error",
                     detail: "An unexpected error occurred while creating the document",
@@ -87,7 +88,7 @@ public static class DataverseDocumentsEndpoints
                 if (document == null)
                 {
                     logger.LogWarning("Document not found: {DocumentId}", id);
-                    return Results.NotFound(new
+                    return TypedResults.NotFound(new
                     {
                         status = 404,
                         title = "Document Not Found",
@@ -96,7 +97,7 @@ public static class DataverseDocumentsEndpoints
                     });
                 }
 
-                return Results.Ok(new
+                return TypedResults.Ok(new
                 {
                     data = document,
                     metadata = new
@@ -110,7 +111,7 @@ public static class DataverseDocumentsEndpoints
             catch (Exception ex)
             {
                 logger.LogError(ex, "Failed to retrieve document {DocumentId}", id);
-                return Results.Problem(
+                return TypedResults.Problem(
                     statusCode: 500,
                     title: "Internal Server Error",
                     detail: "An unexpected error occurred while retrieving the document",
@@ -143,7 +144,7 @@ public static class DataverseDocumentsEndpoints
                 if (existingDocument == null)
                 {
                     logger.LogWarning("Document not found for update: {DocumentId}", id);
-                    return Results.NotFound(new
+                    return TypedResults.NotFound(new
                     {
                         status = 404,
                         title = "Document Not Found",
@@ -158,7 +159,7 @@ public static class DataverseDocumentsEndpoints
 
                 logger.LogInformation("Document updated successfully: {DocumentId}", id);
 
-                return Results.Ok(new
+                return TypedResults.Ok(new
                 {
                     data = updatedDocument,
                     metadata = new
@@ -177,7 +178,7 @@ public static class DataverseDocumentsEndpoints
             catch (Exception ex)
             {
                 logger.LogError(ex, "Failed to update document {DocumentId}", id);
-                return Results.Problem(
+                return TypedResults.Problem(
                     statusCode: 500,
                     title: "Internal Server Error",
                     detail: "An unexpected error occurred while updating the document",
@@ -209,7 +210,7 @@ public static class DataverseDocumentsEndpoints
                 if (existingDocument == null)
                 {
                     logger.LogWarning("Document not found for deletion: {DocumentId}", id);
-                    return Results.NotFound(new
+                    return TypedResults.NotFound(new
                     {
                         status = 404,
                         title = "Document Not Found",
@@ -222,12 +223,12 @@ public static class DataverseDocumentsEndpoints
 
                 logger.LogInformation("Document deleted successfully: {DocumentId}", id);
 
-                return Results.NoContent();
+                return TypedResults.NoContent();
             }
             catch (Exception ex)
             {
                 logger.LogError(ex, "Failed to delete document {DocumentId}", id);
-                return Results.Problem(
+                return TypedResults.Problem(
                     statusCode: 500,
                     title: "Internal Server Error",
                     detail: "An unexpected error occurred while deleting the document",
@@ -269,7 +270,7 @@ public static class DataverseDocumentsEndpoints
                 }
                 else
                 {
-                    // TODO: Implement get all documents with paging
+                    // See backlog item SDAP-401 for paging implementation (get all documents with pagination)
                     return ProblemDetailsHelper.ValidationError("ContainerId is required for listing documents");
                 }
 
@@ -278,7 +279,7 @@ public static class DataverseDocumentsEndpoints
 
                 logger.LogDebug("Retrieved {Count} of {TotalCount} documents", pagedDocuments.Count, totalCount);
 
-                return Results.Ok(new
+                return TypedResults.Ok(new
                 {
                     data = new
                     {
@@ -300,7 +301,7 @@ public static class DataverseDocumentsEndpoints
             catch (Exception ex)
             {
                 logger.LogError(ex, "Failed to list documents");
-                return Results.Problem(
+                return TypedResults.Problem(
                     statusCode: 500,
                     title: "Internal Server Error",
                     detail: "An unexpected error occurred while listing documents",
@@ -336,7 +337,7 @@ public static class DataverseDocumentsEndpoints
                 var pagedDocuments = documents.Skip(skipValue).Take(takeValue).ToList();
                 var totalCount = documents.Count();
 
-                return Results.Ok(new
+                return TypedResults.Ok(new
                 {
                     data = new
                     {
@@ -359,7 +360,7 @@ public static class DataverseDocumentsEndpoints
             catch (Exception ex)
             {
                 logger.LogError(ex, "Failed to list documents for container {ContainerId}", containerId);
-                return Results.Problem(
+                return TypedResults.Problem(
                     statusCode: 500,
                     title: "Internal Server Error",
                     detail: "An unexpected error occurred while listing documents",
@@ -367,6 +368,7 @@ public static class DataverseDocumentsEndpoints
             }
         })
         .WithTags("Containers")
+        .RequireRateLimiting("dataverse-query")
         .RequireAuthorization();
 
         return app;

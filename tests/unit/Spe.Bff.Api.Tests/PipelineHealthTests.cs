@@ -1,7 +1,7 @@
+using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
-using FluentAssertions;
 using Xunit;
 
 namespace Spe.Bff.Api.Tests;
@@ -45,6 +45,7 @@ public class PipelineHealthTests : IClassFixture<CustomWebAppFactory>
         // Core services should be registered
         serviceProvider.GetService<Microsoft.AspNetCore.Authorization.IAuthorizationService>().Should().NotBeNull();
         serviceProvider.GetService<Infrastructure.Graph.IGraphClientFactory>().Should().NotBeNull();
-        serviceProvider.GetService<Infrastructure.Graph.ISpeService>().Should().NotBeNull();
+        serviceProvider.GetService<Infrastructure.Graph.SpeFileStore>().Should().NotBeNull();
+        serviceProvider.GetService<Infrastructure.Graph.UserOperations>().Should().NotBeNull();
     }
 }

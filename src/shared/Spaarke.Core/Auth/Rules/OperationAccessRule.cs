@@ -1,5 +1,5 @@
-using Spaarke.Dataverse;
 using Microsoft.Extensions.Logging;
+using Spaarke.Dataverse;
 
 namespace Spaarke.Core.Auth.Rules;
 

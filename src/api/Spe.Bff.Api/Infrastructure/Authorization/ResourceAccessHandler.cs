@@ -1,7 +1,7 @@
+using System.Diagnostics;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Spaarke.Core.Auth;
-using System.Security.Claims;
-using System.Diagnostics;
 
 namespace Spe.Bff.Api.Infrastructure.Authorization;
 

@@ -1,11 +1,11 @@
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.AspNetCore.Hosting;
-using Spe.Bff.Api.Tests.Mocks;
+using Microsoft.Extensions.Hosting;
 using Spe.Bff.Api.Infrastructure.Graph;
 using Spe.Bff.Api.Services;
+using Spe.Bff.Api.Tests.Mocks;
 
 namespace Spe.Bff.Api.Tests;
 
@@ -36,10 +36,7 @@ public class CustomWebAppFactory : WebApplicationFactory<Program>
                 if (graphFactory != null) services.Remove(graphFactory);
                 services.AddSingleton<IGraphClientFactory, FakeGraphClientFactory>();
 
-                // Replace OBO SPE service with mock
-                var oboService = services.SingleOrDefault(s => s.ServiceType == typeof(IOboSpeService));
-                if (oboService != null) services.Remove(oboService);
-                services.AddSingleton<IOboSpeService, MockOboSpeService>();
+                // OBO functionality now handled by SpeFileStore - no mock needed
             }
         });
     }

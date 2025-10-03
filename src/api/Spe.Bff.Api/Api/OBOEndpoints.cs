@@ -1,10 +1,10 @@
-using Spe.Bff.Api.Infrastructure.Graph;
-using Spe.Bff.Api.Infrastructure.Errors;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
-using Spe.Bff.Api.Services;
+using Spe.Bff.Api.Infrastructure.Auth;
+using Spe.Bff.Api.Infrastructure.Errors;
+using Spe.Bff.Api.Infrastructure.Graph;
 using Spe.Bff.Api.Models;
-using Microsoft.AspNetCore.Mvc;
 
 namespace Spe.Bff.Api.Api;
 
@@ -20,14 +20,13 @@ public static class OBOEndpoints
             string? orderBy,
             string? orderDir,
             HttpContext ctx,
-            [FromServices] IOboSpeService oboSvc,
+            [FromServices] SpeFileStore speFileStore,
             CancellationToken ct) =>
         {
-            var bearer = GetBearer(ctx);
-            if (string.IsNullOrEmpty(bearer)) return Results.Unauthorized();
-
             try
             {
+                var userToken = TokenHelper.ExtractBearerToken(ctx);
+
                 var parameters = new Spe.Bff.Api.Models.ListingParameters(
                     Top: top ?? 50,
                     Skip: skip ?? 0,
@@ -35,40 +34,48 @@ public static class OBOEndpoints
                     OrderDir: orderDir ?? "asc"
                 );
 
-                var result = await oboSvc.ListChildrenAsync(bearer, id, parameters, ct);
-                return Results.Ok(result);
+                var result = await speFileStore.ListChildrenAsUserAsync(userToken, id, parameters, ct);
+                return TypedResults.Ok(result);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return TypedResults.Unauthorized();
             }
             catch (ServiceException ex)
             {
                 return ProblemDetailsHelper.FromGraphException(ex);
             }
-        }); // TODO: .RequireRateLimiting("graph-read");
+        }).RequireRateLimiting("graph-read");
 
 
         // PUT: small upload (as user)
         app.MapPut("/api/obo/containers/{id}/files/{*path}", async (
             string id, string path, HttpRequest req, HttpContext ctx,
-            [FromServices] IOboSpeService oboSvc,
+            [FromServices] SpeFileStore speFileStore,
             CancellationToken ct) =>
         {
             var (ok, err) = ValidatePathForOBO(path);
-            if (!ok) return Results.ValidationProblem(new Dictionary<string, string[]> { ["path"] = new[] { err! } });
+            if (!ok) return TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["path"] = new[] { err! } });
 
-            var bearer = GetBearer(ctx);
-            if (string.IsNullOrEmpty(bearer)) return Results.Unauthorized();
             try
             {
+                var userToken = TokenHelper.ExtractBearerToken(ctx);
+
                 using var ms = new MemoryStream();
                 await req.Body.CopyToAsync(ms, ct);
                 ms.Position = 0;
-                var item = await oboSvc.UploadSmallAsync(bearer, id, path, ms, ct);
-                return item is null ? Results.NotFound() : Results.Ok(item);
+                var item = await speFileStore.UploadSmallAsUserAsync(userToken, id, path, ms, ct);
+                return item is null ? TypedResults.NotFound() : TypedResults.Ok(item);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return TypedResults.Unauthorized();
             }
             catch (ServiceException ex)
             {
                 return ProblemDetailsHelper.FromGraphException(ex);
             }
-        }); // TODO: .RequireRateLimiting("graph-write");
+        }).RequireRateLimiting("graph-write");
 
 
         // POST: create upload session (as user)
@@ -77,7 +84,7 @@ public static class OBOEndpoints
             string path,
             string? conflictBehavior,
             HttpContext ctx,
-            [FromServices] IOboSpeService oboSvc,
+            [FromServices] SpeFileStore speFileStore,
             CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(path))
@@ -85,34 +92,33 @@ public static class OBOEndpoints
                 return ProblemDetailsHelper.ValidationError("path query parameter is required");
             }
 
-            var bearer = GetBearer(ctx);
-            if (string.IsNullOrEmpty(bearer)) return Results.Unauthorized();
-
             try
             {
+                var userToken = TokenHelper.ExtractBearerToken(ctx);
                 var behavior = Spe.Bff.Api.Models.ConflictBehaviorExtensions.ParseConflictBehavior(conflictBehavior);
-                var session = await oboSvc.CreateUploadSessionAsync(bearer, driveId, path, behavior, ct);
+                var session = await speFileStore.CreateUploadSessionAsUserAsync(userToken, driveId, path, behavior, ct);
 
                 return session == null
-                    ? Results.Problem(statusCode: 500, title: "Failed to create upload session")
-                    : Results.Ok(session);
+                    ? TypedResults.Problem(statusCode: 500, title: "Failed to create upload session")
+                    : TypedResults.Ok(session);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return TypedResults.Unauthorized();
             }
             catch (ServiceException ex)
             {
                 return ProblemDetailsHelper.FromGraphException(ex);
             }
-        }); // TODO: .RequireRateLimiting("graph-write");
+        }).RequireRateLimiting("graph-write");
 
         // PUT: upload chunk (as user)
         app.MapPut("/api/obo/upload-session/chunk", async (
             HttpRequest request,
             HttpContext ctx,
-            [FromServices] IOboSpeService oboSvc,
+            [FromServices] SpeFileStore speFileStore,
             CancellationToken ct) =>
         {
-            var bearer = GetBearer(ctx);
-            if (string.IsNullOrEmpty(bearer)) return Results.Unauthorized();
-
             // Get required headers
             var uploadSessionUrl = request.Headers["Upload-Session-Url"].FirstOrDefault();
             var contentRange = request.Headers["Content-Range"].FirstOrDefault();
@@ -129,6 +135,8 @@ public static class OBOEndpoints
 
             try
             {
+                var userToken = TokenHelper.ExtractBearerToken(ctx);
+
                 // Read chunk data from request body
                 using var ms = new MemoryStream();
                 await request.Body.CopyToAsync(ms, ct);
@@ -139,18 +147,22 @@ public static class OBOEndpoints
                     return ProblemDetailsHelper.ValidationError("Request body cannot be empty");
                 }
 
-                var result = await oboSvc.UploadChunkAsync(bearer, uploadSessionUrl, contentRange, chunkData, ct);
+                var result = await speFileStore.UploadChunkAsUserAsync(userToken, uploadSessionUrl, contentRange, chunkData, ct);
 
                 return result.StatusCode switch
                 {
-                    200 => Results.Ok(result.CompletedItem), // Upload complete
-                    201 => Results.Created("", result.CompletedItem), // Upload complete
-                    202 => Results.Accepted(), // More chunks expected
-                    400 => Results.BadRequest("Invalid chunk or Content-Range"),
-                    413 => Results.Problem(statusCode: 413, title: "Chunk too large"),
-                    499 => Results.Problem(statusCode: 499, title: "Client closed request"),
-                    _ => Results.Problem(statusCode: 500, title: "Upload failed")
+                    200 => TypedResults.Ok(result.CompletedItem), // Upload complete
+                    201 => TypedResults.Created("", result.CompletedItem), // Upload complete
+                    202 => TypedResults.Accepted("", result.CompletedItem), // More chunks expected
+                    400 => TypedResults.BadRequest("Invalid chunk or Content-Range"),
+                    413 => TypedResults.Problem(statusCode: 413, title: "Chunk too large"),
+                    499 => TypedResults.Problem(statusCode: 499, title: "Client closed request"),
+                    _ => TypedResults.Problem(statusCode: 500, title: "Upload failed")
                 };
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return TypedResults.Unauthorized();
             }
             catch (ServiceException ex)
             {
@@ -158,9 +170,9 @@ public static class OBOEndpoints
             }
             catch (Exception)
             {
-                return Results.Problem(statusCode: 500, title: "Upload chunk failed");
+                return TypedResults.Problem(statusCode: 500, title: "Upload chunk failed");
             }
-        }); // TODO: .RequireRateLimiting("graph-write");
+        }).RequireRateLimiting("graph-write");
 
         // PATCH: update item (rename/move)
         app.MapPatch("/api/obo/drives/{driveId}/items/{itemId}", async (
@@ -168,12 +180,9 @@ public static class OBOEndpoints
             string itemId,
             UpdateFileRequest request,
             HttpContext ctx,
-            [FromServices] IOboSpeService oboSvc,
+            [FromServices] SpeFileStore speFileStore,
             CancellationToken ct) =>
         {
-            var bearer = GetBearer(ctx);
-            if (string.IsNullOrEmpty(bearer)) return Results.Unauthorized();
-
             if (string.IsNullOrWhiteSpace(itemId))
             {
                 return ProblemDetailsHelper.ValidationError("itemId is required");
@@ -186,17 +195,22 @@ public static class OBOEndpoints
 
             try
             {
-                var updatedItem = await oboSvc.UpdateItemAsync(bearer, driveId, itemId, request, ct);
+                var userToken = TokenHelper.ExtractBearerToken(ctx);
+                var updatedItem = await speFileStore.UpdateItemAsUserAsync(userToken, driveId, itemId, request, ct);
 
                 return updatedItem == null
-                    ? Results.NotFound()
-                    : Results.Ok(updatedItem);
+                    ? TypedResults.NotFound()
+                    : TypedResults.Ok(updatedItem);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return TypedResults.Unauthorized();
             }
             catch (ServiceException ex)
             {
                 return ProblemDetailsHelper.FromGraphException(ex);
             }
-        }); // TODO: .RequireRateLimiting("graph-write");
+        }).RequireRateLimiting("graph-write");
 
 
         // GET: download content with range support (enhanced)
@@ -205,12 +219,9 @@ public static class OBOEndpoints
             string itemId,
             HttpRequest request,
             HttpContext ctx,
-            [FromServices] IOboSpeService oboSvc,
+            [FromServices] SpeFileStore speFileStore,
             CancellationToken ct) =>
         {
-            var bearer = GetBearer(ctx);
-            if (string.IsNullOrEmpty(bearer)) return Results.Unauthorized();
-
             if (string.IsNullOrWhiteSpace(itemId))
             {
                 return ProblemDetailsHelper.ValidationError("itemId is required");
@@ -218,6 +229,8 @@ public static class OBOEndpoints
 
             try
             {
+                var userToken = TokenHelper.ExtractBearerToken(ctx);
+
                 // Parse Range header
                 var rangeHeader = request.Headers["Range"].FirstOrDefault();
                 var range = Spe.Bff.Api.Models.RangeHeader.Parse(rangeHeader);
@@ -225,24 +238,24 @@ public static class OBOEndpoints
                 // Parse If-None-Match header (for ETag-based caching)
                 var ifNoneMatch = request.Headers["If-None-Match"].FirstOrDefault();
 
-                var fileContent = await oboSvc.DownloadContentWithRangeAsync(bearer, driveId, itemId, range, ifNoneMatch, ct);
+                var fileContent = await speFileStore.DownloadFileWithRangeAsUserAsync(userToken, driveId, itemId, range, ifNoneMatch, ct);
 
                 if (fileContent == null)
                 {
                     return range != null
-                        ? Results.Problem(statusCode: 416, title: "Range Not Satisfiable") // 416
-                        : Results.NotFound();
+                        ? TypedResults.Problem(statusCode: 416, title: "Range Not Satisfiable") // 416
+                        : TypedResults.NotFound();
                 }
 
                 // Handle ETag match (304 Not Modified)
                 if (fileContent.ContentLength == 0 && fileContent.Content == Stream.Null)
                 {
-                    return Results.StatusCode(304); // Not Modified
+                    return TypedResults.StatusCode(304); // Not Modified
                 }
 
                 var response = fileContent.IsRangeRequest
-                    ? Results.Stream(fileContent.Content, fileContent.ContentType, enableRangeProcessing: true)
-                    : Results.Stream(fileContent.Content, fileContent.ContentType);
+                    ? TypedResults.Stream(fileContent.Content, fileContent.ContentType, enableRangeProcessing: true)
+                    : TypedResults.Stream(fileContent.Content, fileContent.ContentType);
 
                 // Set headers
                 ctx.Response.Headers.ETag = $"\"{fileContent.ETag}\"";
@@ -256,34 +269,37 @@ public static class OBOEndpoints
 
                 return response;
             }
+            catch (UnauthorizedAccessException)
+            {
+                return TypedResults.Unauthorized();
+            }
             catch (ServiceException ex)
             {
                 return ProblemDetailsHelper.FromGraphException(ex);
             }
             catch (Exception)
             {
-                return Results.Problem(statusCode: 500, title: "Download failed");
+                return TypedResults.Problem(statusCode: 500, title: "Download failed");
             }
-        }); // TODO: .RequireRateLimiting("graph-read");
+        }).RequireRateLimiting("graph-read");
 
         // DELETE: delete item (as user)
         app.MapDelete("/api/obo/drives/{driveId}/items/{itemId}", async (
             string driveId,
             string itemId,
             HttpContext ctx,
-            [FromServices] IOboSpeService oboSpeService,
+            [FromServices] SpeFileStore speFileStore,
             CancellationToken ct) =>
         {
-            var bearer = GetBearer(ctx);
-            if (string.IsNullOrWhiteSpace(bearer))
-            {
-                return Results.Unauthorized();
-            }
-
             try
             {
-                await oboSpeService.DeleteItemAsync(bearer, driveId, itemId, ct);
-                return Results.NoContent();
+                var userToken = TokenHelper.ExtractBearerToken(ctx);
+                await speFileStore.DeleteItemAsUserAsync(userToken, driveId, itemId, ct);
+                return TypedResults.NoContent();
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return TypedResults.Unauthorized();
             }
             catch (ServiceException ex)
             {
@@ -291,20 +307,11 @@ public static class OBOEndpoints
             }
             catch (Exception)
             {
-                return Results.Problem(statusCode: 500, title: "Delete failed");
+                return TypedResults.Problem(statusCode: 500, title: "Delete failed");
             }
-        }); // TODO: .RequireRateLimiting("graph-write");
+        }).RequireRateLimiting("graph-write");
 
         return app;
-    }
-
-    private static string? GetBearer(HttpContext ctx)
-    {
-        var h = ctx.Request.Headers.Authorization.ToString();
-        const string p = "Bearer ";
-        return !string.IsNullOrWhiteSpace(h) && h.StartsWith(p, StringComparison.OrdinalIgnoreCase)
-            ? h[p.Length..].Trim()
-            : null;
     }
 
     // Minimal, local validation to avoid dependency on other files.
