@@ -13,7 +13,9 @@
       "Bash(dotnet clean:*)",
       "Bash(git log:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git filter-branch:*)"
     ],
     "deny": [],
     "ask": []
