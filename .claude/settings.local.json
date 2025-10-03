@@ -17,7 +17,8 @@
       "Bash(git push:*)",
       "Bash(git filter-branch:*)",
       "Bash(git branch:*)",
-      "Bash($env:FILTER_BRANCH_SQUELCH_WARNING=1)"
+      "Bash($env:FILTER_BRANCH_SQUELCH_WARNING=1)",
+      "Bash(FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch --force --tree-filter 'if [ -f \"\"dev/projects/sdap_project/Sprint 3/TASK-1.2-IMPLEMENTATION-COMPLETE.md\"\" ]; then sed -i \"\"s/~Ac8Q~JGnsrvNEODvFo8qmtKbgj1PmwmJ6GVUaJj/[REDACTED]/g\"\" \"\"dev/projects/sdap_project/Sprint 3/TASK-1.2-IMPLEMENTATION-COMPLETE.md\"\"; fi' 48d47ea..HEAD)"
     ],
     "deny": [],
     "ask": []
