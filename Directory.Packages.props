@@ -19,8 +19,8 @@
     <PackageVersion Include="Microsoft.Kiota.Serialization.Text" Version="1.17.1" />
     <!-- Identity packages -->
     <PackageVersion Include="Microsoft.Identity.Client" Version="4.77.0" />
-    <PackageVersion Include="Microsoft.Identity.Web" Version="3.5.0" />
-    <PackageVersion Include="Microsoft.Identity.Web.MicrosoftGraph" Version="3.5.0" />
+    <PackageVersion Include="Microsoft.Identity.Web" Version="3.8.2" />
+    <PackageVersion Include="Microsoft.Identity.Web.MicrosoftGraph" Version="3.8.2" />
     <PackageVersion Include="System.IdentityModel.Tokens.Jwt" Version="8.6.1" />
     <!-- Observability packages -->
     <PackageVersion Include="OpenTelemetry" Version="1.12.0" />

@@ -222,7 +222,7 @@ public class UploadSessionManager
     /// <summary>
     /// Uploads a small file (< 4MB) as the user (OBO flow).
     /// </summary>
-    public async Task<DriveItem?> UploadSmallAsUserAsync(
+    public async Task<FileHandleDto?> UploadSmallAsUserAsync(
         string userToken,
         string containerId,
         string path,
@@ -268,7 +268,16 @@ public class UploadSessionManager
             _logger.LogInformation("Successfully uploaded file to {Path} in container {ContainerId}, item ID: {ItemId}",
                 path, containerId, uploadedItem.Id);
 
-            return uploadedItem;
+            // Map Graph SDK DriveItem to SDAP DTO (ADR-007 compliance)
+            return new FileHandleDto(
+                uploadedItem.Id!,
+                uploadedItem.Name!,
+                uploadedItem.ParentReference?.Id,
+                uploadedItem.Size,
+                uploadedItem.CreatedDateTime ?? DateTimeOffset.UtcNow,
+                uploadedItem.LastModifiedDateTime ?? DateTimeOffset.UtcNow,
+                uploadedItem.ETag,
+                uploadedItem.Folder != null);
         }
         catch (ServiceException ex) when (ex.ResponseStatusCode == 403)
         {

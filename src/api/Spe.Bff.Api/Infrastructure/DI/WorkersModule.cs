@@ -1,7 +1,6 @@
 using Azure.Messaging.ServiceBus;
 using Microsoft.Extensions.Options;
 using Spe.Bff.Api.Configuration;
-using Spe.Bff.Api.Services.BackgroundServices;
 using Spe.Bff.Api.Services.Jobs;
 using Spe.Bff.Api.Services.Jobs.Handlers;
 
@@ -11,8 +10,8 @@ public static class WorkersModule
 {
     public static IServiceCollection AddWorkersModule(this IServiceCollection services, IConfiguration configuration)
     {
-        // NOTE: Job processing (JobProcessor, ServiceBusJobProcessor, JobSubmissionService) is registered in Program.cs
-        // based on Jobs:UseServiceBus configuration. This module only handles DocumentEventProcessor.
+        // NOTE: Job processing (ServiceBusJobProcessor, JobSubmissionService) is registered in Program.cs
+        // This module only handles DocumentEventProcessor.
 
         // Register Service Bus client for DocumentEventProcessor (only if connection string is configured)
         var serviceBusConnectionString = configuration.GetValue<string>("ServiceBus:ConnectionString");

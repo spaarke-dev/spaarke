@@ -1,0 +1,66 @@
+{
+  "schemaVersion": "1.0",
+  "defaultConfig": {
+    "viewMode": "Grid",
+    "enabledCommands": ["open", "create", "delete", "refresh"],
+    "compactToolbar": false,
+    "enableVirtualization": true,
+    "rowHeight": 44,
+    "scrollBehavior": "Auto",
+    "toolbarShowOverflow": true
+  },
+  "entityConfigs": {
+    "sprk_document": {
+      "viewMode": "Grid",
+      "enabledCommands": ["open", "create", "delete", "refresh", "upload", "download"],
+      "customCommands": {
+        "upload": {
+          "label": "Upload to SPE",
+          "icon": "ArrowUpload",
+          "actionType": "customapi",
+          "actionName": "sprk_UploadDocument",
+          "requiresSelection": false,
+          "group": "primary",
+          "description": "Upload document to SharePoint",
+          "keyboardShortcut": "Ctrl+U",
+          "parameters": {
+            "ParentId": "{parentRecordId}",
+            "ParentTable": "{parentTable}"
+          },
+          "refresh": true,
+          "successMessage": "Document uploaded successfully"
+        },
+        "download": {
+          "label": "Download",
+          "icon": "ArrowDownload",
+          "actionType": "customapi",
+          "actionName": "sprk_DownloadDocument",
+          "requiresSelection": true,
+          "group": "secondary",
+          "description": "Download selected documents"
+        }
+      }
+    },
+    "contact": {
+      "viewMode": "Card",
+      "enabledCommands": ["open", "create", "delete", "refresh", "sendEmail"],
+      "customCommands": {
+        "sendEmail": {
+          "label": "Send Email",
+          "icon": "Mail",
+          "actionType": "action",
+          "actionName": "SendEmail",
+          "requiresSelection": true,
+          "group": "primary",
+          "description": "Send email to selected contacts",
+          "keyboardShortcut": "Ctrl+E"
+        }
+      }
+    },
+    "account": {
+      "viewMode": "List",
+      "enabledCommands": ["open", "create", "delete", "refresh"],
+      "compactToolbar": true
+    }
+  }
+}

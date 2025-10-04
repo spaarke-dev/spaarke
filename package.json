@@ -1,0 +1,20 @@
+{
+  "name": "spaarke",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test:e2e": "playwright test --config=tests/e2e/config/playwright.config.ts",
+    "test:e2e:ui": "playwright test --ui --config=tests/e2e/config/playwright.config.ts",
+    "test:e2e:headed": "playwright test --headed --config=tests/e2e/config/playwright.config.ts",
+    "test:e2e:debug": "playwright test --debug --config=tests/e2e/config/playwright.config.ts",
+    "test:e2e:report": "playwright show-report",
+    "test:e2e:codegen": "playwright codegen"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.2",
+    "@azure/identity": "^4.12.0",
+    "@playwright/test": "^1.55.1",
+    "axios": "^1.12.2",
+    "dotenv": "^17.2.3"
+  }
+}

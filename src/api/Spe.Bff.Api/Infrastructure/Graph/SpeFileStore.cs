@@ -134,7 +134,7 @@ public class SpeFileStore
         => _driveItemOps.DeleteItemAsUserAsync(userToken, driveId, itemId, ct);
 
     // Upload Operations (user context)
-    public Task<DriveItem?> UploadSmallAsUserAsync(
+    public Task<FileHandleDto?> UploadSmallAsUserAsync(
         string userToken,
         string containerId,
         string path,

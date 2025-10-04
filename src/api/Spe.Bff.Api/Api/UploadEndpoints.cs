@@ -46,11 +46,8 @@ public static class UploadEndpoints
 
                 logger.LogInformation("Uploading file {Path} to container {ContainerId}", path, containerId);
 
-                using var ms = new MemoryStream();
-                await req.Body.CopyToAsync(ms, ct);
-                ms.Position = 0;
-
-                var item = await speFileStore.UploadSmallAsync(containerId, path, ms, ct);
+                // Stream directly to Graph SDK (no memory buffering)
+                var item = await speFileStore.UploadSmallAsync(containerId, path, req.Body, ct);
 
                 return TypedResults.Ok(item);
             }

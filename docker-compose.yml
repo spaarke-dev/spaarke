@@ -1,0 +1,62 @@
+# ============================================================================
+# SDAP Local Development Environment
+# ============================================================================
+# Purpose: Provides local Azure Service Bus emulator for development/testing
+# Usage: docker-compose up -d
+# ============================================================================
+
+version: '3.8'
+
+services:
+  # Azure Service Bus Emulator
+  # Emulates Azure Service Bus for local development
+  # Provides queues, topics, and subscriptions
+  servicebus:
+    image: mcr.microsoft.com/azure-messaging/servicebus-emulator:latest
+    container_name: sdap-servicebus-emulator
+    ports:
+      - "5672:5672"   # AMQP port
+    environment:
+      # Accept EULA
+      ACCEPT_EULA: "Y"
+      # Configure SQL Server for message storage
+      MSSQL_SA_PASSWORD: "ServiceBus123!"
+    volumes:
+      # Persist Service Bus configuration
+      - servicebus-data:/data
+    networks:
+      - sdap-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5672"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # Redis Cache (Optional - for distributed caching in local dev)
+  # Uncomment if you want to test Redis locally
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: sdap-redis
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis-data:/data
+  #   networks:
+  #     - sdap-network
+  #   command: redis-server --appendonly yes
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "ping"]
+  #     interval: 10s
+  #     timeout: 3s
+  #     retries: 5
+
+volumes:
+  servicebus-data:
+    driver: local
+  # redis-data:
+  #   driver: local
+
+networks:
+  sdap-network:
+    driver: bridge

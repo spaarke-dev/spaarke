@@ -1,0 +1,52 @@
+{
+  "name": "@spaarke/ui-components",
+  "version": "1.0.0",
+  "description": "Spaarke shared UI component library - React + TypeScript + Fluent UI v9",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "build:watch": "tsc --watch",
+    "clean": "rm -rf dist",
+    "lint": "eslint src --ext .ts,.tsx",
+    "lint:fix": "eslint src --ext .ts,.tsx --fix",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:ci": "jest --ci --coverage --maxWorkers=2"
+  },
+  "keywords": [
+    "spaarke",
+    "react",
+    "typescript",
+    "fluent-ui",
+    "components"
+  ],
+  "author": "Spaarke Engineering Team",
+  "license": "UNLICENSED",
+  "peerDependencies": {
+    "@fluentui/react-components": "^9.46.2",
+    "@fluentui/react-icons": "^2.0.220",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/jest": "^30.0.0",
+    "@types/powerapps-component-framework": "^1.3.4",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@types/react-window": "^1.8.8",
+    "eslint": "^9.17.0",
+    "identity-obj-proxy": "^3.0.0",
+    "jest": "^30.2.0",
+    "jest-environment-jsdom": "^30.2.0",
+    "ts-jest": "^29.4.4",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "react-window": "^1.8.11"
+  }
+}

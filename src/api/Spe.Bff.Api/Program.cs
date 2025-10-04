@@ -203,6 +203,14 @@ if (redisEnabled)
     {
         options.Configuration = redisConnectionString;
         options.InstanceName = builder.Configuration["Redis:InstanceName"] ?? "sdap:";
+
+        // Connection resilience options for production reliability
+        options.ConfigurationOptions = StackExchange.Redis.ConfigurationOptions.Parse(redisConnectionString);
+        options.ConfigurationOptions.AbortOnConnectFail = false;  // Don't crash if Redis temporarily unavailable
+        options.ConfigurationOptions.ConnectTimeout = 5000;       // 5 second connection timeout
+        options.ConfigurationOptions.SyncTimeout = 5000;          // 5 second operation timeout
+        options.ConfigurationOptions.ConnectRetry = 3;            // Retry connection 3 times
+        options.ConfigurationOptions.ReconnectRetryPolicy = new StackExchange.Redis.ExponentialRetry(1000);  // Exponential backoff (1s base)
     });
 
     builder.Logging.AddSimpleConsole().Services.Configure<Microsoft.Extensions.Logging.Console.SimpleConsoleFormatterOptions>(options =>
@@ -256,45 +264,65 @@ builder.Services.AddHttpClient<IDataverseService, DataverseWebApiService>(client
     client.Timeout = TimeSpan.FromSeconds(30);
 });
 
-// Background Job Processing (ADR-004) - Unified Strategy
-var useServiceBus = builder.Configuration.GetValue<bool>("Jobs:UseServiceBus", true);
-
+// Background Job Processing (ADR-004) - Service Bus Strategy
 // Always register JobSubmissionService (unified entry point)
 builder.Services.AddSingleton<Spe.Bff.Api.Services.Jobs.JobSubmissionService>();
 
-// Register job handlers (used by both processors)
+// Register job handlers
 builder.Services.AddScoped<Spe.Bff.Api.Services.Jobs.IJobHandler, Spe.Bff.Api.Services.Jobs.Handlers.DocumentProcessingJobHandler>();
 // TODO: Register additional IJobHandler implementations here
 
-if (useServiceBus)
+// Configure Service Bus job processing
+var serviceBusConnectionString = builder.Configuration.GetConnectionString("ServiceBus");
+if (string.IsNullOrWhiteSpace(serviceBusConnectionString))
 {
-    // Production: Service Bus mode
-    var serviceBusConnectionString = builder.Configuration.GetConnectionString("ServiceBus");
-    if (!string.IsNullOrWhiteSpace(serviceBusConnectionString))
-    {
-        builder.Services.AddSingleton(sp => new Azure.Messaging.ServiceBus.ServiceBusClient(serviceBusConnectionString));
-        builder.Services.AddHostedService<Spe.Bff.Api.Services.Jobs.ServiceBusJobProcessor>();
-        builder.Logging.AddConsole();
-        Console.WriteLine("✓ Job processing configured with Service Bus (queue: sdap-jobs)");
-    }
-    else
-    {
-        throw new InvalidOperationException(
-            "Jobs:UseServiceBus is true but ServiceBus:ConnectionString is not configured. " +
-            "Either configure Service Bus or set Jobs:UseServiceBus=false for development.");
-    }
-}
-else
-{
-    // Development: In-memory mode
-    builder.Services.AddSingleton<Spe.Bff.Api.Services.BackgroundServices.JobProcessor>();
-    builder.Services.AddHostedService<Spe.Bff.Api.Services.BackgroundServices.JobProcessor>(sp =>
-        sp.GetRequiredService<Spe.Bff.Api.Services.BackgroundServices.JobProcessor>());
-    Console.WriteLine("⚠️ Job processing configured with In-Memory queue (DEVELOPMENT ONLY - not durable)");
+    throw new InvalidOperationException(
+        "ConnectionStrings:ServiceBus is required. " +
+        "For local development, use Service Bus emulator (see docs/README-Local-Development.md) " +
+        "or configure a dev Service Bus namespace.");
 }
 
+builder.Services.AddSingleton(sp => new Azure.Messaging.ServiceBus.ServiceBusClient(serviceBusConnectionString));
+builder.Services.AddHostedService<Spe.Bff.Api.Services.Jobs.ServiceBusJobProcessor>();
+builder.Logging.AddConsole();
+Console.WriteLine("✓ Job processing configured with Service Bus (queue: sdap-jobs)");
+
 // Health checks
-builder.Services.AddHealthChecks();
+builder.Services.AddHealthChecks()
+    .AddCheck("redis", () =>
+    {
+        if (!redisEnabled)
+        {
+            return Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy(
+                "Redis is disabled (using in-memory cache for development)");
+        }
+
+        try
+        {
+            var cache = builder.Services.BuildServiceProvider().GetRequiredService<Microsoft.Extensions.Caching.Distributed.IDistributedCache>();
+            var testKey = "_health_check_";
+            var testValue = DateTimeOffset.UtcNow.ToString("O");
+
+            cache.SetString(testKey, testValue, new Microsoft.Extensions.Caching.Distributed.DistributedCacheEntryOptions
+            {
+                AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(10)
+            });
+
+            var retrieved = cache.GetString(testKey);
+            cache.Remove(testKey);
+
+            if (retrieved == testValue)
+            {
+                return Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy("Redis cache is available and responsive");
+            }
+
+            return Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Degraded("Redis cache returned unexpected value");
+        }
+        catch (Exception ex)
+        {
+            return Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Unhealthy("Redis cache is unavailable", ex);
+        }
+    });
 
 // ============================================================================
 // CORS - Secure, fail-closed configuration

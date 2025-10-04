@@ -1,0 +1,12 @@
+{
+  "controls": {
+    "UniversalDatasetGrid": {
+      "namespace": "Spaarke.UI.Components",
+      "controlName": "UniversalDatasetGrid",
+      "selector": "[data-control-name='spaarke_UniversalDatasetGrid']",
+      "supportedEntities": ["account", "contact", "sprk_document"],
+      "requiredFeatures": ["create", "read", "update", "delete"],
+      "testDataFactory": "createUniversalDatasetTestData"
+    }
+  }
+}

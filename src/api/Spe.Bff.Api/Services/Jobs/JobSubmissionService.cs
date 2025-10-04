@@ -1,60 +1,32 @@
 using System.Text.Json;
 using Azure.Messaging.ServiceBus;
-using Spe.Bff.Api.Services.BackgroundServices;
 
 namespace Spe.Bff.Api.Services.Jobs;
 
 /// <summary>
-/// Unified job submission service that routes jobs to the appropriate processor.
-/// Routes to Service Bus (production) or in-memory queue (development) based on configuration.
+/// Service for submitting background jobs to Azure Service Bus.
 /// Implements ADR-004 job contract for all job submissions.
 /// </summary>
 public class JobSubmissionService
 {
-    private readonly ServiceBusClient? _serviceBusClient;
-    private readonly JobProcessor? _inMemoryProcessor;
+    private readonly ServiceBusClient _serviceBusClient;
     private readonly ILogger<JobSubmissionService> _logger;
-    private readonly IConfiguration _configuration;
-    private readonly bool _useServiceBus;
     private readonly string _queueName;
 
     public JobSubmissionService(
         IConfiguration configuration,
         ILogger<JobSubmissionService> logger,
-        ServiceBusClient? serviceBusClient = null,
-        JobProcessor? inMemoryProcessor = null)
+        ServiceBusClient serviceBusClient)
     {
-        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _serviceBusClient = serviceBusClient;
-        _inMemoryProcessor = inMemoryProcessor;
-
-        _useServiceBus = configuration.GetValue<bool>("Jobs:UseServiceBus", true);
+        _serviceBusClient = serviceBusClient ?? throw new ArgumentNullException(nameof(serviceBusClient));
         _queueName = configuration["Jobs:ServiceBus:QueueName"] ?? "sdap-jobs";
 
-        // Fail-fast validation
-        if (_useServiceBus && _serviceBusClient == null)
-        {
-            throw new InvalidOperationException(
-                "Service Bus is enabled (Jobs:UseServiceBus=true) but ServiceBusClient is not registered. " +
-                "Configure ServiceBus:ConnectionString or set Jobs:UseServiceBus=false for development.");
-        }
-
-        if (!_useServiceBus && _inMemoryProcessor == null)
-        {
-            throw new InvalidOperationException(
-                "In-memory job processing is enabled (Jobs:UseServiceBus=false) but JobProcessor is not registered. " +
-                "Register JobProcessor as a singleton or enable Service Bus.");
-        }
-
-        _logger.LogInformation("Job submission configured with {Mode} mode (Queue: {Queue})",
-            _useServiceBus ? "Service Bus" : "In-Memory",
-            _useServiceBus ? _queueName : "ConcurrentQueue");
+        _logger.LogInformation("Job submission configured with Service Bus (Queue: {Queue})", _queueName);
     }
 
     /// <summary>
-    /// Submits a job for asynchronous processing.
-    /// Routes to Service Bus (production) or in-memory queue (development).
+    /// Submits a job for asynchronous processing via Azure Service Bus.
     /// </summary>
     /// <param name="job">The job to submit (must follow ADR-004 contract)</param>
     /// <param name="ct">Cancellation token</param>
@@ -72,14 +44,7 @@ public class JobSubmissionService
             throw new ArgumentException("Job.JobType cannot be null or empty", nameof(job));
         }
 
-        if (_useServiceBus)
-        {
-            await SubmitToServiceBusAsync(job, ct);
-        }
-        else
-        {
-            SubmitToInMemoryQueue(job);
-        }
+        await SubmitToServiceBusAsync(job, ct);
     }
 
     private async Task SubmitToServiceBusAsync(JobContract job, CancellationToken ct)
@@ -124,40 +89,4 @@ public class JobSubmissionService
         }
     }
 
-    private void SubmitToInMemoryQueue(JobContract job)
-    {
-        try
-        {
-            _inMemoryProcessor!.EnqueueJob(job);
-
-            _logger.LogInformation(
-                "Job {JobId} ({JobType}) submitted to in-memory queue with idempotency key {IdempotencyKey}",
-                job.JobId, job.JobType, job.IdempotencyKey);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex,
-                "Failed to submit job {JobId} ({JobType}) to in-memory queue",
-                job.JobId, job.JobType);
-            throw;
-        }
-    }
-
-    /// <summary>
-    /// Gets the current queue depth (for monitoring and health checks).
-    /// Only works with in-memory queue. Returns null for Service Bus mode.
-    /// </summary>
-    public int? GetQueueDepth()
-    {
-        if (!_useServiceBus && _inMemoryProcessor != null)
-        {
-            return _inMemoryProcessor.QueueDepth;
-        }
-        return null;
-    }
-
-    /// <summary>
-    /// Indicates whether Service Bus mode is active.
-    /// </summary>
-    public bool IsUsingServiceBus => _useServiceBus;
 }

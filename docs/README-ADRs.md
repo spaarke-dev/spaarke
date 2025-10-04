@@ -9,37 +9,43 @@ This repository segment packages Spaarke’s Architecture Decision Records (ADRs
 - Treat ADRs as **source of truth** for architectural guardrails. New technology introductions or major deviations must add or supersede an ADR.
 - The AI coding agent should read ADRs **before** making automated changes and use the prompts in the guides.
 
-## Index of ADRs (001–010)
+## Index of ADRs (001–012)
 
-- [ADR-001: Minimal API + BackgroundService; do not use Azure Functions](docs/adr/ADR-001-minimal-api-and-workers.md)  
+- [ADR-001: Minimal API + BackgroundService; do not use Azure Functions](docs/adr/ADR-001-minimal-api-and-workers.md)
   Establishes the single runtime: Minimal API for sync calls, BackgroundService workers for async via Service Bus.
 
-- [ADR-002: Keep Dataverse plugins thin; no orchestration in plugins](docs/adr/ADR-002-no-heavy-plugins.md)  
+- [ADR-002: Keep Dataverse plugins thin; no orchestration in plugins](docs/adr/ADR-002-no-heavy-plugins.md)
   Plugins do validation/projection only. No HTTP/Graph calls or long-running logic; orchestration sits in the BFF/workers.
 
-- [ADR-003: Lean authorization with two seams (UAC data and file storage)](docs/adr/ADR-003-lean-authorization-seams.md)  
+- [ADR-003: Lean authorization with two seams (UAC data and file storage)](docs/adr/ADR-003-lean-authorization-seams.md)
   Concrete `AuthorizationService` + small rules; `IAccessDataSource` for Dataverse UAC; `SpeFileStore` for SPE operations.
 
-- [ADR-004: Async job contract and uniform processing](docs/adr/ADR-004-async-job-contract.md)  
+- [ADR-004: Async job contract and uniform processing](docs/adr/ADR-004-async-job-contract.md)
   One job envelope, idempotent handlers, Polly retries, poison-queue on exhaustion, consistent telemetry.
 
-- [ADR-005: Flat storage model in SharePoint Embedded (SPE)](docs/adr/ADR-005-flat-storage-spe.md)  
+- [ADR-005: Flat storage model in SharePoint Embedded (SPE)](docs/adr/ADR-005-flat-storage-spe.md)
   Flat storage with metadata-based associations; no deep folder trees; app-mediated access.
 
-- [ADR-006: Prefer PCF controls over legacy JavaScript webresources](docs/adr/ADR-006-prefer-pcf-over-webresources.md)  
+- [ADR-006: Prefer PCF controls over legacy JavaScript webresources](docs/adr/ADR-006-prefer-pcf-over-webresources.md)
   Modern, typed UI components and better lifecycle on Power Platform.
 
-- [ADR-007: SPE storage seam minimalism (single focused facade)](docs/adr/ADR-007-spe-storage-seam-minimalism.md)  
+- [ADR-007: SPE storage seam minimalism (single focused facade)](docs/adr/ADR-007-spe-storage-seam-minimalism.md)
   Replace generic `IResourceStore` with a concrete `SpeFileStore` facade; no Graph SDK types leak above the facade.
 
-- [ADR-008: Authorization execution model — endpoint filters over global middleware](docs/adr/ADR-008-authorization-endpoint-filters.md)  
+- [ADR-008: Authorization execution model — endpoint filters over global middleware](docs/adr/ADR-008-authorization-endpoint-filters.md)
   One context middleware; enforce resource-level checks via endpoint filters/policy handlers that call `AuthorizationService`.
 
-- [ADR-009: Caching policy — Redis-first with per-request cache](docs/adr/ADR-009-caching-redis-first.md)  
+- [ADR-009: Caching policy — Redis-first with per-request cache](docs/adr/ADR-009-caching-redis-first.md)
   Distributed cache only for cross-request reuse; add L1 only if profiling proves a need; version keys and keep TTLs short.
 
-- [ADR-010: Dependency Injection minimalism and feature modules](docs/adr/ADR-010-di-minimalism.md)  
+- [ADR-010: Dependency Injection minimalism and feature modules](docs/adr/ADR-010-di-minimalism.md)
   Register concretes unless a seam is required; feature-module registration; one typed client per upstream; Options for config.
+
+- [ADR-011: Dataset PCF Controls Over Native Subgrids](docs/adr/ADR-011-dataset-pcf-over-subgrids.md)
+  Build custom Dataset PCF controls instead of using native Power Platform subgrids for list-based scenarios requiring custom UI, actions, or advanced interactions.
+
+- [ADR-012: Shared Component Library for React/TypeScript Across Modules](docs/adr/ADR-012-shared-component-library.md)
+  Create a shared TypeScript/React component library at `src/shared/Spaarke.UI.Components/` for reuse across PCF controls, future SPA, and Office Add-ins.
 
 ## Guides
 

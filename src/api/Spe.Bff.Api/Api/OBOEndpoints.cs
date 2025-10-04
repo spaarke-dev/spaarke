@@ -61,10 +61,8 @@ public static class OBOEndpoints
             {
                 var userToken = TokenHelper.ExtractBearerToken(ctx);
 
-                using var ms = new MemoryStream();
-                await req.Body.CopyToAsync(ms, ct);
-                ms.Position = 0;
-                var item = await speFileStore.UploadSmallAsUserAsync(userToken, id, path, ms, ct);
+                // Stream directly to Graph SDK (no memory buffering)
+                var item = await speFileStore.UploadSmallAsUserAsync(userToken, id, path, req.Body, ct);
                 return item is null ? TypedResults.NotFound() : TypedResults.Ok(item);
             }
             catch (UnauthorizedAccessException)
