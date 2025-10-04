@@ -15,6 +15,7 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <!-- ServiceClient SDK packages removed - using Web API (REST) approach instead -->
     <!-- See README.md for rationale -->
+  <PackageReference Include="Microsoft.Identity.Client" />
   </ItemGroup>
 
 </Project>
