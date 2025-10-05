@@ -6,7 +6,11 @@
       "Bash(timeout:*)",
       "Bash(pac solution delete:*)",
       "Bash(npm ls:*)",
-      "Bash(git tag:*)"
+      "Bash(git tag:*)",
+      "Bash($env:NODE_ENV=\"production\")",
+      "Bash(if [ -f nul ])",
+      "Bash(then rm nul)",
+      "Bash(fi)"
     ],
     "deny": [],
     "ask": []

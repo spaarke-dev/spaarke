@@ -9,6 +9,7 @@ import * as React from 'react';
 import { IInputs } from '../generated/ManifestTypes';
 import { GridConfiguration } from '../types';
 import { CommandBar } from './CommandBar';
+import { DatasetGrid } from './DatasetGrid';
 
 interface UniversalDatasetGridRootProps {
     /** PCF context - passed from index.ts */
@@ -40,11 +41,20 @@ export const UniversalDatasetGridRoot: React.FC<UniversalDatasetGridRootProps> =
         dataset.getSelectedRecordIds() || []
     );
 
+    // Sync selection with Power Apps
+    const handleSelectionChange = React.useCallback((recordIds: string[]) => {
+        setSelectedRecordIds(recordIds);
+        dataset.setSelectedRecordIds(recordIds);
+        notifyOutputChanged();
+    }, [dataset, notifyOutputChanged]);
+
     // Update selection when context changes
     React.useEffect(() => {
         const contextSelection = dataset.getSelectedRecordIds() || [];
-        setSelectedRecordIds(contextSelection);
-    }, [dataset]);
+        if (JSON.stringify(contextSelection) !== JSON.stringify(selectedRecordIds)) {
+            setSelectedRecordIds(contextSelection);
+        }
+    }, [dataset, selectedRecordIds]);
 
     // Handle command execution
     const handleCommandExecute = React.useCallback((commandId: string) => {
@@ -92,17 +102,12 @@ export const UniversalDatasetGridRoot: React.FC<UniversalDatasetGridRootProps> =
                 onCommandExecute={handleCommandExecute}
             />
 
-            {/* Grid - will be replaced with Fluent DataGrid in Task A.2 */}
-            <div style={{ flex: 1, overflow: 'auto', padding: '20px' }}>
-                <div style={{ textAlign: 'center' }}>
-                    <h3>Dataset Grid</h3>
-                    <p>Records: {dataset.sortedRecordIds.length}</p>
-                    <p>Selected: {selectedRecordIds.length}</p>
-                    <p style={{ marginTop: '20px', color: '#666' }}>
-                        Task A.2 will implement Fluent UI DataGrid here
-                    </p>
-                </div>
-            </div>
+            {/* Fluent UI DataGrid - Task A.2 */}
+            <DatasetGrid
+                dataset={dataset}
+                selectedRecordIds={selectedRecordIds}
+                onSelectionChange={handleSelectionChange}
+            />
         </div>
     );
 };

@@ -2,7 +2,7 @@
 <manifest>
   <control namespace="Spaarke.UI.Components"
            constructor="UniversalDatasetGrid"
-           version="2.0.3"
+           version="2.0.4"
            display-name-key="Universal Dataset Grid"
            description-key="Document management grid with SDAP integration and Fluent UI v9"
            control-type="standard">
