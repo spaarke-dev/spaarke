@@ -10,7 +10,8 @@
       "Bash($env:NODE_ENV=\"production\")",
       "Bash(if [ -f nul ])",
       "Bash(then rm nul)",
-      "Bash(fi)"
+      "Bash(fi)",
+      "Bash(npm run build:prod:*)"
     ],
     "deny": [],
     "ask": []
