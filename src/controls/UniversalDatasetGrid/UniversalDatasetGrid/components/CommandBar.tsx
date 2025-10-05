@@ -129,20 +129,18 @@ export const CommandBar: React.FC<CommandBarProps> = ({
                 </ToolbarButton>
             </Tooltip>
 
-            {/* Selection Counter */}
-            {selectedCount > 0 && (
-                <>
-                    <ToolbarDivider />
-                    <div
-                        style={{
-                            padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
-                            color: tokens.colorNeutralForeground2
-                        }}
-                    >
-                        {selectedCount} selected
-                    </div>
-                </>
-            )}
+            {/* Selection Counter - Always rendered to prevent layout shift */}
+            <ToolbarDivider style={{ visibility: selectedCount > 0 ? 'visible' : 'hidden' }} />
+            <div
+                style={{
+                    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+                    color: tokens.colorNeutralForeground2,
+                    visibility: selectedCount > 0 ? 'visible' : 'hidden',
+                    minWidth: '100px' // Reserve space to prevent horizontal shift
+                }}
+            >
+                {selectedCount > 0 ? `${selectedCount} selected` : '\u00A0'}
+            </div>
         </Toolbar>
     );
 };
