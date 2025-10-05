@@ -85,6 +85,12 @@ export const UniversalDatasetGridRoot: React.FC<UniversalDatasetGridRootProps> =
             .filter(record => record != null);
     }, [selectedRecordIds, dataset.records]);
 
+    // Handle dataset refresh
+    const handleRefresh = React.useCallback(() => {
+        console.log('[UniversalDatasetGridRoot] Refreshing dataset');
+        dataset.refresh();
+    }, [dataset]);
+
     return (
         <div
             style={{
@@ -94,12 +100,13 @@ export const UniversalDatasetGridRoot: React.FC<UniversalDatasetGridRootProps> =
                 width: '100%'
             }}
         >
-            {/* Command Bar - will be replaced with Fluent Toolbar in Task A.3 */}
+            {/* Fluent UI Toolbar - Task A.3 */}
             <CommandBar
                 config={config}
                 selectedRecordIds={selectedRecordIds}
                 selectedRecords={selectedRecords}
                 onCommandExecute={handleCommandExecute}
+                onRefresh={handleRefresh}
             />
 
             {/* Fluent UI DataGrid - Task A.2 */}

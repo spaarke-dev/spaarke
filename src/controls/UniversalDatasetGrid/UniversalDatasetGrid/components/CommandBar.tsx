@@ -1,12 +1,14 @@
 /**
  * Command Bar component for Universal Dataset Grid
- * Provides file operation buttons with Fluent UI v9 components
+ * Provides file operation buttons using Fluent UI v9 Toolbar component
  * Pure React component - no wrapper class needed with single React root
  */
 
 import * as React from 'react';
 import {
-    Button,
+    Toolbar,
+    ToolbarButton,
+    ToolbarDivider,
     Tooltip,
     tokens
 } from '@fluentui/react-components';
@@ -14,7 +16,8 @@ import {
     Add24Regular,
     Delete24Regular,
     ArrowUpload24Regular,
-    ArrowDownload24Regular
+    ArrowDownload24Regular,
+    ArrowClockwise24Regular
 } from '@fluentui/react-icons';
 import { GridConfiguration } from '../types';
 
@@ -33,19 +36,23 @@ interface CommandBarProps {
 
     /** Command execution callback */
     onCommandExecute: (commandId: string) => void;
+
+    /** Refresh callback */
+    onRefresh: () => void;
 }
 
 /**
- * Fluent UI v9 command bar with file operation buttons.
+ * Fluent UI v9 command bar using Toolbar component.
  *
- * Renders buttons for Add File, Remove File, Update File, and Download.
+ * Provides file operation buttons with proper layout, spacing, and theming.
  * Buttons are enabled/disabled based on selection state and file attachment status.
  */
 export const CommandBar: React.FC<CommandBarProps> = ({
     config,
     selectedRecordIds,
     selectedRecords,
-    onCommandExecute
+    onCommandExecute,
+    onRefresh
 }) => {
     const selectedCount = selectedRecordIds.length;
     const selectedRecord = selectedCount === 1 ? selectedRecords[0] : null;
@@ -56,72 +63,87 @@ export const CommandBar: React.FC<CommandBarProps> = ({
         : false;
 
     return (
-        <div
+        <Toolbar
+            aria-label="File operations toolbar"
             style={{
-                display: 'flex',
-                padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM}`,
-                background: tokens.colorNeutralBackground2,
-                gap: tokens.spacingHorizontalS,
-                borderBottom: `1px solid ${tokens.colorNeutralStroke1}`
+                borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
+                padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`
             }}
         >
+            {/* Add File Button */}
             <Tooltip content="Upload a file to the selected document" relationship="label">
-                <Button
+                <ToolbarButton
                     appearance="primary"
                     icon={<Add24Regular />}
                     disabled={selectedCount !== 1 || hasFile}
                     onClick={() => onCommandExecute('addFile')}
                 >
                     Add File
-                </Button>
+                </ToolbarButton>
             </Tooltip>
 
+            <ToolbarDivider />
+
+            {/* Remove File Button */}
             <Tooltip content="Delete the file from the selected document" relationship="label">
-                <Button
-                    appearance="secondary"
+                <ToolbarButton
                     icon={<Delete24Regular />}
                     disabled={selectedCount !== 1 || !hasFile}
                     onClick={() => onCommandExecute('removeFile')}
                 >
                     Remove File
-                </Button>
+                </ToolbarButton>
             </Tooltip>
 
+            {/* Update File Button */}
             <Tooltip content="Replace the file in the selected document" relationship="label">
-                <Button
-                    appearance="secondary"
+                <ToolbarButton
                     icon={<ArrowUpload24Regular />}
                     disabled={selectedCount !== 1 || !hasFile}
                     onClick={() => onCommandExecute('updateFile')}
                 >
                     Update File
-                </Button>
+                </ToolbarButton>
             </Tooltip>
 
+            {/* Download Button */}
             <Tooltip content="Download the selected file(s)" relationship="label">
-                <Button
-                    appearance="secondary"
+                <ToolbarButton
                     icon={<ArrowDownload24Regular />}
                     disabled={selectedCount === 0 || (selectedRecord !== null && !hasFile)}
                     onClick={() => onCommandExecute('downloadFile')}
                 >
                     Download
-                </Button>
+                </ToolbarButton>
             </Tooltip>
 
-            {selectedCount > 0 && (
-                <span
-                    style={{
-                        padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
-                        color: tokens.colorNeutralForeground2,
-                        lineHeight: '32px',
-                        marginLeft: 'auto'
-                    }}
+            <ToolbarDivider />
+
+            {/* Refresh Button */}
+            <Tooltip content="Refresh the dataset" relationship="label">
+                <ToolbarButton
+                    icon={<ArrowClockwise24Regular />}
+                    onClick={onRefresh}
                 >
-                    {selectedCount} selected
-                </span>
+                    Refresh
+                </ToolbarButton>
+            </Tooltip>
+
+            {/* Selection Counter */}
+            {selectedCount > 0 && (
+                <>
+                    <ToolbarDivider />
+                    <div
+                        style={{
+                            padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+                            color: tokens.colorNeutralForeground2
+                        }}
+                    >
+                        {selectedCount} selected
+                    </div>
+                </>
             )}
-        </div>
+        </Toolbar>
     );
 };
 
