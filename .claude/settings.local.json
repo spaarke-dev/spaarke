@@ -5,7 +5,8 @@
       "Bash(pac auth:*)",
       "Bash(timeout:*)",
       "Bash(pac solution delete:*)",
-      "Bash(npm ls:*)"
+      "Bash(npm ls:*)",
+      "Bash(git tag:*)"
     ],
     "deny": [],
     "ask": []

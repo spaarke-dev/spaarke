@@ -1,11 +1,10 @@
 /**
  * Command Bar component for Universal Dataset Grid
  * Provides file operation buttons with Fluent UI v9 components
- * Uses selective imports from @fluentui/react-components
+ * Pure React component - no wrapper class needed with single React root
  */
 
 import * as React from 'react';
-import * as ReactDOM from 'react-dom/client';
 import {
     Button,
     Tooltip,
@@ -20,7 +19,7 @@ import {
 import { GridConfiguration } from '../types';
 
 /**
- * Props for CommandBarComponent.
+ * Props for CommandBar.
  */
 interface CommandBarProps {
     /** Grid configuration */
@@ -37,12 +36,12 @@ interface CommandBarProps {
 }
 
 /**
- * Fluent UI command bar with file operation buttons.
+ * Fluent UI v9 command bar with file operation buttons.
  *
  * Renders buttons for Add File, Remove File, Update File, and Download.
  * Buttons are enabled/disabled based on selection state and file attachment status.
  */
-const CommandBarComponent: React.FC<CommandBarProps> = ({
+export const CommandBar: React.FC<CommandBarProps> = ({
     config,
     selectedRecordIds,
     selectedRecords,
@@ -126,71 +125,3 @@ const CommandBarComponent: React.FC<CommandBarProps> = ({
     );
 };
 
-/**
- * Command bar wrapper class for PCF integration.
- *
- * Manages React component lifecycle and provides simple interface
- * for the main PCF control to render and update the command bar.
- */
-export class CommandBar {
-    private container: HTMLDivElement;
-    private root: ReactDOM.Root | null = null;
-    private config: GridConfiguration;
-
-    /**
-     * Creates a new CommandBar instance.
-     *
-     * @param config - Grid configuration
-     */
-    constructor(config: GridConfiguration) {
-        this.container = document.createElement('div');
-        this.config = config;
-    }
-
-    /**
-     * Render the command bar with current state.
-     *
-     * @param selectedRecordIds - IDs of selected records
-     * @param selectedRecords - Full selected record objects
-     * @param onCommandExecute - Callback for command execution
-     */
-    public render(
-        selectedRecordIds: string[],
-        selectedRecords: ComponentFramework.PropertyHelper.DataSetApi.EntityRecord[],
-        onCommandExecute: (commandId: string) => void
-    ): void {
-        // Create root on first render
-        if (!this.root) {
-            this.root = ReactDOM.createRoot(this.container);
-        }
-
-        // Render using React 18 API
-        this.root.render(
-            React.createElement(CommandBarComponent, {
-                config: this.config,
-                selectedRecordIds,
-                selectedRecords,
-                onCommandExecute
-            })
-        );
-    }
-
-    /**
-     * Get the DOM element containing the command bar.
-     *
-     * @returns Command bar container element
-     */
-    public getElement(): HTMLDivElement {
-        return this.container;
-    }
-
-    /**
-     * Clean up and unmount the command bar.
-     */
-    public destroy(): void {
-        if (this.root) {
-            this.root.unmount();
-            this.root = null;
-        }
-    }
-}
