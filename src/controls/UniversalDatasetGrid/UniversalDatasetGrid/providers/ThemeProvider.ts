@@ -8,10 +8,10 @@
 import {
     Theme,
     webLightTheme,
-    webDarkTheme,
-    teamsHighContrastTheme
+    webDarkTheme
 } from '@fluentui/react-components';
 import { IInputs } from '../generated/ManifestTypes';
+import { logger } from '../utils/logger';
 
 /**
  * Resolve the appropriate Fluent UI theme based on Power Apps context.
@@ -31,7 +31,7 @@ export function resolveTheme(context: ComponentFramework.Context<IInputs>): Them
 
         // If Power Apps provides a theme via tokenTheme, use it directly
         if (fluentDesign?.tokenTheme) {
-            console.log('[ThemeProvider] Using theme from Power Apps context');
+            logger.debug('ThemeProvider', 'Using theme from Power Apps context');
 
             // Detect if it's a dark theme by checking background color
             // Dark themes have darker backgrounds (color value closer to #000000)
@@ -39,21 +39,21 @@ export function resolveTheme(context: ComponentFramework.Context<IInputs>): Them
             const isDark = bgColor && isColorDark(bgColor);
 
             if (isDark) {
-                console.log('[ThemeProvider] Dark mode detected from theme colors');
+                logger.info('ThemeProvider', 'Dark mode detected from theme colors');
                 return webDarkTheme;
             }
 
-            console.log('[ThemeProvider] Light mode detected from theme colors');
+            logger.info('ThemeProvider', 'Light mode detected from theme colors');
             return webLightTheme;
         }
 
         // Fallback to light theme if no Fluent Design Language available
-        console.log('[ThemeProvider] No theme info from Power Apps, using light theme (default)');
+        logger.debug('ThemeProvider', 'No theme info from Power Apps, using light theme (default)');
         return webLightTheme;
 
     } catch (error) {
         // Graceful fallback if context properties unavailable
-        console.warn('[ThemeProvider] Error detecting theme, using light theme fallback:', error);
+        logger.warn('ThemeProvider', 'Error detecting theme, using light theme fallback', error);
         return webLightTheme;
     }
 }

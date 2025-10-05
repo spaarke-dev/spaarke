@@ -11,6 +11,25 @@ import { GridConfiguration } from '../types';
 import { CommandBar } from './CommandBar';
 import { DatasetGrid } from './DatasetGrid';
 
+/**
+ * Debounce utility to limit function call frequency
+ */
+function debounce<T extends (...args: unknown[]) => void>(
+    func: T,
+    wait: number
+): (...args: Parameters<T>) => void {
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+
+    return (...args: Parameters<T>) => {
+        if (timeout) {
+            clearTimeout(timeout);
+        }
+        timeout = setTimeout(() => {
+            func(...args);
+        }, wait);
+    };
+}
+
 interface UniversalDatasetGridRootProps {
     /** PCF context - passed from index.ts */
     context: ComponentFramework.Context<IInputs>;
@@ -41,12 +60,18 @@ export const UniversalDatasetGridRoot: React.FC<UniversalDatasetGridRootProps> =
         dataset.getSelectedRecordIds() || []
     );
 
+    // Debounce notifyOutputChanged to reduce PCF call frequency (Task C.2)
+    const debouncedNotify = React.useMemo(
+        () => debounce(notifyOutputChanged, 300),
+        [notifyOutputChanged]
+    );
+
     // Sync selection with Power Apps
     const handleSelectionChange = React.useCallback((recordIds: string[]) => {
         setSelectedRecordIds(recordIds);
         dataset.setSelectedRecordIds(recordIds);
-        notifyOutputChanged();
-    }, [dataset, notifyOutputChanged]);
+        debouncedNotify(); // Debounced to prevent excessive PCF calls
+    }, [dataset, debouncedNotify]);
 
     // Update selection when context changes
     React.useEffect(() => {

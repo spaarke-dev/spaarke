@@ -9,10 +9,9 @@ import {
     TableCellLayout,
     TableColumnDefinition,
     createTableColumn,
-    DataGridProps,
-    TableColumnId
-} from '@fluentui/react-table';
-import { tokens } from '@fluentui/react-components';
+    TableColumnId,
+    tokens
+} from '@fluentui/react-components';
 
 interface DatasetGridProps {
     /** PCF dataset from context */
@@ -75,7 +74,7 @@ export const DatasetGrid: React.FC<DatasetGridProps> = ({
         return dataset.columns.map((column: ComponentFramework.PropertyHelper.DataSetApi.Column) =>
             createTableColumn<GridRow>({
                 columnId: column.name as TableColumnId,
-                compare: (a, b) => {
+                compare: (a: GridRow, b: GridRow) => {
                     const aVal = a[column.name]?.toString() || '';
                     const bVal = b[column.name]?.toString() || '';
                     return aVal.localeCompare(bVal);
@@ -83,7 +82,7 @@ export const DatasetGrid: React.FC<DatasetGridProps> = ({
                 renderHeaderCell: () => {
                     return column.displayName;
                 },
-                renderCell: (item) => {
+                renderCell: (item: GridRow) => {
                     return (
                         <TableCellLayout>
                             {item[column.name]?.toString() || ''}
@@ -93,6 +92,7 @@ export const DatasetGrid: React.FC<DatasetGridProps> = ({
             })
         );
     }, [dataset.columns]);
+
 
     // Handle selection change
     const handleSelectionChange = React.useCallback(
@@ -124,6 +124,7 @@ export const DatasetGrid: React.FC<DatasetGridProps> = ({
         <div
             style={{
                 height: '100%',
+                width: '100%',
                 overflow: 'auto',
                 background: tokens.colorNeutralBackground1
             }}
@@ -138,14 +139,12 @@ export const DatasetGrid: React.FC<DatasetGridProps> = ({
                 getRowId={(item) => item.recordId}
                 focusMode="composite"
                 aria-label="Dataset grid"
-                style={{ minWidth: '100%' }}
+                size="medium"
             >
                 <DataGridHeader>
                     <DataGridRow>
                         {({ renderHeaderCell }) => (
-                            <DataGridHeaderCell>
-                                {renderHeaderCell()}
-                            </DataGridHeaderCell>
+                            <DataGridHeaderCell>{renderHeaderCell()}</DataGridHeaderCell>
                         )}
                     </DataGridRow>
                 </DataGridHeader>
@@ -153,9 +152,7 @@ export const DatasetGrid: React.FC<DatasetGridProps> = ({
                     {({ item, rowId }) => (
                         <DataGridRow<GridRow> key={rowId}>
                             {({ renderCell }) => (
-                                <DataGridCell>
-                                    {renderCell(item)}
-                                </DataGridCell>
+                                <DataGridCell>{renderCell(item)}</DataGridCell>
                             )}
                         </DataGridRow>
                     )}

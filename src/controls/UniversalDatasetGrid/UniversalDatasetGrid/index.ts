@@ -1,6 +1,6 @@
 /**
  * Universal Dataset Grid PCF Control
- * Version 2.0.3 - Single React Root Architecture with Fluent UI v9
+ * Version 2.0.7 - Single React Root Architecture with Fluent UI v9
  */
 
 import * as React from 'react';
@@ -8,8 +8,10 @@ import * as ReactDOM from 'react-dom/client';
 import { FluentProvider } from '@fluentui/react-components';
 import { IInputs, IOutputs } from "./generated/ManifestTypes";
 import { UniversalDatasetGridRoot } from "./components/UniversalDatasetGridRoot";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { resolveTheme } from "./providers/ThemeProvider";
 import { DEFAULT_GRID_CONFIG, GridConfiguration } from "./types";
+import { logger } from "./utils/logger";
 
 export class UniversalDatasetGrid implements ComponentFramework.StandardControl<IInputs, IOutputs> {
     private root: ReactDOM.Root | null = null;
@@ -17,7 +19,7 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
     private config: GridConfiguration;
 
     constructor() {
-        console.log('[UniversalDatasetGrid] Constructor');
+        logger.info('Control', 'Constructor called');
         this.config = DEFAULT_GRID_CONFIG;
     }
 
@@ -27,32 +29,45 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
         state: ComponentFramework.Dictionary,
         container: HTMLDivElement
     ): void {
-        console.log('[UniversalDatasetGrid] Init - Creating single React root');
+        try {
+            logger.info('Control', 'Init - Creating single React root');
 
-        this.notifyOutputChanged = notifyOutputChanged;
+            this.notifyOutputChanged = notifyOutputChanged;
 
-        // Create single React root
-        this.root = ReactDOM.createRoot(container);
+            // Create single React root
+            this.root = ReactDOM.createRoot(container);
 
-        // Render React tree
-        this.renderReactTree(context);
+            // Render React tree
+            this.renderReactTree(context);
 
-        console.log('[UniversalDatasetGrid] Init complete');
+            logger.info('Control', 'Init complete');
+        } catch (error) {
+            logger.error('Control', 'Init failed', error);
+            throw error;
+        }
     }
 
     public updateView(context: ComponentFramework.Context<IInputs>): void {
-        console.log('[UniversalDatasetGrid] UpdateView - Re-rendering with new props');
+        try {
+            logger.debug('Control', 'UpdateView - Re-rendering with new props');
 
-        // Just re-render with new context - React handles the updates
-        this.renderReactTree(context);
+            // Just re-render with new context - React handles the updates
+            this.renderReactTree(context);
+        } catch (error) {
+            logger.error('Control', 'UpdateView failed', error);
+        }
     }
 
     public destroy(): void {
-        console.log('[UniversalDatasetGrid] Destroy - Unmounting React root');
+        try {
+            logger.info('Control', 'Destroy - Unmounting React root');
 
-        if (this.root) {
-            this.root.unmount();
-            this.root = null;
+            if (this.root) {
+                this.root.unmount();
+                this.root = null;
+            }
+        } catch (error) {
+            logger.error('Control', 'Destroy failed', error);
         }
     }
 
@@ -66,22 +81,31 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
      */
     private renderReactTree(context: ComponentFramework.Context<IInputs>): void {
         if (!this.root) {
-            console.error('[UniversalDatasetGrid] Cannot render - root not initialized');
+            logger.error('Control', 'Cannot render - root not initialized');
             return;
         }
 
-        const theme = resolveTheme(context);
+        try {
+            const theme = resolveTheme(context);
 
-        this.root.render(
-            React.createElement(
-                FluentProvider,
-                { theme },
-                React.createElement(UniversalDatasetGridRoot, {
-                    context,
-                    notifyOutputChanged: this.notifyOutputChanged,
-                    config: this.config
-                })
-            )
-        );
+            this.root.render(
+                React.createElement(
+                    FluentProvider,
+                    { theme },
+                    React.createElement(
+                        ErrorBoundary,
+                        null,
+                        React.createElement(UniversalDatasetGridRoot, {
+                            context,
+                            notifyOutputChanged: this.notifyOutputChanged,
+                            config: this.config
+                        })
+                    )
+                )
+            );
+        } catch (error) {
+            logger.error('Control', 'Render failed', error);
+            throw error;
+        }
     }
 }
