@@ -1,0 +1,51 @@
+
+> pcf-project@1.0.0 build
+> pcf-scripts build
+
+[10:30:23 PM] [build] Initializing...
+[10:30:23 PM] [build] Validating manifest...
+[10:30:23 PM] [build] Validating control...
+[10:30:23 PM] [build] Generating manifest types...
+[10:30:23 PM] [build] Generating design types...
+[10:30:23 PM] [build] Running ESLint...
+[10:30:24 PM] [build] Compiling and bundling control...
+[BABEL] Note: The code generator has deoptimised the styling of C:\code_files\spaarke\src\controls\UniversalDatasetGrid\node_modules\react-dom\cjs\react-dom.development.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\code_files\spaarke\src\controls\UniversalDatasetGrid\node_modules\@fluentui\react-icons\lib\icons\chunk-4.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\code_files\spaarke\src\controls\UniversalDatasetGrid\node_modules\@fluentui\react-icons\lib\icons\chunk-0.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\code_files\spaarke\src\controls\UniversalDatasetGrid\node_modules\@fluentui\react-icons\lib\icons\chunk-2.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\code_files\spaarke\src\controls\UniversalDatasetGrid\node_modules\@fluentui\react-icons\lib\icons\chunk-1.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\code_files\spaarke\src\controls\UniversalDatasetGrid\node_modules\@fluentui\react-icons\lib\sizedIcons\chunk-5.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\code_files\spaarke\src\controls\UniversalDatasetGrid\node_modules\@fluentui\react-icons\lib\sizedIcons\chunk-0.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\code_files\spaarke\src\controls\UniversalDatasetGrid\node_modules\@fluentui\react-icons\lib\icons\chunk-3.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\code_files\spaarke\src\controls\UniversalDatasetGrid\node_modules\@fluentui\react-icons\lib\sizedIcons\chunk-2.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\code_files\spaarke\src\controls\UniversalDatasetGrid\node_modules\@fluentui\react-icons\lib\sizedIcons\chunk-3.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\code_files\spaarke\src\controls\UniversalDatasetGrid\node_modules\@fluentui\react-icons\lib\sizedIcons\chunk-4.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\code_files\spaarke\src\controls\UniversalDatasetGrid\node_modules\@fluentui\react-icons\lib\sizedIcons\chunk-7.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\code_files\spaarke\src\controls\UniversalDatasetGrid\node_modules\@fluentui\react-icons\lib\sizedIcons\chunk-9.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\code_files\spaarke\src\controls\UniversalDatasetGrid\node_modules\@fluentui\react-icons\lib\sizedIcons\chunk-11.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\code_files\spaarke\src\controls\UniversalDatasetGrid\node_modules\@fluentui\react-icons\lib\sizedIcons\chunk-6.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\code_files\spaarke\src\controls\UniversalDatasetGrid\node_modules\@fluentui\react-icons\lib\sizedIcons\chunk-10.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\code_files\spaarke\src\controls\UniversalDatasetGrid\node_modules\@fluentui\react-icons\lib\sizedIcons\chunk-8.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\code_files\spaarke\src\controls\UniversalDatasetGrid\node_modules\@fluentui\react-icons\lib\sizedIcons\chunk-13.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\code_files\spaarke\src\controls\UniversalDatasetGrid\node_modules\@fluentui\react-icons\lib\sizedIcons\chunk-14.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\code_files\spaarke\src\controls\UniversalDatasetGrid\node_modules\@fluentui\react-icons\lib\sizedIcons\chunk-12.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\code_files\spaarke\src\controls\UniversalDatasetGrid\node_modules\@fluentui\react-icons\lib\sizedIcons\chunk-15.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\code_files\spaarke\src\controls\UniversalDatasetGrid\node_modules\@fluentui\react-icons\lib\sizedIcons\chunk-16.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\code_files\spaarke\src\controls\UniversalDatasetGrid\node_modules\@fluentui\react-icons\lib\sizedIcons\chunk-17.js as it exceeds the max of 500KB.
+[BABEL] Note: The code generator has deoptimised the styling of C:\code_files\spaarke\src\controls\UniversalDatasetGrid\node_modules\@fluentui\react-icons\lib\sizedIcons\chunk-18.js as it exceeds the max of 500KB.
+[Webpack stats]:
+asset [1m[32mbundle.js[39m[22m 10 MiB [1m[32m[emitted][39m[22m (name: main)
+orphan modules 7.69 MiB [1m[33m[orphan][39m[22m 104 modules
+runtime modules 2.28 KiB 6 modules
+built modules 8.16 MiB [1m[33m[built][39m[22m
+  modules by path [1m./node_modules/[39m[22m 8.15 MiB 51 modules
+  modules by path [1m./UniversalDatasetGrid/[39m[22m 18.2 KiB
+    [1m./UniversalDatasetGrid/index.ts[39m[22m 9.2 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+    [1m./UniversalDatasetGrid/providers/ThemeProvider.ts[39m[22m 3.02 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+    [1m./UniversalDatasetGrid/components/CommandBar.tsx[39m[22m 4.57 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+    [1m./UniversalDatasetGrid/types/index.ts[39m[22m 1.45 KiB [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+  [1mexternal "Reactv16"[39m[22m 42 bytes [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+  [1mexternal "FluentUIReactv940"[39m[22m 42 bytes [1m[33m[built][39m[22m [1m[33m[code generated][39m[22m
+webpack 5.102.0 compiled [1m[32msuccessfully[39m[22m in 11023 ms
+[10:30:36 PM] [build] Generating build outputs...
+[10:30:36 PM] [build] Succeeded

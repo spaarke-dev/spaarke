@@ -1,7 +1,7 @@
 {
   "name": "@spaarke/ui-components",
-  "version": "1.0.0",
-  "description": "Spaarke shared UI component library - React + TypeScript + Fluent UI v9",
+  "version": "2.0.0",
+  "description": "Spaarke shared UI component library - Fluent UI v9 (selective imports)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
@@ -20,13 +20,24 @@
     "react",
     "typescript",
     "fluent-ui",
-    "components"
+    "fluent-ui-v9",
+    "components",
+    "icons"
   ],
   "author": "Spaarke Engineering Team",
   "license": "UNLICENSED",
   "peerDependencies": {
-    "@fluentui/react-components": "^9.46.2",
-    "@fluentui/react-icons": "^2.0.220",
+    "@fluentui/react-button": "^9.6.7",
+    "@fluentui/react-dialog": "^9.15.3",
+    "@fluentui/react-tooltip": "^9.8.6",
+    "@fluentui/react-progress": "^9.4.6",
+    "@fluentui/react-spinner": "^9.7.6",
+    "@fluentui/react-message-bar": "^9.6.8",
+    "@fluentui/react-input": "^9.6.6",
+    "@fluentui/react-label": "^9.3.6",
+    "@fluentui/react-theme": "^9.2.0",
+    "@fluentui/react-provider": "^9.22.6",
+    "@fluentui/react-icons": "^2.0.311",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },

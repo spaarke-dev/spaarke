@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<manifest>
+  <control namespace="Spaarke.UI.Components"
+           constructor="UniversalDatasetGrid"
+           version="2.0.2"
+           display-name-key="Universal Dataset Grid"
+           description-key="Document management grid with SDAP integration and Fluent UI v9"
+           control-type="standard">
+
+    <external-service-usage enabled="false" />
+
+    <!-- Dataset -->
+    <data-set name="dataset" display-name-key="Dataset" />
+
+    <!-- Optional: Configuration JSON -->
+    <property name="configJson"
+              display-name-key="Configuration JSON"
+              description-key="JSON configuration for grid behavior, commands, and SDAP integration"
+              of-type="Multiple"
+              usage="input"
+              required="false" />
+
+    <resources>
+      <code path="index.ts" order="1" />
+      <css path="styles.css" order="2" />
+    </resources>
+
+    <feature-usage>
+      <uses-feature name="WebAPI" required="true" />
+    </feature-usage>
+  </control>
+</manifest>

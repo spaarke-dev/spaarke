@@ -1,0 +1,25 @@
+/* eslint-disable */
+"use strict";
+
+/**
+ * Custom Webpack configuration for Universal Dataset Grid PCF control
+ *
+ * Purpose: Externalize React and ReactDOM to reduce bundle size
+ *
+ * By marking React/ReactDOM as externals, webpack will NOT bundle them
+ * into bundle.js. Instead, the control expects these libraries to be
+ * available in the runtime environment.
+ *
+ * Expected outcome:
+ * - bundle.js will NOT include React/ReactDOM code
+ * - Significant bundle size reduction (from ~10 MB to < 1 MB)
+ * - Runtime environment must provide React/ReactDOM
+ */
+
+module.exports = {
+  externals: {
+    // Externalize React - expect it to be provided by the runtime environment
+    "react": "React",
+    "react-dom": "ReactDOM"
+  }
+};

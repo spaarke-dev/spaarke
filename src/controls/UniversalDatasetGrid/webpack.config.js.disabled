@@ -1,0 +1,32 @@
+/**
+ * Custom webpack configuration for Universal Dataset Grid PCF control
+ *
+ * CRITICAL: This config externalizes react-dom to prevent bundling a version
+ * that conflicts with Power Platform's platform-library React.
+ *
+ * The issue: Platform-library provides React v16 + ReactDOM globally,
+ * but if we bundle react-dom separately, it tries to access React internals
+ * that don't match, causing: "Cannot read properties of undefined (reading 'getStackAddendum')"
+ *
+ * Solution: Map react-dom imports to use the global ReactDOM from platform-library.
+ */
+
+module.exports = {
+  externals: {
+    // Map react to the global React provided by platform-library
+    'react': {
+      commonjs: 'react',
+      commonjs2: 'react',
+      amd: 'react',
+      root: 'React' // Use global React from platform-library
+    },
+    // Map react-dom to the global ReactDOM provided by platform-library
+    // The platform provides ReactDOM as part of the React global
+    'react-dom': {
+      commonjs: 'react-dom',
+      commonjs2: 'react-dom',
+      amd: 'react-dom',
+      root: 'ReactDOM' // Use global ReactDOM from platform-library
+    }
+  }
+};

@@ -1,0 +1,19 @@
+/**
+ * Custom webpack configuration for Universal Dataset Grid PCF control
+ *
+ * This configuration ensures react-dom is properly externalized to work with
+ * Power Platform's platform-library system.
+ *
+ * Platform-library provides:
+ * - React (as global Reactv16) - includes ReactDOM
+ * - Fluent UI (as global FluentUIReactv940)
+ *
+ * We need to ensure react-dom also uses the platform-provided version.
+ */
+
+module.exports = {
+  externals: {
+    // Map react-dom to the platform-provided React (which includes ReactDOM)
+    'react-dom': 'Reactv16'
+  }
+};

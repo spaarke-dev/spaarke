@@ -60,5 +60,9 @@
     <PackageVersion Include="coverlet.collector" Version="6.0.2" />
     <PackageVersion Include="Moq" Version="4.20.70" />
     <PackageVersion Include="WireMock.Net" Version="1.5.45" />
+    <!-- PCF packages -->
+    <PackageVersion Include="Microsoft.PowerApps.MSBuild.Pcf" Version="1.36.3" />
+    <PackageVersion Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.0" />
+    <PackageVersion Include="Microsoft.PowerApps.MSBuild.Solution" Version="1.36.3" />
   </ItemGroup>
 </Project>

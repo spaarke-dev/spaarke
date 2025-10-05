@@ -1,0 +1,15 @@
+/**
+ * Universal Dataset Grid Styles
+ * Fluent UI v9 compatible styling
+ */
+
+/* Base container styles */
+.universal-grid-container {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Roboto', 'Helvetica Neue', sans-serif;
+  font-size: 14px;
+}
+
+/* Fluent UI theme will override these as needed */
