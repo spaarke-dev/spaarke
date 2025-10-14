@@ -5,9 +5,16 @@
  * This script tests the EXACT same logic that the PCF control uses in:
  * src/controls/UniversalDatasetGrid/UniversalDatasetGrid/services/SdapApiClient.ts
  *
+ * UPDATED: Uses correct BFF API routes per ADR-011:
+ * - Upload: PUT /api/obo/containers/{containerId}/files/{path}
+ * - Download: GET /api/obo/drives/{driveId}/items/{itemId}/content
+ * - Delete: DELETE /api/obo/drives/{driveId}/items/{itemId}
+ *
+ * Note: Container ID = Drive ID in SharePoint Embedded (ADR-011)
+ *
  * Usage:
  *   1. Get token: export PCF_TOKEN=$(az account get-access-token --resource api://1e40baad-e065-4aea-a8d4-4b7ab273458c --query accessToken -o tsv)
- *   2. Get drive ID: export DRIVE_ID=<your-drive-id>
+ *   2. Get container ID: export CONTAINER_ID=b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50
  *   3. Run: node test-pcf-client-integration.js
  */
 
@@ -17,7 +24,7 @@ const http = require('http');
 // Configuration (from PCF control)
 const API_BASE_URL = 'https://spe-api-dev-67e2xz.azurewebsites.net';
 const USER_TOKEN = process.env.PCF_TOKEN;
-const DRIVE_ID = process.env.DRIVE_ID;
+const CONTAINER_ID = process.env.CONTAINER_ID; // SPE Container ID (equals Drive ID per ADR-011)
 
 // Color codes for terminal output
 const colors = {
@@ -85,13 +92,16 @@ function fetch(url, options = {}) {
 
 // Simulate SdapApiClient.uploadFile()
 // EXACT logic from: src/controls/UniversalDatasetGrid/UniversalDatasetGrid/services/SdapApiClient.ts:48-81
-async function testUpload(driveId, fileName, fileContent) {
+// UPDATED: Uses correct route /api/obo/containers/{id}/files/{path} (per ADR-011)
+async function testUpload(containerId, fileName, fileContent) {
     log('\n=== Test Upload ===', colors.bright);
     log(`File Name: ${fileName}`, colors.blue);
-    log(`Drive ID: ${driveId}`, colors.blue);
+    log(`Container ID: ${containerId}`, colors.blue);
     log(`File Size: ${fileContent.length} bytes`, colors.blue);
 
-    const url = `${API_BASE_URL}/api/obo/drives/${encodeURIComponent(driveId)}/upload?fileName=${encodeURIComponent(fileName)}`;
+    // Correct route: /api/obo/containers/{containerId}/files/{path}
+    // Not: /api/obo/drives/{driveId}/upload?fileName=...
+    const url = `${API_BASE_URL}/api/obo/containers/${encodeURIComponent(containerId)}/files/${encodeURIComponent(fileName)}`;
 
     try {
         const response = await fetch(url, {
@@ -204,21 +214,22 @@ async function runTests() {
         process.exit(1);
     }
 
-    if (!DRIVE_ID) {
-        log('❌ Error: DRIVE_ID environment variable not set', colors.red);
+    if (!CONTAINER_ID) {
+        log('❌ Error: CONTAINER_ID environment variable not set', colors.red);
         log('');
-        log('Get Drive ID from Dataverse or API, then run:', colors.yellow);
-        log('export DRIVE_ID=<your-drive-id>', colors.blue);
+        log('Get Container ID from architecture doc or Dataverse, then run:', colors.yellow);
+        log('export CONTAINER_ID=<your-container-id>', colors.blue);
         log('');
-        log('To get Drive ID:', colors.yellow);
-        log('  1. From Dataverse: pac data read --entity-logical-name sprk_matter --id <guid> --columns sprk_driveid', colors.blue);
-        log('  2. From API: curl -H "Authorization: Bearer $PCF_TOKEN" https://spe-api-dev-67e2xz.azurewebsites.net/api/containers', colors.blue);
+        log('To get Container ID:', colors.yellow);
+        log('  1. From architecture doc: b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50', colors.blue);
+        log('  2. From Dataverse: pac data read --entity-logical-name sprk_matter --id <guid> --columns sprk_driveid', colors.blue);
+        log('  3. Note: Container ID = Drive ID in SharePoint Embedded (ADR-011)', colors.blue);
         log('');
         process.exit(1);
     }
 
     log(`Token Length: ${USER_TOKEN.length} chars`, colors.blue);
-    log(`Drive ID: ${DRIVE_ID}`, colors.blue);
+    log(`Container ID: ${CONTAINER_ID}`, colors.blue);
     log('');
 
     try {
@@ -226,11 +237,11 @@ async function runTests() {
         const fileName = `pcf-test-${Date.now()}.txt`;
         const fileContent = `Test file from PCF client simulation\nTimestamp: ${new Date().toISOString()}\n\nThis test verifies:\n- MSAL token acquisition\n- BFF API authentication\n- OBO flow (On-Behalf-Of)\n- Graph API calls\n- SharePoint Embedded storage`;
 
-        const uploadResult = await testUpload(DRIVE_ID, fileName, fileContent);
+        const uploadResult = await testUpload(CONTAINER_ID, fileName, fileContent);
         const itemId = uploadResult.id;
 
         // Test 2: Download (SdapApiClient.downloadFile)
-        const downloadedContent = await testDownload(DRIVE_ID, itemId);
+        const downloadedContent = await testDownload(CONTAINER_ID, itemId);
 
         // Verify content matches
         if (downloadedContent.trim() === fileContent.trim()) {
@@ -240,7 +251,7 @@ async function runTests() {
         }
 
         // Test 3: Delete (SdapApiClient.deleteFile)
-        await testDelete(DRIVE_ID, itemId);
+        await testDelete(CONTAINER_ID, itemId);
 
         log('\n' + '='.repeat(80), colors.bright);
         log('✅ ALL TESTS PASSED!', colors.green);
