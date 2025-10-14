@@ -1,6 +1,8 @@
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Caching.Distributed;
+using Spe.Bff.Api.Telemetry;
 
 namespace Spe.Bff.Api.Services;
 
@@ -18,13 +20,16 @@ public class GraphTokenCache
 {
     private readonly IDistributedCache _cache;
     private readonly ILogger<GraphTokenCache> _logger;
+    private readonly CacheMetrics? _metrics;
 
     public GraphTokenCache(
         IDistributedCache cache,
-        ILogger<GraphTokenCache> logger)
+        ILogger<GraphTokenCache> logger,
+        CacheMetrics? metrics = null)
     {
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _metrics = metrics; // Optional: metrics can be null if not configured
     }
 
     /// <summary>
@@ -54,26 +59,34 @@ public class GraphTokenCache
             throw new ArgumentException("Token hash cannot be null or empty", nameof(tokenHash));
 
         var cacheKey = $"sdap:graph:token:{tokenHash}";
+        var sw = Stopwatch.StartNew();
 
         try
         {
             var cachedToken = await _cache.GetStringAsync(cacheKey);
+            sw.Stop();
 
             if (cachedToken != null)
             {
+                // Cache HIT
                 _logger.LogDebug("Cache HIT for token hash {Hash}...", tokenHash[..Math.Min(8, tokenHash.Length)]);
+                _metrics?.RecordHit(sw.Elapsed.TotalMilliseconds);
             }
             else
             {
+                // Cache MISS
                 _logger.LogDebug("Cache MISS for token hash {Hash}...", tokenHash[..Math.Min(8, tokenHash.Length)]);
+                _metrics?.RecordMiss(sw.Elapsed.TotalMilliseconds);
             }
 
             return cachedToken;
         }
         catch (Exception ex)
         {
+            sw.Stop();
             _logger.LogWarning(ex, "Error retrieving token from cache for hash {Hash}..., will perform OBO exchange",
                 tokenHash[..Math.Min(8, tokenHash.Length)]);
+            _metrics?.RecordMiss(sw.Elapsed.TotalMilliseconds); // Treat errors as misses
             return null; // Fail gracefully, will perform OBO exchange
         }
     }

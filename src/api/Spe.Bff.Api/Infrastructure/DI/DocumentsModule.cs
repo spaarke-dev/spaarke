@@ -2,6 +2,7 @@ using Spaarke.Core.Auth;
 using Spe.Bff.Api.Api.Filters;
 using Spe.Bff.Api.Infrastructure.Graph;
 using Spe.Bff.Api.Services;
+using Spe.Bff.Api.Telemetry;
 
 namespace Spe.Bff.Api.Infrastructure.DI;
 
@@ -12,6 +13,10 @@ public static class DocumentsModule
         // ============================================================================
         // Phase 4: Token Caching (ADR-009: Redis-First Caching)
         // ============================================================================
+        // Register CacheMetrics as Singleton (stateless, tracks metrics across all requests)
+        // Provides OpenTelemetry-compatible metrics for cache hits, misses, and latency
+        services.AddSingleton<CacheMetrics>();
+
         // Register GraphTokenCache as Singleton (stateless, uses IDistributedCache which is also Singleton)
         // Reduces OBO token exchange latency by 97% (~200ms → ~5ms on cache hit)
         services.AddSingleton<GraphTokenCache>();
