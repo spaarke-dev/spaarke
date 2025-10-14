@@ -258,10 +258,13 @@ builder.Services.AddHttpClient("GraphApiClient")
 // Singleton GraphServiceClient factory (now uses IHttpClientFactory with resilience handler)
 builder.Services.AddSingleton<IGraphClientFactory, Spe.Bff.Api.Infrastructure.Graph.GraphClientFactory>();
 
-// Dataverse service - using Web API for .NET 8.0 compatibility with IHttpClientFactory
-builder.Services.AddHttpClient<IDataverseService, DataverseWebApiService>(client =>
+// Dataverse service - Singleton lifetime for ServiceClient connection reuse (eliminates 500ms initialization overhead)
+// ServiceClient is thread-safe and designed for long-lived use with internal connection pooling
+builder.Services.AddSingleton<IDataverseService>(sp =>
 {
-    client.Timeout = TimeSpan.FromSeconds(30);
+    var configuration = sp.GetRequiredService<IConfiguration>();
+    var logger = sp.GetRequiredService<ILogger<DataverseServiceClientImpl>>();
+    return new DataverseServiceClientImpl(configuration, logger);
 });
 
 // Background Job Processing (ADR-004) - Service Bus Strategy
