@@ -1,8 +1,8 @@
 # SDAP Implementation Checklist
 
-**Purpose**: Track refactoring progress across 4 phases
+**Purpose**: Track refactoring progress across 5 phases (4 implementation + 1 testing)
 **Usage**: Check off tasks as completed, link to detailed task guides
-**Last Updated**: 2025-10-13
+**Last Updated**: 2025-10-14
 
 ---
 
@@ -14,10 +14,11 @@
 | Phase 2 | 9 | 9/9 | ✅ Complete |
 | Phase 3 | 2 | 2/2 | ✅ Complete |
 | Phase 4 | 4 | 4/4 | ✅ Complete |
-| **Total** | **18** | **18/18** | **100%** |
+| Phase 5 | 10 | 0/10 | 🧪 Ready to Test |
+| **Total** | **28** | **18/28** | **64%** |
 
-**Estimated Duration**: ~40 hours (1 week sprint)
-**Note**: Phase 1 and Phase 2 Tasks 1-6 already complete (discovered during review). Tasks 7-9 are maintenance items found during completion review.
+**Estimated Duration**: ~55 hours (1.5 week sprint)
+**Note**: Phases 1-4 (implementation) complete. Phase 5 (integration testing) ready for execution.
 
 ---
 
@@ -284,6 +285,143 @@
 
 ---
 
+## Phase 5: Integration Testing
+
+**Goal**: Validate end-to-end functionality and address SDAP v1 lessons learned
+**Duration**: 12-16 hours | **Risk**: HIGH (catches integration issues before user release)
+**Pattern**: Evidence-based testing (all tests require screenshots/logs/metrics)
+**Status**: 🧪 **READY TO EXECUTE** - All task documents created, ready for testing
+
+**Historical Context**:
+> "we need to thoroughly test and confirm the end to end because this is where we ran into issues in the first SDAP version"
+
+### Pre-Flight
+- [ ] Phases 1-4 complete and deployed to DEV ✅
+- [ ] Create test evidence directory structure
+- [ ] Verify all testing tools available (az cli, pac cli, curl, jq, node)
+
+### Tasks
+
+#### 5.0 Pre-Flight Environment Verification
+- [ ] Code deployment verification (git commit matches deployed version)
+- [ ] Azure AD configuration validation (app registration, permissions, certificates)
+- [ ] Environment variables & secrets verification (Key Vault access)
+- [ ] Service health checks (BFF API, Redis, Dataverse)
+- [ ] Tool availability (az, pac, node, curl, jq)
+- [ ] Test data preparation (Matter with Drive ID)
+- **Guide**: [phase-5-task-0-preflight.md](tasks/phase-5/phase-5-task-0-preflight.md)
+- **Duration**: 30 minutes | **Risk**: MEDIUM (environment issues block testing)
+
+#### 5.1 Authentication Flow Validation (CRITICAL)
+- [ ] MSAL token acquisition (simulated via az cli)
+- [ ] JWT token validation (decode claims, verify audience)
+- [ ] OBO token exchange (BFF API → Graph token)
+- [ ] Cache performance verification (cache HIT vs MISS latency)
+- [ ] Token expiration handling (401 automatic retry)
+- **Guide**: [phase-5-task-1-authentication.md](tasks/phase-5/phase-5-task-1-authentication.md)
+- **Duration**: 1-2 hours | **Risk**: HIGH (if auth fails, nothing works)
+- **SDAP v1 Issue**: Authentication worked in dev but failed in production
+
+#### 5.2 BFF API Endpoint Testing
+- [ ] File upload (small file: <1MB, verify content integrity)
+- [ ] File download (verify SHA256 checksum match)
+- [ ] File delete (verify 204 response)
+- [ ] List containers (verify Drive IDs)
+- [ ] Error handling (invalid Drive ID, missing permissions)
+- **Guide**: [phase-5-task-2-bff-endpoints.md](tasks/phase-5/phase-5-task-2-bff-endpoints.md)
+- **Duration**: 1-2 hours | **Risk**: HIGH (core functionality)
+
+#### 5.3 SPE Storage Verification
+- [ ] Direct Graph API query (bypass BFF API)
+- [ ] Verify file exists in SharePoint Embedded
+- [ ] Verify metadata (name, size, contentHash)
+- [ ] Container Type registration validation
+- [ ] Permission inheritance verification
+- **Guide**: [phase-5-task-3-spe-storage.md](tasks/phase-5/phase-5-task-3-spe-storage.md)
+- **Duration**: 1 hour | **Risk**: HIGH (silent failures in SDAP v1)
+- **SDAP v1 Issue**: API returned 200 OK but files weren't in SPE
+
+#### 5.4 PCF Control Integration (Pre-Build)
+- [ ] Run test-pcf-client-integration.js (simulates SdapApiClient.ts)
+- [ ] Upload via PCF client simulation
+- [ ] Download and verify content integrity
+- [ ] Delete via PCF client simulation
+- [ ] Error handling (401 automatic retry)
+- **Guide**: [phase-5-task-4-pcf-integration.md](tasks/phase-5/phase-5-task-4-pcf-integration.md)
+- **Duration**: 1-2 hours | **Risk**: MEDIUM (catches PCF integration issues early)
+
+#### 5.5 Dataverse Integration & Metadata Sync
+- [ ] Drive ID retrieval from Matter records
+- [ ] Document entity creation (if applicable)
+- [ ] Metadata field accuracy (sprk_itemid, sprk_driveid, sprk_name)
+- [ ] Query performance (<2s for 10 records)
+- **Guide**: [phase-5-task-5-dataverse.md](tasks/phase-5/phase-5-task-5-dataverse.md)
+- **Duration**: 1-2 hours | **Risk**: MEDIUM (metadata out of sync causes query failures)
+
+#### 5.6 Cache Performance Validation
+- [ ] Cache hit rate measurement (target: >90% after warmup)
+- [ ] Cache HIT latency (<10ms vs ~200ms for MISS)
+- [ ] Verify cache logs (Cache HIT/MISS messages)
+- [ ] Redis health check (if enabled)
+- **Guide**: [phase-5-task-6-cache-performance.md](tasks/phase-5/phase-5-task-6-cache-performance.md)
+- **Duration**: 1 hour | **Risk**: LOW (optimization, not blocker)
+- **Phase 4 Verification**: Validates Phase 4 cache implementation
+
+#### 5.7 Load & Stress Testing
+- [ ] Concurrent uploads (10 users simultaneously)
+- [ ] Large file upload (>100MB, verify <2 min completion)
+- [ ] Sustained load (5 minutes continuous requests)
+- [ ] Resource usage monitoring (CPU, memory)
+- **Guide**: [phase-5-task-7-load-testing.md](tasks/phase-5/phase-5-task-7-load-testing.md)
+- **Duration**: 2-3 hours | **Risk**: MEDIUM (identifies scale issues)
+
+#### 5.8 Error Handling & Failure Scenarios
+- [ ] Network timeout handling
+- [ ] Expired token (401 → automatic retry)
+- [ ] Missing permissions (403 → clear message)
+- [ ] Invalid Drive ID (404 → clear message)
+- [ ] Rate limiting (429 → clear message)
+- [ ] Server errors (500 → no stack traces exposed)
+- **Guide**: [phase-5-task-8-error-handling.md](tasks/phase-5/phase-5-task-8-error-handling.md)
+- **Duration**: 1-2 hours | **Risk**: HIGH (poor error handling breaks UX)
+
+#### 5.9 Production Environment Validation (CRITICAL)
+- [ ] Redis cache verification (MUST be enabled, not in-memory)
+- [ ] Application Insights configured
+- [ ] Azure AD production configuration
+- [ ] Key Vault access verification
+- [ ] Production health check (all components green)
+- [ ] Production authentication flow
+- [ ] Production file operations (TEST container only!)
+- [ ] Performance baseline establishment
+- [ ] Rollback plan documentation
+- [ ] Production sign-off
+- **Guide**: [phase-5-task-9-production.md](tasks/phase-5/phase-5-task-9-production.md)
+- **Duration**: 2-3 hours | **Risk**: CRITICAL (final gate before user release)
+- **SDAP v1 Issue**: In-memory cache in prod broke on scale-out
+
+### Validation
+
+**Evidence Required for Each Task**:
+- [ ] Screenshots of successful operations
+- [ ] Log files showing expected behavior
+- [ ] Performance metrics (latency measurements)
+- [ ] Error scenarios handled gracefully
+- [ ] All evidence saved to `dev/projects/sdap_V2/test-evidence/task-5.X/`
+
+**Phase 5 Pass Criteria**:
+- [ ] All 10 tasks complete with evidence
+- [ ] No HIGH or CRITICAL issues discovered
+- [ ] Performance targets met (see Final Validation section below)
+- [ ] Production sign-off obtained (Task 5.9)
+
+### Commits
+- [x] Phase 5 overview + Tasks 0-1: commit d90b524 ✅
+- [x] Tasks 5.2-5.9: commit 05fa716 ✅
+- [ ] Test evidence (after execution): TBD
+
+---
+
 ## Final Validation
 
 ### Integration Testing
@@ -461,8 +599,50 @@
 
 ---
 
+## 📝 Phase 5 Completion Notes
+
+**Status**: 🧪 **READY TO EXECUTE** (10 tasks created, 0/10 complete)
+
+**Task Documentation Created**:
+1. **Task 5.0**: Pre-Flight Environment Verification (600+ lines)
+2. **Task 5.1**: Authentication Flow Validation (1000+ lines, CRITICAL)
+3. **Task 5.2**: BFF API Endpoint Testing (600+ lines, HIGH RISK)
+4. **Task 5.3**: SPE Storage Verification (addresses SDAP v1 silent failures)
+5. **Task 5.4**: PCF Client Integration (pre-build testing)
+6. **Task 5.5**: Dataverse Integration (metadata sync, query performance)
+7. **Task 5.6**: Cache Performance Validation (Phase 4 verification)
+8. **Task 5.7**: Load & Stress Testing (concurrent users, large files, sustained load)
+9. **Task 5.8**: Error Handling (401/403/404/429/500/503 scenarios)
+10. **Task 5.9**: Production Validation (CRITICAL - final gate before user release)
+
+**Testing Philosophy**:
+- **Evidence-based**: No task complete without screenshots/logs/metrics
+- **Layer-by-layer**: Test each component and integration point
+- **SDAP v1 lessons**: Each task addresses specific historical issues
+
+**SDAP v1 Issues Addressed**:
+1. **Integration Gaps**: Tasks 5.2-5.5 test each layer combination
+2. **Silent Failures**: Task 5.3 verifies SPE storage via Graph API directly
+3. **Cache Misconfiguration**: Task 5.9 enforces Redis in production (not in-memory)
+4. **Auth Issues**: Task 5.1 validates entire auth chain (MSAL → OBO → Graph)
+5. **Performance**: Tasks 5.6-5.7 establish baselines and stress test
+6. **Error Handling**: Task 5.8 validates user-friendly error messages
+
+**Next Steps**:
+1. Execute Task 5.0 (Pre-Flight) to verify environment readiness
+2. Execute Tasks 5.1-5.9 sequentially, collecting evidence for each
+3. Save all test evidence to `dev/projects/sdap_V2/test-evidence/task-5.X/`
+4. Obtain production sign-off (Task 5.9) before user release
+
+**Commits**:
+- d90b524: Phase 5 overview + Tasks 5.0-5.1
+- 05fa716: Tasks 5.2-5.9
+- TBD: Implementation checklist update (current commit)
+
+---
+
 **Last Updated**: 2025-10-14
-**Status**: ✅ **ALL PHASES COMPLETE** (Phase 1, 2, 3, 4)
-**Total Tasks**: 18 tasks across 4 phases (18/18 complete)
-**Progress**: **100% COMPLETE** 🎉
-**Estimated Duration**: ~40 hours (1 week sprint) | **Actual**: ~30 hours
+**Status**: 🧪 **PHASES 1-4 COMPLETE, PHASE 5 READY** (Implementation done, testing ready)
+**Total Tasks**: 28 tasks across 5 phases (18/28 complete, 64%)
+**Progress**: **Phase 1-4: 100% COMPLETE** 🎉 | **Phase 5: 0% COMPLETE** (ready to execute)
+**Estimated Duration**: ~55 hours (1.5 week sprint) | **Actual (Phases 1-4)**: ~30 hours
