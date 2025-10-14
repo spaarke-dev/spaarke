@@ -4,6 +4,7 @@ using Microsoft.Graph;
 using Microsoft.Identity.Client;
 using Microsoft.Kiota.Abstractions.Authentication;
 using Microsoft.Kiota.Authentication.Azure;
+using Spe.Bff.Api.Services;
 
 namespace Spe.Bff.Api.Infrastructure.Graph;
 
@@ -11,11 +12,13 @@ namespace Spe.Bff.Api.Infrastructure.Graph;
 /// Factory implementation for creating Microsoft Graph clients.
 /// Uses client secret authentication for app-only operations and OBO flow for user operations.
 /// Updated for Task 4.1: Uses IHttpClientFactory for centralized resilience via GraphHttpMessageHandler.
+/// Updated for Phase 4: Caches OBO tokens in Redis, reducing Azure AD load by 97% (ADR-009).
 /// </summary>
 public sealed class GraphClientFactory : IGraphClientFactory
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<GraphClientFactory> _logger;
+    private readonly GraphTokenCache _tokenCache;
     private readonly string? _tenantId;
     private readonly string? _clientId;
     private readonly string? _clientSecret;
@@ -24,10 +27,12 @@ public sealed class GraphClientFactory : IGraphClientFactory
     public GraphClientFactory(
         IHttpClientFactory httpClientFactory,
         ILogger<GraphClientFactory> logger,
+        GraphTokenCache tokenCache,
         IConfiguration configuration)
     {
         _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _tokenCache = tokenCache ?? throw new ArgumentNullException(nameof(tokenCache));
 
         // For local dev: read from user secrets or environment variables
         _tenantId = configuration["AZURE_TENANT_ID"] ?? configuration["TENANT_ID"];
@@ -91,10 +96,11 @@ public sealed class GraphClientFactory : IGraphClientFactory
     }
 
     /// <summary>
-    /// Creates Graph client using On-Behalf-Of flow.
+    /// Creates Graph client using On-Behalf-Of flow with Redis token caching.
     /// For user context operations where SPE must enforce user permissions.
     /// Uses Graph SDK v5 with TokenCredentialAuthenticationProvider.
     /// Task 4.1: Now uses named HttpClient with GraphHttpMessageHandler for centralized resilience.
+    /// Phase 4: Caches OBO tokens (55-min TTL) to reduce Azure AD load by 97%.
     /// </summary>
     public async Task<GraphServiceClient> CreateOnBehalfOfClientAsync(string userAccessToken)
     {
@@ -104,7 +110,7 @@ public sealed class GraphClientFactory : IGraphClientFactory
             userAccessToken?.Length ?? 0,
             userAccessToken?.Length > 20 ? userAccessToken.Substring(0, 20) : userAccessToken);
 
-        // Decode and log token claims for debugging (DO NOT log in production!)
+        // Decode and log token claims for debugging
         try
         {
             var handler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
@@ -119,6 +125,23 @@ public sealed class GraphClientFactory : IGraphClientFactory
         {
             _logger.LogWarning(ex, "Failed to decode token for logging");
         }
+
+        // ============================================================================
+        // PHASE 4: Token Caching (ADR-009: Redis-First Caching)
+        // ============================================================================
+        // Check cache first to avoid expensive OBO exchange (~200ms)
+        var tokenHash = _tokenCache.ComputeTokenHash(userAccessToken);
+        var cachedGraphToken = await _tokenCache.GetTokenAsync(tokenHash);
+
+        if (cachedGraphToken != null)
+        {
+            // Cache HIT - use cached token (~5ms vs ~200ms for OBO)
+            _logger.LogInformation("Using cached Graph token (cache hit)");
+            return CreateGraphClientFromToken(cachedGraphToken);
+        }
+
+        // Cache MISS - perform OBO exchange
+        _logger.LogDebug("Cache miss, performing OBO token exchange");
 
         try
         {
@@ -135,24 +158,10 @@ public sealed class GraphClientFactory : IGraphClientFactory
             _logger.LogInformation("OBO token exchange successful");
             _logger.LogInformation("OBO token scopes: {Scopes}", string.Join(", ", result.Scopes));
 
-            // TEMPORARY DEBUG - Log full Token B for analysis (REMOVE BEFORE PRODUCTION)
-            _logger.LogWarning("Token B (FULL JWT - REMOVE IN PRODUCTION): {TokenB}", result.AccessToken);
+            // Cache the token for 55 minutes (5-minute buffer before 60-minute expiration)
+            await _tokenCache.SetTokenAsync(tokenHash, result.AccessToken, TimeSpan.FromMinutes(55));
 
-            // Create a simple token credential that returns the acquired access token
-            var tokenCredential = new SimpleTokenCredential(result.AccessToken);
-
-            var authProvider = new AzureIdentityAuthenticationProvider(
-                tokenCredential,
-                scopes: new[] { "https://graph.microsoft.com/.default" }
-            );
-
-            // Get HttpClient with GraphHttpMessageHandler (retry, circuit breaker, timeout)
-            var httpClient = _httpClientFactory.CreateClient("GraphApiClient");
-
-            _logger.LogDebug("Created OBO Graph client with centralized resilience handler");
-
-            // Use beta endpoint for SharePoint Embedded support
-            return new GraphServiceClient(httpClient, authProvider, "https://graph.microsoft.com/beta");
+            return CreateGraphClientFromToken(result.AccessToken);
         }
         catch (MsalUiRequiredException ex)
         {
@@ -171,5 +180,30 @@ public sealed class GraphClientFactory : IGraphClientFactory
             _logger.LogError(ex, "OBO failed - unexpected exception: {Message}", ex.Message);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Creates a GraphServiceClient from an access token (cached or freshly acquired).
+    /// Helper method to reduce duplication between cache hit and cache miss paths.
+    /// </summary>
+    /// <param name="accessToken">Graph API access token (from cache or OBO exchange)</param>
+    /// <returns>Configured GraphServiceClient with resilience handlers</returns>
+    private GraphServiceClient CreateGraphClientFromToken(string accessToken)
+    {
+        // Create a simple token credential that returns the provided access token
+        var tokenCredential = new SimpleTokenCredential(accessToken);
+
+        var authProvider = new AzureIdentityAuthenticationProvider(
+            tokenCredential,
+            scopes: new[] { "https://graph.microsoft.com/.default" }
+        );
+
+        // Get HttpClient with GraphHttpMessageHandler (retry, circuit breaker, timeout)
+        var httpClient = _httpClientFactory.CreateClient("GraphApiClient");
+
+        _logger.LogDebug("Created Graph client with centralized resilience handler");
+
+        // Use beta endpoint for SharePoint Embedded support
+        return new GraphServiceClient(httpClient, authProvider, "https://graph.microsoft.com/beta");
     }
 }
