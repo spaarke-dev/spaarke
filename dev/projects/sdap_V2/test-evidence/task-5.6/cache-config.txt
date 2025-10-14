@@ -1,0 +1,1 @@
+=== TEST 3: Cache Configuration === az webapp config appsettings list --name spe-api-dev-67e2xz --resource-group spe-infrastructure-westus2 --query [?starts_with(name, 'Redis')].{Name:name, Value:value} -o table
