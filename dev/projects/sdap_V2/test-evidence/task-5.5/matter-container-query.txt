@@ -1,0 +1,40 @@
+Microsoft PowerPlatform CLI
+Version: 1.46.1+gd89d831 (.NET Framework 4.8.9310.0)
+Online documentation: https://aka.ms/PowerPlatformCLI
+Feedback, Suggestions, Issues: https://github.com/microsoft/powerplatform-build-tools/discussions
+
+Error: Not a valid command. Try running 'pac [command] help'.
+
+Hints: 
+  Parse failed on:            list-records
+  Current command:            data
+  Is this a known command?    No, was it misspelled?
+  Is this a known argument?   No, was it misspelled?
+  Was it quote wrapped?       No, be sure to wrap values that contain spaces.
+
+Usage: pac [admin] [application] [auth] [canvas] [catalog] [code] [connection] [connector] [copilot] [data] [env] [help] [modelbuilder] [package] [pages] [pcf] [pipeline] [plugin] [power-fx] [solution] [telemetry] [test] [tool]
+
+  admin                       Work with your Power Platform Admin Account
+  application                 Commands for listing and installing available Dataverse applications from AppSource
+  auth                        Manage how you authenticate to various services
+  canvas                      Operating with Power Apps .msapp files
+  catalog                     Commands for working with Catalog in Power Platform
+  code                        (Preview) Commands to manage your Code apps.
+  connection                  Commands for working with Dataverse connection.
+  connector                   Commands for working with Power Platform Connectors
+  copilot                     Tools and utilities for copilot management
+  data                        Import and export data from Dataverse.
+  env                         Work with your Dataverse organization.
+  help                        Show help for the Microsoft Power Platform CLI.
+  modelbuilder                Code Generator for Dataverse APIs and Tables
+  package                     Commands for working with Dataverse package projects
+  pages                       Commands for working with Power Pages website.
+  pcf                         Commands for working with Power Apps component framework projects
+  pipeline                    Work with Pipelines
+  plugin                      Commands for working with Dataverse plug-in class library
+  power-fx                    (Preview) Commands for working with Power Fx
+  solution                    Commands for working with Dataverse solution projects
+  telemetry                   Manage telemetry settings.
+  test                        (Preview) Execution of automated tests for a Power App
+  tool                        Power Platform tools that can be installed and launched.
+
