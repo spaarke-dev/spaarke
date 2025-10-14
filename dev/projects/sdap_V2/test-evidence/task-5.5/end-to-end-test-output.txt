@@ -1,0 +1,7 @@
+=================================================================================================
+Phase 5 - Task 5.5: End-to-End Document Upload Test
+=================================================================================================
+
+=== STEP 1: Get Dataverse OAuth Token ===
+Using PAC CLI to get Dataverse token...
+? FAIL: Error getting Dataverse token: Cannot run a document in the middle of a pipeline: C:\Users\RalphSchroeder\bin\pac.
