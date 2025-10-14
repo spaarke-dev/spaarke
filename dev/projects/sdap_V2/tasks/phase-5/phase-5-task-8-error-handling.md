@@ -5,12 +5,76 @@
 **Risk**: HIGH (poor error handling breaks user experience)
 **Layers Tested**: All layers (error propagation)
 **Prerequisites**: Tasks 5.1-5.7 complete
+**Status**: HYBRID - Architecture Review + Limited Runtime Testing
+**Updated**: 2025-10-14
 
 ---
 
 ## Goal
 
 **Verify all error scenarios are handled gracefully** with clear, actionable error messages.
+
+**Current Limitation**: Admin consent blocker prevents full runtime testing of authenticated endpoints.
+
+**Testing Strategy**:
+1. ✅ **Architecture Review**: Code review of error handling patterns
+2. ✅ **Anonymous Endpoint Testing**: Test `/ping` endpoint error scenarios
+3. ⏳ **Authenticated Endpoint Testing**: Deferred to Task 5.9 (Production with MSAL.js)
+
+---
+
+## Architecture Review: Error Handling Patterns
+
+### 1. Global Exception Handling
+
+**File**: [Program.cs](c:\code_files\spaarke\src\api\Spe.Bff.Api\Program.cs)
+
+**Expected Pattern**:
+```csharp
+app.UseExceptionHandler("/error");
+app.UseStatusCodePages();
+```
+
+**Validation**: Review Program.cs for global error handling middleware.
+
+### 2. OBO Endpoint Error Handling
+
+**File**: [OBOEndpoints.cs](c:\code_files\spaarke\src\api\Spe.Bff.Api\Api\OBOEndpoints.cs)
+
+**Expected Patterns**:
+- Try-catch blocks around Graph API calls
+- Specific exception types (ServiceException, AuthenticationException)
+- HTTP status code mapping (401, 403, 404, 500)
+- User-friendly error messages (no stack traces)
+
+**Validation**: Review each endpoint for error handling.
+
+### 3. Graph API Error Handling
+
+**File**: [GraphClientFactory.cs](c:\code_files\spaarke\src\api\Spe.Bff.Api\Infrastructure\Graph\GraphClientFactory.cs)
+
+**Expected Patterns**:
+- OBO token exchange failures (401, 403)
+- Graph API errors (ServiceException)
+- Logging for debugging (but not exposed to users)
+
+### 4. Cache Error Handling
+
+**File**: [GraphTokenCache.cs](c:\code_files\spaarke\src\api\Spe.Bff.Api\Services\GraphTokenCache.cs)
+
+**Expected Pattern** (Line 84-91):
+```csharp
+catch (Exception ex)
+{
+    _logger.LogWarning(ex, "Error retrieving token from cache...");
+    _metrics?.RecordMiss(sw.Elapsed.TotalMilliseconds);
+    return null; // Fail gracefully, will perform OBO exchange
+}
+```
+
+**Validation**: ✅ Cache failures don't break requests (already reviewed in Task 5.6)
+
+---
 
 ## Test Procedure
 
