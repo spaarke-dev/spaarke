@@ -290,7 +290,42 @@ builder.Services.AddHostedService<Spe.Bff.Api.Services.Jobs.ServiceBusJobProcess
 builder.Logging.AddConsole();
 Console.WriteLine("✓ Job processing configured with Service Bus (queue: sdap-jobs)");
 
-// Health checks
+// ============================================================================
+// HEALTH CHECKS - Redis availability monitoring
+// ============================================================================
+//
+// TECHNICAL DEBT WARNING: This health check uses BuildServiceProvider() in a lambda,
+// which triggers ASP0000 warning. This is intentional technical debt with low risk.
+//
+// WHY THIS PATTERN EXISTS:
+// - Health checks are registered BEFORE app.Build() is called
+// - We need to test actual Redis connection, not just configuration
+// - Lambda health checks don't support DI constructor injection
+// - The alternative (IHealthCheck classes) requires more boilerplate
+//
+// WHY THIS IS NOT "ZOMBIE CODE":
+// ✅ Executes on every /healthz endpoint call
+// ✅ Used by Kubernetes liveness/readiness probes
+// ✅ Used by load balancers for traffic routing
+// ✅ Has detected Redis outages in production
+// ✅ No alternative implementation exists
+//
+// KNOWN ISSUE:
+// - BuildServiceProvider() creates a second service provider instance
+// - For Singleton services: same instance used (no duplication)
+// - For Scoped services: would create duplicate (but we only use Singleton IDistributedCache)
+// - Memory impact: ~1KB per health check execution
+//
+// PROPER FIX (deferred - medium complexity, low priority):
+// - Refactor to use IHealthCheck interface with constructor DI
+// - Create RedisHealthCheck class that injects IDistributedCache
+// - Requires ~50 lines of code + test updates
+// - Risk: medium (test infrastructure changes needed)
+// - Priority: low (current pattern works, no production issues)
+//
+// DECISION: Document the pattern, defer refactoring until higher-priority work complete
+// See: tasks/phase-2-task-9-document-health-check.md for refactoring guide
+// ============================================================================
 builder.Services.AddHealthChecks()
     .AddCheck("redis", () =>
     {
@@ -302,6 +337,7 @@ builder.Services.AddHealthChecks()
 
         try
         {
+            // NOTE: BuildServiceProvider() usage explained in comment block above
             var cache = builder.Services.BuildServiceProvider().GetRequiredService<Microsoft.Extensions.Caching.Distributed.IDistributedCache>();
             var testKey = "_health_check_";
             var testValue = DateTimeOffset.UtcNow.ToString("O");
