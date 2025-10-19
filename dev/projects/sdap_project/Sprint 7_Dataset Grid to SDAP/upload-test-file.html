@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SDAP File Upload Test</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #0078d4;
+            margin-bottom: 10px;
+        }
+        .info {
+            background: #e7f3ff;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            border-left: 4px solid #0078d4;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 5px;
+            color: #323130;
+        }
+        input, button {
+            padding: 10px;
+            font-size: 14px;
+            border: 1px solid #d1d1d1;
+            border-radius: 4px;
+        }
+        input[type="text"] {
+            width: 100%;
+            box-sizing: border-box;
+        }
+        input[type="file"] {
+            width: 100%;
+        }
+        button {
+            background-color: #0078d4;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+            padding: 12px 24px;
+        }
+        button:hover {
+            background-color: #106ebe;
+        }
+        button:disabled {
+            background-color: #d1d1d1;
+            cursor: not-allowed;
+        }
+        #output {
+            margin-top: 30px;
+        }
+        .error {
+            background: #fde7e9;
+            color: #a80000;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            border-left: 4px solid #a80000;
+        }
+        .success {
+            background: #dff6dd;
+            color: #107c10;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            border-left: 4px solid #107c10;
+        }
+        code {
+            background: #f3f2f1;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            display: block;
+            margin-top: 10px;
+            white-space: pre-wrap;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #605e5c;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>SDAP File Upload Test</h1>
+
+        <div class="info">
+            <strong>Purpose:</strong> Upload a test file to your SharePoint Embedded container so you can test the Download/Delete/Replace buttons in the Universal Dataset Grid.
+        </div>
+
+        <div class="form-group">
+            <label for="apiUrl">SDAP API Base URL:</label>
+            <input type="text" id="apiUrl" value="https://spe-api-dev-67e2xz.azurewebsites.net" />
+        </div>
+
+        <div class="form-group">
+            <label for="driveId">Drive/Container ID:</label>
+            <input type="text" id="driveId" value="b!rAta3Ht_zEKl6AqiQObblUhqWZU646tBrEagKKMKiOcv-7Yo7739SKCuM2H-RPAy" />
+        </div>
+
+        <div class="form-group">
+            <label for="fileName">File Name (will be created in root):</label>
+            <input type="text" id="fileName" placeholder="e.g., test.pdf" value="test-document.txt" />
+        </div>
+
+        <div class="form-group">
+            <label for="fileInput">Select File to Upload:</label>
+            <input type="file" id="fileInput" />
+        </div>
+
+        <button id="uploadBtn" onclick="uploadFile()">Upload File</button>
+
+        <div id="output"></div>
+    </div>
+
+    <script>
+        async function uploadFile() {
+            const apiUrl = document.getElementById('apiUrl').value.trim();
+            const driveId = document.getElementById('driveId').value.trim();
+            const fileName = document.getElementById('fileName').value.trim();
+            const fileInput = document.getElementById('fileInput');
+            const output = document.getElementById('output');
+            const btn = document.getElementById('uploadBtn');
+
+            if (!apiUrl || !driveId || !fileName) {
+                output.innerHTML = '<div class="error">Please provide API URL, Drive ID, and File Name</div>';
+                return;
+            }
+
+            if (!fileInput.files || fileInput.files.length === 0) {
+                output.innerHTML = '<div class="error">Please select a file to upload</div>';
+                return;
+            }
+
+            const file = fileInput.files[0];
+
+            btn.disabled = true;
+            btn.textContent = 'Uploading...';
+            output.innerHTML = '<div class="loading">Uploading file to SharePoint Embedded...</div>';
+
+            try {
+                // Build URL - using the /api/drives/{driveId}/upload endpoint
+                const url = `${apiUrl}/api/drives/${encodeURIComponent(driveId)}/upload?fileName=${encodeURIComponent(fileName)}`;
+
+                console.log('Uploading to:', url);
+                console.log('File:', file.name, file.size, 'bytes');
+
+                const response = await fetch(url, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': file.type || 'application/octet-stream'
+                    },
+                    body: file
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`HTTP ${response.status}: ${errorText}`);
+                }
+
+                const result = await response.json();
+
+                console.log('Upload successful:', result);
+
+                let html = '<div class="success"><strong>Upload Successful!</strong></div>';
+                html += '<div style="background: #f3f2f1; padding: 15px; border-radius: 4px; margin-top: 20px;">';
+                html += '<strong>File Metadata (for Dataverse):</strong>';
+                html += `<div style="margin-top: 10px;">`;
+                html += `<strong>File Name:</strong> ${result.name}<br>`;
+                html += `<strong>Item ID (sprk_graphitemid):</strong> <code style="display:inline;">${result.id}</code><br>`;
+                html += `<strong>Size (sprk_filesize):</strong> ${result.size} bytes<br>`;
+                html += `<strong>Web URL (sprk_filepath):</strong> <code style="display:inline;">${result.webUrl || 'N/A'}</code><br>`;
+                html += `<strong>Created:</strong> ${result.createdDateTime}<br>`;
+                html += `<strong>Modified:</strong> ${result.lastModifiedDateTime}<br>`;
+                html += `<strong>ETag:</strong> ${result.eTag || 'N/A'}<br>`;
+                html += `<strong>Parent ID:</strong> ${result.parentId || 'root'}<br>`;
+                html += `</div>`;
+                html += '</div>';
+
+                html += '<div style="background: #e7f3ff; padding: 15px; border-radius: 4px; margin-top: 20px; border-left: 4px solid #0078d4;">';
+                html += '<strong>Next Steps:</strong><br><br>';
+                html += '1. Go to your Dataverse environment<br>';
+                html += `2. Create or update a Document record with:<br>`;
+                html += `&nbsp;&nbsp;&nbsp;• sprk_graphdriveid = <code style="display:inline;">${driveId}</code><br>`;
+                html += `&nbsp;&nbsp;&nbsp;• sprk_graphitemid = <code style="display:inline;">${result.id}</code><br>`;
+                html += `&nbsp;&nbsp;&nbsp;• sprk_filename = <code style="display:inline;">${result.name}</code><br>`;
+                html += `&nbsp;&nbsp;&nbsp;• sprk_filepath = <code style="display:inline;">${result.webUrl || ''}</code><br>`;
+                html += `&nbsp;&nbsp;&nbsp;• sprk_filesize = <code style="display:inline;">${result.size}</code><br>`;
+                html += `&nbsp;&nbsp;&nbsp;• sprk_hasfile = <code style="display:inline;">true</code><br>`;
+                html += `3. Open your Power Apps app with the Universal Dataset Grid<br>`;
+                html += `4. Select the record and test Download/Delete/Replace buttons!<br>`;
+                html += '</div>';
+
+                html += '<code>' + JSON.stringify(result, null, 2) + '</code>';
+
+                output.innerHTML = html;
+
+            } catch (error) {
+                console.error('Error:', error);
+                output.innerHTML = `<div class="error"><strong>Upload Failed:</strong> ${error.message}<br><br>
+                    <strong>Troubleshooting:</strong><ul>
+                    <li>Make sure CORS is configured on the SDAP API</li>
+                    <li>Verify you have permissions to upload files</li>
+                    <li>Check if the API is running: ${apiUrl}</li>
+                    <li>Verify the container/drive ID is correct</li>
+                    <li>Check browser console for details</li>
+                    </ul></div>`;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Upload File';
+            }
+        }
+    </script>
+</body>
+</html>

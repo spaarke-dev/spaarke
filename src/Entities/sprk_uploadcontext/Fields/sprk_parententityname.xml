@@ -1,0 +1,26 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<field name="sprk_parententityname" type="nvarchar" customfield="1">
+  <Length>100</Length>
+  <RequiredLevel>none</RequiredLevel>
+  <IsCustomField>1</IsCustomField>
+  <IsAuditEnabled>0</IsAuditEnabled>
+  <IsLocalizable>0</IsLocalizable>
+  <IsSecured>0</IsSecured>
+  <IsSortableEnabled>0</IsSortableEnabled>
+  <IsCustomizable>1</IsCustomizable>
+  <IsRenameable>1</IsRenameable>
+  <CanModifySearchSettings>1</CanModifySearchSettings>
+  <CanModifyRequirementLevelSettings>1</CanModifyRequirementLevelSettings>
+  <CanModifyAdditionalSettings>1</CanModifyAdditionalSettings>
+  <IntroducedVersion>1.0.0.0</IntroducedVersion>
+  <SchemaName>sprk_parententityname</SchemaName>
+  <LogicalName>sprk_parententityname</LogicalName>
+  <AttributeTypeName>StringType</AttributeTypeName>
+  <IsValidForAdvancedFind>0</IsValidForAdvancedFind>
+  <displaynames>
+    <displayname description="Parent Entity Name" languagecode="1033" />
+  </displaynames>
+  <Descriptions>
+    <Description description="Logical name of parent entity (e.g., sprk_matter)" languagecode="1033" />
+  </Descriptions>
+</field>

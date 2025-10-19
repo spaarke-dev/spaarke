@@ -1,0 +1,11 @@
+2025-10-15T16:01:24  PID[4692] Information 10/15/2025 4:01:22 PM [[4.8]] [DW0SDWK0005I2] DaasRunner.exe with version 4.8.40625.1 and ProcessId=4692 started
+2025-10-15T16:01:29  PID[4692] Information 10/15/2025 4:01:29 PM [[4.8]] [DW0SDWK0005I2] Checking DaaS bits and updating if required
+2025-10-15T16:01:31  PID[4692] Information 10/15/2025 4:01:31 PM [[4.8]] [DW0SDWK0005I2] [daasrunner.exe] Version in DaaS Installation path (4.8.40625.1) is lower or equal to the existing version 4.8.40625.1. Version Compare result = 0
+2025-10-15T16:01:31  PID[4692] Information 10/15/2025 4:01:31 PM [[4.8]] [DW0SDWK0005I2] Binary Comparing files C:\Program Files (x86)\SiteExtensions\DaaS\4.8.40625.1\bin\daasrunner.exe and C:\home\site\Jobs\Continuous\DaaS\DaasRunner.exe
+2025-10-15T16:01:32  PID[4692] Information 10/15/2025 4:01:32 PM [[4.8]] [DW0SDWK0005I2] Binary Comparison succeeded: C:\Program Files (x86)\SiteExtensions\DaaS\4.8.40625.1\bin\daasrunner.exe and C:\home\site\Jobs\Continuous\DaaS\DaasRunner.exe
+2025-10-15T16:01:34  PID[4692] Information 10/15/2025 4:01:34 PM [[4.8]] [DW0SDWK0005I2] [daasconsole.exe] Version in DaaS Installation path (4.8.40625.1) is lower or equal to the existing version 4.8.40625.1. Version Compare result = 0
+2025-10-15T16:01:34  PID[4692] Information 10/15/2025 4:01:34 PM [[4.8]] [DW0SDWK0005I2] Binary Comparing files C:\Program Files (x86)\SiteExtensions\DaaS\4.8.40625.1\bin\daasconsole.exe and C:\home\data\DaaS\bin\DaasConsole.exe
+2025-10-15T16:01:34  PID[4692] Information 10/15/2025 4:01:34 PM [[4.8]] [DW0SDWK0005I2] Binary Comparison succeeded: C:\Program Files (x86)\SiteExtensions\DaaS\4.8.40625.1\bin\daasconsole.exe and C:\home\data\DaaS\bin\DaasConsole.exe
+2025-10-15T16:01:34  PID[4692] Information 10/15/2025 4:01:34 PM [[4.8]] [DW0SDWK0005I2] Done checking DaaS bits for any new updates
+2025-10-15T16:02:56  PID[4692] Information 10/15/2025 4:02:56 PM [[4.8]] [DW0SDWK0005I2] Storage account is not configured
+2025-10-15T16:02:56  PID[4692] Information 10/15/2025 4:02:56 PM [[4.8]] [DW0SDWK0005I2] Starting cleanup for Completed Sessions MaxDiagnosticSessionsToKeep = [10] MaxNumberOfDaysForSessions= [20]

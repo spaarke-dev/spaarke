@@ -1,0 +1,39 @@
+<step title="BackgroundTrace" date="2025-10-08T19:49:11.279" instance="7153eb" url="/api/zipdeploy" method="POST" >
+  <step title="Updating shutdown sentinel last write time" date="2025-10-08T19:49:11.295" SemaphoreCount="7" /><!-- duration: 0ms -->
+  <step title="LockFile &apos;C:\home\site\locks\deployments.lock&apos; acquired" date="2025-10-08T19:49:11.310" /><!-- duration: 0ms -->
+  <step title="Creating temporary deployment" date="2025-10-08T19:49:11.310" /><!-- duration: 47ms -->
+  <step title="Performing fetch based deployment" date="2025-10-08T19:49:11.358" >
+    <step title="Fetching changes." date="2025-10-08T19:49:11.644" /><!-- duration: 13ms -->
+    <step title="Starting LocalZipHandler" date="2025-10-08T19:49:11.657" /><!-- duration: 0ms -->
+    <step title="Cleaning up temp folders from previous zip deployments and extracting pushed zip file C:\local\Temp\zipdeploy\spfpglru.zip (15.69 MB) to C:\local\Temp\zipdeploy\extracted" date="2025-10-08T19:49:11.689" /><!-- duration: 0ms -->
+    <step title="Cleaning up temp folders from previous zip deployments and extracting pushed zip file C:\local\Temp\zipdeploy\spfpglru.zip (15.69 MB) to C:\local\Temp\zipdeploy\extracted" date="2025-10-08T19:49:11.689" >
+      <step title="Renaming extractTargetDirectory(C:\local\Temp\zipdeploy\extracted) to tempDirectory(C:\local\Temp\zipdeploy\dozljf0y.qt5)" date="2025-10-08T19:49:11.704" /><!-- duration: 0ms -->
+    </step><!-- duration: 68471ms -->
+    <step title="End of Central Directory record could not be found. DEPLOYMENTINFO: deploymentPath = ZipDeploy. Extract zip. , deployer = ZipDeploy, os = windows, sku = Basic, siteName = spe-api-dev-67e2xz, siteHostName = spe-api-dev-67e2xz.azurewebsites.net, deploymentStatus = Error" date="2025-10-08T19:50:20.208" /><!-- duration: 29ms -->
+  </step><!-- duration: 68940ms -->
+  <step title="LockFile &apos;C:\home\site\locks\deployments.lock&apos; released" date="2025-10-08T19:50:20.314" /><!-- duration: 0ms -->
+  <step title="Deleting shutdown sentinel file" date="2025-10-08T19:50:20.314" SemaphoreCount="8" /><!-- duration: 16ms -->
+  <step title="Error occurred" date="2025-10-08T19:50:20.329" type="error" text="One or more errors occurred." stackTrace="   at System.Threading.Tasks.Task.ThrowIfExceptional(Boolean includeTaskCanceledExceptions)
+   at System.Threading.Tasks.Task.Wait(Int32 millisecondsTimeout, CancellationToken cancellationToken)
+   at Kudu.Core.Deployment.FetchDeploymentManager.&lt;&gt;c__DisplayClass12_1.&lt;PerformBackgroundDeployment&gt;b__3()
+   at Kudu.Contracts.Infrastructure.LockExtensions.TryLockOperation(IOperationLock lockObj, Action operation, String operationName, TimeSpan timeout)
+   at Kudu.Contracts.Infrastructure.LockExtensions.LockOperation(IOperationLock lockObj, Action operation, String operationName, TimeSpan timeout)
+   at Kudu.Core.Deployment.FetchDeploymentManager.&lt;&gt;c__DisplayClass12_0.&lt;PerformBackgroundDeployment&gt;b__1()" innerText="End of Central Directory record could not be found." innerStackTrace="   at System.IO.Compression.ZipArchive.ReadEndOfCentralDirectory()
+   at System.IO.Compression.ZipArchive.Init(Stream stream, ZipArchiveMode mode, Boolean leaveOpen)
+   at Kudu.Services.Deployment.PushDeploymentController.&lt;&gt;c__DisplayClass23_0.&lt;LocalZipFetch&gt;b__1() in C:\__w\1\s\Kudu.Services\Deployment\PushDeploymentController.cs:line 902
+   at System.Threading.Tasks.Task.Execute()
+--- End of stack trace from previous location where exception was thrown ---
+   at System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw()
+   at System.Runtime.CompilerServices.TaskAwaiter.HandleNonSuccessAndDebuggerNotification(Task task)
+   at Kudu.Services.Deployment.PushDeploymentController.&lt;LocalZipFetch&gt;d__23.MoveNext() in C:\__w\1\s\Kudu.Services\Deployment\PushDeploymentController.cs:line 908
+--- End of stack trace from previous location where exception was thrown ---
+   at System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw()
+   at System.Runtime.CompilerServices.TaskAwaiter.HandleNonSuccessAndDebuggerNotification(Task task)
+   at Kudu.Services.Deployment.PushDeploymentController.&lt;LocalZipHandler&gt;d__18.MoveNext() in C:\__w\1\s\Kudu.Services\Deployment\PushDeploymentController.cs:line 676
+--- End of stack trace from previous location where exception was thrown ---
+   at System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw()
+   at Kudu.Core.Deployment.FetchDeploymentManager.&lt;PerformDeployment&gt;d__9.MoveNext()
+--- End of stack trace from previous location where exception was thrown ---
+   at System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw()
+   at Kudu.Core.Deployment.FetchDeploymentManager.&lt;PerformDeployment&gt;d__9.MoveNext()" /><!-- duration: 0ms -->
+</step><!-- duration: 69050ms -->

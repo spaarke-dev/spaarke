@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<manifest>
+  <control namespace="Spaarke.Controls" constructor="UniversalDocumentUpload" version="2.1.0"
+           display-name-key="Universal Document Upload"
+           description-key="Multi-file upload for Form Dialog - @odata.bind navigation (v2.1.0 - Expert confirmed)"
+           control-type="standard">
+
+    <external-service-usage enabled="false">
+    </external-service-usage>
+
+    <!--
+      FORM DIALOG BOUND PROPERTIES
+      These properties are bound to form fields on sprk_uploadcontext entity
+      Form passes parameters via formParameters in Xrm.Navigation.openForm()
+    -->
+
+    <!-- Parent Entity Name (BOUND TO sprk_parententityname) -->
+    <property name="parentEntityName"
+              display-name-key="Parent Entity Name"
+              description-key="Logical name of parent entity (e.g., sprk_matter, account, contact)"
+              of-type="SingleLine.Text"
+              usage="bound"
+              required="true" />
+
+    <!-- Parent Record ID (BOUND TO sprk_parentrecordid) -->
+    <property name="parentRecordId"
+              display-name-key="Parent Record ID"
+              description-key="GUID of parent record (without curly braces)"
+              of-type="SingleLine.Text"
+              usage="bound"
+              required="true" />
+
+    <!-- Container ID (BOUND TO sprk_containerid) -->
+    <property name="containerId"
+              display-name-key="Container ID"
+              description-key="SharePoint Embedded Container ID for file uploads"
+              of-type="SingleLine.Text"
+              usage="bound"
+              required="true" />
+
+    <!-- Parent Display Name (BOUND TO sprk_parentdisplayname) -->
+    <property name="parentDisplayName"
+              display-name-key="Parent Display Name"
+              description-key="Display name of parent record for UI header (e.g., Matter #12345)"
+              of-type="SingleLine.Text"
+              usage="bound"
+              required="false" />
+
+    <!-- Configuration: SDAP API Base URL -->
+    <property name="sdapApiBaseUrl"
+              display-name-key="SDAP API Base URL"
+              description-key="Base URL for SDAP BFF API (include /api suffix)"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false"
+              default-value="spe-api-dev-67e2xz.azurewebsites.net/api" />
+
+    <resources>
+      <code path="index.ts" order="1"/>
+      <css path="css/UniversalQuickCreate.css" order="1" />
+    </resources>
+
+    <feature-usage>
+      <uses-feature name="WebAPI" required="true" />
+      <uses-feature name="Utility" required="true" />
+    </feature-usage>
+  </control>
+</manifest>

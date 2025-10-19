@@ -1,0 +1,58 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Entity>
+  <EntityInfo>
+    <entity Name="sprk_uploadcontext">
+      <LocalizedNames>
+        <LocalizedName description="Upload Context" languagecode="1033" />
+      </LocalizedNames>
+      <LocalizedCollectionNames>
+        <LocalizedCollectionName description="Upload Contexts" languagecode="1033" />
+      </LocalizedCollectionNames>
+      <Descriptions>
+        <Description description="Utility entity for passing parameters to Universal Document Upload PCF control via Form Dialog" languagecode="1033" />
+      </Descriptions>
+      <EntityMetadata>
+        <IsActivity>0</IsActivity>
+        <IsActivityParty>0</IsActivityParty>
+        <IsAvailableOffline>0</IsAvailableOffline>
+        <IsConnectionsEnabled>0</IsConnectionsEnabled>
+        <IsCustomizable>1</IsCustomizable>
+        <IsCustomEntity>1</IsCustomEntity>
+        <IsDocumentManagementEnabled>0</IsDocumentManagementEnabled>
+        <IsEnabledForCharts>0</IsEnabledForCharts>
+        <IsImportable>1</IsImportable>
+        <IsIntersect>0</IsIntersect>
+        <IsMailMergeEnabled>0</IsMailMergeEnabled>
+        <IsManaged>0</IsManaged>
+        <IsMappable>0</IsMappable>
+        <IsReadingPaneEnabled>1</IsReadingPaneEnabled>
+        <IsRenameable>1</IsRenameable>
+        <IsValidForAdvancedFind>0</IsValidForAdvancedFind>
+        <IsVisibleInMobile>0</IsVisibleInMobile>
+        <IsVisibleInMobileClient>0</IsVisibleInMobileClient>
+        <OwnershipType>UserOwned</OwnershipType>
+        <PrimaryIdAttribute>sprk_uploadcontextid</PrimaryIdAttribute>
+        <PrimaryNameAttribute>sprk_name</PrimaryNameAttribute>
+        <SchemaName>sprk_uploadcontext</SchemaName>
+      </EntityMetadata>
+    </entity>
+  </EntityInfo>
+  <FormXml>
+    <forms />
+  </FormXml>
+  <SavedQueries />
+  <Visualizations />
+  <RibbonDiffXml>
+    <CustomActions />
+    <Templates>
+      <RibbonTemplates Id="Mscrm.Templates" />
+    </Templates>
+    <CommandDefinitions />
+    <RuleDefinitions>
+      <TabDisplayRules />
+      <DisplayRules />
+      <EnableRules />
+    </RuleDefinitions>
+    <LocLabels />
+  </RibbonDiffXml>
+</Entity>

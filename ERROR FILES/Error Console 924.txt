@@ -1,0 +1,527 @@
+bundle.js:2 [UniversalQuickCreate][UniversalQuickCreatePCF] Files selected {count: 2, totalSize: 65418}
+bundle.js:2 [UniversalQuickCreate][UniversalQuickCreatePCF] Starting upload and record creation {fileCount: 2, totalSizeMB: '0.1'}
+bundle.js:2 [UniversalQuickCreate][UniversalQuickCreatePCF] renderReactComponent called {hasReactRoot: true, isUploading: true}
+bundle.js:2 [UniversalQuickCreate][UniversalQuickCreatePCF] Rendering UploadProgress component
+bundle.js:2 [UniversalQuickCreate][UniversalQuickCreatePCF] Form data extracted {sprk_driveitemid: 'b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50', sprk_graphdriveid: 'b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50', statecode: 0}
+bundle.js:2 [UniversalQuickCreate][MultiFileUploadService] Starting multi-file upload {fileCount: 2, totalSize: 65418}
+bundle.js:2 [UniversalQuickCreate][MultiFileUploadService] Using sync-parallel strategy
+bundle.js:2 [UniversalQuickCreate][MultiFileUploadService] Using Container ID from sprk_graphdriveid field {containerId: 'b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50'}
+bundle.js:2 [UniversalQuickCreate][MultiFileUploadService] Phase 1: Uploading files in parallel
+bundle.js:2 [UniversalQuickCreate][FileUploadService] Starting file upload {fileName: 'A MRT.P0046WO01_US2024039292-IASR.pdf', fileSize: 41739, driveId: 'b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50'}
+bundle.js:2 [UniversalQuickCreate][SdapApiClient] Uploading file {fileName: 'A MRT.P0046WO01_US2024039292-IASR.pdf', fileSize: 41739, containerId: 'b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50'}
+bundle.js:2 [MsalAuthProvider] Using cached token ✅ (expires in 70 minutes)
+bundle.js:2 [UniversalQuickCreate][FileUploadService] Starting file upload {fileName: 'B MRT.P0046WO01_WO2025024521-DECLA-20250130-5048.pdf', fileSize: 23679, driveId: 'b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50'}
+bundle.js:2 [UniversalQuickCreate][SdapApiClient] Uploading file {fileName: 'B MRT.P0046WO01_WO2025024521-DECLA-20250130-5048.pdf', fileSize: 23679, containerId: 'b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50'}
+bundle.js:2 [MsalAuthProvider] Using cached token ✅ (expires in 70 minutes)
+bundle.js:2 [UniversalQuickCreate][SdapApiClient] File uploaded successfully {id: '01LBYCMX5GZPCUECDGBZE2T3J4GOABMJF5', name: 'A MRT.P0046WO01_US2024039292-IASR.pdf', parentId: '01LBYCMX56Y2GOVW7725BZO354PWSELRRZ', size: 41739, createdDateTime: '2025-10-09T21:08:35+00:00', …}
+bundle.js:2 [UniversalQuickCreate][FileUploadService] File uploaded successfully {fileName: 'A MRT.P0046WO01_US2024039292-IASR.pdf', driveItemId: '01LBYCMX5GZPCUECDGBZE2T3J4GOABMJF5', sharePointUrl: ''}
+bundle.js:2 [UniversalQuickCreate][SdapApiClient] File uploaded successfully {id: '01LBYCMXZ45AZCIR5AFFAKG63JJQDGGRED', name: 'B MRT.P0046WO01_WO2025024521-DECLA-20250130-5048.pdf', parentId: '01LBYCMX56Y2GOVW7725BZO354PWSELRRZ', size: 23679, createdDateTime: '2025-10-09T21:08:35+00:00', …}
+bundle.js:2 [UniversalQuickCreate][FileUploadService] File uploaded successfully {fileName: 'B MRT.P0046WO01_WO2025024521-DECLA-20250130-5048.pdf', driveItemId: '01LBYCMXZ45AZCIR5AFFAKG63JJQDGGRED', sharePointUrl: ''}
+bundle.js:2 [UniversalQuickCreate][MultiFileUploadService] Phase 2: Creating records sequentially {totalFiles: 2, uploadResultsCount: 2}
+bundle.js:2 [UniversalQuickCreate][MultiFileUploadService] Processing file 1/2 {fileName: 'A MRT.P0046WO01_US2024039292-IASR.pdf', uploadStatus: 'fulfilled'}
+bundle.js:2 [UniversalQuickCreate][UniversalQuickCreatePCF] renderReactComponent called {hasReactRoot: true, isUploading: true}
+bundle.js:2 [UniversalQuickCreate][UniversalQuickCreatePCF] Rendering UploadProgress component
+bundle.js:2 [UniversalQuickCreate][DataverseRecordService] Creating document record {fileName: 'A MRT.P0046WO01_US2024039292-IASR.pdf', driveItemId: '01LBYCMX5GZPCUECDGBZE2T3J4GOABMJF5', parentEntityName: 'sprk_matter', parentRecordId: '3A785F76-C773-F011-B4CB-6045BDD8B757'}
+bundle.js:2 [UniversalQuickCreate][DataverseRecordService] Building record data {uniqueFileName: 'A MRT.P0046WO01_US2024039292-IASR.pdf', formDataKeys: Array(3), formDataDocName: undefined, speMetadata: {…}}
+bundle.js:2 [UniversalQuickCreate][DataverseRecordService] [DEBUG] Record data AFTER spreading formData {documentName: 'A MRT.P0046WO01_US2024039292-IASR.pdf', fileName: 'A MRT.P0046WO01_US2024039292-IASR.pdf', graphItemId: '01LBYCMX5GZPCUECDGBZE2T3J4GOABMJF5', allKeys: Array(7), fullRecordData: '{\n  "sprk_driveitemid": "b!yLRdWEOAdkaWXskuRfByIRi…S2024039292-IASR.pdf",\n  "sprk_filesize": 41739\n}'}
+bundle.js:2 [UniversalQuickCreate][DataverseRecordService] [DEBUG] Lookup field resolution {parentEntityName: 'sprk_matter', lookupFieldName: 'sprk_matter', lookupFieldExistsInData: false, lookupFieldValue: undefined}
+bundle.js:2 [UniversalQuickCreate][DataverseRecordService] [DEBUG] BEFORE cleanup - keys containing lookup field {lookupFieldName: 'sprk_matter', keysWithLookup: Array(0)}
+bundle.js:2 [UniversalQuickCreate][DataverseRecordService] [DEBUG] AFTER cleanup - remaining keys {allKeys: Array(7)}
+bundle.js:2 [UniversalQuickCreate][DataverseRecordService] [DEBUG] Parent relationship configured {lookupFieldName: 'sprk_matter', entitySetName: 'sprk_matters', parentRecordId: '3A785F76-C773-F011-B4CB-6045BDD8B757', odataBindKey: 'sprk_matter@odata.bind', odataBindValue: '/sprk_matters(3A785F76-C773-F011-B4CB-6045BDD8B757)'}
+bundle.js:2 [UniversalQuickCreate][DataverseRecordService] [DEBUG] FINAL PAYLOAD being sent to Dataverse {entityName: 'sprk_document', allKeys: Array(8), fullPayload: '{\n  "sprk_driveitemid": "b!yLRdWEOAdkaWXskuRfByIRi…_matters(3A785F76-C773-F011-B4CB-6045BDD8B757)"\n}'}
+bundle.js:2 [UniversalQuickCreate][DataverseRecordService] Waiting for createRecord to complete...
+app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28   POST https://spaarkedev1.crm.dynamics.com/api/data/v9.0/sprk_documents 400 (Bad Request)
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28
+o @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28
+Promise.then
+c @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28
+m @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28
+e.fetch @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28
+execute @ 43.67d5fe35a32a7607eb3b38aea0157f6e.js:4
+intercept @ 43.67d5fe35a32a7607eb3b38aea0157f6e.js:4
+await in intercept
+proceed @ 43.67d5fe35a32a7607eb3b38aea0157f6e.js:4
+executeWithPolicy @ 43.67d5fe35a32a7607eb3b38aea0157f6e.js:4
+await in executeWithPolicy
+intercept @ 43.67d5fe35a32a7607eb3b38aea0157f6e.js:4
+proceed @ 43.67d5fe35a32a7607eb3b38aea0157f6e.js:4
+intercept @ 43.67d5fe35a32a7607eb3b38aea0157f6e.js:4
+proceed @ 43.67d5fe35a32a7607eb3b38aea0157f6e.js:4
+intercept @ 43.67d5fe35a32a7607eb3b38aea0157f6e.js:4
+proceed @ 43.67d5fe35a32a7607eb3b38aea0157f6e.js:4
+intercept @ 43.67d5fe35a32a7607eb3b38aea0157f6e.js:4
+proceed @ 43.67d5fe35a32a7607eb3b38aea0157f6e.js:4
+execute @ 43.67d5fe35a32a7607eb3b38aea0157f6e.js:4
+execute @ 43.67d5fe35a32a7607eb3b38aea0157f6e.js:4
+Na @ 84.eac76cad5ea7965d8b261c971081f8ab.js:4
+await in Na
+La @ 84.eac76cad5ea7965d8b261c971081f8ab.js:4
+execute @ 84.eac76cad5ea7965d8b261c971081f8ab.js:4
+await in execute
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_executeAsyncAction @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_executeAsync @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+executeAction @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+t.dispatch @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_executeODataViaMDL @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:33
+await in _executeODataViaMDL
+executeOData @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:33
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+Promise.then
+execute @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_executeAsyncAction @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_executeAsync @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+executeAction @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+t.dispatch @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+dispatch @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_execute.name @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_executeInternal @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+executeAsync @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_execute @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+createRecord @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_clientApiExecutor.executeAsync.name @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+await in _clientApiExecutor.executeAsync.name
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_executeInternal @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+executeAsync @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+createRecord @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28
+a @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+createRecord @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28
+createRecord @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:33
+createRecord @ 26.b67401f7dc3eb94ecef6363e3475c0dc.js:4
+o @ bundle.js:2
+(anonymous) @ bundle.js:2
+createDocument @ bundle.js:2
+(anonymous) @ bundle.js:2
+a @ bundle.js:2
+Promise.then
+s @ bundle.js:2
+(anonymous) @ bundle.js:2
+Zv @ bundle.js:2
+handleSyncParallelUpload @ bundle.js:2
+(anonymous) @ bundle.js:2
+(anonymous) @ bundle.js:2
+Zv @ bundle.js:2
+uploadFiles @ bundle.js:2
+(anonymous) @ bundle.js:2
+(anonymous) @ bundle.js:2
+ly @ bundle.js:2
+handleSaveAndCreateDocuments @ bundle.js:2
+(anonymous) @ bundle.js:2
+app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28  [storage] Error Messages: 
+1: Error identified in Payload provided by the user for Entity :'sprk_documents', For more information on this error please follow this help link https://go.microsoft.com/fwlink/?linkid=2195293  ---->  InnerException : Microsoft.OData.ODataException: An undeclared property 'sprk_matter' which only has property annotations in the payload but no property value was found in the payload. In OData, only declared navigation properties and declared named streams can be represented as properties without values.
+   at Microsoft.OData.JsonLight.ODataJsonLightResourceDeserializer.ReadUndeclaredProperty(IODataJsonLightReaderResourceState resourceState, String propertyName, Boolean propertyWithValue)
+   at Microsoft.OData.JsonLight.ODataJsonLightResourceDeserializer.ReadPropertyWithoutValue(IODataJsonLightReaderResourceState resourceState, String propertyName)
+   at Microsoft.OData.JsonLight.ODataJsonLightResourceDeserializer.<>c__DisplayClass9_0.<ReadResourceContent>b__0(PropertyParsingResult propertyParsingResult, String propertyName)
+   at Microsoft.OData.JsonLight.ODataJsonLightDeserializer.ProcessProperty(PropertyAndAnnotationCollector propertyAndAnnotationCollector, Func`2 readPropertyAnnotationValue, Action`2 handleProperty)
+   at Microsoft.OData.JsonLight.ODataJsonLightResourceDeserializer.ReadResourceContent(IODataJsonLightReaderResourceState resourceState)
+   at Microsoft.OData.JsonLight.ODataJsonLightReader.StartReadingResource()
+   at Microsoft.OData.JsonLight.ODataJsonLightReader.ReadResourceSetItemStart(PropertyAndAnnotationCollector propertyAndAnnotationCollector, SelectedPropertiesNode selectedProperties)
+   at Microsoft.OData.JsonLight.ODataJsonLightReader.ReadAtStartImplementationSynchronously(PropertyAndAnnotationCollector propertyAndAnnotationCollector)
+   at Microsoft.OData.ODataReaderCore.ReadImplementation()
+   at Microsoft.OData.ODataReaderCore.InterceptException[T](Func`1 action)
+   at Microsoft.AspNet.OData.Formatter.Deserialization.ODataReaderExtensions.ReadResourceOrResourceSet(ODataReader reader)
+   at Microsoft.Crm.Extensibility.CrmODataEntityDeserializer.Read(ODataMessageReader messageReader, Type type, ODataDeserializerContext readContext)
+   at Microsoft.AspNet.OData.Formatter.ODataInputFormatterHelper.ReadFromStream(Type type, Object defaultValue, IEdmModel model, ODataVersion version, Uri baseAddress, IWebApiRequestMessage internalRequest, Func`1 getODataRequestMessage, Func`2 getEdmTypeDeserializer, Func`2 getODataPayloadDeserializer, Func`1 getODataDeserializerContext, Action`1 registerForDisposeAction, Action`1 logErrorAction).
+
+    at K (https://content.powerapps.com/resource/uci-infra-web/scripts/app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28:282583)
+    at new p (https://content.powerapps.com/resource/uci-infra-web/scripts/app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14:1199529)
+    at $a (https://content.powerapps.com/resource/uci-infra-web/scripts/84.eac76cad5ea7965d8b261c971081f8ab.js:4:56454)
+    at https://content.powerapps.com/resource/uci-infra-web/scripts/84.eac76cad5ea7965d8b261c971081f8ab.js:4:51897
+    at new Promise (<anonymous>)
+Call stack hash: 1213
+u @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28
+ae @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28
+K @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28
+p @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+$a @ 84.eac76cad5ea7965d8b261c971081f8ab.js:4
+(anonymous) @ 84.eac76cad5ea7965d8b261c971081f8ab.js:4
+Ua @ 84.eac76cad5ea7965d8b261c971081f8ab.js:4
+(anonymous) @ 84.eac76cad5ea7965d8b261c971081f8ab.js:4
+await in (anonymous)
+La @ 84.eac76cad5ea7965d8b261c971081f8ab.js:4
+await in La
+execute @ 84.eac76cad5ea7965d8b261c971081f8ab.js:4
+await in execute
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_executeAsyncAction @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_executeAsync @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+executeAction @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+t.dispatch @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_executeODataViaMDL @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:33
+await in _executeODataViaMDL
+executeOData @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:33
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+Promise.then
+execute @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_executeAsyncAction @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_executeAsync @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+executeAction @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+t.dispatch @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+dispatch @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_execute.name @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_executeInternal @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+executeAsync @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_execute @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+createRecord @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_clientApiExecutor.executeAsync.name @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+await in _clientApiExecutor.executeAsync.name
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_executeInternal @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+executeAsync @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+createRecord @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28
+a @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+createRecord @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28
+createRecord @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:33
+createRecord @ 26.b67401f7dc3eb94ecef6363e3475c0dc.js:4
+o @ bundle.js:2
+(anonymous) @ bundle.js:2
+createDocument @ bundle.js:2
+(anonymous) @ bundle.js:2
+a @ bundle.js:2
+Promise.then
+s @ bundle.js:2
+(anonymous) @ bundle.js:2
+Zv @ bundle.js:2
+handleSyncParallelUpload @ bundle.js:2
+(anonymous) @ bundle.js:2
+(anonymous) @ bundle.js:2
+Zv @ bundle.js:2
+uploadFiles @ bundle.js:2
+(anonymous) @ bundle.js:2
+(anonymous) @ bundle.js:2
+ly @ bundle.js:2
+handleSaveAndCreateDocuments @ bundle.js:2
+(anonymous) @ bundle.js:2
+bundle.js:2  [UniversalQuickCreate][DataverseRecordService] Failed to create document record {errorCode: 2147781913, message: 'Error identified in Payload provided by the user f…gisterForDisposeAction, Action`1 logErrorAction).', code: 2147781913, title: '', raw: '{"errorCode":2147781913,"message":"Error identifie…d\\":\\"c32cb547-e8c5-409a-8308-49f5cbed3963\\"}}}"}'}
+error @ bundle.js:2
+o @ bundle.js:2
+c @ bundle.js:2
+Promise.then
+s @ bundle.js:2
+(anonymous) @ bundle.js:2
+createDocument @ bundle.js:2
+(anonymous) @ bundle.js:2
+a @ bundle.js:2
+Promise.then
+s @ bundle.js:2
+(anonymous) @ bundle.js:2
+Zv @ bundle.js:2
+handleSyncParallelUpload @ bundle.js:2
+(anonymous) @ bundle.js:2
+(anonymous) @ bundle.js:2
+Zv @ bundle.js:2
+uploadFiles @ bundle.js:2
+(anonymous) @ bundle.js:2
+(anonymous) @ bundle.js:2
+ly @ bundle.js:2
+handleSaveAndCreateDocuments @ bundle.js:2
+(anonymous) @ bundle.js:2
+bundle.js:2  [UniversalQuickCreate][MultiFileUploadService] Failed to process file: A MRT.P0046WO01_US2024039292-IASR.pdf Error: Failed to create Dataverse record
+    at ey.<anonymous> (bundle.js:2:552151)
+    at Generator.next (<anonymous>)
+    at a (bundle.js:2:549908)
+error @ bundle.js:2
+(anonymous) @ bundle.js:2
+a @ bundle.js:2
+Promise.then
+s @ bundle.js:2
+a @ bundle.js:2
+Promise.then
+s @ bundle.js:2
+(anonymous) @ bundle.js:2
+Zv @ bundle.js:2
+handleSyncParallelUpload @ bundle.js:2
+(anonymous) @ bundle.js:2
+(anonymous) @ bundle.js:2
+Zv @ bundle.js:2
+uploadFiles @ bundle.js:2
+(anonymous) @ bundle.js:2
+(anonymous) @ bundle.js:2
+ly @ bundle.js:2
+handleSaveAndCreateDocuments @ bundle.js:2
+(anonymous) @ bundle.js:2
+bundle.js:2 [UniversalQuickCreate][UniversalQuickCreatePCF] renderReactComponent called {hasReactRoot: true, isUploading: true}
+bundle.js:2 [UniversalQuickCreate][UniversalQuickCreatePCF] Rendering UploadProgress component
+bundle.js:2 [UniversalQuickCreate][MultiFileUploadService] Processing file 2/2 {fileName: 'B MRT.P0046WO01_WO2025024521-DECLA-20250130-5048.pdf', uploadStatus: 'fulfilled'}
+bundle.js:2 [UniversalQuickCreate][UniversalQuickCreatePCF] renderReactComponent called {hasReactRoot: true, isUploading: true}
+bundle.js:2 [UniversalQuickCreate][UniversalQuickCreatePCF] Rendering UploadProgress component
+bundle.js:2 [UniversalQuickCreate][DataverseRecordService] Creating document record {fileName: 'B MRT.P0046WO01_WO2025024521-DECLA-20250130-5048.pdf', driveItemId: '01LBYCMXZ45AZCIR5AFFAKG63JJQDGGRED', parentEntityName: 'sprk_matter', parentRecordId: '3A785F76-C773-F011-B4CB-6045BDD8B757'}
+bundle.js:2 [UniversalQuickCreate][DataverseRecordService] Building record data {uniqueFileName: 'B MRT.P0046WO01_WO2025024521-DECLA-20250130-5048.pdf', formDataKeys: Array(3), formDataDocName: undefined, speMetadata: {…}}
+bundle.js:2 [UniversalQuickCreate][DataverseRecordService] [DEBUG] Record data AFTER spreading formData {documentName: 'B MRT.P0046WO01_WO2025024521-DECLA-20250130-5048.pdf', fileName: 'B MRT.P0046WO01_WO2025024521-DECLA-20250130-5048.pdf', graphItemId: '01LBYCMXZ45AZCIR5AFFAKG63JJQDGGRED', allKeys: Array(7), fullRecordData: '{\n  "sprk_driveitemid": "b!yLRdWEOAdkaWXskuRfByIRi…LA-20250130-5048.pdf",\n  "sprk_filesize": 23679\n}'}
+bundle.js:2 [UniversalQuickCreate][DataverseRecordService] [DEBUG] Lookup field resolution {parentEntityName: 'sprk_matter', lookupFieldName: 'sprk_matter', lookupFieldExistsInData: false, lookupFieldValue: undefined}
+bundle.js:2 [UniversalQuickCreate][DataverseRecordService] [DEBUG] BEFORE cleanup - keys containing lookup field {lookupFieldName: 'sprk_matter', keysWithLookup: Array(0)}
+bundle.js:2 [UniversalQuickCreate][DataverseRecordService] [DEBUG] AFTER cleanup - remaining keys {allKeys: Array(7)}
+bundle.js:2 [UniversalQuickCreate][DataverseRecordService] [DEBUG] Parent relationship configured {lookupFieldName: 'sprk_matter', entitySetName: 'sprk_matters', parentRecordId: '3A785F76-C773-F011-B4CB-6045BDD8B757', odataBindKey: 'sprk_matter@odata.bind', odataBindValue: '/sprk_matters(3A785F76-C773-F011-B4CB-6045BDD8B757)'}
+bundle.js:2 [UniversalQuickCreate][DataverseRecordService] [DEBUG] FINAL PAYLOAD being sent to Dataverse {entityName: 'sprk_document', allKeys: Array(8), fullPayload: '{\n  "sprk_driveitemid": "b!yLRdWEOAdkaWXskuRfByIRi…_matters(3A785F76-C773-F011-B4CB-6045BDD8B757)"\n}'}
+bundle.js:2 [UniversalQuickCreate][DataverseRecordService] Waiting for createRecord to complete...
+app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28   POST https://spaarkedev1.crm.dynamics.com/api/data/v9.0/sprk_documents 400 (Bad Request)
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28
+o @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28
+Promise.then
+c @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28
+m @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28
+e.fetch @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28
+execute @ 43.67d5fe35a32a7607eb3b38aea0157f6e.js:4
+intercept @ 43.67d5fe35a32a7607eb3b38aea0157f6e.js:4
+await in intercept
+proceed @ 43.67d5fe35a32a7607eb3b38aea0157f6e.js:4
+executeWithPolicy @ 43.67d5fe35a32a7607eb3b38aea0157f6e.js:4
+await in executeWithPolicy
+intercept @ 43.67d5fe35a32a7607eb3b38aea0157f6e.js:4
+proceed @ 43.67d5fe35a32a7607eb3b38aea0157f6e.js:4
+intercept @ 43.67d5fe35a32a7607eb3b38aea0157f6e.js:4
+proceed @ 43.67d5fe35a32a7607eb3b38aea0157f6e.js:4
+intercept @ 43.67d5fe35a32a7607eb3b38aea0157f6e.js:4
+proceed @ 43.67d5fe35a32a7607eb3b38aea0157f6e.js:4
+intercept @ 43.67d5fe35a32a7607eb3b38aea0157f6e.js:4
+proceed @ 43.67d5fe35a32a7607eb3b38aea0157f6e.js:4
+execute @ 43.67d5fe35a32a7607eb3b38aea0157f6e.js:4
+execute @ 43.67d5fe35a32a7607eb3b38aea0157f6e.js:4
+Na @ 84.eac76cad5ea7965d8b261c971081f8ab.js:4
+await in Na
+La @ 84.eac76cad5ea7965d8b261c971081f8ab.js:4
+execute @ 84.eac76cad5ea7965d8b261c971081f8ab.js:4
+await in execute
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_executeAsyncAction @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_executeAsync @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+executeAction @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+t.dispatch @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_executeODataViaMDL @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:33
+await in _executeODataViaMDL
+executeOData @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:33
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+Promise.then
+execute @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_executeAsyncAction @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_executeAsync @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+executeAction @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+t.dispatch @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+dispatch @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_execute.name @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_executeInternal @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+executeAsync @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_execute @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+createRecord @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_clientApiExecutor.executeAsync.name @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+await in _clientApiExecutor.executeAsync.name
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_executeInternal @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+executeAsync @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+createRecord @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28
+a @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+createRecord @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28
+createRecord @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:33
+createRecord @ 26.b67401f7dc3eb94ecef6363e3475c0dc.js:4
+o @ bundle.js:2
+(anonymous) @ bundle.js:2
+createDocument @ bundle.js:2
+(anonymous) @ bundle.js:2
+a @ bundle.js:2
+Promise.then
+s @ bundle.js:2
+a @ bundle.js:2
+Promise.then
+s @ bundle.js:2
+(anonymous) @ bundle.js:2
+Zv @ bundle.js:2
+handleSyncParallelUpload @ bundle.js:2
+(anonymous) @ bundle.js:2
+(anonymous) @ bundle.js:2
+Zv @ bundle.js:2
+uploadFiles @ bundle.js:2
+(anonymous) @ bundle.js:2
+(anonymous) @ bundle.js:2
+ly @ bundle.js:2
+handleSaveAndCreateDocuments @ bundle.js:2
+(anonymous) @ bundle.js:2
+app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28  [storage] Error Messages: 
+1: Error identified in Payload provided by the user for Entity :'sprk_documents', For more information on this error please follow this help link https://go.microsoft.com/fwlink/?linkid=2195293  ---->  InnerException : Microsoft.OData.ODataException: An undeclared property 'sprk_matter' which only has property annotations in the payload but no property value was found in the payload. In OData, only declared navigation properties and declared named streams can be represented as properties without values.
+   at Microsoft.OData.JsonLight.ODataJsonLightResourceDeserializer.ReadUndeclaredProperty(IODataJsonLightReaderResourceState resourceState, String propertyName, Boolean propertyWithValue)
+   at Microsoft.OData.JsonLight.ODataJsonLightResourceDeserializer.ReadPropertyWithoutValue(IODataJsonLightReaderResourceState resourceState, String propertyName)
+   at Microsoft.OData.JsonLight.ODataJsonLightResourceDeserializer.<>c__DisplayClass9_0.<ReadResourceContent>b__0(PropertyParsingResult propertyParsingResult, String propertyName)
+   at Microsoft.OData.JsonLight.ODataJsonLightDeserializer.ProcessProperty(PropertyAndAnnotationCollector propertyAndAnnotationCollector, Func`2 readPropertyAnnotationValue, Action`2 handleProperty)
+   at Microsoft.OData.JsonLight.ODataJsonLightResourceDeserializer.ReadResourceContent(IODataJsonLightReaderResourceState resourceState)
+   at Microsoft.OData.JsonLight.ODataJsonLightReader.StartReadingResource()
+   at Microsoft.OData.JsonLight.ODataJsonLightReader.ReadResourceSetItemStart(PropertyAndAnnotationCollector propertyAndAnnotationCollector, SelectedPropertiesNode selectedProperties)
+   at Microsoft.OData.JsonLight.ODataJsonLightReader.ReadAtStartImplementationSynchronously(PropertyAndAnnotationCollector propertyAndAnnotationCollector)
+   at Microsoft.OData.ODataReaderCore.ReadImplementation()
+   at Microsoft.OData.ODataReaderCore.InterceptException[T](Func`1 action)
+   at Microsoft.AspNet.OData.Formatter.Deserialization.ODataReaderExtensions.ReadResourceOrResourceSet(ODataReader reader)
+   at Microsoft.Crm.Extensibility.CrmODataEntityDeserializer.Read(ODataMessageReader messageReader, Type type, ODataDeserializerContext readContext)
+   at Microsoft.AspNet.OData.Formatter.ODataInputFormatterHelper.ReadFromStream(Type type, Object defaultValue, IEdmModel model, ODataVersion version, Uri baseAddress, IWebApiRequestMessage internalRequest, Func`1 getODataRequestMessage, Func`2 getEdmTypeDeserializer, Func`2 getODataPayloadDeserializer, Func`1 getODataDeserializerContext, Action`1 registerForDisposeAction, Action`1 logErrorAction).
+
+    at K (https://content.powerapps.com/resource/uci-infra-web/scripts/app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28:282583)
+    at new p (https://content.powerapps.com/resource/uci-infra-web/scripts/app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14:1199529)
+    at $a (https://content.powerapps.com/resource/uci-infra-web/scripts/84.eac76cad5ea7965d8b261c971081f8ab.js:4:56454)
+    at https://content.powerapps.com/resource/uci-infra-web/scripts/84.eac76cad5ea7965d8b261c971081f8ab.js:4:51897
+    at new Promise (<anonymous>)
+Call stack hash: 1213
+u @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28
+ae @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28
+K @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28
+p @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+$a @ 84.eac76cad5ea7965d8b261c971081f8ab.js:4
+(anonymous) @ 84.eac76cad5ea7965d8b261c971081f8ab.js:4
+Ua @ 84.eac76cad5ea7965d8b261c971081f8ab.js:4
+(anonymous) @ 84.eac76cad5ea7965d8b261c971081f8ab.js:4
+await in (anonymous)
+La @ 84.eac76cad5ea7965d8b261c971081f8ab.js:4
+await in La
+execute @ 84.eac76cad5ea7965d8b261c971081f8ab.js:4
+await in execute
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_executeAsyncAction @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_executeAsync @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+executeAction @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+t.dispatch @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_executeODataViaMDL @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:33
+await in _executeODataViaMDL
+executeOData @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:33
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+Promise.then
+execute @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_executeAsyncAction @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_executeAsync @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+executeAction @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+t.dispatch @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+dispatch @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_execute.name @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_executeInternal @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+executeAsync @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_execute @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+createRecord @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_clientApiExecutor.executeAsync.name @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+await in _clientApiExecutor.executeAsync.name
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+_executeInternal @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+executeAsync @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+createRecord @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+(anonymous) @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28
+a @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:14
+createRecord @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:28
+createRecord @ app.6dce24e2ba8df27fafe80d5dc269e4f3.js:33
+createRecord @ 26.b67401f7dc3eb94ecef6363e3475c0dc.js:4
+o @ bundle.js:2
+(anonymous) @ bundle.js:2
+createDocument @ bundle.js:2
+(anonymous) @ bundle.js:2
+a @ bundle.js:2
+Promise.then
+s @ bundle.js:2
+a @ bundle.js:2
+Promise.then
+s @ bundle.js:2
+(anonymous) @ bundle.js:2
+Zv @ bundle.js:2
+handleSyncParallelUpload @ bundle.js:2
+(anonymous) @ bundle.js:2
+(anonymous) @ bundle.js:2
+Zv @ bundle.js:2
+uploadFiles @ bundle.js:2
+(anonymous) @ bundle.js:2
+(anonymous) @ bundle.js:2
+ly @ bundle.js:2
+handleSaveAndCreateDocuments @ bundle.js:2
+(anonymous) @ bundle.js:2
+bundle.js:2  [UniversalQuickCreate][DataverseRecordService] Failed to create document record {errorCode: 2147781913, message: 'Error identified in Payload provided by the user f…gisterForDisposeAction, Action`1 logErrorAction).', code: 2147781913, title: '', raw: '{"errorCode":2147781913,"message":"Error identifie…d\\":\\"ef008b11-aae0-4206-aa80-ddccefd2cf5d\\"}}}"}'}
+error @ bundle.js:2
+o @ bundle.js:2
+c @ bundle.js:2
+Promise.then
+s @ bundle.js:2
+(anonymous) @ bundle.js:2
+createDocument @ bundle.js:2
+(anonymous) @ bundle.js:2
+a @ bundle.js:2
+Promise.then
+s @ bundle.js:2
+a @ bundle.js:2
+Promise.then
+s @ bundle.js:2
+(anonymous) @ bundle.js:2
+Zv @ bundle.js:2
+handleSyncParallelUpload @ bundle.js:2
+(anonymous) @ bundle.js:2
+(anonymous) @ bundle.js:2
+Zv @ bundle.js:2
+uploadFiles @ bundle.js:2
+(anonymous) @ bundle.js:2
+(anonymous) @ bundle.js:2
+ly @ bundle.js:2
+handleSaveAndCreateDocuments @ bundle.js:2
+(anonymous) @ bundle.js:2
+bundle.js:2  [UniversalQuickCreate][MultiFileUploadService] Failed to process file: B MRT.P0046WO01_WO2025024521-DECLA-20250130-5048.pdf Error: Failed to create Dataverse record
+    at ey.<anonymous> (bundle.js:2:552151)
+    at Generator.next (<anonymous>)
+    at a (bundle.js:2:549908)
+error @ bundle.js:2
+(anonymous) @ bundle.js:2
+a @ bundle.js:2
+Promise.then
+s @ bundle.js:2
+a @ bundle.js:2
+Promise.then
+s @ bundle.js:2
+a @ bundle.js:2
+Promise.then
+s @ bundle.js:2
+(anonymous) @ bundle.js:2
+Zv @ bundle.js:2
+handleSyncParallelUpload @ bundle.js:2
+(anonymous) @ bundle.js:2
+(anonymous) @ bundle.js:2
+Zv @ bundle.js:2
+uploadFiles @ bundle.js:2
+(anonymous) @ bundle.js:2
+(anonymous) @ bundle.js:2
+ly @ bundle.js:2
+handleSaveAndCreateDocuments @ bundle.js:2
+(anonymous) @ bundle.js:2
+bundle.js:2 [UniversalQuickCreate][UniversalQuickCreatePCF] renderReactComponent called {hasReactRoot: true, isUploading: true}
+bundle.js:2 [UniversalQuickCreate][UniversalQuickCreatePCF] Rendering UploadProgress component
+bundle.js:2 [UniversalQuickCreate][MultiFileUploadService] Sync-parallel upload complete {success: false, totalFiles: 2, successCount: 0, failureCount: 2, documentRecordIds: Array(0), …}
+bundle.js:2  [UniversalQuickCreate][UniversalQuickCreatePCF] Upload failed (2) [{…}, {…}]
+error @ bundle.js:2
+(anonymous) @ bundle.js:2
+a @ bundle.js:2
+Promise.then
+s @ bundle.js:2
+(anonymous) @ bundle.js:2
+ly @ bundle.js:2
+handleSaveAndCreateDocuments @ bundle.js:2
+(anonymous) @ bundle.js:2
+bundle.js:2 [UniversalQuickCreate][UniversalQuickCreatePCF] renderReactComponent called {hasReactRoot: true, isUploading: false}
+bundle.js:2 [UniversalQuickCreate][UniversalQuickCreatePCF] Rendering FileUploadField component {allowMultiple: true}

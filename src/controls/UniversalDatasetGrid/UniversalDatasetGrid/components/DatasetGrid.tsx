@@ -71,8 +71,48 @@ export const DatasetGrid: React.FC<DatasetGridProps> = ({
             return [];
         }
 
-        return dataset.columns.map((column: ComponentFramework.PropertyHelper.DataSetApi.Column) =>
-            createTableColumn<GridRow>({
+        return dataset.columns.map((column: ComponentFramework.PropertyHelper.DataSetApi.Column) => {
+            // Special renderer for SharePoint URL column (sprk_filepath)
+            if (column.name === 'sprk_filepath') {
+                return createTableColumn<GridRow>({
+                    columnId: column.name as TableColumnId,
+                    compare: (a: GridRow, b: GridRow) => {
+                        const aVal = a[column.name]?.toString() || '';
+                        const bVal = b[column.name]?.toString() || '';
+                        return aVal.localeCompare(bVal);
+                    },
+                    renderHeaderCell: () => column.displayName,
+                    renderCell: (item: GridRow) => {
+                        const url = item[column.name]?.toString();
+
+                        // If no URL, show empty state
+                        if (!url) {
+                            return <TableCellLayout>-</TableCellLayout>;
+                        }
+
+                        // Render as clickable link
+                        return (
+                            <TableCellLayout>
+                                <a
+                                    href={url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    style={{
+                                        color: tokens.colorBrandForeground1,
+                                        textDecoration: 'none'
+                                    }}
+                                    onClick={(e) => e.stopPropagation()} // Prevent row selection
+                                >
+                                    Open in SharePoint
+                                </a>
+                            </TableCellLayout>
+                        );
+                    }
+                });
+            }
+
+            // Default renderer for all other columns
+            return createTableColumn<GridRow>({
                 columnId: column.name as TableColumnId,
                 compare: (a: GridRow, b: GridRow) => {
                     const aVal = a[column.name]?.toString() || '';
@@ -89,8 +129,8 @@ export const DatasetGrid: React.FC<DatasetGridProps> = ({
                         </TableCellLayout>
                     );
                 }
-            })
-        );
+            });
+        });
     }, [dataset.columns]);
 
 

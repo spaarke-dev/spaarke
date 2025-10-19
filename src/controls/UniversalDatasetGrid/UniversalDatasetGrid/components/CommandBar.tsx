@@ -54,28 +54,53 @@ export const CommandBar: React.FC<CommandBarProps> = ({
     onCommandExecute,
     onRefresh
 }) => {
+    console.log('[CommandBar] Component rendering', {
+        selectedRecordIds,
+        selectedRecordCount: selectedRecordIds.length,
+        selectedRecordsCount: selectedRecords.length
+    });
+
     const selectedCount = selectedRecordIds.length;
     const selectedRecord = selectedCount === 1 ? selectedRecords[0] : null;
 
     // Get hasFile status from the selected record
-    const hasFile = selectedRecord
-        ? (selectedRecord.getValue(config.fieldMappings.hasFile) as boolean) === true
-        : false;
+    const hasFileValue = selectedRecord?.getValue(config.fieldMappings.hasFile);
+    const hasFile = hasFileValue === true || hasFileValue === 1 || hasFileValue === '1';
+
+    // Debug logging
+    if (selectedRecord) {
+        console.log('[CommandBar] Selected record debug:', {
+            recordId: selectedRecord.getRecordId(),
+            hasFileFieldName: config.fieldMappings.hasFile,
+            hasFileRawValue: hasFileValue,
+            hasFileResult: hasFile
+        });
+    }
 
     return (
-        <Toolbar
-            aria-label="File operations toolbar"
-            style={{
-                borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
-                padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`
-            }}
-        >
+        <div>
+            <div style={{
+                backgroundColor: 'red',
+                color: 'white',
+                padding: '10px',
+                fontSize: '20px',
+                fontWeight: 'bold'
+            }}>
+                🔴 VERSION 2.1.4 - BFF API SCOPE FIXED 🔴
+            </div>
+            <Toolbar
+                aria-label="File operations toolbar"
+                style={{
+                    borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
+                    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`
+                }}
+            >
             {/* Add File Button */}
             <Tooltip content="Upload a file to the selected document" relationship="label">
                 <ToolbarButton
                     appearance="primary"
                     icon={<Add24Regular />}
-                    disabled={selectedCount !== 1 || hasFile}
+                    disabled={false}
                     onClick={() => onCommandExecute('addFile')}
                 >
                     Add File
@@ -88,7 +113,7 @@ export const CommandBar: React.FC<CommandBarProps> = ({
             <Tooltip content="Delete the file from the selected document" relationship="label">
                 <ToolbarButton
                     icon={<Delete24Regular />}
-                    disabled={selectedCount !== 1 || !hasFile}
+                    disabled={false}
                     onClick={() => onCommandExecute('removeFile')}
                 >
                     Remove File
@@ -99,7 +124,7 @@ export const CommandBar: React.FC<CommandBarProps> = ({
             <Tooltip content="Replace the file in the selected document" relationship="label">
                 <ToolbarButton
                     icon={<ArrowUpload24Regular />}
-                    disabled={selectedCount !== 1 || !hasFile}
+                    disabled={false}
                     onClick={() => onCommandExecute('updateFile')}
                 >
                     Update File
@@ -110,7 +135,7 @@ export const CommandBar: React.FC<CommandBarProps> = ({
             <Tooltip content="Download the selected file(s)" relationship="label">
                 <ToolbarButton
                     icon={<ArrowDownload24Regular />}
-                    disabled={selectedCount === 0 || (selectedRecord !== null && !hasFile)}
+                    disabled={false}
                     onClick={() => onCommandExecute('downloadFile')}
                 >
                     Download
@@ -142,6 +167,7 @@ export const CommandBar: React.FC<CommandBarProps> = ({
                 {selectedCount > 0 ? `${selectedCount} selected` : '\u00A0'}
             </div>
         </Toolbar>
+        </div>
     );
 };
 

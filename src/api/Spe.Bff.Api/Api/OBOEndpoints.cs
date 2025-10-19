@@ -52,6 +52,7 @@ public static class OBOEndpoints
         app.MapPut("/api/obo/containers/{id}/files/{*path}", async (
             string id, string path, HttpRequest req, HttpContext ctx,
             [FromServices] SpeFileStore speFileStore,
+            [FromServices] ILogger<Program> logger,
             CancellationToken ct) =>
         {
             var (ok, err) = ValidatePathForOBO(path);
@@ -59,19 +60,34 @@ public static class OBOEndpoints
 
             try
             {
+                logger.LogInformation("OBO upload starting - Container: {ContainerId}, Path: {Path}", id, path);
+
                 var userToken = TokenHelper.ExtractBearerToken(ctx);
 
                 // Stream directly to Graph SDK (no memory buffering)
                 var item = await speFileStore.UploadSmallAsUserAsync(userToken, id, path, req.Body, ct);
+
+                logger.LogInformation("OBO upload successful - DriveItemId: {ItemId}", item?.Id);
                 return item is null ? TypedResults.NotFound() : TypedResults.Ok(item);
             }
-            catch (UnauthorizedAccessException)
+            catch (UnauthorizedAccessException ex)
             {
+                logger.LogError(ex, "OBO upload unauthorized");
                 return TypedResults.Unauthorized();
             }
             catch (ServiceException ex)
             {
+                logger.LogError(ex, "OBO upload failed - Graph API error: {Message}", ex.Message);
                 return ProblemDetailsHelper.FromGraphException(ex);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "OBO upload failed - Unexpected error: {Message}", ex.Message);
+                return TypedResults.Problem(
+                    title: "Upload failed",
+                    detail: $"An unexpected error occurred: {ex.Message}",
+                    statusCode: 500
+                );
             }
         }).RequireRateLimiting("graph-write");
 

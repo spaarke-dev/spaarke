@@ -124,7 +124,7 @@ export const DEFAULT_GRID_CONFIG: GridConfiguration = {
         }
     ],
     sdapConfig: {
-        baseUrl: 'https://spe-bff-api.azurewebsites.net',
+        baseUrl: 'https://spe-api-dev-67e2xz.azurewebsites.net',
         timeout: 300000 // 5 minutes
     }
 };
@@ -141,4 +141,126 @@ export interface CommandContext {
 
     /** Selected record IDs */
     selectedRecordIds: string[];
+}
+
+/**
+ * SDAP-specific type definitions for SharePoint Embedded operations
+ */
+
+/**
+ * SPE File Metadata returned from SDAP API (matches FileHandleDto from Spe.Bff.Api)
+ *
+ * Maps to Dataverse fields:
+ * - id → sprk_graphitemid
+ * - name → sprk_filename
+ * - size → sprk_filesize
+ * - createdDateTime → sprk_createddatetime
+ * - lastModifiedDateTime → sprk_lastmodifieddatetime
+ * - eTag → sprk_etag
+ * - parentId → sprk_parentfolderid
+ * - webUrl → sprk_filepath (URL field)
+ */
+export interface SpeFileMetadata {
+    /** Graph API Item ID */
+    id: string;
+
+    /** File name */
+    name: string;
+
+    /** Parent folder ID (optional) */
+    parentId?: string;
+
+    /** File size in bytes */
+    size: number;
+
+    /** Created date/time (ISO 8601) */
+    createdDateTime: string;
+
+    /** Last modified date/time (ISO 8601) */
+    lastModifiedDateTime: string;
+
+    /** Version identifier (ETag) */
+    eTag?: string;
+
+    /** Is this a folder */
+    isFolder: boolean;
+
+    /** SharePoint web URL (may not be available in all responses) */
+    webUrl?: string;
+}
+
+/**
+ * File upload request parameters
+ * API: PUT /api/drives/{driveId}/upload?fileName={name}
+ */
+export interface FileUploadRequest {
+    /** File to upload */
+    file: File;
+
+    /** Graph API Drive ID (from sprk_graphdriveid or Container) */
+    driveId: string;
+
+    /** File name */
+    fileName: string;
+}
+
+/**
+ * File download request parameters
+ * API: GET /api/drives/{driveId}/items/{itemId}/content
+ */
+export interface FileDownloadRequest {
+    /** Graph API Drive ID (from sprk_graphdriveid) */
+    driveId: string;
+
+    /** Graph API Item ID (from sprk_graphitemid) */
+    itemId: string;
+}
+
+/**
+ * File delete request parameters
+ * API: DELETE /api/drives/{driveId}/items/{itemId}
+ */
+export interface FileDeleteRequest {
+    /** Graph API Drive ID (from sprk_graphdriveid) */
+    driveId: string;
+
+    /** Graph API Item ID (from sprk_graphitemid) */
+    itemId: string;
+}
+
+/**
+ * File replace request parameters
+ * Replace = Delete existing + Upload new
+ */
+export interface FileReplaceRequest {
+    /** New file to upload */
+    file: File;
+
+    /** Graph API Drive ID (from sprk_graphdriveid) */
+    driveId: string;
+
+    /** Graph API Item ID of file to replace (from sprk_graphitemid) */
+    itemId: string;
+
+    /** New file name */
+    fileName: string;
+}
+
+/**
+ * API Response wrapper
+ */
+export interface ApiResponse<T> {
+    success: boolean;
+    data?: T;
+    error?: string;
+    details?: string;
+}
+
+/**
+ * Service operation result
+ */
+export interface ServiceResult<T = void> {
+    success: boolean;
+    data?: T;
+    error?: string;
 }

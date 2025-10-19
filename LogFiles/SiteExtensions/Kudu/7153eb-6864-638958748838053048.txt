@@ -1,0 +1,18 @@
+2025-10-12T14:08:00  PID[6864] Information Unpacking resources...
+2025-10-12T14:08:01  PID[6864] Information 10-12 14:07:58 Information: Executing Application Insights Profiler agent version 2.6.2201.2106 with arguments: 
+2025-10-12T14:08:02  PID[6864] Information 10-12 14:07:59 Information: Minimum version enabled on machine: 1.0.0
+2025-10-12T14:08:03  PID[6864] Error       Thread was being aborted.
+2025-10-12T14:08:03  PID[6864] Information 10-12 14:07:59 Information: Applying logging level: Information
+2025-10-12T14:08:03  PID[6864] Information 10-12 14:07:59 Information: Applying logging level: Information
+2025-10-12T14:08:03  PID[6864] Information 10-12 14:07:59 Information: Instrumentation key: 09a9beed-0dcd-4aad-84bb-3696372ed5d1
+2025-10-12T14:08:03  PID[6864] Information 10-12 14:07:59 Information: Application Insights Profiler endpoint: https://profiler.monitor.azure.com/
+2025-10-12T14:08:03  PID[6864] Information 10-12 14:07:59 Information: Application Insights endpoint: https://westus2-2.in.applicationinsights.azure.com/v2/track/
+2025-10-12T14:08:03  PID[6864] Information 10-12 14:07:59 Information: Runtime Environment: Antares
+2025-10-12T14:08:03  PID[6864] Information 10-12 14:07:59 Information: Support files: C:\local\Temp\jobs\continuous\ApplicationInsightsProfiler3\evehcu1d.obx\spsupport
+2025-10-12T14:08:03  PID[6864] Information 10-12 14:07:59 Information: Providing usage data (to opt out set the AppSettings ApplicationInsightsProvideUsageTelemetryData with the value "false"): True
+2025-10-12T14:08:03  PID[6864] Information 10-12 14:07:59 Information: Engine mode: Sampling
+2025-10-12T14:08:03  PID[6864] Information 10-12 14:08:01 Information: Application Insights AppId: 6a76b012-46d9-412f-b4ab-4905658a9559
+2025-10-12T14:08:03  PID[6864] Information 10-12 14:08:01 Information: Press 'Ctrl+C' to exit Application Insights Profiler.
+2025-10-12T14:08:03  PID[6864] Information 10-12 14:08:01 Information: Set up shutdown handler.
+2025-10-12T14:08:03  PID[6864] Information 10-12 14:08:01 Information: Shutdown handler set to watch C:\local\Temp\JobsShutdown\continuous\ApplicationInsightsProfiler3\fbuwomaj.zn0.
+2025-10-12T14:08:03  PID[6864] Information 10-12 14:08:01 Information: Starting main process

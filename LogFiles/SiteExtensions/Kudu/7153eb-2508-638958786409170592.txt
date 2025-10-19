@@ -1,0 +1,21 @@
+2025-10-12T15:10:22  PID[2508] Information Unpacking resources...
+2025-10-12T15:10:24  PID[2508] Information 10-12 15:10:24 Information: Executing Application Insights Profiler agent version 2.6.2201.2106 with arguments: 
+2025-10-12T15:10:24  PID[2508] Information 10-12 15:10:24 Information: Minimum version enabled on machine: 1.0.0
+2025-10-12T15:10:24  PID[2508] Information 10-12 15:10:24 Information: Applying logging level: Information
+2025-10-12T15:10:24  PID[2508] Information 10-12 15:10:24 Information: Instrumentation key: 09a9beed-0dcd-4aad-84bb-3696372ed5d1
+2025-10-12T15:10:24  PID[2508] Information 10-12 15:10:24 Information: Application Insights Profiler endpoint: https://profiler.monitor.azure.com/
+2025-10-12T15:10:24  PID[2508] Information 10-12 15:10:24 Information: Application Insights endpoint: https://westus2-2.in.applicationinsights.azure.com/v2/track/
+2025-10-12T15:10:24  PID[2508] Information 10-12 15:10:24 Information: Runtime Environment: Antares
+2025-10-12T15:10:24  PID[2508] Information 10-12 15:10:24 Information: Support files: C:\local\Temp\jobs\continuous\ApplicationInsightsProfiler3\3fzfgdrp.xad\spsupport
+2025-10-12T15:10:24  PID[2508] Information 10-12 15:10:24 Information: Providing usage data (to opt out set the AppSettings ApplicationInsightsProvideUsageTelemetryData with the value "false"): True
+2025-10-12T15:10:24  PID[2508] Information 10-12 15:10:24 Information: Engine mode: Sampling
+2025-10-12T15:10:27  PID[2508] Information 10-12 15:10:27 Information: Application Insights AppId: 6a76b012-46d9-412f-b4ab-4905658a9559
+2025-10-12T15:10:27  PID[2508] Information 10-12 15:10:27 Information: Press 'Ctrl+C' to exit Application Insights Profiler.
+2025-10-12T15:10:27  PID[2508] Information 10-12 15:10:27 Information: Set up shutdown handler.
+2025-10-12T15:10:27  PID[2508] Information 10-12 15:10:27 Information: Shutdown handler set to watch C:\local\Temp\JobsShutdown\continuous\ApplicationInsightsProfiler3\dkfnmciz.diy.
+2025-10-12T15:10:27  PID[2508] Information 10-12 15:10:27 Information: Starting main process
+2025-10-12T15:10:31  PID[2508] Information 10-12 15:10:31 Critical: Settings have been set from Engine
+2025-10-12T15:10:33  PID[2508] Information 10-12 15:10:33 Critical: Settings contract has been updated
+2025-10-12T15:10:33  PID[2508] Information 10-12 15:10:33 Critical: Enabled has been set to True
+2025-10-12T15:52:02  PID[2508] Information 10-12 15:52:02 Information: Received shutdown request.
+2025-10-12T15:52:08  PID[2508] Error       Thread was being aborted.

@@ -32,20 +32,25 @@ public class DataverseWebApiService : IDataverseService
         _logger = logger;
 
         var dataverseUrl = configuration["Dataverse:ServiceUrl"];
-        var managedIdentityClientId = configuration["ManagedIdentity:ClientId"];
+        var tenantId = configuration["TENANT_ID"];
+        var clientId = configuration["API_APP_ID"];
+        var clientSecret = configuration["Dataverse:ClientSecret"];
 
         if (string.IsNullOrEmpty(dataverseUrl))
             throw new InvalidOperationException("Dataverse:ServiceUrl configuration is required");
 
-        if (string.IsNullOrEmpty(managedIdentityClientId))
-            throw new InvalidOperationException("ManagedIdentity:ClientId configuration is required");
+        if (string.IsNullOrEmpty(tenantId))
+            throw new InvalidOperationException("TENANT_ID configuration is required");
+
+        if (string.IsNullOrEmpty(clientId))
+            throw new InvalidOperationException("API_APP_ID configuration is required");
+
+        if (string.IsNullOrEmpty(clientSecret))
+            throw new InvalidOperationException("Dataverse:ClientSecret configuration is required");
 
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2";
 
-        _credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions
-        {
-            ManagedIdentityClientId = managedIdentityClientId
-        });
+        _credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
 
         _httpClient.BaseAddress = new Uri(_apiUrl);
         _httpClient.DefaultRequestHeaders.Add("OData-MaxVersion", "4.0");
@@ -223,22 +228,14 @@ public class DataverseWebApiService : IDataverseService
 
     public async Task<bool> TestConnectionAsync()
     {
-        try
-        {
-            await EnsureAuthenticatedAsync();
+        await EnsureAuthenticatedAsync();
 
-            // Simple WhoAmI request
-            var response = await _httpClient.GetAsync("WhoAmI");
-            response.EnsureSuccessStatusCode();
+        // Simple WhoAmI request
+        var response = await _httpClient.GetAsync("WhoAmI");
+        response.EnsureSuccessStatusCode();
 
-            _logger.LogInformation("Dataverse connection test successful");
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Dataverse connection test failed");
-            return false;
-        }
+        _logger.LogInformation("Dataverse connection test successful");
+        return true;
     }
 
     public async Task<bool> TestDocumentOperationsAsync()

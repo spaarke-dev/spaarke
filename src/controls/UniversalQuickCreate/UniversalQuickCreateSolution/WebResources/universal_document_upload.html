@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quick Create: Document</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif;
+            background: #ffffff;
+        }
+
+        #pcf-container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+        }
+
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            font-size: 16px;
+            color: #605e5c;
+        }
+
+        #error {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            padding: 20px;
+            max-width: 500px;
+        }
+
+        #error.show {
+            display: block;
+        }
+
+        .error-icon {
+            font-size: 48px;
+            color: #a4262c;
+            margin-bottom: 16px;
+        }
+
+        .error-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: #323130;
+            margin-bottom: 8px;
+        }
+
+        .error-message {
+            font-size: 14px;
+            color: #605e5c;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+    <div id="pcf-container">
+        <div id="loading">Loading Universal Document Upload...</div>
+        <div id="error">
+            <div class="error-icon">⚠️</div>
+            <div class="error-title">Unable to Load Control</div>
+            <div class="error-message" id="error-message">
+                The PCF control could not be initialized. Please check the browser console for details.
+            </div>
+        </div>
+    </div>
+
+    <script>
+        (function() {
+            'use strict';
+
+            console.log('[PCF Host] Initializing Universal Document Upload HTML host...');
+
+            // Parse URL parameters
+            function getUrlParameter(name) {
+                const urlParams = new URLSearchParams(window.location.search);
+                return urlParams.get(name) || urlParams.get('data-' + name);
+            }
+
+            // Get parameters from URL
+            const parentEntityName = getUrlParameter('parentEntityName');
+            const parentRecordId = getUrlParameter('parentRecordId');
+            const containerId = getUrlParameter('containerId');
+            const parentDisplayName = getUrlParameter('parentDisplayName') || parentEntityName;
+
+            console.log('[PCF Host] Parameters:', {
+                parentEntityName,
+                parentRecordId,
+                containerId,
+                parentDisplayName
+            });
+
+            // Validate required parameters
+            if (!parentEntityName || !parentRecordId || !containerId) {
+                console.error('[PCF Host] Missing required parameters');
+                showError('Missing required parameters. Please ensure parentEntityName, parentRecordId, and containerId are provided.');
+                return;
+            }
+
+            // Initialize PCF Control
+            function initializePCFControl() {
+                try {
+                    // Wait for ComponentFramework to be available
+                    if (typeof ComponentFramework === 'undefined') {
+                        console.error('[PCF Host] ComponentFramework not available');
+                        showError('Power Apps Component Framework is not available. This page must be opened from within a Dataverse environment.');
+                        return;
+                    }
+
+                    console.log('[PCF Host] ComponentFramework available, initializing control...');
+
+                    // Get the container element
+                    const container = document.getElementById('pcf-container');
+
+                    // Hide loading message
+                    const loading = document.getElementById('loading');
+                    if (loading) {
+                        loading.style.display = 'none';
+                    }
+
+                    // Create a mock context for the PCF control
+                    const mockContext = {
+                        parameters: {
+                            parentEntityName: { raw: parentEntityName },
+                            parentRecordId: { raw: parentRecordId },
+                            containerId: { raw: containerId },
+                            parentDisplayName: { raw: parentDisplayName },
+                            sdapApiBaseUrl: { raw: 'spe-api-dev-67e2xz.azurewebsites.net/api' }
+                        },
+                        mode: {
+                            isControlDisabled: false,
+                            isVisible: true
+                        },
+                        utils: {
+                            getEntityMetadata: function() {
+                                return Promise.resolve({});
+                            }
+                        },
+                        webAPI: window.Xrm ? window.Xrm.WebApi : null,
+                        navigation: window.Xrm ? window.Xrm.Navigation : null,
+                        factory: {
+                            requestRender: function() {}
+                        }
+                    };
+
+                    // Load and initialize the PCF control
+                    // Note: The actual PCF control bundle is loaded by Dataverse
+                    console.log('[PCF Host] PCF control should initialize via Dataverse...');
+
+                    // The PCF control will be loaded and initialized by Dataverse's infrastructure
+                    // This HTML page serves as the host container
+
+                } catch (error) {
+                    console.error('[PCF Host] Error initializing PCF control:', error);
+                    showError('Failed to initialize control: ' + error.message);
+                }
+            }
+
+            function showError(message) {
+                const errorDiv = document.getElementById('error');
+                const errorMessage = document.getElementById('error-message');
+                const loading = document.getElementById('loading');
+
+                if (loading) {
+                    loading.style.display = 'none';
+                }
+
+                if (errorMessage) {
+                    errorMessage.textContent = message;
+                }
+
+                if (errorDiv) {
+                    errorDiv.classList.add('show');
+                }
+            }
+
+            // Wait for page to load
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', initializePCFControl);
+            } else {
+                initializePCFControl();
+            }
+
+            // Handle window close (for dialog scenarios)
+            window.addEventListener('beforeunload', function() {
+                console.log('[PCF Host] Page closing...');
+            });
+
+        })();
+    </script>
+</body>
+</html>

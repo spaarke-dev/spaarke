@@ -1,0 +1,18 @@
+2025-10-15T15:56:13
+System.Threading.ThreadAbortException: Thread was being aborted.
+   at Microsoft.Win32.Win32Native.WriteFile(SafeFileHandle handle, Byte* bytes, Int32 numBytesToWrite, Int32& numBytesWritten, IntPtr mustBeZero)
+   at System.IO.FileStream.WriteFileNative(SafeFileHandle handle, Byte[] bytes, Int32 offset, Int32 count, NativeOverlapped* overlapped, Int32& hr)
+   at System.IO.FileStream.WriteCore(Byte[] buffer, Int32 offset, Int32 count)
+   at System.IO.FileStream.FlushInternalBuffer()
+   at System.IO.FileStream.Flush(Boolean flushToDisk)
+   at System.IO.StreamWriter.Flush(Boolean flushStream, Boolean flushEncoder)
+   at System.IO.StreamWriter.Dispose(Boolean disposing)
+   at System.IO.StreamWriter.Close()
+   at Microsoft.WindowsAzure.WebSites.Diagnostics.AzureDriveTraceListener.ConsumeBuffer()
+   at Microsoft.WindowsAzure.WebSites.Diagnostics.BaseTraceListener.FlushBuffer(Boolean waitForCompletion)
+
+2025-10-15T15:56:13
+System.Threading.ThreadAbortException: Thread was being aborted.
+   at Microsoft.WindowsAzure.WebSites.Diagnostics.BaseTraceListener.FlushBuffer(Boolean waitForCompletion)
+   at Microsoft.WindowsAzure.WebSites.Diagnostics.BaseTraceListener.OnFlushBuffer(Object state)
+

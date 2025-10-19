@@ -1,0 +1,122 @@
+2025-10-12T14:20:35  PID[6632] Warning     Message='Exception thrown while getting types from 'Microsoft.Rest.ClientRuntime.Azure, Version=3.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35'.', Exception=System.Reflection.ReflectionTypeLoadException: Unable to load one or more of the requested types. Retrieve the LoaderExceptions property for more information.
+   at System.Reflection.RuntimeModule.GetTypes(RuntimeModule module)
+   at System.Reflection.RuntimeModule.GetTypes()
+   at System.Reflection.Assembly.GetTypes()
+   at System.Web.Http.Tracing.Tracers.DefaultHttpControllerTypeResolverTracer.GetTypesAndTrace(Assembly assembly)
+2025-10-12T14:20:36  PID[6632] Information 10/12/2025 2:20:36 PM [[4.8]] [DW0SDWK0005I2] DAAS Application_Start took 13922.546 ms
+2025-10-12T14:20:39  PID[6632] Information Request, Method=POST, Url=https://spe-api-dev-67e2xz.scm.azurewebsites.net/daas/sessions/list?api-version=2015-08-01, Message='https://spe-api-dev-67e2xz.scm.azurewebsites.net/daas/sessions/list?api-version=2015-08-01'
+2025-10-12T14:20:39  PID[6632] Information Message='Session', Operation=DefaultHttpControllerSelector.SelectController
+2025-10-12T14:20:40  PID[6632] Information Message='DiagnosticsExtension.Controllers.SessionController', Operation=DefaultHttpControllerActivator.Create
+2025-10-12T14:20:40  PID[6632] Information Message='DiagnosticsExtension.Controllers.SessionController', Operation=HttpControllerDescriptor.CreateController
+2025-10-12T14:20:40  PID[6632] Information 10/12/2025 2:20:40 PM [[4.8]] [DW0SDWK0005I2] Checking DaaS bits and updating if required
+2025-10-12T14:20:40  PID[6632] Information Message='Selected action 'ListSessions()'', Operation=ApiControllerActionSelector.SelectAction
+2025-10-12T14:20:40  PID[6632] Information Operation=HttpActionBinding.ExecuteBindingAsync
+2025-10-12T14:20:40  PID[6632] Information 10/12/2025 2:20:40 PM [[4.8]] [DW0SDWK0005I2] C:\home\site\Jobs\Continuous\DaaS\DaasRunner.exe does not exist, new bits will be copied
+2025-10-12T14:20:40  PID[6632] Information 10/12/2025 2:20:40 PM [[4.8]] [DW0SDWK0005I2] Copying file daasrunner.exe from C:\Program Files (x86)\SiteExtensions\DaaS\4.8.40625.1\bin\daasrunner.exe to C:\home\site\Jobs\Continuous\DaaS\DaasRunner.exe
+2025-10-12T14:20:40  PID[6632] Information 10/12/2025 2:20:40 PM [[4.8]] [DW0SDWK0005I2] File daasrunner.exe copied successfully
+2025-10-12T14:20:40  PID[6632] Information 10/12/2025 2:20:40 PM [[4.8]] [DW0SDWK0005I2] Copying file daasrunner.exe.config from C:\Program Files (x86)\SiteExtensions\DaaS\4.8.40625.1\bin\daasrunner.exe.config to C:\home\site\Jobs\Continuous\DaaS\DaasRunner.exe.config
+2025-10-12T14:20:40  PID[6632] Information 10/12/2025 2:20:40 PM [[4.8]] [DW0SDWK0005I2] File daasrunner.exe.config copied successfully
+2025-10-12T14:20:40  PID[6632] Information 10/12/2025 2:20:40 PM [[4.8]] [DW0SDWK0005I2] C:\home\data\DaaS\bin\DaasConsole.exe does not exist, new bits will be copied
+2025-10-12T14:20:40  PID[6632] Information 10/12/2025 2:20:40 PM [[4.8]] [DW0SDWK0005I2] Copying file daasconsole.exe from C:\Program Files (x86)\SiteExtensions\DaaS\4.8.40625.1\bin\daasconsole.exe to C:\home\data\DaaS\bin\DaasConsole.exe
+2025-10-12T14:20:41  PID[6632] Information Message='Action returned 'System.Web.Http.Results.OkNegotiatedContentResult`1[System.Collections.Generic.IEnumerable`1[DaaS.Sessions.Session]]'', Operation=ReflectedHttpActionDescriptor.ExecuteAsync
+2025-10-12T14:20:41  PID[6632] Information 10/12/2025 2:20:41 PM [[4.8]] [DW0SDWK0005I2] File daasconsole.exe copied successfully
+2025-10-12T14:20:41  PID[6632] Information 10/12/2025 2:20:41 PM [[4.8]] [DW0SDWK0005I2] Copying file daasconsole.exe.config from C:\Program Files (x86)\SiteExtensions\DaaS\4.8.40625.1\bin\daasconsole.exe.config to C:\home\data\DaaS\bin\DaasConsole.exe.config
+2025-10-12T14:20:41  PID[6632] Information 10/12/2025 2:20:41 PM [[4.8]] [DW0SDWK0005I2] File daasconsole.exe.config copied successfully
+2025-10-12T14:20:41  PID[6632] Information 10/12/2025 2:20:41 PM [[4.8]] [DW0SDWK0005I2] Done checking DaaS bits for any new updates
+2025-10-12T14:20:41  PID[6632] Information Message='Selected formatter='JsonMediaTypeFormatter', content-type='application/json; charset=utf-8'', Operation=DefaultContentNegotiator.Negotiate
+2025-10-12T14:20:41  PID[6632] Information Operation=ApiControllerActionInvoker.InvokeActionAsync, Status=200 (OK)
+2025-10-12T14:20:41  PID[6632] Information Operation=SessionController.ExecuteAsync, Status=200 (OK)
+2025-10-12T14:20:41  PID[6632] Information Response, Status=200 (OK), Method=POST, Url=https://spe-api-dev-67e2xz.scm.azurewebsites.net/daas/sessions/list?api-version=2015-08-01, Message='Content-type='application/json; charset=utf-8', content-length=unknown'
+2025-10-12T14:20:41  PID[6632] Information Operation=JsonMediaTypeFormatter.WriteToStreamAsync
+2025-10-12T14:20:41  PID[6632] Information Operation=SessionController.Dispose
+2025-10-12T14:21:10  PID[6632] Information Request, Method=POST, Url=https://spe-api-dev-67e2xz.scm.azurewebsites.net/daas/sessions/list?api-version=2015-08-01, Message='https://spe-api-dev-67e2xz.scm.azurewebsites.net/daas/sessions/list?api-version=2015-08-01'
+2025-10-12T14:21:10  PID[6632] Information Message='Session', Operation=DefaultHttpControllerSelector.SelectController
+2025-10-12T14:21:10  PID[6632] Information Message='DiagnosticsExtension.Controllers.SessionController', Operation=DefaultHttpControllerActivator.Create
+2025-10-12T14:21:10  PID[6632] Information Message='DiagnosticsExtension.Controllers.SessionController', Operation=HttpControllerDescriptor.CreateController
+2025-10-12T14:21:10  PID[6632] Information Message='Selected action 'ListSessions()'', Operation=ApiControllerActionSelector.SelectAction
+2025-10-12T14:21:10  PID[6632] Information Operation=HttpActionBinding.ExecuteBindingAsync
+2025-10-12T14:21:10  PID[6632] Information Message='Action returned 'System.Web.Http.Results.OkNegotiatedContentResult`1[System.Collections.Generic.IEnumerable`1[DaaS.Sessions.Session]]'', Operation=ReflectedHttpActionDescriptor.ExecuteAsync
+2025-10-12T14:21:10  PID[6632] Information Message='Selected formatter='JsonMediaTypeFormatter', content-type='application/json; charset=utf-8'', Operation=DefaultContentNegotiator.Negotiate
+2025-10-12T14:21:10  PID[6632] Information Operation=ApiControllerActionInvoker.InvokeActionAsync, Status=200 (OK)
+2025-10-12T14:21:10  PID[6632] Information Operation=SessionController.ExecuteAsync, Status=200 (OK)
+2025-10-12T14:21:10  PID[6632] Information Response, Status=200 (OK), Method=POST, Url=https://spe-api-dev-67e2xz.scm.azurewebsites.net/daas/sessions/list?api-version=2015-08-01, Message='Content-type='application/json; charset=utf-8', content-length=unknown'
+2025-10-12T14:21:10  PID[6632] Information Operation=JsonMediaTypeFormatter.WriteToStreamAsync
+2025-10-12T14:21:10  PID[6632] Information Operation=SessionController.Dispose
+2025-10-12T14:22:09  PID[6632] Information Request, Method=POST, Url=https://spe-api-dev-67e2xz.scm.azurewebsites.net/daas/sessions/list?api-version=2015-08-01, Message='https://spe-api-dev-67e2xz.scm.azurewebsites.net/daas/sessions/list?api-version=2015-08-01'
+2025-10-12T14:22:09  PID[6632] Information Message='Session', Operation=DefaultHttpControllerSelector.SelectController
+2025-10-12T14:22:09  PID[6632] Information Message='DiagnosticsExtension.Controllers.SessionController', Operation=DefaultHttpControllerActivator.Create
+2025-10-12T14:22:09  PID[6632] Information Message='DiagnosticsExtension.Controllers.SessionController', Operation=HttpControllerDescriptor.CreateController
+2025-10-12T14:22:09  PID[6632] Information Message='Selected action 'ListSessions()'', Operation=ApiControllerActionSelector.SelectAction
+2025-10-12T14:22:09  PID[6632] Information Operation=HttpActionBinding.ExecuteBindingAsync
+2025-10-12T14:22:09  PID[6632] Information Message='Action returned 'System.Web.Http.Results.OkNegotiatedContentResult`1[System.Collections.Generic.IEnumerable`1[DaaS.Sessions.Session]]'', Operation=ReflectedHttpActionDescriptor.ExecuteAsync
+2025-10-12T14:22:09  PID[6632] Information Message='Selected formatter='JsonMediaTypeFormatter', content-type='application/json; charset=utf-8'', Operation=DefaultContentNegotiator.Negotiate
+2025-10-12T14:22:09  PID[6632] Information Operation=ApiControllerActionInvoker.InvokeActionAsync, Status=200 (OK)
+2025-10-12T14:22:09  PID[6632] Information Operation=SessionController.ExecuteAsync, Status=200 (OK)
+2025-10-12T14:22:09  PID[6632] Information Response, Status=200 (OK), Method=POST, Url=https://spe-api-dev-67e2xz.scm.azurewebsites.net/daas/sessions/list?api-version=2015-08-01, Message='Content-type='application/json; charset=utf-8', content-length=unknown'
+2025-10-12T14:22:09  PID[6632] Information Operation=JsonMediaTypeFormatter.WriteToStreamAsync
+2025-10-12T14:22:09  PID[6632] Information Operation=SessionController.Dispose
+2025-10-12T14:23:10  PID[6632] Information Request, Method=POST, Url=https://spe-api-dev-67e2xz.scm.azurewebsites.net/daas/sessions/list?api-version=2015-08-01, Message='https://spe-api-dev-67e2xz.scm.azurewebsites.net/daas/sessions/list?api-version=2015-08-01'
+2025-10-12T14:23:10  PID[6632] Information Message='Session', Operation=DefaultHttpControllerSelector.SelectController
+2025-10-12T14:23:10  PID[6632] Information Message='DiagnosticsExtension.Controllers.SessionController', Operation=DefaultHttpControllerActivator.Create
+2025-10-12T14:23:10  PID[6632] Information Message='DiagnosticsExtension.Controllers.SessionController', Operation=HttpControllerDescriptor.CreateController
+2025-10-12T14:23:10  PID[6632] Information Message='Selected action 'ListSessions()'', Operation=ApiControllerActionSelector.SelectAction
+2025-10-12T14:23:10  PID[6632] Information Operation=HttpActionBinding.ExecuteBindingAsync
+2025-10-12T14:23:10  PID[6632] Information Message='Action returned 'System.Web.Http.Results.OkNegotiatedContentResult`1[System.Collections.Generic.IEnumerable`1[DaaS.Sessions.Session]]'', Operation=ReflectedHttpActionDescriptor.ExecuteAsync
+2025-10-12T14:23:10  PID[6632] Information Message='Selected formatter='JsonMediaTypeFormatter', content-type='application/json; charset=utf-8'', Operation=DefaultContentNegotiator.Negotiate
+2025-10-12T14:23:10  PID[6632] Information Operation=ApiControllerActionInvoker.InvokeActionAsync, Status=200 (OK)
+2025-10-12T14:23:10  PID[6632] Information Operation=SessionController.ExecuteAsync, Status=200 (OK)
+2025-10-12T14:23:10  PID[6632] Information Response, Status=200 (OK), Method=POST, Url=https://spe-api-dev-67e2xz.scm.azurewebsites.net/daas/sessions/list?api-version=2015-08-01, Message='Content-type='application/json; charset=utf-8', content-length=unknown'
+2025-10-12T14:23:10  PID[6632] Information Operation=JsonMediaTypeFormatter.WriteToStreamAsync
+2025-10-12T14:23:10  PID[6632] Information Operation=SessionController.Dispose
+2025-10-12T14:24:10  PID[6632] Information Request, Method=POST, Url=https://spe-api-dev-67e2xz.scm.azurewebsites.net/daas/sessions/list?api-version=2015-08-01, Message='https://spe-api-dev-67e2xz.scm.azurewebsites.net/daas/sessions/list?api-version=2015-08-01'
+2025-10-12T14:24:10  PID[6632] Information Message='Session', Operation=DefaultHttpControllerSelector.SelectController
+2025-10-12T14:24:10  PID[6632] Information Message='DiagnosticsExtension.Controllers.SessionController', Operation=DefaultHttpControllerActivator.Create
+2025-10-12T14:24:10  PID[6632] Information Message='DiagnosticsExtension.Controllers.SessionController', Operation=HttpControllerDescriptor.CreateController
+2025-10-12T14:24:10  PID[6632] Information Message='Selected action 'ListSessions()'', Operation=ApiControllerActionSelector.SelectAction
+2025-10-12T14:24:10  PID[6632] Information Operation=HttpActionBinding.ExecuteBindingAsync
+2025-10-12T14:24:10  PID[6632] Information Message='Action returned 'System.Web.Http.Results.OkNegotiatedContentResult`1[System.Collections.Generic.IEnumerable`1[DaaS.Sessions.Session]]'', Operation=ReflectedHttpActionDescriptor.ExecuteAsync
+2025-10-12T14:24:10  PID[6632] Information Message='Selected formatter='JsonMediaTypeFormatter', content-type='application/json; charset=utf-8'', Operation=DefaultContentNegotiator.Negotiate
+2025-10-12T14:24:10  PID[6632] Information Operation=ApiControllerActionInvoker.InvokeActionAsync, Status=200 (OK)
+2025-10-12T14:24:10  PID[6632] Information Operation=SessionController.ExecuteAsync, Status=200 (OK)
+2025-10-12T14:24:10  PID[6632] Information Response, Status=200 (OK), Method=POST, Url=https://spe-api-dev-67e2xz.scm.azurewebsites.net/daas/sessions/list?api-version=2015-08-01, Message='Content-type='application/json; charset=utf-8', content-length=unknown'
+2025-10-12T14:24:10  PID[6632] Information Operation=JsonMediaTypeFormatter.WriteToStreamAsync
+2025-10-12T14:24:10  PID[6632] Information Operation=SessionController.Dispose
+2025-10-12T14:25:10  PID[6632] Information Request, Method=POST, Url=https://spe-api-dev-67e2xz.scm.azurewebsites.net/daas/sessions/list?api-version=2015-08-01, Message='https://spe-api-dev-67e2xz.scm.azurewebsites.net/daas/sessions/list?api-version=2015-08-01'
+2025-10-12T14:25:10  PID[6632] Information Message='Session', Operation=DefaultHttpControllerSelector.SelectController
+2025-10-12T14:25:10  PID[6632] Information Message='DiagnosticsExtension.Controllers.SessionController', Operation=DefaultHttpControllerActivator.Create
+2025-10-12T14:25:10  PID[6632] Information Message='DiagnosticsExtension.Controllers.SessionController', Operation=HttpControllerDescriptor.CreateController
+2025-10-12T14:25:10  PID[6632] Information Message='Selected action 'ListSessions()'', Operation=ApiControllerActionSelector.SelectAction
+2025-10-12T14:25:10  PID[6632] Information Operation=HttpActionBinding.ExecuteBindingAsync
+2025-10-12T14:25:10  PID[6632] Information Message='Action returned 'System.Web.Http.Results.OkNegotiatedContentResult`1[System.Collections.Generic.IEnumerable`1[DaaS.Sessions.Session]]'', Operation=ReflectedHttpActionDescriptor.ExecuteAsync
+2025-10-12T14:25:10  PID[6632] Information Message='Selected formatter='JsonMediaTypeFormatter', content-type='application/json; charset=utf-8'', Operation=DefaultContentNegotiator.Negotiate
+2025-10-12T14:25:10  PID[6632] Information Operation=ApiControllerActionInvoker.InvokeActionAsync, Status=200 (OK)
+2025-10-12T14:25:10  PID[6632] Information Operation=SessionController.ExecuteAsync, Status=200 (OK)
+2025-10-12T14:25:10  PID[6632] Information Response, Status=200 (OK), Method=POST, Url=https://spe-api-dev-67e2xz.scm.azurewebsites.net/daas/sessions/list?api-version=2015-08-01, Message='Content-type='application/json; charset=utf-8', content-length=unknown'
+2025-10-12T14:25:10  PID[6632] Information Operation=JsonMediaTypeFormatter.WriteToStreamAsync
+2025-10-12T14:25:10  PID[6632] Information Operation=SessionController.Dispose
+2025-10-12T14:26:09  PID[6632] Information Request, Method=POST, Url=https://spe-api-dev-67e2xz.scm.azurewebsites.net/daas/sessions/list?api-version=2015-08-01, Message='https://spe-api-dev-67e2xz.scm.azurewebsites.net/daas/sessions/list?api-version=2015-08-01'
+2025-10-12T14:26:09  PID[6632] Information Message='Session', Operation=DefaultHttpControllerSelector.SelectController
+2025-10-12T14:26:09  PID[6632] Information Message='DiagnosticsExtension.Controllers.SessionController', Operation=DefaultHttpControllerActivator.Create
+2025-10-12T14:26:09  PID[6632] Information Message='DiagnosticsExtension.Controllers.SessionController', Operation=HttpControllerDescriptor.CreateController
+2025-10-12T14:26:09  PID[6632] Information Message='Selected action 'ListSessions()'', Operation=ApiControllerActionSelector.SelectAction
+2025-10-12T14:26:09  PID[6632] Information Operation=HttpActionBinding.ExecuteBindingAsync
+2025-10-12T14:26:09  PID[6632] Information Message='Action returned 'System.Web.Http.Results.OkNegotiatedContentResult`1[System.Collections.Generic.IEnumerable`1[DaaS.Sessions.Session]]'', Operation=ReflectedHttpActionDescriptor.ExecuteAsync
+2025-10-12T14:26:09  PID[6632] Information Message='Selected formatter='JsonMediaTypeFormatter', content-type='application/json; charset=utf-8'', Operation=DefaultContentNegotiator.Negotiate
+2025-10-12T14:26:09  PID[6632] Information Operation=ApiControllerActionInvoker.InvokeActionAsync, Status=200 (OK)
+2025-10-12T14:26:09  PID[6632] Information Operation=SessionController.ExecuteAsync, Status=200 (OK)
+2025-10-12T14:26:09  PID[6632] Information Response, Status=200 (OK), Method=POST, Url=https://spe-api-dev-67e2xz.scm.azurewebsites.net/daas/sessions/list?api-version=2015-08-01, Message='Content-type='application/json; charset=utf-8', content-length=unknown'
+2025-10-12T14:26:09  PID[6632] Information Operation=JsonMediaTypeFormatter.WriteToStreamAsync
+2025-10-12T14:26:09  PID[6632] Information Operation=SessionController.Dispose
+2025-10-12T14:27:10  PID[6632] Information Request, Method=POST, Url=https://spe-api-dev-67e2xz.scm.azurewebsites.net/daas/sessions/list?api-version=2015-08-01, Message='https://spe-api-dev-67e2xz.scm.azurewebsites.net/daas/sessions/list?api-version=2015-08-01'
+2025-10-12T14:27:10  PID[6632] Information Message='Session', Operation=DefaultHttpControllerSelector.SelectController
+2025-10-12T14:27:10  PID[6632] Information Message='DiagnosticsExtension.Controllers.SessionController', Operation=DefaultHttpControllerActivator.Create
+2025-10-12T14:27:10  PID[6632] Information Message='DiagnosticsExtension.Controllers.SessionController', Operation=HttpControllerDescriptor.CreateController
+2025-10-12T14:27:10  PID[6632] Information Message='Selected action 'ListSessions()'', Operation=ApiControllerActionSelector.SelectAction
+2025-10-12T14:27:10  PID[6632] Information Operation=HttpActionBinding.ExecuteBindingAsync
+2025-10-12T14:27:10  PID[6632] Information Message='Action returned 'System.Web.Http.Results.OkNegotiatedContentResult`1[System.Collections.Generic.IEnumerable`1[DaaS.Sessions.Session]]'', Operation=ReflectedHttpActionDescriptor.ExecuteAsync
+2025-10-12T14:27:10  PID[6632] Information Message='Selected formatter='JsonMediaTypeFormatter', content-type='application/json; charset=utf-8'', Operation=DefaultContentNegotiator.Negotiate
+2025-10-12T14:27:10  PID[6632] Information Operation=ApiControllerActionInvoker.InvokeActionAsync, Status=200 (OK)
+2025-10-12T14:27:10  PID[6632] Information Operation=SessionController.ExecuteAsync, Status=200 (OK)
+2025-10-12T14:27:10  PID[6632] Information Response, Status=200 (OK), Method=POST, Url=https://spe-api-dev-67e2xz.scm.azurewebsites.net/daas/sessions/list?api-version=2015-08-01, Message='Content-type='application/json; charset=utf-8', content-length=unknown'
+2025-10-12T14:27:10  PID[6632] Information Operation=JsonMediaTypeFormatter.WriteToStreamAsync
+2025-10-12T14:27:10  PID[6632] Information Operation=SessionController.Dispose

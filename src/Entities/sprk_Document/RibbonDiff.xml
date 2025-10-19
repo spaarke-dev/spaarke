@@ -1,14 +1,53 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <RibbonDiffXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-  <CustomActions />
+  <CustomActions>
+    <!-- Add "Quick Create: Document" button to Documents subgrid on parent entity forms -->
+    <CustomAction Id="Spaarke.Document.AddMultiple.CustomAction"
+                  Location="Mscrm.SubGrid.sprk_document.MainTab.Actions.Controls._children"
+                  Sequence="5">
+      <CommandUIDefinition>
+        <Button Id="Spaarke.Document.AddMultiple.Button"
+                Command="Spaarke.Document.AddMultiple.Command"
+                LabelText="Quick Create: Document"
+                Alt="Quick Create: Document"
+                ToolTipTitle="Quick Create: Document"
+                ToolTipDescription="Upload multiple documents to SharePoint Embedded and create Document records"
+                TemplateAlias="o1"
+                Image16by16="/_imgs/ribbon/DocumentAdd_16.png"
+                Image32by32="/_imgs/ribbon/DocumentAdd_32.png" />
+      </CommandUIDefinition>
+    </CustomAction>
+  </CustomActions>
   <Templates>
     <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>
   </Templates>
-  <CommandDefinitions />
+  <CommandDefinitions>
+    <CommandDefinition Id="Spaarke.Document.AddMultiple.Command">
+      <EnableRules>
+        <EnableRule Id="Spaarke.Document.AddMultiple.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_subgrid_commands.js"
+                           FunctionName="Spaarke_AddMultipleDocuments">
+          <!-- CRITICAL: SelectedControl must be first parameter to access parent form context -->
+          <CrmParameter Value="SelectedControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+  </CommandDefinitions>
   <RuleDefinitions>
     <TabDisplayRules />
     <DisplayRules />
-    <EnableRules />
+    <EnableRules>
+      <EnableRule Id="Spaarke.Document.AddMultiple.EnableRule">
+        <!-- Always enabled when user has access to parent record -->
+        <Or>
+          <CrmClientTypeRule Type="Web" />
+          <CrmClientTypeRule Type="Outlook" />
+        </Or>
+      </EnableRule>
+    </EnableRules>
   </RuleDefinitions>
   <LocLabels />
 </RibbonDiffXml>

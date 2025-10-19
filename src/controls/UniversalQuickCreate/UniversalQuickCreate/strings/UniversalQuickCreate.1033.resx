@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+
+  <!-- Control Display Names -->
+  <data name="Universal_Quick_Create_Display_Key" xml:space="preserve">
+    <value>Universal Quick Create</value>
+    <comment>Display name for the Universal Quick Create control</comment>
+  </data>
+  <data name="Universal_Quick_Create_Desc_Key" xml:space="preserve">
+    <value>Multi-file upload control for Quick Create forms with parent context mapping</value>
+    <comment>Description for the Universal Quick Create control</comment>
+  </data>
+
+  <!-- Property Display Names -->
+  <data name="Bound_Field" xml:space="preserve">
+    <value>Bound Field</value>
+    <comment>Display name for the bound field property</comment>
+  </data>
+  <data name="Default_Value_Mappings" xml:space="preserve">
+    <value>Default Value Mappings</value>
+    <comment>Display name for default value mappings property</comment>
+  </data>
+  <data name="Enable_File_Upload" xml:space="preserve">
+    <value>Enable File Upload</value>
+    <comment>Display name for enable file upload property</comment>
+  </data>
+  <data name="SDAP_API_Base_URL" xml:space="preserve">
+    <value>SDAP API Base URL</value>
+    <comment>Display name for SDAP API base URL property</comment>
+  </data>
+  <data name="Allow_Multiple_Files" xml:space="preserve">
+    <value>Allow Multiple Files</value>
+    <comment>Display name for allow multiple files property</comment>
+  </data>
+</root>

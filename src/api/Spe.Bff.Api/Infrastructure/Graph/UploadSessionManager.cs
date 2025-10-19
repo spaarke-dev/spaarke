@@ -236,15 +236,7 @@ public class UploadSessionManager
         {
             var graphClient = await _factory.CreateOnBehalfOfClientAsync(userToken);
 
-            // Get drive ID
-            var drive = await graphClient.Storage.FileStorage.Containers[containerId].Drive
-                .GetAsync(cancellationToken: ct);
-
-            if (drive?.Id is null)
-            {
-                _logger.LogWarning("Drive not found for container {ContainerId}", containerId);
-                return null;
-            }
+            _logger.LogInformation("Uploading file as user to container {ContainerId}, path {Path}", containerId, path);
 
             // Validate content size (small upload < 4MB)
             if (content.CanSeek && content.Length > 4 * 1024 * 1024)
@@ -253,8 +245,12 @@ public class UploadSessionManager
                 throw new ArgumentException("Content size exceeds 4MB limit for small uploads. Use chunked upload instead.");
             }
 
-            // Upload file using PUT to drive item path
-            var uploadedItem = await graphClient.Drives[drive.Id].Root
+            // For SharePoint Embedded: Container ID = Drive ID (per Microsoft documentation)
+            // Use container ID directly with OBO credentials (user has access, App-Only might not)
+            // Reference: https://learn.microsoft.com/en-us/sharepoint/dev/embedded/concepts/app-concepts/containertypes
+            _logger.LogDebug("Using container ID as drive ID for SPE OBO upload");
+
+            var uploadedItem = await graphClient.Drives[containerId].Root
                 .ItemWithPath(path)
                 .Content
                 .PutAsync(content, cancellationToken: ct);
@@ -281,8 +277,9 @@ public class UploadSessionManager
         }
         catch (ServiceException ex) when (ex.ResponseStatusCode == 403)
         {
-            _logger.LogWarning("Access denied uploading to container {ContainerId}: {Error}", containerId, ex.Message);
-            throw new UnauthorizedAccessException($"Access denied to container {containerId}", ex);
+            _logger.LogError(ex, "Access denied uploading to container {ContainerId}: HTTP {StatusCode} - {Message}",
+                containerId, ex.ResponseStatusCode, ex.Message);
+            throw new UnauthorizedAccessException($"Access denied to container {containerId}: {ex.Message}", ex);
         }
         catch (ServiceException ex) when (ex.ResponseStatusCode == 413)
         {
@@ -294,6 +291,12 @@ public class UploadSessionManager
             _logger.LogWarning("Graph API throttling, retry after {RetryAfter}s",
                 ex.ResponseHeaders?.RetryAfter?.Delta?.TotalSeconds ?? 60);
             throw new InvalidOperationException("Service temporarily unavailable due to rate limiting", ex);
+        }
+        catch (ServiceException ex)
+        {
+            _logger.LogError(ex, "Graph API error uploading file: HTTP {StatusCode} - {Message}",
+                ex.ResponseStatusCode, ex.Message);
+            throw new InvalidOperationException($"Failed to upload file: HTTP {ex.ResponseStatusCode} - {ex.Message}", ex);
         }
         catch (Exception ex)
         {

@@ -92,7 +92,8 @@ public sealed class GraphClientFactory : IGraphClientFactory
 
         _logger.LogInformation("Created app-only Graph client with centralized resilience handler");
 
-        return new GraphServiceClient(httpClient, authProvider);
+        // Use beta endpoint for SharePoint Embedded support
+        return new GraphServiceClient(httpClient, authProvider, "https://graph.microsoft.com/beta");
     }
 
     /// <summary>
@@ -145,13 +146,15 @@ public sealed class GraphClientFactory : IGraphClientFactory
 
         try
         {
-            // Try using Sites.FullControl.All explicitly to bypass FileStorageContainer.Selected restrictions
-            // Sites.FullControl.All doesn't have app-specific container restrictions
+            // OBO Flow: Use .default scope per Microsoft OAuth 2.0 OBO documentation
+            // The .default scope requests ALL permissions that have been granted to the API
+            // via admin consent in Azure AD. This includes:
+            // - Sites.FullControl.All
+            // - Files.ReadWrite.All
+            // - FileStorageContainer.Selected (SharePoint Embedded)
+            // Per OAUTH-OBO-IMPLEMENTATION.md: Using individual scopes causes AADSTS70011 errors
             var result = await _cca.AcquireTokenOnBehalfOf(
-                new[] {
-                    "https://graph.microsoft.com/Sites.FullControl.All",
-                    "https://graph.microsoft.com/Files.ReadWrite.All"
-                },
+                new[] { "https://graph.microsoft.com/.default" },
                 new UserAssertion(userAccessToken)
             ).ExecuteAsync();
 
@@ -203,7 +206,8 @@ public sealed class GraphClientFactory : IGraphClientFactory
 
         _logger.LogDebug("Created Graph client with centralized resilience handler");
 
-        // Use beta endpoint for SharePoint Embedded support
-        return new GraphServiceClient(httpClient, authProvider, "https://graph.microsoft.com/beta");
+        // Use v1.0 endpoint - SharePoint Embedded containers work with v1.0 drives endpoint
+        // Container ID can be used directly as Drive ID in: /v1.0/drives/{containerId}/root:/path:/content
+        return new GraphServiceClient(httpClient, authProvider, "https://graph.microsoft.com/v1.0");
     }
 }
