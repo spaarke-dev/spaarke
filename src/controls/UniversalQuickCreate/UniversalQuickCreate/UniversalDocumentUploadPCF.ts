@@ -241,8 +241,8 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
             apiBaseUrl,
             async () => {
                 // Reuse same MSAL auth as file operations
-                // NavMapClient expects OAuth scope for BFF API
-                const token = await this.authProvider.getToken(['api://spe-bff-api/user_impersonation']);
+                // Use same OAuth scope as msalConfig.ts (full application ID URI)
+                const token = await this.authProvider.getToken(['api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation']);
                 return token;
             }
         );
