@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="UniversalDocumentUpload" version="2.1.0"
+  <control namespace="Spaarke.Controls" constructor="UniversalDocumentUpload" version="2.2.0"
            display-name-key="Universal Document Upload"
-           description-key="Multi-file upload for Form Dialog - @odata.bind navigation (v2.1.0 - Expert confirmed)"
+           description-key="Multi-file upload with metadata-driven navigation property resolution (v2.2.0 - Case-sensitive fix)"
            control-type="standard">
 
     <external-service-usage enabled="false">
