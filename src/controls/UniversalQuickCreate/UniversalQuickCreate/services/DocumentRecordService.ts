@@ -1,22 +1,24 @@
 /**
- * Document Record Service
+ * Document Record Service (Phase 7 - Dynamic Metadata Discovery)
  *
  * Creates Document records in Dataverse using context.webAPI.
- * Uses case-sensitive navigation property names from EntityDocumentConfig.
+ * Queries navigation property metadata dynamically via NavMapClient → BFF API → Dataverse.
  *
  * ADR Compliance:
  * - ADR-003: Separation of Concerns (service layer)
- * - ADR-010: Configuration Over Code (uses EntityDocumentConfig)
+ * - ADR-010: Configuration Over Code (uses EntityDocumentConfig + dynamic metadata)
  *
  * Key Architectural Decisions:
  * - Uses context.webAPI (works across all PCF hosts: Custom Pages, Model-Driven Apps, Canvas Apps)
- * - Navigation property names stored in config with correct case (e.g., "sprk_Matter" not "sprk_matter")
- * - PCF context.webAPI cannot query EntityDefinitions metadata, so case must be correct in config
+ * - PHASE 7: Queries navigation property metadata dynamically (no more hardcoded case!)
+ * - Eliminates manual PowerShell validation for new entities
+ * - Supports multi-entity scenarios (Matter, Project, Invoice, etc.)
  *
- * @version 2.2.0
+ * @version 2.3.0 (Phase 7)
  */
 
 import { getEntityDocumentConfig } from '../config/EntityDocumentConfig';
+import { NavMapClient } from './NavMapClient';
 import {
     ParentContext,
     FormData,
@@ -30,13 +32,19 @@ import { logInfo, logError } from '../utils/logger';
  */
 export class DocumentRecordService {
     private context: ComponentFramework.Context<any>;
+    private navMapClient: NavMapClient;
 
     /**
      * Constructor
-     * @param context - PCF context (required for webAPI and metadata queries)
+     * @param context - PCF context (required for webAPI)
+     * @param navMapClient - Navigation metadata client (Phase 7)
      */
-    constructor(context: ComponentFramework.Context<any>) {
+    constructor(
+        context: ComponentFramework.Context<any>,
+        navMapClient: NavMapClient
+    ) {
         this.context = context;
+        this.navMapClient = navMapClient;
     }
 
     /**
@@ -99,27 +107,27 @@ export class DocumentRecordService {
                 throw new Error(`Unsupported entity type: ${parentContext.parentEntityName}`);
             }
 
-            // CRITICAL: Use navigation property from config (case-sensitive!)
-            // Example: "sprk_Matter" (capital M) for Matter entity
-            // Cannot query metadata dynamically in PCF - context.webAPI doesn't support EntityDefinitions
-            const navigationPropertyName = config.navigationPropertyName;
+            // PHASE 7: Query navigation property metadata dynamically via BFF API
+            // This replaces hardcoded config.navigationPropertyName
+            logInfo('DocumentRecordService', `[Phase 7] Querying navigation metadata for ${parentContext.parentEntityName}`);
 
-            if (!navigationPropertyName) {
-                throw new Error(
-                    `Navigation property not configured for entity '${config.entityName}'. ` +
-                    `Please add navigationPropertyName to EntityDocumentConfig.`
-                );
-            }
+            const navMetadata = await this.navMapClient.getLookupNavigation(
+                'sprk_document',                    // childEntity (always sprk_document)
+                config.relationshipSchemaName       // e.g., "sprk_matter_document"
+            );
 
-            logInfo('DocumentRecordService', `Using navigation property: ${navigationPropertyName}`);
+            const navigationPropertyName = navMetadata.navigationPropertyName; // e.g., "sprk_Matter" (capital M)
+            const targetEntitySetName = navMetadata.targetEntity + 's';        // e.g., "sprk_matters"
+
+            logInfo('DocumentRecordService', `[Phase 7] Using navigation property: ${navigationPropertyName} (source: ${navMetadata.source})`);
 
             // Build record payload with correct navigation property
             const payload = this.buildRecordPayload(
                 file,
                 parentContext,
                 formData,
-                navigationPropertyName,  // Dynamic from metadata (not hardcoded!)
-                config.entitySetName
+                navigationPropertyName,  // Now dynamic from metadata!
+                targetEntitySetName       // Also dynamic from metadata
             );
 
             logInfo('DocumentRecordService', `Creating Document: ${file.name}`);

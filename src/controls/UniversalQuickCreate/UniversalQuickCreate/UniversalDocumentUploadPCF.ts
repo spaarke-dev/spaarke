@@ -31,6 +31,7 @@ import { MultiFileUploadService } from "./services/MultiFileUploadService";
 import { DocumentRecordService } from "./services/DocumentRecordService";
 import { FileUploadService } from "./services/FileUploadService";
 import { SdapApiClientFactory } from "./services/SdapApiClientFactory";
+import { NavMapClient } from "./services/NavMapClient"; // Phase 7
 import { getEntityDocumentConfig, isEntitySupported } from "./config/EntityDocumentConfig";
 import { ParentContext } from "./types";
 import { DocumentUploadForm } from "./components/DocumentUploadForm";
@@ -223,7 +224,7 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
     }
 
     /**
-     * Initialize services
+     * Initialize services (Phase 7: includes NavMapClient)
      */
     private initializeServices(context: ComponentFramework.Context<IInputs>): void {
         // Get API base URL
@@ -232,15 +233,26 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
             ? rawApiUrl
             : `https://${rawApiUrl}`;
 
-        logInfo('UniversalDocumentUploadPCF', 'Initializing services', { apiBaseUrl });
+        logInfo('UniversalDocumentUploadPCF', 'Initializing services (Phase 7)', { apiBaseUrl });
+
+        // Create API clients
+        const apiClient = SdapApiClientFactory.create(apiBaseUrl);
+        const navMapClient = new NavMapClient(
+            apiBaseUrl,
+            async () => {
+                // Reuse same MSAL auth as file operations
+                // NavMapClient expects OAuth scope for BFF API
+                const token = await this.authProvider.getToken(['api://spe-bff-api/user_impersonation']);
+                return token;
+            }
+        );
 
         // Create services
-        const apiClient = SdapApiClientFactory.create(apiBaseUrl);
         const fileUploadService = new FileUploadService(apiClient);
         this.multiFileService = new MultiFileUploadService(fileUploadService);
-        this.documentRecordService = new DocumentRecordService(context); // Pass context for webAPI access
+        this.documentRecordService = new DocumentRecordService(context, navMapClient); // Pass navMapClient for metadata queries
 
-        logInfo('UniversalDocumentUploadPCF', 'Services initialized');
+        logInfo('UniversalDocumentUploadPCF', 'Services initialized (including NavMapClient)');
     }
 
     /**
