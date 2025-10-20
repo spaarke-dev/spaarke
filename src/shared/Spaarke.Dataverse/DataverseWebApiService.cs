@@ -137,7 +137,7 @@ public class DataverseWebApiService : IDataverseService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to retrieve document {Id}", id);
+            _logger.LogError(exception: ex, message: "Failed to retrieve document {Id}", id);
             throw;
         }
     }
@@ -254,7 +254,7 @@ public class DataverseWebApiService : IDataverseService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Dataverse document operations test failed");
+            _logger.LogError(exception: ex, message: "Dataverse document operations test failed");
             return false;
         }
     }
@@ -328,6 +328,51 @@ public class DataverseWebApiService : IDataverseService
             }
         }
         return null;
+    }
+
+    // ========================================
+    // Metadata Operations (Phase 7)
+    // NOTE: Web API implementation not currently used (ServiceClient is preferred)
+    // These are stub implementations to satisfy the interface contract
+    // ========================================
+
+    public Task<string> GetEntitySetNameAsync(string entityLogicalName, CancellationToken ct = default)
+    {
+        _logger.LogWarning(
+            "GetEntitySetNameAsync called on DataverseWebApiService (not implemented). " +
+            "Consider using DataverseServiceClientImpl for metadata operations.");
+
+        throw new NotImplementedException(
+            "Metadata operations via Web API are not yet implemented. " +
+            "Use DataverseServiceClientImpl for full metadata support.");
+    }
+
+    public Task<LookupNavigationMetadata> GetLookupNavigationAsync(
+        string childEntityLogicalName,
+        string relationshipSchemaName,
+        CancellationToken ct = default)
+    {
+        _logger.LogWarning(
+            "GetLookupNavigationAsync called on DataverseWebApiService (not implemented). " +
+            "Consider using DataverseServiceClientImpl for metadata operations.");
+
+        throw new NotImplementedException(
+            "Metadata operations via Web API are not yet implemented. " +
+            "Use DataverseServiceClientImpl for full metadata support.");
+    }
+
+    public Task<string> GetCollectionNavigationAsync(
+        string parentEntityLogicalName,
+        string relationshipSchemaName,
+        CancellationToken ct = default)
+    {
+        _logger.LogWarning(
+            "GetCollectionNavigationAsync called on DataverseWebApiService (not implemented). " +
+            "Consider using DataverseServiceClientImpl for metadata operations.");
+
+        throw new NotImplementedException(
+            "Metadata operations via Web API are not yet implemented. " +
+            "Use DataverseServiceClientImpl for full metadata support.");
     }
 
     private class ODataCollectionResponse

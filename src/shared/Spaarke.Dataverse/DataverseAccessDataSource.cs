@@ -62,8 +62,11 @@ public class DataverseAccessDataSource : IAccessDataSource
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to fetch access data for user {UserId} on resource {ResourceId}. Fail-closed: returning AccessRights.None",
-                userId, resourceId);
+            _logger.LogError(
+                exception: ex,
+                message: "Failed to fetch access data for user {UserId} on resource {ResourceId}. Fail-closed: returning AccessRights.None",
+                userId,
+                resourceId);
 
             // Fail-closed security: Return None on errors
             return new AccessSnapshot
@@ -139,7 +142,7 @@ public class DataverseAccessDataSource : IAccessDataSource
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error querying Dataverse access for {UserId} on {ResourceId}", userId, resourceId);
+            _logger.LogError(exception: ex, message: "Error querying Dataverse access for {UserId} on {ResourceId}", userId, resourceId);
             return new List<PermissionRecord>();
         }
     }
@@ -217,7 +220,7 @@ public class DataverseAccessDataSource : IAccessDataSource
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error querying team memberships for {UserId}", userId);
+            _logger.LogError(exception: ex, message: "Error querying team memberships for {UserId}", userId);
             return Array.Empty<string>();
         }
     }
@@ -253,7 +256,7 @@ public class DataverseAccessDataSource : IAccessDataSource
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error querying user roles for {UserId}", userId);
+            _logger.LogError(exception: ex, message: "Error querying user roles for {UserId}", userId);
             return Array.Empty<string>();
         }
     }

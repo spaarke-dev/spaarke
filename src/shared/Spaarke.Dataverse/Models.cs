@@ -67,3 +67,32 @@ public enum DocumentAccessLevel
     Write = 2,
     FullControl = 3
 }
+
+/// <summary>
+/// Metadata for a lookup navigation property on a child entity.
+/// Used for discovering case-sensitive navigation properties for @odata.bind operations.
+/// </summary>
+public record LookupNavigationMetadata
+{
+    /// <summary>
+    /// Logical name of the lookup attribute (e.g., "sprk_matter")
+    /// </summary>
+    public required string LogicalName { get; init; }
+
+    /// <summary>
+    /// Schema name of the lookup attribute (may differ in case, e.g., "sprk_Matter")
+    /// </summary>
+    public required string SchemaName { get; init; }
+
+    /// <summary>
+    /// Navigation property name for @odata.bind (CASE-SENSITIVE!)
+    /// Example: "sprk_Matter" (capital M)
+    /// This is ReferencingEntityNavigationPropertyName from metadata
+    /// </summary>
+    public required string NavigationPropertyName { get; init; }
+
+    /// <summary>
+    /// Target entity logical name (e.g., "sprk_matter")
+    /// </summary>
+    public required string TargetEntityLogicalName { get; init; }
+}

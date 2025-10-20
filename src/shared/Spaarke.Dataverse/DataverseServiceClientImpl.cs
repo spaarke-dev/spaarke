@@ -76,7 +76,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Exception initializing Dataverse ServiceClient");
+            _logger.LogError(exception: ex, message: "Exception initializing Dataverse ServiceClient");
             throw;
         }
     }
@@ -194,7 +194,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Dataverse document operations test failed");
+            _logger.LogError(exception: ex, message: "Dataverse document operations test failed");
             return false;
         }
     }
@@ -209,6 +209,231 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     {
         // Simplified - assume full access for application user
         return Task.FromResult(DocumentAccessLevel.FullControl);
+    }
+
+    // ========================================
+    // Metadata Operations (Phase 7)
+    // ========================================
+
+    public async Task<string> GetEntitySetNameAsync(string entityLogicalName, CancellationToken ct = default)
+    {
+        _logger.LogDebug("Querying entity set name for {EntityLogicalName}", entityLogicalName);
+
+        try
+        {
+            var request = new Microsoft.Xrm.Sdk.Messages.RetrieveEntityRequest
+            {
+                LogicalName = entityLogicalName,
+                EntityFilters = Microsoft.Xrm.Sdk.Metadata.EntityFilters.Entity
+            };
+
+            var response = (Microsoft.Xrm.Sdk.Messages.RetrieveEntityResponse)await Task.Run(() =>
+                _serviceClient.Execute(request), ct);
+
+            var entitySetName = response.EntityMetadata.EntitySetName;
+
+            _logger.LogInformation(
+                "Retrieved entity set name for {EntityLogicalName}: {EntitySetName}",
+                entityLogicalName,
+                entitySetName);
+
+            return entitySetName;
+        }
+        catch (Exception ex) when (ex.Message.Contains("Could not find") || ex.Message.Contains("does not exist"))
+        {
+            _logger.LogError(exception: ex, message: "Entity '{EntityLogicalName}' not found in Dataverse metadata", entityLogicalName);
+            throw new InvalidOperationException(
+                $"Entity '{entityLogicalName}' not found in Dataverse metadata.", ex);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogError(exception: ex, message: "Insufficient permissions to query EntityDefinitions metadata");
+            throw new UnauthorizedAccessException(
+                "Insufficient permissions to query EntityDefinitions metadata. " +
+                "Ensure the application user has 'Read' permission on Entity Definitions.", ex);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(exception: ex, message: "Failed to retrieve entity set name for {EntityLogicalName}", entityLogicalName);
+            throw new InvalidOperationException(
+                $"Failed to query metadata for entity '{entityLogicalName}': {ex.Message}", ex);
+        }
+    }
+
+    public async Task<LookupNavigationMetadata> GetLookupNavigationAsync(
+        string childEntityLogicalName,
+        string relationshipSchemaName,
+        CancellationToken ct = default)
+    {
+        _logger.LogDebug(
+            "Querying lookup navigation metadata: Child={ChildEntity}, Relationship={Relationship}",
+            childEntityLogicalName,
+            relationshipSchemaName);
+
+        try
+        {
+            var request = new Microsoft.Xrm.Sdk.Messages.RetrieveEntityRequest
+            {
+                LogicalName = childEntityLogicalName,
+                EntityFilters = Microsoft.Xrm.Sdk.Metadata.EntityFilters.Relationships | Microsoft.Xrm.Sdk.Metadata.EntityFilters.Attributes
+            };
+
+            var response = (Microsoft.Xrm.Sdk.Messages.RetrieveEntityResponse)await Task.Run(() =>
+                _serviceClient.Execute(request), ct);
+
+            // Find the relationship
+            var relationship = response.EntityMetadata.ManyToOneRelationships
+                .FirstOrDefault(r => r.SchemaName == relationshipSchemaName);
+
+            if (relationship == null)
+            {
+                var availableRelationships = response.EntityMetadata.ManyToOneRelationships
+                    .Select(r => r.SchemaName)
+                    .ToList();
+
+                _logger.LogWarning(
+                    "Relationship {RelationshipSchemaName} not found on {EntityLogicalName}. " +
+                    "Available relationships: {AvailableRelationships}",
+                    relationshipSchemaName,
+                    childEntityLogicalName,
+                    string.Join(", ", availableRelationships));
+
+                throw new InvalidOperationException(
+                    $"Relationship '{relationshipSchemaName}' not found on entity '{childEntityLogicalName}'. " +
+                    $"Verify the relationship exists and the schema name is correct. " +
+                    $"Available relationships: {string.Join(", ", availableRelationships)}");
+            }
+
+            // Find the lookup attribute
+            var attribute = response.EntityMetadata.Attributes
+                .OfType<Microsoft.Xrm.Sdk.Metadata.LookupAttributeMetadata>()
+                .FirstOrDefault(a => a.LogicalName == relationship.ReferencingAttribute);
+
+            if (attribute == null)
+            {
+                _logger.LogError(
+                    "Lookup attribute '{ReferencingAttribute}' not found on entity '{EntityLogicalName}'",
+                    relationship.ReferencingAttribute,
+                    childEntityLogicalName);
+
+                throw new InvalidOperationException(
+                    $"Lookup attribute '{relationship.ReferencingAttribute}' not found on entity '{childEntityLogicalName}'");
+            }
+
+            var metadata = new LookupNavigationMetadata
+            {
+                LogicalName = attribute.LogicalName,
+                SchemaName = attribute.SchemaName,
+                NavigationPropertyName = relationship.ReferencingEntityNavigationPropertyName,
+                TargetEntityLogicalName = relationship.ReferencedEntity
+            };
+
+            _logger.LogInformation(
+                "Retrieved lookup navigation metadata for {ChildEntity}.{Relationship}: NavProperty={NavProperty} (LogicalName={LogicalName}, SchemaName={SchemaName})",
+                childEntityLogicalName,
+                relationshipSchemaName,
+                metadata.NavigationPropertyName,
+                metadata.LogicalName,
+                metadata.SchemaName);
+
+            return metadata;
+        }
+        catch (Exception ex) when (ex.Message.Contains("Could not find") || ex.Message.Contains("does not exist"))
+        {
+            _logger.LogError(exception: ex, message: "Entity '{EntityLogicalName}' not found in Dataverse metadata", childEntityLogicalName);
+            throw new InvalidOperationException(
+                $"Entity '{childEntityLogicalName}' not found in Dataverse metadata.", ex);
+        }
+        catch (InvalidOperationException)
+        {
+            throw; // Re-throw relationship/attribute not found exceptions
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                exception: ex,
+                message: "Failed to retrieve lookup navigation metadata for {ChildEntity}.{Relationship}",
+                childEntityLogicalName,
+                relationshipSchemaName);
+            throw new InvalidOperationException(
+                $"Failed to query lookup navigation metadata for '{childEntityLogicalName}.{relationshipSchemaName}': {ex.Message}", ex);
+        }
+    }
+
+    public async Task<string> GetCollectionNavigationAsync(
+        string parentEntityLogicalName,
+        string relationshipSchemaName,
+        CancellationToken ct = default)
+    {
+        _logger.LogDebug(
+            "Querying collection navigation property: Parent={ParentEntity}, Relationship={Relationship}",
+            parentEntityLogicalName,
+            relationshipSchemaName);
+
+        try
+        {
+            var request = new Microsoft.Xrm.Sdk.Messages.RetrieveEntityRequest
+            {
+                LogicalName = parentEntityLogicalName,
+                EntityFilters = Microsoft.Xrm.Sdk.Metadata.EntityFilters.Relationships
+            };
+
+            var response = (Microsoft.Xrm.Sdk.Messages.RetrieveEntityResponse)await Task.Run(() =>
+                _serviceClient.Execute(request), ct);
+
+            // Find the relationship
+            var relationship = response.EntityMetadata.OneToManyRelationships
+                .FirstOrDefault(r => r.SchemaName == relationshipSchemaName);
+
+            if (relationship == null)
+            {
+                var availableRelationships = response.EntityMetadata.OneToManyRelationships
+                    .Select(r => r.SchemaName)
+                    .ToList();
+
+                _logger.LogWarning(
+                    "Relationship {RelationshipSchemaName} not found on {EntityLogicalName}. " +
+                    "Available relationships: {AvailableRelationships}",
+                    relationshipSchemaName,
+                    parentEntityLogicalName,
+                    string.Join(", ", availableRelationships));
+
+                throw new InvalidOperationException(
+                    $"Relationship '{relationshipSchemaName}' not found on entity '{parentEntityLogicalName}'. " +
+                    $"Verify the relationship exists and the schema name is correct. " +
+                    $"Available relationships: {string.Join(", ", availableRelationships)}");
+            }
+
+            var collectionPropertyName = relationship.ReferencedEntityNavigationPropertyName;
+
+            _logger.LogInformation(
+                "Retrieved collection navigation property for {ParentEntity}.{Relationship}: {CollectionProperty}",
+                parentEntityLogicalName,
+                relationshipSchemaName,
+                collectionPropertyName);
+
+            return collectionPropertyName;
+        }
+        catch (Exception ex) when (ex.Message.Contains("Could not find") || ex.Message.Contains("does not exist"))
+        {
+            _logger.LogError(exception: ex, message: "Entity '{EntityLogicalName}' not found in Dataverse metadata", parentEntityLogicalName);
+            throw new InvalidOperationException(
+                $"Entity '{parentEntityLogicalName}' not found in Dataverse metadata.", ex);
+        }
+        catch (InvalidOperationException)
+        {
+            throw; // Re-throw relationship not found exceptions
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                exception: ex,
+                message: "Failed to retrieve collection navigation property for {ParentEntity}.{Relationship}",
+                parentEntityLogicalName,
+                relationshipSchemaName);
+            throw new InvalidOperationException(
+                $"Failed to query collection navigation property for '{parentEntityLogicalName}.{relationshipSchemaName}': {ex.Message}", ex);
+        }
     }
 
     private DocumentEntity MapToDocumentEntity(Entity entity)
