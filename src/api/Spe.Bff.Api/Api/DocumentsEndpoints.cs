@@ -1,4 +1,5 @@
 using Microsoft.Graph;
+using Microsoft.Graph.Models.ODataErrors;
 using Spe.Bff.Api.Infrastructure.Errors;
 using Spe.Bff.Api.Infrastructure.Graph;
 using Spe.Bff.Api.Models;
@@ -41,7 +42,7 @@ public static class DocumentsEndpoints
 
                 return TypedResults.Created($"/api/containers/{result?.Id}", result);
             }
-            catch (ServiceException ex)
+            catch (ODataError ex)
             {
                 logger.LogError(ex, "Failed to create container");
                 return ProblemDetailsHelper.FromGraphException(ex);
@@ -84,7 +85,7 @@ public static class DocumentsEndpoints
 
                 return TypedResults.Ok(result);
             }
-            catch (ServiceException ex)
+            catch (ODataError ex)
             {
                 logger.LogError(ex, "Failed to list containers");
                 return ProblemDetailsHelper.FromGraphException(ex);
@@ -125,7 +126,7 @@ public static class DocumentsEndpoints
 
                 return TypedResults.Ok(result);
             }
-            catch (ServiceException ex)
+            catch (ODataError ex)
             {
                 logger.LogError(ex, "Failed to get container drive");
                 return ProblemDetailsHelper.FromGraphException(ex);
@@ -166,7 +167,7 @@ public static class DocumentsEndpoints
 
                 return TypedResults.Ok(result);
             }
-            catch (ServiceException ex)
+            catch (ODataError ex)
             {
                 logger.LogError(ex, "Failed to list drive children");
                 return ProblemDetailsHelper.FromGraphException(ex);
@@ -217,7 +218,7 @@ public static class DocumentsEndpoints
 
                 return TypedResults.Ok(result);
             }
-            catch (ServiceException ex)
+            catch (ODataError ex)
             {
                 logger.LogError(ex, "Failed to get file metadata");
                 return ProblemDetailsHelper.FromGraphException(ex);
@@ -272,7 +273,7 @@ public static class DocumentsEndpoints
 
                 return TypedResults.File(stream, "application/octet-stream", fileName);
             }
-            catch (ServiceException ex)
+            catch (ODataError ex)
             {
                 logger.LogError(ex, "Failed to download file");
                 return ProblemDetailsHelper.FromGraphException(ex);
@@ -330,7 +331,7 @@ public static class DocumentsEndpoints
 
                 return TypedResults.Created($"/api/drives/{driveId}/items/{result.Id}", result);
             }
-            catch (ServiceException ex)
+            catch (ODataError ex)
             {
                 logger.LogError(ex, "Failed to upload file");
                 return ProblemDetailsHelper.FromGraphException(ex);
@@ -381,7 +382,7 @@ public static class DocumentsEndpoints
 
                 return TypedResults.NoContent();
             }
-            catch (ServiceException ex)
+            catch (ODataError ex)
             {
                 logger.LogError(ex, "Failed to delete file");
                 return ProblemDetailsHelper.FromGraphException(ex);

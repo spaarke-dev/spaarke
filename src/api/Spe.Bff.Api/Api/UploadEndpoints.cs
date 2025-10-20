@@ -1,4 +1,5 @@
 using Microsoft.Graph;
+using Microsoft.Graph.Models.ODataErrors;
 using Spe.Bff.Api.Infrastructure.Errors;
 using Spe.Bff.Api.Infrastructure.Graph;
 using Spe.Bff.Api.Infrastructure.Validation;
@@ -51,7 +52,7 @@ public static class UploadEndpoints
 
                 return TypedResults.Ok(item);
             }
-            catch (ServiceException ex)
+            catch (ODataError ex)
             {
                 logger.LogError(ex, "Failed to upload file");
                 return ProblemDetailsHelper.FromGraphException(ex);
@@ -100,7 +101,7 @@ public static class UploadEndpoints
 
                 return TypedResults.Ok(session);
             }
-            catch (ServiceException ex)
+            catch (ODataError ex)
             {
                 logger.LogError(ex, "Failed to create upload session");
                 return ProblemDetailsHelper.FromGraphException(ex);

@@ -10,7 +10,7 @@ namespace Spe.Bff.Api.Infrastructure.Http;
 
 /// <summary>
 /// DelegatingHandler that provides centralized resilience patterns for Microsoft Graph API calls.
-/// Implements retry, circuit breaker, and timeout policies using Polly (Task 4.1).
+/// Implements retry, circuit breaker, and timeout policies using Polly v8.x (updated Phase 7).
 /// Registered with IHttpClientFactory for automatic injection into GraphServiceClient.
 /// </summary>
 public class GraphHttpMessageHandler : DelegatingHandler

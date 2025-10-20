@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
+using Microsoft.Graph.Models.ODataErrors;
 using Spe.Bff.Api.Infrastructure.Auth;
 using Spe.Bff.Api.Infrastructure.Errors;
 using Spe.Bff.Api.Infrastructure.Graph;
@@ -41,7 +42,7 @@ public static class OBOEndpoints
             {
                 return TypedResults.Unauthorized();
             }
-            catch (ServiceException ex)
+            catch (ODataError ex)
             {
                 return ProblemDetailsHelper.FromGraphException(ex);
             }
@@ -75,7 +76,7 @@ public static class OBOEndpoints
                 logger.LogError(ex, "OBO upload unauthorized");
                 return TypedResults.Unauthorized();
             }
-            catch (ServiceException ex)
+            catch (ODataError ex)
             {
                 logger.LogError(ex, "OBO upload failed - Graph API error: {Message}", ex.Message);
                 return ProblemDetailsHelper.FromGraphException(ex);
@@ -120,7 +121,7 @@ public static class OBOEndpoints
             {
                 return TypedResults.Unauthorized();
             }
-            catch (ServiceException ex)
+            catch (ODataError ex)
             {
                 return ProblemDetailsHelper.FromGraphException(ex);
             }
@@ -178,7 +179,7 @@ public static class OBOEndpoints
             {
                 return TypedResults.Unauthorized();
             }
-            catch (ServiceException ex)
+            catch (ODataError ex)
             {
                 return ProblemDetailsHelper.FromGraphException(ex);
             }
@@ -220,7 +221,7 @@ public static class OBOEndpoints
             {
                 return TypedResults.Unauthorized();
             }
-            catch (ServiceException ex)
+            catch (ODataError ex)
             {
                 return ProblemDetailsHelper.FromGraphException(ex);
             }
@@ -287,7 +288,7 @@ public static class OBOEndpoints
             {
                 return TypedResults.Unauthorized();
             }
-            catch (ServiceException ex)
+            catch (ODataError ex)
             {
                 return ProblemDetailsHelper.FromGraphException(ex);
             }
@@ -315,7 +316,7 @@ public static class OBOEndpoints
             {
                 return TypedResults.Unauthorized();
             }
-            catch (ServiceException ex)
+            catch (ODataError ex)
             {
                 return ProblemDetailsHelper.FromGraphException(ex);
             }
