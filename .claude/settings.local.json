@@ -111,7 +111,9 @@
       "Read(//c/**)",
       "Bash(pac data query:*)",
       "Bash(pac auth:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(\"/c/Program Files/Microsoft Visual Studio/2022/Professional/MSBuild/Current/Bin/MSBuild.exe\" /t:Rebuild /p:Configuration=Release UniversalQuickCreateSolution/UniversalQuickCreateSolution.cdsproj)",
+      "Bash(\"C:/Program Files/Microsoft Visual Studio/2022/Professional/MSBuild/Current/Bin/MSBuild.exe\" /t:Rebuild /p:Configuration=Release UniversalQuickCreateSolution/UniversalQuickCreateSolution.cdsproj)"
     ],
     "deny": [],
     "ask": []
