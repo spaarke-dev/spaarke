@@ -233,12 +233,17 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
             ? rawApiUrl
             : `https://${rawApiUrl}`;
 
-        logInfo('UniversalDocumentUploadPCF', 'Initializing services (Phase 7)', { apiBaseUrl });
+        // NavMapClient needs base URL without /api suffix (it adds /api/navmap internally)
+        const navMapBaseUrl = apiBaseUrl.endsWith('/api')
+            ? apiBaseUrl.substring(0, apiBaseUrl.length - 4)  // Remove trailing /api
+            : apiBaseUrl;
+
+        logInfo('UniversalDocumentUploadPCF', 'Initializing services (Phase 7)', { apiBaseUrl, navMapBaseUrl });
 
         // Create API clients
         const apiClient = SdapApiClientFactory.create(apiBaseUrl);
         const navMapClient = new NavMapClient(
-            apiBaseUrl,
+            navMapBaseUrl,
             async () => {
                 // Reuse same MSAL auth as file operations
                 // Use same OAuth scope as msalConfig.ts (full application ID URI)
