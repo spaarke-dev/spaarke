@@ -105,9 +105,10 @@ export class MetadataService {
     }
 
     // Query ManyToOneRelationships on child entity to get navigation property
+    // Use $filter to find entity by LogicalName, then $expand to get relationships
     const query =
-      `EntityDefinitions(LogicalName='${childEntityLogicalName}')` +
-      `?$expand=ManyToOneRelationships(` +
+      `?$filter=LogicalName eq '${childEntityLogicalName}'` +
+      `&$expand=ManyToOneRelationships(` +
       `$select=SchemaName,ReferencingEntityNavigationPropertyName;` +
       `$filter=SchemaName eq '${relationshipSchemaName}'` +
       `)`;
@@ -205,7 +206,8 @@ export class MetadataService {
       return cached;
     }
 
-    const query = `EntityDefinitions(LogicalName='${entityLogicalName}')?$select=EntitySetName`;
+    // Use $filter to find entity by LogicalName
+    const query = `?$filter=LogicalName eq '${entityLogicalName}'&$select=EntitySetName`;
 
     try {
       const result = await context.webAPI.retrieveMultipleRecords('EntityDefinitions', query);
@@ -291,9 +293,10 @@ export class MetadataService {
     }
 
     // Query OneToManyRelationships on parent entity to get collection navigation property
+    // Use $filter to find entity by LogicalName, then $expand to get relationships
     const query =
-      `EntityDefinitions(LogicalName='${parentEntityLogicalName}')` +
-      `?$expand=OneToManyRelationships(` +
+      `?$filter=LogicalName eq '${parentEntityLogicalName}'` +
+      `&$expand=OneToManyRelationships(` +
       `$select=SchemaName,ReferencedEntityNavigationPropertyName;` +
       `$filter=SchemaName eq '${relationshipSchemaName}'` +
       `)`;
