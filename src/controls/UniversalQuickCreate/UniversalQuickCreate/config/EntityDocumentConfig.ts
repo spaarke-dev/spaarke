@@ -58,11 +58,15 @@ export const ENTITY_DOCUMENT_CONFIGS: Record<string, EntityDocumentConfig> = {
     /**
      * Matter Entity (sprk_matter)
      * Legal matters with associated documents
+     *
+     * CRITICAL: navigationPropertyName is CASE-SENSITIVE!
+     * Validated via metadata query: sprk_Matter (capital M)
      */
     'sprk_matter': {
         entityName: 'sprk_matter',
         lookupFieldName: 'sprk_matter',
         relationshipSchemaName: 'sprk_matter_document',
+        navigationPropertyName: 'sprk_Matter',  // ⚠️ CAPITAL M - from metadata validation
         containerIdField: 'sprk_containerid',
         displayNameField: 'sprk_matternumber',
         entitySetName: 'sprk_matters'

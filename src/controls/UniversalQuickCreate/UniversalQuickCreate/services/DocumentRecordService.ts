@@ -2,7 +2,7 @@
  * Document Record Service
  *
  * Creates Document records in Dataverse using context.webAPI.
- * Dynamically resolves navigation properties via MetadataService for case-sensitive accuracy.
+ * Uses case-sensitive navigation property names from EntityDocumentConfig.
  *
  * ADR Compliance:
  * - ADR-003: Separation of Concerns (service layer)
@@ -10,8 +10,8 @@
  *
  * Key Architectural Decisions:
  * - Uses context.webAPI (works across all PCF hosts: Custom Pages, Model-Driven Apps, Canvas Apps)
- * - Queries metadata dynamically to get correct navigation property names (case-sensitive!)
- * - Caches metadata per environment + relationship for performance
+ * - Navigation property names stored in config with correct case (e.g., "sprk_Matter" not "sprk_matter")
+ * - PCF context.webAPI cannot query EntityDefinitions metadata, so case must be correct in config
  *
  * @version 2.2.0
  */
@@ -24,7 +24,6 @@ import {
     CreateResult
 } from '../types';
 import { logInfo, logError } from '../utils/logger';
-import { MetadataService } from './MetadataService';
 
 /**
  * Service for creating Document records using context.webAPI
@@ -100,16 +99,19 @@ export class DocumentRecordService {
                 throw new Error(`Unsupported entity type: ${parentContext.parentEntityName}`);
             }
 
-            // CRITICAL: Query metadata to get EXACT navigation property name (case-sensitive!)
-            // Example: Returns "sprk_Matter" (capital M), not "sprk_matter" (lowercase)
-            // This prevents "undeclared property" errors
-            const navigationPropertyName = await MetadataService.getLookupNavProp(
-                this.context,
-                'sprk_document',              // Child entity
-                config.relationshipSchemaName // Relationship (e.g., "sprk_matter_document")
-            );
+            // CRITICAL: Use navigation property from config (case-sensitive!)
+            // Example: "sprk_Matter" (capital M) for Matter entity
+            // Cannot query metadata dynamically in PCF - context.webAPI doesn't support EntityDefinitions
+            const navigationPropertyName = config.navigationPropertyName;
 
-            logInfo('DocumentRecordService', `Resolved navigation property: ${navigationPropertyName}`);
+            if (!navigationPropertyName) {
+                throw new Error(
+                    `Navigation property not configured for entity '${config.entityName}'. ` +
+                    `Please add navigationPropertyName to EntityDocumentConfig.`
+                );
+            }
+
+            logInfo('DocumentRecordService', `Using navigation property: ${navigationPropertyName}`);
 
             // Build record payload with correct navigation property
             const payload = this.buildRecordPayload(
@@ -217,35 +219,14 @@ export class DocumentRecordService {
 
         const results: CreateResult[] = [];
 
-        // Get entity configuration
-        const config = getEntityDocumentConfig(parentContext.parentEntityName);
-        if (!config) {
-            throw new Error(`Unsupported entity type: ${parentContext.parentEntityName}`);
-        }
-
-        // Query collection navigation property for parent → child relationship
-        const collectionNavProp = await MetadataService.getCollectionNavProp(
-            this.context,
-            parentContext.parentEntityName,    // Parent entity (e.g., "sprk_matter")
-            config.relationshipSchemaName      // Relationship (e.g., "sprk_matter_document")
-        );
-
-        // Sanitize GUID
-        const sanitizedGuid = parentContext.parentRecordId
-            .replace(/[{}]/g, '')
-            .toLowerCase();
-
-        // Relationship URL: /sprk_matters(guid)/sprk_matter_document
-        const relationshipUrl = `/${config.entitySetName}(${sanitizedGuid})/${collectionNavProp}`;
-
-        logInfo('DocumentRecordService', `Relationship URL: ${relationshipUrl}`);
-
         // NOTE: context.webAPI.createRecord() doesn't support relationship URL as 3rd parameter
         // This method would require using Web API directly via fetch/XMLHttpRequest
         // For now, Option B is not implemented - use createDocuments() (Option A) instead
         //
         // Example of how this would work with direct Web API:
-        // const response = await fetch(`${baseUrl}/api/data/v9.2${relationshipUrl}`, {
+        // const config = getEntityDocumentConfig(parentContext.parentEntityName);
+        // const relationshipSchemaName = config.relationshipSchemaName;
+        // const response = await fetch(`${baseUrl}/api/data/v9.2/${config.entitySetName}(guid)/${relationshipSchemaName}`, {
         //     method: 'POST',
         //     headers: { 'Content-Type': 'application/json' },
         //     body: JSON.stringify(payload)
@@ -255,11 +236,5 @@ export class DocumentRecordService {
             'Option B (relationship URL) is not yet implemented. ' +
             'Please use createDocuments() method (Option A with @odata.bind) instead.'
         );
-
-        const successCount = results.filter(r => r.success).length;
-        const failureCount = results.filter(r => !r.success).length;
-        logInfo('DocumentRecordService', `Created ${successCount} records, ${failureCount} failures`);
-
-        return results;
     }
 }
