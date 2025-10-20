@@ -1,0 +1,59 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/powerapps/custom-pages/v1.0/custom-page.schema.json",
+  "name": "sprk_documentuploaddialog",
+  "displayName": "Document Upload",
+  "description": "Custom page for uploading documents to SharePoint Embedded - v3.0.0",
+  "type": "Dialog",
+  "parameters": {
+    "parentEntityName": {
+      "type": "String",
+      "required": true,
+      "description": "Parent entity logical name (e.g., sprk_matter, sprk_project)"
+    },
+    "parentRecordId": {
+      "type": "String",
+      "required": true,
+      "description": "Parent record GUID (without curly braces)"
+    },
+    "containerId": {
+      "type": "String",
+      "required": true,
+      "description": "SharePoint Embedded container ID for file uploads"
+    },
+    "parentDisplayName": {
+      "type": "String",
+      "required": false,
+      "description": "Display name of parent record for UI header (e.g., Matter #12345)"
+    }
+  },
+  "components": [
+    {
+      "id": "uploadControl",
+      "name": "UniversalDocumentUploadControl",
+      "type": "pcfControl",
+      "controlName": "Spaarke.Controls.UniversalDocumentUpload",
+      "properties": {
+        "parentEntityName": "={Parent.parentEntityName}",
+        "parentRecordId": "={Parent.parentRecordId}",
+        "containerId": "={Parent.containerId}",
+        "parentDisplayName": "={Parent.parentDisplayName}",
+        "sdapApiBaseUrl": "https://spe-api-dev-67e2xz.azurewebsites.net"
+      }
+    }
+  ],
+  "onClose": {
+    "action": "RefreshParent",
+    "description": "Refresh parent form and subgrid when dialog closes"
+  },
+  "dialog": {
+    "width": {
+      "value": 800,
+      "unit": "px"
+    },
+    "height": {
+      "value": 600,
+      "unit": "px"
+    },
+    "position": "center"
+  }
+}
