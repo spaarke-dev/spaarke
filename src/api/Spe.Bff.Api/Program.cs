@@ -507,6 +507,23 @@ builder.Services.AddRateLimiter(options =>
         });
     });
 
+    // 3b. Metadata Query Operations - Very high volume with L1 cache (Phase 7)
+    options.AddPolicy("metadata-query", context =>
+    {
+        var userId = context.User?.FindFirst("oid")?.Value
+                     ?? context.User?.FindFirst("sub")?.Value
+                     ?? context.Connection.RemoteIpAddress?.ToString()
+                     ?? "unknown";
+
+        return RateLimitPartition.GetSlidingWindowLimiter(userId, _ => new SlidingWindowRateLimiterOptions
+        {
+            Window = TimeSpan.FromMinutes(1),
+            PermitLimit = 200, // Higher limit due to L1 cache
+            QueueLimit = 10,
+            SegmentsPerWindow = 6 // 10-second segments
+        });
+    });
+
     // 4. Heavy Operations - File uploads, strict concurrency
     options.AddPolicy("upload-heavy", context =>
     {
@@ -645,6 +662,9 @@ app.MapUserEndpoints();
 
 // Permissions endpoints (for UI to query user capabilities)
 app.MapPermissionsEndpoints();
+
+// Navigation metadata endpoints (Phase 7)
+app.MapNavMapEndpoints();
 
 // Dataverse document CRUD endpoints (Task 1.3)
 app.MapDataverseDocumentsEndpoints();

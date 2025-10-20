@@ -106,8 +106,9 @@ public class AuthorizationService
             activity.SetTag("result", "Error");
             activity.SetTag("durationMs", stopwatch.ElapsedMilliseconds);
 
-            _logger.LogError(ex,
-                "AUTHORIZATION ERROR: Failed to evaluate authorization for user {UserId} on resource {ResourceId} operation {Operation} - Fail-closed: DENY (Duration: {DurationMs}ms)",
+            _logger.LogError(
+                exception: ex,
+                message: "AUTHORIZATION ERROR: Failed to evaluate authorization for user {UserId} on resource {ResourceId} operation {Operation} - Fail-closed: DENY (Duration: {DurationMs}ms)",
                 context.UserId, context.ResourceId, context.Operation, stopwatch.ElapsedMilliseconds);
 
             // Fail-closed: Deny on errors
