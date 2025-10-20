@@ -10,7 +10,8 @@ namespace Spaarke.Dataverse;
 
 /// <summary>
 /// Dataverse service implementation using ServiceClient for .NET 8.0.
-/// Uses Managed Identity authentication for server-to-server scenarios.
+/// Uses ClientSecretCredential authentication (same approach as Graph/SPE) for server-to-server scenarios.
+/// Requires TENANT_ID, API_APP_ID, and API_CLIENT_SECRET configuration.
 /// Per Microsoft documentation: https://learn.microsoft.com/en-us/power-apps/developer/data-platform/authenticate-dot-net-framework
 /// </summary>
 public class DataverseServiceClientImpl : IDataverseService, IDisposable
@@ -26,43 +27,34 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         _logger = logger;
 
         var dataverseUrl = configuration["Dataverse:ServiceUrl"];
-        var managedIdentityClientId = configuration["ManagedIdentity:ClientId"];
-
         if (string.IsNullOrEmpty(dataverseUrl))
             throw new InvalidOperationException("Dataverse:ServiceUrl configuration is required");
 
-        _logger.LogInformation("Initializing Dataverse ServiceClient with Managed Identity for {DataverseUrl}", dataverseUrl);
+        // Use same authentication approach as Graph/SPE (ClientSecretCredential)
+        var tenantId = configuration["TENANT_ID"];
+        var clientId = configuration["API_APP_ID"];
+        var clientSecret = configuration["API_CLIENT_SECRET"];
+
+        if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(clientId) || string.IsNullOrEmpty(clientSecret))
+        {
+            throw new InvalidOperationException(
+                "Dataverse authentication requires TENANT_ID, API_APP_ID, and API_CLIENT_SECRET configuration. " +
+                "These should match the same values used for Graph/SPE authentication.");
+        }
+
+        _logger.LogInformation("Initializing Dataverse ServiceClient with ClientSecret for {DataverseUrl}", dataverseUrl);
+        _logger.LogInformation("Using ClientId (masked): ...{Suffix}", clientId.Substring(Math.Max(0, clientId.Length - 8)));
 
         try
         {
-            // Create ManagedIdentityCredential for system-assigned or user-assigned managed identity
-            TokenCredential credential;
+            // Use connection string method (Microsoft's recommended approach for server-to-server auth)
+            // Format: AuthType=ClientSecret;Url=https://org.crm.dynamics.com;ClientId=xxx;ClientSecret=xxx
+            var connectionString = $"AuthType=ClientSecret;Url={dataverseUrl};ClientId={clientId};ClientSecret={clientSecret}";
 
-            if (!string.IsNullOrEmpty(managedIdentityClientId))
-            {
-                // User-assigned Managed Identity specified
-                credential = new ManagedIdentityCredential(managedIdentityClientId);
-                _logger.LogInformation("Using user-assigned Managed Identity: {ClientId}",
-                    managedIdentityClientId.Substring(Math.Max(0, managedIdentityClientId.Length - 8)));
-            }
-            else
-            {
-                // System-assigned Managed Identity (default)
-                credential = new ManagedIdentityCredential();
-                _logger.LogInformation("Using system-assigned Managed Identity");
-            }
+            _logger.LogInformation("Using ClientSecret authentication (connection string method)");
 
-            // Create ServiceClient using token provider pattern for Managed Identity
-            _serviceClient = new ServiceClient(
-                instanceUrl: new Uri(dataverseUrl),
-                tokenProviderFunction: async (uri) =>
-                {
-                    var tokenRequestContext = new TokenRequestContext(new[] { $"{uri}/.default" });
-                    var token = await credential.GetTokenAsync(tokenRequestContext, CancellationToken.None);
-                    return token.Token;
-                },
-                useUniqueInstance: true
-            );
+            // Create ServiceClient using connection string
+            _serviceClient = new ServiceClient(connectionString);
 
             if (!_serviceClient.IsReady)
             {

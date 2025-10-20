@@ -79,7 +79,7 @@ export const ENTITY_DOCUMENT_CONFIGS: Record<string, EntityDocumentConfig> = {
     'sprk_project': {
         entityName: 'sprk_project',
         lookupFieldName: 'sprk_project',
-        relationshipSchemaName: 'sprk_project_document',
+        relationshipSchemaName: 'sprk_Project_Document_1n',  // ⚠️ Actual relationship name in Dataverse
         containerIdField: 'sprk_containerid',
         displayNameField: 'sprk_projectname',
         entitySetName: 'sprk_projects'
