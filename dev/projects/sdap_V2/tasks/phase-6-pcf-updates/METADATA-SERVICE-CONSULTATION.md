@@ -336,7 +336,134 @@ await context.webAPI.createRecord('sprk_document', payload);
 
 ---
 
+## UPDATE: Current Approach WORKS ✅
+
+**Date:** 2025-10-19 (Evening)
+**Status:** Hardcoded navigation property approach successfully tested and working
+
+### Test Results
+
+**What Was Tested:**
+- Multiple file upload to Matter entity
+- Document record creation with lookup to parent Matter
+- Multiple Document records created in single operation
+
+**Results:**
+✅ File upload to SharePoint Embedded successful
+✅ Multiple Document records created successfully
+✅ Lookup field populated correctly with parent Matter reference
+✅ Navigation property `sprk_Matter@odata.bind` accepted by Dataverse
+✅ No "undeclared property" errors
+
+**Approach That Works:**
+
+```typescript
+// EntityDocumentConfig.ts - Hardcoded navigation property with correct case
+'sprk_matter': {
+  entityName: 'sprk_matter',
+  lookupFieldName: 'sprk_matter',
+  relationshipSchemaName: 'sprk_matter_document',
+  navigationPropertyName: 'sprk_Matter',  // ✅ CAPITAL M - validated via metadata
+  containerIdField: 'sprk_containerid',
+  displayNameField: 'sprk_matternumber',
+  entitySetName: 'sprk_matters'
+}
+
+// DocumentRecordService.ts - Use config value directly
+const navigationPropertyName = config.navigationPropertyName; // "sprk_Matter"
+const payload = {
+  sprk_documentname: file.name,
+  sprk_filename: file.name,
+  sprk_filesize: file.size,
+  sprk_graphitemid: file.id,
+  sprk_graphdriveid: containerId,
+  sprk_documentdescription: formData.description,
+  [`${navigationPropertyName}@odata.bind`]: `/${entitySetName}(${sanitizedGuid})`
+  // Expands to: "sprk_Matter@odata.bind": "/sprk_matters(guid)"
+};
+
+await context.webAPI.createRecord('sprk_document', payload);
+```
+
+**Key Success Factors:**
+1. ✅ Correct case in navigation property: `sprk_Matter` (capital M)
+2. ✅ Pre-validated via PowerShell metadata query
+3. ✅ Hardcoded in configuration with documentation
+4. ✅ Uses `context.webAPI` for record creation (works in all PCF hosts)
+5. ✅ No runtime metadata queries required
+
+**Deployment:**
+- Version: 2.2.0
+- Deployed: 2025-10-19
+- Environment: spaarkedev1.crm.dynamics.com
+- Status: Production-ready for Matter entity
+
+### Revised Question for Expert
+
+**Original Question:**
+"Can we dynamically query EntityDefinitions metadata in PCF to support multiple parent entities?"
+
+**Revised Question Given Working Solution:**
+"The hardcoded approach works well for single parent (Matter). For multi-parent support (Account, Contact, Project, Invoice), what is the recommended pattern?"
+
+**Options:**
+
+**Option A: Continue Hardcoded Approach (Current - Working)**
+- Pro: Simple, reliable, tested and working
+- Pro: No runtime dependencies or API calls
+- Pro: Works across all PCF hosts
+- Con: Requires manual metadata validation for each parent entity
+- Con: Must update config if Microsoft changes schema
+- **Recommended for:** 2-5 parent entities, stable schema
+
+**Option B: Build-Time Metadata Resolution**
+- Pro: Best of both worlds (validated + automated)
+- Pro: No runtime overhead
+- Con: Requires build/deployment tooling
+- **Recommended for:** 5+ parent entities, frequent schema changes
+
+**Option C: Runtime Metadata via Custom API**
+- Pro: Fully dynamic, self-maintaining
+- Con: Additional API deployment
+- Con: Runtime overhead
+- **Recommended for:** 10+ parent entities, complex scenarios
+
+**Option D: Runtime Metadata via Xrm.WebApi (If Possible)**
+- Pro: Native PCF, no external dependencies
+- Con: May not work in all PCF hosts
+- Con: Unknown if Xrm.WebApi can access EntityDefinitions
+- **Recommended for:** Unknown - needs expert validation
+
+**Current Recommendation:**
+- Proceed with **Option A (Hardcoded)** for immediate multi-parent support
+- Validate navigation properties for Account, Contact, Project, Invoice via PowerShell
+- Document the validation process
+- Revisit if we need to support 10+ parent entities
+
+### Business Decision Point
+
+**Question:** Do we need to support multi-parent entities immediately?
+
+**If NO (Matter only):**
+- ✅ Current solution is production-ready
+- ✅ No further work needed
+- Close consultation as "Resolved with hardcoded approach"
+
+**If YES (Account, Contact, etc.):**
+- Add 4-5 more entities to config (one-time effort)
+- Validate each navigation property via PowerShell (documented process)
+- Deploy updated config
+- Estimated effort: 2-4 hours total
+
+**If MAYBE (Future requirement):**
+- Deploy current solution for Matter
+- Document validation process for future entities
+- Seek expert guidance on best long-term pattern
+
+---
+
 **Prepared By:** Claude (AI Agent)
 **Date:** 2025-10-19
 **Phase:** 6 - PCF Control Document Record Creation Fix
 **Task:** 6.5 - Deployment & MetadataService Investigation
+**Status:** ✅ Working solution deployed, consultation request updated
