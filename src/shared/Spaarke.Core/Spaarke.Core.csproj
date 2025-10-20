@@ -15,6 +15,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Azure.Core" Version="1.49.0" />
     <ProjectReference Include="..\Spaarke.Dataverse\Spaarke.Dataverse.csproj" />
   </ItemGroup>
 
