@@ -15,6 +15,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.Identity.Client" Version="4.77.1" />
     <ProjectReference Include="..\Spaarke.Dataverse\Spaarke.Dataverse.csproj" />
   </ItemGroup>
 
