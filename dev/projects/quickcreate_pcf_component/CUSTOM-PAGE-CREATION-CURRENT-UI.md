@@ -80,34 +80,15 @@ Once the page editor opens, you'll see template components on the canvas.
 
 ---
 
-### Step 5: Add Input Parameters
+### Step 5: Add Input Parameters via Variables
 
-Parameters might be in different locations depending on your Power Apps version. Try these options:
+1. In the **left navigation panel**, look for **"Variables"** (usually has a "x" or variable icon)
+2. Click on **"Variables"**
+3. You should see options for different variable types
+4. Look for **"Environment variables"**, **"App variables"**, or **"Parameters"**
+5. Click **"+ New variable"** or **"+ Add"** to create input parameters
 
-**Option A: Via App object in Tree View (Most Common)**
-1. In the left **Tree view**, find and click **"App"** (at the very top)
-2. Look for **"OnStart"** or a formula bar
-3. You should see a properties panel on the right
-4. Look for **"Custom properties"** or **"Parameters"** section
-5. Click **"+ New parameter"** or **"New custom property"**
-
-**Option B: Via Settings**
-1. Click the **Settings** icon (⚙️) in the top-right
-2. Look through tabs for: **"Parameters"**, **"Custom properties"**, or **"Variables"**
-
-**Option C: Via Advanced Settings**
-1. Click **Settings** (⚙️)
-2. Go to **"General"** or **"Advanced settings"**
-3. Look for **"App parameters"** or **"Input parameters"**
-
-**Option D: Via Properties Panel**
-1. Click anywhere on the blank canvas (select the screen)
-2. In the properties panel (right side)
-3. Look for **"Custom properties"** or **"+ Add property"**
-
----
-
-Once you find where to add parameters, create these 4 parameters:
+Create these 4 input parameters:
 
 #### Parameter 1:
 - **Name:** `parentEntityName`

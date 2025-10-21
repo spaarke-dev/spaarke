@@ -1,0 +1,49 @@
+Screens:
+  'Document Upload':
+    Fill: =RGBA(255, 255, 255, 1)
+    LoadingSpinnerColor: =RGBA(0, 120, 212, 1)
+    Properties:
+      DisplayMode: View
+      Height: 600
+      Width: 800
+
+    # PCF Control Component
+    UniversalDocumentUpload:
+      Control: Spaarke.Controls.UniversalDocumentUpload
+      Properties:
+        parentEntityName: =parentEntityName
+        parentRecordId: =parentRecordId
+        containerId: =containerId
+        parentDisplayName: =parentDisplayName
+        sdapApiBaseUrl: ="https://spe-api-dev-67e2xz.azurewebsites.net"
+        X: 0
+        Y: 0
+        Width: =Parent.Width
+        Height: =Parent.Height
+
+# Page Parameters
+Parameters:
+  parentEntityName:
+    Type: Text
+    Required: true
+
+  parentRecordId:
+    Type: Text
+    Required: true
+
+  containerId:
+    Type: Text
+    Required: true
+
+  parentDisplayName:
+    Type: Text
+    Required: false
+
+# Page Settings
+Settings:
+  Type: Dialog
+  Width: 800
+  Height: 600
+  Position: Center
+  Name: sprk_documentuploaddialog
+  DisplayName: Document Upload Dialog
