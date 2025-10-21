@@ -36,16 +36,49 @@
 
 ### Step 7: Add PCF Control
 
-1. Click **Insert** (+ button in left toolbar)
-2. Click **Get more components**
-3. Go to **"Code"** tab
-4. You should see: **"UniversalDocumentUpload"** (or "Universal Document Upload")
-   - If NOT visible, close Power Apps and redeploy: `pac pcf push --publisher-prefix sprk`
-5. Click **Import** (check the box next to the control)
-6. Click **Import** button at bottom
-7. After import completes, find the control in Insert panel
-8. **Drag it onto the canvas**
-9. **Resize to fill entire screen:**
+**Finding and Adding the PCF Control - Try these options:**
+
+#### Option A: Via Insert Menu
+1. Click **Insert** (+ button) in the top menu bar
+2. Look for one of these:
+   - **"Custom"** or **"Code component"**
+   - **"More"** or **"..."** at the bottom of Insert menu
+   - **Library** or **Components**
+3. If you see **"Get more components"** - click it
+4. Look for **Code** tab or **Custom controls**
+
+#### Option B: Via Add Data
+1. Click **"Add data"** in the top toolbar
+2. Look for **"Connectors"** or **"Custom"**
+3. Find **Code components** or **Custom controls**
+
+#### Option C: Direct Search
+1. In the Insert panel (left side after clicking +)
+2. Look for a **Search box** at the top
+3. Type: **"UniversalDocumentUpload"**
+4. The PCF control should appear if deployed
+
+#### Option D: Via Media/Advanced
+1. Click **Insert** (+)
+2. Scroll down to **"Media"** or **"Advanced"**
+3. Look for **"Custom"** or **"Import component"**
+
+---
+
+**Once you find where Code Components are:**
+
+1. You should see: **"UniversalDocumentUpload"** or **"Universal Document Upload"**
+   - **If NOT visible:** The control isn't deployed yet
+   - Close Power Apps, run: `cd /c/code_files/spaarke/src/controls/UniversalQuickCreate && pac pcf push --publisher-prefix sprk`
+   - Reopen Power Apps
+
+2. **Select/Import the control** (might be a checkbox or Add button)
+
+3. After import, the control should appear in your Insert panel
+
+4. **Drag it onto the canvas**
+
+5. **Resize to fill entire screen:**
    - Select the control
    - In properties panel (right side):
      - **X:** `0`
