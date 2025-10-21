@@ -1,7 +1,7 @@
 {
   "name": "universal-quick-create-pcf",
-  "version": "1.0.0",
-  "description": "Universal Quick Create PCF control with SharePoint Embedded file upload and MSAL authentication",
+  "version": "3.0.0",
+  "description": "Universal Document Upload PCF control with Custom Page dialog support and SharePoint Embedded file upload",
   "scripts": {
     "build": "pcf-scripts build",
     "build:dev": "pcf-scripts build --buildMode development",

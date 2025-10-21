@@ -17,7 +17,7 @@
  * - ADR-003: Separation of Concerns
  * - ADR-010: Configuration Over Code
  *
- * @version 2.3.0 (Phase 7 - Dynamic Metadata Discovery)
+ * @version 3.0.0 (Custom Page Dialog Support + Phase 7 Dynamic Metadata)
  */
 
 // Declare global Xrm (used for navigation/dialog management only)
@@ -46,6 +46,9 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
     private notifyOutputChanged: () => void;
     private context: ComponentFramework.Context<IInputs>;
 
+    // Hosting context detection (Custom Page vs Quick Create Form)
+    private isCustomPageMode: boolean = false;
+
     // Services
     private authProvider: MsalAuthProvider;
     private multiFileService: MultiFileUploadService | null = null;
@@ -63,6 +66,27 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
     }
 
     /**
+     * Detect hosting context - Custom Page vs Quick Create Form
+     * @returns true if running in Custom Page mode, false otherwise
+     */
+    private detectHostingContext(context: ComponentFramework.Context<IInputs>): boolean {
+        // Check if context.page exists and has type='custom'
+        // Custom Pages have context.page.type === 'custom'
+        // Quick Create forms don't have context.page or have different type
+        const contextAny = context as any;
+        if (contextAny.page && contextAny.page.type === 'custom') {
+            logInfo('UniversalDocumentUpload', 'Detected Custom Page context', {
+                pageType: contextAny.page.type,
+                hasNavigationClose: !!(contextAny.navigation && contextAny.navigation.close)
+            });
+            return true;
+        }
+
+        logInfo('UniversalDocumentUpload', 'Detected Quick Create Form context');
+        return false;
+    }
+
+    /**
      * Initialize PCF Control
      */
     public init(
@@ -71,10 +95,13 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
         state: ComponentFramework.Dictionary,
         container: HTMLDivElement
     ): void {
-        logInfo('UniversalDocumentUpload', 'Initializing PCF control v2.3.0 (Phase 7)');
+        logInfo('UniversalDocumentUpload', 'Initializing PCF control v3.0.0 (Custom Page Dialog)');
 
         this.context = context;
         this.notifyOutputChanged = notifyOutputChanged;
+
+        // Detect hosting context (Custom Page vs Quick Create Form)
+        this.isCustomPageMode = this.detectHostingContext(context);
 
         // Create container
         this.container = document.createElement("div");
@@ -83,7 +110,7 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
 
         // Version badge for debugging
         const versionBadge = document.createElement("div");
-        versionBadge.textContent = "✓ UNIVERSAL DOCUMENT UPLOAD V2.3.0 - PHASE 7 (DYNAMIC METADATA) - " + new Date().toLocaleTimeString();
+        versionBadge.textContent = "✓ UNIVERSAL DOCUMENT UPLOAD V3.0.0 - CUSTOM PAGE DIALOG - " + new Date().toLocaleTimeString();
         versionBadge.style.cssText = "padding: 12px; background: #107c10; color: white; font-size: 14px; font-weight: bold; border-radius: 4px; margin-bottom: 8px; text-align: center;";
         this.container.appendChild(versionBadge);
 
@@ -283,18 +310,46 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
                 parentContext: this.parentContext,
                 multiFileService: this.multiFileService,
                 documentRecordService: this.documentRecordService,
-                onClose: this.handleClose.bind(this)
+                onClose: this.closeDialog.bind(this) // Use closeDialog for both Custom Page and Quick Create Form
             })
         );
     }
 
     /**
-     * Handle dialog close
+     * Close dialog - supports both Custom Page and Quick Create Form modes
+     *
+     * Called after successful upload completion:
+     * - Custom Page: Closes dialog programmatically via context.navigation.close()
+     * - Quick Create Form: Does nothing (form handles close on save)
+     */
+    private closeDialog(): void {
+        logInfo('UniversalDocumentUpload', 'closeDialog() called after successful upload', {
+            isCustomPageMode: this.isCustomPageMode
+        });
+
+        if (this.isCustomPageMode) {
+            // Custom Page mode - close dialog programmatically
+            const contextAny = this.context as any;
+            if (contextAny.navigation && contextAny.navigation.close) {
+                contextAny.navigation.close();
+                logInfo('UniversalDocumentUpload', 'Custom Page dialog closed via context.navigation.close()');
+            } else {
+                logError('UniversalDocumentUpload', 'Custom Page mode but context.navigation.close() not available');
+            }
+        } else {
+            // Quick Create form mode - do NOT close programmatically
+            // Form will handle close behavior when user saves the form
+            logInfo('UniversalDocumentUpload', 'Quick Create Form mode - not closing dialog (form handles close on save)');
+        }
+    }
+
+    /**
+     * Handle dialog close (Quick Create Form mode only - backward compatibility)
      */
     private handleClose(): void {
-        logInfo('UniversalDocumentUpload', 'Dialog closed by user');
+        logInfo('UniversalDocumentUpload', 'Dialog closed by user (Quick Create Form mode)');
 
-        // Close Custom Page dialog
+        // Close Quick Create Form dialog
         if (typeof Xrm !== 'undefined' && Xrm.Navigation) {
             // Refresh parent grid if available
             try {

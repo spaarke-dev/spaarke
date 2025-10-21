@@ -242,7 +242,7 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
         ? 'Select Files to Continue'
         : isUploading
             ? 'Uploading...'
-            : `Save and Create Document${selectedFiles.length > 1 ? 's' : ''}`;
+            : `Upload & Create Document${selectedFiles.length > 1 ? 's' : ''}`;
 
     const mainButtonDisabled = selectedFiles.length === 0 || isUploading;
 
