@@ -103,7 +103,7 @@
         // Custom Page input
         const pageInput = {
             pageType: 'custom',
-            name: 'sprk_documentuploaddialog',  // ⚠️ UPDATE IF YOUR PAGE HAS DIFFERENT NAME
+            name: 'sprk_documentuploaddialog_e52db',  // Actual name with Dataverse-generated suffix
             data: navigationParams
         };
 
