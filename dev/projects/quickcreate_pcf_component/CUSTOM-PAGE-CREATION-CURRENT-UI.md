@@ -44,14 +44,30 @@ Component uploaded successfully
    - **Start this screen with: With layout**
 
 5. **Choose: "With layout"**
-6. Select **"Blank"** template (empty canvas)
-7. Click **"Create"**
+6. You'll see layout templates like:
+   - Side bar
+   - Scrollable
+   - Portrait print
+   - Landscape print
+
+7. **Choose ANY template** (recommend: "Scrollable" or "Portrait print")
+   - We'll delete the template content and add our PCF control
+8. Click **"Create"**
 
 ---
 
-### Step 3: Configure Page Properties
+### Step 3: Clear Template Content
 
-Once the page editor opens:
+Once the page editor opens, you'll see template components on the canvas.
+
+1. **Delete all template components:**
+   - Select each component on the canvas (headers, containers, etc.)
+   - Press **Delete** key OR right-click → **Delete**
+   - Clear the canvas completely (should be empty)
+
+---
+
+### Step 4: Configure Page Properties
 
 1. **Name the page:**
    - Look for the page name field at the top (default might be "Screen1")
@@ -64,7 +80,7 @@ Once the page editor opens:
 
 ---
 
-### Step 4: Add Input Parameters
+### Step 5: Add Input Parameters
 
 1. Click the **Settings** icon (⚙️) in the top-right
 2. Go to the **"Parameters"** section/tab
@@ -98,7 +114,7 @@ You should now have 4 parameters listed.
 
 ---
 
-### Step 5: Configure as Dialog
+### Step 6: Configure as Dialog
 
 Still in **Settings**:
 
@@ -113,7 +129,7 @@ Still in **Settings**:
 
 ---
 
-### Step 6: Add the PCF Control
+### Step 7: Add the PCF Control
 
 1. Click **"Insert"** in the left toolbar (or **"+"** button)
 2. Look for **"Get more components"** or **"Code components"**
@@ -140,7 +156,7 @@ Still in **Settings**:
 
 ---
 
-### Step 7: Bind PCF Control Properties
+### Step 8: Bind PCF Control Properties
 
 With the PCF control selected on the canvas:
 
@@ -184,7 +200,7 @@ With the PCF control selected on the canvas:
 
 ---
 
-### Step 8: Save the Custom Page
+### Step 9: Save the Custom Page
 
 1. Click **"Save"** button (top-right)
 2. In the save dialog:
@@ -194,7 +210,7 @@ With the PCF control selected on the canvas:
 
 ---
 
-### Step 9: Publish the Custom Page
+### Step 10: Publish the Custom Page
 
 1. After saving, click **"Publish"** button (top-right)
 2. Wait for publish to complete
