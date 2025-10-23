@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="UniversalDocumentUpload" version="3.0.0"
+  <control namespace="Spaarke.Controls" constructor="UniversalDocumentUpload" version="3.0.2"
            display-name-key="Universal Document Upload"
-           description-key="Multi-file upload with Custom Page dialog support (v3.0.0 - Custom Page mode)"
+           description-key="Multi-file upload with Custom Page dialog support (v3.0.2 - usage=input fix)"
            control-type="standard">
 
     <external-service-usage enabled="false">
@@ -14,36 +14,36 @@
       Form passes parameters via formParameters in Xrm.Navigation.openForm()
     -->
 
-    <!-- Parent Entity Name (BOUND TO sprk_parententityname) -->
+    <!-- Parent Entity Name (INPUT for Custom Page) -->
     <property name="parentEntityName"
               display-name-key="Parent Entity Name"
               description-key="Logical name of parent entity (e.g., sprk_matter, account, contact)"
               of-type="SingleLine.Text"
-              usage="bound"
+              usage="input"
               required="true" />
 
-    <!-- Parent Record ID (BOUND TO sprk_parentrecordid) -->
+    <!-- Parent Record ID (INPUT for Custom Page) -->
     <property name="parentRecordId"
               display-name-key="Parent Record ID"
               description-key="GUID of parent record (without curly braces)"
               of-type="SingleLine.Text"
-              usage="bound"
+              usage="input"
               required="true" />
 
-    <!-- Container ID (BOUND TO sprk_containerid) -->
+    <!-- Container ID (INPUT for Custom Page) -->
     <property name="containerId"
               display-name-key="Container ID"
               description-key="SharePoint Embedded Container ID for file uploads"
               of-type="SingleLine.Text"
-              usage="bound"
+              usage="input"
               required="true" />
 
-    <!-- Parent Display Name (BOUND TO sprk_parentdisplayname) -->
+    <!-- Parent Display Name (INPUT for Custom Page) -->
     <property name="parentDisplayName"
               display-name-key="Parent Display Name"
               description-key="Display name of parent record for UI header (e.g., Matter #12345)"
               of-type="SingleLine.Text"
-              usage="bound"
+              usage="input"
               required="false" />
 
     <!-- Configuration: SDAP API Base URL -->

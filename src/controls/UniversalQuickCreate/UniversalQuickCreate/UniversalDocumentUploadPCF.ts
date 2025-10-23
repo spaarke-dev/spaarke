@@ -36,6 +36,8 @@ import { getEntityDocumentConfig, isEntitySupported } from "./config/EntityDocum
 import { ParentContext } from "./types";
 import { DocumentUploadForm } from "./components/DocumentUploadForm";
 
+type ParentContextLoadState = "missing" | "unchanged" | "updated";
+
 /**
  * PCF Control for Custom Page Document Upload
  */
@@ -52,6 +54,9 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
 
     // Parent Context (from Custom Page parameters)
     private parentContext: ParentContext | null = null;
+    private waitingBanner: HTMLDivElement | null = null;
+    private isBootstrapInProgress = false;
+    private isMsalInitialized = false;
 
     // UI State
     private selectedFiles: File[] = [];
@@ -89,8 +94,8 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
         // Create React root
         this.reactRoot = ReactDOM.createRoot(this.container);
 
-        // Async initialization
-        this.initializeAsync(context);
+    // Async initialization
+    void this.initializeAsync(context);
     }
 
     /**
@@ -98,27 +103,7 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
      */
     private async initializeAsync(context: ComponentFramework.Context<IInputs>): Promise<void> {
         try {
-            // Step 1: Load and validate parent context
-            this.loadParentContext(context);
-
-            // Step 2: Validate parent entity is supported
-            this.validateParentEntity();
-
-            // Step 3: Initialize MSAL authentication
-            await this.initializeMsalAsync();
-
-            // Step 4: Initialize services
-            this.initializeServices(context);
-
-            // Step 5: Render React UI
-            this.renderReactComponent();
-
-            logInfo('UniversalDocumentUploadPCF', 'Initialization complete', {
-                parentEntityName: this.parentContext?.parentEntityName,
-                parentRecordId: this.parentContext?.parentRecordId,
-                containerId: this.parentContext?.containerId
-            });
-
+            await this.bootstrapAsync(context, true);
         } catch (error) {
             logError('UniversalDocumentUploadPCF', 'Initialization failed', error);
             this.showError((error as Error).message);
@@ -126,56 +111,110 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
     }
 
     /**
-     * Load parent context from bound form fields or Custom Page parameters
+     * Attempt to fully initialize the control when the host provides context.
      */
-    private loadParentContext(context: ComponentFramework.Context<IInputs>): void {
-        logInfo('UniversalDocumentUploadPCF', 'Loading parent context from parameters');
+    private async bootstrapAsync(
+        context: ComponentFramework.Context<IInputs>,
+        forceServiceInitialization = false
+    ): Promise<void> {
+        const contextState = this.updateParentContext(context);
 
-        // Read parameters (might be bound to form fields or passed via Custom Page)
-        const parentEntityName = context.parameters.parentEntityName?.raw;
-        const parentRecordId = context.parameters.parentRecordId?.raw;
-        const containerId = context.parameters.containerId?.raw;
-        const parentDisplayName = context.parameters.parentDisplayName?.raw;
-
-        logInfo('UniversalDocumentUploadPCF', 'Raw parameter values', {
-            parentEntityName,
-            parentRecordId,
-            containerId,
-            parentDisplayName
-        });
-
-        // If values are missing, show a user-friendly message instead of throwing
-        // This allows the form to load even if fields are empty initially
-        if (!parentEntityName || !parentRecordId || !containerId) {
-            logWarn('UniversalDocumentUploadPCF', 'Parameters not yet populated - waiting for user input');
-
-            // Show instructions to user
-            this.showInfo(
-                'Please fill in the required fields: Parent Entity Name, Parent Record ID, and Container ID. ' +
-                'Then save the form to activate the upload control.'
-            );
-
-            return; // Exit gracefully - don't throw error
+        if (contextState === "missing") {
+            logWarn('UniversalDocumentUploadPCF', 'Parent context not yet available - waiting for Custom Page parameters');
+            return;
         }
 
-        // Validate GUID format for parentRecordId
+        if (this.isBootstrapInProgress) {
+            logInfo('UniversalDocumentUploadPCF', 'Bootstrap already in progress - skipping duplicate call');
+            return;
+        }
+
+        this.isBootstrapInProgress = true;
+
+        try {
+            this.validateParentEntity();
+
+            if (!this.isMsalInitialized) {
+                await this.initializeMsalAsync();
+            }
+
+            if (forceServiceInitialization || contextState === "updated" || !this.multiFileService || !this.documentRecordService) {
+                this.initializeServices(context);
+            }
+
+            this.renderReactComponent();
+
+            logInfo('UniversalDocumentUploadPCF', 'Bootstrap complete', {
+                parentEntityName: this.parentContext?.parentEntityName,
+                parentRecordId: this.parentContext?.parentRecordId,
+                containerId: this.parentContext?.containerId
+            });
+
+        } catch (error) {
+            logError('UniversalDocumentUploadPCF', 'Bootstrap failed', error);
+            this.showError((error as Error).message);
+        } finally {
+            this.isBootstrapInProgress = false;
+        }
+    }
+
+    /**
+     * Evaluate incoming parameters and determine whether context is ready/changed.
+     */
+    private updateParentContext(context: ComponentFramework.Context<IInputs>): ParentContextLoadState {
+        logInfo('UniversalDocumentUploadPCF', 'Evaluating parent context from parameters');
+
+        const parentEntityNameRaw = context.parameters.parentEntityName?.raw?.trim();
+        const parentRecordIdRaw = context.parameters.parentRecordId?.raw?.trim();
+        const containerIdRaw = context.parameters.containerId?.raw?.trim();
+        const parentDisplayNameRaw = context.parameters.parentDisplayName?.raw?.trim();
+
+        logInfo('UniversalDocumentUploadPCF', 'Raw parameter values', {
+            parentEntityName: parentEntityNameRaw,
+            parentRecordId: parentRecordIdRaw,
+            containerId: containerIdRaw,
+            parentDisplayName: parentDisplayNameRaw
+        });
+
+        if (!parentEntityNameRaw || !parentRecordIdRaw || !containerIdRaw) {
+            this.displayWaitingForContextMessage();
+            return "missing";
+        }
+
+        this.removeWaitingBanner();
+
+        const parentEntityName = parentEntityNameRaw;
+        const cleanParentRecordId = parentRecordIdRaw.replace(/[{}]/g, '').toLowerCase();
+        const containerId = containerIdRaw;
+        const parentDisplayName = parentDisplayNameRaw || parentEntityName;
+
         const guidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-        if (!guidRegex.test(parentRecordId)) {
+        if (!guidRegex.test(cleanParentRecordId)) {
             throw new Error(
-                `Invalid parentRecordId format: "${parentRecordId}". ` +
+                `Invalid parentRecordId format: "${cleanParentRecordId}". ` +
                 'Expected GUID format without curly braces (e.g., "abc12345-def6-7890-ghij-klmnopqrstuv")'
             );
         }
 
-        // Create parent context
+        if (
+            this.parentContext &&
+            this.parentContext.parentEntityName === parentEntityName &&
+            this.parentContext.parentRecordId === cleanParentRecordId &&
+            this.parentContext.containerId === containerId &&
+            this.parentContext.parentDisplayName === parentDisplayName
+        ) {
+            return "unchanged";
+        }
+
         this.parentContext = {
             parentEntityName,
-            parentRecordId,
+            parentRecordId: cleanParentRecordId,
             containerId,
-            parentDisplayName: parentDisplayName || parentEntityName
+            parentDisplayName
         };
 
         logInfo('UniversalDocumentUploadPCF', 'Parent context loaded', this.parentContext);
+        return "updated";
     }
 
     /**
@@ -209,6 +248,7 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
 
             this.authProvider = MsalAuthProvider.getInstance();
             await this.authProvider.initialize();
+            this.isMsalInitialized = true;
 
             logInfo('UniversalDocumentUploadPCF', 'MSAL authentication initialized ✅');
 
@@ -219,6 +259,7 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
 
         } catch (error) {
             logError('UniversalDocumentUploadPCF', 'MSAL initialization failed', error);
+            this.isMsalInitialized = false;
             throw new Error('Authentication initialization failed. Please refresh and try again.');
         }
     }
@@ -318,6 +359,7 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
      * Show error message
      */
     private showError(message: string): void {
+        this.removeWaitingBanner();
         const errorDiv = document.createElement('div');
         errorDiv.style.cssText = 'padding: 20px; color: #a4262c; background: #fde7e9; border: 1px solid #a4262c; border-radius: 4px; margin: 10px;';
         errorDiv.innerHTML = `<strong>Error:</strong> ${message}`;
@@ -335,11 +377,35 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
     }
 
     /**
+     * Display banner while waiting for host context to arrive
+     */
+    private displayWaitingForContextMessage(): void {
+        if (!this.waitingBanner) {
+            this.waitingBanner = document.createElement('div');
+            this.waitingBanner.style.cssText = 'padding: 20px; color: #323130; background: #f3f2f1; border: 1px solid #8a8886; border-radius: 4px; margin: 10px;';
+            this.container.appendChild(this.waitingBanner);
+        }
+
+        this.waitingBanner.innerHTML = '<strong>Loading:</strong> Waiting for host to provide upload context...';
+    }
+
+    /**
+     * Remove pending banner when context is available
+     */
+    private removeWaitingBanner(): void {
+        if (this.waitingBanner?.parentElement) {
+            this.waitingBanner.parentElement.removeChild(this.waitingBanner);
+        }
+
+        this.waitingBanner = null;
+    }
+
+    /**
      * Update view
      */
     public updateView(context: ComponentFramework.Context<IInputs>): void {
         this.context = context;
-        // Re-render if needed
+        void this.bootstrapAsync(context);
     }
 
     /**

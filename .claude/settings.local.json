@@ -131,7 +131,14 @@
       "Bash(pkill -f \"az webapp log tail\")",
       "Bash(pkill:*)",
       "Bash(xargs:*)",
-      "Bash(git reset:*)"
+      "Bash(git reset:*)",
+      "Bash(node -c:*)",
+      "Bash(pac solution online-version:*)",
+      "Bash(pac webresource push:*)",
+      "Bash(tee:*)",
+      "Bash(pac solution sync:*)",
+      "Bash(start https://make.powerapps.com)",
+      "Bash(sort:*)"
     ],
     "deny": [],
     "ask": []

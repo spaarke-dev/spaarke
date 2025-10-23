@@ -1,12 +1,12 @@
 /**
  * Universal Multi-Document Upload Command Script
  *
- * PURPOSE: Opens Form Dialog for uploading multiple documents
+ * PURPOSE: Opens Custom Page Dialog for uploading multiple documents
  * WORKS WITH: Any parent entity (Matter, Project, Invoice, Account, Contact, etc.)
  * DEPLOYMENT: Classic Ribbon Workbench command button on Documents subgrid
- * ARCHITECTURE: Form Dialog approach using sprk_uploadcontext utility entity
+ * ARCHITECTURE: Custom Page dialog approach with PCF control
  *
- * @version 2.1.0
+ * @version 3.0.2
  * @namespace Spaarke.Commands.Documents
  */
 
@@ -73,7 +73,7 @@ function getEntityConfiguration(entityName) {
 function Spaarke_AddMultipleDocuments(selectedControl) {
     try {
         console.log("[Spaarke] ========================================");
-        console.log("[Spaarke] AddMultipleDocuments: Starting v2.1.0 - FORM DIALOG APPROACH");
+        console.log("[Spaarke] AddMultipleDocuments: Starting v3.0.2 - CUSTOM PAGE DIALOG");
         console.log("[Spaarke] ========================================");
         console.log("[Spaarke] Received selectedControl:", selectedControl);
         console.log("[Spaarke] selectedControl type:", typeof selectedControl);
@@ -273,46 +273,63 @@ function getContainerId(formContext, entityConfig) {
 }
 
 /**
- * Open Form Dialog for document upload
- * Uses sprk_uploadcontext utility entity with PCF control
+ * Open Custom Page Dialog for document upload
+ * Uses Custom Page with PCF control (v3.0.2)
  *
  * @param {object} params - Dialog parameters
  * @param {object} selectedControl - Subgrid control for refresh
+ * @version 3.0.2
  */
 function openDocumentUploadDialog(params, selectedControl) {
-    console.log("[Spaarke] Opening Form Dialog with parameters:", params);
+    console.log("[Spaarke] Opening Custom Page Dialog with parameters:", params);
 
-    // Generate unique name for temporary record
-    const timestamp = new Date().getTime();
-    const uniqueName = "UPLOAD_" + timestamp;
+    // Try to get appId (may not be available in ribbon context)
+    let appId = null;
+    try {
+        const globalContext = Xrm.Utility.getGlobalContext();
+        if (globalContext && globalContext.client && typeof globalContext.client.getAppId === 'function') {
+            appId = globalContext.client.getAppId();
+            console.log("[Spaarke] Using appId:", appId);
+        } else {
+            console.log("[Spaarke] client.getAppId() not available in this context (ribbon commands), using default app resolution");
+        }
+    } catch (e) {
+        console.log("[Spaarke] Could not get appId:", e.message);
+    }
 
-    // Configure form parameters - these populate the hidden fields
-    const formParameters = {
-        sprk_name: uniqueName,
-        sprk_parententityname: params.parentEntityName,
-        sprk_parentrecordid: params.parentRecordId,
-        sprk_containerid: params.containerId,
-        sprk_parentdisplayname: params.parentDisplayName
+    // Configure Custom Page navigation
+    // NOTE: Using 'parameters' property as recommended by expert
+    // Each parameter should be accessible via Param("parameterName") in Custom Page
+    // IMPORTANT: Ensure all values are serializable (use ?? "" for safety, clean GUID format)
+    const dialogParameters = {
+        parentEntityName: params?.parentEntityName ?? "",
+        parentRecordId: (params?.parentRecordId ?? "").replace(/[{}]/g, "").toLowerCase(),
+        containerId: params?.containerId ?? "",
+        parentDisplayName: params?.parentDisplayName ?? ""
+    };
+
+    const pageInput = {
+        pageType: "custom",
+        name: "sprk_documentuploaddialog_e52db",  // Custom Page logical name (with Dataverse suffix)
+        parameters: dialogParameters,
+        appId: appId  // Include appId directly in pageInput (may be null, that's OK)
     };
 
     // Configure dialog display options
-    const formOptions = {
-        entityName: "sprk_uploadcontext",
-        // formId will be set after form is deployed
-        // For now, open default form - Dataverse will use main form
-        openInNewWindow: false,
-        windowPosition: 2,  // Side dialog (like Quick Create)
-        width: 600,
-        height: 700
+    const navigationOptions = {
+        target: 2,      // Dialog
+        position: 2,    // Right side pane (Quick Create style)
+        width: { value: 640, unit: 'px' }
+        // Height removed - let Custom Page control its own height
     };
 
-    console.log("[Spaarke] Form Options:", formOptions);
-    console.log("[Spaarke] Form Parameters:", formParameters);
+    console.log("[Spaarke] Page Input:", pageInput);
+    console.log("[Spaarke] Navigation Options:", navigationOptions);
 
-    // Open Form Dialog
-    Xrm.Navigation.openForm(formOptions, formParameters).then(
+    // Navigate to Custom Page
+    Xrm.Navigation.navigateTo(pageInput, navigationOptions).then(
         function success(result) {
-            console.log("[Spaarke] Form Dialog closed successfully", result);
+            console.log("[Spaarke] Custom Page Dialog closed successfully", result);
 
             // Refresh subgrid to show new documents
             if (selectedControl && typeof selectedControl.refresh === "function") {

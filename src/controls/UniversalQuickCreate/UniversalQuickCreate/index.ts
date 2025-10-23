@@ -17,7 +17,7 @@
  * - ADR-003: Separation of Concerns
  * - ADR-010: Configuration Over Code
  *
- * @version 3.0.0 (Custom Page Dialog Support + Phase 7 Dynamic Metadata)
+ * @version 3.0.2 (Custom Page Dialog Support + Phase 7 Dynamic Metadata + usage=input fix)
  */
 
 // Declare global Xrm (used for navigation/dialog management only)
@@ -57,6 +57,9 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
     // Parent Context (from Custom Page parameters)
     private parentContext: ParentContext | null = null;
 
+    // Initialization state (Phase 4 fix - idempotent updateView)
+    private _initialized = false;
+
     // UI State
     private selectedFiles: File[] = [];
     private isUploading = false;
@@ -95,13 +98,13 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
         state: ComponentFramework.Dictionary,
         container: HTMLDivElement
     ): void {
-        logInfo('UniversalDocumentUpload', 'Initializing PCF control v3.0.0 (Custom Page Dialog)');
+        logInfo('UniversalDocumentUpload', 'Initializing PCF control v3.0.2 (USAGE=INPUT + PARAM DATA FIX)');
 
         this.context = context;
         this.notifyOutputChanged = notifyOutputChanged;
 
-        // Detect hosting context (Custom Page vs Quick Create Form)
-        this.isCustomPageMode = this.detectHostingContext(context);
+        // Always use Custom Page mode (v3.0.2 - Quick Create Form deprecated)
+        this.isCustomPageMode = true;
 
         // Create container
         this.container = document.createElement("div");
@@ -110,15 +113,15 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
 
         // Version badge for debugging
         const versionBadge = document.createElement("div");
-        versionBadge.textContent = "✓ UNIVERSAL DOCUMENT UPLOAD V3.0.0 - CUSTOM PAGE DIALOG - " + new Date().toLocaleTimeString();
+        versionBadge.textContent = "✓ V3.0.2 - USAGE=INPUT - PARAM(DATA) - " + new Date().toLocaleTimeString();
         versionBadge.style.cssText = "padding: 12px; background: #107c10; color: white; font-size: 14px; font-weight: bold; border-radius: 4px; margin-bottom: 8px; text-align: center;";
         this.container.appendChild(versionBadge);
 
         // Create React root
         this.reactRoot = ReactDOM.createRoot(this.container);
 
-        // Async initialization
-        this.initializeAsync(context);
+        // NOTE: Do NOT call initializeAsync here - updateView() will call it when params are ready
+        // This allows Custom Page parameters to hydrate before initialization
     }
 
     /**
@@ -391,11 +394,43 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
     }
 
     /**
-     * Update view
+     * Update view - Idempotent (Phase 4 fix)
+     * Waits for parameters to hydrate before initializing
      */
     public updateView(context: ComponentFramework.Context<IInputs>): void {
         this.context = context;
-        // Re-render if needed
+
+        // Extract parameter values (may be empty on first call while params hydrate)
+        const parentEntityName = context.parameters.parentEntityName?.raw ?? "";
+        const parentRecordId = context.parameters.parentRecordId?.raw ?? "";
+        const containerId = context.parameters.containerId?.raw ?? "";
+        const parentDisplayName = context.parameters.parentDisplayName?.raw ?? "";
+
+        // Only initialize once when all required params are present
+        if (!this._initialized) {
+            if (parentEntityName && parentRecordId && containerId) {
+                logInfo('UniversalDocumentUpload', 'Parameters hydrated - initializing async', {
+                    parentEntityName,
+                    parentRecordId,
+                    containerId
+                });
+
+                this._initialized = true;
+
+                // Reinitialize with actual parameters
+                this.initializeAsync(context);
+            } else {
+                // Params not ready yet - wait for next updateView call
+                logInfo('UniversalDocumentUpload', 'Waiting for parameters to hydrate', {
+                    hasEntityName: !!parentEntityName,
+                    hasRecordId: !!parentRecordId,
+                    hasContainerId: !!containerId
+                });
+                return;
+            }
+        }
+
+        // After initialization, re-render if needed
     }
 
     /**
