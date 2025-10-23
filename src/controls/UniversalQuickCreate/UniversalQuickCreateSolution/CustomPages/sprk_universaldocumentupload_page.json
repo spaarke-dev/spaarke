@@ -58,16 +58,16 @@
           },
           "properties": {
             "parentEntityName": {
-              "expr": "Parameters.parentEntityName"
+              "expr": "Param(\"parentEntityName\")"
             },
             "parentRecordId": {
-              "expr": "Parameters.parentRecordId"
+              "expr": "Param(\"parentRecordId\")"
             },
             "containerId": {
-              "expr": "Parameters.containerId"
+              "expr": "Param(\"containerId\")"
             },
             "parentDisplayName": {
-              "expr": "Parameters.parentDisplayName"
+              "expr": "Param(\"parentDisplayName\")"
             },
             "sdapApiBaseUrl": {
               "value": "spe-api-dev-67e2xz.azurewebsites.net/api"

@@ -1,4 +1,4 @@
-# Update sprk_subgrid_commands.js Web Resource to v3.0.2
+# Update sprk_subgrid_commands.js Web Resource to v3.0.3
 # This script updates the web resource content in Dataverse
 
 param(
@@ -7,7 +7,7 @@ param(
 )
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "Web Resource Update Script v3.0.2" -ForegroundColor Cyan
+Write-Host "Web Resource Update Script v3.0.3" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -93,9 +93,8 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "File location: $WebResourcePath" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Key changes in v3.0.2:" -ForegroundColor Yellow
-Write-Host "  ✓ Changed 'data:' to 'parameters:'" -ForegroundColor Green
-Write-Host "  ✓ Added GUID cleaning (.replace, .toLowerCase)" -ForegroundColor Green
-Write-Host "  ✓ Added null safety (params?.field ?? '')" -ForegroundColor Green
-Write-Host "  ✓ Version updated to 3.0.2 in console logs" -ForegroundColor Green
+Write-Host "Key changes in v3.0.3:" -ForegroundColor Yellow
+Write-Host "  ✓ Custom Page now binds parameters via Param()" -ForegroundColor Green
+Write-Host "  ✓ Added appId URL fallback" -ForegroundColor Green
+Write-Host "  ✓ Version references updated to 3.0.3" -ForegroundColor Green
 Write-Host ""

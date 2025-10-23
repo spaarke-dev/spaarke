@@ -17,7 +17,7 @@
  * - ADR-003: Separation of Concerns
  * - ADR-010: Configuration Over Code
  *
- * @version 3.0.2 (Custom Page Dialog Support + Phase 7 Dynamic Metadata + usage=input fix)
+ * @version 3.0.3 (Custom Page Dialog Support + Phase 7 Dynamic Metadata + param binding fix)
  */
 
 // Declare global Xrm (used for navigation/dialog management only)
@@ -98,12 +98,12 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
         state: ComponentFramework.Dictionary,
         container: HTMLDivElement
     ): void {
-        logInfo('UniversalDocumentUpload', 'Initializing PCF control v3.0.2 (USAGE=INPUT + PARAM DATA FIX)');
+    logInfo('UniversalDocumentUpload', 'Initializing PCF control v3.0.3 (USAGE=INPUT + PARAM(DATA) FIX)');
 
         this.context = context;
         this.notifyOutputChanged = notifyOutputChanged;
 
-        // Always use Custom Page mode (v3.0.2 - Quick Create Form deprecated)
+    // Always use Custom Page mode (v3.0.3 - Quick Create Form deprecated)
         this.isCustomPageMode = true;
 
         // Create container
@@ -113,7 +113,7 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
 
         // Version badge for debugging
         const versionBadge = document.createElement("div");
-        versionBadge.textContent = "✓ V3.0.2 - USAGE=INPUT - PARAM(DATA) - " + new Date().toLocaleTimeString();
+    versionBadge.textContent = "✓ V3.0.3 - USAGE=INPUT - PARAM(DATA) - " + new Date().toLocaleTimeString();
         versionBadge.style.cssText = "padding: 12px; background: #107c10; color: white; font-size: 14px; font-weight: bold; border-radius: 4px; margin-bottom: 8px; text-align: center;";
         this.container.appendChild(versionBadge);
 

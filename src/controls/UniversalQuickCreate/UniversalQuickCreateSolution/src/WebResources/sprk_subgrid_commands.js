@@ -6,7 +6,7 @@
  * DEPLOYMENT: Classic Ribbon Workbench command button on Documents subgrid
  * ARCHITECTURE: Custom Page dialog approach with PCF control
  *
- * @version 3.0.2
+ * @version 3.0.3
  * @namespace Spaarke.Commands.Documents
  */
 
@@ -73,7 +73,7 @@ function getEntityConfiguration(entityName) {
 function Spaarke_AddMultipleDocuments(selectedControl) {
     try {
         console.log("[Spaarke] ========================================");
-        console.log("[Spaarke] AddMultipleDocuments: Starting v3.0.2 - CUSTOM PAGE DIALOG");
+    console.log("[Spaarke] AddMultipleDocuments: Starting v3.0.3 - CUSTOM PAGE DIALOG");
         console.log("[Spaarke] ========================================");
         console.log("[Spaarke] Received selectedControl:", selectedControl);
         console.log("[Spaarke] selectedControl type:", typeof selectedControl);
@@ -274,11 +274,11 @@ function getContainerId(formContext, entityConfig) {
 
 /**
  * Open Custom Page Dialog for document upload
- * Uses Custom Page with PCF control (v3.0.2)
+ * Uses Custom Page with PCF control (v3.0.3)
  *
  * @param {object} params - Dialog parameters
  * @param {object} selectedControl - Subgrid control for refresh
- * @version 3.0.2
+ * @version 3.0.3
  */
 function openDocumentUploadDialog(params, selectedControl) {
     console.log("[Spaarke] Opening Custom Page Dialog with parameters:", params);
