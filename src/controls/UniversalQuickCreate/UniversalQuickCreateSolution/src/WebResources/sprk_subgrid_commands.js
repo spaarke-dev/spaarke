@@ -324,7 +324,8 @@ function openDocumentUploadDialog(params, selectedControl) {
     const pageInput = {
         pageType: "custom",
         name: "sprk_documentuploaddialog_e52db",  // Custom Page logical name (with Dataverse suffix)
-        parameters: dialogParameters
+        parameters: dialogParameters,
+        data: JSON.stringify(dialogParameters)
     };
 
     if (appId) {

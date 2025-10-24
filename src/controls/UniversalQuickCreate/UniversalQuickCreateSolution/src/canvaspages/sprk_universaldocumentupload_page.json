@@ -45,6 +45,11 @@
         "width": "100%",
         "height": "100%"
       },
+      "events": {
+        "onVisible": {
+          "formula": "If(Not(varInit), Set(varInit, true); Set(_pEntity, Param(\"parentEntityName\")); Set(_pId, Param(\"parentRecordId\")); Set(_pContainer, Param(\"containerId\")); Set(_pDisplayName, Param(\"parentDisplayName\")); Set(_raw, Param(\"data\")); If(Or(IsBlank(_pEntity), IsBlank(_pId), IsBlank(_pContainer)), If(Not(IsBlank(_raw)), Set(_cfg, ParseJSON(_raw)); Set(_pEntity, Coalesce(_pEntity, Text(_cfg.parentEntityName))); Set(_pId, Coalesce(_pId, Text(_cfg.parentRecordId))); Set(_pContainer, Coalesce(_pContainer, Text(_cfg.containerId))); Set(_pDisplayName, Coalesce(_pDisplayName, Text(_cfg.parentDisplayName))))); Set(varParentEntityName, _pEntity); Set(varParentRecordId, _pId); Set(varContainerId, _pContainer); Set(varParentDisplayName, _pDisplayName))"
+        }
+      },
       "controls": [
         {
           "id": "universalDocumentUploadControl",
@@ -57,17 +62,20 @@
             "columnSpan": 1
           },
           "properties": {
+            "Visible": {
+              "expr": "And(Not(IsBlank(varParentEntityName)), Not(IsBlank(varParentRecordId)), Not(IsBlank(varContainerId)))"
+            },
             "parentEntityName": {
-              "expr": "Parameters.parentEntityName"
+              "expr": "varParentEntityName"
             },
             "parentRecordId": {
-              "expr": "Parameters.parentRecordId"
+              "expr": "varParentRecordId"
             },
             "containerId": {
-              "expr": "Parameters.containerId"
+              "expr": "varContainerId"
             },
             "parentDisplayName": {
-              "expr": "Parameters.parentDisplayName"
+              "expr": "varParentDisplayName"
             },
             "sdapApiBaseUrl": {
               "value": "spe-api-dev-67e2xz.azurewebsites.net/api"

@@ -6,15 +6,17 @@ Screens:
       DisplayMode: View
       Height: 600
       Width: 800
+      OnVisible: =If(Not(varInit), Set(varInit, true); Set(_pEntity, Param("parentEntityName")); Set(_pId, Param("parentRecordId")); Set(_pContainer, Param("containerId")); Set(_pDisplayName, Param("parentDisplayName")); Set(_raw, Param("data")); If(Or(IsBlank(_pEntity), IsBlank(_pId), IsBlank(_pContainer)), If(Not(IsBlank(_raw)), Set(_cfg, ParseJSON(_raw)); Set(_pEntity, Coalesce(_pEntity, Text(_cfg.parentEntityName))); Set(_pId, Coalesce(_pId, Text(_cfg.parentRecordId))); Set(_pContainer, Coalesce(_pContainer, Text(_cfg.containerId))); Set(_pDisplayName, Coalesce(_pDisplayName, Text(_cfg.parentDisplayName))))); Set(varParentEntityName, _pEntity); Set(varParentRecordId, _pId); Set(varContainerId, _pContainer); Set(varParentDisplayName, _pDisplayName))
 
     # PCF Control Component
     UniversalDocumentUpload:
       Control: Spaarke.Controls.UniversalDocumentUpload
       Properties:
-        parentEntityName: =parentEntityName
-        parentRecordId: =parentRecordId
-        containerId: =containerId
-        parentDisplayName: =parentDisplayName
+        Visible: =And(Not(IsBlank(varParentEntityName)), Not(IsBlank(varParentRecordId)), Not(IsBlank(varContainerId)))
+        parentEntityName: =varParentEntityName
+        parentRecordId: =varParentRecordId
+        containerId: =varContainerId
+        parentDisplayName: =varParentDisplayName
         sdapApiBaseUrl: ="https://spe-api-dev-67e2xz.azurewebsites.net"
         X: 0
         Y: 0
