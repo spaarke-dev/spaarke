@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<manifest>
+  <control namespace="Spaarke" constructor="SpeFileViewer" version="1.3.0" display-name-key="SpeFileViewer" description-key="SpeFileViewer description" control-type="standard" >
+    <external-service-usage enabled="false">
+    </external-service-usage>
+
+    <!-- REQUIRED: At least one bound property for field control discoverability -->
+    <property name="value"
+              display-name-key="Value_Display_Key"
+              description-key="Value_Desc_Key"
+              of-type="SingleLine.Text"
+              usage="bound"
+              required="true" />
+
+    <!-- Optional configuration properties -->
+    <property name="documentId"
+              display-name-key="DocumentId_Display_Key"
+              description-key="DocumentId_Desc_Key"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false" />
+
+    <property name="bffApiUrl"
+              display-name-key="BffApiUrl_Display_Key"
+              description-key="BffApiUrl_Desc_Key"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false"
+              default-value="https://spe-api-dev-67e2xz.azurewebsites.net" />
+
+    <property name="clientAppId"
+              display-name-key="ClientAppId_Display_Key"
+              description-key="ClientAppId_Desc_Key"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="true" />
+
+    <property name="bffAppId"
+              display-name-key="BffAppId_Display_Key"
+              description-key="BffAppId_Desc_Key"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="true" />
+
+    <property name="tenantId"
+              display-name-key="TenantId_Display_Key"
+              description-key="TenantId_Desc_Key"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="true" />
+
+    <property name="controlHeight"
+              display-name-key="ControlHeight_Display_Key"
+              description-key="ControlHeight_Desc_Key"
+              of-type="Whole.None"
+              usage="input"
+              required="false"
+              default-value="600" />
+
+    <resources>
+      <code path="index.ts" order="1"/>
+      <css path="css/SpeFileViewer.css" order="1" />
+      <resx path="strings/SpeFileViewer.1033.resx" version="1.0.0" />
+    </resources>
+
+    <feature-usage>
+      <uses-feature name="WebAPI" required="true" />
+      <uses-feature name="Utility" required="true" />
+    </feature-usage>
+  </control>
+</manifest>

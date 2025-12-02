@@ -1,0 +1,8 @@
+{
+  "uniquename": "ExpiresAt",
+  "name": "ExpiresAt",
+  "displayname": "Expires At",
+  "description": "When the preview URL expires (UTC)",
+  "type": 8,
+  "customapiid@odata.bind": "/customapis(REPLACE_WITH_CUSTOM_API_ID)"
+}

@@ -64,6 +64,9 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
     private selectedFiles: File[] = [];
     private isUploading = false;
 
+    // Output property for signaling dialog close
+    private shouldClose: boolean = false;
+
     constructor() {
         logInfo('UniversalDocumentUpload', 'Constructor called');
     }
@@ -98,12 +101,12 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
         state: ComponentFramework.Dictionary,
         container: HTMLDivElement
     ): void {
-    logInfo('UniversalDocumentUpload', 'Initializing PCF control v3.0.3 (USAGE=INPUT + PARAM(DATA) FIX)');
+    logInfo('UniversalDocumentUpload', 'Initializing PCF control v3.0.6 (File URL field)');
 
         this.context = context;
         this.notifyOutputChanged = notifyOutputChanged;
 
-    // Always use Custom Page mode (v3.0.3 - Quick Create Form deprecated)
+    // Always use Custom Page mode (v3.0.4 - Quick Create Form deprecated)
         this.isCustomPageMode = true;
 
         // Create container
@@ -113,7 +116,7 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
 
         // Version badge for debugging
         const versionBadge = document.createElement("div");
-    versionBadge.textContent = "✓ V3.0.3 - USAGE=INPUT - PARAM(DATA) - " + new Date().toLocaleTimeString();
+    versionBadge.textContent = "✓ V3.0.6 - FILE URL - " + new Date().toLocaleTimeString();
         versionBadge.style.cssText = "padding: 12px; background: #107c10; color: white; font-size: 14px; font-weight: bold; border-radius: 4px; margin-bottom: 8px; text-align: center;";
         this.container.appendChild(versionBadge);
 
@@ -322,7 +325,7 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
      * Close dialog - supports both Custom Page and Quick Create Form modes
      *
      * Called after successful upload completion:
-     * - Custom Page: Closes dialog programmatically via context.navigation.close()
+     * - Custom Page: Sets shouldClose output property to signal Custom Page Timer to call Exit()
      * - Quick Create Form: Does nothing (form handles close on save)
      */
     private closeDialog(): void {
@@ -331,14 +334,11 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
         });
 
         if (this.isCustomPageMode) {
-            // Custom Page mode - close dialog programmatically
-            const contextAny = this.context as any;
-            if (contextAny.navigation && contextAny.navigation.close) {
-                contextAny.navigation.close();
-                logInfo('UniversalDocumentUpload', 'Custom Page dialog closed via context.navigation.close()');
-            } else {
-                logError('UniversalDocumentUpload', 'Custom Page mode but context.navigation.close() not available');
-            }
+            // Custom Page mode - signal dialog to close via output property
+            // The Custom Page Timer watches this property and calls Exit() when it becomes true
+            this.shouldClose = true;
+            this.notifyOutputChanged();
+            logInfo('UniversalDocumentUpload', 'shouldClose set to true - Custom Page Timer will close dialog');
         } else {
             // Quick Create form mode - do NOT close programmatically
             // Form will handle close behavior when user saves the form
@@ -437,7 +437,9 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
      * Get outputs
      */
     public getOutputs(): IOutputs {
-        return {};
+        return {
+            shouldClose: this.shouldClose
+        };
     }
 
     /**

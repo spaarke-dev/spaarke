@@ -36,7 +36,7 @@ public class UploadSessionManager
 
         try
         {
-            var graphClient = _factory.CreateAppOnlyClient();
+            var graphClient = _factory.ForApp();
 
             // Upload the file using PUT to drive item content endpoint
             var item = await graphClient.Drives[driveId].Root
@@ -61,7 +61,8 @@ public class UploadSessionManager
                 item.CreatedDateTime ?? DateTimeOffset.UtcNow,
                 item.LastModifiedDateTime ?? DateTimeOffset.UtcNow,
                 item.ETag,
-                item.Folder != null);
+                item.Folder != null,
+                item.WebUrl);
         }
         catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
         {
@@ -100,7 +101,7 @@ public class UploadSessionManager
 
         try
         {
-            var graphClient = _factory.CreateAppOnlyClient();
+            var graphClient = _factory.ForApp();
 
             // First, get the drive for this container
             var drive = await graphClient.Storage.FileStorage.Containers[containerId].Drive
@@ -223,18 +224,15 @@ public class UploadSessionManager
     /// Uploads a small file (< 4MB) as the user (OBO flow).
     /// </summary>
     public async Task<FileHandleDto?> UploadSmallAsUserAsync(
-        string userToken,
+        HttpContext ctx,
         string containerId,
         string path,
         Stream content,
         CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(userToken))
-            throw new ArgumentException("User access token required", nameof(userToken));
-
         try
         {
-            var graphClient = await _factory.CreateOnBehalfOfClientAsync(userToken);
+            var graphClient = await _factory.ForUserAsync(ctx, ct);
 
             _logger.LogInformation("Uploading file as user to container {ContainerId}, path {Path}", containerId, path);
 
@@ -273,7 +271,8 @@ public class UploadSessionManager
                 uploadedItem.CreatedDateTime ?? DateTimeOffset.UtcNow,
                 uploadedItem.LastModifiedDateTime ?? DateTimeOffset.UtcNow,
                 uploadedItem.ETag,
-                uploadedItem.Folder != null);
+                uploadedItem.Folder != null,
+                uploadedItem.WebUrl);
         }
         catch (ServiceException ex) when (ex.ResponseStatusCode == 403)
         {
@@ -309,18 +308,15 @@ public class UploadSessionManager
     /// Creates an upload session for large files as the user (OBO flow).
     /// </summary>
     public async Task<UploadSessionResponse?> CreateUploadSessionAsUserAsync(
-        string userToken,
+        HttpContext ctx,
         string driveId,
         string path,
         ConflictBehavior conflictBehavior,
         CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(userToken))
-            throw new ArgumentException("User access token required", nameof(userToken));
-
         try
         {
-            var graphClient = await _factory.CreateOnBehalfOfClientAsync(userToken);
+            var graphClient = await _factory.ForUserAsync(ctx, ct);
 
             // Create upload session request
             var uploadSessionRequest = new Microsoft.Graph.Drives.Item.Items.Item.CreateUploadSession.CreateUploadSessionPostRequestBody

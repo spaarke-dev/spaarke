@@ -83,7 +83,7 @@ public class DataverseWebApiService : IDataverseService
         var payload = new
         {
             sprk_documentname = request.Name,
-            sprk_description = request.Description,
+            sprk_documentdescription = request.Description,
             statuscode = 1, // Draft
             statecode = 0    // Active state
         };
@@ -154,7 +154,7 @@ public class DataverseWebApiService : IDataverseService
         var payload = new Dictionary<string, object?>();
 
         if (request.Name != null) payload["sprk_documentname"] = request.Name;
-        if (request.Description != null) payload["sprk_description"] = request.Description;
+        if (request.Description != null) payload["sprk_documentdescription"] = request.Description;
         if (request.FileName != null) payload["sprk_filename"] = request.FileName;
         if (request.FileSize.HasValue) payload["sprk_filesize"] = request.FileSize.Value;
         if (request.MimeType != null) payload["sprk_filetype"] = request.MimeType;
@@ -265,7 +265,7 @@ public class DataverseWebApiService : IDataverseService
         {
             Id = id,
             Name = GetStringValue(data, "sprk_documentname") ?? "Untitled",
-            Description = GetStringValue(data, "sprk_description"),
+            Description = GetStringValue(data, "sprk_documentdescription"),
             ContainerId = GetStringValue(data, "_sprk_containerid_value"),
             HasFile = GetBoolValue(data, "sprk_hasfile"),
             FileName = GetStringValue(data, "sprk_filename"),

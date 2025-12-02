@@ -194,7 +194,7 @@ function Spaarke_AddMultipleDocuments(selectedControl) {
    ↓
 4. Custom Page loads PCF control with parameters bound
    ↓
-5. UniversalDocumentUploadPCF.ts initializes
+5. PCF control (index.ts) initializes
    - Validates GUID format
    - Resolves entity configuration from EntityDocumentConfig
    - Renders React UI
@@ -205,7 +205,9 @@ function Spaarke_AddMultipleDocuments(selectedControl) {
    Phase 1: MultiFileUploadService uploads files to SharePoint Embedded (parallel)
    Phase 2: DocumentRecordService creates Dataverse records (sequential via Xrm.WebApi)
    ↓
-8. Dialog closes via window.close()
+8. PCF sets shouldClose output property to true
+   ↓
+9. Custom Page Timer (bound to shouldClose) triggers and calls Exit()
    ↓
 9. Command script refreshes subgrid (selectedControl.refresh())
 ```

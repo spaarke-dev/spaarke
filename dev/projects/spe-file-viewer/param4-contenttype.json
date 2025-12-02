@@ -1,0 +1,8 @@
+{
+  "uniquename": "ContentType",
+  "name": "ContentType",
+  "displayname": "Content Type",
+  "description": "MIME type",
+  "type": 10,
+  "customapiid@odata.bind": "/customapis(REPLACE_WITH_CUSTOM_API_ID)"
+}

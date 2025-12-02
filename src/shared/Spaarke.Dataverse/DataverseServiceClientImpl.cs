@@ -79,7 +79,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         document["sprk_documentname"] = request.Name;
 
         if (!string.IsNullOrEmpty(request.Description))
-            document["sprk_description"] = request.Description;
+            document["sprk_documentdescription"] = request.Description;
 
         document["statuscode"] = new OptionSetValue(1); // Draft
         document["statecode"] = new OptionSetValue(0);  // Active
@@ -94,7 +94,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         var entity = await _serviceClient.RetrieveAsync(
             "sprk_document",
             Guid.Parse(id),
-            new ColumnSet("sprk_documentname", "sprk_description", "sprk_containerid",
+            new ColumnSet("sprk_documentname", "sprk_documentdescription", "sprk_containerid",
                          "sprk_hasfile", "sprk_filename", "sprk_filesize", "sprk_mimetype",
                          "sprk_graphitemid", "sprk_graphdriveid", "sprk_filepath",
                          "statuscode", "statecode", "createdon", "modifiedon"),
@@ -114,7 +114,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             document["sprk_documentname"] = request.Name;
 
         if (request.Description != null)
-            document["sprk_description"] = request.Description;
+            document["sprk_documentdescription"] = request.Description;
 
         if (request.HasFile.HasValue)
             document["sprk_hasfile"] = request.HasFile.Value;
@@ -434,11 +434,11 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         {
             Id = entity.Id.ToString(),
             Name = entity.GetAttributeValue<string>("sprk_documentname") ?? "Untitled",
-            Description = entity.GetAttributeValue<string>("sprk_description"),
+            Description = entity.GetAttributeValue<string>("sprk_documentdescription"),
             ContainerId = entity.GetAttributeValue<EntityReference>("sprk_containerid")?.Id.ToString(),
             HasFile = entity.GetAttributeValue<bool>("sprk_hasfile"),
             FileName = entity.GetAttributeValue<string>("sprk_filename"),
-            FileSize = entity.GetAttributeValue<long?>("sprk_filesize"),
+            FileSize = entity.Contains("sprk_filesize") ? (long?)entity.GetAttributeValue<int>("sprk_filesize") : null,
             MimeType = entity.GetAttributeValue<string>("sprk_mimetype"),
             GraphItemId = entity.GetAttributeValue<string>("sprk_graphitemid"),
             GraphDriveId = entity.GetAttributeValue<string>("sprk_graphdriveid"),

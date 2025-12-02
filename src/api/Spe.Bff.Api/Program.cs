@@ -1,9 +1,11 @@
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
 using Microsoft.Graph;
+using Microsoft.Identity.Client;
 using Microsoft.Identity.Web;
 using Polly;
 using Spaarke.Dataverse;
@@ -12,6 +14,7 @@ using Spe.Bff.Api.Configuration;
 using Spe.Bff.Api.Infrastructure.Authorization;
 using Spe.Bff.Api.Infrastructure.DI;
 using Spe.Bff.Api.Infrastructure.Errors;
+using Spe.Bff.Api.Infrastructure.Exceptions;
 using Spe.Bff.Api.Infrastructure.Graph;
 using Spe.Bff.Api.Infrastructure.Startup;
 using Spe.Bff.Api.Infrastructure.Validation;
@@ -60,6 +63,9 @@ builder.Services.AddHostedService<StartupValidationService>();
 
 // Core module (AuthorizationService, RequestCache)
 builder.Services.AddSpaarkeCore();
+
+// Data Access Layer - Document storage resolution (Phase 2 v1.0.5 implementation)
+builder.Services.AddScoped<Spe.Bff.Api.Infrastructure.Dataverse.IDocumentStorageResolver, Spe.Bff.Api.Infrastructure.Dataverse.DocumentStorageResolver>();
 
 // ============================================================================
 // AUTHENTICATION - Azure AD JWT Bearer Token Validation
@@ -433,18 +439,41 @@ builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        policy.WithOrigins(allowedOrigins)
+        // Support both explicit origins from config and Dataverse/PowerApps wildcard patterns
+        policy.SetIsOriginAllowed(origin =>
+        {
+            // Check explicit allowed origins from configuration
+            if (allowedOrigins.Contains(origin))
+                return true;
+
+            // Allow Dataverse origins (*.dynamics.com)
+            if (Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+            {
+                if (uri.Host.EndsWith(".dynamics.com", StringComparison.OrdinalIgnoreCase) ||
+                    uri.Host == "dynamics.com")
+                    return true;
+
+                // Allow PowerApps origins (*.powerapps.com)
+                if (uri.Host.EndsWith(".powerapps.com", StringComparison.OrdinalIgnoreCase) ||
+                    uri.Host == "powerapps.com")
+                    return true;
+            }
+
+            return false;
+        })
               .AllowCredentials()
               .AllowAnyMethod()
               .WithHeaders(
                   "Authorization",
                   "Content-Type",
                   "Accept",
-                  "X-Requested-With")
+                  "X-Requested-With",
+                  "X-Correlation-Id")
               .WithExposedHeaders(
                   "request-id",
                   "client-request-id",
                   "traceparent",
+                  "X-Correlation-Id",
                   "X-Pagination-TotalCount",
                   "X-Pagination-HasMore")
               .SetPreflightMaxAge(TimeSpan.FromMinutes(10));
@@ -620,6 +649,75 @@ app.UseCors();
 app.UseMiddleware<Spe.Bff.Api.Api.SecurityHeadersMiddleware>();
 
 // ============================================================================
+// GLOBAL EXCEPTION HANDLER - RFC 7807 Problem Details
+// ============================================================================
+// Catches all unhandled exceptions and converts them to structured Problem Details JSON
+// with correlation IDs for tracing. Must come early in pipeline to catch all errors.
+app.UseExceptionHandler(exceptionHandlerApp =>
+{
+    exceptionHandlerApp.Run(async ctx =>
+    {
+        var exception = ctx.Features.Get<IExceptionHandlerFeature>()?.Error;
+        var traceId = ctx.TraceIdentifier;
+
+        var logger = ctx.RequestServices.GetRequiredService<ILogger<Program>>();
+
+        // Map exception to Problem Details (status, code, title, detail)
+        (int status, string code, string title, string detail) = exception switch
+        {
+            // SDAP validation/business logic errors
+            SdapProblemException sp => (sp.StatusCode, sp.Code, sp.Title, sp.Detail ?? sp.Message),
+
+            // MSAL OBO token acquisition failures
+            MsalServiceException ms => (
+                401,
+                "obo_failed",
+                "OBO Token Acquisition Failed",
+                $"Failed to exchange user token for Graph API token: {ms.Message}"
+            ),
+
+            // Graph API errors (ODataError is the base exception type in Graph SDK v5)
+            Microsoft.Graph.Models.ODataErrors.ODataError gs => (
+                (int?)gs.ResponseStatusCode ?? 500,
+                "graph_error",
+                "Graph API Error",
+                gs.Error?.Message ?? gs.Message
+            ),
+
+            // Unexpected errors
+            _ => (
+                500,
+                "server_error",
+                "Internal Server Error",
+                "An unexpected error occurred. Please check correlation ID in logs."
+            )
+        };
+
+        // Log the error with correlation ID
+        logger.LogError(exception,
+            "Request failed with {StatusCode} {Code}: {Detail} | CorrelationId: {CorrelationId}",
+            status, code, detail, traceId);
+
+        // Return RFC 7807 Problem Details response
+        ctx.Response.StatusCode = status;
+        ctx.Response.ContentType = "application/problem+json";
+
+        await ctx.Response.WriteAsJsonAsync(new
+        {
+            type = $"https://spaarke.com/errors/{code}",
+            title,
+            detail,
+            status,
+            extensions = new Dictionary<string, object?>
+            {
+                ["code"] = code,
+                ["correlationId"] = traceId
+            }
+        });
+    });
+});
+
+// ============================================================================
 // AUTHENTICATION & AUTHORIZATION
 // ============================================================================
 // CRITICAL: Authentication must come before Authorization
@@ -668,6 +766,9 @@ app.MapNavMapEndpoints();
 
 // Dataverse document CRUD endpoints (Task 1.3)
 app.MapDataverseDocumentsEndpoints();
+
+// File access endpoints (SPE preview, download, Office viewer - Nov 2025 Microsoft guidance)
+app.MapFileAccessEndpoints();
 
 // Document and container management endpoints (SharePoint Embedded)
 app.MapDocumentsEndpoints();

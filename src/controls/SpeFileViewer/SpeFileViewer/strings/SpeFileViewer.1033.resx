@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="SpeFileViewer" xml:space="preserve">
+    <value>SPE File Viewer</value>
+    <comment>Name of the control</comment>
+  </data>
+  <data name="SpeFileViewer description" xml:space="preserve">
+    <value>Displays SharePoint file previews with user access control enforcement</value>
+    <comment>Description of the control</comment>
+  </data>
+  <data name="DocumentId_Display_Key" xml:space="preserve">
+    <value>Document ID</value>
+    <comment>Display name for documentId property</comment>
+  </data>
+  <data name="DocumentId_Desc_Key" xml:space="preserve">
+    <value>The GUID of the document to preview. Leave empty to preview the current record.</value>
+    <comment>Description for documentId property</comment>
+  </data>
+  <data name="BffApiUrl_Display_Key" xml:space="preserve">
+    <value>BFF API URL</value>
+    <comment>Display name for bffApiUrl property</comment>
+  </data>
+  <data name="BffApiUrl_Desc_Key" xml:space="preserve">
+    <value>Base URL of the Spaarke BFF API (defaults to dev environment)</value>
+    <comment>Description for bffApiUrl property</comment>
+  </data>
+  <data name="ClientAppId_Display_Key" xml:space="preserve">
+    <value>File Viewer Client App ID</value>
+    <comment>Display name for clientAppId property</comment>
+  </data>
+  <data name="ClientAppId_Desc_Key" xml:space="preserve">
+    <value>Azure AD App ID for the File Viewer PCF control (used for MSAL authentication)</value>
+    <comment>Description for clientAppId property</comment>
+  </data>
+  <data name="BffAppId_Display_Key" xml:space="preserve">
+    <value>BFF Application ID</value>
+    <comment>Display name for bffAppId property</comment>
+  </data>
+  <data name="BffAppId_Desc_Key" xml:space="preserve">
+    <value>Azure AD Application ID of the BFF API (for MSAL token scope)</value>
+    <comment>Description for bffAppId property</comment>
+  </data>
+  <data name="TenantId_Display_Key" xml:space="preserve">
+    <value>Tenant ID</value>
+    <comment>Display name for tenantId property</comment>
+  </data>
+  <data name="TenantId_Desc_Key" xml:space="preserve">
+    <value>Azure AD Tenant ID for authentication</value>
+    <comment>Description for tenantId property</comment>
+  </data>
+  <data name="ControlHeight_Display_Key" xml:space="preserve">
+    <value>Control Height (px)</value>
+    <comment>Display name for controlHeight property</comment>
+  </data>
+  <data name="ControlHeight_Desc_Key" xml:space="preserve">
+    <value>Minimum height of the control in pixels. Control will expand to fill available space while respecting this minimum. Default: 600px</value>
+    <comment>Description for controlHeight property</comment>
+  </data>
+  <data name="Value_Display_Key" xml:space="preserve">
+    <value>Field Value</value>
+    <comment>Display name for value property</comment>
+  </data>
+  <data name="Value_Desc_Key" xml:space="preserve">
+    <value>The field this control is bound to (required for control discoverability)</value>
+    <comment>Description for value property</comment>
+  </data>
+</root>

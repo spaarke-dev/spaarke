@@ -4,8 +4,6 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
-using Azure.Identity;
-using Azure.Core;
 using Newtonsoft.Json;
 
 namespace Spaarke.Dataverse.CustomApiProxy
@@ -176,21 +174,19 @@ namespace Spaarke.Dataverse.CustomApiProxy
 
         private string GetClientCredentialsToken(ExternalServiceConfig config)
         {
-            TracingService.Trace("Acquiring token using ClientSecretCredential");
+            TracingService.Trace("Acquiring token using client credentials flow (OAuth2)");
 
             try
             {
-                var credential = new ClientSecretCredential(
+                var token = SimpleAuthHelper.GetClientCredentialsToken(
                     config.TenantId,
                     config.ClientId,
-                    config.ClientSecret
+                    config.ClientSecret,
+                    config.Scope
                 );
 
-                var tokenRequestContext = new TokenRequestContext(new[] { config.Scope });
-                var token = credential.GetToken(tokenRequestContext, default);
-
                 TracingService.Trace("Token acquired successfully");
-                return token.Token;
+                return token;
             }
             catch (Exception ex)
             {
@@ -201,22 +197,9 @@ namespace Spaarke.Dataverse.CustomApiProxy
 
         private string GetManagedIdentityToken(ExternalServiceConfig config)
         {
-            TracingService.Trace("Acquiring token using ManagedIdentityCredential");
-
-            try
-            {
-                var credential = new ManagedIdentityCredential(config.ClientId);
-                var tokenRequestContext = new TokenRequestContext(new[] { config.Scope });
-                var token = credential.GetToken(tokenRequestContext, default);
-
-                TracingService.Trace("Token acquired successfully");
-                return token.Token;
-            }
-            catch (Exception ex)
-            {
-                TracingService.Trace($"Token acquisition failed: {ex.Message}");
-                throw new InvalidPluginExecutionException($"Failed to acquire access token using managed identity: {ex.Message}", ex);
-            }
+            TracingService.Trace("Managed Identity authentication not supported in this version");
+            throw new InvalidPluginExecutionException(
+                "Managed Identity authentication is not supported. Please use Client Credentials (AuthType=1) instead.");
         }
 
         private string LogRequest()

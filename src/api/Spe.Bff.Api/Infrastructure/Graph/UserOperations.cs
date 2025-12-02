@@ -23,15 +23,12 @@ public class UserOperations
     /// Gets current user information via Microsoft Graph /me endpoint.
     /// </summary>
     public async Task<UserInfoResponse?> GetUserInfoAsync(
-        string userToken,
+        HttpContext ctx,
         CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(userToken))
-            throw new ArgumentException("User access token required", nameof(userToken));
-
         try
         {
-            var graphClient = await _factory.CreateOnBehalfOfClientAsync(userToken);
+            var graphClient = await _factory.ForUserAsync(ctx, ct);
             var user = await graphClient.Me.GetAsync(cancellationToken: ct);
 
             if (user == null || string.IsNullOrEmpty(user.Id))
@@ -56,16 +53,13 @@ public class UserOperations
     /// Note: Simplified implementation - checks drive access only.
     /// </summary>
     public async Task<UserCapabilitiesResponse> GetUserCapabilitiesAsync(
-        string userToken,
+        HttpContext ctx,
         string containerId,
         CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(userToken))
-            throw new ArgumentException("User access token required", nameof(userToken));
-
         try
         {
-            var graphClient = await _factory.CreateOnBehalfOfClientAsync(userToken);
+            var graphClient = await _factory.ForUserAsync(ctx, ct);
 
             // Try to access the container to determine capabilities
             var hasAccess = false;

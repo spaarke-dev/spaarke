@@ -1,8 +1,8 @@
 # SDAP Architecture Guide
-## SharePoint Embedded Document Attachment Platform
+## SharePoint Document Access Platform
 
-**Version:** 1.0.0 (Phase 7 - Dynamic Metadata Discovery)
-**Last Updated:** October 20, 2025
+**Version:** 1.1.0 (Phase 8 - File Preview & Office Online Editor Integration)
+**Last Updated:** November 26, 2025
 **Status:** Production Ready
 **Environment:** SPAARKE DEV 1 (Dataverse) + Azure WestUS2
 
@@ -28,14 +28,15 @@
 
 ## Executive Summary
 
-**SDAP** (SharePoint Embedded Document Attachment Platform) is an enterprise document management solution that integrates Microsoft Dataverse with SharePoint Embedded (SPE) for secure, scalable document storage and management.
+**SDAP** (SharePoint Document Access Platform) is an enterprise document management solution that integrates Microsoft Dataverse with SharePoint Embedded (SPE) for secure, scalable document storage, preview, and collaborative editing.
 
 ### Key Capabilities
 
 - **Multi-Entity Document Upload:** Upload documents to any configured Dataverse entity (Matter, Project, Invoice, etc.)
 - **SharePoint Embedded Storage:** Files stored in SPE containers, not Dataverse attachments
+- **File Preview & Office Online Editor (Phase 8):** View and edit Office documents directly within Dataverse forms
 - **Dynamic Metadata Discovery (Phase 7):** Automatically discovers correct navigation property names from Dataverse metadata
-- **Unified Authentication:** Single sign-on using Microsoft Entra ID (Azure AD)
+- **Unified Authentication:** Single sign-on using Microsoft Entra ID (Azure AD) with On-Behalf-Of token flow
 - **Scalable Architecture:** BFF pattern with Redis caching, supports high concurrent usage
 - **PCF Control Integration:** Native Dataverse UI with Fluent UI components
 
@@ -69,6 +70,17 @@
 │  │  │  │  │  - NavMapClient (Phase 7)                   │  │  │  │  │
 │  │  │  │  └────────────────────────────────────────────────┘  │  │  │  │
 │  │  │  └──────────────────────────────────────────────────────┘  │  │  │
+│  │  │                                                             │  │  │
+│  │  │  ┌──────────────────────────────────────────────────────┐  │  │  │
+│  │  │  │  Document Form (sprk_document)                       │  │  │  │
+│  │  │  │  ┌────────────────────────────────────────────────┐  │  │  │  │
+│  │  │  │  │  SpeFileViewer PCF Control (v1.0.6, Phase 8)  │  │  │  │  │
+│  │  │  │  │  - File Preview (Office Online Viewer)      │  │  │  │  │
+│  │  │  │  │  - Office Online Editor (docx/xlsx/pptx)    │  │  │  │  │
+│  │  │  │  │  - MSAL Authentication                      │  │  │  │  │
+│  │  │  │  │  - Responsive Height (600px min)            │  │  │  │  │
+│  │  │  │  └────────────────────────────────────────────────┘  │  │  │  │
+│  │  │  └──────────────────────────────────────────────────────┘  │  │  │
 │  │  └─────────────────────────────────────────────────────────────┘  │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -85,14 +97,17 @@
 │  │  │  ├─ POST /upload/session        (Large File Upload)        │  │  │
 │  │  │  ├─ GET  /healthz                (Health Check)            │  │  │
 │  │  │  ├─ GET  /api/navmap/{entity}/{relationship}/lookup        │  │  │
-│  │  │  └─ GET  /api/navmap/{entity}/{relationship}/collection    │  │  │
+│  │  │  ├─ GET  /api/navmap/{entity}/{relationship}/collection    │  │  │
+│  │  │  ├─ GET  /api/documents/{id}/preview-url (Preview Access)  │  │  │
+│  │  │  └─ GET  /api/documents/{id}/office      (Editor Access)   │  │  │
 │  │  └─────────────────────────────────────────────────────────────┘  │  │
 │  │  ┌─────────────────────────────────────────────────────────────┐  │  │
 │  │  │  Services Layer                                             │  │  │
 │  │  │  ├─ GraphClientFactory (On-Behalf-Of Token Exchange)       │  │  │
 │  │  │  ├─ UploadSessionManager (Large File Chunking)             │  │  │
 │  │  │  ├─ IDataverseService (Metadata Queries)                   │  │  │
-│  │  │  └─ NavMapEndpoints (Phase 7 Metadata Discovery)           │  │  │
+│  │  │  ├─ NavMapEndpoints (Phase 7 Metadata Discovery)           │  │  │
+│  │  │  └─ FileAccessEndpoints (Phase 8 Preview & Editor)         │  │  │
 │  │  └─────────────────────────────────────────────────────────────┘  │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -198,6 +213,200 @@ export interface EntityDocumentConfig {
 
 ---
 
+### 1a. PCF Control (SpeFileViewer)
+
+**Technology:** TypeScript, React, Fluent UI v8, MSAL.js
+**Version:** 1.0.6 (Phase 8)
+**Location:** `src/controls/SpeFileViewer/`
+
+#### Core Components
+
+```typescript
+SpeFileViewer (index.ts)
+├─ FilePreview.tsx                // Main React component
+├─ BffClient.ts                   // BFF API HTTP client
+│
+├─ Types & Interfaces
+│  ├─ FilePreviewProps            // Component props
+│  ├─ FilePreviewState            // Component state
+│  ├─ PreviewUrlResponse          // BFF API response
+│  ├─ OfficeUrlResponse           // Office Online URL response
+│  └─ DocumentInfo                // File metadata
+│
+└─ Styles
+   └─ SpeFileViewer.css           // Fluent UI styles
+```
+
+#### Key Responsibilities
+
+1. **File Preview:** Display SharePoint files in read-only mode using Office Online viewer
+2. **Office Online Editor:** Open Office files (docx, xlsx, pptx) in edit mode
+3. **Authentication:** MSAL.js integration for user token acquisition
+4. **Permission Handling:** Read-only dialog for users without edit permissions
+5. **Responsive Height:** Configurable minimum height with flexible expansion
+6. **Error Recovery:** User-friendly error messages with retry functionality
+
+#### Preview & Editor Workflow
+
+**Preview Mode (All File Types):**
+```typescript
+1. Component receives documentId parameter from Dataverse field
+2. Call BffClient.getPreviewUrl(documentId, accessToken, correlationId)
+3. BFF returns SharePoint preview URL with access token
+4. Render iframe with preview URL (Office Online viewer)
+5. Display "Open in Editor" button for Office file types
+```
+
+**Editor Mode (Office Files Only):**
+```typescript
+1. User clicks "Open in Editor" button
+2. Call BffClient.getOfficeUrl(documentId, accessToken, correlationId)
+3. BFF returns Office Online editor URL with permissions
+4. Switch iframe to editor URL
+5. If permissions.canEdit = false, show read-only dialog
+6. Display "Back to Preview" button to return to viewer
+```
+
+#### BFF API Integration
+
+**BffClient.getPreviewUrl()**
+```typescript
+GET /api/documents/{documentId}/preview-url
+Authorization: Bearer <user-access-token>
+X-Correlation-Id: <correlation-id>
+
+Response:
+{
+  "previewUrl": "https://...-my.sharepoint.com/_layouts/15/Doc.aspx?...",
+  "documentInfo": {
+    "name": "Contract_2025.docx",
+    "fileExtension": "docx",
+    "size": 45678
+  }
+}
+```
+
+**BffClient.getOfficeUrl()**
+```typescript
+GET /api/documents/{documentId}/office
+Authorization: Bearer <user-access-token>
+X-Correlation-Id: <correlation-id>
+
+Response:
+{
+  "officeUrl": "https://...-my.sharepoint.com/_layouts/15/WopiFrame.aspx?...",
+  "permissions": {
+    "canEdit": true,
+    "role": "write"
+  },
+  "documentInfo": {
+    "name": "Contract_2025.docx",
+    "fileExtension": "docx",
+    "size": 45678
+  }
+}
+```
+
+#### PCF Configuration Properties
+
+**Control Manifest (ControlManifest.Input.xml):**
+```xml
+<property name="documentId" display-name-key="DocumentId_Display_Key"
+          of-type="SingleLine.Text" usage="bound" required="true" />
+
+<property name="bffApiUrl" display-name-key="BffApiUrl_Display_Key"
+          of-type="SingleLine.Text" usage="input" required="true" />
+
+<property name="clientAppId" display-name-key="ClientAppId_Display_Key"
+          of-type="SingleLine.Text" usage="input" required="true" />
+
+<property name="bffAppId" display-name-key="BffAppId_Display_Key"
+          of-type="SingleLine.Text" usage="input" required="true" />
+
+<property name="tenantId" display-name-key="TenantId_Display_Key"
+          of-type="SingleLine.Text" usage="input" required="true" />
+
+<property name="controlHeight" display-name-key="ControlHeight_Display_Key"
+          of-type="Whole.None" usage="input" default-value="600" />
+```
+
+**Form Designer Configuration:**
+- **Document ID Field:** Bound to `sprk_documentid` text field on form
+- **BFF API URL:** `https://spe-api-dev-67e2xz.azurewebsites.net`
+- **Client App ID:** Entra ID app registration for PCF control
+- **BFF App ID:** Entra ID app registration for BFF API
+- **Tenant ID:** Azure AD tenant GUID
+- **Control Height:** 600px (default), configurable via Form Designer
+
+#### Responsive Height Feature (v1.0.5+)
+
+**Implementation:**
+```typescript
+// index.ts - init() method
+const controlHeight = context.parameters.controlHeight?.raw ?? 600;
+this.container.style.minHeight = `${controlHeight}px`;
+this.container.style.height = '100%';
+this.container.style.display = 'flex';
+this.container.style.flexDirection = 'column';
+```
+
+**Behavior:**
+- **Minimum Height:** Control always at least configured pixel height (default 600px)
+- **Expansion:** Control fills available vertical space beyond minimum
+- **Flexibility:** Works across desktop, tablet, and mobile screen sizes
+
+#### UI Layout (v1.0.6+)
+
+**Structure:**
+```html
+<div class="spe-file-viewer">
+  <div class="spe-file-viewer__actions">        <!-- Action header -->
+    <button class="...--primary">Open in Editor</button>
+    <button class="...--secondary">← Back to Preview</button>
+  </div>
+  <iframe class="spe-file-viewer__iframe" />    <!-- Preview/Editor iframe -->
+</div>
+```
+
+**Action Buttons:**
+- **Position:** Top-right header above iframe (not floating)
+- **Size:** Compact (4px/12px padding, 13px font)
+- **Alignment:** Right-aligned using flexbox
+- **Visibility:**
+  - Preview mode + Office file → "Open in Editor" button
+  - Editor mode → "Back to Preview" button
+
+#### Supported File Types
+
+**Office Files (Preview + Editor):**
+- Word: docx, doc, docm, dot, dotx, dotm
+- Excel: xlsx, xls, xlsm, xlsb, xlt, xltx, xltm
+- PowerPoint: pptx, ppt, pptm, pot, potx, potm, pps, ppsx, ppsm
+
+**Other Files (Preview Only):**
+- PDF, images (png, jpg, gif), text files, etc.
+
+#### Error Handling
+
+**Error States:**
+- No document selected → Info message bar
+- API call failure → Error message bar with retry button
+- Permission denied → Read-only dialog in editor mode
+- Network timeout → Error message with retry option
+
+**Logging:**
+```typescript
+console.log('[SpeFileViewer] Initializing control...');
+console.log('[SpeFileViewer] Loading preview for document: {documentId}');
+console.log('[SpeFileViewer] Correlation ID: {correlationId}');
+console.log('[SpeFileViewer] Preview loaded: {fileName}');
+console.log('[SpeFileViewer] Editor opened | CanEdit: {canEdit} | Role: {role}');
+console.warn('[SpeFileViewer] User has read-only access...');
+console.error('[SpeFileViewer] Failed to load preview: {error}');
+```
+
+---
+
 ### 2. BFF API (Backend-for-Frontend)
 
 **Technology:** ASP.NET Core 8.0, Minimal APIs
@@ -233,6 +442,19 @@ GET /api/navmap/{childEntity}/{relationshipSchemaName}/collection
   - Query: Collection navigation properties
   - Returns: Navigation property name for related entity collections
   - Example: /api/navmap/sprk_matter/sprk_matter_document_1n/collection
+
+// File Preview & Editor (Phase 8)
+GET /api/documents/{id}/preview-url
+  - Query: SharePoint file preview URL
+  - Returns: Office Online viewer URL with access token
+  - Authentication: On-Behalf-Of flow
+  - Example: /api/documents/a1b2c3d4-e5f6-7890/preview-url
+
+GET /api/documents/{id}/office
+  - Query: Office Online editor URL
+  - Returns: Office Online editor URL with edit permissions
+  - Authentication: On-Behalf-Of flow
+  - Example: /api/documents/a1b2c3d4-e5f6-7890/office
 ```
 
 #### Core Services
@@ -319,6 +541,119 @@ public static void MapNavMapEndpoints(this IEndpointRouteBuilder app)
     });
 }
 ```
+
+**FileAccessEndpoints** (`Api/FileAccessEndpoints.cs`)
+```csharp
+// Phase 8: File preview and Office Online editor endpoints
+public static void MapFileAccessEndpoints(this IEndpointRouteBuilder app)
+{
+    // Preview URL endpoint (read-only viewer)
+    app.MapGet("/api/documents/{documentId}/preview-url",
+        async (string documentId,
+               HttpContext httpContext,
+               IDataverseService dataverse,
+               IGraphClientFactory graphFactory,
+               ILogger<Program> logger) =>
+    {
+        var correlationId = httpContext.Request.Headers["X-Correlation-Id"].ToString();
+        logger.LogInformation("[FileAccess] GET preview-url for {DocumentId} | Correlation: {CorrelationId}",
+            documentId, correlationId);
+
+        // 1. Retrieve sprk_document from Dataverse
+        var document = await dataverse.GetDocumentAsync(documentId);
+        if (document == null)
+            return Results.NotFound(new { error = "Document not found" });
+
+        // 2. Get user access token from Authorization header
+        var authHeader = httpContext.Request.Headers["Authorization"].ToString();
+        var userToken = authHeader.Replace("Bearer ", "");
+
+        // 3. Create Graph client using On-Behalf-Of flow
+        var graphClient = await graphFactory.CreateClientAsync(userToken);
+
+        // 4. Get DriveItem from SharePoint
+        var driveItem = await graphClient.Drives[document.GraphDriveId]
+            .Items[document.GraphItemId]
+            .GetAsync();
+
+        // 5. Generate preview URL with nb=true (hide SharePoint header)
+        var previewUrl = driveItem.WebUrl + "?web=1&action=embedview&nb=true";
+
+        return Results.Ok(new
+        {
+            previewUrl = previewUrl,
+            documentInfo = new
+            {
+                name = driveItem.Name,
+                fileExtension = Path.GetExtension(driveItem.Name)?.TrimStart('.'),
+                size = driveItem.Size ?? 0
+            }
+        });
+    });
+
+    // Office URL endpoint (editor mode with permissions)
+    app.MapGet("/api/documents/{documentId}/office",
+        async (string documentId,
+               HttpContext httpContext,
+               IDataverseService dataverse,
+               IGraphClientFactory graphFactory,
+               ILogger<Program> logger) =>
+    {
+        var correlationId = httpContext.Request.Headers["X-Correlation-Id"].ToString();
+        logger.LogInformation("[FileAccess] GET office for {DocumentId} | Correlation: {CorrelationId}",
+            documentId, correlationId);
+
+        // 1. Retrieve sprk_document from Dataverse
+        var document = await dataverse.GetDocumentAsync(documentId);
+        if (document == null)
+            return Results.NotFound(new { error = "Document not found" });
+
+        // 2. Get user access token from Authorization header
+        var authHeader = httpContext.Request.Headers["Authorization"].ToString();
+        var userToken = authHeader.Replace("Bearer ", "");
+
+        // 3. Create Graph client using On-Behalf-Of flow
+        var graphClient = await graphFactory.CreateClientAsync(userToken);
+
+        // 4. Get DriveItem with permissions
+        var driveItem = await graphClient.Drives[document.GraphDriveId]
+            .Items[document.GraphItemId]
+            .GetAsync(config => config.QueryParameters.Expand = new[] { "permissions" });
+
+        // 5. Get user's effective permissions
+        var userPermissions = driveItem.Permissions?.FirstOrDefault(p =>
+            p.GrantedToV2?.User?.Email == httpContext.User.Identity.Name);
+
+        var canEdit = userPermissions?.Roles?.Contains("write") ?? false;
+
+        // 6. Generate Office Online editor URL with nb=true
+        var officeUrl = driveItem.WebUrl + "?web=1&action=edit&nb=true";
+
+        return Results.Ok(new
+        {
+            officeUrl = officeUrl,
+            permissions = new
+            {
+                canEdit = canEdit,
+                role = canEdit ? "write" : "read"
+            },
+            documentInfo = new
+            {
+                name = driveItem.Name,
+                fileExtension = Path.GetExtension(driveItem.Name)?.TrimStart('.'),
+                size = driveItem.Size ?? 0
+            }
+        });
+    });
+}
+```
+
+**Key Features:**
+- **On-Behalf-Of Authentication:** User token → Graph token exchange
+- **Dataverse Integration:** Query sprk_document for GraphDriveId and GraphItemId
+- **Permission Checking:** Validate user's write access for editor mode
+- **SharePoint Header Removal:** `nb=true` parameter hides SharePoint navigation
+- **Correlation ID Tracking:** Request tracing for troubleshooting
 
 ---
 
@@ -636,6 +971,199 @@ Cache Benefits:
 - Reduced Dataverse API calls (cost savings)
 - Lower load on Dataverse service
 - Better user experience (faster uploads)
+```
+
+---
+
+### Flow 3: File Preview & Office Online Editor (Phase 8)
+
+```
+User Action: Open sprk_document form → View file preview in SpeFileViewer PCF control
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ STEP 1: PREVIEW MODE INITIALIZATION                                    │
+└─────────────────────────────────────────────────────────────────────────┘
+SpeFileViewer PCF Control (index.ts)
+  ├─ Component mounts on form
+  ├─ Receive parameters from form context:
+  │   ├─ documentId: "ca5bbb9f-ddad-f011-bbd3-7c1e5217cd7c" (bound to sprk_documentid)
+  │   ├─ bffApiUrl: "https://spe-api-dev-67e2xz.azurewebsites.net"
+  │   ├─ clientAppId: "{PCF_CLIENT_APP_ID}"
+  │   ├─ bffAppId: "{BFF_APP_ID}"
+  │   ├─ tenantId: "{TENANT_ID}"
+  │   └─ controlHeight: 1200 (from form configuration)
+  │
+  ├─ Apply responsive height styling:
+  │   container.style.minHeight = "1200px"
+  │   container.style.height = "100%"
+  │   container.style.display = "flex"
+  │
+  └─ Render React component: <FilePreview />
+
+FilePreview Component (FilePreview.tsx)
+  ├─ componentDidMount() triggered
+  ├─ Acquire MSAL access token:
+  │   └─ Scope: api://{BFF_APP_ID}/user_impersonation
+  │   └─ Returns: Bearer token (JWT)
+  │
+  └─ Call: loadPreview()
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ STEP 2: GET PREVIEW URL FROM BFF                                       │
+└─────────────────────────────────────────────────────────────────────────┘
+BffClient.getPreviewUrl()
+  └─ GET https://spe-api-dev-67e2xz.azurewebsites.net/api/documents/{documentId}/preview-url
+      Headers:
+        Authorization: Bearer {user_access_token}
+        X-Correlation-Id: {correlation_id}
+
+BFF API (FileAccessEndpoints)
+  ├─ Validate JWT token (Microsoft.Identity.Web)
+  ├─ Extract documentId from route parameter
+  │
+  ├─ Query Dataverse for sprk_document:
+  │   └─ IDataverseService.GetDocumentAsync(documentId)
+  │   └─ Returns: { sprk_graphitemid, sprk_graphdriveid, sprk_filename, ... }
+  │
+  ├─ Exchange user token for Graph token (OBO flow):
+  │   └─ GraphClientFactory.CreateClientAsync(userAccessToken)
+  │
+  ├─ Get DriveItem from SharePoint:
+  │   └─ GET https://graph.microsoft.com/v1.0/drives/{driveId}/items/{itemId}
+  │   └─ Returns: DriveItem with webUrl, name, size, etc.
+  │
+  └─ Build preview URL:
+      └─ driveItem.WebUrl + "?web=1&action=embedview&nb=true"
+      └─ nb=true parameter hides SharePoint header/navigation
+
+Response to PCF:
+{
+  "previewUrl": "https://...-my.sharepoint.com/_layouts/15/Doc.aspx?sourcedoc={guid}&action=embedview&nb=true",
+  "documentInfo": {
+    "name": "Contract_2025.docx",
+    "fileExtension": "docx",
+    "size": 45678
+  }
+}
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ STEP 3: RENDER PREVIEW IFRAME                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+FilePreview Component
+  ├─ Update state:
+  │   ├─ previewUrl: "https://...-my.sharepoint.com/..."
+  │   ├─ documentInfo: { name, fileExtension, size }
+  │   ├─ isLoading: false
+  │   └─ mode: "preview"
+  │
+  └─ Render UI:
+      ├─ Action header (right-aligned):
+      │   └─ [Open in Editor] button (if Office file type)
+      │
+      └─ <iframe src={previewUrl} /> (full-frame below header)
+          └─ Office Online viewer displays document in read-only mode
+
+Total Time: ~1-2 seconds
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ STEP 4: SWITCH TO EDITOR MODE (User clicks "Open in Editor")          │
+└─────────────────────────────────────────────────────────────────────────┘
+User Action: Click "Open in Editor" button (only visible for Office files)
+
+FilePreview.handleOpenEditor()
+  ├─ Set loading state
+  └─ Call: BffClient.getOfficeUrl()
+
+BffClient.getOfficeUrl()
+  └─ GET https://spe-api-dev-67e2xz.azurewebsites.net/api/documents/{documentId}/office
+      Headers:
+        Authorization: Bearer {user_access_token}
+        X-Correlation-Id: {correlation_id}
+
+BFF API (FileAccessEndpoints)
+  ├─ Validate JWT token
+  ├─ Query Dataverse for sprk_document (same as preview flow)
+  ├─ Exchange user token for Graph token (OBO flow)
+  │
+  ├─ Get DriveItem WITH permissions:
+  │   └─ GET https://graph.microsoft.com/v1.0/drives/{driveId}/items/{itemId}?$expand=permissions
+  │   └─ Returns: DriveItem + permissions array
+  │
+  ├─ Check user's effective permissions:
+  │   └─ Find permission where grantedToV2.user.email == current user
+  │   └─ Check if roles contains "write"
+  │   └─ canEdit = (roles.contains("write"))
+  │
+  └─ Build Office Online editor URL:
+      └─ driveItem.WebUrl + "?web=1&action=edit&nb=true"
+
+Response to PCF:
+{
+  "officeUrl": "https://...-my.sharepoint.com/_layouts/15/WopiFrame.aspx?sourcedoc={guid}&action=edit&nb=true",
+  "permissions": {
+    "canEdit": true,    // or false if user has read-only access
+    "role": "write"     // or "read"
+  },
+  "documentInfo": {
+    "name": "Contract_2025.docx",
+    "fileExtension": "docx",
+    "size": 45678
+  }
+}
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ STEP 5: RENDER EDITOR IFRAME                                           │
+└─────────────────────────────────────────────────────────────────────────┘
+FilePreview Component
+  ├─ Update state:
+  │   ├─ officeUrl: "https://...-my.sharepoint.com/..."
+  │   ├─ mode: "editor"
+  │   ├─ isLoading: false
+  │   └─ showReadOnlyDialog: !canEdit (if user lacks edit permissions)
+  │
+  └─ Render UI:
+      ├─ Action header (right-aligned):
+      │   └─ [← Back to Preview] button
+      │
+      ├─ <iframe src={officeUrl} /> (Office Online editor)
+      │   └─ User can edit document directly in browser
+      │   └─ Office Online enforces read-only if user lacks write permissions
+      │
+      └─ Read-Only Dialog (if showReadOnlyDialog = true):
+          └─ Title: "File Opened in Read-Only Mode"
+          └─ Message: "You have view-only access to this file..."
+          └─ Button: [OK] (dismisses dialog)
+
+Total Time: ~1-2 seconds
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ STEP 6: RETURN TO PREVIEW (User clicks "Back to Preview")             │
+└─────────────────────────────────────────────────────────────────────────┘
+User Action: Click "← Back to Preview" button
+
+FilePreview.handleBackToPreview()
+  ├─ Update state:
+  │   ├─ mode: "preview"
+  │   └─ showReadOnlyDialog: false
+  │
+  └─ Render UI:
+      ├─ Switch iframe src back to previewUrl
+      └─ Show "Open in Editor" button again
+
+Total Time: Instant (client-side state change)
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ SUPPORTED FILE TYPES                                                   │
+└─────────────────────────────────────────────────────────────────────────┘
+Office Files (Preview + Editor):
+├─ Word: docx, doc, docm, dot, dotx, dotm
+├─ Excel: xlsx, xls, xlsm, xlsb, xlt, xltx, xltm
+└─ PowerPoint: pptx, ppt, pptm, pot, potx, potm, pps, ppsx, ppsm
+
+Other Files (Preview Only):
+├─ PDF: Rendered in Office Online PDF viewer
+├─ Images: png, jpg, gif (browser image viewer)
+└─ Text: txt, md (browser text viewer)
 ```
 
 ---

@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document File Viewer</title>
+
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f5f5f5;
+            overflow: hidden;
+        }
+
+        #container {
+            width: 100%;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #loading {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #666;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #0078d4;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 16px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        #error {
+            display: none;
+            padding: 20px;
+            background-color: #fef0f0;
+            border-left: 4px solid #d13438;
+            color: #d13438;
+            margin: 20px;
+        }
+
+        #error h3 {
+            margin-top: 0;
+        }
+
+        #filePreview {
+            display: none;
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+
+        #toolbar {
+            display: none;
+            background-color: #fff;
+            border-bottom: 1px solid #ddd;
+            padding: 10px;
+            flex-shrink: 0;
+        }
+
+        #toolbar button {
+            background-color: #0078d4;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            margin-right: 8px;
+            cursor: pointer;
+            border-radius: 2px;
+            font-size: 14px;
+        }
+
+        #toolbar button:hover {
+            background-color: #106ebe;
+        }
+
+        #toolbar button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+
+        #toolbar .info {
+            display: inline-block;
+            margin-left: 16px;
+            color: #666;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="loading">
+            <div class="spinner"></div>
+            <p>Loading file preview...</p>
+        </div>
+
+        <div id="error">
+            <h3>Unable to Load File Preview</h3>
+            <p id="errorMessage"></p>
+            <button id="loginBtn" style="display: none; margin-top: 10px; padding: 8px 16px; background-color: #0078d4; color: white; border: none; border-radius: 2px; cursor: pointer;">
+                Login to View Files
+            </button>
+        </div>
+
+        <div id="toolbar">
+            <button id="refreshBtn" title="Refresh file view (generates new URL)">Refresh</button>
+            <button id="downloadBtn">Download</button>
+            <span class="info">
+                <span id="fileName"></span>
+                <span id="fileSize"></span>
+            </span>
+        </div>
+
+        <iframe id="filePreview"></iframe>
+    </div>
+
+    <script>
+        // Configuration
+        const PREVIEW_REFRESH_INTERVAL = 4 * 60 * 1000; // 4 minutes (download URLs expire in ~5 min)
+        const ENDPOINT_TYPE = 'content'; // Use 'content' for editable Office files, 'preview' for read-only
+
+        // State
+        let documentId = null;
+        let currentPreviewUrl = null;
+        let refreshTimer = null;
+        let documentMetadata = null;
+        let xrm = null;
+
+        // Initialize when parent form is ready
+        window.addEventListener('DOMContentLoaded', async () => {
+            try {
+                // Get parent Xrm context
+                xrm = parent.Xrm;
+
+                if (!xrm || !xrm.Page) {
+                    throw new Error('Unable to access Xrm context. This web resource must be embedded in a Dataverse form.');
+                }
+
+                // Get current Document record ID
+                documentId = xrm.Page.data.entity.getId().replace(/[{}]/g, '');
+
+                console.log('[Document Viewer] Document ID:', documentId);
+
+                // Load file preview
+                await loadFilePreview();
+
+                // Set up auto-refresh timer
+                startAutoRefresh();
+
+                // Wire up toolbar buttons
+                document.getElementById('refreshBtn').addEventListener('click', () => loadFilePreview());
+                document.getElementById('downloadBtn').addEventListener('click', () => downloadFile());
+
+            } catch (error) {
+                console.error('[Document Viewer] Initialization error:', error);
+                showError('Failed to initialize file viewer: ' + error.message);
+            }
+        });
+
+        /**
+         * Load file content via Dataverse Custom API
+         * Calls sprk_GetDocumentFileUrl which handles server-side authentication
+         */
+        async function loadFilePreview() {
+            try {
+                showLoading();
+
+                console.log('[Document Viewer] Calling Custom API for document:', documentId);
+
+                // Call Custom API using Xrm.WebApi
+                const result = await xrm.WebApi.online.execute({
+                    getMetadata: function() {
+                        return {
+                            boundParameter: "entity",
+                            parameterTypes: {
+                                "entity": {
+                                    "typeName": "mscrm.sprk_document",
+                                    "structuralProperty": 5  // Entity
+                                },
+                                "EndpointType": {
+                                    "typeName": "Edm.String",
+                                    "structuralProperty": 1  // PrimitiveType
+                                }
+                            },
+                            operationType: 1,  // Function
+                            operationName: "sprk_GetDocumentFileUrl"
+                        };
+                    },
+
+                    // Bound entity (Document record)
+                    entity: {
+                        entityType: "sprk_document",
+                        id: documentId
+                    },
+
+                    // Input parameters
+                    EndpointType: ENDPOINT_TYPE  // 'content' for editable, 'preview' for read-only
+                });
+
+                console.log('[Document Viewer] Custom API response:', result);
+
+                // Extract file URL and metadata
+                currentPreviewUrl = result.FileUrl;
+                documentMetadata = {
+                    fileName: result.FileName,
+                    contentType: result.ContentType,
+                    size: result.FileSize
+                };
+
+                // Update UI
+                document.getElementById('filePreview').src = currentPreviewUrl;
+                document.getElementById('fileName').textContent = documentMetadata.fileName || 'Unknown';
+
+                // Format file size
+                if (documentMetadata.size > 0) {
+                    const sizeMB = (documentMetadata.size / (1024 * 1024)).toFixed(2);
+                    document.getElementById('fileSize').textContent = ` (${sizeMB} MB)`;
+                } else {
+                    document.getElementById('fileSize').textContent = '';
+                }
+
+                // Show preview
+                showPreview();
+
+                // Check if this is an Office file
+                const fileName = documentMetadata.fileName || '';
+                const isOfficeFile = /\.(docx?|xlsx?|pptx?)$/i.test(fileName);
+
+                // For Office files, the content URL automatically opens in Office Online (editable!)
+                if (isOfficeFile) {
+                    console.log('[Document Viewer] Office file detected - will open in Office Online with edit mode');
+                }
+
+                // For PDFs, browser will use native PDF viewer or Adobe plugin
+                const isPdf = /\.pdf$/i.test(fileName);
+                if (isPdf) {
+                    console.log('[Document Viewer] PDF file detected - will open in browser PDF viewer (read-only)');
+                }
+
+                console.log('[Document Viewer] File loaded successfully');
+
+            } catch (error) {
+                console.error('[Document Viewer] Failed to load preview:', error);
+
+                // Parse error message
+                let errorMessage = 'Failed to load file preview';
+                if (error.message) {
+                    errorMessage = error.message;
+                }
+
+                showError(errorMessage);
+            }
+        }
+
+        /**
+         * Download file (opens in new tab)
+         */
+        async function downloadFile() {
+            try {
+                // Use the already-loaded download URL
+                if (currentPreviewUrl) {
+                    window.open(currentPreviewUrl, '_blank');
+                } else {
+                    throw new Error('File URL not available. Please refresh the page.');
+                }
+
+            } catch (error) {
+                console.error('[Document Viewer] Download failed:', error);
+                alert('Failed to download file: ' + error.message);
+            }
+        }
+
+        /**
+         * Start auto-refresh timer for preview URL
+         */
+        function startAutoRefresh() {
+            // Clear existing timer
+            if (refreshTimer) {
+                clearInterval(refreshTimer);
+            }
+
+            // Refresh preview every 8 minutes (URLs expire in ~10 min)
+            refreshTimer = setInterval(() => {
+                console.log('[Document Viewer] Auto-refreshing preview URL');
+                loadFilePreview();
+            }, PREVIEW_REFRESH_INTERVAL);
+        }
+
+        /**
+         * Show loading state
+         */
+        function showLoading() {
+            document.getElementById('loading').style.display = 'flex';
+            document.getElementById('error').style.display = 'none';
+            document.getElementById('toolbar').style.display = 'none';
+            document.getElementById('filePreview').style.display = 'none';
+        }
+
+        /**
+         * Show preview state
+         */
+        function showPreview() {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('error').style.display = 'none';
+            document.getElementById('toolbar').style.display = 'block';
+            document.getElementById('filePreview').style.display = 'block';
+        }
+
+        /**
+         * Show error state
+         */
+        function showError(message) {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('error').style.display = 'block';
+            document.getElementById('errorMessage').textContent = message;
+            document.getElementById('toolbar').style.display = 'none';
+            document.getElementById('filePreview').style.display = 'none';
+
+            // Hide login button (no longer needed with Custom API)
+            const loginBtn = document.getElementById('loginBtn');
+            if (loginBtn) {
+                loginBtn.style.display = 'none';
+            }
+        }
+
+        // Cleanup on unload
+        window.addEventListener('beforeunload', () => {
+            if (refreshTimer) {
+                clearInterval(refreshTimer);
+            }
+        });
+    </script>
+</body>
+</html>

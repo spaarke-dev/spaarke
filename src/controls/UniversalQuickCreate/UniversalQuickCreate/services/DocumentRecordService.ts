@@ -191,6 +191,9 @@ export class DocumentRecordService {
             sprk_graphitemid: file.id,
             sprk_graphdriveid: parentContext.containerId,
 
+            // SharePoint file URL (enables "Open in SharePoint" links and iFrame viewers)
+            sprk_filepath: file.webUrl || null,
+
             // Optional description (field name: sprk_documentdescription, not sprk_description)
             sprk_documentdescription: formData.description || null,
 

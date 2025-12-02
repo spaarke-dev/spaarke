@@ -88,6 +88,13 @@ public class SpeFileStore
         CancellationToken ct = default)
         => _driveItemOps.GetFileMetadataAsync(driveId, itemId, ct);
 
+    public Task<FilePreviewDto> GetPreviewUrlAsync(
+        string driveId,
+        string itemId,
+        string? correlationId = null,
+        CancellationToken ct = default)
+        => _driveItemOps.GetPreviewUrlAsync(driveId, itemId, correlationId, ct);
+
     // =============================================================================
     // USER CONTEXT METHODS (OBO Flow)
     // =============================================================================
@@ -96,59 +103,59 @@ public class SpeFileStore
 
     // Container Operations (user context)
     public Task<IList<ContainerDto>> ListContainersAsUserAsync(
-        string userToken,
+        HttpContext ctx,
         Guid containerTypeId,
         CancellationToken ct = default)
-        => _containerOps.ListContainersAsUserAsync(userToken, containerTypeId, ct);
+        => _containerOps.ListContainersAsUserAsync(ctx, containerTypeId, ct);
 
     // Drive Item Operations (user context)
     public Task<ListingResponse> ListChildrenAsUserAsync(
-        string userToken,
+        HttpContext ctx,
         string containerId,
         ListingParameters parameters,
         CancellationToken ct = default)
-        => _driveItemOps.ListChildrenAsUserAsync(userToken, containerId, parameters, ct);
+        => _driveItemOps.ListChildrenAsUserAsync(ctx, containerId, parameters, ct);
 
     public Task<FileContentResponse?> DownloadFileWithRangeAsUserAsync(
-        string userToken,
+        HttpContext ctx,
         string driveId,
         string itemId,
         RangeHeader? range,
         string? ifNoneMatch,
         CancellationToken ct = default)
-        => _driveItemOps.DownloadFileWithRangeAsUserAsync(userToken, driveId, itemId, range, ifNoneMatch, ct);
+        => _driveItemOps.DownloadFileWithRangeAsUserAsync(ctx, driveId, itemId, range, ifNoneMatch, ct);
 
     public Task<DriveItemDto?> UpdateItemAsUserAsync(
-        string userToken,
+        HttpContext ctx,
         string driveId,
         string itemId,
         UpdateFileRequest request,
         CancellationToken ct = default)
-        => _driveItemOps.UpdateItemAsUserAsync(userToken, driveId, itemId, request, ct);
+        => _driveItemOps.UpdateItemAsUserAsync(ctx, driveId, itemId, request, ct);
 
     public Task<bool> DeleteItemAsUserAsync(
-        string userToken,
+        HttpContext ctx,
         string driveId,
         string itemId,
         CancellationToken ct = default)
-        => _driveItemOps.DeleteItemAsUserAsync(userToken, driveId, itemId, ct);
+        => _driveItemOps.DeleteItemAsUserAsync(ctx, driveId, itemId, ct);
 
     // Upload Operations (user context)
     public Task<FileHandleDto?> UploadSmallAsUserAsync(
-        string userToken,
+        HttpContext ctx,
         string containerId,
         string path,
         Stream content,
         CancellationToken ct = default)
-        => _uploadManager.UploadSmallAsUserAsync(userToken, containerId, path, content, ct);
+        => _uploadManager.UploadSmallAsUserAsync(ctx, containerId, path, content, ct);
 
     public Task<UploadSessionResponse?> CreateUploadSessionAsUserAsync(
-        string userToken,
+        HttpContext ctx,
         string driveId,
         string path,
         ConflictBehavior conflictBehavior,
         CancellationToken ct = default)
-        => _uploadManager.CreateUploadSessionAsUserAsync(userToken, driveId, path, conflictBehavior, ct);
+        => _uploadManager.CreateUploadSessionAsUserAsync(ctx, driveId, path, conflictBehavior, ct);
 
     public Task<ChunkUploadResponse> UploadChunkAsUserAsync(
         string userToken,
@@ -160,13 +167,13 @@ public class SpeFileStore
 
     // User Operations
     public Task<UserInfoResponse?> GetUserInfoAsync(
-        string userToken,
+        HttpContext ctx,
         CancellationToken ct = default)
-        => _userOps.GetUserInfoAsync(userToken, ct);
+        => _userOps.GetUserInfoAsync(ctx, ct);
 
     public Task<UserCapabilitiesResponse> GetUserCapabilitiesAsync(
-        string userToken,
+        HttpContext ctx,
         string containerId,
         CancellationToken ct = default)
-        => _userOps.GetUserCapabilitiesAsync(userToken, containerId, ct);
+        => _userOps.GetUserCapabilitiesAsync(ctx, containerId, ct);
 }

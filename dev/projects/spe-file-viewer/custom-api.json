@@ -1,0 +1,11 @@
+{
+  "uniquename": "sprk_GetFilePreviewUrl",
+  "name": "Get File Preview URL",
+  "displayname": "Get File Preview URL",
+  "description": "Server-side proxy for getting SharePoint Embedded preview URLs",
+  "bindingtype": 1,
+  "boundentitylogicalname": "sprk_document",
+  "isfunction": true,
+  "isprivate": false,
+  "allowedcustomprocessingsteptype": 0
+}

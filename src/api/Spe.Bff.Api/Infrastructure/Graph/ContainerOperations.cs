@@ -35,7 +35,7 @@ public class ContainerOperations
 
         try
         {
-            var graphClient = _factory.CreateAppOnlyClient();
+            var graphClient = _factory.ForApp();
 
             var container = new FileStorageContainer
             {
@@ -89,7 +89,7 @@ public class ContainerOperations
 
         try
         {
-            var graphClient = _factory.CreateAppOnlyClient();
+            var graphClient = _factory.ForApp();
 
             var drive = await graphClient.Storage.FileStorage.Containers[containerId].Drive
                 .GetAsync(cancellationToken: ct);
@@ -141,7 +141,7 @@ public class ContainerOperations
 
         try
         {
-            var graphClient = _factory.CreateAppOnlyClient();
+            var graphClient = _factory.ForApp();
 
             // Get containers filtered by containerTypeId
             var response = await graphClient.Storage.FileStorage.Containers
@@ -190,17 +190,12 @@ public class ContainerOperations
     /// <summary>
     /// Lists containers accessible to the user (OBO flow).
     /// </summary>
-    /// <param name="userToken">User's bearer token for OBO flow</param>
+    /// <param name="ctx">HttpContext containing user's bearer token</param>
     public async Task<IList<ContainerDto>> ListContainersAsUserAsync(
-        string userToken,
+        HttpContext ctx,
         Guid containerTypeId,
         CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(userToken))
-        {
-            throw new ArgumentException("User access token is required for OBO operations", nameof(userToken));
-        }
-
         using var activity = Activity.Current;
         activity?.SetTag("operation", "ListContainersAsUser");
         activity?.SetTag("containerTypeId", containerTypeId.ToString());
@@ -210,7 +205,7 @@ public class ContainerOperations
         try
         {
             // Create Graph client with user token (OBO flow)
-            var graphClient = await _factory.CreateOnBehalfOfClientAsync(userToken);
+            var graphClient = await _factory.ForUserAsync(ctx, ct);
 
             // Query containers with user's permissions
             var containers = await graphClient.Storage.FileStorage.Containers

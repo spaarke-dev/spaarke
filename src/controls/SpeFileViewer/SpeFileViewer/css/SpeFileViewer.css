@@ -1,0 +1,257 @@
+/**
+ * SPE File Viewer PCF Control Styles
+ *
+ * Layout:
+ * - Loading state: Centered spinner
+ * - Error state: Message bar with retry button
+ * - Preview state: Document header + iframe
+ * - Empty state: Informational message
+ */
+
+/* Root container */
+.spe-file-viewer {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    background-color: #faf9f8; /* Fluent UI neutral background */
+    font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, "Roboto", "Helvetica Neue", sans-serif;
+}
+
+/* ========== Loading State ========== */
+.spe-file-viewer__loading {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100%;
+    min-height: 200px;
+}
+
+/* ========== Error State ========== */
+.spe-file-viewer__error {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.spe-file-viewer__retry-button {
+    align-self: flex-start;
+    padding: 8px 16px;
+    background-color: #0078d4; /* Fluent UI primary blue */
+    color: white;
+    border: none;
+    border-radius: 2px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.spe-file-viewer__retry-button:hover {
+    background-color: #106ebe;
+}
+
+.spe-file-viewer__retry-button:active {
+    background-color: #005a9e;
+}
+
+.spe-file-viewer__retry-button:focus {
+    outline: 2px solid #605e5c;
+    outline-offset: 2px;
+}
+
+/* ========== Empty State ========== */
+.spe-file-viewer__empty {
+    padding: 20px;
+}
+
+/* ========== Preview State ========== */
+.spe-file-viewer__preview {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+}
+
+/* Action Buttons Container - Top-right above iframe */
+.spe-file-viewer__actions {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    padding: 8px 12px;
+    gap: 8px;
+    background-color: #faf9f8; /* Match parent background */
+    border-bottom: 1px solid #edebe9;
+    min-height: 40px;
+}
+
+/* Preview iframe - Full frame below actions */
+.spe-file-viewer__iframe {
+    flex: 1 1 auto; /* Take all available space */
+    width: 100%;
+    height: 100%;
+    border: none;
+    background-color: #ffffff;
+    overflow: auto; /* Scroll only if content exceeds container */
+}
+
+/* ========== Action Buttons (Compact) ========== */
+
+.spe-file-viewer__action-button {
+    padding: 4px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    border-radius: 2px;
+    cursor: pointer;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+    white-space: nowrap;
+}
+
+/* Primary button (Open in Editor) */
+.spe-file-viewer__action-button--primary {
+    background-color: #0078d4; /* Fluent UI primary blue */
+    color: white;
+    border: none;
+}
+
+.spe-file-viewer__action-button--primary:hover {
+    background-color: #106ebe; /* Darker blue on hover */
+}
+
+.spe-file-viewer__action-button--primary:active {
+    background-color: #005a9e; /* Even darker on click */
+}
+
+.spe-file-viewer__action-button--primary:focus {
+    outline: 2px solid #605e5c;
+    outline-offset: 2px;
+}
+
+.spe-file-viewer__action-button--primary:disabled {
+    background-color: #c8c6c4; /* Gray when disabled */
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+/* Secondary button (Back to Preview) */
+.spe-file-viewer__action-button--secondary {
+    background-color: #ffffff;
+    color: #323130;
+    border: 1px solid #8a8886;
+}
+
+.spe-file-viewer__action-button--secondary:hover {
+    background-color: #f3f2f1; /* Light gray on hover */
+    border-color: #605e5c;
+}
+
+.spe-file-viewer__action-button--secondary:active {
+    background-color: #edebe9; /* Darker gray on click */
+}
+
+.spe-file-viewer__action-button--secondary:focus {
+    outline: 2px solid #605e5c;
+    outline-offset: 2px;
+}
+
+/* ========== Responsive Design ========== */
+
+/* Small screens (< 600px) */
+@media (max-width: 599px) {
+    .spe-file-viewer__actions {
+        padding: 6px 8px;
+        min-height: 36px;
+    }
+
+    .spe-file-viewer__action-button {
+        padding: 3px 10px;
+        font-size: 12px;
+    }
+}
+
+/* Medium screens (600px - 1024px) */
+@media (min-width: 600px) and (max-width: 1024px) {
+    .spe-file-viewer__header {
+        padding: 10px 14px;
+    }
+}
+
+/* Large screens (> 1024px) */
+@media (min-width: 1025px) {
+    .spe-file-viewer__header {
+        padding: 12px 20px;
+    }
+}
+
+/* ========== Accessibility ========== */
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+    .spe-file-viewer__retry-button {
+        border: 2px solid currentColor;
+    }
+
+    .spe-file-viewer__header {
+        border-bottom-width: 2px;
+    }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+    .spe-file-viewer__retry-button {
+        transition: none;
+    }
+}
+
+/* Focus visible (keyboard navigation) */
+.spe-file-viewer__iframe:focus {
+    outline: 2px solid #0078d4;
+    outline-offset: -2px;
+}
+
+/* ========== Dark Mode Support ========== */
+@media (prefers-color-scheme: dark) {
+    .spe-file-viewer {
+        background-color: #292827;
+    }
+
+    .spe-file-viewer__header {
+        background-color: #323130;
+        border-bottom-color: #484644;
+    }
+
+    .spe-file-viewer__document-name {
+        color: #ffffff;
+    }
+
+    .spe-file-viewer__file-type {
+        background-color: #004377;
+        color: #8ddaff;
+    }
+
+    .spe-file-viewer__file-size {
+        color: #d2d0ce;
+    }
+
+    .spe-file-viewer__iframe {
+        background-color: #1b1a19;
+    }
+}
+
+/* ========== Print Styles ========== */
+@media print {
+    .spe-file-viewer__header {
+        display: none;
+    }
+
+    .spe-file-viewer__loading,
+    .spe-file-viewer__error,
+    .spe-file-viewer__empty {
+        display: none;
+    }
+
+    .spe-file-viewer__iframe {
+        height: 100vh;
+    }
+}

@@ -34,7 +34,7 @@ public class DriveItemOperations
 
         try
         {
-            var graphClient = _factory.CreateAppOnlyClient();
+            var graphClient = _factory.ForApp();
 
             DriveItemCollectionResponse? page;
 
@@ -71,7 +71,8 @@ public class DriveItemOperations
                 item.CreatedDateTime ?? DateTimeOffset.UtcNow,
                 item.LastModifiedDateTime ?? DateTimeOffset.UtcNow,
                 item.ETag,
-                item.Folder != null)).ToList();
+                item.Folder != null,
+                item.WebUrl)).ToList();
         }
         catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
         {
@@ -109,7 +110,7 @@ public class DriveItemOperations
 
         try
         {
-            var graphClient = _factory.CreateAppOnlyClient();
+            var graphClient = _factory.ForApp();
 
             var stream = await graphClient.Drives[driveId].Items[itemId].Content
                 .GetAsync(cancellationToken: ct);
@@ -159,7 +160,7 @@ public class DriveItemOperations
 
         try
         {
-            var graphClient = _factory.CreateAppOnlyClient();
+            var graphClient = _factory.ForApp();
 
             await graphClient.Drives[driveId].Items[itemId]
                 .DeleteAsync(cancellationToken: ct);
@@ -203,7 +204,7 @@ public class DriveItemOperations
 
         try
         {
-            var graphClient = _factory.CreateAppOnlyClient();
+            var graphClient = _factory.ForApp();
 
             var item = await graphClient.Drives[driveId].Items[itemId]
                 .GetAsync(cancellationToken: ct);
@@ -224,7 +225,8 @@ public class DriveItemOperations
                 item.CreatedDateTime ?? DateTimeOffset.UtcNow,
                 item.LastModifiedDateTime ?? DateTimeOffset.UtcNow,
                 item.ETag,
-                item.Folder != null);
+                item.Folder != null,
+                item.WebUrl);
         }
         catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
         {
@@ -256,14 +258,11 @@ public class DriveItemOperations
     /// Lists drive children as the user (OBO flow) with paging and ordering.
     /// </summary>
     public async Task<ListingResponse> ListChildrenAsUserAsync(
-        string userToken,
+        HttpContext ctx,
         string containerId,
         ListingParameters parameters,
         CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(userToken))
-            throw new ArgumentException("User access token required", nameof(userToken));
-
         using var activity = Activity.Current;
         activity?.SetTag("operation", "ListChildrenAsUser");
         activity?.SetTag("containerId", containerId);
@@ -272,7 +271,7 @@ public class DriveItemOperations
 
         try
         {
-            var graphClient = await _factory.CreateOnBehalfOfClientAsync(userToken);
+            var graphClient = await _factory.ForUserAsync(ctx, ct);
 
             // Get the drive for the container
             var drive = await graphClient.Storage.FileStorage.Containers[containerId].Drive
@@ -361,16 +360,13 @@ public class DriveItemOperations
     /// Supports partial content (206) and conditional requests (304).
     /// </summary>
     public async Task<FileContentResponse?> DownloadFileWithRangeAsUserAsync(
-        string userToken,
+        HttpContext ctx,
         string driveId,
         string itemId,
         RangeHeader? range,
         string? ifNoneMatch,
         CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(userToken))
-            throw new ArgumentException("User access token required", nameof(userToken));
-
         if (!FileOperationExtensions.IsValidItemId(itemId))
         {
             _logger.LogWarning("Invalid item ID: {ItemId}", itemId);
@@ -386,7 +382,7 @@ public class DriveItemOperations
 
         try
         {
-            var graphClient = await _factory.CreateOnBehalfOfClientAsync(userToken);
+            var graphClient = await _factory.ForUserAsync(ctx, ct);
 
             // First, get item metadata to check ETag and size
             var item = await graphClient.Drives[driveId].Items[itemId]
@@ -507,15 +503,12 @@ public class DriveItemOperations
     /// Updates drive item (rename/move) as the user (OBO flow).
     /// </summary>
     public async Task<DriveItemDto?> UpdateItemAsUserAsync(
-        string userToken,
+        HttpContext ctx,
         string driveId,
         string itemId,
         UpdateFileRequest request,
         CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(userToken))
-            throw new ArgumentException("User access token required", nameof(userToken));
-
         if (!FileOperationExtensions.IsValidItemId(itemId))
         {
             _logger.LogWarning("Invalid item ID: {ItemId}", itemId);
@@ -537,7 +530,7 @@ public class DriveItemOperations
 
         try
         {
-            var graphClient = await _factory.CreateOnBehalfOfClientAsync(userToken);
+            var graphClient = await _factory.ForUserAsync(ctx, ct);
 
             // Build update request
             var driveItemUpdate = new DriveItem();
@@ -599,14 +592,11 @@ public class DriveItemOperations
     /// Deletes drive item as the user (OBO flow).
     /// </summary>
     public async Task<bool> DeleteItemAsUserAsync(
-        string userToken,
+        HttpContext ctx,
         string driveId,
         string itemId,
         CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(userToken))
-            throw new ArgumentException("User access token required", nameof(userToken));
-
         if (!FileOperationExtensions.IsValidItemId(itemId))
         {
             _logger.LogWarning("Invalid item ID: {ItemId}", itemId);
@@ -622,7 +612,7 @@ public class DriveItemOperations
 
         try
         {
-            var graphClient = await _factory.CreateOnBehalfOfClientAsync(userToken);
+            var graphClient = await _factory.ForUserAsync(ctx, ct);
 
             // Delete item via Graph API
             await graphClient.Drives[driveId].Items[itemId]
@@ -644,6 +634,85 @@ public class DriveItemOperations
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to delete item {ItemId}", itemId);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Get preview URL for a file using app-only authentication.
+    /// Returns ephemeral URL that expires in ~10 minutes.
+    /// Used for server-side file viewing with correlation ID tracking.
+    /// </summary>
+    public async Task<FilePreviewDto> GetPreviewUrlAsync(
+        string driveId,
+        string itemId,
+        string? correlationId = null,
+        CancellationToken ct = default)
+    {
+        using var activity = Activity.Current;
+        activity?.SetTag("operation", "GetPreviewUrl");
+        activity?.SetTag("driveId", driveId);
+        activity?.SetTag("itemId", itemId);
+
+        if (!string.IsNullOrEmpty(correlationId))
+        {
+            activity?.SetTag("correlationId", correlationId);
+        }
+
+        _logger.LogInformation("[{CorrelationId}] Getting preview URL for {DriveId}/{ItemId} (app-only)",
+            correlationId ?? "N/A", driveId, itemId);
+
+        try
+        {
+            var graphClient = _factory.ForApp();
+
+            // Call Graph API preview action with default viewer settings
+            var previewRequest = new Microsoft.Graph.Drives.Item.Items.Item.Preview.PreviewPostRequestBody();
+
+            var previewResult = await graphClient.Drives[driveId]
+                .Items[itemId]
+                .Preview
+                .PostAsync(previewRequest, cancellationToken: ct);
+
+            if (previewResult == null || string.IsNullOrEmpty(previewResult.GetUrl))
+            {
+                _logger.LogWarning("[{CorrelationId}] Preview URL not returned for {DriveId}/{ItemId}",
+                    correlationId ?? "N/A", driveId, itemId);
+                throw new InvalidOperationException($"Failed to get preview URL for item {itemId}");
+            }
+
+            _logger.LogInformation("[{CorrelationId}] Preview URL retrieved for {ItemId}, expires in ~10 minutes",
+                correlationId ?? "N/A", itemId);
+
+            return new FilePreviewDto(
+                PreviewUrl: previewResult.GetUrl,
+                PostUrl: previewResult.PostUrl,
+                ExpiresAt: DateTimeOffset.UtcNow.AddMinutes(10), // Preview URLs typically expire in ~10 minutes
+                ContentType: null // Will be enriched from Document metadata
+            );
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == 404)
+        {
+            _logger.LogWarning("[{CorrelationId}] File not found: {DriveId}/{ItemId}",
+                correlationId ?? "N/A", driveId, itemId);
+            throw new FileNotFoundException($"File {itemId} not found in drive {driveId}", ex);
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == 403)
+        {
+            _logger.LogWarning("[{CorrelationId}] Access denied to file {ItemId}: {Error}",
+                correlationId ?? "N/A", itemId, ex.Message);
+            throw new UnauthorizedAccessException($"Access denied to file {itemId}", ex);
+        }
+        catch (ServiceException ex)
+        {
+            _logger.LogError(ex, "[{CorrelationId}] Graph API error getting preview URL: {Error}",
+                correlationId ?? "N/A", ex.Message);
+            throw new InvalidOperationException($"Failed to get preview URL: {ex.Message}", ex);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[{CorrelationId}] Unexpected error getting preview URL for {ItemId}",
+                correlationId ?? "N/A", itemId);
             throw;
         }
     }

@@ -1,0 +1,8 @@
+{
+  "uniquename": "CorrelationId",
+  "name": "CorrelationId",
+  "displayname": "Correlation ID",
+  "description": "Request tracking ID for tracing and debugging",
+  "type": 10,
+  "customapiid@odata.bind": "/customapis(REPLACE_WITH_CUSTOM_API_ID)"
+}

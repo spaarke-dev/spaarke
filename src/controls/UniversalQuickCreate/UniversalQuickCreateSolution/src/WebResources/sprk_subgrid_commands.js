@@ -6,7 +6,7 @@
  * DEPLOYMENT: Classic Ribbon Workbench command button on Documents subgrid
  * ARCHITECTURE: Custom Page dialog approach with PCF control
  *
- * @version 3.0.3
+ * @version 3.0.4-DIAGNOSTIC
  * @namespace Spaarke.Commands.Documents
  */
 
@@ -73,7 +73,7 @@ function getEntityConfiguration(entityName) {
 function Spaarke_AddMultipleDocuments(selectedControl) {
     try {
         console.log("[Spaarke] ========================================");
-    console.log("[Spaarke] AddMultipleDocuments: Starting v3.0.3 - CUSTOM PAGE DIALOG");
+    console.log("[Spaarke] AddMultipleDocuments: Starting v3.0.4-DIAGNOSTIC - CUSTOM PAGE DIALOG");
         console.log("[Spaarke] ========================================");
         console.log("[Spaarke] Received selectedControl:", selectedControl);
         console.log("[Spaarke] selectedControl type:", typeof selectedControl);
@@ -321,11 +321,18 @@ function openDocumentUploadDialog(params, selectedControl) {
         parentDisplayName: params?.parentDisplayName ?? ""
     };
 
+    // Encode parameters as JSON string and pass via recordId (workaround for dialog parameter issues)
+    const dataPayload = JSON.stringify({
+        parentEntityName: dialogParameters.parentEntityName,
+        parentRecordId: dialogParameters.parentRecordId,
+        containerId: dialogParameters.containerId,
+        parentDisplayName: dialogParameters.parentDisplayName
+    });
+
     const pageInput = {
         pageType: "custom",
         name: "sprk_documentuploaddialog_e52db",  // Custom Page logical name (with Dataverse suffix)
-        parameters: dialogParameters,
-        data: JSON.stringify(dialogParameters)
+        recordId: dataPayload  // Use recordId to pass JSON string (dialog workaround)
     };
 
     if (appId) {

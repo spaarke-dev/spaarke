@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="UniversalDocumentUpload" version="3.0.3"
+  <control namespace="Spaarke.Controls" constructor="UniversalDocumentUpload" version="3.0.6"
            display-name-key="Universal Document Upload"
-           description-key="Multi-file upload with Custom Page dialog support (v3.0.3 - Param binding fix)"
+           description-key="Multi-file upload with Custom Page dialog support (v3.0.6 - File URL field)"
            control-type="standard">
 
     <external-service-usage enabled="false">
@@ -54,6 +54,14 @@
               usage="input"
               required="false"
               default-value="spe-api-dev-67e2xz.azurewebsites.net/api" />
+
+    <!-- OUTPUT: Should Close Dialog (signals Custom Page to call Exit()) -->
+    <property name="shouldClose"
+              display-name-key="Should Close Dialog"
+              description-key="Set to true when upload completes successfully - Custom Page monitors this and calls Exit()"
+              of-type="TwoOptions"
+              usage="output"
+              required="false" />
 
     <resources>
       <code path="index.ts" order="1"/>

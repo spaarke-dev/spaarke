@@ -4,6 +4,7 @@ using Microsoft.Graph;
 using Microsoft.Identity.Client;
 using Microsoft.Kiota.Abstractions.Authentication;
 using Microsoft.Kiota.Authentication.Azure;
+using Spe.Bff.Api.Infrastructure.Auth;
 using Spe.Bff.Api.Services;
 
 namespace Spe.Bff.Api.Infrastructure.Graph;
@@ -67,7 +68,7 @@ public sealed class GraphClientFactory : IGraphClientFactory
     /// Uses Graph SDK v5 with TokenCredentialAuthenticationProvider.
     /// Task 4.1: Now uses named HttpClient with GraphHttpMessageHandler for centralized resilience.
     /// </summary>
-    public GraphServiceClient CreateAppOnlyClient()
+    private GraphServiceClient CreateAppOnlyClient()
     {
         // Validate required configuration
         if (string.IsNullOrWhiteSpace(_clientSecret) ||
@@ -103,7 +104,7 @@ public sealed class GraphClientFactory : IGraphClientFactory
     /// Task 4.1: Now uses named HttpClient with GraphHttpMessageHandler for centralized resilience.
     /// Phase 4: Caches OBO tokens (55-min TTL) to reduce Azure AD load by 97%.
     /// </summary>
-    public async Task<GraphServiceClient> CreateOnBehalfOfClientAsync(string userAccessToken)
+    private async Task<GraphServiceClient> CreateOnBehalfOfClientAsync(string userAccessToken)
     {
         // Log configuration for debugging OBO issues
         _logger.LogInformation("OBO Token Exchange - CCA configured with ClientId from API_APP_ID");
@@ -183,6 +184,46 @@ public sealed class GraphClientFactory : IGraphClientFactory
             _logger.LogError(ex, "OBO failed - unexpected exception: {Message}", ex.Message);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Creates Graph client using On-Behalf-Of flow for user context operations.
+    /// Extracts user token from Authorization header and exchanges it for Graph API token.
+    /// </summary>
+    /// <param name="ctx">HttpContext containing Authorization header with user's bearer token</param>
+    /// <param name="ct">Cancellation token (currently unused, reserved for future async cancellation)</param>
+    /// <returns>GraphServiceClient authenticated with user's delegated permissions</returns>
+    /// <exception cref="UnauthorizedAccessException">Missing or invalid Authorization header</exception>
+    /// <exception cref="Microsoft.Identity.Client.MsalServiceException">OBO token exchange failed</exception>
+    /// <remarks>
+    /// This method wraps CreateOnBehalfOfClientAsync with automatic token extraction.
+    /// OBO tokens are cached in Redis for 55 minutes to reduce Azure AD load by 97%.
+    /// </remarks>
+    public async Task<GraphServiceClient> ForUserAsync(HttpContext ctx, CancellationToken ct = default)
+    {
+        // Extract bearer token from Authorization header (throws UnauthorizedAccessException if invalid)
+        var userAccessToken = TokenHelper.ExtractBearerToken(ctx);
+
+        _logger.LogDebug("ForUserAsync called | TraceId: {TraceId}", ctx.TraceIdentifier);
+
+        // Delegate to existing OBO implementation (handles caching, token exchange, etc.)
+        return await CreateOnBehalfOfClientAsync(userAccessToken);
+    }
+
+    /// <summary>
+    /// Creates Graph client using app-only authentication (Managed Identity or Client Secret).
+    /// </summary>
+    /// <returns>GraphServiceClient authenticated with application permissions</returns>
+    /// <remarks>
+    /// This method wraps CreateAppOnlyClient with a clearer name.
+    /// Use for platform/admin operations (container creation, background jobs).
+    /// </remarks>
+    public GraphServiceClient ForApp()
+    {
+        _logger.LogDebug("ForApp called - using app-only authentication");
+
+        // Delegate to existing app-only implementation
+        return CreateAppOnlyClient();
     }
 
     /// <summary>
