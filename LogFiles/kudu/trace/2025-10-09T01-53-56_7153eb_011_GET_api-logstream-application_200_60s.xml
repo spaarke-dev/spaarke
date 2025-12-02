@@ -1,9 +1,0 @@
-<step title="Incoming Request" date="2025-10-09T01:53:56.082" instance="7153eb" url="/api/logstream/application" method="GET" type="request" pid="6220,2,27" Accept="*/*" Authorization="Bea..." Host="spe-api-dev-67e2xz.scm.azurewebsites.net" User-Agent="curl/8.15.0" X-ARR-LOG-ID="0d4baef7-826f-47f9-b182-029f37a6aa0c" CLIENT-IP="47.198.1.206:55078" X-SITE-DEPLOYMENT-ID="spe-api-dev-67e2xz" WAS-DEFAULT-HOSTNAME="spe-api-dev-67e2xz.scm.azurewebsites.net" X-Forwarded-Proto="https" X-AppService-Proto="https" X-Forwarded-TlsVersion="1.3" X-WAWS-Unencoded-URL="/api/logstream/application" >
-  <step title="Cleanup Xml Logs" date="2025-10-09T01:53:56.082" /><!-- duration: 31ms -->
-  <step title="LogStreamHandler.BeginProcessRequest" date="2025-10-09T01:53:56.133" >
-    <step title="LockFile &apos;C:\home\site\locks\hooks.lock&apos; acquired" date="2025-10-09T01:53:56.145" /><!-- duration: 17ms -->
-    <step title="LockFile &apos;C:\home\site\locks\hooks.lock&apos; released" date="2025-10-09T01:53:56.176" /><!-- duration: 0ms -->
-  </step><!-- duration: 43ms -->
-  <step title="LogStreamHandler.EndProcessRequest" date="2025-10-09T01:54:56.220" /><!-- duration: 29ms -->
-  <step title="Outgoing response" date="2025-10-09T01:54:56.249" type="response" statusCode="200" statusText="OK" Server="Microsoft-IIS/10.0" Cache-Control="private" X-AspNet-Version="4.0.30319" Content-Type="text/plain; charset=utf-8" /><!-- duration: 31ms -->
-</step><!-- duration: 60245ms -->

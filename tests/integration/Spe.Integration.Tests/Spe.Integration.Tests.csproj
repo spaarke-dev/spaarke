@@ -18,7 +18,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\src\api\Spe.Bff.Api\Spe.Bff.Api.csproj" />
+    <ProjectReference Include="..\..\..\src\server\api\Spe.Bff.Api\Spe.Bff.Api.csproj" />
   </ItemGroup>
 
   <ItemGroup>

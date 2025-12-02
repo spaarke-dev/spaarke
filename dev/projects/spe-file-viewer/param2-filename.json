@@ -1,8 +1,0 @@
-{
-  "uniquename": "FileName",
-  "name": "FileName",
-  "displayname": "File Name",
-  "description": "File name for display",
-  "type": 10,
-  "customapiid@odata.bind": "/customapis(REPLACE_WITH_CUSTOM_API_ID)"
-}

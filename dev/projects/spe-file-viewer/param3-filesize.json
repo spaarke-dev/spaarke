@@ -1,8 +1,0 @@
-{
-  "uniquename": "FileSize",
-  "name": "FileSize",
-  "displayname": "File Size",
-  "description": "File size in bytes",
-  "type": 6,
-  "customapiid@odata.bind": "/customapis(REPLACE_WITH_CUSTOM_API_ID)"
-}

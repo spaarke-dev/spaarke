@@ -1,0 +1,21 @@
+2025-11-25T21:43:19  PID[6040] Information Unpacking resources...
+2025-11-25T21:43:19  PID[6040] Information 11-25 21:43:18 Information: Executing Application Insights Profiler agent version 2.6.2201.2106 with arguments: 
+2025-11-25T21:43:19  PID[6040] Information 11-25 21:43:18 Information: Minimum version enabled on machine: 1.0.0
+2025-11-25T21:43:19  PID[6040] Information 11-25 21:43:18 Information: Applying logging level: Information
+2025-11-25T21:43:20  PID[6040] Information 11-25 21:43:18 Information: Instrumentation key: 09a9beed-0dcd-4aad-84bb-3696372ed5d1
+2025-11-25T21:43:21  PID[6040] Information 11-25 21:43:18 Information: Application Insights Profiler endpoint: https://profiler.monitor.azure.com/
+2025-11-25T21:43:21  PID[6040] Information 11-25 21:43:18 Information: Application Insights endpoint: https://westus2-2.in.applicationinsights.azure.com/v2/track/
+2025-11-25T21:43:21  PID[6040] Information 11-25 21:43:18 Information: Runtime Environment: Antares
+2025-11-25T21:43:21  PID[6040] Information 11-25 21:43:18 Information: Support files: C:\local\Temp\jobs\continuous\ApplicationInsightsProfiler3\iipnmndc.2nj\spsupport
+2025-11-25T21:43:21  PID[6040] Information 11-25 21:43:18 Information: Providing usage data (to opt out set the AppSettings ApplicationInsightsProvideUsageTelemetryData with the value "false"): True
+2025-11-25T21:43:21  PID[6040] Information 11-25 21:43:18 Information: Engine mode: Sampling
+2025-11-25T21:43:22  PID[6040] Information 11-25 21:43:21 Information: Application Insights AppId: 6a76b012-46d9-412f-b4ab-4905658a9559
+2025-11-25T21:43:22  PID[6040] Information 11-25 21:43:21 Information: Press 'Ctrl+C' to exit Application Insights Profiler.
+2025-11-25T21:43:22  PID[6040] Information 11-25 21:43:21 Information: Set up shutdown handler.
+2025-11-25T21:43:22  PID[6040] Information 11-25 21:43:21 Information: Shutdown handler set to watch C:\local\Temp\JobsShutdown\continuous\ApplicationInsightsProfiler3\kwkw440e.mwu.
+2025-11-25T21:43:23  PID[6040] Information 11-25 21:43:21 Information: Starting main process
+2025-11-25T21:43:24  PID[6040] Information 11-25 21:43:24 Critical: Settings have been set from Engine
+2025-11-25T21:43:25  PID[6040] Information 11-25 21:43:25 Critical: Settings contract has been updated
+2025-11-25T21:43:25  PID[6040] Information 11-25 21:43:25 Critical: Enabled has been set to True
+2025-11-25T21:56:05  PID[6040] Information 11-25 21:56:05 Information: Received shutdown request.
+2025-11-25T21:56:11  PID[6040] Error       Thread was being aborted.

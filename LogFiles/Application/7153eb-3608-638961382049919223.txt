@@ -1,9 +1,0 @@
-2025-10-15T15:16:41  PID[3608] Information 10/15/2025 3:16:40 PM [[4.8]] [DW0SDWK0005I2] [daasrunner.exe] Version in DaaS Installation path (4.8.40625.1) is lower or equal to the existing version 4.8.40625.1. Version Compare result = 0
-2025-10-15T15:16:41  PID[3608] Information 10/15/2025 3:16:41 PM [[4.8]] [DW0SDWK0005I2] Binary Comparing files C:\Program Files (x86)\SiteExtensions\DaaS\4.8.40625.1\bin\daasrunner.exe and C:\home\site\Jobs\Continuous\DaaS\DaasRunner.exe
-2025-10-15T15:16:41  PID[3608] Information 10/15/2025 3:16:41 PM [[4.8]] [DW0SDWK0005I2] Binary Comparison succeeded: C:\Program Files (x86)\SiteExtensions\DaaS\4.8.40625.1\bin\daasrunner.exe and C:\home\site\Jobs\Continuous\DaaS\DaasRunner.exe
-2025-10-15T15:16:43  PID[3608] Information 10/15/2025 3:16:43 PM [[4.8]] [DW0SDWK0005I2] [daasconsole.exe] Version in DaaS Installation path (4.8.40625.1) is lower or equal to the existing version 4.8.40625.1. Version Compare result = 0
-2025-10-15T15:16:43  PID[3608] Information 10/15/2025 3:16:43 PM [[4.8]] [DW0SDWK0005I2] Binary Comparing files C:\Program Files (x86)\SiteExtensions\DaaS\4.8.40625.1\bin\daasconsole.exe and C:\home\data\DaaS\bin\DaasConsole.exe
-2025-10-15T15:16:43  PID[3608] Information 10/15/2025 3:16:43 PM [[4.8]] [DW0SDWK0005I2] Binary Comparison succeeded: C:\Program Files (x86)\SiteExtensions\DaaS\4.8.40625.1\bin\daasconsole.exe and C:\home\data\DaaS\bin\DaasConsole.exe
-2025-10-15T15:16:44  PID[3608] Information 10/15/2025 3:16:44 PM [[4.8]] [DW0SDWK0005I2] Done checking DaaS bits for any new updates
-2025-10-15T15:18:05  PID[3608] Information 10/15/2025 3:18:05 PM [[4.8]] [DW0SDWK0005I2] Storage account is not configured
-2025-10-15T15:18:05  PID[3608] Information 10/15/2025 3:18:05 PM [[4.8]] [DW0SDWK0005I2] Starting cleanup for Completed Sessions MaxDiagnosticSessionsToKeep = [10] MaxNumberOfDaysForSessions= [20]

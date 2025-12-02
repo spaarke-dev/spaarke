@@ -1,0 +1,112 @@
+<step title="Incoming Request" date="2025-11-25T21:21:40.825" instance="e68e25" url="/api/publish?type=zip" method="POST" type="request" pid="6628,2,18" Cache-Control="no-cache" Content-Length="16014934" Content-Type="application/octet-stream" Accept="*/*" Accept-Encoding="gzip, deflate" Authorization="Bas..." Host="spe-api-dev-67e2xz.scm.azurewebsites.net" User-Agent="AZURECLI/2.77.0 (MSI)" x-ms-client-request-id="b6f9816e-ca44-11f0-863d-a8e291177057" X-ARR-LOG-ID="b6f9816e-ca44-11f0-863d-a8e291177057" CLIENT-IP="47.198.1.206:49719" X-SITE-DEPLOYMENT-ID="spe-api-dev-67e2xz" WAS-DEFAULT-HOSTNAME="spe-api-dev-67e2xz.scm.azurewebsites.net" X-Forwarded-Proto="https" X-AppService-Proto="https" X-Forwarded-TlsVersion="1.3" X-WAWS-Unencoded-URL="/api/publish?type=zip" >
+  <step title="Cleanup Xml Logs" date="2025-11-25T21:21:41.013" /><!-- duration: 18ms -->
+  <step title="OneDeploy" date="2025-11-25T21:21:41.294" >
+    <step title="Starting PushDeployAsync" date="2025-11-25T21:21:41.325" /><!-- duration: 0ms -->
+    <step title="Updating shutdown sentinel last write time" date="2025-11-25T21:21:41.451" SemaphoreCount="7" /><!-- duration: 113ms -->
+    <step title="LockFile &apos;C:\home\site\locks\deployments.lock&apos; acquired" date="2025-11-25T21:21:41.623" /><!-- duration: 109ms -->
+    <step title="Saving request content to C:\local\Temp\zipdeploy\a2unmjwa.zip" date="2025-11-25T21:21:42.138" >
+      <step title="Total 16,014,934 bytes written to C:\local\Temp\zipdeploy\a2unmjwa.zip" date="2025-11-25T21:21:48.732" /><!-- duration: 20ms -->
+    </step><!-- duration: 6625ms -->
+    <step title="LockFile &apos;C:\home\site\locks\deployments.lock&apos; released" date="2025-11-25T21:21:48.781" /><!-- duration: 0ms -->
+    <step title="Deleting shutdown sentinel file" date="2025-11-25T21:21:48.794" SemaphoreCount="8" /><!-- duration: 16ms -->
+    <step title="Starting FetchDeploy" date="2025-11-25T21:21:48.830" /><!-- duration: 11ms -->
+    <step title="Attempting to fetch target branch HEAD" date="2025-11-25T21:21:48.841" /><!-- duration: 18ms -->
+    <step title="Updating shutdown sentinel last write time" date="2025-11-25T21:21:48.908" SemaphoreCount="7" /><!-- duration: 11ms -->
+    <step title="LockFile &apos;C:\home\site\locks\deployments.lock&apos; acquired" date="2025-11-25T21:21:48.919" /><!-- duration: 18ms -->
+    <step title="Performing fetch based deployment" date="2025-11-25T21:21:48.950" >
+      <step title="Creating temporary deployment" date="2025-11-25T21:21:48.966" /><!-- duration: 828ms -->
+      <step title="Fetching changes." date="2025-11-25T21:21:50.876" /><!-- duration: 203ms -->
+      <step title="Starting LocalZipHandler" date="2025-11-25T21:21:51.295" /><!-- duration: 17ms -->
+      <step title="Starting LocalZipFetch" date="2025-11-25T21:21:51.325" /><!-- duration: 0ms -->
+      <step title="Cleaning up temp folders from previous zip deployments and extracting pushed zip file C:\local\Temp\zipdeploy\a2unmjwa.zip (15.27 MB) to C:\local\Temp\zipdeploy\extracted" date="2025-11-25T21:21:51.341" /><!-- duration: 19ms -->
+      <step title="Cleaning up temp folders from previous zip deployments and extracting pushed zip file C:\local\Temp\zipdeploy\a2unmjwa.zip (15.27 MB) to C:\local\Temp\zipdeploy\extracted" date="2025-11-25T21:21:51.372" >
+        <step title="Renaming extractTargetDirectory(C:\local\Temp\zipdeploy\extracted) to tempDirectory(C:\local\Temp\zipdeploy\vfibipni.o4b)" date="2025-11-25T21:21:51.390" /><!-- duration: 14ms -->
+        <step title="Extracting 165 entries to C:\local\Temp\zipdeploy\extracted directory" date="2025-11-25T21:21:51.528" >
+          <step title="Extracting to C:\local\Temp\zipdeploy\extracted\cs\System.ServiceModel.Http.resources.dll ..." date="2025-11-25T21:21:51.545" /><!-- duration: 233ms -->
+          <step title="Extracting to C:\local\Temp\zipdeploy\extracted\cs\System.ServiceModel.Primitives.resources.dll ..." date="2025-11-25T21:21:51.798" /><!-- duration: 29ms -->
+          <step title="Extracting to C:\local\Temp\zipdeploy\extracted\de\System.ServiceModel.Http.resources.dll ..." date="2025-11-25T21:21:51.828" /><!-- duration: 29ms -->
+          <step title="Extracting to C:\local\Temp\zipdeploy\extracted\de\System.ServiceModel.Primitives.resources.dll ..." date="2025-11-25T21:21:51.857" /><!-- duration: 20ms -->
+          <step title="Extracting to C:\local\Temp\zipdeploy\extracted\es\System.ServiceModel.Http.resources.dll ..." date="2025-11-25T21:21:51.888" /><!-- duration: 18ms -->
+          <step title="Omitting extracting file traces ..." date="2025-11-25T21:21:51.906" /><!-- duration: 29ms -->
+          <step title="Extracting to C:\local\Temp\zipdeploy\extracted\web.config ..." date="2025-11-25T21:21:56.842" /><!-- duration: 19ms -->
+        </step><!-- duration: 5361ms -->
+      </step><!-- duration: 5536ms -->
+      <step title="None repository commit" date="2025-11-25T21:21:57.032" >
+        <step title="Commit id: 49c0a85b0b724ec0a8ce59d840f68fea" date="2025-11-25T21:21:57.044" Message="OneDeploy" AuthorName="N/A" AuthorEmail="N/A" /><!-- duration: 34ms -->
+      </step><!-- duration: 90ms -->
+      <step title="Before sending BuildRequestReceived status to /api/updatedeploystatus" date="2025-11-25T21:21:57.141" /><!-- duration: 0ms -->
+      <step title="DeploymentManager.Deploy(id:49c0a85b0b724ec0a8ce59d840f68fea)" date="2025-11-25T21:21:57.420" >
+        <step title="Collecting changeset information" date="2025-11-25T21:21:57.450" /><!-- duration: 406ms -->
+        <step title="Updating submodules" date="2025-11-25T21:21:57.903" >
+          <step title="Updating submodules." date="2025-11-25T21:21:58.143" /><!-- duration: 11ms -->
+        </step><!-- duration: 297ms -->
+        <step title="Preparing deployment for commit id &apos;49c0a85b0b&apos;." date="2025-11-25T21:21:58.842" /><!-- duration: 31ms -->
+        <step title="Determining deployment builder" date="2025-11-25T21:21:59.028" >
+          <step title="Builder is OneDeployBuilder" date="2025-11-25T21:21:59.075" /><!-- duration: 18ms -->
+        </step><!-- duration: 94ms -->
+        <step title="Copying SSH keys" date="2025-11-25T21:21:59.232" /><!-- duration: 17ms -->
+        <step title="Building" date="2025-11-25T21:21:59.268" >
+          <step title="Running build. Project type: OneDeploy" date="2025-11-25T21:21:59.607" /><!-- duration: 17ms -->
+          <step title="Copying the manifest" date="2025-11-25T21:21:59.872" /><!-- duration: 0ms -->
+          <step title="Clean deploying to C:\home\site\wwwroot" date="2025-11-25T21:22:00.528" /><!-- duration: 19ms -->
+          <step title="Generating deployment script." date="2025-11-25T21:22:01.138" /><!-- duration: 64ms -->
+          <step title="Generating deployment script" date="2025-11-25T21:22:01.341" >
+            <step title="Using cached version of the deployment script for command: -y --no-dot-deployment -r &quot;C:\local\Temp\zipdeploy\extracted&quot; -o &quot;C:\home\site\deployments\tools&quot; --basic --sitePath &quot;C:\local\Temp\zipdeploy\extracted&quot;" date="2025-11-25T21:22:01.499" /><!-- duration: 13ms -->
+            <step title="Using cached version of deployment script (command: &apos;azure -y --no-dot-deployment -r &quot;C:\local\Temp\zipdeploy\extracted&quot; -o &quot;C:\home\site\deployments\tools&quot; --basic --sitePath &quot;C:\local\Temp\zipdeploy\extracted&quot;&apos;)." date="2025-11-25T21:22:01.643" /><!-- duration: 106ms -->
+          </step><!-- duration: 485ms -->
+          <step title="Running deployment command..." date="2025-11-25T21:22:02.079" /><!-- duration: 0ms -->
+          <step title="Command: &quot;C:\home\site\deployments\tools\deploy.cmd&quot;" date="2025-11-25T21:22:02.156" /><!-- duration: 13ms -->
+          <step title="Executing external process" date="2025-11-25T21:22:02.252" type="process" path="starter.cmd" arguments="&quot;C:\home\site\deployments\tools\deploy.cmd&quot;" >
+            <step title="Handling Basic Web Site deployment." date="2025-11-25T21:22:04.545" /><!-- duration: 0ms -->
+            <step title="Creating app_offline.htm" date="2025-11-25T21:22:12.690" /><!-- duration: 10ms -->
+            <step title="KuduSync.NET from: &apos;C:\local\Temp\zipdeploy\extracted&apos; to: &apos;C:\home\site\wwwroot&apos;" date="2025-11-25T21:22:12.732" /><!-- duration: 17ms -->
+            <step title="Copying file: &apos;Spaarke.Core.dll&apos;" date="2025-11-25T21:22:12.779" /><!-- duration: 0ms -->
+            <step title="Copying file: &apos;Spaarke.Core.pdb&apos;" date="2025-11-25T21:22:12.815" /><!-- duration: 0ms -->
+            <step title="Copying file: &apos;Spaarke.Dataverse.dll&apos;" date="2025-11-25T21:22:12.843" /><!-- duration: 0ms -->
+            <step title="Copying file: &apos;Spaarke.Dataverse.pdb&apos;" date="2025-11-25T21:22:12.872" /><!-- duration: 17ms -->
+            <step title="Copying file: &apos;Spe.Bff.Api.deps.json&apos;" date="2025-11-25T21:22:12.919" /><!-- duration: 0ms -->
+            <step title="Copying file: &apos;Spe.Bff.Api.dll&apos;" date="2025-11-25T21:22:12.985" /><!-- duration: 0ms -->
+            <step title="Copying file: &apos;Spe.Bff.Api.exe&apos;" date="2025-11-25T21:22:13.014" /><!-- duration: 19ms -->
+            <step title="Copying file: &apos;Spe.Bff.Api.pdb&apos;" date="2025-11-25T21:22:13.062" /><!-- duration: 905ms -->
+            <step title="Copying file: &apos;Spe.Bff.Api.runtimeconfig.json&apos;" date="2025-11-25T21:22:16.310" /><!-- duration: 234ms -->
+            <step title="Copying file: &apos;publish\Spe.Bff.Api.deps.json&apos;" date="2025-11-25T21:22:16.763" /><!-- duration: 18ms -->
+            <step title="Copying file: &apos;publish\Spe.Bff.Api.runtimeconfig.json&apos;" date="2025-11-25T21:22:16.841" /><!-- duration: 17ms -->
+            <step title="Copying file: &apos;publish\publish\Spe.Bff.Api.deps.json&apos;" date="2025-11-25T21:22:16.906" /><!-- duration: 0ms -->
+            <step title="Copying file: &apos;publish\publish\Spe.Bff.Api.runtimeconfig.json&apos;" date="2025-11-25T21:22:17.280" /><!-- duration: 19ms -->
+            <step title="Copying file: &apos;publish\publish\publish\Spe.Bff.Api.deps.json&apos;" date="2025-11-25T21:22:17.328" /><!-- duration: 0ms -->
+            <step title="Copying file: &apos;publish\publish\publish\Spe.Bff.Api.runtimeconfig.json&apos;" date="2025-11-25T21:22:17.357" /><!-- duration: 19ms -->
+            <step title="Copying file: &apos;publish\publish\publish\publish\appsettings.Development.json&apos;" date="2025-11-25T21:22:17.405" /><!-- duration: 19ms -->
+            <step title="Copying file: &apos;publish\publish\publish\publish\appsettings.json&apos;" date="2025-11-25T21:22:17.453" /><!-- duration: 0ms -->
+            <step title="Copying file: &apos;publish\publish\publish\publish\appsettings.Production.json&apos;" date="2025-11-25T21:22:17.501" /><!-- duration: 0ms -->
+            <step title="Copying file: &apos;publish\publish\publish\publish\appsettings.Staging.json&apos;" date="2025-11-25T21:22:17.530" /><!-- duration: 19ms -->
+            <step title="Copying file: &apos;publish\publish\publish\publish\runtimeconfig.template.json&apos;" date="2025-11-25T21:22:17.560" /><!-- duration: 18ms -->
+            <step title="Copying file: &apos;publish\publish\publish\publish\Spe.Bff.Api.deps.json&apos;" date="2025-11-25T21:22:17.607" /><!-- duration: 19ms -->
+            <step title="Copying file: &apos;publish\publish\publish\publish\Spe.Bff.Api.runtimeconfig.json&apos;" date="2025-11-25T21:22:17.655" /><!-- duration: 0ms -->
+            <step title="Copying file: &apos;publish\publish\publish\publish\Spe.Bff.Api.staticwebassets.endpoints.json&apos;" date="2025-11-25T21:22:17.685" /><!-- duration: 19ms -->
+            <step title="Copying file: &apos;publish\publish\publish\publish\web.config&apos;" date="2025-11-25T21:22:17.732" /><!-- duration: 0ms -->
+            <step title="Deleting app_offline.htm" date="2025-11-25T21:22:17.763" /><!-- duration: 0ms -->
+            <step title="Finished successfully." date="2025-11-25T21:22:17.810" /><!-- duration: 0ms -->
+          </step><!-- duration: 15750ms -->
+          <step title="Build completed succesfully." date="2025-11-25T21:22:18.173" /><!-- duration: 0ms -->
+          <step title="Running post deployment command(s)..." date="2025-11-25T21:22:18.373" /><!-- duration: 0ms -->
+          <step title="Requesting site restart" date="2025-11-25T21:22:18.700" /><!-- duration: 65ms -->
+          <step title="Requesting site restart" date="2025-11-25T21:22:18.842" /><!-- duration: 30ms -->
+          <step title="Requesting site restart. Attempt #1" date="2025-11-25T21:22:19.075" /><!-- duration: 16ms -->
+          <step title="Requesting site restart. Attempt #1" date="2025-11-25T21:22:19.111" /><!-- duration: 11ms -->
+          <step title="Successfully requested a restart. Attempt #1" date="2025-11-25T21:22:24.500" /><!-- duration: 29ms -->
+          <step title="Successfully requested a restart. Attempt #1" date="2025-11-25T21:22:24.560" /><!-- duration: 18ms -->
+          <step title="Deployment successful. DEPLOYMENTINFO: deploymentPath = OneDeploy, deployer = OneDeploy, os = windows, sku = Basic, siteName = spe-api-dev-67e2xz, siteHostName = spe-api-dev-67e2xz.azurewebsites.net, deploymentStatus = Success" date="2025-11-25T21:22:25.233" /><!-- duration: 186ms -->
+          <step title="Purge deployment items" date="2025-11-25T21:22:27.185" >
+            <step title="Remove temp-b021, Failed, received at 11/25/2025 9:18:01 PM" date="2025-11-25T21:22:27.327" /><!-- duration: 0ms -->
+            <step title="Remove dd4cc40bd, Success, received at 10/17/2025 2:08:11 PM" date="2025-11-25T21:22:27.794" /><!-- duration: 0ms -->
+          </step><!-- duration: 656ms -->
+        </step><!-- duration: 28718ms -->
+      </step><!-- duration: 30625ms -->
+      <step title="Cleaning up temp files" date="2025-11-25T21:22:28.060" /><!-- duration: 33ms -->
+      <step title="Skip function trigger and logicapp sync because function is not enabled." date="2025-11-25T21:22:28.154" /><!-- duration: 16ms -->
+    </step><!-- duration: 39345ms -->
+    <step title="LockFile &apos;C:\home\site\locks\deployments.lock&apos; released" date="2025-11-25T21:22:28.295" /><!-- duration: 19ms -->
+    <step title="Deleting shutdown sentinel file" date="2025-11-25T21:22:28.343" SemaphoreCount="8" /><!-- duration: 29ms -->
+  </step><!-- duration: 47203ms -->
+  <step title="Outgoing response" date="2025-11-25T21:22:28.625" type="response" statusCode="200" statusText="OK" Server="Microsoft-IIS/10.0" x-ms-request-id="b6f9816e-ca44-11f0-863d-a8e291177057" Cache-Control="private" X-AspNet-Version="4.0.30319" /><!-- duration: 13ms -->
+</step><!-- duration: 47813ms -->

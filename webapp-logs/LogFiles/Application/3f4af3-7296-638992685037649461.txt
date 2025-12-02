@@ -1,0 +1,2 @@
+2025-11-20T20:48:22  PID[7296] Information 11/20/2025 8:48:22 PM [[4.8]] [dw0sdwk0006R4] Starting cleanup for Completed Sessions MaxDiagnosticSessionsToKeep = [10] MaxNumberOfDaysForSessions= [20]
+2025-11-20T20:48:22  PID[7296] Information 11/20/2025 8:48:22 PM [[4.8]] [dw0sdwk0006R4] Storage account is not configured

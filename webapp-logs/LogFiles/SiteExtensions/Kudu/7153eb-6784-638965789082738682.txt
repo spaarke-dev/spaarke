@@ -1,0 +1,20 @@
+2025-10-20T17:41:38  PID[6784] Information Unpacking resources...
+2025-10-20T17:41:39  PID[6784] Information 10-20 17:41:39 Information: Executing Application Insights Profiler agent version 2.6.2201.2106 with arguments: 
+2025-10-20T17:41:39  PID[6784] Information 10-20 17:41:39 Information: Minimum version enabled on machine: 1.0.0
+2025-10-20T17:41:39  PID[6784] Information 10-20 17:41:39 Information: Applying logging level: Information
+2025-10-20T17:41:39  PID[6784] Information 10-20 17:41:39 Information: Instrumentation key: 09a9beed-0dcd-4aad-84bb-3696372ed5d1
+2025-10-20T17:41:39  PID[6784] Information 10-20 17:41:39 Information: Application Insights Profiler endpoint: https://profiler.monitor.azure.com/
+2025-10-20T17:41:39  PID[6784] Information 10-20 17:41:39 Information: Application Insights endpoint: https://westus2-2.in.applicationinsights.azure.com/v2/track/
+2025-10-20T17:41:39  PID[6784] Information 10-20 17:41:39 Information: Runtime Environment: Antares
+2025-10-20T17:41:39  PID[6784] Information 10-20 17:41:39 Information: Support files: C:\local\Temp\jobs\continuous\ApplicationInsightsProfiler3\0qvluuvg.iq1\spsupport
+2025-10-20T17:41:39  PID[6784] Information 10-20 17:41:39 Information: Providing usage data (to opt out set the AppSettings ApplicationInsightsProvideUsageTelemetryData with the value "false"): True
+2025-10-20T17:41:39  PID[6784] Information 10-20 17:41:39 Information: Engine mode: Sampling
+2025-10-20T17:41:41  PID[6784] Information 10-20 17:41:41 Information: Application Insights AppId: 6a76b012-46d9-412f-b4ab-4905658a9559
+2025-10-20T17:41:41  PID[6784] Information 10-20 17:41:41 Information: Press 'Ctrl+C' to exit Application Insights Profiler.
+2025-10-20T17:41:42  PID[6784] Information 10-20 17:41:42 Information: Set up shutdown handler.
+2025-10-20T17:41:42  PID[6784] Information 10-20 17:41:42 Information: Shutdown handler set to watch C:\local\Temp\JobsShutdown\continuous\ApplicationInsightsProfiler3\xgyrozfc.4ch.
+2025-10-20T17:41:42  PID[6784] Information 10-20 17:41:42 Information: Starting main process
+2025-10-20T17:41:45  PID[6784] Information 10-20 17:41:45 Critical: Settings have been set from Engine
+2025-10-20T17:41:47  PID[6784] Information 10-20 17:41:47 Critical: Settings contract has been updated
+2025-10-20T17:41:47  PID[6784] Information 10-20 17:41:47 Critical: Enabled has been set to True
+2025-10-20T17:42:58  PID[6784] Information 10-20 17:42:58 Information: Received shutdown request.

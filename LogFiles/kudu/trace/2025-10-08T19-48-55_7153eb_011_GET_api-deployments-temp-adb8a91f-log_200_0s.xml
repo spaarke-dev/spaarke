@@ -1,6 +1,0 @@
-<step title="Incoming Request" date="2025-10-08T19:48:55.394" instance="7153eb" url="/api/deployments/temp-adb8a91f/log" method="GET" type="request" pid="5436,2,26" Accept="*/*" Accept-Encoding="gzip, deflate" Authorization="Bas..." Host="spe-api-dev-67e2xz.scm.azurewebsites.net" User-Agent="AZURECLI/2.77.0 (MSI)" x-ms-client-request-id="cf7fa310-a47f-11f0-b496-a8e291177057" X-ARR-LOG-ID="cf7fa310-a47f-11f0-b496-a8e291177057" CLIENT-IP="47.198.1.206:49500" X-SITE-DEPLOYMENT-ID="spe-api-dev-67e2xz" WAS-DEFAULT-HOSTNAME="spe-api-dev-67e2xz.scm.azurewebsites.net" X-Forwarded-Proto="https" X-AppService-Proto="https" X-Forwarded-TlsVersion="1.3" X-WAWS-Unencoded-URL="/api/deployments/temp-adb8a91f/log" >
-  <step title="DeploymentService.GetLogEntry" date="2025-10-08T19:48:55.425" >
-    <step title="DeploymentManager.GetLogEntries(id:temp-adb8a91f)" date="2025-10-08T19:48:55.443" /><!-- duration: 76ms -->
-  </step><!-- duration: 94ms -->
-  <step title="Outgoing response" date="2025-10-08T19:48:55.551" type="response" statusCode="200" statusText="OK" Server="Microsoft-IIS/10.0" x-ms-request-id="cf7fa310-a47f-11f0-b496-a8e291177057" Cache-Control="private" X-AspNet-Version="4.0.30319" Content-Type="application/json; charset=utf-8" /><!-- duration: 0ms -->
-</step><!-- duration: 157ms -->

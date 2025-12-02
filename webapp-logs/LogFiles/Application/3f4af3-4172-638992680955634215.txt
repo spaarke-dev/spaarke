@@ -1,0 +1,9 @@
+2025-11-20T20:41:33  PID[4172] Information 11/20/2025 8:41:32 PM [[4.8]] [dw0sdwk0006R4] DaasRunner.exe with version 4.8.40625.1 and ProcessId=4172 started
+2025-11-20T20:41:36  PID[4172] Information 11/20/2025 8:41:36 PM [[4.8]] [dw0sdwk0006R4] Checking DaaS bits and updating if required
+2025-11-20T20:41:36  PID[4172] Information 11/20/2025 8:41:36 PM [[4.8]] [dw0sdwk0006R4] [daasrunner.exe] Version in DaaS Installation path (4.8.40625.1) is lower or equal to the existing version 4.8.40625.1. Version Compare result = 0
+2025-11-20T20:41:36  PID[4172] Information 11/20/2025 8:41:36 PM [[4.8]] [dw0sdwk0006R4] Binary Comparing files C:\Program Files (x86)\SiteExtensions\DaaS\4.8.40625.1\bin\daasrunner.exe and C:\home\site\Jobs\Continuous\DaaS\DaasRunner.exe
+2025-11-20T20:41:36  PID[4172] Information 11/20/2025 8:41:36 PM [[4.8]] [dw0sdwk0006R4] Binary Comparison succeeded: C:\Program Files (x86)\SiteExtensions\DaaS\4.8.40625.1\bin\daasrunner.exe and C:\home\site\Jobs\Continuous\DaaS\DaasRunner.exe
+2025-11-20T20:41:37  PID[4172] Information 11/20/2025 8:41:37 PM [[4.8]] [dw0sdwk0006R4] [daasconsole.exe] Version in DaaS Installation path (4.8.40625.1) is lower or equal to the existing version 4.8.40625.1. Version Compare result = 0
+2025-11-20T20:41:37  PID[4172] Information 11/20/2025 8:41:37 PM [[4.8]] [dw0sdwk0006R4] Binary Comparing files C:\Program Files (x86)\SiteExtensions\DaaS\4.8.40625.1\bin\daasconsole.exe and C:\home\data\DaaS\bin\DaasConsole.exe
+2025-11-20T20:41:38  PID[4172] Information 11/20/2025 8:41:38 PM [[4.8]] [dw0sdwk0006R4] Binary Comparison succeeded: C:\Program Files (x86)\SiteExtensions\DaaS\4.8.40625.1\bin\daasconsole.exe and C:\home\data\DaaS\bin\DaasConsole.exe
+2025-11-20T20:41:38  PID[4172] Information 11/20/2025 8:41:38 PM [[4.8]] [dw0sdwk0006R4] Done checking DaaS bits for any new updates

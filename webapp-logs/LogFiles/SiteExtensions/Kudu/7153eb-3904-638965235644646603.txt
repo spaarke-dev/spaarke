@@ -1,0 +1,38 @@
+2025-10-20T02:19:04  PID[3904] Information Unpacking resources...
+2025-10-20T02:19:05  PID[3904] Information 10-20 02:19:05 Information: Executing Application Insights Profiler agent version 2.6.2201.2106 with arguments: 
+2025-10-20T02:19:05  PID[3904] Information 10-20 02:19:05 Information: Minimum version enabled on machine: 1.0.0
+2025-10-20T02:19:05  PID[3904] Information 10-20 02:19:05 Information: Applying logging level: Information
+2025-10-20T02:19:05  PID[3904] Information 10-20 02:19:05 Information: Instrumentation key: 09a9beed-0dcd-4aad-84bb-3696372ed5d1
+2025-10-20T02:19:05  PID[3904] Information 10-20 02:19:05 Information: Application Insights Profiler endpoint: https://profiler.monitor.azure.com/
+2025-10-20T02:19:06  PID[3904] Information 10-20 02:19:05 Information: Application Insights endpoint: https://westus2-2.in.applicationinsights.azure.com/v2/track/
+2025-10-20T02:19:06  PID[3904] Information 10-20 02:19:05 Information: Runtime Environment: Antares
+2025-10-20T02:19:06  PID[3904] Information 10-20 02:19:05 Information: Support files: C:\local\Temp\jobs\continuous\ApplicationInsightsProfiler3\k25pl1tu.wgb\spsupport
+2025-10-20T02:19:06  PID[3904] Information 10-20 02:19:05 Information: Providing usage data (to opt out set the AppSettings ApplicationInsightsProvideUsageTelemetryData with the value "false"): True
+2025-10-20T02:19:06  PID[3904] Information 10-20 02:19:05 Information: Engine mode: Sampling
+2025-10-20T02:19:08  PID[3904] Information 10-20 02:19:08 Information: Application Insights AppId: 6a76b012-46d9-412f-b4ab-4905658a9559
+2025-10-20T02:19:08  PID[3904] Information 10-20 02:19:08 Information: Press 'Ctrl+C' to exit Application Insights Profiler.
+2025-10-20T02:19:08  PID[3904] Information 10-20 02:19:08 Information: Set up shutdown handler.
+2025-10-20T02:19:08  PID[3904] Information 10-20 02:19:08 Information: Shutdown handler set to watch C:\local\Temp\JobsShutdown\continuous\ApplicationInsightsProfiler3\2231xag0.a3b.
+2025-10-20T02:19:08  PID[3904] Information 10-20 02:19:08 Information: Starting main process
+2025-10-20T02:19:12  PID[3904] Information 10-20 02:19:12 Critical: Settings have been set from Engine
+2025-10-20T02:19:13  PID[3904] Information 10-20 02:19:13 Critical: Settings contract has been updated
+2025-10-20T02:19:13  PID[3904] Information 10-20 02:19:13 Critical: Enabled has been set to True
+2025-10-20T02:27:15  PID[3904] Information 10-20 02:27:15 Information: Triggering Based on Memory
+2025-10-20T02:27:15  PID[3904] Information 10-20 02:27:15 Critical: StartProfiler triggered.
+2025-10-20T02:27:15  PID[3904] Information 10-20 02:27:15 Information: Starting circular monitor
+2025-10-20T02:27:16  PID[3904] Information 10-20 02:27:16 Information: NativeImagePdbGeneration enabled.
+2025-10-20T02:27:55  PID[3904] Information 10-20 02:27:55 Information: Monitoring process 2932
+2025-10-20T02:28:25  PID[3904] Information 10-20 02:28:25 Information: Monitoring process 3904
+2025-10-20T02:28:58  PID[3904] Information 10-20 02:28:58 Information: Monitoring process 6008
+2025-10-20T02:29:29  PID[3904] Information 10-20 02:29:29 Information: Monitoring process 7164
+2025-10-20T02:30:02  PID[3904] Information 10-20 02:30:02 Information: Monitoring process 6356
+2025-10-20T02:30:35  PID[3904] Information 10-20 02:30:35 Information: Monitoring process 7508
+2025-10-20T02:30:35  PID[3904] Information 10-20 02:30:35 Critical: StartProfiler succeeded.
+2025-10-20T02:31:05  PID[3904] Information 10-20 02:31:05 Critical: StopProfiler triggered.
+2025-10-20T02:31:05  PID[3904] Information 10-20 02:31:05 Information: Stopping circular monitor and collecting etl snapshot.
+2025-10-20T02:33:05  PID[3904] Information 10-20 02:33:05 Information: Start to upload trace D:\DWASFiles\Sites\#1spe-api-dev-67e2xz\Temp\DA.Circular.2025-10-20T02-27-16-7990909Z.638965240367990909.638965242656740068.etl.zip
+2025-10-20T02:33:05  PID[3904] Information 10-20 02:33:05 Critical: Upload trace was canceled as no activity detected from target iKey.
+2025-10-20T02:33:06  PID[3904] Information 10-20 02:33:05 Information: Target iKey: 09a9beed-0dcd-4aad-84bb-3696372ed5d1. Detected iKeys: .
+2025-10-20T02:33:06  PID[3904] Information 10-20 02:33:05 Critical: StopProfiler succeeded.
+2025-10-20T04:39:29  PID[3904] Information 10-20 04:39:29 Information: Received shutdown request.
+2025-10-20T04:39:36  PID[3904] Error       Thread was being aborted.

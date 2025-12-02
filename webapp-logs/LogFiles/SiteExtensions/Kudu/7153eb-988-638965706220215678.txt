@@ -1,0 +1,20 @@
+2025-10-20T15:23:31  PID[988] Information Unpacking resources...
+2025-10-20T15:23:32  PID[988] Information 10-20 15:23:32 Information: Executing Application Insights Profiler agent version 2.6.2201.2106 with arguments: 
+2025-10-20T15:23:32  PID[988] Information 10-20 15:23:32 Information: Minimum version enabled on machine: 1.0.0
+2025-10-20T15:23:32  PID[988] Information 10-20 15:23:32 Information: Applying logging level: Information
+2025-10-20T15:23:32  PID[988] Information 10-20 15:23:32 Information: Instrumentation key: 09a9beed-0dcd-4aad-84bb-3696372ed5d1
+2025-10-20T15:23:32  PID[988] Information 10-20 15:23:32 Information: Application Insights Profiler endpoint: https://profiler.monitor.azure.com/
+2025-10-20T15:23:32  PID[988] Information 10-20 15:23:32 Information: Application Insights endpoint: https://westus2-2.in.applicationinsights.azure.com/v2/track/
+2025-10-20T15:23:32  PID[988] Information 10-20 15:23:32 Information: Runtime Environment: Antares
+2025-10-20T15:23:32  PID[988] Information 10-20 15:23:32 Information: Support files: C:\local\Temp\jobs\continuous\ApplicationInsightsProfiler3\3fb5quye.e4y\spsupport
+2025-10-20T15:23:32  PID[988] Information 10-20 15:23:32 Information: Providing usage data (to opt out set the AppSettings ApplicationInsightsProvideUsageTelemetryData with the value "false"): True
+2025-10-20T15:23:32  PID[988] Information 10-20 15:23:32 Information: Engine mode: Sampling
+2025-10-20T15:23:34  PID[988] Information 10-20 15:23:34 Information: Application Insights AppId: 6a76b012-46d9-412f-b4ab-4905658a9559
+2025-10-20T15:23:34  PID[988] Information 10-20 15:23:34 Information: Press 'Ctrl+C' to exit Application Insights Profiler.
+2025-10-20T15:23:34  PID[988] Information 10-20 15:23:34 Information: Set up shutdown handler.
+2025-10-20T15:23:34  PID[988] Information 10-20 15:23:34 Information: Shutdown handler set to watch C:\local\Temp\JobsShutdown\continuous\ApplicationInsightsProfiler3\wkiiia5b.b2g.
+2025-10-20T15:23:34  PID[988] Information 10-20 15:23:34 Information: Starting main process
+2025-10-20T15:23:37  PID[988] Information 10-20 15:23:37 Critical: Settings have been set from Engine
+2025-10-20T15:23:39  PID[988] Information 10-20 15:23:39 Critical: Settings contract has been updated
+2025-10-20T15:23:39  PID[988] Information 10-20 15:23:39 Critical: Enabled has been set to True
+2025-10-20T15:24:55  PID[988] Information 10-20 15:24:55 Information: Received shutdown request.

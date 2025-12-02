@@ -1,2 +1,0 @@
-{"type":"https://tools.ietf.org/html/rfc7235#section-3.1","title":"Unauthorized","status":401,"detail":"Invalid or expired token","traceId":"40002785-0000-c000-b63f-84710c7967bb"}
-HTTP_STATUS:401

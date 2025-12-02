@@ -1,0 +1,73 @@
+2025-10-18T19:01:59  PID[3656] Information Unpacking resources...
+2025-10-18T19:02:04  PID[3656] Information 10-18 19:02:04 Information: Executing Application Insights Profiler agent version 2.6.2201.2106 with arguments: 
+2025-10-18T19:02:04  PID[3656] Information 10-18 19:02:04 Information: Minimum version enabled on machine: 1.0.0
+2025-10-18T19:02:04  PID[3656] Information 10-18 19:02:04 Information: Applying logging level: Information
+2025-10-18T19:02:04  PID[3656] Information 10-18 19:02:04 Information: Instrumentation key: 09a9beed-0dcd-4aad-84bb-3696372ed5d1
+2025-10-18T19:02:04  PID[3656] Information 10-18 19:02:04 Information: Application Insights Profiler endpoint: https://profiler.monitor.azure.com/
+2025-10-18T19:02:04  PID[3656] Information 10-18 19:02:04 Information: Application Insights endpoint: https://westus2-2.in.applicationinsights.azure.com/v2/track/
+2025-10-18T19:02:04  PID[3656] Information 10-18 19:02:04 Information: Runtime Environment: Antares
+2025-10-18T19:02:04  PID[3656] Information 10-18 19:02:04 Information: Support files: C:\local\Temp\jobs\continuous\ApplicationInsightsProfiler3\akruinbs.sjz\spsupport
+2025-10-18T19:02:04  PID[3656] Information 10-18 19:02:04 Information: Providing usage data (to opt out set the AppSettings ApplicationInsightsProvideUsageTelemetryData with the value "false"): True
+2025-10-18T19:02:04  PID[3656] Information 10-18 19:02:04 Information: Engine mode: Sampling
+2025-10-18T19:02:08  PID[3656] Information 10-18 19:02:08 Information: Application Insights AppId: 6a76b012-46d9-412f-b4ab-4905658a9559
+2025-10-18T19:02:08  PID[3656] Information 10-18 19:02:08 Information: Press 'Ctrl+C' to exit Application Insights Profiler.
+2025-10-18T19:02:08  PID[3656] Information 10-18 19:02:08 Information: Set up shutdown handler.
+2025-10-18T19:02:08  PID[3656] Information 10-18 19:02:08 Information: Shutdown handler set to watch C:\local\Temp\JobsShutdown\continuous\ApplicationInsightsProfiler3\xxzmfpcv.3h1.
+2025-10-18T19:02:08  PID[3656] Information 10-18 19:02:08 Information: Starting main process
+2025-10-18T19:02:12  PID[3656] Information 10-18 19:02:12 Critical: Settings have been set from Engine
+2025-10-18T19:02:14  PID[3656] Information 10-18 19:02:14 Critical: Settings contract has been updated
+2025-10-18T19:02:14  PID[3656] Information 10-18 19:02:14 Critical: Enabled has been set to True
+2025-10-18T19:02:14  PID[3656] Information 10-18 19:02:14 Information: Triggering Based on Memory
+2025-10-18T19:02:14  PID[3656] Information 10-18 19:02:14 Critical: StartProfiler triggered.
+2025-10-18T19:02:14  PID[3656] Information 10-18 19:02:14 Information: Starting circular monitor
+2025-10-18T19:02:15  PID[3656] Information 10-18 19:02:15 Information: NativeImagePdbGeneration enabled.
+2025-10-18T19:02:35  PID[3656] Information 10-18 19:02:35 Information: Monitoring process 2836
+2025-10-18T19:02:42  PID[3656] Information 10-18 19:02:42 Information: Monitoring process 4864
+2025-10-18T19:02:45  PID[3656] Information 10-18 19:02:45 Information: Monitoring process 5652
+2025-10-18T19:02:49  PID[3656] Information 10-18 19:02:49 Information: Monitoring process 6076
+2025-10-18T19:02:50  PID[3656] Information 10-18 19:02:50 Information: Monitoring process 6244
+2025-10-18T19:02:58  PID[3656] Information 10-18 19:02:58 Information: Monitoring process 3656
+2025-10-18T19:03:06  PID[3656] Information 10-18 19:03:06 Information: Monitoring process 5252
+2025-10-18T19:03:06  PID[3656] Information 10-18 19:03:06 Critical: StartProfiler succeeded.
+2025-10-18T19:03:36  PID[3656] Information 10-18 19:03:36 Critical: StopProfiler triggered.
+2025-10-18T19:03:36  PID[3656] Information 10-18 19:03:36 Information: Stopping circular monitor and collecting etl snapshot.
+2025-10-18T19:06:20  PID[3656] Information 10-18 19:06:20 Information: Start to upload trace D:\DWASFiles\Sites\#1spe-api-dev-67e2xz\Temp\DA.Circular.2025-10-18T19-02-15-6364513Z.638964109356364513.638964110168845961.etl.zip
+2025-10-18T19:06:20  PID[3656] Information 10-18 19:06:20 Critical: Upload trace was canceled as no activity detected from target iKey.
+2025-10-18T19:06:20  PID[3656] Information 10-18 19:06:20 Information: Target iKey: 09a9beed-0dcd-4aad-84bb-3696372ed5d1. Detected iKeys: .
+2025-10-18T19:06:20  PID[3656] Information 10-18 19:06:20 Critical: StopProfiler succeeded.
+2025-10-18T19:12:31  PID[3656] Information 10-18 19:12:31 Critical: StartProfiler triggered.
+2025-10-18T19:12:31  PID[3656] Information 10-18 19:12:31 Information: Starting circular monitor
+2025-10-18T19:12:31  PID[3656] Information 10-18 19:12:31 Information: NativeImagePdbGeneration enabled.
+2025-10-18T19:12:37  PID[3656] Information 10-18 19:12:37 Information: Monitoring process 2836
+2025-10-18T19:12:44  PID[3656] Information 10-18 19:12:44 Information: Monitoring process 4864
+2025-10-18T19:12:45  PID[3656] Information 10-18 19:12:45 Information: Monitoring process 5652
+2025-10-18T19:12:50  PID[3656] Information 10-18 19:12:50 Information: Monitoring process 6076
+2025-10-18T19:12:56  PID[3656] Information 10-18 19:12:56 Information: Monitoring process 6244
+2025-10-18T19:13:00  PID[3656] Information 10-18 19:13:00 Information: Monitoring process 3656
+2025-10-18T19:13:09  PID[3656] Information 10-18 19:13:09 Information: Monitoring process 5252
+2025-10-18T19:13:09  PID[3656] Information 10-18 19:13:09 Critical: StartProfiler succeeded.
+2025-10-18T19:13:39  PID[3656] Information 10-18 19:13:39 Critical: StopProfiler triggered.
+2025-10-18T19:13:39  PID[3656] Information 10-18 19:13:39 Information: Stopping circular monitor and collecting etl snapshot.
+2025-10-18T19:15:30  PID[3656] Information 10-18 19:15:30 Information: Start to upload trace D:\DWASFiles\Sites\#1spe-api-dev-67e2xz\Temp\DA.Circular.2025-10-18T19-12-31-3996875Z.638964115513996875.638964116193226984.etl.zip
+2025-10-18T19:15:30  PID[3656] Information 10-18 19:15:30 Critical: Upload trace was canceled as no activity detected from target iKey.
+2025-10-18T19:15:30  PID[3656] Information 10-18 19:15:30 Information: Target iKey: 09a9beed-0dcd-4aad-84bb-3696372ed5d1. Detected iKeys: .
+2025-10-18T19:15:30  PID[3656] Information 10-18 19:15:30 Critical: StopProfiler succeeded.
+2025-10-18T20:01:43  PID[3656] Information 10-18 20:01:43 Critical: StartProfiler triggered.
+2025-10-18T20:01:43  PID[3656] Information 10-18 20:01:43 Information: Starting circular monitor
+2025-10-18T20:01:44  PID[3656] Information 10-18 20:01:44 Information: NativeImagePdbGeneration enabled.
+2025-10-18T20:01:53  PID[3656] Information 10-18 20:01:53 Information: Monitoring process 2836
+2025-10-18T20:02:00  PID[3656] Information 10-18 20:02:00 Information: Monitoring process 4864
+2025-10-18T20:02:01  PID[3656] Information 10-18 20:02:01 Information: Monitoring process 5652
+2025-10-18T20:02:03  PID[3656] Information 10-18 20:02:03 Information: Monitoring process 6076
+2025-10-18T20:02:06  PID[3656] Information 10-18 20:02:06 Information: Monitoring process 6244
+2025-10-18T20:02:11  PID[3656] Information 10-18 20:02:11 Information: Monitoring process 3656
+2025-10-18T20:02:22  PID[3656] Information 10-18 20:02:22 Information: Monitoring process 5252
+2025-10-18T20:02:22  PID[3656] Information 10-18 20:02:22 Critical: StartProfiler succeeded.
+2025-10-18T20:02:52  PID[3656] Information 10-18 20:02:52 Critical: StopProfiler triggered.
+2025-10-18T20:02:52  PID[3656] Information 10-18 20:02:52 Information: Stopping circular monitor and collecting etl snapshot.
+2025-10-18T20:04:56  PID[3656] Information 10-18 20:04:56 Information: Start to upload trace D:\DWASFiles\Sites\#1spe-api-dev-67e2xz\Temp\DA.Circular.2025-10-18T20-01-44-9609332Z.638964145049609332.638964145729342851.etl.zip
+2025-10-18T20:04:56  PID[3656] Information 10-18 20:04:56 Critical: Upload trace was canceled as no activity detected from target iKey.
+2025-10-18T20:04:56  PID[3656] Information 10-18 20:04:56 Information: Target iKey: 09a9beed-0dcd-4aad-84bb-3696372ed5d1. Detected iKeys: .
+2025-10-18T20:04:56  PID[3656] Information 10-18 20:04:56 Critical: StopProfiler succeeded.
+2025-10-18T20:35:29  PID[3656] Information 10-18 20:35:29 Information: Received shutdown request.
+2025-10-18T20:35:35  PID[3656] Error       Thread was being aborted.

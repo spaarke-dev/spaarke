@@ -1,3 +1,0 @@
-<step title="Startup Request" date="2025-10-08T18:01:03.283" instance="7153eb" url="/api/siteextensions/Microsoft.ApplicationInsights.AzureWebSites?api-version=2014-11-01" method="DELETE" type="request" pid="6928,2,7" ScmType="None" >
-  <step title="Cleanup Xml Logs" date="2025-10-08T18:01:03.343" /><!-- duration: 17ms -->
-</step><!-- duration: 97ms -->

@@ -1,9 +1,0 @@
-<step title="Incoming Request" date="2025-10-13T03:11:25.994" instance="7153eb" url="/api/deployments/latest" method="GET" type="request" pid="6496,2,18" Accept="*/*" Accept-Encoding="gzip, deflate" Authorization="Bas..." Host="spe-api-dev-67e2xz.scm.azurewebsites.net" User-Agent="AZURECLI/2.77.0 (MSI)" x-ms-client-request-id="0d8f4989-a7e2-11f0-b0aa-a8e291177057" X-ARR-LOG-ID="0d8f4989-a7e2-11f0-b0aa-a8e291177057" CLIENT-IP="47.198.1.206:55807" X-SITE-DEPLOYMENT-ID="spe-api-dev-67e2xz" WAS-DEFAULT-HOSTNAME="spe-api-dev-67e2xz.scm.azurewebsites.net" X-Forwarded-Proto="https" X-AppService-Proto="https" X-Forwarded-TlsVersion="1.3" X-WAWS-Unencoded-URL="/api/deployments/latest" >
-  <step title="DeploymentService.GetResult" date="2025-10-13T03:11:27.976" >
-    <step title="DeploymentService.GetLatestDeployment" date="2025-10-13T03:11:30.151" >
-      <step title="DeploymentManager.GetResults" date="2025-10-13T03:11:32.616" /><!-- duration: 15595ms -->
-      <step title="Deployment temp-c49e95da is Pending" date="2025-10-13T03:11:48.211" /><!-- duration: 906ms -->
-    </step><!-- duration: 20700ms -->
-  </step><!-- duration: 24238ms -->
-  <step title="Outgoing response" date="2025-10-13T03:11:53.321" type="response" statusCode="202" statusText="Accepted" Server="Microsoft-IIS/10.0" x-ms-request-id="0d8f4989-a7e2-11f0-b0aa-a8e291177057" Retry-After="30" Cache-Control="private" X-AspNet-Version="4.0.30319" Location="https://spe-api-dev-67e2xz.scm.azurewebsites.net/api/deployments/latest" Content-Type="application/json; charset=utf-8" /><!-- duration: 939ms -->
-</step><!-- duration: 29186ms -->

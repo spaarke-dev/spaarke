@@ -1,0 +1,55 @@
+2025-11-25T21:58:15  PID[300] Information Unpacking resources...
+2025-11-25T21:58:17  PID[300] Information 11-25 21:58:09 Information: Executing Application Insights Profiler agent version 2.6.2201.2106 with arguments: 
+2025-11-25T21:58:18  PID[300] Information 11-25 21:58:10 Information: Minimum version enabled on machine: 1.0.0
+2025-11-25T21:58:19  PID[300] Information 11-25 21:58:10 Information: Applying logging level: Information
+2025-11-25T21:58:19  PID[300] Information 11-25 21:58:10 Information: Instrumentation key: 09a9beed-0dcd-4aad-84bb-3696372ed5d1
+2025-11-25T21:58:21  PID[300] Information 11-25 21:58:10 Information: Application Insights Profiler endpoint: https://profiler.monitor.azure.com/
+2025-11-25T21:58:25  PID[300] Information 11-25 21:58:10 Information: Application Insights endpoint: https://westus2-2.in.applicationinsights.azure.com/v2/track/
+2025-11-25T21:58:26  PID[300] Information 11-25 21:58:10 Information: Runtime Environment: Antares
+2025-11-25T21:58:28  PID[300] Information 11-25 21:58:10 Information: Support files: C:\local\Temp\jobs\continuous\ApplicationInsightsProfiler3\wja3ihsn.3nx\spsupport
+2025-11-25T21:58:28  PID[300] Information 11-25 21:58:10 Information: Providing usage data (to opt out set the AppSettings ApplicationInsightsProvideUsageTelemetryData with the value "false"): True
+2025-11-25T21:58:28  PID[300] Information 11-25 21:58:10 Information: Engine mode: Sampling
+2025-11-25T21:58:28  PID[300] Information 11-25 21:58:13 Information: Application Insights AppId: 6a76b012-46d9-412f-b4ab-4905658a9559
+2025-11-25T21:58:28  PID[300] Information 11-25 21:58:13 Information: Press 'Ctrl+C' to exit Application Insights Profiler.
+2025-11-25T21:58:28  PID[300] Information 11-25 21:58:13 Information: Set up shutdown handler.
+2025-11-25T21:58:28  PID[300] Information 11-25 21:58:13 Information: Shutdown handler set to watch C:\local\Temp\JobsShutdown\continuous\ApplicationInsightsProfiler3\krtjdr3g.ake.
+2025-11-25T21:58:28  PID[300] Information 11-25 21:58:13 Information: Starting main process
+2025-11-25T21:58:28  PID[300] Information 11-25 21:58:18 Critical: Settings have been set from Engine
+2025-11-25T21:58:28  PID[300] Information 11-25 21:58:22 Critical: Settings contract has been updated
+2025-11-25T21:58:28  PID[300] Information 11-25 21:58:22 Critical: Enabled has been set to True
+2025-11-25T22:04:24  PID[300] Information 11-25 22:04:24 Information: Triggering Based on Memory
+2025-11-25T22:04:24  PID[300] Information 11-25 22:04:24 Critical: StartProfiler triggered.
+2025-11-25T22:04:24  PID[300] Information 11-25 22:04:24 Information: Starting circular monitor
+2025-11-25T22:04:26  PID[300] Information 11-25 22:04:26 Information: NativeImagePdbGeneration enabled.
+2025-11-25T22:05:28  PID[300] Information 11-25 22:05:28 Information: Monitoring process 4620
+2025-11-25T22:05:29  PID[300] Information 11-25 22:05:29 Information: Monitoring process 5052
+2025-11-25T22:05:39  PID[300] Information 11-25 22:05:39 Information: Monitoring process 3716
+2025-11-25T22:05:57  PID[300] Information 11-25 22:05:57 Information: Monitoring process 4936
+2025-11-25T22:06:18  PID[300] Information 11-25 22:06:18 Information: Monitoring process 300
+2025-11-25T22:06:40  PID[300] Information 11-25 22:06:40 Information: Monitoring process 4904
+2025-11-25T22:06:58  PID[300] Information 11-25 22:06:58 Information: Monitoring process 2588
+2025-11-25T22:06:58  PID[300] Information 11-25 22:06:58 Critical: StartProfiler succeeded.
+2025-11-25T22:07:30  PID[300] Information 11-25 22:07:30 Critical: StopProfiler triggered.
+2025-11-25T22:07:30  PID[300] Information 11-25 22:07:30 Information: Stopping circular monitor and collecting etl snapshot.
+2025-11-25T22:09:41  PID[300] Information 11-25 22:09:41 Information: Start to upload trace D:\DWASFiles\Sites\#1spe-api-dev-67e2xz\Temp\DA.Circular.2025-11-25T22-04-26-7915393Z.638997050667915393.638997052515262086.etl.zip
+2025-11-25T22:09:41  PID[300] Information 11-25 22:09:41 Critical: Upload trace was canceled as no activity detected from target iKey.
+2025-11-25T22:09:41  PID[300] Information 11-25 22:09:41 Information: Target iKey: 09a9beed-0dcd-4aad-84bb-3696372ed5d1. Detected iKeys: .
+2025-11-25T22:09:41  PID[300] Information 11-25 22:09:41 Critical: StopProfiler succeeded.
+2025-11-25T22:49:54  PID[300] Information 11-25 22:49:54 Critical: StartProfiler triggered.
+2025-11-25T22:49:54  PID[300] Information 11-25 22:49:54 Information: Starting circular monitor
+2025-11-25T22:49:54  PID[300] Information 11-25 22:49:54 Information: NativeImagePdbGeneration enabled.
+2025-11-25T22:50:04  PID[300] Information 11-25 22:50:04 Information: Monitoring process 4620
+2025-11-25T22:50:05  PID[300] Information 11-25 22:50:05 Information: Monitoring process 5052
+2025-11-25T22:50:07  PID[300] Information 11-25 22:50:07 Information: Monitoring process 3716
+2025-11-25T22:50:08  PID[300] Information 11-25 22:50:08 Information: Monitoring process 5204
+2025-11-25T22:50:11  PID[300] Information 11-25 22:50:11 Information: Monitoring process 300
+2025-11-25T22:50:21  PID[300] Information 11-25 22:50:21 Information: Monitoring process 8128
+2025-11-25T22:50:28  PID[300] Information 11-25 22:50:28 Information: Monitoring process 2588
+2025-11-25T22:50:28  PID[300] Information 11-25 22:50:28 Critical: StartProfiler succeeded.
+2025-11-25T22:50:58  PID[300] Information 11-25 22:50:58 Critical: StopProfiler triggered.
+2025-11-25T22:50:58  PID[300] Information 11-25 22:50:58 Information: Stopping circular monitor and collecting etl snapshot.
+2025-11-25T22:52:23  PID[300] Information 11-25 22:52:23 Information: Start to upload trace D:\DWASFiles\Sites\#1spe-api-dev-67e2xz\Temp\DA.Circular.2025-11-25T22-49-54-3383364Z.638997077943383364.638997078588236486.etl.zip
+2025-11-25T22:52:23  PID[300] Information 11-25 22:52:23 Critical: Upload trace was canceled as no activity detected from target iKey.
+2025-11-25T22:52:23  PID[300] Information 11-25 22:52:23 Information: Target iKey: 09a9beed-0dcd-4aad-84bb-3696372ed5d1. Detected iKeys: .
+2025-11-25T22:52:23  PID[300] Information 11-25 22:52:23 Critical: StopProfiler succeeded.
+2025-11-25T22:56:41  PID[300] Information 11-25 22:56:41 Information: Received shutdown request.

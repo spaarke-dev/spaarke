@@ -7,7 +7,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "api", "api", "{984BB9B3-3FA3-BE33-9484-CAC21695A33C}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Spe.Bff.Api", "src\api\Spe.Bff.Api\Spe.Bff.Api.csproj", "{2D04E747-C646-4523-8CC1-7FE89B372F32}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Spe.Bff.Api", "src\server\api\Spe.Bff.Api\Spe.Bff.Api.csproj", "{2D04E747-C646-4523-8CC1-7FE89B372F32}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
 EndProject
@@ -19,7 +19,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "power-platform", "power-pla
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "plugins", "plugins", "{366D66B1-3D2B-9C9F-1AE3-20F64F0A1479}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Spaarke.Plugins", "power-platform\plugins\Spaarke.Plugins\Spaarke.Plugins.csproj", "{2C545C3B-B4D9-4869-80C1-4A4543D9FB68}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Spaarke.Plugins", "src\server\plugins\Spaarke.Plugins\Spaarke.Plugins.csproj", "{2C545C3B-B4D9-4869-80C1-4A4543D9FB68}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Spaarke.Plugins.Tests", "tests\unit\Spaarke.Plugins.Tests\Spaarke.Plugins.Tests.csproj", "{9876260F-EC1A-4F2B-BA75-95EA3C95A138}"
 EndProject

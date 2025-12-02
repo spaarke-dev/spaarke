@@ -20,7 +20,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\power-platform\plugins\Spaarke.Plugins\Spaarke.Plugins.csproj" />
+    <ProjectReference Include="..\..\..\src\server\plugins\Spaarke.Plugins\Spaarke.Plugins.csproj" />
   </ItemGroup>
 
 </Project>

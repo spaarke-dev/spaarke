@@ -1,0 +1,17 @@
+<step title="Incoming Request" date="2025-10-15T16:19:27.489" instance="7153eb" url="/api/zipdeploy?isAsync=true" method="POST" type="request" pid="4600,2,23" Cache-Control="no-cache" Content-Length="17093564" Content-Type="application/octet-stream" Accept="*/*" Accept-Encoding="gzip, deflate" Authorization="Bas..." Host="spe-api-dev-67e2xz.scm.azurewebsites.net" User-Agent="AZURECLI/2.77.0 (MSI)" x-ms-client-request-id="b5b20a5a-a9e2-11f0-af7f-a8e291177057" X-ARR-LOG-ID="b5b20a5a-a9e2-11f0-af7f-a8e291177057" CLIENT-IP="47.198.1.206:54240" X-SITE-DEPLOYMENT-ID="spe-api-dev-67e2xz" WAS-DEFAULT-HOSTNAME="spe-api-dev-67e2xz.scm.azurewebsites.net" X-Forwarded-Proto="https" X-AppService-Proto="https" X-Forwarded-TlsVersion="1.3" X-WAWS-Unencoded-URL="/api/zipdeploy?isAsync=true" >
+  <step title="Cleanup Xml Logs" date="2025-10-15T16:19:27.505" /><!-- duration: 16ms -->
+  <step title="ZipPushDeploy" date="2025-10-15T16:19:28.317" >
+    <step title="ZipDeploy. Extract zip. " date="2025-10-15T16:19:28.348" /><!-- duration: 16ms -->
+    <step title="Starting PushDeployAsync" date="2025-10-15T16:19:28.506" /><!-- duration: 0ms -->
+    <step title="Updating shutdown sentinel last write time" date="2025-10-15T16:19:28.741" SemaphoreCount="7" /><!-- duration: 0ms -->
+    <step title="LockFile &apos;C:\home\site\locks\deployments.lock&apos; acquired" date="2025-10-15T16:19:28.849" /><!-- duration: 0ms -->
+    <step title="Saving request content to C:\local\Temp\zipdeploy\0q3jamc4.zip" date="2025-10-15T16:19:28.897" >
+      <step title="Total 17,093,564 bytes written to C:\local\Temp\zipdeploy\0q3jamc4.zip" date="2025-10-15T16:19:30.694" /><!-- duration: 16ms -->
+    </step><!-- duration: 1831ms -->
+    <step title="LockFile &apos;C:\home\site\locks\deployments.lock&apos; released" date="2025-10-15T16:19:30.741" /><!-- duration: 16ms -->
+    <step title="Deleting shutdown sentinel file" date="2025-10-15T16:19:30.776" SemaphoreCount="8" /><!-- duration: 0ms -->
+    <step title="Starting FetchDeploy" date="2025-10-15T16:19:30.806" /><!-- duration: 0ms -->
+    <step title="Start deployment in the background" date="2025-10-15T16:19:30.835" /><!-- duration: 437ms -->
+  </step><!-- duration: 3004ms -->
+  <step title="Outgoing response" date="2025-10-15T16:19:31.413" type="response" statusCode="202" statusText="Accepted" Server="Microsoft-IIS/10.0" x-ms-request-id="b5b20a5a-a9e2-11f0-af7f-a8e291177057" Retry-After="30" Cache-Control="private" X-AspNet-Version="4.0.30319" Location="https://spe-api-dev-67e2xz.scm.azurewebsites.net/api/deployments/latest?deployer=ZipDeploy&amp;time=2025-10-15_16-19-31Z" /><!-- duration: 16ms -->
+</step><!-- duration: 3988ms -->
