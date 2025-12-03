@@ -1,0 +1,218 @@
+name: ADR Architecture Audit
+
+on:
+  workflow_dispatch:  # Manual trigger
+  schedule:
+    - cron: '0 9 * * 1'  # Weekly on Monday at 9 AM UTC (optional)
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  audit:
+    name: ADR Compliance Audit
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.x'
+
+      - name: Restore dependencies
+        run: dotnet restore --verbosity minimal
+
+      - name: Run ADR architecture tests
+        id: adr-tests
+        run: dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj --no-restore --logger "trx;LogFileName=adr-audit-results.trx" --results-directory ./TestResults
+        continue-on-error: true
+
+      - name: Parse results and create/update tracking issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            // Read TRX file
+            const trxPath = './TestResults/adr-audit-results.trx';
+            if (!fs.existsSync(trxPath)) {
+              console.log('No test results found');
+              return;
+            }
+
+            const trxContent = fs.readFileSync(trxPath, 'utf8');
+
+            // Parse test results
+            const failureMatches = [...trxContent.matchAll(/<UnitTestResult.*?outcome="Failed".*?testName="(.*?)".*?<Message>(.*?)<\/Message>.*?<StackTrace>(.*?)<\/StackTrace>/gs)];
+            const totalTests = (trxContent.match(/<UnitTestResult/g) || []).length;
+            const passedTests = (trxContent.match(/outcome="Passed"/g) || []).length;
+            const failedTests = failureMatches.length;
+
+            const now = new Date().toISOString().split('T')[0];
+
+            // Build issue body
+            let issueBody = `# ADR Architecture Compliance Report\n\n`;
+            issueBody += `**Report Date:** ${now}\n`;
+            issueBody += `**Branch:** ${context.ref}\n`;
+            issueBody += `**Commit:** ${context.sha.substring(0, 7)}\n\n`;
+            issueBody += `---\n\n`;
+            issueBody += `## 📊 Summary\n\n`;
+            issueBody += `- **Total Tests:** ${totalTests}\n`;
+            issueBody += `- **Passed:** ${passedTests} ✅\n`;
+            issueBody += `- **Failed:** ${failedTests} ❌\n`;
+            issueBody += `- **Compliance:** ${Math.round((passedTests/totalTests)*100)}%\n\n`;
+
+            if (failedTests === 0) {
+              issueBody += `## ✅ All ADR Validations Passed!\n\n`;
+              issueBody += `No architectural violations detected. The codebase is compliant with all enforced ADRs.\n\n`;
+            } else {
+              issueBody += `## ⚠️ Violations Found (${failedTests})\n\n`;
+              issueBody += `The following architectural violations were detected and should be addressed:\n\n`;
+
+              // Group violations by ADR
+              const violationsByAdr = {};
+              failureMatches.forEach((match) => {
+                const testName = match[1];
+                const message = match[2]
+                  .replace(/&lt;/g, '<')
+                  .replace(/&gt;/g, '>')
+                  .replace(/&quot;/g, '"')
+                  .replace(/&amp;/g, '&')
+                  .trim();
+                const stackTrace = match[3]
+                  .replace(/&lt;/g, '<')
+                  .replace(/&gt;/g, '>')
+                  .trim();
+
+                const adrMatch = testName.match(/ADR-(\d+)/);
+                const adrNum = adrMatch ? adrMatch[1] : 'Unknown';
+
+                if (!violationsByAdr[adrNum]) {
+                  violationsByAdr[adrNum] = [];
+                }
+
+                // Extract file locations from message or stack trace
+                const fileMatches = (message + ' ' + stackTrace).match(/[\w\.\/\\]+\.cs/g) || [];
+                const uniqueFiles = [...new Set(fileMatches)];
+
+                violationsByAdr[adrNum].push({
+                  testName,
+                  message: message.substring(0, 300),
+                  files: uniqueFiles.slice(0, 5)
+                });
+              });
+
+              // Output violations grouped by ADR
+              for (const [adrNum, violations] of Object.entries(violationsByAdr).sort()) {
+                const adrPadded = adrNum.padStart(3, '0');
+                issueBody += `### ADR-${adrPadded} Violations (${violations.length})\n\n`;
+                issueBody += `📖 [ADR-${adrPadded} Documentation](./docs/adr/ADR-${adrPadded}-*.md)\n\n`;
+
+                violations.forEach((v, idx) => {
+                  issueBody += `#### ${idx + 1}. ${v.testName}\n\n`;
+                  issueBody += `**Issue:**\n`;
+                  issueBody += '```\n';
+                  issueBody += v.message;
+                  if (v.message.length >= 300) issueBody += '...\n(truncated)';
+                  issueBody += '\n```\n\n';
+
+                  if (v.files.length > 0) {
+                    issueBody += `**Affected Files:**\n`;
+                    v.files.forEach(f => {
+                      issueBody += `- \`${f}\`\n`;
+                    });
+                    issueBody += '\n';
+                  }
+                });
+
+                issueBody += '\n';
+              }
+            }
+
+            issueBody += `---\n\n`;
+            issueBody += `## 🔧 Remediation\n\n`;
+            issueBody += `### For Developers\n\n`;
+            issueBody += `1. **Run validation locally:**\n`;
+            issueBody += '   ```bash\n';
+            issueBody += '   dotnet test tests/Spaarke.ArchTests/\n';
+            issueBody += '   ```\n\n';
+            issueBody += `2. **Get interactive guidance:**\n`;
+            issueBody += '   ```bash\n';
+            issueBody += '   /adr-check\n';
+            issueBody += '   ```\n\n';
+            issueBody += `3. **Review process documentation:**\n   - [ADR Validation Process](./docs/adr/ADR-VALIDATION-PROCESS.md)\n   - [All ADRs](./docs/adr/README-ADRs.md)\n\n`;
+            issueBody += `### Priority\n\n`;
+            issueBody += `- **High Priority:** ADR-001, 007, 009 (runtime stability, security)\n`;
+            issueBody += `- **Medium Priority:** ADR-002, 008, 010 (maintainability)\n`;
+            issueBody += `- **Low Priority:** Other violations (code quality)\n\n`;
+            issueBody += `---\n\n`;
+            issueBody += `## 📈 Tracking\n\n`;
+            issueBody += `- **Labels:** \`architecture\`, \`technical-debt\`\n`;
+            issueBody += `- **Frequency:** This audit runs weekly or can be triggered manually\n`;
+            issueBody += `- **Automated by:** [ADR Audit Workflow](./.github/workflows/adr-audit.yml)\n\n`;
+            issueBody += `---\n\n`;
+            issueBody += `*Last updated: ${new Date().toUTCString()}*\n`;
+            issueBody += `*Run manually: [Trigger ADR Audit](../../actions/workflows/adr-audit.yml)*\n`;
+
+            // Find existing tracking issue
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'architecture,adr-audit',
+              per_page: 100
+            });
+
+            const trackingIssue = issues.find(i =>
+              i.title.includes('ADR Architecture Compliance Report')
+            );
+
+            const issueTitle = `ADR Architecture Compliance Report - ${now}`;
+
+            if (trackingIssue) {
+              // Update existing issue
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: trackingIssue.number,
+                title: issueTitle,
+                body: issueBody
+              });
+
+              console.log(`Updated tracking issue #${trackingIssue.number}`);
+
+              // Close if no violations
+              if (failedTests === 0) {
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: trackingIssue.number,
+                  state: 'closed',
+                  state_reason: 'completed'
+                });
+                console.log('Closed tracking issue - all violations resolved');
+              }
+            } else if (failedTests > 0) {
+              // Create new issue only if there are violations
+              const { data: newIssue } = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: issueTitle,
+                body: issueBody,
+                labels: ['architecture', 'technical-debt', 'adr-audit']
+              });
+
+              console.log(`Created new tracking issue #${newIssue.number}`);
+            } else {
+              console.log('No violations found and no existing tracking issue - nothing to do');
+            }

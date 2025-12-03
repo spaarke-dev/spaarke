@@ -178,7 +178,8 @@
       "Bash(else echo \"✓ Directory.Packages.props already restored\")",
       "Bash(if [ -f \"../../Directory.Packages.props.disabled\" ])",
       "Bash(then mv \"../../Directory.Packages.props.disabled\" \"../../Directory.Packages.props\")",
-      "Bash(\"/c/Program Files/Microsoft Visual Studio/2022/Professional/MSBuild/Current/Bin/MSBuild.exe\" C:/code_files/spaarke/src/controls/SpeFileViewer/SpeFileViewerSolution/SpeFileViewerSolution.cdsproj /t:Rebuild /p:Configuration=Release)"
+      "Bash(\"/c/Program Files/Microsoft Visual Studio/2022/Professional/MSBuild/Current/Bin/MSBuild.exe\" C:/code_files/spaarke/src/controls/SpeFileViewer/SpeFileViewerSolution/SpeFileViewerSolution.cdsproj /t:Rebuild /p:Configuration=Release)",
+      "Bash(git rm:*)"
     ],
     "deny": [],
     "ask": []

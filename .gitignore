@@ -8,6 +8,7 @@ obj/
 out/
 dist/
 build/
+publish/
 
 # IDE files
 .vs/
@@ -25,6 +26,7 @@ Thumbs.db
 # Logs
 *.log
 logs/
+webapp-logs/
 
 # Environment variables
 .env

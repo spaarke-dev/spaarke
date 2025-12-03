@@ -123,9 +123,22 @@ jobs:
       - name: Format verification
         run: dotnet format --verify-no-changes --verbosity diagnostic
 
-      - name: ADR policy check
+      - name: ADR policy check (Legacy PowerShell)
         shell: pwsh
         run: ./scripts/adr_policy_check.ps1 -RepoRoot .
+        continue-on-error: true  # Legacy script - NetArchTest is primary validation
+
+      - name: ADR architecture tests (NetArchTest)
+        id: adr-tests
+        run: dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj --no-restore --logger "trx;LogFileName=adr-results.trx" --results-directory ./TestResults
+        continue-on-error: true  # Don't block PR - violations reported via comment
+
+      - name: Upload ADR test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: adr-test-results
+          path: ./TestResults/adr-results.trx
 
       - name: Plugin size validation
         shell: pwsh
@@ -195,6 +208,116 @@ jobs:
           if (-not $hasDeployConfig) {
             Write-Warning "⚠ Deployment workflow not found. Add deployment pipelines for complete CI/CD."
           }
+
+  adr-pr-comment:
+    name: ADR Violations Report
+    runs-on: ubuntu-latest
+    needs: code-quality
+    if: github.event_name == 'pull_request'
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+      - name: Download test results
+        uses: actions/download-artifact@v4
+        with:
+          name: adr-test-results
+          path: ./test-results
+
+      - name: Parse and comment on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            // Read TRX file
+            const trxPath = './test-results/adr-results.trx';
+            if (!fs.existsSync(trxPath)) {
+              console.log('No test results found');
+              return;
+            }
+
+            const trxContent = fs.readFileSync(trxPath, 'utf8');
+
+            // Parse failures from TRX (simple regex parsing)
+            const failureMatches = [...trxContent.matchAll(/<UnitTestResult.*?outcome="Failed".*?testName="(.*?)".*?<Message>(.*?)<\/Message>/gs)];
+            const totalTests = (trxContent.match(/<UnitTestResult/g) || []).length;
+            const passedTests = (trxContent.match(/outcome="Passed"/g) || []).length;
+            const failedTests = failureMatches.length;
+
+            // Build comment
+            let comment = '## 🏛️ ADR Architecture Validation Report\n\n';
+            comment += `**Summary:** ${passedTests}/${totalTests} tests passed`;
+
+            if (failedTests === 0) {
+              comment += ' ✅\n\n';
+              comment += '**Status:** All ADR validations passed! No architectural violations detected.\n\n';
+              comment += '---\n';
+              comment += '*This is a non-blocking validation. See [ADR Validation Process](../blob/master/docs/adr/ADR-VALIDATION-PROCESS.md) for details.*';
+            } else {
+              comment += ` ⚠️ (${failedTests} violations)\n\n`;
+              comment += '**Status:** ADR violations detected. These are **non-blocking warnings** but should be reviewed.\n\n';
+              comment += '### ⚠️ Violations Found\n\n';
+
+              failureMatches.forEach((match, index) => {
+                const testName = match[1];
+                const message = match[2]
+                  .replace(/&lt;/g, '<')
+                  .replace(/&gt;/g, '>')
+                  .replace(/&quot;/g, '"')
+                  .replace(/&amp;/g, '&')
+                  .trim();
+
+                // Extract ADR number from test name
+                const adrMatch = testName.match(/ADR-(\d+)/);
+                const adrNum = adrMatch ? adrMatch[1] : '???';
+
+                comment += `#### ${index + 1}. ${testName}\n\n`;
+                comment += '```\n';
+                comment += message.substring(0, 500); // Limit message length
+                if (message.length > 500) comment += '...\n(truncated)';
+                comment += '\n```\n\n';
+                comment += `📖 See [ADR-${adrNum}](../blob/master/docs/adr/ADR-${adrNum.padStart(3, '0')}-*.md) for guidance\n\n`;
+              });
+
+              comment += '---\n\n';
+              comment += '### 🔧 How to Fix\n\n';
+              comment += '1. Run locally: `dotnet test tests/Spaarke.ArchTests/`\n';
+              comment += '2. Get guidance: `/adr-check` (Claude Code skill)\n';
+              comment += '3. Review [ADR Validation Process](../blob/master/docs/adr/ADR-VALIDATION-PROCESS.md)\n\n';
+              comment += '**Note:** These violations are **warnings only** and will not block this PR.\n';
+            }
+
+            // Find existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' &&
+              c.body.includes('ADR Architecture Validation Report')
+            );
+
+            // Create or update comment
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: comment
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: comment
+              });
+            }
 
   summary:
     name: CI Summary

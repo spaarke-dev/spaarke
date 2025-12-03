@@ -69,12 +69,32 @@ This repository segment packages Spaarke’s Architecture Decision Records (ADRs
 - Discuss impacts in PR description and label with `architecture`.
 - Once merged, update the **Runtime Model** section of design docs and adjust code where the ADR specifies “Operationalization.”
 
+## Validating ADR Compliance
+
+**📋 Process Documentation:** See [ADR Validation Process](ADR-VALIDATION-PROCESS.md) for complete workflow, tools, issue tracking, and maintenance procedures.
+
+### Quick Reference
+
+**Automated Validation (CI/CD):**
+```bash
+dotnet test tests/Spaarke.ArchTests/
+```
+Runs automatically on every PR and push to master. Validates 6 core ADRs (001, 002, 007, 008, 009, 010) via NetArchTest.
+
+**Interactive Validation (Local):**
+```bash
+/adr-check
+```
+Claude Code skill providing guidance for all 12 ADRs with contextual explanations and suggested fixes.
+
 ## AI coding agent usage
 
-- Read ADR-001..010 and the two guides before making changes.
+- Read ADR-001..012 and the two guides before making changes.
+- Run `/adr-check` before committing to validate compliance.
 - Apply the prompts in **Guides → SDAP_Architecture_Simplification_Guide.md** and **SDAP_Refactor_Playbook_v2.md**.
 - When unsure, prefer: Minimal API + workers, endpoint filters for authorization, Redis-first caching, concrete services with two seams, and the `SpeFileStore` facade for SPE.
 
 ## Change log
 
+- 2025-12-02: Implemented hybrid ADR validation (NetArchTest + Claude Code skill) covering all 12 ADRs. Added ADR-011 (Dataset PCF) and ADR-012 (Shared components).
 - 2025-09-27: Initial publication of consolidated ADRs (001–010) and guides with README.

@@ -1,3 +1,0 @@
-App As appinfo:
-    BackEnabled: =false
-    OnStart: =Set(varInit, false); Set(varParentEntityName, Blank()); Set(varParentRecordId, Blank()); Set(varContainerId, Blank()); Set(varParentDisplayName, Blank())
