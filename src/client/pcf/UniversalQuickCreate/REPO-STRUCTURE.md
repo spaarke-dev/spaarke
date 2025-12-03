@@ -2,14 +2,15 @@
 
 Clean file structure for the Universal Document Upload PCF control and Custom Page solution (v3.0.5).
 
+**Last Updated:** December 3, 2025 (Repository Restructure)
+
 ## 📂 Project Root
 
 ```
 UniversalQuickCreate/
-├── UniversalQuickCreate/           # PCF Control Source (TypeScript)
-├── UniversalQuickCreateSolution/   # Dataverse Solution Package
-├── docs/                           # Current Documentation
-├── archive/                        # Historical Documentation (deprecated approaches)
+├── control/                        # PCF Control Source (TypeScript)
+├── solution/                       # Dataverse Solution Package
+├── docs/                           # Documentation
 ├── scripts/                        # Deployment Scripts
 ├── package.json                    # Node.js dependencies
 ├── tsconfig.json                   # TypeScript configuration
@@ -20,7 +21,7 @@ UniversalQuickCreate/
 
 ---
 
-## 🎨 PCF Control Source (`UniversalQuickCreate/`)
+## 🎨 PCF Control Source (`control/`)
 
 ### Entry Point
 - **`index.ts`** - Main PCF control (v3.0.5)
@@ -28,16 +29,17 @@ UniversalQuickCreate/
 
 ### React Components
 ```
-components/
+control/components/
 ├── DocumentUploadForm.tsx          # Main form container
 ├── FileSelectionField.tsx          # File picker UI
+├── FilePickerField.tsx             # Alternative file picker
 ├── UploadProgressBar.tsx           # Upload progress display
 └── ErrorMessageList.tsx            # Error message list
 ```
 
 ### Services Layer
 ```
-services/
+control/services/
 ├── auth/
 │   ├── MsalAuthProvider.ts         # MSAL authentication provider
 │   └── msalConfig.ts               # MSAL configuration
@@ -52,14 +54,14 @@ services/
 
 ### Configuration
 ```
-config/
+control/config/
 ├── EntityDocumentConfig.ts         # Entity-specific configuration
 └── EntityFieldDefinitions.ts       # Field mapping definitions
 ```
 
 ### Type Definitions
 ```
-types/
+control/types/
 ├── index.ts                        # Core types (ParentContext, etc.)
 ├── auth.ts                         # Authentication types
 └── FieldMetadata.ts                # Metadata types
@@ -67,30 +69,37 @@ types/
 
 ### Utilities
 ```
-utils/
+control/utils/
 └── logger.ts                       # Logging utility (logInfo, logError, logWarn)
 ```
 
 ### Styles
 ```
-css/
+control/css/
 └── UniversalQuickCreate.css        # Component styles
+```
+
+### Localization
+```
+control/strings/
+└── UniversalQuickCreate.1033.resx  # English resource strings
 ```
 
 ---
 
-## 📦 Solution Package (`UniversalQuickCreateSolution/`)
+## 📦 Solution Package (`solution/`)
 
 ### Custom Pages
 ```
-src/canvaspages/
+solution/src/canvaspages/
 └── sprk_universaldocumentupload_page.json    # Custom Page definition
 ```
 
 ### Web Resources
 ```
-src/WebResources/
+solution/src/WebResources/
 ├── sprk_subgrid_commands.js                             # Ribbon button script (v3.0.4)
+├── sprk_document_file_viewer.html                       # File viewer HTML
 └── sprk_Spaarke.Controls.UniversalDocumentUpload/
     ├── bundle.js                                        # Compiled PCF control
     └── css/UniversalQuickCreate.css                     # Styles
@@ -98,37 +107,23 @@ src/WebResources/
 
 ### Solution Metadata
 ```
-src/Other/
+solution/src/Other/
 ├── Solution.xml                    # Solution metadata
 ├── Customizations.xml              # Customization metadata
 └── Relationships.xml               # Entity relationships
 ```
 
 ### Project Files
-- `UniversalQuickCreateSolution.cdsproj` - Solution project file
+- `solution/UniversalQuickCreateSolution.cdsproj` - Solution project file
 
 ---
 
 ## 📚 Documentation (`docs/`)
 
-### Current Documentation
 - **`DEPLOYMENT-GUIDE.md`** - Complete deployment guide
 - **`QUICK-START-DEPLOYMENT.md`** - Quick start instructions
 - **`RIBBON-LOCATIONS-GUIDE.md`** - Ribbon configuration reference
 - `WEBRESOURCE-APPROACH.md` - Old approach (reference only)
-
----
-
-## 🗃️ Archive (`archive/`)
-
-Historical documentation from deprecated approaches. **Do NOT use for new implementations.**
-
-See [archive/README.md](archive/README.md) for details.
-
-Contents:
-- Form Dialog approach documentation (v2.1.0)
-- Manual deployment steps (pre-automation)
-- Cleanup scripts
 
 ---
 
@@ -156,7 +151,7 @@ Custom Page (sprk_documentuploaddialog_e52db)
   • Binds to PCF control properties
   • Timer watches shouldClose property
   ↓
-PCF Control (index.ts)
+PCF Control (control/index.ts)
   • Authenticates with MSAL
   • Renders file picker UI
   • Uploads files to SPE (SDAP API)
@@ -173,22 +168,18 @@ Ribbon Script
 
 ---
 
-## 🧹 Deleted Files (Cleanup 2025-01-20)
+## 🧹 Repository Restructure (December 2025)
 
-The following deprecated files were removed:
+The following changes were made to improve clarity:
 
-### Deprecated PCF Control
-- ❌ `UniversalQuickCreate/UniversalDocumentUploadPCF.ts` (v2.0.0 - replaced by index.ts v3.0.5)
+### Folder Renames
+- ✅ `UniversalQuickCreate/` → `control/` (eliminates ambiguous double-naming)
+- ✅ `UniversalQuickCreateSolution/` → `solution/` (cleaner, consistent naming)
 
-### Duplicate Files
-- ❌ `UniversalQuickCreateSolution/CustomPages/sprk_universaldocumentupload_page.json` (duplicate of src/canvaspages version)
-
-### Old Web Resource Approach
-- ❌ `UniversalQuickCreateSolution/src/WebResources/universal_document_upload.html` (deprecated HTML wrapper)
-
-### Build Artifacts
-- ❌ `bin/Release/UniversalQuickCreate.zip` (build output - now gitignored)
-- ❌ `archive/UniversalQuickCreate.zip` (build output - now gitignored)
+### Previously Deleted Files
+- ❌ `UniversalDocumentUploadPCF.ts` (v2.0.0 - replaced by index.ts v3.0.5)
+- ❌ `CustomPages/sprk_universaldocumentupload_page.json` (duplicate)
+- ❌ `universal_document_upload.html` (deprecated HTML wrapper)
 
 ---
 
@@ -196,25 +187,25 @@ The following deprecated files were removed:
 
 | File | Purpose | Version |
 |------|---------|---------|
-| `UniversalQuickCreate/index.ts` | PCF control entry point | v3.0.5 |
-| `UniversalQuickCreate/ControlManifest.Input.xml` | PCF manifest | v3.0.5 |
-| `UniversalQuickCreateSolution/src/canvaspages/sprk_universaldocumentupload_page.json` | Custom Page definition | v3.0.4 |
-| `UniversalQuickCreateSolution/src/WebResources/sprk_subgrid_commands.js` | Ribbon button script | v3.0.4 |
+| `control/index.ts` | PCF control entry point | v3.0.5 |
+| `control/ControlManifest.Input.xml` | PCF manifest | v3.0.5 |
+| `solution/src/canvaspages/sprk_universaldocumentupload_page.json` | Custom Page definition | v3.0.4 |
+| `solution/src/WebResources/sprk_subgrid_commands.js` | Ribbon button script | v3.0.4 |
 | `docs/DEPLOYMENT-GUIDE.md` | Deployment instructions | Current |
 
 ---
 
-## 🎯 Next Steps
+## 🎯 Development Guide
 
 To enhance functionality with additional features:
 
 1. **Review** the clean codebase structure
 2. **Plan** new features (see feature requirements)
 3. **Implement** in the appropriate layer:
-   - UI changes → `components/`
-   - Business logic → `services/`
-   - Configuration → `config/`
-   - Types → `types/`
+   - UI changes → `control/components/`
+   - Business logic → `control/services/`
+   - Configuration → `control/config/`
+   - Types → `control/types/`
 4. **Update** documentation in `docs/`
 5. **Test** end-to-end
 6. **Deploy** via PAC CLI
@@ -226,6 +217,11 @@ To enhance functionality with additional features:
 - **Build artifacts** (bin/, out/, *.zip) are gitignored
 - **Node modules** are gitignored (run `npm install` to restore)
 - **Generated files** (generated/, obj/) are gitignored
-- **Archive folder** contains historical reference only
+- Solution files use relative paths (`../*.pcfproj`) - no updates needed after rename
 
-For questions about deprecated approaches, see [archive/README.md](archive/README.md).
+---
+
+## 🔗 Related Documentation
+
+- [SDAP Architecture Guide](../../../../docs/architecture/SDAP-ARCHITECTURE-GUIDE.md) - System-wide architecture
+- [PCF Deployment Guide](docs/DEPLOYMENT-GUIDE.md) - Deployment instructions

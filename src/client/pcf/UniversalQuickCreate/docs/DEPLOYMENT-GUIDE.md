@@ -27,7 +27,7 @@ The Web Resource contains the command button logic for launching the Custom Page
    - **Name**: `sprk_subgrid_commands.js`
    - **Display Name**: "Subgrid Commands - Universal Document Upload"
    - **Type**: Script (JScript)
-   - **Upload file**: Browse to `src/controls/UniversalQuickCreate/UniversalQuickCreateSolution/WebResources/sprk_subgrid_commands.js`
+   - **Upload file**: Browse to `solution/src/WebResources/sprk_subgrid_commands.js`
 6. Click **Save** and **Publish**
 
 #### Option B: Automated via Solution Export/Import
@@ -35,7 +35,7 @@ The Web Resource contains the command button logic for launching the Custom Page
 ```bash
 # TODO: Create solution package script
 # This will package the Web Resource into the solution ZIP
-cd src/controls/UniversalQuickCreate/UniversalQuickCreateSolution
+cd solution
 pac solution export --name "UniversalQuickCreate" --path ./export
 pac solution import --path ./UniversalQuickCreate.zip
 ```
@@ -96,7 +96,7 @@ Custom Pages for Model-Driven Apps must be created through the Power Apps Studio
 
 #### Reference JSON
 The complete Custom Page definition is available in:
-`src/controls/UniversalQuickCreate/UniversalQuickCreateSolution/CustomPages/sprk_universaldocumentupload_page.json`
+`solution/src/canvaspages/sprk_universaldocumentupload_page.json`
 
 Use this as a reference for the structure and parameters.
 
