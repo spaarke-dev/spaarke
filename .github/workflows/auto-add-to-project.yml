@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Add to org project
-        uses: actions/add-to-project@v0.5.0
+        uses: actions/add-to-project@v1.0.2
         with:
           project-url: https://github.com/orgs/spaarke-dev/projects/PVT_kwHODW0Pv84BEgWu
           github-token: ${{ secrets.GH_TOKEN_PROJECT }}
