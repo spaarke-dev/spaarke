@@ -4,6 +4,9 @@
 **Architecture**: Server-side proxy pattern
 **Status**: Production-Ready
 **ADR Compliance**: ADR-002 (Thin plugins, no heavy orchestration)
+**Last Updated**: 2025-12-03
+**Maintainers**: Spaarke Engineering Team
+**Status**: ✅ Production-Ready, ADR-002 Compliant
 
 ---
 
@@ -578,7 +581,3 @@ Spaarke.CustomApiProxy/
 | 2025-09-30 | Initial GetFilePreviewUrlPlugin | Phase 7 - Office Online integration |
 
 ---
-
-**Last Updated**: 2025-12-03
-**Maintainers**: Spaarke Engineering Team
-**Status**: ✅ Production-Ready, ADR-002 Compliant

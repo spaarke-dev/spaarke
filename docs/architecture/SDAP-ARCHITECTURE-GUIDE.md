@@ -1,8 +1,8 @@
 # SDAP Architecture Guide
 ## SharePoint Document Access Platform
 
-**Version:** 1.1.0 (Phase 8 - File Preview & Office Online Editor Integration)
-**Last Revised:** November 26, 2025
+**Version:** 1.1.1 (Phase 8 - File Preview & Office Online Editor Integration)
+**Last Revised:** December 3, 2025 (Repository Restructure)
 **Status:** Production Ready
 **Environment:** SPAARKE DEV 1 (Dataverse) + Azure WestUS2
 
@@ -159,7 +159,7 @@
 
 **Technology:** TypeScript, React, Fluent UI v9, MSAL.js
 **Version:** 2.3.0 (Phase 7)
-**Location:** `src/controls/UniversalQuickCreate/`
+**Location:** `src/client/pcf/UniversalQuickCreate/`
 
 #### Core Components
 
@@ -217,7 +217,7 @@ export interface EntityDocumentConfig {
 
 **Technology:** TypeScript, React, Fluent UI v8, MSAL.js
 **Version:** 1.0.6 (Phase 8)
-**Location:** `src/controls/SpeFileViewer/`
+**Location:** `src/client/pcf/SpeFileViewer/`
 
 #### Core Components
 
@@ -411,7 +411,7 @@ console.error('[SpeFileViewer] Failed to load preview: {error}');
 
 **Technology:** ASP.NET Core 8.0, Minimal APIs
 **Hosting:** Azure Web App (Linux, B1 tier)
-**Location:** `src/api/Spe.Bff.Api/`
+**Location:** `src/server/api/Spe.Bff.Api/`
 
 #### API Endpoints
 
@@ -1196,7 +1196,7 @@ App Settings (Configuration):
 Deployment:
 ├─ Method: ZIP deployment via Azure CLI
 ├─ Command: az webapp deploy --name spe-api-dev-67e2xz --src-path deployment.zip --type zip
-└─ Source: src/api/Spe.Bff.Api/publish/
+└─ Source: src/server/api/Spe.Bff.Api/publish/
 
 Health Endpoint: /healthz
 - Returns: "Healthy" (200 OK)
@@ -1652,7 +1652,7 @@ c:\code_files\spaarke\
 
 #### 1. EntityDocumentConfig.ts (PCF Configuration)
 
-**Location:** `src/controls/UniversalQuickCreate/UniversalQuickCreate/config/EntityDocumentConfig.ts`
+**Location:** `src/client/pcf/UniversalQuickCreate/control/config/EntityDocumentConfig.ts`
 
 **Purpose:** Central configuration for all entity-document relationships
 
@@ -1708,7 +1708,7 @@ const navMetadata = await this.navMapClient.getLookupNavigation(
 
 #### 2. NavMapEndpoints.cs (Phase 7 Metadata Discovery)
 
-**Location:** `src/api/Spe.Bff.Api/Api/NavMapEndpoints.cs`
+**Location:** `src/server/api/Spe.Bff.Api/Api/NavMapEndpoints.cs`
 
 **Purpose:** REST API endpoints for querying Dataverse relationship metadata
 
@@ -1862,7 +1862,7 @@ public async Task<OneToManyRelationshipMetadata> GetLookupNavigationPropertyAsyn
 
 #### 4. MsalAuthProvider.ts (PCF Authentication)
 
-**Location:** `src/controls/UniversalQuickCreate/UniversalQuickCreate/services/auth/MsalAuthProvider.ts`
+**Location:** `src/client/pcf/UniversalQuickCreate/control/services/auth/MsalAuthProvider.ts`
 
 **Purpose:** MSAL.js wrapper for user authentication in PCF control
 
@@ -2190,7 +2190,7 @@ Save and publish
 
 ```bash
 # 6.1 Clone repository and install dependencies
-cd /c/code_files/spaarke/src/controls/UniversalQuickCreate
+cd /c/code_files/spaarke/src/client/pcf/UniversalQuickCreate
 npm install
 
 # 6.2 Update EntityDocumentConfig.ts
@@ -2217,7 +2217,7 @@ pac pcf push --publisher-prefix sprk
 
 ```bash
 # 7.1 Build BFF API
-cd /c/code_files/spaarke/src/api/Spe.Bff.Api
+cd /c/code_files/spaarke/src/server/api/Spe.Bff.Api
 dotnet clean --configuration Release
 dotnet publish --configuration Release --output ./publish
 
@@ -2310,7 +2310,7 @@ PCF control using friendly name `api://spe-bff-api/user_impersonation` instead o
 
 **Resolution:**
 ```typescript
-// WRONG (index.ts, UniversalDocumentUploadPCF.ts)
+// WRONG (index.ts, UniversalDocumentUploadPCF.ts (deprecated, removed in cleanup))
 const token = await this.authProvider.getToken(['api://spe-bff-api/user_impersonation']);
 
 // CORRECT
@@ -2320,8 +2320,8 @@ const token = await this.authProvider.getToken([
 ```
 
 **Files Modified:**
-- `src/controls/UniversalQuickCreate/UniversalQuickCreate/index.ts` (line 253)
-- `src/controls/UniversalQuickCreate/UniversalQuickCreate/UniversalDocumentUploadPCF.ts` (line 253)
+- `src/client/pcf/UniversalQuickCreate/control/index.ts` (line 253)
+- `src/client/pcf/UniversalQuickCreate/control/UniversalDocumentUploadPCF.ts (deprecated, removed in cleanup)` (line 253)
 
 **Commit:** `a4196a1`
 
@@ -2339,7 +2339,7 @@ NavMapClient received baseUrl with `/api` suffix, then added `/api/navmap` inter
 
 **Resolution:**
 ```typescript
-// In index.ts and UniversalDocumentUploadPCF.ts
+// In index.ts and UniversalDocumentUploadPCF.ts (deprecated, removed in cleanup)
 private initializeServices(context: ComponentFramework.Context<IInputs>): void {
     const rawApiUrl = context.parameters.sdapApiBaseUrl?.raw ||
                      'spe-api-dev-67e2xz.azurewebsites.net/api';
@@ -2358,8 +2358,8 @@ private initializeServices(context: ComponentFramework.Context<IInputs>): void {
 ```
 
 **Files Modified:**
-- `src/controls/UniversalQuickCreate/UniversalQuickCreate/index.ts` (lines 237-256)
-- `src/controls/UniversalQuickCreate/UniversalQuickCreate/UniversalDocumentUploadPCF.ts` (lines 237-256)
+- `src/client/pcf/UniversalQuickCreate/control/index.ts` (lines 237-256)
+- `src/client/pcf/UniversalQuickCreate/control/UniversalDocumentUploadPCF.ts (deprecated, removed in cleanup)` (lines 237-256)
 
 **Commit:** `f4654ae`
 
@@ -2397,7 +2397,7 @@ Click relationship → Note "Relationship name" field exactly
 ```
 
 **Files Modified:**
-- `src/controls/UniversalQuickCreate/UniversalQuickCreate/config/EntityDocumentConfig.ts` (line 82)
+- `src/client/pcf/UniversalQuickCreate/control/config/EntityDocumentConfig.ts` (line 82)
 
 **Commit:** Included in final Phase 7 commit
 
@@ -2454,7 +2454,7 @@ _serviceClient = new ServiceClient(connectionString);
 
 **Method 1: pac pcf push (Recommended)**
 ```bash
-cd /c/code_files/spaarke/src/controls/UniversalQuickCreate
+cd /c/code_files/spaarke/src/client/pcf/UniversalQuickCreate
 
 # Build
 npm run build
@@ -2474,7 +2474,7 @@ pac pcf push --publisher-prefix sprk
 **Method 2: Solution Import (Alternative)**
 ```bash
 # Build solution package
-cd /c/code_files/spaarke/src/controls/UniversalQuickCreate
+cd /c/code_files/spaarke/src/client/pcf/UniversalQuickCreate
 msbuild /t:Rebuild /p:Configuration=Release
 
 # Solution package created at:
@@ -2505,7 +2505,7 @@ pac pcf push --publisher-prefix sprk
 
 **Standard Deployment (Azure Web App)**
 ```bash
-cd /c/code_files/spaarke/src/api/Spe.Bff.Api
+cd /c/code_files/spaarke/src/server/api/Spe.Bff.Api
 
 # Clean and publish
 dotnet clean --configuration Release
@@ -2562,7 +2562,7 @@ az webapp log tail \
 ```bash
 # Option 1: Redeploy previous version
 git checkout {previous_commit_sha}
-cd src/api/Spe.Bff.Api
+cd src/server/api/Spe.Bff.Api
 dotnet publish --configuration Release --output ./publish
 # ... (repeat deployment steps above)
 
