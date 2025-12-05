@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="sdap-fileviewer-enhancements-1">
+  <metadata>
+    <title>Integration Testing - BFF Open-Links Endpoint</title>
+    <phase>4: Testing</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>004</dependencies>
+    <blocks>040</blocks>
+  </metadata>
+
+  <prompt>
+    Create integration tests for the /open-links endpoint using WebApplicationFactory.
+    Tests should verify the full request pipeline including authentication, authorization,
+    and Graph API integration (mocked). Cover all success and error scenarios.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core integration testing, WebApplicationFactory,
+    and test mocking. Follow testing best practices.
+  </role>
+
+  <goal>
+    Comprehensive integration test suite that verifies the /open-links endpoint works
+    correctly with all dependencies, running in CI without requiring live services.
+  </goal>
+
+  <context>
+    <background>
+      Integration tests verify the endpoint works correctly through the full ASP.NET Core
+      pipeline, including routing, auth middleware, and service integration. We mock
+      external services (Graph API) to make tests reliable and fast.
+    </background>
+    <relevant-files>
+      <file>tests/integration/Spe.Bff.Api.Integration/OpenLinksEndpointTests.cs (create)</file>
+      <file>tests/integration/Spe.Bff.Api.Integration/BffApiFactory.cs (create or modify)</file>
+      <file>src/server/api/Spe.Bff.Api/Program.cs (reference)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use WebApplicationFactory pattern</constraint>
+    <constraint source="project">Mock external services - no live Graph API calls</constraint>
+    <constraint source="project">Tests must be deterministic (no flaky tests)</constraint>
+    <constraint source="project">Tests must run in CI without special setup</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>tests/integration/ (existing patterns)</file>
+      <file>projects/sdap-fileviewer-enhancements-1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="WebApplicationFactory" location="ASP.NET Core testing">
+        Inherit from WebApplicationFactory&lt;Program&gt;, override ConfigureWebHost
+        to replace services with mocks.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create integration test project if not exists</step>
+    <step order="2">Create BffApiFactory extending WebApplicationFactory</step>
+    <step order="3">Configure mock services in ConfigureWebHost</step>
+    <step order="4">Create test class OpenLinksEndpointTests</step>
+    <step order="5">Write test: ValidWordDocument_ReturnsWordProtocolUrl</step>
+    <step order="6">Write test: ValidExcelDocument_ReturnsExcelProtocolUrl</step>
+    <step order="7">Write test: ValidPowerPointDocument_ReturnsPowerPointProtocolUrl</step>
+    <step order="8">Write test: MissingDriveItemId_Returns400</step>
+    <step order="9">Write test: NonExistentDriveItem_Returns404</step>
+    <step order="10">Write test: UnauthenticatedRequest_Returns401</step>
+    <step order="11">Write test: UnauthorizedUser_Returns403</step>
+    <step order="12">Write test: UnsupportedMimeType_ReturnsNullDesktopUrl</step>
+    <step order="13">Run dotnet test and verify all pass</step>
+    <step order="14">Update TASK-INDEX.md: change this task's status from 🔲 to ✅</step>
+    <step order="15">Document any implementation deviations or decisions in projects/sdap-fileviewer-enhancements-1/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Run integration tests (dotnet test)</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/Spe.Bff.Api.Integration/OpenLinksEndpointTests.cs</output>
+    <output type="test">tests/integration/Spe.Bff.Api.Integration/BffApiFactory.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Integration test project exists with proper references.
+    </criterion>
+    <criterion testable="true">
+      BffApiFactory correctly replaces services with mocks.
+    </criterion>
+    <criterion testable="true">
+      Tests cover Word, Excel, PowerPoint MIME type mappings.
+    </criterion>
+    <criterion testable="true">
+      Tests cover error scenarios: 400, 401, 403, 404.
+    </criterion>
+    <criterion testable="true">
+      All integration tests pass (dotnet test exits with code 0).
+    </criterion>
+    <criterion testable="true">
+      Tests run without external service dependencies.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference spec.md Section 7.5 for acceptance criteria to test.
+    
+    BffApiFactory pattern:
+    public class BffApiFactory : WebApplicationFactory&lt;Program&gt;
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            builder.ConfigureServices(services =&gt;
+            {
+                // Remove real Graph service
+                var descriptor = services.SingleOrDefault(
+                    d =&gt; d.ServiceType == typeof(ISpeFileStore));
+                if (descriptor != null)
+                    services.Remove(descriptor);
+                
+                // Add mock
+                services.AddSingleton&lt;ISpeFileStore&gt;(new MockSpeFileStore());
+            });
+        }
+    }
+    
+    Test pattern:
+    [Fact]
+    public async Task GetOpenLinks_WithValidWordDocument_ReturnsWordProtocolUrl()
+    {
+        // Arrange
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = 
+            new AuthenticationHeaderValue("Bearer", TestTokens.ValidUser);
+        
+        // Act
+        var response = await client.GetAsync(
+            "/api/open-links?driveItemId=word-doc-123");
+        
+        // Assert
+        response.EnsureSuccessStatusCode();
+        var content = await response.Content.ReadFromJsonAsync&lt;OpenLinksResponse&gt;();
+        Assert.StartsWith("ms-word:ofe|u|", content!.DesktopUrl);
+    }
+    
+    Test authentication:
+    - Use test JWT tokens with appropriate claims
+    - Or configure test auth handler
+  </notes>
+</task>

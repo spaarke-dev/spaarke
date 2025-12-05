@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="sdap-fileviewer-enhancements-1">
+  <metadata>
+    <title>Performance Validation</title>
+    <phase>4: Testing</phase>
+    <status>not-started</status>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>020, 021, 022</dependencies>
+    <blocks>040</blocks>
+  </metadata>
+
+  <prompt>
+    Validate that the performance targets from the spec are met: loading state within 200ms,
+    preview load under 3 seconds for warm BFF. Create performance tests and document
+    baseline measurements.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in web performance testing and measurement.
+    Use data-driven approach to validate performance.
+  </role>
+
+  <goal>
+    Documented performance baseline showing targets are met, with automated tests to
+    prevent performance regression.
+  </goal>
+
+  <context>
+    <background>
+      The spec defines specific performance targets. We need to validate these are met
+      and create tests that will catch future regressions.
+    </background>
+    <relevant-files>
+      <file>tests/e2e/FileViewer/performance.spec.ts (create)</file>
+      <file>projects/sdap-fileviewer-enhancements-1/notes/performance-baseline.md (create)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Loading state must appear within 200ms of init</constraint>
+    <constraint source="project">Preview load under 3 seconds with warm BFF</constraint>
+    <constraint source="project">Cold start time documented (not a hard fail)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-fileviewer-enhancements-1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Performance Testing" location="Playwright">
+        Use Date.now() for timing, page.evaluate() for performance marks.
+        Allow margin for network variability.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create performance test file</step>
+    <step order="2">Write test: LoadingStateAppearsWithin200ms</step>
+    <step order="3">Write test: PreviewLoadsWithin3Seconds (warm BFF)</step>
+    <step order="4">Write test: DocumentColdStartTime (measure, don't fail)</step>
+    <step order="5">Run tests multiple times for consistent results</step>
+    <step order="6">Record measurements in performance baseline doc</step>
+    <step order="7">Add performance test to CI pipeline</step>
+    <step order="8">Set up alerting for regression (optional)</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status from 🔲 to ✅</step>
+    <step order="10">Document any implementation deviations or decisions in projects/sdap-fileviewer-enhancements-1/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="playwright">Run performance tests</tool>
+    <tool name="browser">DevTools Performance tab</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/e2e/FileViewer/performance.spec.ts</output>
+    <output type="docs">projects/sdap-fileviewer-enhancements-1/notes/performance-baseline.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Performance test exists for loading state timing.
+    </criterion>
+    <criterion testable="true">
+      Loading state appears within 500ms of navigation (200ms target + margin).
+    </criterion>
+    <criterion testable="true">
+      Preview loads within 3 seconds with warm BFF.
+    </criterion>
+    <criterion testable="true">
+      Cold start time documented in baseline.
+    </criterion>
+    <criterion testable="true">
+      Performance baseline document created with measurements.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference spec.md Section 7.5 for performance targets.
+    
+    Performance test pattern:
+    test('loading state appears within 200ms', async ({ page }) =&gt; {
+        const startTime = Date.now();
+        
+        await page.goto('/test-record-with-fileviewer');
+        await page.waitForSelector('.file-viewer-loading');
+        
+        const elapsed = Date.now() - startTime;
+        
+        // Allow 500ms including navigation time
+        expect(elapsed).toBeLessThan(500);
+        
+        test.info().annotations.push({
+            type: 'performance',
+            description: `Loading state appeared in ${elapsed}ms`
+        });
+    });
+    
+    test('preview loads within 3 seconds (warm BFF)', async ({ page }) =&gt; {
+        // Warm up BFF first
+        await page.request.get('/api/health');
+        
+        const startTime = Date.now();
+        await page.goto('/test-record-with-fileviewer');
+        await page.waitForSelector('.file-viewer-ready');
+        
+        const elapsed = Date.now() - startTime;
+        expect(elapsed).toBeLessThan(3000);
+    });
+    
+    Performance baseline format:
+    # Performance Baseline
+    Date: YYYY-MM-DD
+    Environment: Test
+    
+    | Metric | Target | P50 | P95 | Status |
+    |--------|--------|-----|-----|--------|
+    | Loading state | &lt;200ms | Xms | Xms | ✅/❌ |
+    | Preview (warm) | &lt;3s | Xs | Xs | ✅/❌ |
+    | Cold start | documented | Xs | Xs | N/A |
+  </notes>
+</task>

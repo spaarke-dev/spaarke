@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="sdap-fileviewer-enhancements-1">
+  <metadata>
+    <title>Create DesktopUrlBuilder Utility</title>
+    <phase>1: BFF Endpoint Development</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>002</blocks>
+  </metadata>
+
+  <prompt>
+    Create a static utility class DesktopUrlBuilder that generates Office desktop protocol URLs 
+    (ms-word:, ms-excel:, ms-powerpoint:) from SharePoint Embedded web URLs. The utility must 
+    map MIME types to protocol schemes and return null for unsupported types. Follow ADR-010 
+    DI Minimalism by using static methods.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in C# and .NET 8. Follow ADRs strictly. 
+    Prefer minimal abstractions per ADR-010.
+  </role>
+
+  <goal>
+    A working DesktopUrlBuilder.cs utility class with static method FromMime(webUrl, mimeType) 
+    that returns correctly formatted protocol URLs, with unit tests achieving full coverage 
+    of all mappings and edge cases.
+  </goal>
+
+  <context>
+    <background>
+      The FileViewer PCF currently opens documents in embedded edit mode, which is slow and 
+      confusing. We're replacing this with "Open in Desktop" functionality that uses Office 
+      protocol handlers (ms-word:ofe|u|{url}). This utility provides the URL transformation 
+      logic that the BFF endpoint will use.
+    </background>
+    <relevant-files>
+      <file>src/shared/Spaarke.SharePointEmbedded/Utilities/DesktopUrlBuilder.cs (create)</file>
+      <file>tests/unit/Spaarke.SharePointEmbedded.Tests/DesktopUrlBuilderTests.cs (create)</file>
+      <file>projects/sdap-fileviewer-enhancements-1/spec.md (reference)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">Use static methods - no DI registration needed for pure functions</constraint>
+    <constraint source="ADR-001">Keep utility focused and minimal - single responsibility</constraint>
+    <constraint source="project">Must handle null/empty inputs gracefully (return null)</constraint>
+    <constraint source="project">Must support Word, Excel, and PowerPoint MIME types</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>projects/sdap-fileviewer-enhancements-1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Office Protocol URL" location="spec.md Section 5.1">
+        Format: ms-{app}:ofe|u|{encoded-web-url}
+        - ms-word: for .docx (application/vnd.openxmlformats-officedocument.wordprocessingml.document)
+        - ms-excel: for .xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)
+        - ms-powerpoint: for .pptx (application/vnd.openxmlformats-officedocument.presentationml.presentation)
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create Utilities folder in src/shared/Spaarke.SharePointEmbedded/ if missing</step>
+    <step order="2">Create DesktopUrlBuilder.cs with static class definition and XML documentation</step>
+    <step order="3">Implement private static dictionary mapping MIME types to protocol schemes</step>
+    <step order="4">Implement public static FromMime(string webUrl, string mimeType) method</step>
+    <step order="5">Add null/empty handling - return null for invalid inputs</step>
+    <step order="6">Add URL encoding for the webUrl parameter</step>
+    <step order="7">Create test file DesktopUrlBuilderTests.cs in tests/unit/</step>
+    <step order="8">Write tests for Word MIME type mapping</step>
+    <step order="9">Write tests for Excel MIME type mapping</step>
+    <step order="10">Write tests for PowerPoint MIME type mapping</step>
+    <step order="11">Write tests for unsupported MIME types (returns null)</step>
+    <step order="12">Write tests for null/empty webUrl (returns null)</step>
+    <step order="13">Run dotnet build and verify no errors</step>
+    <step order="14">Run dotnet test and verify all tests pass</step>
+    <step order="15">Update TASK-INDEX.md: change this task's status from 🔲 to ✅</step>
+    <step order="16">Document any implementation deviations or decisions in projects/sdap-fileviewer-enhancements-1/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects (dotnet build, dotnet test)</tool>
+    <tool name="terminal">Run shell commands for file operations</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/shared/Spaarke.SharePointEmbedded/Utilities/DesktopUrlBuilder.cs</output>
+    <output type="test">tests/unit/Spaarke.SharePointEmbedded.Tests/DesktopUrlBuilderTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given a Word MIME type (application/vnd.openxmlformats-officedocument.wordprocessingml.document) 
+      and valid webUrl, FromMime returns "ms-word:ofe|u|{encoded-url}".
+    </criterion>
+    <criterion testable="true">
+      Given an Excel MIME type (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet) 
+      and valid webUrl, FromMime returns "ms-excel:ofe|u|{encoded-url}".
+    </criterion>
+    <criterion testable="true">
+      Given a PowerPoint MIME type (application/vnd.openxmlformats-officedocument.presentationml.presentation) 
+      and valid webUrl, FromMime returns "ms-powerpoint:ofe|u|{encoded-url}".
+    </criterion>
+    <criterion testable="true">
+      For unsupported MIME types (e.g., application/pdf), FromMime returns null.
+    </criterion>
+    <criterion testable="true">
+      For null or empty webUrl, FromMime returns null.
+    </criterion>
+    <criterion testable="true">
+      Unit tests exist and validate all MIME mappings, null handling, and edge cases.
+    </criterion>
+    <criterion testable="true">All unit tests pass (dotnet test exits with code 0).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference spec.md Section 5.1 for the exact protocol URL format.
+    
+    MIME type constants to use:
+    - Word: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    - Excel: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"  
+    - PowerPoint: "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    
+    URL encoding is critical - use Uri.EscapeDataString() for the webUrl.
+    
+    Consider also supporting legacy MIME types:
+    - application/msword (.doc)
+    - application/vnd.ms-excel (.xls)
+    - application/vnd.ms-powerpoint (.ppt)
+  </notes>
+</task>

@@ -1,0 +1,128 @@
+# Skills Index
+
+> **Purpose**: Central registry of Claude Code skills for Spaarke development.
+
+## Available Skills
+
+| Skill | Description | Always Apply | Trigger |
+|-------|-------------|--------------|---------|
+| [adr-aware](adr-aware/SKILL.md) | Proactively load ADRs when creating resources | **Yes** | Auto-applied |
+| [adr-check](adr-check/SKILL.md) | Validate code against Architecture Decision Records | No | `/adr-check`, "check ADRs" |
+| [code-review](code-review/SKILL.md) | Comprehensive code review (security, performance, style) | No | `/code-review`, "review code" |
+| [design-to-project](design-to-project/SKILL.md) | Full design spec to implementation pipeline | No | `/design-to-project`, "implement spec" |
+| [project-init](project-init/SKILL.md) | Initialize project folder with README, plan, tasks | No | `/project-init`, "create project" |
+| [spaarke-conventions](spaarke-conventions/SKILL.md) | Coding standards and naming conventions | **Yes** | Auto-applied |
+| [task-create](task-create/SKILL.md) | Decompose plan.md into POML task files | No | `/task-create`, "create tasks" |
+
+## Skill Categories
+
+### 📐 Standards (Always-Apply)
+- **adr-aware** - Proactive ADR loading based on resource type
+- **spaarke-conventions** - Naming, patterns, file organization
+
+### 🚀 Project Lifecycle
+- **design-to-project** - Start here for new features from design specs
+- **project-init** - Create project folder structure
+- **task-create** - Break plan into executable tasks
+
+### ✅ Quality Assurance
+- **code-review** - General code quality review
+- **adr-check** - Architecture compliance validation (post-hoc)
+
+## Skill Flow
+
+```
+Design Spec
+    │
+    ▼
+┌─────────────────────┐
+│  design-to-project  │  ← Full pipeline orchestrator
+└─────────────────────┘
+    │ calls ▼
+┌─────────────────────┐
+│    project-init     │  ← Creates folder structure
+└─────────────────────┘
+    │ then ▼
+┌─────────────────────┐
+│    task-create      │  ← Decomposes into tasks
+└─────────────────────┘
+    │ during implementation ▼
+┌─────────────────────┐
+│     adr-aware       │  ← BEFORE: Load relevant ADRs (always-apply)
+│ spaarke-conventions │  ← DURING: Apply coding standards (always-apply)
+│     adr-check       │  ← AFTER: Validate architecture
+│    code-review      │  ← AFTER: Quality review
+└─────────────────────┘
+```
+
+## ADR Awareness Flow
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                   ADR COMPLIANCE LIFECYCLE                   │
+├──────────────────────────────────────────────────────────────┤
+│                                                              │
+│  PLANNING              IMPLEMENTATION           VALIDATION   │
+│  ───────              ──────────────           ──────────   │
+│                                                              │
+│  design-to-project    adr-aware (proactive)   adr-check     │
+│  ↓                    ↓                       ↓             │
+│  Identifies ADRs      Loads ADRs before       Validates all │
+│  in Phase 2          writing code            12 ADRs        │
+│                                                              │
+│  task-create          Prevents violations     Reports        │
+│  ↓                    before they happen     violations     │
+│  Includes ADR refs                                          │
+│  in constraints                                              │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+```
+
+## Creating New Skills
+
+1. Copy `_templates/skill-starter/` to `.claude/skills/{skill-name}/`
+2. Edit `SKILL.md` following the template structure
+3. Add references, scripts, assets as needed
+4. Update this INDEX.md
+
+Template location: `_templates/SKILL-TEMPLATE.md`
+
+## Skill File Structure
+
+```
+.claude/skills/
+├── INDEX.md                    ← This file
+├── _templates/                 ← Skill creation templates
+│   ├── SKILL-TEMPLATE.md
+│   └── skill-starter/
+│       ├── SKILL.md
+│       ├── scripts/
+│       ├── references/
+│       └── assets/
+├── adr-aware/                  ← NEW: Proactive ADR loading
+│   └── SKILL.md
+├── adr-check/
+│   ├── SKILL.md
+│   └── references/
+│       └── adr-validation-rules.md
+├── code-review/
+│   ├── SKILL.md
+│   └── references/
+│       └── review-checklist.md
+├── design-to-project/
+│   ├── SKILL.md
+│   └── references/
+├── project-init/
+│   ├── SKILL.md
+│   └── assets/
+├── spaarke-conventions/
+│   ├── SKILL.md
+│   └── references/
+└── task-create/
+    ├── SKILL.md
+    └── references/
+```
+
+---
+
+*Last updated: December 4, 2025*

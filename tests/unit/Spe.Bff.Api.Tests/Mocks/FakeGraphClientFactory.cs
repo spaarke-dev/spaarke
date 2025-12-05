@@ -1,5 +1,5 @@
+using Microsoft.AspNetCore.Http;
 using Microsoft.Graph;
-using Microsoft.Kiota.Abstractions.Authentication;
 using Spe.Bff.Api.Infrastructure.Graph;
 
 namespace Spe.Bff.Api.Tests.Mocks;
@@ -11,22 +11,22 @@ namespace Spe.Bff.Api.Tests.Mocks;
 /// </summary>
 public sealed class FakeGraphClientFactory : IGraphClientFactory
 {
-    public GraphServiceClient CreateAppOnlyClient()
+    public Task<GraphServiceClient> ForUserAsync(HttpContext ctx, CancellationToken ct = default)
     {
         // Create a simple fake client - this won't work for real Graph calls but allows DI to work
         var httpClient = new HttpClient();
         httpClient.DefaultRequestHeaders.Authorization =
-            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "fake");
-        return new GraphServiceClient(httpClient);
-    }
-
-    public Task<GraphServiceClient> CreateOnBehalfOfClientAsync(string userAccessToken)
-    {
-        // Create a simple fake client - this won't work for real Graph calls but allows DI to work
-        var httpClient = new HttpClient();
-        httpClient.DefaultRequestHeaders.Authorization =
-            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "fake");
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "fake-user-token");
         var client = new GraphServiceClient(httpClient);
         return Task.FromResult(client);
+    }
+
+    public GraphServiceClient ForApp()
+    {
+        // Create a simple fake client - this won't work for real Graph calls but allows DI to work
+        var httpClient = new HttpClient();
+        httpClient.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "fake-app-token");
+        return new GraphServiceClient(httpClient);
     }
 }

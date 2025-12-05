@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="sdap-fileviewer-enhancements-1">
+  <metadata>
+    <title>Integrate with open-links Endpoint</title>
+    <phase>2: FileViewer PCF Updates</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>014, 002</dependencies>
+    <blocks>031</blocks>
+  </metadata>
+
+  <prompt>
+    Implement the Edit button click handler to call the BFF /open-links endpoint and launch
+    the desktop application using the returned protocol URL. Handle loading states and errors
+    gracefully during the API call.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in TypeScript, fetch API, and browser protocol handlers.
+    Follow ADRs strictly. Handle async operations and errors properly.
+  </role>
+
+  <goal>
+    When user clicks Edit, the PCF calls /open-links, gets the desktop URL, and launches
+    the native Office application using window.open() with the protocol URL.
+  </goal>
+
+  <context>
+    <background>
+      The Edit button (task 014) needs to trigger the actual "Open in Desktop" flow. This
+      involves calling the BFF to get the protocol URL, then using window.open() to trigger
+      the browser's protocol handler for ms-word:, ms-excel:, or ms-powerpoint:.
+    </background>
+    <relevant-files>
+      <file>power-platform/pcf/FileViewer/index.ts (modify)</file>
+      <file>power-platform/pcf/FileViewer/services/BffClient.ts (create or modify)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">BFF handles Graph calls - PCF just calls BFF</constraint>
+    <constraint source="project">Must handle 401/403 errors gracefully</constraint>
+    <constraint source="project">Must show loading indicator during API call</constraint>
+    <constraint source="project">Must not block UI - use async/await</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>projects/sdap-fileviewer-enhancements-1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Protocol Handler" location="spec.md Section 5">
+        window.open(desktopUrl, "_blank") triggers browser protocol handler.
+        Some browsers may show confirmation dialog.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create BffClient service class for API calls</step>
+    <step order="2">Implement getOpenLinks(driveItemId) method</step>
+    <step order="3">Add auth token retrieval (from PCF context or auth service)</step>
+    <step order="4">Wire up Edit button click to handler method</step>
+    <step order="5">In click handler, disable button and show loading state</step>
+    <step order="6">Call BffClient.getOpenLinks(driveItemId)</step>
+    <step order="7">On success, extract desktopUrl from response</step>
+    <step order="8">Call window.open(desktopUrl, "_blank") to launch app</step>
+    <step order="9">Re-enable button after launch attempt</step>
+    <step order="10">Handle errors: show message if API call fails</step>
+    <step order="11">Handle null desktopUrl (unsupported file type)</step>
+    <step order="12">Test end-to-end: click Edit, verify app opens</step>
+    <step order="13">Update TASK-INDEX.md: change this task's status from 🔲 to ✅</step>
+    <step order="14">Document any implementation deviations or decisions in projects/sdap-fileviewer-enhancements-1/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF (npm run build)</tool>
+    <tool name="pac">Test PCF locally</tool>
+    <tool name="browser">DevTools Network tab to inspect API calls</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">power-platform/pcf/FileViewer/index.ts</output>
+    <output type="code">power-platform/pcf/FileViewer/services/BffClient.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      BffClient.getOpenLinks(driveItemId) method exists and calls /api/open-links.
+    </criterion>
+    <criterion testable="true">
+      Edit button click triggers API call to /open-links.
+    </criterion>
+    <criterion testable="true">
+      On successful response, window.open() is called with desktopUrl.
+    </criterion>
+    <criterion testable="true">
+      Button shows loading state during API call.
+    </criterion>
+    <criterion testable="true">
+      Error is displayed if API call fails.
+    </criterion>
+    <criterion testable="true">
+      Graceful handling when desktopUrl is null (unsupported file).
+    </criterion>
+    <criterion testable="true">
+      npm run build succeeds without errors.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference spec.md Section 5 and 6 for integration details.
+    
+    BffClient implementation:
+    class BffClient {
+        private baseUrl: string;
+        
+        constructor(baseUrl: string) {
+            this.baseUrl = baseUrl;
+        }
+        
+        async getOpenLinks(driveItemId: string): Promise&lt;OpenLinksResponse&gt; {
+            const token = await this.getAccessToken();
+            const response = await fetch(
+                `${this.baseUrl}/api/open-links?driveItemId=${driveItemId}`,
+                {
+                    headers: { Authorization: `Bearer ${token}` }
+                }
+            );
+            
+            if (!response.ok) {
+                throw new Error(`API error: ${response.status}`);
+            }
+            
+            return response.json();
+        }
+    }
+    
+    Click handler:
+    private async handleEditClick(): Promise&lt;void&gt; {
+        this.setButtonLoading(true);
+        try {
+            const response = await this.bffClient.getOpenLinks(this.driveItemId);
+            if (response.desktopUrl) {
+                window.open(response.desktopUrl, "_blank");
+            } else {
+                this.showMessage("This file type cannot be opened in desktop app");
+            }
+        } catch (error) {
+            this.showError("Failed to open document. Please try again.");
+        } finally {
+            this.setButtonLoading(false);
+        }
+    }
+    
+    Note: window.open with protocol URL may be blocked by popup blockers.
+    Consider window.location.href as fallback.
+  </notes>
+</task>

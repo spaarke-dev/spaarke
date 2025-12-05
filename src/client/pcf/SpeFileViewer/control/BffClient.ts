@@ -7,7 +7,7 @@
  * - Error handling and logging
  */
 
-import { FilePreviewResponse, BffErrorResponse, OfficeUrlResponse } from './types';
+import { FilePreviewResponse, BffErrorResponse, OfficeUrlResponse, OpenLinksResponse } from './types';
 
 /**
  * BffClient encapsulates all HTTP communication with the BFF API
@@ -154,6 +154,64 @@ export class BffClient {
             console.error('[BffClient] Request failed:', error);
             throw new Error(
                 `Failed to get Office URL: ${error instanceof Error ? error.message : String(error)}`
+            );
+        }
+    }
+
+    /**
+     * Get open links (desktop + web URLs) for a document
+     *
+     * Calls: GET /api/documents/{documentId}/open-links
+     *
+     * Returns URLs for opening the document in:
+     * - Desktop Office app (Word, Excel, PowerPoint) via protocol handler
+     * - Web browser via SharePoint URL
+     *
+     * @param documentId Document GUID
+     * @param accessToken Bearer token from MSAL
+     * @param correlationId Correlation ID for distributed tracing
+     * @returns OpenLinksResponse with desktop and web URLs
+     * @throws Error if API call fails
+     */
+    public async getOpenLinks(
+        documentId: string,
+        accessToken: string,
+        correlationId: string
+    ): Promise<OpenLinksResponse> {
+        const url = `${this.baseUrl}/api/documents/${documentId}/open-links`;
+
+        console.log(`[BffClient] GET ${url} (Open Links)`);
+        console.log(`[BffClient] Correlation ID: ${correlationId}`);
+
+        try {
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'X-Correlation-Id': correlationId,
+                    'Accept': 'application/json'
+                },
+                mode: 'cors',
+                credentials: 'omit'
+            });
+
+            // Handle non-2xx responses
+            if (!response.ok) {
+                await this.handleErrorResponse(response, correlationId);
+            }
+
+            // Parse successful response
+            const data = await response.json() as OpenLinksResponse;
+
+            console.log(`[BffClient] Open links acquired for: ${data.fileName}`);
+            console.log(`[BffClient] Desktop URL available: ${data.desktopUrl ? 'Yes' : 'No'}`);
+
+            return data;
+
+        } catch (error) {
+            console.error('[BffClient] Request failed:', error);
+            throw new Error(
+                `Failed to get open links: ${error instanceof Error ? error.message : String(error)}`
             );
         }
     }

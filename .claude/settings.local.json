@@ -179,7 +179,12 @@
       "Bash(if [ -f \"../../Directory.Packages.props.disabled\" ])",
       "Bash(then mv \"../../Directory.Packages.props.disabled\" \"../../Directory.Packages.props\")",
       "Bash(\"/c/Program Files/Microsoft Visual Studio/2022/Professional/MSBuild/Current/Bin/MSBuild.exe\" C:/code_files/spaarke/src/controls/SpeFileViewer/SpeFileViewerSolution/SpeFileViewerSolution.cdsproj /t:Rebuild /p:Configuration=Release)",
-      "Bash(git rm:*)"
+      "Bash(git rm:*)",
+      "Bash(test -d \"C:\\code_files\\spaarke\\src\\client\\pcf\\UniversalDatasetGrid\")",
+      "Bash(git mv:*)",
+      "Bash(mkdir:*)",
+      "Bash(\"/c/Program Files/Microsoft Visual Studio/2022/Professional/MSBuild/Current/Bin/MSBuild.exe\" \"/c/code_files/spaarke/src/client/pcf/SpeFileViewer/SpeFileViewerSolution/SpeFileViewerSolution.cdsproj\" /t:Rebuild /p:Configuration=Release)",
+      "Bash(\"/c/Program Files/Microsoft Visual Studio/2022/Professional/MSBuild/Current/Bin/MSBuild.exe\" SpeFileViewerSolution/SpeFileViewerSolution.cdsproj /t:Rebuild /p:Configuration=Release)"
     ],
     "deny": [],
     "ask": []

@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="sdap-fileviewer-enhancements-1">
+  <metadata>
+    <title>Write Unit Tests for Endpoint</title>
+    <phase>1: BFF Endpoint Development</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>030</blocks>
+  </metadata>
+
+  <prompt>
+    Write comprehensive unit tests for the /open-links endpoint covering happy path, 
+    error conditions, and authorization scenarios. Use mocking for Graph API dependencies.
+    Tests should validate all acceptance criteria from the spec.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in xUnit, Moq, and testing ASP.NET Core Minimal APIs.
+    Follow testing best practices with Arrange-Act-Assert pattern.
+  </role>
+
+  <goal>
+    A complete unit test suite for the /open-links endpoint with tests for all success 
+    and failure scenarios, achieving high code coverage.
+  </goal>
+
+  <context>
+    <background>
+      Unit tests ensure the endpoint behaves correctly before integration testing.
+      We mock the Graph API to test the endpoint logic in isolation.
+    </background>
+    <relevant-files>
+      <file>tests/unit/Spe.Bff.Api.Tests/OpenLinksEndpointTests.cs (create)</file>
+      <file>src/server/api/Spe.Bff.Api/Program.cs (reference)</file>
+      <file>tests/unit/ (reference for patterns)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use xUnit as test framework</constraint>
+    <constraint source="project">Use Moq for mocking dependencies</constraint>
+    <constraint source="project">Follow Arrange-Act-Assert pattern</constraint>
+    <constraint source="project">Test names should describe scenario and expected outcome</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>tests/unit/ (existing test patterns)</file>
+      <file>projects/sdap-fileviewer-enhancements-1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Minimal API Testing" location="tests/unit/">
+        Use WebApplicationFactory or direct handler invocation with mocked services.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create test file OpenLinksEndpointTests.cs in tests/unit/Spe.Bff.Api.Tests/</step>
+    <step order="2">Set up test class with mocked ISpeFileStore or GraphServiceClient</step>
+    <step order="3">Write test: ValidDriveItemId_ReturnsDesktopUrl</step>
+    <step order="4">Write test: WordDocument_ReturnsWordProtocolUrl</step>
+    <step order="5">Write test: ExcelDocument_ReturnsExcelProtocolUrl</step>
+    <step order="6">Write test: PowerPointDocument_ReturnsPowerPointProtocolUrl</step>
+    <step order="7">Write test: MissingDriveItemId_Returns400</step>
+    <step order="8">Write test: InvalidDriveItemId_Returns404</step>
+    <step order="9">Write test: UnsupportedMimeType_ReturnsNullDesktopUrl</step>
+    <step order="10">Write test: UnauthenticatedRequest_Returns401</step>
+    <step order="11">Write test: UnauthorizedUser_Returns403</step>
+    <step order="12">Run tests: dotnet test</step>
+    <step order="13">Verify all tests pass</step>
+    <step order="14">Check code coverage if tooling available</step>
+    <step order="15">Update TASK-INDEX.md: change this task's status from 🔲 to ✅</step>
+    <step order="16">Document any implementation deviations or decisions in projects/sdap-fileviewer-enhancements-1/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Run tests (dotnet test)</tool>
+    <tool name="dotnet">Check coverage (dotnet test --collect:"XPlat Code Coverage")</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/unit/Spe.Bff.Api.Tests/OpenLinksEndpointTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Test exists: Given valid Word driveItemId, returns ms-word: protocol URL.
+    </criterion>
+    <criterion testable="true">
+      Test exists: Given valid Excel driveItemId, returns ms-excel: protocol URL.
+    </criterion>
+    <criterion testable="true">
+      Test exists: Given valid PowerPoint driveItemId, returns ms-powerpoint: protocol URL.
+    </criterion>
+    <criterion testable="true">
+      Test exists: Given missing driveItemId parameter, returns 400.
+    </criterion>
+    <criterion testable="true">
+      Test exists: Given non-existent driveItemId, returns 404.
+    </criterion>
+    <criterion testable="true">
+      Test exists: Given unsupported MIME type, desktopUrl is null in response.
+    </criterion>
+    <criterion testable="true">
+      All unit tests pass (dotnet test exits with code 0).
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Test naming convention: MethodName_Scenario_ExpectedBehavior
+    
+    Example test structure:
+    [Fact]
+    public async Task GetOpenLinks_WithValidWordDocument_ReturnsWordProtocolUrl()
+    {
+        // Arrange
+        var mockStore = new Mock&lt;ISpeFileStore&gt;();
+        mockStore.Setup(s => s.GetDriveItemAsync(It.IsAny&lt;string&gt;()))
+            .ReturnsAsync(new DriveItem { 
+                WebUrl = "https://...", 
+                File = new() { MimeType = "application/.../word..." }
+            });
+        
+        // Act
+        var response = await endpoint.HandleAsync("item123", mockStore.Object);
+        
+        // Assert
+        Assert.StartsWith("ms-word:ofe|u|", response.DesktopUrl);
+    }
+    
+    Consider using Theory with InlineData for MIME type mappings.
+  </notes>
+</task>

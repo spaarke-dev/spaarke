@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="sdap-fileviewer-enhancements-1">
+  <metadata>
+    <title>Deploy to Test Environment</title>
+    <phase>5: Deployment</phase>
+    <status>not-started</status>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>030, 031</dependencies>
+    <blocks>041</blocks>
+  </metadata>
+
+  <prompt>
+    Deploy the updated BFF API and FileViewer PCF to the test environment. Verify both
+    components work together and perform smoke testing before proceeding to pilot validation.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Azure deployment and Power Platform solution import.
+    Follow deployment best practices with verification at each step.
+  </role>
+
+  <goal>
+    Both BFF API and FileViewer PCF deployed to test environment, verified working,
+    ready for pilot validation.
+  </goal>
+
+  <context>
+    <background>
+      Test environment deployment allows validation before production. Both components
+      must be deployed together as the PCF depends on the new BFF endpoint.
+    </background>
+    <relevant-files>
+      <file>infrastructure/bicep/ (deployment scripts)</file>
+      <file>power-platform/solutions/ (PCF solution)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Deploy BFF before PCF (dependency order)</constraint>
+    <constraint source="project">Verify deployment before proceeding</constraint>
+    <constraint source="project">Have rollback plan ready</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>infrastructure/bicep/</file>
+      <file>projects/sdap-fileviewer-enhancements-1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Azure Deployment" location="infrastructure/bicep/">
+        Use az deployment or CI/CD pipeline for App Service deployment.
+      </pattern>
+      <pattern name="PCF Deployment" location="power-platform/">
+        Use pac solution import for Dataverse deployment.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Pre-deployment checklist (tests pass, code reviewed)</step>
+    <step order="2">Build BFF API for deployment</step>
+    <step order="3">Deploy BFF to test App Service</step>
+    <step order="4">Verify BFF /health endpoint responds</step>
+    <step order="5">Verify /open-links endpoint accessible</step>
+    <step order="6">Build PCF solution package</step>
+    <step order="7">Deploy PCF to test Dataverse</step>
+    <step order="8">Verify PCF loads in test form</step>
+    <step order="9">Smoke test: view document</step>
+    <step order="10">Smoke test: click Edit button</step>
+    <step order="11">Verify desktop app opens</step>
+    <step order="12">Document deployment in notes</step>
+    <step order="13">Update TASK-INDEX.md: change this task's status from 🔲 to ✅</step>
+    <step order="14">Document any implementation deviations or decisions in projects/sdap-fileviewer-enhancements-1/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI for deployment</tool>
+    <tool name="pac">Power Platform CLI for solution import</tool>
+    <tool name="dotnet">Build API (dotnet publish)</tool>
+    <tool name="npm">Build PCF (npm run build)</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment">Test environment BFF deployed</output>
+    <output type="deployment">Test environment PCF deployed</output>
+    <output type="docs" ephemeral="true">projects/sdap-fileviewer-enhancements-1/notes/deployment-test.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      BFF deployed to test App Service.
+    </criterion>
+    <criterion testable="true">
+      BFF /health returns 200 OK.
+    </criterion>
+    <criterion testable="true">
+      PCF deployed to test Dataverse.
+    </criterion>
+    <criterion testable="true">
+      FileViewer loads in test environment.
+    </criterion>
+    <criterion testable="true">
+      Edit button visible and functional.
+    </criterion>
+    <criterion testable="true">
+      Smoke test passed.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference spec.md Section 7.4 for deployment strategy.
+    
+    Deployment commands:
+    
+    # BFF
+    dotnet publish -c Release -o ./publish
+    az webapp deploy --resource-group rg-spaarke-test \
+        --name app-spe-bff-test \
+        --src-path ./publish
+    
+    # Verify BFF
+    curl https://app-spe-bff-test.azurewebsites.net/health
+    
+    # PCF
+    cd power-platform/solutions
+    pac solution import --path FileViewer_managed.zip \
+        --environment https://spaarke-test.crm.dynamics.com
+    
+    Rollback procedure:
+    - BFF: Swap deployment slots or redeploy previous version
+    - PCF: Import previous solution version
+    
+    Deployment checklist:
+    - [ ] All tests pass
+    - [ ] Code review complete
+    - [ ] Version numbers updated
+    - [ ] Rollback tested
+  </notes>
+</task>

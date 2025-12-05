@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="sdap-fileviewer-enhancements-1">
+  <metadata>
+    <title>Update Render Logic with iframe onload</title>
+    <phase>2: FileViewer PCF Updates</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>011</dependencies>
+    <blocks>022, 031</blocks>
+  </metadata>
+
+  <prompt>
+    Update the FileViewer render logic to transition from Loading to Ready state only when
+    the iframe's onload event fires, indicating the preview content is actually displayed.
+    Handle error cases by transitioning to Error state with retry capability.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in TypeScript, DOM events, and iframe handling.
+    Follow ADRs strictly. Handle edge cases and errors gracefully.
+  </role>
+
+  <goal>
+    Render logic that shows loading overlay until iframe content is ready, with proper
+    error handling and state transitions.
+  </goal>
+
+  <context>
+    <background>
+      Currently the preview may appear to "pop in" after a delay because we don't track
+      when the iframe actually loads. By listening to onload, we can keep the loading
+      overlay visible until content is truly ready.
+    </background>
+    <relevant-files>
+      <file>power-platform/pcf/FileViewer/index.ts (modify)</file>
+      <file>power-platform/pcf/FileViewer/components/LoadingOverlay.ts (use)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">Keep PCF logic simple and maintainable</constraint>
+    <constraint source="project">Must handle iframe load errors (onerror)</constraint>
+    <constraint source="project">Must have timeout fallback (don't wait forever)</constraint>
+    <constraint source="project">Ready state within 3 seconds for warm BFF</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-006-prefer-pcf-over-webresources.md</file>
+      <file>projects/sdap-fileviewer-enhancements-1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="iframe load handling" location="spec.md Section 6.2">
+        iframe.onload = () => transitionTo(Ready);
+        iframe.onerror = () => transitionTo(Error);
+        setTimeout fallback after 10 seconds
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review current iframe creation/rendering in index.ts</step>
+    <step order="2">Add onload handler to iframe element</step>
+    <step order="3">In onload handler, call transitionTo(FileViewerState.Ready)</step>
+    <step order="4">Add onerror handler to iframe element</step>
+    <step order="5">In onerror handler, call transitionTo(FileViewerState.Error)</step>
+    <step order="6">Add timeout fallback (10 seconds) to prevent infinite loading</step>
+    <step order="7">On timeout, transition to Error with "Load timeout" message</step>
+    <step order="8">Clear timeout when onload or onerror fires</step>
+    <step order="9">Update updateView() to render based on current state</step>
+    <step order="10">Test: verify overlay hides when iframe loads successfully</step>
+    <step order="11">Test: verify error state shown when iframe fails</step>
+    <step order="12">Test: verify timeout triggers error state</step>
+    <step order="13">Update TASK-INDEX.md: change this task's status from 🔲 to ✅</step>
+    <step order="14">Document any implementation deviations or decisions in projects/sdap-fileviewer-enhancements-1/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF (npm run build)</tool>
+    <tool name="pac">Test PCF locally</tool>
+    <tool name="browser">DevTools to simulate network conditions</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">power-platform/pcf/FileViewer/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      iframe has onload handler that transitions state to Ready.
+    </criterion>
+    <criterion testable="true">
+      iframe has onerror handler that transitions state to Error.
+    </criterion>
+    <criterion testable="true">
+      Timeout fallback exists (10 seconds) that transitions to Error.
+    </criterion>
+    <criterion testable="true">
+      Loading overlay remains visible until onload fires.
+    </criterion>
+    <criterion testable="true">
+      State transitions correctly: Loading -> Ready on success.
+    </criterion>
+    <criterion testable="true">
+      State transitions correctly: Loading -> Error on failure/timeout.
+    </criterion>
+    <criterion testable="true">
+      npm run build succeeds without errors.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference spec.md Section 6.2 for state transition logic.
+    
+    Implementation pattern:
+    private createIframe(src: string): HTMLIFrameElement {
+        const iframe = document.createElement("iframe");
+        iframe.src = src;
+        
+        const timeoutId = setTimeout(() => {
+            this.transitionTo(FileViewerState.Error);
+            this._errorMessage = "Document load timeout";
+        }, 10000);
+        
+        iframe.onload = () => {
+            clearTimeout(timeoutId);
+            this.transitionTo(FileViewerState.Ready);
+        };
+        
+        iframe.onerror = () => {
+            clearTimeout(timeoutId);
+            this.transitionTo(FileViewerState.Error);
+            this._errorMessage = "Failed to load document";
+        };
+        
+        return iframe;
+    }
+    
+    Note: Cross-origin iframes may not fire onerror reliably.
+    Consider also checking for empty iframe content.
+  </notes>
+</task>

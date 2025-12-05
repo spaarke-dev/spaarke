@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="sdap-fileviewer-enhancements-1">
+  <metadata>
+    <title>E2E Testing - FileViewer PCF</title>
+    <phase>4: Testing</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>015, 016</dependencies>
+    <blocks>032, 040</blocks>
+  </metadata>
+
+  <prompt>
+    Create end-to-end tests using Playwright to verify the complete FileViewer user flow:
+    loading state display, preview rendering, Edit button functionality, and error handling.
+    Tests should run against a test environment.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Playwright, E2E testing, and browser automation.
+    Write reliable, maintainable tests that don't flake.
+  </role>
+
+  <goal>
+    Playwright test suite that validates the complete user experience of the FileViewer PCF,
+    including loading states, Edit button, and error scenarios.
+  </goal>
+
+  <context>
+    <background>
+      E2E tests verify the complete user flow from browser to backend. While we can't
+      verify the desktop app actually opens (browser security), we can verify the correct
+      protocol URL is triggered.
+    </background>
+    <relevant-files>
+      <file>tests/e2e/FileViewer/open-in-desktop.spec.ts (create)</file>
+      <file>tests/e2e/playwright.config.ts (modify if needed)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use Playwright test framework</constraint>
+    <constraint source="project">Tests must handle authentication</constraint>
+    <constraint source="project">Cannot verify desktop app opens - verify URL only</constraint>
+    <constraint source="project">No flaky tests - use proper waits</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>tests/e2e/ (existing patterns)</file>
+      <file>projects/sdap-fileviewer-enhancements-1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Playwright PCF Testing" location="tests/e2e/">
+        Use page.locator() for element selection, page.waitForSelector() for loading.
+        Handle Dataverse form loading before interacting with PCF.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Set up Playwright test file for FileViewer</step>
+    <step order="2">Configure authentication (storageState or login flow)</step>
+    <step order="3">Write test: LoadingStateAppearsOnInit</step>
+    <step order="4">Write test: PreviewLoadsWithinTimeout</step>
+    <step order="5">Write test: EditButtonVisible</step>
+    <step order="6">Write test: EditButtonTriggersProtocolUrl</step>
+    <step order="7">Write test: ErrorStateOnFetchFailure</step>
+    <step order="8">Write test: RetryButtonRefetches</step>
+    <step order="9">Write test: AccessibilityAttributes</step>
+    <step order="10">Run tests: npx playwright test</step>
+    <step order="11">Verify all tests pass reliably</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status from 🔲 to ✅</step>
+    <step order="13">Document any implementation deviations or decisions in projects/sdap-fileviewer-enhancements-1/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="playwright">Run E2E tests (npx playwright test)</tool>
+    <tool name="browser">Debug tests with --headed flag</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/e2e/FileViewer/open-in-desktop.spec.ts</output>
+    <output type="test">tests/e2e/FileViewer/loading-states.spec.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Test verifies loading state appears within 500ms of navigation.
+    </criterion>
+    <criterion testable="true">
+      Test verifies preview loads within 10 second timeout.
+    </criterion>
+    <criterion testable="true">
+      Test verifies Edit button is visible when preview is ready.
+    </criterion>
+    <criterion testable="true">
+      Test verifies Edit button click triggers protocol URL (ms-word:, etc.).
+    </criterion>
+    <criterion testable="true">
+      Test verifies error state appears on fetch failure.
+    </criterion>
+    <criterion testable="true">
+      All E2E tests pass (npx playwright test exits with code 0).
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference spec.md Section 7.5 for acceptance criteria.
+    
+    Test structure:
+    import { test, expect } from '@playwright/test';
+    
+    test.describe('FileViewer Open in Desktop', () =&gt; {
+        test.beforeEach(async ({ page }) =&gt; {
+            // Navigate to test page with FileViewer
+            await page.goto('/test-record-with-fileviewer');
+            // Wait for form to load
+            await page.waitForSelector('[data-control-name="fileviewer"]');
+        });
+        
+        test('shows loading state while fetching preview', async ({ page }) =&gt; {
+            // May need to reset state or navigate fresh
+            await expect(page.locator('.file-viewer-loading')).toBeVisible();
+        });
+        
+        test('Edit button triggers desktop app protocol', async ({ page }) =&gt; {
+            // Wait for ready state
+            await page.waitForSelector('.file-viewer-ready');
+            
+            // Track navigation/popup
+            const [popup] = await Promise.all([
+                page.waitForEvent('popup'),
+                page.click('[data-testid="edit-in-desktop-btn"]')
+            ]);
+            
+            // Verify protocol URL
+            expect(popup.url()).toMatch(/^ms-(word|excel|powerpoint):ofe\|u\|/);
+        });
+    });
+    
+    Authentication options:
+    - Use storageState from globalSetup
+    - Use test.use({ storageState: 'auth.json' })
+    
+    Note: Protocol handler may be blocked - intercept with page.route if needed.
+  </notes>
+</task>

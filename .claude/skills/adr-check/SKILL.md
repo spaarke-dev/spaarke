@@ -1,0 +1,199 @@
+---
+description: Validate code changes against Architecture Decision Records (ADRs)
+alwaysApply: false
+---
+
+# ADR Check
+
+> **Category**: Quality  
+> **Last Updated**: December 4, 2025
+
+---
+
+## Purpose
+
+Validate code changes against Spaarke's 12 Architecture Decision Records (ADRs) before committing. This skill helps developers identify architectural violations early, ensuring code aligns with established constraints.
+
+---
+
+## Applies When
+
+- Developer asks to "check ADRs", "validate architecture", or "review changes against ADRs"
+- Before creating a pull request
+- After making significant code changes
+- When reviewing code for architectural compliance
+- NOT for general code review (use `code-review` skill instead)
+
+---
+
+## Workflow
+
+### Step 1: Identify Scope
+
+Determine what code to validate:
+
+1. **If files specified**: Check those specific files
+2. **If no files specified**: Check recent git changes
+   ```bash
+   git status --short
+   git diff --name-only HEAD~1
+   ```
+3. **If scope unclear**: Ask developer to clarify
+
+### Step 2: Load ADR Context
+
+Reference the ADR validation rules in `references/adr-validation-rules.md` for detailed checks per ADR.
+
+Quick reference of key constraints:
+
+| ADR | Key Constraint | Check For |
+|-----|----------------|-----------|
+| ADR-001 | No Azure Functions | `Microsoft.Azure.Functions`, `[FunctionName]` |
+| ADR-002 | Thin plugins | `HttpClient` in plugins, >50ms operations |
+| ADR-006 | PCF over webresources | New `.js` files in webresources |
+| ADR-007 | Graph isolation | `Microsoft.Graph` outside Infrastructure |
+| ADR-008 | Endpoint filters | Global `UseAuthorization` middleware |
+| ADR-009 | Redis-first | `IMemoryCache` for cross-request caching |
+| ADR-010 | DI minimalism | Interfaces with single implementation |
+
+### Step 3: Run Validation Checks
+
+For each applicable ADR:
+1. Search codebase using grep/find patterns from `references/adr-validation-rules.md`
+2. Categorize findings as Compliant, Warning, or Violation
+3. Note specific file paths and line numbers
+
+### Step 4: Generate Report
+
+Output structured report using the format in Output Format section.
+
+### Step 5: Suggest Fixes
+
+For each violation:
+1. Explain why it violates the ADR
+2. Provide concrete fix with code example
+3. Reference the ADR document for full context
+
+---
+
+## Conventions
+
+- Always check all 12 ADRs, even if some seem irrelevant
+- Report warnings for potential issues that need human judgment
+- Provide specific file paths and line numbers for violations
+- Reference ADR documents by full path: `/docs/reference/adr/ADR-XXX-*.md`
+- Suggest running NetArchTest after fixes: `dotnet test tests/Spaarke.Bff.Api.ArchTests/`
+
+---
+
+## Resources
+
+| Resource | Purpose |
+|----------|---------|
+| `references/adr-validation-rules.md` | Detailed validation rules and grep patterns for each ADR |
+
+---
+
+## Output Format
+
+```markdown
+## ADR Validation Report
+
+**Scope:** [files/changes being validated]
+**Date:** [timestamp]
+
+### ✅ Compliant ADRs
+
+- ADR-001: Minimal API + BackgroundService
+- ADR-007: Graph isolation
+- [list all compliant ADRs]
+
+### ⚠️ Warnings (Review Required)
+
+- **ADR-010:** Found [N] interfaces with single implementation
+  - `src/server/Services/IFooService.cs` → `FooService.cs`
+  - **Recommendation:** Consider registering `FooService` directly unless testing seam needed
+
+### ❌ Violations (Must Fix)
+
+- **ADR-007:** Graph types found outside Infrastructure layer
+  - **File:** `src/api/Spe.Bff.Api/Api/FileEndpoints.cs:42`
+  - **Code:** `Microsoft.Graph.DriveItem item = ...`
+  - **Fix:** Replace with `FileHandleDto` and route through `SpeFileStore`
+
+### Summary
+
+| Status | Count |
+|--------|-------|
+| ✅ Compliant | [N] |
+| ⚠️ Warnings | [N] |
+| ❌ Violations | [N] |
+
+### Next Steps
+
+1. Fix violations listed above
+2. Review warnings with team if needed
+3. Re-run validation: invoke `adr-check` skill
+4. Run NetArchTest: `dotnet test tests/Spaarke.Bff.Api.ArchTests/`
+```
+
+---
+
+## Examples
+
+### Example 1: Check recent changes
+
+**Input:**
+```
+Developer: "Check my changes against ADRs before I commit"
+```
+
+**Output:**
+Claude runs `git diff --name-only`, identifies changed files, validates each against ADRs, and produces a structured report.
+
+### Example 2: Check specific file
+
+**Input:**
+```
+Developer: "Validate src/api/Spe.Bff.Api/Api/DocumentEndpoints.cs against ADRs"
+```
+
+**Output:**
+Claude focuses validation on the specified file, checking for Graph types, authorization patterns, caching usage, etc.
+
+### Example 3: Full project scan
+
+**Input:**
+```
+Developer: "Run a full ADR compliance check on the solution"
+```
+
+**Output:**
+Claude scans all source directories, producing a comprehensive report across all ADRs.
+
+---
+
+## Error Handling
+
+| Situation | Response |
+|-----------|----------|
+| No files specified and no git changes | Ask developer what to validate |
+| File path doesn't exist | Report error, ask for correct path |
+| Unclear whether finding is violation or warning | Report as warning, explain uncertainty |
+
+---
+
+## Related Skills
+
+- `code-review` - General code quality review (not architecture-focused)
+- `pr-workflow` - Include ADR check as part of PR creation
+
+---
+
+## Tips for AI
+
+- Be thorough: check all 12 ADRs even when changes seem small
+- Be specific: always include file paths and line numbers
+- Be actionable: provide concrete fixes, not just problem descriptions
+- When in doubt, report as warning rather than skipping
+- Encourage running automated NetArchTest for additional validation

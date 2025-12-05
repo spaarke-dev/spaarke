@@ -36,6 +36,12 @@ export default defineConfig({
   },
 
   projects: [
+    // Primary browser for Dataverse/Power Apps
+    {
+      name: 'edge',
+      use: { channel: 'msedge' }
+    },
+    // Secondary browsers
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] }

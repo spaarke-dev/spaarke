@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="sdap-fileviewer-enhancements-1">
+  <metadata>
+    <title>Production Deployment</title>
+    <phase>5: Deployment</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>041</dependencies>
+    <blocks>none</blocks>
+  </metadata>
+
+  <prompt>
+    Deploy the validated FileViewer enhancements to production. Follow deployment checklist,
+    deploy during low-usage window, monitor for issues, and notify stakeholders of completion.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in production deployments and incident response.
+    Follow change management best practices.
+  </role>
+
+  <goal>
+    Both components deployed to production, monitored, and confirmed working.
+    Stakeholders notified of successful deployment.
+  </goal>
+
+  <context>
+    <background>
+      Production deployment is the final step. Pilot validation must be complete with
+      GO decision before proceeding. Deploy during low-usage window with monitoring
+      and rollback plan ready.
+    </background>
+    <relevant-files>
+      <file>infrastructure/bicep/ (production config)</file>
+      <file>power-platform/solutions/ (production solution)</file>
+      <file>projects/sdap-fileviewer-enhancements-1/notes/go-no-go-decision.md (verify GO)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Pilot GO decision required</constraint>
+    <constraint source="project">Deploy during low-usage window</constraint>
+    <constraint source="project">Monitor for 30 minutes post-deployment</constraint>
+    <constraint source="project">Have rollback plan ready</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>infrastructure/bicep/</file>
+      <file>projects/sdap-fileviewer-enhancements-1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Production Deployment" location="ops best practices">
+        Pre-announce, deploy in low-usage window, monitor aggressively,
+        communicate completion.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify pilot GO decision documented</step>
+    <step order="2">Pre-deployment checklist complete</step>
+    <step order="3">Schedule low-usage deployment window</step>
+    <step order="4">Notify stakeholders of planned deployment</step>
+    <step order="5">Deploy BFF to production App Service</step>
+    <step order="6">Verify BFF health endpoint</step>
+    <step order="7">Deploy PCF to production Dataverse</step>
+    <step order="8">Verify PCF loads correctly</step>
+    <step order="9">Monitor Application Insights for 30 minutes</step>
+    <step order="10">If issues: execute rollback procedure</step>
+    <step order="11">If success: send completion notification</step>
+    <step order="12">Update project status to Complete</step>
+    <step order="13">Update TASK-INDEX.md: change this task's status from 🔲 to ✅</step>
+    <step order="14">Document any implementation deviations or decisions in projects/sdap-fileviewer-enhancements-1/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI for production deployment</tool>
+    <tool name="pac">Power Platform CLI for solution import</tool>
+    <tool name="app-insights">Monitor for errors</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment">Production BFF deployed</output>
+    <output type="deployment">Production PCF deployed</output>
+    <output type="docs">projects/sdap-fileviewer-enhancements-1/README.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Pilot GO decision verified before deployment.
+    </criterion>
+    <criterion testable="true">
+      BFF deployed to production and /health returns 200.
+    </criterion>
+    <criterion testable="true">
+      PCF deployed to production Dataverse.
+    </criterion>
+    <criterion testable="true">
+      No errors in Application Insights for 30 minutes.
+    </criterion>
+    <criterion testable="true">
+      Stakeholders notified of completion.
+    </criterion>
+    <criterion testable="true">
+      Project README updated with completion status.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference spec.md Section 7.4 for deployment strategy.
+    
+    Pre-deployment checklist:
+    - [ ] Pilot validation: GO decision
+    - [ ] All tests passing
+    - [ ] Rollback procedure tested
+    - [ ] Stakeholders notified of window
+    - [ ] Support staff on standby
+    
+    Deployment commands (production):
+    # BFF
+    az webapp deploy --resource-group rg-spaarke-prod \
+        --name app-spe-bff-prod \
+        --src-path ./publish
+    
+    # PCF
+    pac solution import --path FileViewer_managed.zip \
+        --environment https://spaarke-prod.crm.dynamics.com
+    
+    Monitoring checklist:
+    - [ ] No 500 errors in App Insights
+    - [ ] Response times normal
+    - [ ] No spike in support tickets
+    - [ ] Feature working for random sample
+    
+    Rollback procedure:
+    1. PCF: pac solution import --path FileViewer_previous.zip
+    2. BFF: az webapp deployment slot swap --slot staging
+    3. Verify rollback successful
+    4. Notify stakeholders
+    
+    Completion notification template:
+    Subject: FileViewer Enhancements - Deployed to Production
+    
+    The FileViewer enhancements have been deployed to production.
+    
+    New features:
+    - "Open in Desktop" button for Word, Excel, PowerPoint
+    - Improved loading experience
+    - Faster performance
+    
+    If you encounter issues, contact [support channel].
+    
+    ## Project Completion
+    After successful deployment, update README.md:
+    - Status: ✅ Complete
+    - Completion Date: YYYY-MM-DD
+    - Lessons Learned: [key learnings]
+  </notes>
+</task>

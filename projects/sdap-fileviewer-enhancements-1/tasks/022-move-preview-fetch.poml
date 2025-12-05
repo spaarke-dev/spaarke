@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="sdap-fileviewer-enhancements-1">
+  <metadata>
+    <title>Move Preview Fetch to PCF init()</title>
+    <phase>3: Performance Enhancements</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>012</dependencies>
+    <blocks>033</blocks>
+  </metadata>
+
+  <prompt>
+    Optimize the FileViewer PCF by moving the preview URL fetch to the init() lifecycle
+    method, starting the network request as early as possible. Add proper cancellation
+    handling to prevent race conditions when the component context changes.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in TypeScript, PCF lifecycle, and async programming.
+    Follow ADRs strictly. Optimize for perceived performance.
+  </role>
+
+  <goal>
+    Preview URL fetch starts at the earliest possible moment (init), reducing perceived
+    latency by parallelizing network request with UI rendering.
+  </goal>
+
+  <context>
+    <background>
+      Currently the preview fetch may happen later in the component lifecycle. By moving
+      it to init(), we can start the fetch immediately when the PCF loads, making the
+      content appear faster from the user's perspective.
+    </background>
+    <relevant-files>
+      <file>power-platform/pcf/FileViewer/index.ts (modify)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">Keep PCF logic straightforward</constraint>
+    <constraint source="project">Must handle case where driveItemId not available in init()</constraint>
+    <constraint source="project">Must cancel in-flight requests if context changes</constraint>
+    <constraint source="project">No duplicate fetches</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-006-prefer-pcf-over-webresources.md</file>
+      <file>projects/sdap-fileviewer-enhancements-1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="PCF Lifecycle" location="Microsoft PCF docs">
+        init() called once, updateView() called on context changes.
+        Start async work in init(), handle updates in updateView().
+      </pattern>
+      <pattern name="AbortController" location="web platform">
+        Use AbortController to cancel fetch on component update/destroy.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review current preview fetch location in index.ts</step>
+    <step order="2">Add AbortController property to component class</step>
+    <step order="3">Move preview fetch call to init() method</step>
+    <step order="4">Guard fetch with driveItemId availability check</step>
+    <step order="5">Pass AbortController.signal to fetch calls</step>
+    <step order="6">In updateView(), check if driveItemId changed</step>
+    <step order="7">If changed, abort previous fetch and start new one</step>
+    <step order="8">In destroy(), abort any in-flight requests</step>
+    <step order="9">Handle AbortError gracefully (don't show as error)</step>
+    <step order="10">Test fetch starts immediately in init()</step>
+    <step order="11">Test context change cancels previous fetch</step>
+    <step order="12">Measure timing improvement</step>
+    <step order="13">Update TASK-INDEX.md: change this task's status from 🔲 to ✅</step>
+    <step order="14">Document any implementation deviations or decisions in projects/sdap-fileviewer-enhancements-1/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF (npm run build)</tool>
+    <tool name="browser">DevTools Network tab to verify fetch timing</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">power-platform/pcf/FileViewer/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Preview fetch starts in init() method (visible in Network tab).
+    </criterion>
+    <criterion testable="true">
+      AbortController is used to cancel previous fetches.
+    </criterion>
+    <criterion testable="true">
+      No duplicate fetches for same driveItemId.
+    </criterion>
+    <criterion testable="true">
+      Graceful handling when driveItemId not available in init().
+    </criterion>
+    <criterion testable="true">
+      AbortError does not show as user-visible error.
+    </criterion>
+    <criterion testable="true">
+      npm run build succeeds without errors.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference spec.md Section 7.3.2 for performance requirements.
+    
+    Implementation pattern:
+    private abortController: AbortController | null = null;
+    
+    public init(context: ComponentFramework.Context&lt;IInputs&gt;): void {
+        this._context = context;
+        this.state = FileViewerState.Loading;
+        
+        // Start fetch early if data available
+        const driveItemId = context.parameters.driveItemId.raw;
+        if (driveItemId) {
+            this.fetchPreviewUrl(driveItemId);
+        }
+    }
+    
+    public updateView(context: ComponentFramework.Context&lt;IInputs&gt;): void {
+        const newDriveItemId = context.parameters.driveItemId.raw;
+        const oldDriveItemId = this._context.parameters.driveItemId.raw;
+        
+        if (newDriveItemId !== oldDriveItemId) {
+            // Cancel previous and start new fetch
+            this.abortController?.abort();
+            if (newDriveItemId) {
+                this.fetchPreviewUrl(newDriveItemId);
+            }
+        }
+        
+        this._context = context;
+        this.renderBasedOnState();
+    }
+    
+    private async fetchPreviewUrl(driveItemId: string): Promise&lt;void&gt; {
+        this.abortController = new AbortController();
+        
+        try {
+            const url = await this.bffClient.getPreviewUrl(
+                driveItemId, 
+                this.abortController.signal
+            );
+            this.previewUrl = url;
+            this.transitionTo(FileViewerState.Ready);
+        } catch (e) {
+            if (e.name === 'AbortError') {
+                // Silently ignore - request was intentionally cancelled
+                return;
+            }
+            this.transitionTo(FileViewerState.Error);
+        }
+    }
+    
+    public destroy(): void {
+        this.abortController?.abort();
+    }
+  </notes>
+</task>

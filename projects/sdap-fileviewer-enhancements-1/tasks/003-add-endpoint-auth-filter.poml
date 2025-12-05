@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="sdap-fileviewer-enhancements-1">
+  <metadata>
+    <title>Add Endpoint Authorization Filter</title>
+    <phase>1: BFF Endpoint Development</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>030</blocks>
+  </metadata>
+
+  <prompt>
+    Add an authorization endpoint filter to the /open-links endpoint that verifies the 
+    authenticated user has access to the specified SharePoint Embedded container. Follow 
+    ADR-008 which mandates endpoint filters over middleware for authorization.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core authorization and endpoint filters.
+    Follow ADRs strictly. Security-conscious approach.
+  </role>
+
+  <goal>
+    An endpoint filter that validates container membership before allowing access to /open-links,
+    returning 403 Forbidden if the user is not a member of the container containing the document.
+  </goal>
+
+  <context>
+    <background>
+      The /open-links endpoint returns URLs that can open documents in desktop apps. We must
+      verify the user has permission to access the document before providing these URLs.
+      ADR-008 establishes that authorization checks should be endpoint filters, not middleware.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Spe.Bff.Api/Filters/ContainerAuthorizationFilter.cs (create or modify)</file>
+      <file>src/server/api/Spe.Bff.Api/Program.cs (modify)</file>
+      <file>docs/adr/ADR-008-authorization-endpoint-filters.md (reference)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008">Use endpoint filters for authorization, not middleware</constraint>
+    <constraint source="ADR-008">Filter should be reusable across endpoints needing container auth</constraint>
+    <constraint source="project">Must return 403 with clear error message if unauthorized</constraint>
+    <constraint source="project">Must not leak information about container existence</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-008-authorization-endpoint-filters.md</file>
+      <file>docs/adr/ADR-003-lean-authorization-seams.md</file>
+    </files>
+    <patterns>
+      <pattern name="Endpoint Filter" location="ADR-008">
+        public class ContainerAuthFilter : IEndpointFilter
+        {
+            public async ValueTask&lt;object?&gt; InvokeAsync(
+                EndpointFilterInvocationContext context,
+                EndpointFilterDelegate next)
+            {
+                // Check authorization
+                // Return Results.Forbid() or call next(context)
+            }
+        }
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review ADR-008 for endpoint filter patterns</step>
+    <step order="2">Check for existing ContainerAuthorizationFilter implementation</step>
+    <step order="3">Create or extend filter to check container membership</step>
+    <step order="4">Extract user identity from HttpContext</step>
+    <step order="5">Extract driveItemId from request (query parameter)</step>
+    <step order="6">Look up container ID from driveItemId (may need Graph call)</step>
+    <step order="7">Check if user is member of container</step>
+    <step order="8">Return Results.Forbid() if not authorized</step>
+    <step order="9">Call next(context) if authorized</step>
+    <step order="10">Apply filter to /open-links endpoint with .AddEndpointFilter()</step>
+    <step order="11">Test with authorized user - should return 200</step>
+    <step order="12">Test with unauthorized user - should return 403</step>
+    <step order="13">Update TASK-INDEX.md: change this task's status from 🔲 to ✅</step>
+    <step order="14">Document any implementation deviations or decisions in projects/sdap-fileviewer-enhancements-1/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and run API</tool>
+    <tool name="terminal">Test endpoint with different user tokens</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Spe.Bff.Api/Filters/ContainerAuthorizationFilter.cs</output>
+    <output type="code">src/server/api/Spe.Bff.Api/Program.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given a user who IS a member of the container, GET /open-links returns 200.
+    </criterion>
+    <criterion testable="true">
+      Given a user who is NOT a member of the container, GET /open-links returns 403 Forbidden.
+    </criterion>
+    <criterion testable="true">
+      The filter is implemented as an IEndpointFilter per ADR-008.
+    </criterion>
+    <criterion testable="true">
+      Error response does not reveal whether the container/document exists (security).
+    </criterion>
+    <criterion testable="true">
+      Filter is applied using .AddEndpointFilter() on the endpoint definition.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference ADR-008 for the endpoint filter pattern.
+    
+    Key decision: How to determine container membership?
+    - Option A: Graph API call to check container permissions
+    - Option B: Check against cached membership from token claims
+    - Option C: Call existing ISpeContainerClient.IsMemberAsync()
+    
+    Check existing codebase for membership check patterns.
+    
+    Filter registration pattern:
+    app.MapGet("/api/open-links", handler)
+       .AddEndpointFilter&lt;ContainerAuthorizationFilter&gt;()
+       .RequireAuthorization();
+  </notes>
+</task>

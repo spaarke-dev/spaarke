@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="sdap-fileviewer-enhancements-1">
+  <metadata>
+    <title>Enable App Service Always On</title>
+    <phase>3: Performance Enhancements</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>033</blocks>
+  </metadata>
+
+  <prompt>
+    Enable the "Always On" setting for the Spe.Bff.Api Azure App Service to eliminate
+    cold start delays. Update the Bicep infrastructure code to ensure this setting is
+    applied consistently across environments.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Azure App Service and Bicep infrastructure-as-code.
+    Follow ADRs strictly. Infrastructure changes should be code-driven.
+  </role>
+
+  <goal>
+    App Service Always On enabled in Bicep templates, preventing the BFF from going idle
+    and eliminating cold start latency for users.
+  </goal>
+
+  <context>
+    <background>
+      Cold starts on the BFF can add 5-15 seconds to the first request after idle periods.
+      The "Always On" setting keeps at least one instance warm, ensuring fast response
+      times for the /open-links endpoint.
+    </background>
+    <relevant-files>
+      <file>infrastructure/bicep/modules/app-service.bicep (modify)</file>
+      <file>infrastructure/bicep/main.bicep (reference)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Always On requires Basic tier or higher (verify SKU)</constraint>
+    <constraint source="project">Change must be in Bicep, not portal click-ops</constraint>
+    <constraint source="project">Apply to test and production environments</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>infrastructure/bicep/</file>
+      <file>projects/sdap-fileviewer-enhancements-1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="App Service Always On" location="Azure Bicep">
+        siteConfig: {
+          alwaysOn: true
+        }
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review current App Service Bicep module</step>
+    <step order="2">Verify App Service SKU supports Always On (Basic or higher)</step>
+    <step order="3">Add alwaysOn: true to siteConfig in Bicep</step>
+    <step order="4">Verify setting applies to correct App Service (Spe.Bff.Api)</step>
+    <step order="5">Run bicep build to validate syntax</step>
+    <step order="6">Deploy to test environment</step>
+    <step order="7">Verify in Azure Portal that Always On is enabled</step>
+    <step order="8">Test cold start scenario - should be fast now</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status from 🔲 to ✅</step>
+    <step order="10">Document any implementation deviations or decisions in projects/sdap-fileviewer-enhancements-1/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI (az deployment, az webapp show)</tool>
+    <tool name="bicep">Bicep CLI (bicep build)</tool>
+    <tool name="terminal">Run deployment commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">infrastructure/bicep/modules/app-service.bicep</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Bicep template includes alwaysOn: true in siteConfig.
+    </criterion>
+    <criterion testable="true">
+      bicep build succeeds without errors.
+    </criterion>
+    <criterion testable="true">
+      After deployment, Azure Portal shows Always On = On.
+    </criterion>
+    <criterion testable="true">
+      First request after 20+ minutes idle responds in under 3 seconds.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference spec.md Section 7.3.1 for performance requirements.
+    
+    Bicep snippet:
+    resource webApp 'Microsoft.Web/sites@2022-03-01' = {
+      name: appServiceName
+      location: location
+      properties: {
+        serverFarmId: appServicePlan.id
+        siteConfig: {
+          alwaysOn: true
+          // ... other config
+        }
+      }
+    }
+    
+    Verification command:
+    az webapp config show --name &lt;app-name&gt; --resource-group &lt;rg&gt; --query "alwaysOn"
+    
+    Note: Always On is not available on Free/Shared tier. If using those tiers in dev,
+    may need to make alwaysOn conditional on environment.
+  </notes>
+</task>

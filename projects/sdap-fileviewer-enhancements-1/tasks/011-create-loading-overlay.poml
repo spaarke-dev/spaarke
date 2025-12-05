@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="sdap-fileviewer-enhancements-1">
+  <metadata>
+    <title>Create Loading Overlay Component</title>
+    <phase>2: FileViewer PCF Updates</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>012, 016</blocks>
+  </metadata>
+
+  <prompt>
+    Create a loading overlay component for the FileViewer PCF that displays a spinner and
+    "Loading document..." text. The overlay should be shown when state is Loading and
+    hidden when state transitions to Ready or Error.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in TypeScript, HTML/CSS, and accessible UI components.
+    Follow ADRs strictly. Create accessible, performant UI.
+  </role>
+
+  <goal>
+    A LoadingOverlay component that renders a centered spinner with loading text,
+    properly integrated with the FileViewerState machine.
+  </goal>
+
+  <context>
+    <background>
+      The loading overlay provides visual feedback to users while the document preview
+      is being fetched. It should appear immediately on component init and smoothly
+      transition away when content is ready.
+    </background>
+    <relevant-files>
+      <file>power-platform/pcf/FileViewer/components/LoadingOverlay.ts (create)</file>
+      <file>power-platform/pcf/FileViewer/index.ts (modify)</file>
+      <file>power-platform/pcf/FileViewer/css/FileViewer.css (modify)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">PCF preferred - use native DOM, avoid heavy frameworks</constraint>
+    <constraint source="project">Must be accessible (aria-busy, aria-label)</constraint>
+    <constraint source="project">Spinner animation should be CSS-only (no JS animation)</constraint>
+    <constraint source="project">Must not block underlying content from loading</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-006-prefer-pcf-over-webresources.md</file>
+      <file>projects/sdap-fileviewer-enhancements-1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="PCF Component Pattern" location="power-platform/pcf/">
+        Use pure DOM manipulation for simple components, or React for complex ones.
+        FileViewer uses DOM manipulation.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create LoadingOverlay.ts in components/ subdirectory</step>
+    <step order="2">Implement render() method that creates overlay DOM structure</step>
+    <step order="3">Add spinner element with CSS animation class</step>
+    <step order="4">Add "Loading document..." text element</step>
+    <step order="5">Add aria-busy="true" and role="status" for accessibility</step>
+    <step order="6">Implement show() and hide() methods</step>
+    <step order="7">Integrate with index.ts - show when state is Loading</step>
+    <step order="8">Hide overlay when state transitions to Ready or Error</step>
+    <step order="9">Add CSS styles in FileViewer.css (task 016 will refine)</step>
+    <step order="10">Test overlay appears immediately on component load</step>
+    <step order="11">Test overlay disappears when content loads</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status from 🔲 to ✅</step>
+    <step order="13">Document any implementation deviations or decisions in projects/sdap-fileviewer-enhancements-1/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF (npm run build)</tool>
+    <tool name="pac">Test PCF locally</tool>
+    <tool name="browser">Inspect accessibility in DevTools</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">power-platform/pcf/FileViewer/components/LoadingOverlay.ts</output>
+    <output type="code">power-platform/pcf/FileViewer/index.ts</output>
+    <output type="code">power-platform/pcf/FileViewer/css/FileViewer.css</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      LoadingOverlay component exists with render(), show(), hide() methods.
+    </criterion>
+    <criterion testable="true">
+      Overlay includes spinner element and "Loading document..." text.
+    </criterion>
+    <criterion testable="true">
+      Overlay has aria-busy="true" and role="status" attributes.
+    </criterion>
+    <criterion testable="true">
+      Overlay is visible when FileViewerState is Loading.
+    </criterion>
+    <criterion testable="true">
+      Overlay is hidden when FileViewerState is Ready or Error.
+    </criterion>
+    <criterion testable="true">
+      npm run build succeeds without errors.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference spec.md Section 6 for loading state UX requirements.
+    
+    DOM structure:
+    &lt;div class="file-viewer-loading" role="status" aria-busy="true"&gt;
+      &lt;div class="loading-spinner"&gt;&lt;/div&gt;
+      &lt;span class="loading-text"&gt;Loading document...&lt;/span&gt;
+    &lt;/div&gt;
+    
+    Basic CSS (refined in task 016):
+    .file-viewer-loading {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(255, 255, 255, 0.9);
+    }
+    
+    .loading-spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid #f3f3f3;
+      border-top: 3px solid #0078d4;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </notes>
+</task>

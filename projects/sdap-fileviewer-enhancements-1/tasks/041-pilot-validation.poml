@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="sdap-fileviewer-enhancements-1">
+  <metadata>
+    <title>Pilot Validation with Stakeholders</title>
+    <phase>5: Deployment</phase>
+    <status>not-started</status>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>040</dependencies>
+    <blocks>042</blocks>
+  </metadata>
+
+  <prompt>
+    Conduct pilot validation with 2-5 users to verify the feature works in real-world
+    conditions. Create test script, collect feedback, and make go/no-go decision for
+    production deployment.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Facilitate user testing and gather actionable feedback.
+    Document findings clearly for stakeholder decision.
+  </role>
+
+  <goal>
+    Pilot validation complete with documented feedback and clear go/no-go decision
+    for production deployment.
+  </goal>
+
+  <context>
+    <background>
+      Pilot validation ensures the feature works for real users before production rollout.
+      Feedback helps identify issues that automated tests might miss.
+    </background>
+    <relevant-files>
+      <file>projects/sdap-fileviewer-enhancements-1/notes/pilot-feedback.md (create)</file>
+      <file>projects/sdap-fileviewer-enhancements-1/notes/test-script.md (create)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">2-5 pilot users required</constraint>
+    <constraint source="project">Users must have Office desktop installed</constraint>
+    <constraint source="project">Structured feedback collection</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-fileviewer-enhancements-1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="User Testing" location="UX best practices">
+        Use structured test script, observe without leading, collect both
+        quantitative and qualitative feedback.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Select 2-5 pilot users with different usage patterns</step>
+    <step order="2">Verify users have Office desktop installed</step>
+    <step order="3">Create test script with specific scenarios</step>
+    <step order="4">Schedule 30-minute sessions with each user</step>
+    <step order="5">Run test sessions - observe and note issues</step>
+    <step order="6">Collect feedback using structured template</step>
+    <step order="7">Aggregate feedback across users</step>
+    <step order="8">Identify common issues or concerns</step>
+    <step order="9">Make go/no-go recommendation</step>
+    <step order="10">Document decision and any required fixes</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status from 🔲 to ✅</step>
+    <step order="12">Document any implementation deviations or decisions in projects/sdap-fileviewer-enhancements-1/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="browser">Test environment for pilot sessions</tool>
+    <tool name="screen-share">Video call for remote pilot sessions</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs" ephemeral="true">projects/sdap-fileviewer-enhancements-1/notes/test-script.md</output>
+    <output type="docs" ephemeral="true">projects/sdap-fileviewer-enhancements-1/notes/pilot-feedback.md</output>
+    <output type="docs">projects/sdap-fileviewer-enhancements-1/notes/go-no-go-decision.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      At least 3 pilot users completed test sessions.
+    </criterion>
+    <criterion testable="true">
+      Test script covers: view document, click Edit, verify app opens.
+    </criterion>
+    <criterion testable="true">
+      Feedback documented for each user.
+    </criterion>
+    <criterion testable="true">
+      Go/no-go decision documented with rationale.
+    </criterion>
+    <criterion testable="true">
+      Critical issues (if any) documented with remediation plan.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference spec.md Section 7.5 for acceptance criteria.
+    
+    Test script template:
+    ## Pilot Test Script
+    
+    ### Setup
+    1. Log into test environment
+    2. Navigate to record with FileViewer
+    
+    ### Test Cases
+    
+    TC1: View Document
+    - Open record with Word document
+    - Observe: Loading state visible?
+    - Observe: Preview loads successfully?
+    
+    TC2: Edit Document
+    - Click Edit button
+    - Observe: Word opens?
+    - Make and save a change
+    
+    TC3: Different File Types
+    - Repeat with Excel
+    - Repeat with PowerPoint
+    
+    Feedback template:
+    ## Participant Feedback
+    
+    **User**: [Name]
+    **Date**: [Date]
+    **Office Version**: [Version]
+    
+    ### Observations
+    - Loading state: [Fast/Slow/Not visible]
+    - Edit button: [Found easily/Hard to find]
+    - Desktop app: [Opened quickly/Slow/Failed]
+    
+    ### Issues
+    1. [Issue description]
+    
+    ### Rating (1-5)
+    - Overall experience: [X]
+    - Would use feature: [Yes/No/Maybe]
+    
+    Go/No-Go criteria:
+    - ✅ GO if: No critical issues, positive overall feedback
+    - ❌ NO-GO if: Critical issues affecting core functionality
+    - 🔄 GO with fixes: Minor issues that can be fixed quickly
+  </notes>
+</task>

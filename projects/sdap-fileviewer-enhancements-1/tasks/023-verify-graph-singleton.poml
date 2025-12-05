@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="sdap-fileviewer-enhancements-1">
+  <metadata>
+    <title>Verify GraphServiceClient Singleton</title>
+    <phase>3: Performance Enhancements</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>033</blocks>
+  </metadata>
+
+  <prompt>
+    Verify that the GraphServiceClient (or its underlying HttpClient) is registered as a
+    singleton in the DI container to avoid repeated initialization costs. If not singleton,
+    update the registration. Document the finding and any changes made.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core DI and Microsoft Graph SDK.
+    Follow ADRs strictly. Optimize service lifetimes for performance.
+  </role>
+
+  <goal>
+    Verified singleton registration for GraphServiceClient, ensuring no repeated
+    initialization overhead per request.
+  </goal>
+
+  <context>
+    <background>
+      GraphServiceClient initialization includes token acquisition and HTTP client setup.
+      If registered as scoped or transient, this overhead happens per request. Singleton
+      registration ensures initialization happens once at startup.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Spe.Bff.Api/Program.cs (review/modify)</file>
+      <file>src/shared/Spaarke.SharePointEmbedded/SpeFileStore.cs (review)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">DI Minimalism - prefer simple, correct registrations</constraint>
+    <constraint source="project">Must not break existing authentication flow</constraint>
+    <constraint source="project">Must handle token refresh correctly with singleton</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>projects/sdap-fileviewer-enhancements-1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Graph SDK Registration" location="Microsoft docs">
+        Singleton GraphServiceClient with TokenCredential handles token refresh internally.
+        HttpClient is managed by Graph SDK when using default constructor.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Find GraphServiceClient registration in Program.cs</step>
+    <step order="2">Check current service lifetime (Singleton/Scoped/Transient)</step>
+    <step order="3">Review how GraphServiceClient is constructed (credential type)</step>
+    <step order="4">If not singleton, assess impact of changing to singleton</step>
+    <step order="5">If using scoped credential, verify singleton is safe</step>
+    <step order="6">Update registration to singleton if needed</step>
+    <step order="7">Verify SpeFileStore correctly receives the singleton</step>
+    <step order="8">Test authentication still works after change</step>
+    <step order="9">Document finding in task notes</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status from 🔲 to ✅</step>
+    <step order="11">Document any implementation deviations or decisions in projects/sdap-fileviewer-enhancements-1/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and run API to test</tool>
+    <tool name="grep">Search for GraphServiceClient registration</tool>
+    <tool name="terminal">Test API authentication</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Spe.Bff.Api/Program.cs</output>
+    <output type="docs" ephemeral="true">projects/sdap-fileviewer-enhancements-1/notes/graph-client-review.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      GraphServiceClient registration verified or updated to singleton.
+    </criterion>
+    <criterion testable="true">
+      No initialization overhead per request (verified by profiling or code review).
+    </criterion>
+    <criterion testable="true">
+      Authentication and token refresh still work correctly.
+    </criterion>
+    <criterion testable="true">
+      Finding documented in notes.
+    </criterion>
+    <criterion testable="true">
+      dotnet build and dotnet test pass.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference spec.md Section 7.3.1 for performance requirements.
+    
+    Correct singleton registration pattern with Azure Identity:
+    
+    builder.Services.AddSingleton(sp =&gt; {
+        var credential = new DefaultAzureCredential();
+        // Or ClientSecretCredential, ManagedIdentityCredential, etc.
+        return new GraphServiceClient(credential);
+    });
+    
+    Or using Microsoft.Identity.Web:
+    
+    builder.Services.AddMicrosoftGraph(options =&gt; {
+        options.Scopes = "https://graph.microsoft.com/.default";
+    });
+    // This registers as singleton internally
+    
+    Things to verify:
+    1. Is GraphServiceClient registered at all, or created inline?
+    2. What lifetime is it registered with?
+    3. What credential type is used?
+    4. Does SpeFileStore or other services get it via DI?
+    
+    If using on-behalf-of flow with user tokens:
+    - May need different approach (scoped per user context)
+    - Document this finding if applicable
+  </notes>
+</task>

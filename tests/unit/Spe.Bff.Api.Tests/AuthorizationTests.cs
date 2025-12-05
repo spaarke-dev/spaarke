@@ -23,8 +23,7 @@ public class AuthorizationTests
         var logger = new TestLogger<AuthorizationService>();
         var rules = new IAuthorizationRule[]
         {
-            new ExplicitDenyRule(),
-            new ExplicitGrantRule(),
+            new OperationAccessRule(new TestLogger<OperationAccessRule>()),
             new TeamMembershipRule()
         };
 

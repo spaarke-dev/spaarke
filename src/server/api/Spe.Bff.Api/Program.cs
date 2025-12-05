@@ -741,17 +741,26 @@ app.MapGet("/healthz/dataverse", TestDataverseConnectionAsync);
 // Dataverse CRUD operations test endpoint
 app.MapGet("/healthz/dataverse/crud", TestDataverseCrudOperationsAsync);
 
-// Detailed ping endpoint
-app.MapGet("/ping", (HttpContext context) =>
+// Lightweight ping endpoint for warm-up agents (Task 021)
+// Must be fast (<100ms), unauthenticated, and expose no sensitive info
+app.MapGet("/ping", () => Results.Text("pong"))
+    .AllowAnonymous()
+    .WithTags("Health")
+    .WithDescription("Lightweight health check for warm-up agents. Returns 'pong' without authentication.");
+
+// Detailed status endpoint with service metadata
+app.MapGet("/status", () =>
 {
     return TypedResults.Json(new
     {
         service = "Spe.Bff.Api",
         version = "1.0.0",
-        environment = app.Environment.EnvironmentName,
         timestamp = DateTimeOffset.UtcNow
     });
-});
+})
+    .AllowAnonymous()
+    .WithTags("Health")
+    .WithDescription("Service status with metadata (no sensitive info).");
 
 // ---- Endpoint Groups ----
 

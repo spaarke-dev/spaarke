@@ -1,0 +1,206 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="sdap-fileviewer-enhancements-1">
+  <metadata>
+    <title>Add Loading State CSS</title>
+    <phase>2: FileViewer PCF Updates</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>011</dependencies>
+    <blocks>031</blocks>
+  </metadata>
+
+  <prompt>
+    Create polished CSS for all FileViewer loading and error states. This includes the
+    loading overlay spinner, error message styling, retry button, and transitions between
+    states for a smooth user experience.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in CSS animations, Fluent UI design, and accessible styling.
+    Follow ADRs strictly. Create smooth, performant animations.
+  </role>
+
+  <goal>
+    Complete, polished CSS for loading overlay, error states, and transitions that aligns
+    with Fluent/Office design language and performs well.
+  </goal>
+
+  <context>
+    <background>
+      Task 011 added basic CSS for the loading overlay. This task refines and completes
+      all state-related styling, including error states, transitions, and ensuring the
+      design matches Microsoft Fluent UI patterns.
+    </background>
+    <relevant-files>
+      <file>power-platform/pcf/FileViewer/css/FileViewer.css (modify)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use CSS-only animations (no JavaScript animation)</constraint>
+    <constraint source="project">Support reduced-motion preference</constraint>
+    <constraint source="project">Match Fluent/Office color scheme</constraint>
+    <constraint source="project">Spinner must be visible against both light and dark backgrounds</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-fileviewer-enhancements-1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent UI Colors" location="Microsoft Design">
+        Primary blue: #0078d4
+        Error red: #a4262c
+        Neutral grays: #323130, #605e5c, #8a8886
+        Background: #ffffff, #f3f2f1
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing CSS in FileViewer.css</step>
+    <step order="2">Refine loading overlay container styling</step>
+    <step order="3">Create polished spinner animation</step>
+    <step order="4">Add loading text styling</step>
+    <step order="5">Add fade-in/fade-out transitions for overlay</step>
+    <step order="6">Create error state container styling</step>
+    <step order="7">Style error icon and message</step>
+    <step order="8">Style retry button</step>
+    <step order="9">Add prefers-reduced-motion media query</step>
+    <step order="10">Test in both light and dark contexts</step>
+    <step order="11">Verify animations are smooth (60fps)</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status from 🔲 to ✅</step>
+    <step order="13">Document any implementation deviations or decisions in projects/sdap-fileviewer-enhancements-1/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF (npm run build)</tool>
+    <tool name="browser">DevTools Performance tab to check animation smoothness</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">power-platform/pcf/FileViewer/css/FileViewer.css</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Loading overlay has centered spinner with smooth rotation animation.
+    </criterion>
+    <criterion testable="true">
+      Overlay has semi-transparent background that doesn't fully obscure content.
+    </criterion>
+    <criterion testable="true">
+      Error state has distinct styling with error icon and message.
+    </criterion>
+    <criterion testable="true">
+      Retry button is styled and clearly clickable.
+    </criterion>
+    <criterion testable="true">
+      @media (prefers-reduced-motion: reduce) disables or simplifies animations.
+    </criterion>
+    <criterion testable="true">
+      Colors match Fluent UI design system.
+    </criterion>
+    <criterion testable="true">
+      npm run build succeeds without CSS errors.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference spec.md Section 6 for UX requirements.
+    
+    Complete CSS:
+    
+    /* Loading State */
+    .file-viewer-loading {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: rgba(255, 255, 255, 0.95);
+        z-index: 100;
+        opacity: 1;
+        transition: opacity 0.2s ease-out;
+    }
+    
+    .file-viewer-loading.hidden {
+        opacity: 0;
+        pointer-events: none;
+    }
+    
+    .loading-spinner {
+        width: 32px;
+        height: 32px;
+        border: 3px solid #f3f2f1;
+        border-top: 3px solid #0078d4;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+    }
+    
+    .loading-text {
+        margin-top: 12px;
+        color: #323130;
+        font-size: 14px;
+        font-family: "Segoe UI", sans-serif;
+    }
+    
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+    
+    /* Error State */
+    .file-viewer-error {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: #ffffff;
+        z-index: 100;
+    }
+    
+    .error-icon {
+        width: 48px;
+        height: 48px;
+        color: #a4262c;
+    }
+    
+    .error-message {
+        margin-top: 12px;
+        color: #323130;
+        font-size: 14px;
+        text-align: center;
+    }
+    
+    .retry-btn {
+        margin-top: 16px;
+        padding: 8px 16px;
+        background: #0078d4;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+    }
+    
+    .retry-btn:hover {
+        background: #106ebe;
+    }
+    
+    /* Reduced Motion */
+    @media (prefers-reduced-motion: reduce) {
+        .loading-spinner {
+            animation: none;
+            border-top-color: #0078d4;
+        }
+        
+        .file-viewer-loading {
+            transition: none;
+        }
+    }
+  </notes>
+</task>

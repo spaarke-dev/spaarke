@@ -17,12 +17,24 @@ public class HealthAndHeadersTests : IClassFixture<CustomWebAppFactory>
     }
 
     [Fact]
-    public async Task Ping_ReturnsTraceId_And_Json()
+    public async Task Ping_ReturnsPong()
     {
+        // Task 021: /ping returns simple "pong" response for warm-up agents
         var res = await _client.GetAsync("/ping");
         res.StatusCode.Should().Be(System.Net.HttpStatusCode.OK);
+        var content = await res.Content.ReadAsStringAsync();
+        content.Should().Be("pong");
+    }
+
+    [Fact]
+    public async Task Status_ReturnsServiceMetadata()
+    {
+        // Task 021: /status returns service metadata JSON
+        var res = await _client.GetAsync("/status");
+        res.StatusCode.Should().Be(System.Net.HttpStatusCode.OK);
         var json = await res.Content.ReadAsStringAsync();
-        json.Should().Contain("traceId");
+        json.Should().Contain("Spe.Bff.Api");
+        json.Should().Contain("1.0.0");
         res.Content.Headers.ContentType!.MediaType.Should().Be("application/json");
     }
 

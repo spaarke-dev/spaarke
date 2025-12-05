@@ -1,7 +1,7 @@
 using System.Text;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Graph;
+using Microsoft.Graph.Models.ODataErrors;
 using Spe.Bff.Api.Infrastructure.Errors;
 using Xunit;
 
@@ -23,9 +23,14 @@ public class ProblemDetailsHelperTests
     [Fact]
     public async Task Maps_Authorization_RequestDenied_As_AppConfigIssue()
     {
-        // Create ServiceException for Graph SDK v5 - message should contain Authorization_RequestDenied
-        var ex = new ServiceException("Authorization_RequestDenied: Access denied")
+        // Create ODataError for Graph SDK v5 - message should contain Authorization_RequestDenied
+        var ex = new ODataError
         {
+            Error = new MainError
+            {
+                Code = "Authorization_RequestDenied",
+                Message = "Access denied"
+            },
             ResponseStatusCode = 403
         };
 
@@ -39,9 +44,14 @@ public class ProblemDetailsHelperTests
     [Fact]
     public async Task Maps_Forbidden_Without_Code_As_UserDenied()
     {
-        // Create ServiceException without Authorization_RequestDenied in message
-        var ex = new ServiceException("Forbidden")
+        // Create ODataError without Authorization_RequestDenied in message
+        var ex = new ODataError
         {
+            Error = new MainError
+            {
+                Code = "accessDenied",
+                Message = "Forbidden"
+            },
             ResponseStatusCode = 403
         };
 

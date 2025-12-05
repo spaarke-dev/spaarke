@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="sdap-fileviewer-enhancements-1">
+  <metadata>
+    <title>Add Open in Desktop Button</title>
+    <phase>2: FileViewer PCF Updates</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>015, 031</blocks>
+  </metadata>
+
+  <prompt>
+    Add an "Open in Desktop" button to the FileViewer PCF toolbar that will launch the
+    document in the native Office application. The button should be styled consistently
+    with the existing UI and be easily discoverable.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in TypeScript, accessible UI, and Office Fluent design.
+    Follow ADRs strictly. Create intuitive, accessible UI components.
+  </role>
+
+  <goal>
+    A visible "Open in Desktop" button (or "Edit" with pencil icon) in the FileViewer
+    toolbar that users can click to open the document in Word, Excel, or PowerPoint.
+  </goal>
+
+  <context>
+    <background>
+      After removing embedded edit mode (task 013), users need a way to edit documents.
+      The new pattern is to open documents in the native desktop application, which provides
+      a superior editing experience and avoids conflicts with Dataverse auto-save.
+    </background>
+    <relevant-files>
+      <file>power-platform/pcf/FileViewer/index.ts (modify)</file>
+      <file>power-platform/pcf/FileViewer/components/Toolbar.ts (create or modify)</file>
+      <file>power-platform/pcf/FileViewer/css/FileViewer.css (modify)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">PCF component - use native DOM or simple components</constraint>
+    <constraint source="project">Button must be keyboard accessible (focusable, Enter to activate)</constraint>
+    <constraint source="project">Button text should be "Edit" or icon with aria-label</constraint>
+    <constraint source="project">Must be visible and easily discoverable</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-006-prefer-pcf-over-webresources.md</file>
+      <file>projects/sdap-fileviewer-enhancements-1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent UI Button" location="Office design guidelines">
+        Use simple button with icon + text, consistent with Dataverse/Office styling.
+        Primary action blue (#0078d4), secondary gray.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing toolbar/header area in FileViewer</step>
+    <step order="2">Create button element with appropriate ID and class</step>
+    <step order="3">Add pencil/edit icon (SVG or CSS icon)</step>
+    <step order="4">Add "Edit" text label next to icon</step>
+    <step order="5">Add aria-label="Open in desktop application" for accessibility</step>
+    <step order="6">Style button to match Fluent/Office design</step>
+    <step order="7">Make button keyboard accessible (tabindex, Enter handling)</step>
+    <step order="8">Add click handler (implementation in task 015)</step>
+    <step order="9">Add data-testid="edit-in-desktop-btn" for testing</step>
+    <step order="10">Test button is visible and styled correctly</step>
+    <step order="11">Test keyboard navigation to button</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status from 🔲 to ✅</step>
+    <step order="13">Document any implementation deviations or decisions in projects/sdap-fileviewer-enhancements-1/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF (npm run build)</tool>
+    <tool name="pac">Test PCF locally</tool>
+    <tool name="browser">Test keyboard accessibility</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">power-platform/pcf/FileViewer/index.ts</output>
+    <output type="code">power-platform/pcf/FileViewer/components/Toolbar.ts</output>
+    <output type="code">power-platform/pcf/FileViewer/css/FileViewer.css</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      "Edit" button exists in FileViewer toolbar/header.
+    </criterion>
+    <criterion testable="true">
+      Button has pencil/edit icon visible.
+    </criterion>
+    <criterion testable="true">
+      Button has aria-label for screen readers.
+    </criterion>
+    <criterion testable="true">
+      Button is keyboard accessible (can Tab to it, Enter activates).
+    </criterion>
+    <criterion testable="true">
+      Button has data-testid="edit-in-desktop-btn" attribute.
+    </criterion>
+    <criterion testable="true">
+      Button styling matches Fluent/Office design.
+    </criterion>
+    <criterion testable="true">
+      npm run build succeeds without errors.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference spec.md Section 6 for UI requirements.
+    
+    Button HTML structure:
+    &lt;button 
+        class="file-viewer-edit-btn"
+        data-testid="edit-in-desktop-btn"
+        aria-label="Open in desktop application"
+        title="Open in Word/Excel/PowerPoint"
+    &gt;
+        &lt;svg class="edit-icon"&gt;...&lt;/svg&gt;
+        &lt;span&gt;Edit&lt;/span&gt;
+    &lt;/button&gt;
+    
+    Pencil icon SVG (simple version):
+    &lt;svg viewBox="0 0 16 16" width="16" height="16"&gt;
+        &lt;path d="M11.7 3.3l1 1-8 8H3.7v-1l8-8zm1.4-1.4l.6.6c.4.4.4 1 0 1.4l-9 9c-.2.2-.4.3-.7.3H2V11.2c0-.3.1-.5.3-.7l9-9c.4-.4 1-.4 1.4 0l.4.4z"/&gt;
+    &lt;/svg&gt;
+    
+    Button styling:
+    .file-viewer-edit-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 12px;
+        background: #0078d4;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+    }
+    
+    .file-viewer-edit-btn:hover {
+        background: #106ebe;
+    }
+  </notes>
+</task>

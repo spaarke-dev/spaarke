@@ -2,6 +2,7 @@ using Microsoft.Graph;
 using Microsoft.Graph.Drives.Item.Items.Item.Preview;
 using Microsoft.Graph.Models;
 using Spaarke.Core.Auth;
+using Spaarke.Core.Utilities;
 using Spaarke.Dataverse;
 using Spe.Bff.Api.Api.Filters;
 using Spe.Bff.Api.Infrastructure.Exceptions;
@@ -63,6 +64,16 @@ public static class FileAccessEndpoints
             .Produces<object>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status500InternalServerError);
+
+        docs.MapGet("/{documentId}/open-links", GetOpenLinks)
+            .WithName("GetDocumentOpenLinks")
+            .WithTags("File Access")
+            .Produces<OpenLinksResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status409Conflict)
             .Produces(StatusCodes.Status500InternalServerError);
 
         return app;
@@ -396,6 +407,139 @@ public static class FileAccessEndpoints
                 },
                 correlationId = context.TraceIdentifier
             });
+        }
+
+        /// <summary>
+        /// GET /api/documents/{documentId}/open-links
+        /// Returns desktop protocol URL (ms-word:, ms-excel:, ms-powerpoint:) and web URL
+        /// for opening documents in native Office applications.
+        /// </summary>
+        static async Task<IResult> GetOpenLinks(
+            string documentId,
+            IDataverseService dataverseService,
+            IGraphClientFactory graphFactory,
+            ILogger<Program> logger,
+            HttpContext context,
+            CancellationToken ct)
+        {
+            logger.LogInformation("GetOpenLinks called | DocumentId: {DocumentId} | TraceId: {TraceId}",
+                documentId, context.TraceIdentifier);
+
+            // 1. Validate document ID format
+            if (!Guid.TryParse(documentId, out var docGuid))
+            {
+                throw new SdapProblemException(
+                    "invalid_id",
+                    "Invalid Document ID",
+                    $"Document ID '{documentId}' is not a valid GUID format",
+                    400
+                );
+            }
+
+            // 2. Get document entity from Dataverse (includes SPE pointers)
+            var document = await dataverseService.GetDocumentAsync(documentId, ct);
+
+            if (document == null)
+            {
+                throw new SdapProblemException(
+                    "document_not_found",
+                    "Document Not Found",
+                    $"Document with ID '{documentId}' does not exist",
+                    404
+                );
+            }
+
+            // 3. Validate SPE pointers (driveId, itemId)
+            ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId);
+
+            logger.LogInformation("SPE pointers validated | DriveId: {DriveId} | ItemId: {ItemId}",
+                document.GraphDriveId, document.GraphItemId);
+
+            // 4. Create Graph client using OBO (user context)
+            var graphClient = await graphFactory.ForUserAsync(context, ct);
+
+            // 5. Get DriveItem from Graph to retrieve URLs, parentReference, and mimeType
+            var driveItem = await graphClient.Drives[document.GraphDriveId!]
+                .Items[document.GraphItemId!]
+                .GetAsync(requestConfiguration =>
+                {
+                    requestConfiguration.QueryParameters.Select = new[] { "id", "name", "webUrl", "webDavUrl", "file", "parentReference" };
+                }, cancellationToken: ct);
+
+            if (driveItem == null)
+            {
+                throw new SdapProblemException(
+                    "item_not_found",
+                    "Drive Item Not Found",
+                    $"Graph API did not return drive item for document {documentId}",
+                    404
+                );
+            }
+
+            if (string.IsNullOrEmpty(driveItem.WebUrl))
+            {
+                throw new SdapProblemException(
+                    "web_url_not_available",
+                    "Web URL Not Available",
+                    $"Graph API did not return a webUrl for document {documentId}",
+                    500
+                );
+            }
+
+            // 6. Extract MIME type from file facet
+            var mimeType = driveItem.File?.MimeType ?? document.MimeType ?? "application/octet-stream";
+            var fileName = driveItem.Name ?? document.FileName ?? "Unknown";
+
+            // 7. Construct direct file URL for desktop protocol
+            // The webUrl returns Doc.aspx (Office Online URL) which doesn't work well with ms-word: protocol
+            // We need to construct a direct file URL from the parent path + filename
+            string? directFileUrl = null;
+
+            // Prefer webDavUrl if available (direct file URL)
+            if (!string.IsNullOrEmpty(driveItem.WebDavUrl))
+            {
+                directFileUrl = driveItem.WebDavUrl;
+            }
+            // Otherwise construct from parent path
+            else if (driveItem.ParentReference?.Path != null && !string.IsNullOrEmpty(fileName))
+            {
+                // ParentReference.Path format: /drives/{driveId}/root:/folder/path
+                // Extract the path after "root:" and construct URL
+                var pathParts = driveItem.ParentReference.Path.Split("root:");
+                if (pathParts.Length > 1)
+                {
+                    var folderPath = pathParts[1].TrimStart('/');
+                    // Get base SharePoint URL from webUrl (before /_layouts/)
+                    var webUrlParts = driveItem.WebUrl!.Split("/_layouts/");
+                    if (webUrlParts.Length > 0)
+                    {
+                        var baseUrl = webUrlParts[0];
+                        directFileUrl = $"{baseUrl}/{folderPath}/{Uri.EscapeDataString(fileName)}";
+                    }
+                }
+            }
+
+            // Fall back to webUrl if we couldn't construct a direct URL
+            var urlForDesktop = directFileUrl ?? driveItem.WebUrl;
+
+            logger.LogInformation(
+                "OpenLinks URL selection | WebUrl: {WebUrl} | WebDavUrl: {WebDavUrl} | DirectFileUrl: {DirectFileUrl} | UsingUrl: {UsingUrl}",
+                driveItem.WebUrl, driveItem.WebDavUrl, directFileUrl, urlForDesktop);
+
+            // 8. Generate desktop protocol URL using DesktopUrlBuilder
+            var desktopUrl = DesktopUrlBuilder.FromMime(urlForDesktop, mimeType);
+
+            logger.LogInformation(
+                "OpenLinks generated | FileName: {FileName} | MimeType: {MimeType} | HasDesktopUrl: {HasDesktopUrl} | TraceId: {TraceId}",
+                fileName, mimeType, desktopUrl != null, context.TraceIdentifier);
+
+            // 8. Return response
+            return TypedResults.Ok(new OpenLinksResponse(
+                DesktopUrl: desktopUrl,
+                WebUrl: driveItem.WebUrl,
+                MimeType: mimeType,
+                FileName: fileName
+            ));
         }
     }
 

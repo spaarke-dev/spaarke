@@ -12,6 +12,7 @@ import * as React from 'react';
 import { createRoot, Root } from 'react-dom/client';
 import { AuthService } from './AuthService';
 import { FilePreview } from './FilePreview';
+import { FileViewerState } from './types';
 import { v4 as uuidv4 } from 'uuid';
 
 export class SpeFileViewer implements ComponentFramework.StandardControl<IInputs, IOutputs> {
@@ -36,6 +37,24 @@ export class SpeFileViewer implements ComponentFramework.StandardControl<IInputs
     // Correlation ID for current session
     private correlationId: string;
 
+    // State machine for component lifecycle
+    private _state: FileViewerState = FileViewerState.Loading;
+
+    // PCF notification callback (for triggering re-renders)
+    private _notifyOutputChanged: (() => void) | null = null;
+
+    // Current context reference (for re-rendering)
+    private _context: ComponentFramework.Context<IInputs> | null = null;
+
+    // Error message when in Error state
+    private _errorMessage: string | null = null;
+
+    // AbortController for cancelling in-flight requests (Task 022)
+    private _abortController: AbortController | null = null;
+
+    // Previous document ID for detecting changes
+    private _previousDocumentId: string | null = null;
+
     constructor() {
         // Generate correlation ID for this control instance
         this.correlationId = uuidv4();
@@ -55,6 +74,13 @@ export class SpeFileViewer implements ComponentFramework.StandardControl<IInputs
         container: HTMLDivElement
     ): Promise<void> {
         this.container = container;
+        this._notifyOutputChanged = notifyOutputChanged;
+        this._context = context;
+
+        // IMMEDIATELY set state to Loading and render loading UI
+        // (Must happen within 200ms per task spec)
+        this.transitionTo(FileViewerState.Loading);
+        this.renderBasedOnState();
 
         // Apply responsive height styling
         const controlHeight = context.parameters.controlHeight?.raw ?? 600;
@@ -95,23 +121,163 @@ export class SpeFileViewer implements ComponentFramework.StandardControl<IInputs
             this.accessToken = await this.authService.getAccessToken();
             console.log('[SpeFileViewer] Access token acquired');
 
-            // Initial render
-            this.renderControl(context);
+            // Create AbortController for this session (Task 022)
+            this._abortController = new AbortController();
+
+            // Track initial document ID for change detection
+            try {
+                this._previousDocumentId = this.extractDocumentId(context);
+                console.log(`[SpeFileViewer] Initial document ID: ${this._previousDocumentId || '(none)'}`);
+            } catch {
+                // extractDocumentId may throw for invalid GUIDs - handle gracefully in init
+                this._previousDocumentId = null;
+            }
+
+            // Transition to Ready and render React component
+            this.transitionTo(FileViewerState.Ready);
+            this.renderBasedOnState();
 
         } catch (error) {
             console.error('[SpeFileViewer] Initialization failed:', error);
-            this.renderError(error instanceof Error ? error.message : String(error));
+            this._errorMessage = error instanceof Error ? error.message : String(error);
+            this.transitionTo(FileViewerState.Error);
+            this.renderBasedOnState();
         }
     }
 
     /**
      * Update view when context changes
      * - Detects documentId changes
-     * - Re-renders React component
+     * - Aborts in-flight requests if document changes (Task 022)
+     * - Re-renders React component (only when in Ready state)
      */
     public updateView(context: ComponentFramework.Context<IInputs>): void {
-        // Re-render with updated context
+        this._context = context;
+
+        // Only process if in Ready state
+        if (this._state !== FileViewerState.Ready) {
+            return;
+        }
+
+        // Extract current document ID (handle extraction errors gracefully)
+        let currentDocumentId: string | null = null;
+        try {
+            currentDocumentId = this.extractDocumentId(context);
+        } catch {
+            currentDocumentId = null;
+        }
+
+        // Check if document ID changed (Task 022 - cancel previous, start new)
+        if (currentDocumentId !== this._previousDocumentId) {
+            console.log(`[SpeFileViewer] Document ID changed: ${this._previousDocumentId} → ${currentDocumentId}`);
+
+            // Abort any in-flight requests from previous document
+            if (this._abortController) {
+                this._abortController.abort();
+                console.log('[SpeFileViewer] Aborted previous request due to document change');
+            }
+
+            // Create new AbortController for new document
+            this._abortController = new AbortController();
+            this._previousDocumentId = currentDocumentId;
+        }
+
+        // Re-render React component
         this.renderControl(context);
+    }
+
+    /**
+     * Transition to a new state with logging
+     *
+     * @param newState The state to transition to
+     */
+    private transitionTo(newState: FileViewerState): void {
+        const previousState = this._state;
+        this._state = newState;
+
+        console.log(`[SpeFileViewer] State: ${previousState} → ${newState}`);
+
+        // Notify PCF framework of state change (triggers updateView)
+        this._notifyOutputChanged?.();
+    }
+
+    /**
+     * Get current component state
+     *
+     * @returns Current FileViewerState
+     */
+    public getState(): FileViewerState {
+        return this._state;
+    }
+
+    /**
+     * Render UI based on current state
+     */
+    private renderBasedOnState(): void {
+        switch (this._state) {
+            case FileViewerState.Loading:
+                this.renderLoading();
+                break;
+            case FileViewerState.Ready:
+                if (this._context) {
+                    this.renderControl(this._context);
+                }
+                break;
+            case FileViewerState.Error:
+                this.renderError(this._errorMessage || 'An unknown error occurred');
+                break;
+        }
+    }
+
+    /**
+     * Render loading overlay with spinner (shown during init)
+     *
+     * Accessibility: Uses role="status" and aria-busy for screen readers.
+     * The loading indicator is announced when it appears.
+     */
+    private renderLoading(): void {
+        // Create loading overlay element programmatically for better control
+        const overlay = document.createElement('div');
+        overlay.className = 'spe-file-viewer-loading-overlay';
+        overlay.setAttribute('role', 'status');
+        overlay.setAttribute('aria-busy', 'true');
+        overlay.setAttribute('aria-label', 'Loading document');
+
+        // Create spinner element
+        const spinner = document.createElement('div');
+        spinner.className = 'spe-file-viewer-loading-spinner';
+
+        // Create loading text
+        const text = document.createElement('span');
+        text.className = 'spe-file-viewer-loading-text';
+        text.textContent = 'Loading document...';
+
+        // Assemble the overlay
+        overlay.appendChild(spinner);
+        overlay.appendChild(text);
+
+        // Clear container and add overlay
+        this.container.innerHTML = '';
+        this.container.appendChild(overlay);
+    }
+
+    /**
+     * Show the loading overlay (used when re-entering Loading state)
+     */
+    public showLoading(): void {
+        this.transitionTo(FileViewerState.Loading);
+        this.renderBasedOnState();
+    }
+
+    /**
+     * Hide the loading overlay by transitioning to Ready state
+     * Note: This is typically called internally after successful init
+     */
+    public hideLoading(): void {
+        if (this._state === FileViewerState.Loading && this._context) {
+            this.transitionTo(FileViewerState.Ready);
+            this.renderBasedOnState();
+        }
     }
 
     /**
@@ -236,6 +402,13 @@ export class SpeFileViewer implements ComponentFramework.StandardControl<IInputs
      */
     public destroy(): void {
         console.log('[SpeFileViewer] Destroying control...');
+
+        // Abort any in-flight requests (Task 022)
+        if (this._abortController) {
+            this._abortController.abort();
+            this._abortController = null;
+            console.log('[SpeFileViewer] Aborted in-flight requests on destroy');
+        }
 
         // Unmount React component (React 19+)
         if (this.root) {

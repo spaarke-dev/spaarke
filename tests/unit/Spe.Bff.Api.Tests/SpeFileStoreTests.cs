@@ -30,8 +30,9 @@ public class SpeFileStoreTests
 
     private class TestGraphClientFactory : IGraphClientFactory
     {
-        public GraphServiceClient CreateAppOnlyClient() => null!;
-        public Task<GraphServiceClient> CreateOnBehalfOfClientAsync(string userAccessToken) => Task.FromResult<GraphServiceClient>(null!);
+        public Task<GraphServiceClient> ForUserAsync(Microsoft.AspNetCore.Http.HttpContext ctx, CancellationToken ct = default)
+            => Task.FromResult<GraphServiceClient>(null!);
+        public GraphServiceClient ForApp() => null!;
     }
 
     private class TestLogger<T> : ILogger<T>

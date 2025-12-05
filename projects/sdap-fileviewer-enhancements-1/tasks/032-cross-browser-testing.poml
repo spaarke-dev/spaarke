@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="sdap-fileviewer-enhancements-1">
+  <metadata>
+    <title>Cross-Browser Testing</title>
+    <phase>4: Testing</phase>
+    <status>not-started</status>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>031</dependencies>
+    <blocks>040</blocks>
+  </metadata>
+
+  <prompt>
+    Configure Playwright to run E2E tests across Edge (primary), Chrome, and Firefox.
+    Document any browser-specific behaviors or limitations, especially for protocol handlers.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in cross-browser testing and Playwright configuration.
+    Document browser differences clearly.
+  </role>
+
+  <goal>
+    E2E tests passing on Edge, Chrome, and Firefox (or documented exceptions), with a
+    browser compatibility matrix for stakeholder reference.
+  </goal>
+
+  <context>
+    <background>
+      Different browsers may handle protocol URLs differently. Edge is the primary target
+      for Dataverse, but Chrome and Firefox should also work. Testing across browsers
+      ensures a consistent experience.
+    </background>
+    <relevant-files>
+      <file>tests/e2e/playwright.config.ts (modify)</file>
+      <file>tests/e2e/FileViewer/*.spec.ts (run)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Edge is primary target - must work</constraint>
+    <constraint source="project">Chrome and Firefox are secondary - document issues</constraint>
+    <constraint source="project">Tests must run in CI environment</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-fileviewer-enhancements-1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Playwright Projects" location="playwright.config.ts">
+        Configure multiple projects for different browsers using projects array.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Update playwright.config.ts with browser projects</step>
+    <step order="2">Add Edge project (channel: 'msedge')</step>
+    <step order="3">Add Chrome project (devices['Desktop Chrome'])</step>
+    <step order="4">Add Firefox project (devices['Desktop Firefox'])</step>
+    <step order="5">Run tests on Edge: npx playwright test --project=edge</step>
+    <step order="6">Run tests on Chrome: npx playwright test --project=chromium</step>
+    <step order="7">Run tests on Firefox: npx playwright test --project=firefox</step>
+    <step order="8">Document any browser-specific test failures</step>
+    <step order="9">Create browser compatibility matrix</step>
+    <step order="10">Add test.skip() for known browser limitations</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status from 🔲 to ✅</step>
+    <step order="12">Document any implementation deviations or decisions in projects/sdap-fileviewer-enhancements-1/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="playwright">Run tests with --project flag</tool>
+    <tool name="terminal">npx playwright test --project=edge</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">tests/e2e/playwright.config.ts</output>
+    <output type="docs">projects/sdap-fileviewer-enhancements-1/notes/browser-compatibility.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Playwright config includes Edge, Chrome, and Firefox projects.
+    </criterion>
+    <criterion testable="true">
+      All tests pass on Edge (primary browser).
+    </criterion>
+    <criterion testable="true">
+      Tests pass on Chrome (or failures documented).
+    </criterion>
+    <criterion testable="true">
+      Tests pass on Firefox (or failures documented).
+    </criterion>
+    <criterion testable="true">
+      Browser compatibility matrix created.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference spec.md Section 3 for browser requirements.
+    
+    Playwright config:
+    export default defineConfig({
+        projects: [
+            {
+                name: 'edge',
+                use: { channel: 'msedge' },
+            },
+            {
+                name: 'chromium',
+                use: { ...devices['Desktop Chrome'] },
+            },
+            {
+                name: 'firefox',
+                use: { ...devices['Desktop Firefox'] },
+            },
+        ],
+    });
+    
+    Browser compatibility matrix format:
+    | Feature | Edge | Chrome | Firefox |
+    |---------|------|--------|---------|
+    | Loading state | ✅ | ✅ | ✅ |
+    | Preview iframe | ✅ | ✅ | ✅ |
+    | Edit button | ✅ | ✅ | ✅ |
+    | Protocol handler | ✅ | ✅ | ⚠️ May show dialog |
+    | Accessibility | ✅ | ✅ | ✅ |
+    
+    Firefox protocol handler notes:
+    - May show "Open with" dialog
+    - User must have registered handler
+    - Consider documenting for users
+  </notes>
+</task>

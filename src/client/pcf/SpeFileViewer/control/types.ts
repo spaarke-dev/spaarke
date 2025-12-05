@@ -4,6 +4,27 @@
  */
 
 /**
+ * PCF Control state machine
+ *
+ * Tracks component lifecycle from initialization through ready/error states.
+ * Used by index.ts to manage UI feedback before React component renders.
+ *
+ * Transitions:
+ * - init() → Loading (immediately, within 200ms)
+ * - Loading → Ready (after auth + token acquisition complete)
+ * - Loading → Error (if init fails)
+ * - Error → Loading (on retry)
+ */
+export enum FileViewerState {
+    /** Initial state: authenticating, acquiring token */
+    Loading = "loading",
+    /** Ready state: React component can render */
+    Ready = "ready",
+    /** Error state: initialization failed */
+    Error = "error"
+}
+
+/**
  * Response from BFF /api/documents/{id}/preview-url endpoint
  */
 export interface FilePreviewResponse {
@@ -90,6 +111,46 @@ export interface OfficeUrlResponse {
 }
 
 /**
+ * Response from BFF /api/documents/{id}/open-links endpoint
+ *
+ * Returns URLs for opening the document in different modes:
+ * - desktopUrl: Protocol URL for desktop Office apps (ms-word:, ms-excel:, ms-powerpoint:)
+ * - webUrl: SharePoint web URL for browser access
+ */
+export interface OpenLinksResponse {
+    /**
+     * Desktop protocol URL for launching native Office app
+     *
+     * Format: ms-word:ofe|u|{encoded-webUrl}
+     * Null if file type is not supported for desktop editing.
+     *
+     * Supported: .docx, .xlsx, .pptx (and legacy .doc, .xls, .ppt)
+     */
+    desktopUrl: string | null;
+
+    /**
+     * SharePoint web URL for the document
+     *
+     * Can be used for browser-based access or as fallback.
+     */
+    webUrl: string;
+
+    /**
+     * MIME type of the document
+     *
+     * Example: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+     */
+    mimeType: string;
+
+    /**
+     * Document file name
+     *
+     * Example: "Report.docx"
+     */
+    fileName: string;
+}
+
+/**
  * Error response from BFF API (RFC 7807 Problem Details)
  *
  * Supports stable error codes in extensions for precise error handling.
@@ -122,16 +183,38 @@ export interface BffErrorResponse {
 
 /**
  * Component state for FilePreview React component
+ *
+ * Preview-only mode (embedded editor removed per Task 013).
+ * Desktop editing is handled via "Open in Desktop" button (Task 014).
  */
 export interface FilePreviewState {
     /** SharePoint preview URL (embed.aspx with nb=true) */
     previewUrl: string | null;
 
-    /** Office Online editor URL (webUrl from Graph API) */
-    officeUrl: string | null;
-
-    /** Loading state for async operations */
+    /** Loading state for API fetch */
     isLoading: boolean;
+
+    /**
+     * Loading state for iframe content
+     *
+     * True while waiting for iframe onload event.
+     * Used to keep spinner visible until content actually displays.
+     */
+    isIframeLoading: boolean;
+
+    /**
+     * Loading state for Open in Desktop button
+     *
+     * True while calling /open-links API to get desktop URL.
+     */
+    isEditLoading: boolean;
+
+    /**
+     * Loading state for Open in Web button
+     *
+     * True while calling /open-links API to get web URL.
+     */
+    isWebLoading: boolean;
 
     /** Error message to display to user */
     error: string | null;
@@ -142,21 +225,6 @@ export interface FilePreviewState {
         fileExtension?: string;
         size?: number;
     } | null;
-
-    /**
-     * Current display mode
-     *
-     * 'preview': Read-only preview mode (default)
-     * 'editor': Office Online editor mode
-     */
-    mode: 'preview' | 'editor';
-
-    /**
-     * Whether to show read-only permission dialog
-     *
-     * Set to true when user opens editor but lacks edit permissions.
-     */
-    showReadOnlyDialog: boolean;
 }
 
 /**

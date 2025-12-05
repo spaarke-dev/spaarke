@@ -1,5 +1,20 @@
 namespace Spe.Bff.Api.Models;
 
+/// <summary>
+/// Response for /api/documents/{documentId}/open-links endpoint.
+/// Contains URLs for opening documents in desktop Office applications and web.
+/// </summary>
+public record OpenLinksResponse(
+    /// <summary>Desktop protocol URL (e.g., "ms-word:ofe|u|...") for opening in Office desktop app.</summary>
+    string? DesktopUrl,
+    /// <summary>SharePoint Embedded web URL for the file.</summary>
+    string WebUrl,
+    /// <summary>MIME type of the document.</summary>
+    string MimeType,
+    /// <summary>File name of the document.</summary>
+    string FileName
+);
+
 public record UpdateFileRequest(
     string? Name = null,
     string? ParentReferenceId = null

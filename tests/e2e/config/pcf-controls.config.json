@@ -7,6 +7,14 @@
       "supportedEntities": ["account", "contact", "sprk_document"],
       "requiredFeatures": ["create", "read", "update", "delete"],
       "testDataFactory": "createUniversalDatasetTestData"
+    },
+    "SpeFileViewer": {
+      "namespace": "Spaarke.UI.Components",
+      "controlName": "SpeFileViewer",
+      "selector": "[data-control-name='spaarke_SpeFileViewer']",
+      "supportedEntities": ["sprk_document"],
+      "requiredFeatures": ["read"],
+      "testDataFactory": "createSpeFileViewerTestData"
     }
   }
 }

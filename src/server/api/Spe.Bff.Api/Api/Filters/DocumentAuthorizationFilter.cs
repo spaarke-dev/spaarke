@@ -5,6 +5,30 @@ using Spe.Bff.Api.Infrastructure.Errors;
 
 namespace Spe.Bff.Api.Api.Filters;
 
+/// <summary>
+/// Extension methods for adding DocumentAuthorizationFilter to endpoints.
+/// </summary>
+public static class DocumentAuthorizationFilterExtensions
+{
+    /// <summary>
+    /// Adds document authorization to an endpoint with the specified operation.
+    /// </summary>
+    /// <param name="builder">The endpoint convention builder.</param>
+    /// <param name="operation">The operation being authorized (e.g., "read", "write", "delete").</param>
+    /// <returns>The builder for chaining.</returns>
+    public static TBuilder AddDocumentAuthorizationFilter<TBuilder>(
+        this TBuilder builder,
+        string operation) where TBuilder : IEndpointConventionBuilder
+    {
+        return builder.AddEndpointFilter(async (context, next) =>
+        {
+            var authService = context.HttpContext.RequestServices.GetRequiredService<AuthorizationService>();
+            var filter = new DocumentAuthorizationFilter(authService, operation);
+            return await filter.InvokeAsync(context, next);
+        });
+    }
+}
+
 public class DocumentAuthorizationFilter : IEndpointFilter
 {
     private readonly AuthorizationService _authorizationService;

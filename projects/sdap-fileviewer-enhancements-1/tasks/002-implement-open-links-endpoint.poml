@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="sdap-fileviewer-enhancements-1">
+  <metadata>
+    <title>Implement /open-links Endpoint</title>
+    <phase>1: BFF Endpoint Development</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>003, 004, 014, 015</blocks>
+  </metadata>
+
+  <prompt>
+    Implement a GET /api/open-links endpoint in the Spe.Bff.Api that accepts a driveItemId, 
+    retrieves the document's web URL and MIME type from Microsoft Graph, and returns the 
+    desktop protocol URL using the DesktopUrlBuilder utility. Follow ADR-001 Minimal API patterns.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs and Microsoft Graph SDK.
+    Follow ADRs strictly. Prefer minimal abstractions per ADR-010.
+  </role>
+
+  <goal>
+    A working GET /api/open-links?driveItemId={id} endpoint that returns JSON with the 
+    desktop protocol URL, properly authenticated and following Minimal API patterns.
+  </goal>
+
+  <context>
+    <background>
+      The FileViewer PCF needs to get the desktop protocol URL (ms-word:, etc.) for a document
+      so it can launch the native Office application. The BFF is the appropriate place to call
+      Microsoft Graph and construct the URL, keeping the PCF thin.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Spe.Bff.Api/Program.cs (modify)</file>
+      <file>src/shared/Spaarke.SharePointEmbedded/Utilities/DesktopUrlBuilder.cs (use)</file>
+      <file>src/shared/Spaarke.SharePointEmbedded/SpeFileStore.cs (reference)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API pattern - no controllers</constraint>
+    <constraint source="ADR-008">Authentication handled by endpoint filters (added in task 003)</constraint>
+    <constraint source="ADR-010">Inject only what's needed - prefer thin service layer</constraint>
+    <constraint source="project">Must return 404 if driveItemId not found</constraint>
+    <constraint source="project">Must return 400 if driveItemId parameter missing</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>docs/adr/ADR-008-authorization-endpoint-filters.md</file>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>projects/sdap-fileviewer-enhancements-1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Minimal API endpoint" location="src/server/api/Spe.Bff.Api/Program.cs">
+        app.MapGet("/api/endpoint", async (params, services) => { ... })
+           .RequireAuthorization()
+           .WithTags("TagName");
+      </pattern>
+      <pattern name="Graph DriveItem lookup" location="SpeFileStore.cs">
+        Use GraphServiceClient to get DriveItem by ID, extract webUrl and file.mimeType
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing endpoint patterns in Program.cs</step>
+    <step order="2">Create response DTO record: OpenLinksResponse { DesktopUrl, WebUrl, MimeType }</step>
+    <step order="3">Add GET /api/open-links endpoint with driveItemId query parameter</step>
+    <step order="4">Add parameter validation - return 400 if driveItemId is null/empty</step>
+    <step order="5">Inject ISpeFileStore or GraphServiceClient to retrieve DriveItem</step>
+    <step order="6">Call Graph API to get DriveItem by ID</step>
+    <step order="7">Extract webUrl and file.mimeType from DriveItem response</step>
+    <step order="8">Call DesktopUrlBuilder.FromMime(webUrl, mimeType)</step>
+    <step order="9">Return OpenLinksResponse with all URLs</step>
+    <step order="10">Add error handling - return 404 if item not found</step>
+    <step order="11">Add .RequireAuthorization() to endpoint</step>
+    <step order="12">Add .WithTags("OpenLinks") for Swagger grouping</step>
+    <step order="13">Test endpoint manually with valid driveItemId</step>
+    <step order="14">Update TASK-INDEX.md: change this task's status from 🔲 to ✅</step>
+    <step order="15">Document any implementation deviations or decisions in projects/sdap-fileviewer-enhancements-1/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and run API (dotnet build, dotnet run)</tool>
+    <tool name="terminal">Test endpoint with curl or Invoke-RestMethod</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Spe.Bff.Api/Program.cs</output>
+    <output type="code">src/server/api/Spe.Bff.Api/Models/OpenLinksResponse.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      GET /api/open-links?driveItemId={valid-id} returns 200 with JSON containing desktopUrl.
+    </criterion>
+    <criterion testable="true">
+      GET /api/open-links without driveItemId returns 400 Bad Request.
+    </criterion>
+    <criterion testable="true">
+      GET /api/open-links?driveItemId={invalid-id} returns 404 Not Found.
+    </criterion>
+    <criterion testable="true">
+      Endpoint requires authentication (returns 401 without token).
+    </criterion>
+    <criterion testable="true">
+      Response includes desktopUrl, webUrl, and mimeType fields.
+    </criterion>
+    <criterion testable="true">
+      For Word documents, desktopUrl starts with "ms-word:ofe|u|".
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference spec.md Section 5.1 for endpoint specification.
+    
+    Response DTO structure:
+    public record OpenLinksResponse(
+        string? DesktopUrl,
+        string WebUrl,
+        string MimeType
+    );
+    
+    Graph API call pattern:
+    var driveItem = await graphClient.Drives["{driveId}"]
+        .Items[driveItemId]
+        .GetAsync();
+    
+    Note: May need to determine driveId from context or pass it as parameter.
+    Check how other endpoints handle this.
+  </notes>
+</task>

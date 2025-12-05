@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="sdap-fileviewer-enhancements-1">
+  <metadata>
+    <title>Add /ping Warm-up Endpoint</title>
+    <phase>3: Performance Enhancements</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>033</blocks>
+  </metadata>
+
+  <prompt>
+    Add a lightweight /ping endpoint to the BFF API that can be used by external warm-up
+    agents to keep the app initialized. The endpoint should be unauthenticated, fast, and
+    optionally warm up key services like the Graph client.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs and health endpoints.
+    Follow ADRs strictly. Keep health endpoints simple and fast.
+  </role>
+
+  <goal>
+    A /ping (and optionally /health) endpoint that responds quickly, allows unauthenticated
+    access, and can be used by monitoring/warm-up agents.
+  </goal>
+
+  <context>
+    <background>
+      Even with Always On, it's useful to have a lightweight endpoint for health checks
+      and external warm-up agents. This endpoint can also be configured as the Azure App
+      Service health check endpoint for automatic monitoring.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Spe.Bff.Api/Program.cs (modify)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API pattern</constraint>
+    <constraint source="project">Must be unauthenticated (warm-up agents can't auth)</constraint>
+    <constraint source="project">Must respond in under 100ms</constraint>
+    <constraint source="project">Must not expose sensitive information</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>projects/sdap-fileviewer-enhancements-1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Health Endpoint" location="ASP.NET Core best practices">
+        app.MapGet("/ping", () => Results.Ok("pong")).AllowAnonymous();
+        app.MapGet("/health", () => Results.Ok(new { status = "healthy" })).AllowAnonymous();
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add /ping endpoint to Program.cs</step>
+    <step order="2">Return simple "pong" response</step>
+    <step order="3">Add .AllowAnonymous() to skip authentication</step>
+    <step order="4">Add .WithTags("Health") for Swagger grouping</step>
+    <step order="5">Optionally add /health endpoint with status object</step>
+    <step order="6">Optionally add /warmup endpoint that touches Graph client</step>
+    <step order="7">Test endpoint responds without authentication</step>
+    <step order="8">Verify response time is under 100ms</step>
+    <step order="9">Document endpoint for external warm-up agent setup</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status from 🔲 to ✅</step>
+    <step order="11">Document any implementation deviations or decisions in projects/sdap-fileviewer-enhancements-1/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and run API</tool>
+    <tool name="terminal">Test with curl or Invoke-RestMethod</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Spe.Bff.Api/Program.cs</output>
+    <output type="docs">projects/sdap-fileviewer-enhancements-1/notes/warmup-setup.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      GET /ping returns 200 OK with "pong" body.
+    </criterion>
+    <criterion testable="true">
+      /ping endpoint does not require authentication.
+    </criterion>
+    <criterion testable="true">
+      Response time is under 100ms.
+    </criterion>
+    <criterion testable="true">
+      No sensitive information exposed in response.
+    </criterion>
+    <criterion testable="true">
+      Endpoint appears in Swagger under Health tag.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference spec.md Section 7.3.1 for warm-up requirements.
+    
+    Implementation:
+    // Simple ping
+    app.MapGet("/ping", () => Results.Ok("pong"))
+        .AllowAnonymous()
+        .WithTags("Health")
+        .WithDescription("Lightweight health check for warm-up agents");
+    
+    // Richer health check
+    app.MapGet("/health", () => Results.Ok(new { 
+        status = "healthy",
+        timestamp = DateTime.UtcNow
+    }))
+        .AllowAnonymous()
+        .WithTags("Health");
+    
+    // Optional warm-up that touches DI services
+    app.MapGet("/warmup", async (SpeFileStore store) => {
+        // Touch services to initialize them
+        await Task.CompletedTask;
+        return Results.Ok("warm");
+    })
+        .AllowAnonymous()
+        .WithTags("Health");
+    
+    External warm-up options:
+    - Azure Logic App on timer (every 5 min)
+    - Azure Function with timer trigger
+    - UptimeRobot or similar service
+    - Azure App Service health check config
+  </notes>
+</task>

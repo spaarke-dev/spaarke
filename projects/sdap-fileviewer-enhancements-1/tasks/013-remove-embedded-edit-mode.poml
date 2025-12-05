@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="sdap-fileviewer-enhancements-1">
+  <metadata>
+    <title>Remove Embedded Edit Mode</title>
+    <phase>2: FileViewer PCF Updates</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+  </metadata>
+
+  <prompt>
+    Remove the embedded edit mode functionality from the FileViewer PCF. Currently, clicking
+    Edit loads the document in edit mode within the iframe, which is slow and confusing.
+    This will be replaced by "Open in Desktop" functionality in task 014.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in TypeScript refactoring and code cleanup.
+    Follow ADRs strictly. Remove code cleanly without breaking existing functionality.
+  </role>
+
+  <goal>
+    FileViewer PCF with embedded edit mode removed, leaving only preview (read-only) mode
+    for the iframe. Edit button UI temporarily removed or disabled.
+  </goal>
+
+  <context>
+    <background>
+      The current embedded edit mode has poor UX - it's slow to load, confusing to users,
+      and competes with Dataverse auto-save. Removing it simplifies the component and
+      prepares for the new "Open in Desktop" functionality.
+    </background>
+    <relevant-files>
+      <file>power-platform/pcf/FileViewer/index.ts (modify)</file>
+      <file>power-platform/pcf/FileViewer/css/FileViewer.css (modify if needed)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Must not break preview (read-only) functionality</constraint>
+    <constraint source="project">Remove code cleanly - no commented-out code left behind</constraint>
+    <constraint source="project">If Edit button exists, either remove or disable temporarily</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-fileviewer-enhancements-1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Code Removal" location="best practices">
+        Remove completely, don't comment out. Use git history if needed later.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review current edit mode implementation in index.ts</step>
+    <step order="2">Identify all edit mode related code (methods, event handlers, state)</step>
+    <step order="3">Remove edit mode state variables and tracking</step>
+    <step order="4">Remove edit mode toggle functionality</step>
+    <step order="5">Remove embedded edit URL construction (if separate from preview URL)</step>
+    <step order="6">Remove or disable Edit button in UI (will be replaced in task 014)</step>
+    <step order="7">Keep preview URL construction intact</step>
+    <step order="8">Clean up any orphaned CSS for edit mode</step>
+    <step order="9">Build and verify no TypeScript errors</step>
+    <step order="10">Test that preview mode still works correctly</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status from 🔲 to ✅</step>
+    <step order="12">Document any implementation deviations or decisions in projects/sdap-fileviewer-enhancements-1/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF (npm run build)</tool>
+    <tool name="pac">Test PCF locally</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">power-platform/pcf/FileViewer/index.ts</output>
+    <output type="code">power-platform/pcf/FileViewer/css/FileViewer.css</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      No embedded edit mode code remains in index.ts.
+    </criterion>
+    <criterion testable="true">
+      Preview (read-only) mode continues to work.
+    </criterion>
+    <criterion testable="true">
+      No commented-out code left in the file.
+    </criterion>
+    <criterion testable="true">
+      Edit button is removed or clearly disabled.
+    </criterion>
+    <criterion testable="true">
+      npm run build succeeds without errors.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference spec.md Section 4 for removal justification.
+    
+    Things to look for and remove:
+    - isEditMode or editMode state variable
+    - toggleEditMode() or similar method
+    - Edit button click handler that switches to edit URL
+    - Edit URL construction with action=edit parameter
+    - CSS for edit mode indicator/state
+    
+    Things to KEEP:
+    - Preview URL construction
+    - iframe rendering for preview
+    - Any toolbar/header that will hold new Edit button
+    
+    This task intentionally leaves a gap where the Edit button was.
+    Task 014 will add the new "Open in Desktop" button.
+  </notes>
+</task>

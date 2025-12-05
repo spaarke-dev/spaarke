@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="sdap-fileviewer-enhancements-1">
+  <metadata>
+    <title>Implement Loading State Machine</title>
+    <phase>2: FileViewer PCF Updates</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>011, 012</blocks>
+  </metadata>
+
+  <prompt>
+    Implement a state machine in the FileViewer PCF to manage loading states (Loading, Ready, Error).
+    The state machine must transition immediately to Loading on init() and track the preview
+    fetch lifecycle. This enables proper UX feedback while content loads.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in TypeScript and PCF component development.
+    Follow ADRs strictly. Prefer simple state management over complex frameworks.
+  </role>
+
+  <goal>
+    A FileViewerState enum and state management logic that tracks component lifecycle,
+    enabling the UI to show appropriate loading indicators.
+  </goal>
+
+  <context>
+    <background>
+      Users currently see nothing while the FileViewer loads, leading to confusion. By
+      implementing an explicit state machine, we can show a loading indicator immediately
+      on init() and transition to Ready only when content is displayed.
+    </background>
+    <relevant-files>
+      <file>power-platform/pcf/FileViewer/index.ts (modify)</file>
+      <file>power-platform/pcf/FileViewer/types.ts (create or modify)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">PCF preferred over web resources - keep logic in PCF</constraint>
+    <constraint source="project">State must be set to Loading within 200ms of init()</constraint>
+    <constraint source="project">No external state management libraries - use simple enum/variable</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-006-prefer-pcf-over-webresources.md</file>
+      <file>projects/sdap-fileviewer-enhancements-1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="State Machine Pattern" location="spec.md Section 6">
+        enum FileViewerState { Loading, Ready, Error }
+        Transitions: init() -> Loading -> Ready (on iframe load) or Error (on failure)
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review current FileViewer index.ts structure</step>
+    <step order="2">Create FileViewerState enum: Loading, Ready, Error</step>
+    <step order="3">Add private _state property to component class</step>
+    <step order="4">Set state to Loading in init() method (immediately)</step>
+    <step order="5">Add transitionTo(newState) method for state changes</step>
+    <step order="6">Add getState() method for UI to query current state</step>
+    <step order="7">Ensure state changes trigger component re-render</step>
+    <step order="8">Add logging for state transitions (for debugging)</step>
+    <step order="9">Test state is Loading immediately after init()</step>
+    <step order="10">Verify state management doesn't break existing functionality</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status from 🔲 to ✅</step>
+    <step order="12">Document any implementation deviations or decisions in projects/sdap-fileviewer-enhancements-1/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF (npm run build)</tool>
+    <tool name="pac">Test PCF locally (pac pcf push)</tool>
+    <tool name="terminal">Run TypeScript compiler (tsc)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">power-platform/pcf/FileViewer/index.ts</output>
+    <output type="code">power-platform/pcf/FileViewer/types.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      FileViewerState enum exists with values: Loading, Ready, Error.
+    </criterion>
+    <criterion testable="true">
+      Component state is set to Loading within init() method.
+    </criterion>
+    <criterion testable="true">
+      transitionTo() method exists and updates internal state.
+    </criterion>
+    <criterion testable="true">
+      State changes trigger updateView() to re-render.
+    </criterion>
+    <criterion testable="true">
+      npm run build succeeds without TypeScript errors.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference spec.md Section 6 for state machine specification.
+    
+    State machine definition from spec:
+    - Loading: Initial state, show spinner
+    - Ready: Content loaded, show preview
+    - Error: Fetch failed, show retry button
+    
+    Implementation pattern:
+    enum FileViewerState {
+        Loading = "loading",
+        Ready = "ready", 
+        Error = "error"
+    }
+    
+    private _state: FileViewerState = FileViewerState.Loading;
+    
+    private transitionTo(newState: FileViewerState): void {
+        console.log(`FileViewer: ${this._state} -> ${newState}`);
+        this._state = newState;
+        this._notifyOutputChanged?.();
+    }
+  </notes>
+</task>

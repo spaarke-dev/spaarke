@@ -25,15 +25,27 @@ public class PipelineHealthTests : IClassFixture<CustomWebAppFactory>
     }
 
     [Fact]
-    public async Task Ping_Returns_Ok_With_Service_Info()
+    public async Task Ping_Returns_Pong()
     {
+        // Task 021: /ping returns simple "pong" response for warm-up agents
         var response = await _client.GetAsync("/ping");
         response.StatusCode.Should().Be(System.Net.HttpStatusCode.OK);
 
         var content = await response.Content.ReadAsStringAsync();
-        content.Should().Contain("SPE BFF API");
-        content.Should().Contain("ok");
-        content.Should().Contain("traceId");
+        content.Should().Be("pong");
+    }
+
+    [Fact]
+    public async Task Status_Returns_Service_Metadata()
+    {
+        // Task 021: /status returns service metadata JSON
+        var response = await _client.GetAsync("/status");
+        response.StatusCode.Should().Be(System.Net.HttpStatusCode.OK);
+
+        var content = await response.Content.ReadAsStringAsync();
+        content.Should().Contain("Spe.Bff.Api");
+        content.Should().Contain("1.0.0");
+        response.Content.Headers.ContentType!.MediaType.Should().Be("application/json");
     }
 
     [Fact]
