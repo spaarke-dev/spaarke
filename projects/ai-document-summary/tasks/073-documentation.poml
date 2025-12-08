@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="073" project="ai-document-summary">
+  <metadata>
+    <title>Documentation</title>
+    <phase>8: Production Hardening</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>all</dependencies>
+    <blocks>090</blocks>
+  </metadata>
+
+  <prompt>
+    Update project README with feature description, create API documentation,
+    and write troubleshooting guide for common issues.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in technical writing and documentation.
+  </role>
+
+  <goal>
+    Complete documentation for the AI Document Summary feature including API reference,
+    configuration guide, and troubleshooting steps.
+  </goal>
+
+  <context>
+    <background>
+      Documentation is essential for maintenance and onboarding.
+      API docs help consumers, troubleshooting guides help support.
+    </background>
+    <relevant-files>
+      <file>projects/ai-document-summary/README.md</file>
+      <file>docs/guides/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Follow existing documentation patterns</constraint>
+    <constraint source="project">Include code examples for API usage</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Update projects/ai-document-summary/README.md with complete feature description</step>
+    <step order="2">Document all configuration options in AiOptions</step>
+    <step order="3">Create API documentation for streaming endpoint</step>
+    <step order="4">Create API documentation for enqueue endpoints</step>
+    <step order="5">Document SSE response format with examples</step>
+    <step order="6">Create troubleshooting guide for common issues</step>
+    <step order="7">Document token usage and cost estimation</step>
+    <step order="8">Add architecture diagram</step>
+    <step order="9">Review and polish all documentation</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">For any verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-document-summary/README.md (updated)</output>
+    <output type="docs">docs/guides/ai-document-summary.md</output>
+    <output type="docs">docs/guides/ai-troubleshooting.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given README, when read, then feature is fully described with examples.</criterion>
+    <criterion testable="true">Given API docs, when read, then all endpoints are documented with request/response examples.</criterion>
+    <criterion testable="true">Given troubleshooting guide, when common error encountered, then solution is documented.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Include cost estimates: ~$0.005 per document.
+    Document KeyVault secrets required.
+    Include sequence diagram for streaming flow.
+  </notes>
+</task>

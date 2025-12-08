@@ -1,19 +1,23 @@
 # Spaarke AI Strategy & Architecture
 
-> **Version**: 1.0  
-> **Date**: December 2025  
+> **Version**: 2.0  
+> **Date**: December 4, 2025  
 > **Status**: Draft  
-> **Authors**: Spaarke Engineering
+> **Authors**: Spaarke Engineering  
+> **Updated**: Reflects Microsoft Foundry announcements (Ignite 2025)
 
 ---
 
 ## Executive Summary
 
-Spaarke will build **custom AI capabilities** integrated into the SharePoint Document Access Platform (SDAP) using Azure AI services, Semantic Kernel, and custom RAG pipelines. This strategy is **independent of M365 Copilot and Copilot Studio**, ensuring consistent AI features across both deployment models.
+Spaarke will build **custom AI capabilities** integrated into the SharePoint Document Access Platform (SDAP) using **Microsoft Foundry** services, **Microsoft Agent Framework**, and custom RAG pipelines. This strategy is **independent of M365 Copilot and Copilot Studio**, ensuring consistent AI features across both deployment models.
+
+> **Note (December 2025)**: Azure AI Foundry has been rebranded to **Microsoft Foundry**. Semantic Kernel has evolved into **Microsoft Agent Framework** - a unified SDK combining Semantic Kernel and AutoGen for building AI agents.
 
 **Key Decisions:**
 - Build Spaarke-owned AI Copilots (not M365 Copilot dependent)
-- Use Azure OpenAI + Azure AI Search as primary AI stack
+- Use **Microsoft Foundry** (Azure OpenAI + AI Search + Foundry IQ) as primary AI stack
+- Leverage **Microsoft Agent Framework** for orchestration (successor to Semantic Kernel)
 - Support both Spaarke-hosted and Customer-hosted deployments
 - Design for multi-tenant isolation from day one
 
@@ -23,14 +27,16 @@ Spaarke will build **custom AI capabilities** integrated into the SharePoint Doc
 
 1. [Deployment Models](#1-deployment-models)
 2. [Architecture Overview](#2-architecture-overview)
-3. [Azure Services & Components](#3-azure-services--components)
-4. [Application Components](#4-application-components)
-5. [Use Cases & Solutions](#5-use-cases--solutions)
-6. [Data Flow & Pipelines](#6-data-flow--pipelines)
-7. [Security & Compliance](#7-security--compliance)
-8. [Implementation Roadmap](#8-implementation-roadmap)
-9. [Cost Model](#9-cost-model)
-10. [Future Considerations](#10-future-considerations)
+3. [ADR Alignment](#3-adr-alignment)
+4. [Azure Services & Components](#4-azure-services--components)
+5. [Application Components](#5-application-components)
+6. [Use Cases & Solutions](#6-use-cases--solutions)
+7. [Data Flow & Pipelines](#7-data-flow--pipelines)
+8. [Security & Compliance](#8-security--compliance)
+9. [Implementation Details](#9-implementation-details)
+10. [Implementation Roadmap](#10-implementation-roadmap)
+11. [Cost Model](#11-cost-model)
+12. [Future Considerations](#12-future-considerations)
 
 ---
 
@@ -163,7 +169,21 @@ Spaarke will build **custom AI capabilities** integrated into the SharePoint Doc
 
 ## 2. Architecture Overview
 
-### 2.1 Layered Architecture
+> **Implementation Details**: For detailed code structure, DI patterns, and endpoint implementations, see [SPAARKE-AI-ARCHITECTURE.md](../../ai-knowledge/guides/SPAARKE-AI-ARCHITECTURE.md)
+
+### 2.1 Microsoft Foundry Platform
+
+Microsoft Foundry (formerly Azure AI Foundry) is Microsoft's unified AI platform for building AI apps and agents. Spaarke will leverage the following Foundry components:
+
+| Component | Purpose | Spaarke Usage |
+|-----------|---------|---------------|
+| **Foundry Models** | 11,000+ frontier models, model router | Azure OpenAI GPT-4o/4-Turbo, embeddings |
+| **Foundry IQ** | Dynamic RAG, multi-source grounding | Document retrieval, context enrichment |
+| **Foundry Agent Service** | Hosted agents, multi-agent workflows | Future: autonomous document agents |
+| **Foundry Tools** | MCP tool catalog, API connectors | SPE/Dataverse integrations |
+| **Foundry Control Plane** | Identity, observability, security | Agent governance, monitoring |
+
+### 2.2 Layered Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -179,7 +199,7 @@ Spaarke will build **custom AI capabilities** integrated into the SharePoint Doc
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                                 API LAYER                                   │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│                         BFF API (Spe.Bff.Api)                               │
+│                         BFF API (Sprk.Bff.Api)                              │
 │  ┌──────────────────────────────────────────────────────────────────────┐  │
 │  │  AI Endpoints                                                        │  │
 │  │  • POST /api/ai/chat              - Conversational Q&A               │  │
@@ -197,11 +217,16 @@ Spaarke will build **custom AI capabilities** integrated into the SharePoint Doc
 │                            ORCHESTRATION LAYER                              │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │  ┌──────────────────────────────────────────────────────────────────────┐  │
-│  │                      Semantic Kernel                                 │  │
+│  │                   Microsoft Agent Framework                          │  │
+│  │           (Successor to Semantic Kernel + AutoGen)                   │  │
 │  │  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐    │  │
-│  │  │ Chat       │  │ RAG        │  │ Prompt     │  │ Function   │    │  │
+│  │  │ Chat       │  │ RAG        │  │ Prompt     │  │ Tool       │    │  │
 │  │  │ Completion │  │ Pipeline   │  │ Templates  │  │ Calling    │    │  │
 │  │  └────────────┘  └────────────┘  └────────────┘  └────────────┘    │  │
+│  │  ┌────────────┐  ┌────────────┐  ┌────────────┐                    │  │
+│  │  │ Multi-Agent│  │ AG-UI      │  │ OpenTel    │                    │  │
+│  │  │ Orchestr.  │  │ Protocol   │  │ Tracing    │                    │  │
+│  │  └────────────┘  └────────────┘  └────────────┘                    │  │
 │  └──────────────────────────────────────────────────────────────────────┘  │
 │  ┌──────────────────────────────────────────────────────────────────────┐  │
 │  │                    AI Provider Abstraction                           │  │
@@ -234,11 +259,11 @@ Spaarke will build **custom AI capabilities** integrated into the SharePoint Doc
                                       │
                                       ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                           INFRASTRUCTURE LAYER                              │
+│                      MICROSOFT FOUNDRY LAYER                                │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐               │
-│  │ Azure OpenAI   │  │ Azure AI       │  │ Azure Document │               │
-│  │                │  │ Search         │  │ Intelligence   │               │
+│  │ Foundry Models │  │ Foundry IQ     │  │ Azure Document │               │
+│  │ (Azure OpenAI) │  │ (AI Search)    │  │ Intelligence   │               │
 │  └────────────────┘  └────────────────┘  └────────────────┘               │
 │  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐               │
 │  │ SharePoint     │  │ Dataverse      │  │ Azure Key      │               │
@@ -249,17 +274,149 @@ Spaarke will build **custom AI capabilities** integrated into the SharePoint Doc
 
 ---
 
-## 3. Azure Services & Components
+## 3. ADR Alignment
 
-### 3.1 Core AI Services
+All AI features must comply with existing Spaarke Architecture Decision Records:
+
+| ADR | Requirement | AI Implementation |
+|-----|-------------|-------------------|
+| **ADR-001** | Minimal API + BackgroundService; no Azure Functions | AI endpoints via Minimal API; indexing via `BackgroundService` + Service Bus |
+| **ADR-003** | Lean authorization with UAC and file storage seams | AI access controlled by existing `AuthorizationService`; no new service layers |
+| **ADR-004** | Async job contract and uniform processing | AI indexing uses standard `JobContract` with `JobType: "ai-indexing"` |
+| **ADR-007** | SpeFileStore facade; no Graph SDK leakage | AI services use `SpeFileStore` for document access; no direct Graph calls |
+| **ADR-008** | Endpoint filters for authorization | `AiAuthorizationFilter` for per-resource AI access checks |
+| **ADR-009** | Redis-first caching; no hybrid L1 without proof | Embeddings and search results cached in Redis with appropriate TTLs |
+| **ADR-010** | DI minimalism (≤15 registrations) | ≤3 new AI service registrations: `AiSearchService`, `AiChatService`, `EmbeddingService` |
+
+### 3.1 AI-Specific Caching Strategy (ADR-009)
+
+| Data Type | TTL | Cache Key Pattern | Rationale |
+|-----------|-----|-------------------|----------|
+| Document embeddings | 24 hours | `{customerId}:ai:embed:{docHash}` | Deterministic, expensive to compute |
+| Search results | 5 minutes | `{customerId}:ai:search:{queryHash}` | Balance freshness vs. cost |
+| Document summaries | 1 hour | `{customerId}:ai:summary:{docId}` | Expensive, document rarely changes |
+| Chat context | Request only | N/A (not cached) | Personalized, not cacheable |
+| Metadata extractions | 1 hour | `{customerId}:ai:extract:{docId}` | Expensive, document rarely changes |
+
+### 3.2 AI Job Contract (ADR-004)
+
+```json
+{
+  "JobId": "guid",
+  "JobType": "ai-indexing",
+  "SubjectId": "document-guid",
+  "CorrelationId": "request-guid",
+  "IdempotencyKey": "doc-{docId}-v{version}",
+  "Attempt": 1,
+  "MaxAttempts": 3,
+  "Payload": {
+    "customerId": "customer-guid",
+    "containerId": "spe-container-id",
+    "action": "index|reindex|delete"
+  }
+}
+```
+
+---
+
+## 4. BFF Orchestration Pattern
+
+### 4.1 Single BFF Architecture
+
+AI capabilities are implemented as **extensions to the existing `Sprk.Bff.Api`**, not as a separate microservice. The BFF serves as the **orchestration layer** that coordinates Dataverse, Azure, SPE, and AI services.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              Sprk.Bff.Api                                   │
+│                    "Backend for Frontend - Orchestration Layer"             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                     Unified Access Control (UAC)                    │   │
+│  │                   Entra ID + Dataverse Permissions                  │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                    │                                        │
+│         ┌──────────────────────────┼──────────────────────────┐            │
+│         ▼                          ▼                          ▼            │
+│  ┌─────────────┐           ┌─────────────┐           ┌─────────────┐       │
+│  │     SPE     │           │  Dataverse  │           │   Azure AI  │       │
+│  │  (Graph)    │           │   (CRUD)    │           │  (OpenAI)   │       │
+│  └─────────────┘           └─────────────┘           └─────────────┘       │
+│         │                          │                          │            │
+│         └──────────────────────────┴──────────────────────────┘            │
+│                                    │                                        │
+│                          Orchestrated Operations                            │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │  Example: AI Document Summary                                       │   │
+│  │  1. Authenticate via UAC (Entra + Dataverse permissions)            │   │
+│  │  2. Get file content from SPE via SpeFileStore                      │   │
+│  │  3. Extract text via Document Intelligence                          │   │
+│  │  4. Generate summary via Azure OpenAI                               │   │
+│  │  5. Update sprk_document record in Dataverse                        │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 4.2 Why Single BFF (Not Separate AI Service)
+
+| Factor | Single BFF | Separate AI Service |
+|--------|------------|---------------------|
+| **Auth reuse** | ✅ UAC already wired | ❌ Wire UAC again |
+| **File access** | ✅ SpeFileStore exists | ❌ Duplicate or call BFF |
+| **Deployment** | ✅ One artifact | ❌ Two artifacts |
+| **Latency** | ✅ In-process | ❌ Network hop |
+| **ADR compliance** | ✅ ADR-001 | ⚠️ May conflict |
+
+**When to reconsider**: If AI request volume exceeds 10x SDAP volume, teams separate, or compliance requires isolation.
+
+### 4.3 Tool-Focused Implementation Approach
+
+AI features are built as **focused, self-contained tools** rather than a generic framework. Each tool has specific:
+- Input/output contracts
+- BFF endpoints
+- UI components (if needed)
+- Dataverse fields (if persisted)
+
+**Rationale**: 
+- YAGNI - Don't build abstractions for hypothetical future tools
+- First tool teaches what's actually reusable
+- Faster time-to-value for each feature
+- Shared utilities extracted organically after 2+ tools exist
+
+| Tool | Integration | Output |
+|------|-------------|--------|
+| **Document Summary** | SDAP upload flow | `sprk_filesummary` field |
+| **Translate** (future) | On-demand | New file in SPE |
+| **Draft Response** (future) | On-demand dialog | Text to UI |
+| **Extract Data** (future) | On-demand | JSON fields |
+
+### 4.4 Shared Infrastructure (Available to All Tools)
+
+| Component | Purpose | Location |
+|-----------|---------|----------|
+| `SpeFileStore` | File download from SPE | Existing |
+| `DataverseClient` | Dataverse CRUD | Existing |
+| `OpenAiClient` | Azure OpenAI calls | New (shared) |
+| `TextExtractorService` | Text extraction | New (shared) |
+| Redis cache | Cache extracted text, embeddings | Existing |
+| Service Bus | Background job queue | Existing |
+
+---
+
+## 5. Azure Services & Components
+
+### 4.1 Microsoft Foundry Services
 
 | Service | Purpose | Model 1 | Model 2 |
 |---------|---------|---------|---------|
-| **Azure OpenAI** | LLM for chat, summarization, extraction | Spaarke subscription | Customer subscription |
-| **Azure AI Search** | Vector search, hybrid search, indexes | Spaarke subscription | Customer subscription |
+| **Foundry Models (Azure OpenAI)** | LLM for chat, summarization, extraction | Spaarke subscription | Customer subscription |
+| **Foundry IQ (Azure AI Search)** | Dynamic RAG, vector search, grounding | Spaarke subscription | Customer subscription |
 | **Azure Document Intelligence** | PDF/image text extraction, layout analysis | Spaarke subscription | Customer subscription |
 
-### 3.2 Azure OpenAI Configuration
+### 4.2 Foundry Models Configuration
+
+> **Foundry Models** provides access to 11,000+ models including OpenAI, Anthropic Claude, Mistral, and more. The **Model Router** (GA) can dynamically select the best model per task.
 
 | Deployment | Model | Purpose | TPM (Recommended) |
 |------------|-------|---------|-------------------|
@@ -268,7 +425,24 @@ Spaarke will build **custom AI capabilities** integrated into the SharePoint Doc
 | `gpt-4o-mini` | gpt-4o-mini-2024-07-18 | Classification, simple tasks | 200K |
 | `text-embedding-3-large` | text-embedding-3-large | Document embeddings | 350K |
 
-### 3.3 Azure AI Search Configuration
+**Future Model Options (Available in Foundry):**
+| Model Provider | Models | Consideration |
+|----------------|--------|---------------|
+| **Anthropic** | Claude Sonnet 4.5, Opus 4.1, Haiku 4.5 | Alternative for specific tasks |
+| **Mistral** | Mistral Large 3 | Open-weight, cost-effective |
+| **Cohere** | Command R+, Embed | Specialized embedding/retrieval |
+
+### 4.3 Foundry IQ Configuration
+
+> **Foundry IQ** (Public Preview) reimagines RAG as a dynamic reasoning process. It provides a single grounding API that simplifies orchestration while respecting user permissions and data classifications.
+
+**Key Foundry IQ Features:**
+- Simplified cross-source grounding (no upfront indexing required)
+- Multi-source selection with iterative retrieval
+- Reflection to dynamically improve response quality
+- Foundry Agent Service integration
+
+**Azure AI Search Configuration (Foundry IQ Backend):**
 
 | Component | Configuration |
 |-----------|---------------|
@@ -311,7 +485,7 @@ Spaarke will build **custom AI capabilities** integrated into the SharePoint Doc
 }
 ```
 
-### 3.4 Azure Document Intelligence
+### 4.4 Azure Document Intelligence
 
 | Feature | Usage |
 |---------|-------|
@@ -319,7 +493,41 @@ Spaarke will build **custom AI capabilities** integrated into the SharePoint Doc
 | **Layout API** | Understand document structure (tables, sections) |
 | **Prebuilt Models** | Invoice, receipt, ID extraction (future) |
 
-### 3.5 Supporting Azure Services
+### 4.5 Foundry Tools & MCP Integration
+
+> **Foundry Tools** (Public Preview) enables agents to securely access business systems via Model Context Protocol (MCP).
+
+| Capability | Spaarke Usage |
+|------------|---------------|
+| **MCP Tools Catalog** | Expose SPE/Dataverse APIs as MCP tools |
+| **1,400+ Connectors** | SAP, Salesforce, UiPath integration (future) |
+| **Built-in Tools** | Transcription, translation, document processing |
+| **API Management** | Expose existing APIs as MCP tools |
+
+### 4.6 Foundry Agent Service
+
+> **Foundry Agent Service** provides hosted agents, multi-agent workflows, and memory for building sophisticated AI systems.
+
+| Feature | Status | Spaarke Usage |
+|---------|--------|---------------|
+| **Hosted Agents** | Public Preview | Run Spaarke agents in managed environment |
+| **Multi-Agent Workflows** | Public Preview | Orchestrate document processing agents |
+| **Memory** | Public Preview | Retain context across sessions |
+| **M365 Integration** | Public Preview | Deploy agents to M365 apps (Model 2) |
+
+### 4.7 Foundry Control Plane
+
+> **Foundry Control Plane** (Public Preview) provides unified identity, controls, observability, and security.
+
+| Capability | Description |
+|------------|-------------|
+| **Entra Agent ID** | Durable identity for agents |
+| **Guardrails** | Input/output/tool interaction controls |
+| **Observability** | OpenTelemetry tracing, evaluations, dashboards |
+| **Security** | Defender + Purview integration, risk detection |
+| **Fleet Operations** | Health, cost, performance monitoring |
+
+### 4.8 Supporting Azure Services
 
 | Service | Purpose |
 |---------|---------|
@@ -331,15 +539,32 @@ Spaarke will build **custom AI capabilities** integrated into the SharePoint Doc
 
 ---
 
-## 4. Application Components
+## 5. Application Components
 
-### 4.1 Backend Components (C#/.NET 8)
+### 5.1 Microsoft Agent Framework
+
+> **Microsoft Agent Framework** is the unified SDK from the Semantic Kernel and AutoGen teams. It's the recommended approach for new agentic AI projects.
+
+**Key Features:**
+| Feature | Description |
+|---------|-------------|
+| **Multi-Agent Orchestration** | Coordinate specialized agents |
+| **AG-UI Protocol** | Agent-to-UI communication standard |
+| **DevUI** | Development and debugging interface |
+| **OpenTelemetry** | Built-in observability |
+| **Migration Path** | Guides from Semantic Kernel available |
+
+**Migration Note:** For existing Semantic Kernel projects, Microsoft provides migration guides:
+- [.NET Migration Guide](https://github.com/microsoft/agent-framework/tree/main/dotnet/samples/SemanticKernelMigration)
+- [Python Migration Guide](https://github.com/microsoft/agent-framework/tree/main/python/samples/semantic-kernel-migration)
+
+### 5.2 Backend Components (C#/.NET 8)
 
 | Component | Location | Description |
 |-----------|----------|-------------|
 | **Spaarke.AI** | `src/server/shared/Spaarke.AI/` | Core AI library |
-| **AI Endpoints** | `src/server/api/Spe.Bff.Api/Api/AIEndpoints.cs` | Minimal API endpoints |
-| **AI Services** | `src/server/api/Spe.Bff.Api/Services/AI/` | AI service implementations |
+| **AI Endpoints** | `src/server/api/Sprk.Bff.Api/Api/AIEndpoints.cs` | Minimal API endpoints |
+| **AI Services** | `src/server/api/Sprk.Bff.Api/Services/AI/` | AI service implementations |
 
 **Core Interfaces:**
 ```csharp
@@ -351,7 +576,7 @@ public interface IAIProvider
     IAsyncEnumerable<string> StreamCompleteAsync(string prompt, CompletionOptions options, CancellationToken ct);
 }
 
-// Vector Search
+// Vector Search (Foundry IQ / Azure AI Search)
 public interface IVectorSearchService
 {
     Task<SearchResult[]> SearchAsync(string query, SearchOptions options, CancellationToken ct);
@@ -375,7 +600,7 @@ public interface IChatService
 }
 ```
 
-### 4.2 Frontend Components (TypeScript/React)
+### 5.3 Frontend Components (TypeScript/React)
 
 | Component | Location | Description |
 |-----------|----------|-------------|
@@ -384,7 +609,7 @@ public interface IChatService
 | **AI Insights Panel** | `src/client/pcf/AIInsightsPanel/` | Document insights sidebar |
 | **AI Components** | `src/client/shared/Spaarke.UI.Components/ai/` | Shared AI UI components |
 
-### 4.3 Dataverse Components
+### 5.4 Dataverse Components
 
 | Entity | Purpose |
 |--------|---------|
@@ -394,7 +619,7 @@ public interface IChatService
 | `sprk_AIPromptTemplate` | Custom prompt templates |
 | `sprk_AIUsageLog` | Usage tracking for billing |
 
-### 4.4 Background Workers
+### 5.5 Background Workers
 
 | Worker | Purpose |
 |--------|---------|
@@ -404,9 +629,9 @@ public interface IChatService
 
 ---
 
-## 5. Use Cases & Solutions
+## 6. Use Cases & Solutions
 
-### 5.1 Document Q&A (RAG)
+### 6.1 Document Q&A (RAG)
 
 **Description:** Users ask natural language questions about their documents and receive AI-generated answers with citations.
 
@@ -467,7 +692,7 @@ Always cite your sources using [Document Name, Page X] format.
 
 ---
 
-### 5.2 Semantic Document Search
+### 6.2 Semantic Document Search
 
 **Description:** Users search across documents using natural language, not just keywords.
 
@@ -484,7 +709,7 @@ Always cite your sources using [Document Name, Page X] format.
 
 ---
 
-### 5.3 Document Summarization
+### 6.3 Document Summarization
 
 **Description:** Generate concise summaries of long documents.
 
@@ -502,7 +727,7 @@ Always cite your sources using [Document Name, Page X] format.
 
 ---
 
-### 5.4 Metadata Extraction
+### 6.4 Metadata Extraction
 
 **Description:** Automatically extract structured metadata from documents.
 
@@ -528,7 +753,7 @@ Document Upload → Text Extraction → LLM Extraction → Dataverse Update
 
 ---
 
-### 5.5 Document Classification
+### 6.5 Document Classification
 
 **Description:** Auto-categorize documents based on content.
 
@@ -546,7 +771,7 @@ Document Upload → Text Extraction → LLM Extraction → Dataverse Update
 
 ---
 
-### 5.6 Multi-Document Analysis
+### 6.6 Multi-Document Analysis
 
 **Description:** Compare, contrast, or analyze multiple documents together.
 
@@ -559,7 +784,7 @@ Document Upload → Text Extraction → LLM Extraction → Dataverse Update
 
 ---
 
-### 5.7 Smart Suggestions
+### 6.7 Smart Suggestions
 
 **Description:** Proactive AI suggestions based on context.
 
@@ -571,9 +796,9 @@ Document Upload → Text Extraction → LLM Extraction → Dataverse Update
 
 ---
 
-## 6. Data Flow & Pipelines
+## 7. Data Flow & Pipelines
 
-### 6.1 Document Indexing Pipeline
+### 7.1 Document Indexing Pipeline
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -622,7 +847,7 @@ Document Upload → Text Extraction → LLM Extraction → Dataverse Update
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 6.2 RAG Query Pipeline
+### 7.2 RAG Query Pipeline
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -650,9 +875,9 @@ Document Upload → Text Extraction → LLM Extraction → Dataverse Update
 
 ---
 
-## 7. Security & Compliance
+## 8. Security & Compliance
 
-### 7.1 Data Security
+### 8.1 Data Security
 
 | Concern | Mitigation |
 |---------|------------|
@@ -662,7 +887,7 @@ Document Upload → Text Extraction → LLM Extraction → Dataverse Update
 | **PII handling** | Option to mask PII before LLM processing |
 | **No model training** | Azure OpenAI does not train on customer data |
 
-### 7.2 Access Control
+### 8.2 Access Control
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -703,7 +928,7 @@ Document Upload → Text Extraction → LLM Extraction → Dataverse Update
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 7.3 Audit & Compliance
+### 8.3 Audit & Compliance
 
 | Audit Point | Captured Data |
 |-------------|---------------|
@@ -714,7 +939,100 @@ Document Upload → Text Extraction → LLM Extraction → Dataverse Update
 
 ---
 
-## 8. Implementation Roadmap
+## 9. Implementation Details
+
+> **Full Implementation Guide**: See [SPAARKE-AI-ARCHITECTURE.md](../../ai-knowledge/guides/SPAARKE-AI-ARCHITECTURE.md) for detailed code structure and patterns.
+
+### 9.1 BFF API Configuration
+
+Add to `appsettings.json`:
+
+```json
+{
+  "AiServices": {
+    "OpenAi": {
+      "Endpoint": "${OPENAI_ENDPOINT}",
+      "ApiKey": "@Microsoft.KeyVault(VaultName=${KEY_VAULT_NAME};SecretName=openai-api-key)",
+      "ChatModel": "gpt-4o",
+      "EmbeddingModel": "text-embedding-3-large",
+      "MaxTokensPerRequest": 4000
+    },
+    "AiSearch": {
+      "Endpoint": "${AI_SEARCH_ENDPOINT}",
+      "ApiKey": "@Microsoft.KeyVault(VaultName=${KEY_VAULT_NAME};SecretName=aisearch-admin-key)",
+      "IndexNamePrefix": "",
+      "SemanticConfigName": "default"
+    },
+    "DocIntelligence": {
+      "Endpoint": "${DOC_INTELLIGENCE_ENDPOINT}",
+      "ApiKey": "@Microsoft.KeyVault(VaultName=${KEY_VAULT_NAME};SecretName=docintel-key)"
+    },
+    "Caching": {
+      "EmbeddingTtlMinutes": 1440,
+      "SearchResultTtlSeconds": 300,
+      "SummaryTtlMinutes": 60
+    },
+    "RateLimiting": {
+      "RequestsPerMinute": 100,
+      "TokensPerMinute": 50000
+    }
+  }
+}
+```
+
+### 9.2 Service Bus Queues
+
+| Queue Name | Purpose | Message Type |
+|------------|---------|--------------|
+| `ai-indexing` | Document vectorization | `JobContract` with `JobType: "ai-indexing"` |
+| `document-indexing` | Metadata extraction | `JobContract` with `JobType: "document-indexing"` |
+
+### 9.3 DI Registrations (ADR-010)
+
+```csharp
+// Program.cs - AI Services (3 registrations)
+builder.Services.AddSingleton<AiSearchService>();
+builder.Services.AddSingleton<AiChatService>();
+builder.Services.AddSingleton<EmbeddingService>();
+
+// Job handler (existing pattern)
+builder.Services.AddScoped<IJobHandler, AiIndexingJobHandler>();
+```
+
+### 9.4 Per-Customer Rate Limiting
+
+```csharp
+// Program.cs - Rate limiting for AI endpoints
+builder.Services.AddRateLimiter(options =>
+{
+    options.AddPolicy("ai-per-customer", context =>
+        RateLimitPartition.GetTokenBucketLimiter(
+            context.User.FindFirst("tenant_id")?.Value ?? "anonymous",
+            _ => new TokenBucketRateLimiterOptions
+            {
+                TokenLimit = 100,
+                ReplenishmentPeriod = TimeSpan.FromMinutes(1),
+                TokensPerPeriod = 50
+            }));
+});
+
+// Apply to AI endpoints
+app.MapGroup("/api/ai")
+   .RequireRateLimiting("ai-per-customer");
+```
+
+### 9.5 Azure Resource Naming (Model 1 vs Model 2)
+
+| Resource | Model 1 (Shared) | Model 2 (Customer) |
+|----------|------------------|---------------------|
+| Azure OpenAI | `sprkshared{env}-openai` | `sprk{custId}{env}-openai` |
+| AI Search | `sprkshared{env}-search` | `sprk{custId}{env}-search` |
+| Doc Intelligence | `sprkshared{env}-docintel` | `sprk{custId}{env}-docintel` |
+| Index Name | `{customerId}-documents` | `documents` |
+
+---
+
+## 10. Implementation Roadmap
 
 ### Phase 1: Foundation (Q1)
 
@@ -756,9 +1074,9 @@ Document Upload → Text Extraction → LLM Extraction → Dataverse Update
 
 ---
 
-## 9. Cost Model
+## 11. Cost Model
 
-### 9.1 Azure OpenAI Pricing (Estimated)
+### 11.1 Azure OpenAI Pricing (Estimated)
 
 | Model | Price per 1K tokens | Typical usage |
 |-------|---------------------|---------------|
@@ -773,14 +1091,14 @@ Document Upload → Text Extraction → LLM Extraction → Dataverse Update
 - Output: 500 tokens = $0.015
 - **Total: ~$0.055 per query**
 
-### 9.2 Azure AI Search Pricing
+### 11.2 Azure AI Search Pricing
 
 | SKU | Monthly Cost | Documents | Queries/sec |
 |-----|--------------|-----------|-------------|
 | S1 | ~$250 | 2M chunks | 50 QPS |
 | S2 | ~$1,000 | 10M chunks | 100 QPS |
 
-### 9.3 Model 1 Cost Recovery
+### 11.3 Model 1 Cost Recovery
 
 | Approach | Description |
 |----------|-------------|
@@ -790,32 +1108,61 @@ Document Upload → Text Extraction → LLM Extraction → Dataverse Update
 
 ---
 
-## 10. Future Considerations
+## 12. Future Considerations
 
-### 10.1 M365 Copilot Integration (Model 2 Only)
+### 12.1 M365 Copilot Integration (Model 2 Only)
 
 If customers with M365 Copilot licenses want integration:
 - **Graph Connector**: Index SPE documents to Microsoft Search
 - **Declarative Agent**: Spaarke-specific agent in customer's Copilot
 - **Plugin**: Expose Spaarke AI as Copilot plugin
+- **Agent 365**: Deploy from Foundry Agent Service to M365 (Public Preview)
 
-### 10.2 Advanced Capabilities
+### 12.2 Foundry Agent Service Adoption
+
+| Feature | Timeline | Description |
+|---------|----------|-------------|
+| **Hosted Agents** | 2025 H2 | Move from self-hosted to Foundry-managed agents |
+| **Multi-Agent Workflows** | 2026 | Document review, contract analysis agents |
+| **Memory** | 2026 | Cross-session context for personalization |
+| **Foundry Tools (MCP)** | 2026 | Expose Spaarke APIs via MCP protocol |
+
+### 12.3 Advanced Capabilities
 
 | Capability | Timeline | Description |
 |------------|----------|-------------|
-| **Multimodal** | 2025 H2 | Process images, diagrams in documents |
-| **Agentic workflows** | 2026 | Multi-step reasoning, tool use |
-| **Fine-tuned models** | 2026 | Customer-specific model training |
-| **On-premise option** | 2026+ | Air-gapped deployment |
+| **Multimodal** | 2025 H2 | Process images, diagrams in documents (GPT-4o) |
+| **Agentic workflows** | 2026 | Multi-step reasoning, tool use via Agent Framework |
+| **Model Router** | 2026 | Dynamic model selection per task (cost/quality) |
+| **Foundry Local** | 2026+ | Edge deployment for offline/privacy scenarios |
 
-### 10.3 Technology Watch
+### 12.4 Technology Watch
 
 | Technology | Interest | Notes |
 |------------|----------|-------|
-| **GPT-5** | High | Performance improvements |
-| **Anthropic Claude** | Medium | Alternative provider |
-| **Local models (Llama, Phi)** | Medium | Cost reduction, privacy |
-| **Microsoft Copilot APIs** | High | Future integration |
+| **Microsoft Agent Framework GA** | High | Migrate from Semantic Kernel when stable |
+| **Foundry IQ GA** | High | Simplify RAG implementation |
+| **GPT-5 / o3** | High | Performance improvements |
+| **Anthropic Claude (via Foundry)** | Medium | Alternative for specific tasks |
+| **Mistral Large 3** | Medium | Cost-effective, open-weight |
+| **Foundry Local (Android/iOS)** | Medium | Mobile offline AI |
+| **Model Router** | Medium | Automatic model selection |
+
+### 12.5 Migration Path: Semantic Kernel → Microsoft Agent Framework
+
+Microsoft Agent Framework is the successor to Semantic Kernel. Current guidance:
+
+| Scenario | Recommendation |
+|----------|----------------|
+| **New projects** | Start with Microsoft Agent Framework if can wait for GA |
+| **Existing SK projects** | Continue with SK until Agent Framework reaches GA |
+| **Need SK features** | OK to use SK; migration path will be provided |
+| **Need new Agent Framework features** | Can start with Agent Framework in Preview |
+
+**Support Timeline:**
+- Semantic Kernel will be supported for at least 1 year after Agent Framework GA
+- Critical bugs and security fixes will continue
+- Most new features will be Agent Framework only
 
 ---
 
@@ -832,10 +1179,30 @@ If customers with M365 Copilot licenses want integration:
 
 ## Appendix B: References
 
+### Microsoft Foundry
+- [Microsoft Foundry Portal](https://ai.azure.com/)
+- [Microsoft Foundry Blog Post (Ignite 2025)](https://azure.microsoft.com/en-us/blog/microsoft-foundry-scale-innovation-on-a-modular-interoperable-and-secure-agent-stack/)
+- [Foundry IQ Documentation](https://aka.ms/IgniteFoundryIQ)
+- [Foundry Agent Service Documentation](https://aka.ms/IgniteFoundryAgents)
+- [Foundry Tools Documentation](https://aka.ms/IgniteFoundryTools)
+- [Foundry Control Plane](https://aka.ms/IgniteFoundryControlPlane)
+
+### Microsoft Agent Framework
+- [Microsoft Agent Framework](https://aka.ms/AgentFramework)
+- [Agent Framework Documentation](https://aka.ms/AgentFramework/Docs)
+- [Semantic Kernel Migration (.NET)](https://github.com/microsoft/agent-framework/tree/main/dotnet/samples/SemanticKernelMigration)
+- [Semantic Kernel Migration (Python)](https://github.com/microsoft/agent-framework/tree/main/python/samples/semantic-kernel-migration)
+- [Semantic Kernel Documentation](https://learn.microsoft.com/en-us/semantic-kernel/) (legacy, still supported)
+
+### Azure AI Services
 - [Azure OpenAI Documentation](https://learn.microsoft.com/en-us/azure/ai-services/openai/)
 - [Azure AI Search Documentation](https://learn.microsoft.com/en-us/azure/search/)
-- [Semantic Kernel Documentation](https://learn.microsoft.com/en-us/semantic-kernel/)
 - [Azure Document Intelligence](https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence/)
+
+### Learning Resources
+- [Microsoft Learn: Develop AI Agents on Azure](https://learn.microsoft.com/en-us/training/paths/develop-ai-agents-on-azure/)
+- [AI Agents for Beginners (GitHub)](https://github.com/microsoft/ai-agents-for-beginners)
+- [AI Show Demos](https://aka.ms/AgentFramework/AIShow)
 
 ---
 

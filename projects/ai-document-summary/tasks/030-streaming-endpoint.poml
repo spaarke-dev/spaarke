@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="ai-document-summary">
+  <metadata>
+    <title>Streaming SSE Endpoint</title>
+    <phase>4: API Endpoints</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>052</blocks>
+  </metadata>
+
+  <prompt>
+    Create POST /api/ai/summarize/stream endpoint that returns Server-Sent Events (SSE) with
+    real-time token streaming from OpenAI completion.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs, SSE, and HTTP streaming.
+    Follow ADR-001 for Minimal API patterns and ADR-008 for authorization filters.
+  </role>
+
+  <goal>
+    Streaming endpoint returns SSE format with proper headers, streams tokens in real-time,
+    and handles client disconnection by enqueueing background job.
+  </goal>
+
+  <context>
+    <background>
+      The streaming endpoint enables real-time UI updates as the AI generates the summary.
+      This provides a better user experience than waiting for the full response.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/SummarizeEndpoints.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API endpoint pattern</constraint>
+    <constraint source="ADR-008">Apply authorization via endpoint filter</constraint>
+    <constraint source="project">Response must be Content-Type: text/event-stream</constraint>
+    <constraint source="project">On client disconnect, enqueue background job</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/reference/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>docs/reference/adr/ADR-008-endpoint-filters-for-auth.md</file>
+      <file>projects/ai-document-summary/plan.md</file>
+    </files>
+    <patterns>
+      <pattern name="Minimal API Endpoint" location="src/server/api/Sprk.Bff.Api/Api/">
+        Follow existing endpoint registration pattern
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create src/server/api/Sprk.Bff.Api/Api/Ai/ directory</step>
+    <step order="2">Create SummarizeEndpoints.cs with MapSummarizeEndpoints extension method</step>
+    <step order="3">Implement POST /api/ai/summarize/stream endpoint</step>
+    <step order="4">Set response headers: Content-Type: text/event-stream, Cache-Control: no-cache</step>
+    <step order="5">Parse SummarizeRequest from JSON body</step>
+    <step order="6">Call SummarizeService.SummarizeStreamingAsync</step>
+    <step order="7">Write each chunk as SSE format: "data: {json}\n\n"</step>
+    <step order="8">Flush after each chunk for real-time delivery</step>
+    <step order="9">On client disconnect (OperationCanceledException), enqueue background job</step>
+    <step order="10">Register endpoint in Program.cs</step>
+    <step order="11">Create integration tests with actual HTTP client</step>
+    <step order="12">Run tests and verify all pass</step>
+    <step order="13">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/SummarizeEndpoints.cs</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.Tests/Api/SummarizeEndpointsTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given valid request, when called, then response Content-Type is text/event-stream.</criterion>
+    <criterion testable="true">Given streaming active, when tokens generated, then SSE events are sent in real-time.</criterion>
+    <criterion testable="true">Given final chunk, when done=true, then summary field contains complete text.</criterion>
+    <criterion testable="true">Given client disconnects, when streaming incomplete, then background job is enqueued.</criterion>
+    <criterion testable="true">All integration tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    SSE format: data: {"content": "token", "done": false}\n\n
+    Final event: data: {"content": "", "done": true, "summary": "Full text"}\n\n
+    Use HttpContext.RequestAborted for cancellation detection.
+  </notes>
+</task>

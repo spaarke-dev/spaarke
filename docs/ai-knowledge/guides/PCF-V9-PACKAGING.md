@@ -1,4 +1,9 @@
 # PCF Dataset Component — React/Fluent v9 Best-Practice Review and Fix Plan
+
+> **Related Skill**: `.claude/skills/dataverse-deploy/SKILL.md` - See Scenario 1b for deployment workflow
+>
+> **Last Updated**: December 2025
+
 Date: 2025-10-04
 Scope: This document explains why your current PCF bundle grows past 5 MB, clarifies the correct runtime model for React and Fluent UI in Power Platform, and provides precise code changes and task instructions your AI coding agent (Claude Code) can apply immediately.
 

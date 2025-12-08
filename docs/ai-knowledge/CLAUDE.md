@@ -90,22 +90,29 @@ Step-by-step procedures for specific tasks. Load when performing that task.
 
 | Document | Applies To | Key Content |
 |----------|------------|-------------|
+| `SPAARKE-AI-ARCHITECTURE.md` | AI feature implementation | BFF API extension, services, job handlers, ADR compliance |
 | `SPAARKE-SKILLS-PROCEDURE-GUIDE.md` | Claude Code skills | Skill creation, SKILL.md format, discovery |
 | `HOW-TO-ADD-SDAP-TO-NEW-ENTITY.md` | Adding entities | Entity configuration, PCF binding |
 | `HOW-TO-SETUP-CONTAINERTYPES-AND-CONTAINERS.md` | SPE setup | Container types, registration |
 | `DATAVERSE-AUTHENTICATION-GUIDE.md` | Dataverse auth setup | OAuth configuration, app registration |
-| `PCF-V9-PACKAGING.md` | PCF deployment | Build, package, deploy PCF controls |
+| `PCF-V9-PACKAGING.md` | PCF deployment | Build, package, platform libraries, bundle size |
 | `RIBBON-WORKBENCH-HOW-TO-ADD-BUTTON.md` | Ribbon customization | Adding buttons to Dataverse forms |
+
+> **Skills**: For Dataverse deployment tasks, also load the skill:
+> - PCF/solution deployment → `.claude/skills/dataverse-deploy/SKILL.md`
+> - Ribbon editing → `.claude/skills/ribbon-edit/SKILL.md`
 
 ### Decision Tree: Common Tasks
 
 ```
 What do you need to do?
+├─ Implement AI features → SPAARKE-AI-ARCHITECTURE.md
 ├─ Add SDAP to new entity → HOW-TO-ADD-SDAP-TO-NEW-ENTITY.md
 ├─ Create Claude skill → SPAARKE-SKILLS-PROCEDURE-GUIDE.md
-├─ Deploy PCF control → PCF-V9-PACKAGING.md
+├─ Deploy PCF control → .claude/skills/dataverse-deploy/SKILL.md + PCF-V9-PACKAGING.md
 ├─ Set up SPE containers → HOW-TO-SETUP-CONTAINERTYPES-AND-CONTAINERS.md
-└─ Configure ribbon button → RIBBON-WORKBENCH-HOW-TO-ADD-BUTTON.md
+├─ Configure ribbon button → .claude/skills/ribbon-edit/SKILL.md
+└─ Import/export solutions → .claude/skills/dataverse-deploy/SKILL.md
 ```
 
 ---

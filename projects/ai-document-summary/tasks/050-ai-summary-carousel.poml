@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="ai-document-summary">
+  <metadata>
+    <title>AiSummaryCarousel Component (Multi-File)</title>
+    <phase>6: Frontend Integration</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>052</blocks>
+  </metadata>
+
+  <prompt>
+    Create AiSummaryCarousel React component for displaying AI summaries of multiple uploaded documents
+    with navigation, concurrent streaming, and per-document status tracking.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in React, TypeScript, Fluent UI v9, and PCF controls.
+    Follow ADR-006 for PCF patterns and ADR-012 for shared component library.
+  </role>
+
+  <goal>
+    Carousel component displays 1-10 documents with navigation arrows, concurrent streaming
+    (max 3 at once), and per-document status badges.
+  </goal>
+
+  <context>
+    <background>
+      Users can upload multiple files at once. Each file's summary should be generated concurrently
+      (up to 3 at a time) with visual feedback on which are pending, streaming, complete, or failed.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/UniversalQuickCreate/control/components/AiSummaryCarousel.tsx</file>
+      <file>src/client/pcf/UniversalQuickCreate/control/components/AiSummaryPanel.tsx</file>
+      <file>src/client/pcf/UniversalQuickCreate/control/components/AiSummaryCarousel.styles.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">Use PCF control pattern, not legacy webresources</constraint>
+    <constraint source="ADR-012">Use Fluent UI v9 components from shared library</constraint>
+    <constraint source="project">Max 3 concurrent streams</constraint>
+    <constraint source="project">Support keyboard navigation and screen readers</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/reference/adr/ADR-006-prefer-pcf-over-webresources.md</file>
+      <file>docs/reference/adr/ADR-012-shared-component-library.md</file>
+      <file>projects/ai-document-summary/plan.md</file>
+      <file>src/client/pcf/UniversalQuickCreate/</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent UI Components" location="src/client/pcf/">
+        Use makeStyles for styling, Button/Text/Badge from @fluentui/react-components
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create AiSummaryCarousel.tsx in UniversalQuickCreate/control/components/</step>
+    <step order="2">Define AiSummaryCarouselProps interface with documents array</step>
+    <step order="3">Implement carousel state: currentIndex, documentStatuses map</step>
+    <step order="4">Create navigation UI: [◀] 1 of N [▶] with Button components</step>
+    <step order="5">Implement AiSummaryPanel.tsx for single document display (summary text area)</step>
+    <step order="6">Add status badges: pending, streaming, complete, error, not-supported</step>
+    <step order="7">Implement concurrent stream management (max 3 at once)</step>
+    <step order="8">Add aggregate status display: "2 complete, 1 generating"</step>
+    <step order="9">Create AiSummaryCarousel.styles.ts with makeStyles</step>
+    <step order="10">Add keyboard navigation (arrow keys) and aria labels</step>
+    <step order="11">Write unit tests with React Testing Library</step>
+    <step order="12">Run tests and verify all pass</step>
+    <step order="13">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/React projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/UniversalQuickCreate/control/components/AiSummaryCarousel.tsx</output>
+    <output type="code">src/client/pcf/UniversalQuickCreate/control/components/AiSummaryPanel.tsx</output>
+    <output type="code">src/client/pcf/UniversalQuickCreate/control/components/AiSummaryCarousel.styles.ts</output>
+    <output type="test">src/client/pcf/UniversalQuickCreate/control/components/__tests__/AiSummaryCarousel.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given 3 documents, when rendered, then navigation shows "1 of 3".</criterion>
+    <criterion testable="true">Given navigation click, when right arrow clicked, then shows next document.</criterion>
+    <criterion testable="true">Given 5 pending documents, when streaming starts, then max 3 stream concurrently.</criterion>
+    <criterion testable="true">Given mixed statuses, when rendered, then aggregate status shows correct counts.</criterion>
+    <criterion testable="true">Given keyboard focus, when arrow keys pressed, then navigation works.</criterion>
+    <criterion testable="true">All unit tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use React state to track document statuses map.
+    Consider useReducer for complex state management.
+    Status badge colors: pending=neutral, streaming=informative, complete=success, error=danger.
+  </notes>
+</task>

@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="ai-document-summary">
+  <metadata>
+    <title>SummarizeService Core Implementation</title>
+    <phase>3: Summarization Service</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>001, 010</dependencies>
+    <blocks>021, 030</blocks>
+  </metadata>
+
+  <prompt>
+    Create SummarizeService that orchestrates the complete summarization flow: download file from SPE,
+    extract text, build prompt, stream OpenAI completion, and save summary to Dataverse.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in service orchestration, async streaming, and integration patterns.
+    Follow ADR-007 for SpeFileStore usage and ADR-010 for DI patterns.
+  </role>
+
+  <goal>
+    SummarizeService provides SummarizeStreamingAsync for real-time UI streaming and EnqueueAsync
+    for background processing. Completed summaries are saved to Dataverse.
+  </goal>
+
+  <context>
+    <background>
+      This is the core service that ties together SPE file access, text extraction, and AI completion.
+      It must support streaming for real-time UI updates when user waits, and non-streaming for background jobs.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SummarizeService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/SummarizeRequest.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/SummarizeResponse.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/SummarizeChunk.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-007">Use SpeFileStore for all SPE file operations - no direct Graph SDK usage</constraint>
+    <constraint source="ADR-010">Inject dependencies as concrete types unless interface required</constraint>
+    <constraint source="project">Handle cancellation gracefully at all async points</constraint>
+    <constraint source="project">Use prompt template from plan.md</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/reference/adr/ADR-007-spe-filestore-facade.md</file>
+      <file>docs/reference/adr/ADR-010-di-minimalism.md</file>
+      <file>projects/ai-document-summary/plan.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs</file>
+    </files>
+    <patterns>
+      <pattern name="SpeFileStore" location="src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs">
+        Use DownloadFileAsync to get file stream from SPE
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create SummarizeRequest record with DocumentId, DriveId, ItemId</step>
+    <step order="2">Create SummarizeChunk record with Content, Done, Summary, Error properties</step>
+    <step order="3">Create SummarizeService class with SpeFileStore, TextExtractorService, OpenAiClient, IDataverseClient injection</step>
+    <step order="4">Implement private BuildPromptAsync that fetches file and extracts text</step>
+    <step order="5">Implement SummarizeStreamingAsync returning IAsyncEnumerable&lt;SummarizeChunk&gt;</step>
+    <step order="6">In streaming method: download file, extract text, stream completion, save to Dataverse on completion</step>
+    <step order="7">Implement EnqueueAsync that submits job to Service Bus</step>
+    <step order="8">Add prompt template as const string (from plan.md)</step>
+    <step order="9">Register SummarizeService in DI container</step>
+    <step order="10">Create unit tests with mocked dependencies</step>
+    <step order="11">Run tests and verify all pass</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/SummarizeService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/SummarizeRequest.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/SummarizeChunk.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/SummarizeServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a valid document, when SummarizeStreamingAsync is called, then chunks are yielded.</criterion>
+    <criterion testable="true">Given streaming completes, when final chunk sent, then Done=true and Summary contains full text.</criterion>
+    <criterion testable="true">Given successful summarization, when complete, then Dataverse record is updated with summary.</criterion>
+    <criterion testable="true">Given cancellation token cancelled, when streaming, then operation stops gracefully.</criterion>
+    <criterion testable="true">All unit tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Prompt template from plan.md section 3.1.
+    Consider accumulating streamed chunks to build final summary for Dataverse save.
+    Use IDataverseClient.UpdateAsync to save summary to sprk_document.
+  </notes>
+</task>

@@ -1,0 +1,174 @@
+<!--
+  Theme Menu Ribbon Configuration
+
+  This file contains the RibbonDiffXml for adding a Theme flyout menu to the
+  model-driven app command bar. Import via Ribbon Workbench.
+
+  Prerequisites:
+  - Web Resources must be deployed to Dataverse first:
+    - sprk_ThemeMenu.js (src/client/webresources/js/sprk_ThemeMenu.js)
+    - sprk_ThemeMenu16.svg (src/client/assets/icons/sprk_ThemeMenu16.svg)
+    - sprk_ThemeMenu32.svg (src/client/assets/icons/sprk_ThemeMenu32.svg)
+    - sprk_ThemeAuto16.svg (src/client/assets/icons/sprk_ThemeAuto16.svg)
+    - sprk_ThemeLight16.svg (src/client/assets/icons/sprk_ThemeLight16.svg)
+    - sprk_ThemeDark16.svg (src/client/assets/icons/sprk_ThemeDark16.svg)
+
+  Usage:
+  1. Open XrmToolBox > Ribbon Workbench
+  2. Load the target solution (e.g., SpaarkeCore)
+  3. Select Application Ribbon
+  4. Import this XML via "Import XML" or manually configure using the structure below
+  5. Publish customizations
+
+  See: projects/mda-darkmode-theme/spec.md Section 3.6.1
+-->
+<RibbonDiffXml>
+  <CustomActions>
+    <!-- Theme Flyout Menu in More Commands -->
+    <CustomAction Id="sprk.ThemeMenu.FlyoutAnchor.CustomAction"
+                  Location="Mscrm.GlobalTab.MainTab.More._children"
+                  Sequence="1000">
+      <CommandUIDefinition>
+        <FlyoutAnchor Id="sprk.ThemeMenu.FlyoutAnchor"
+                      Command="sprk.ThemeMenu.FlyoutCommand"
+                      LabelText="$LocLabels:sprk.ThemeMenu.Label"
+                      ToolTipTitle="$LocLabels:sprk.ThemeMenu.TooltipTitle"
+                      ToolTipDescription="$LocLabels:sprk.ThemeMenu.TooltipDesc"
+                      Image16by16="$webresource:sprk_ThemeMenu16.svg"
+                      Image32by32="$webresource:sprk_ThemeMenu32.svg"
+                      PopulateDynamically="false"
+                      PopulateQueryCommand=""
+                      TemplateAlias="o1">
+          <Menu Id="sprk.ThemeMenu.Menu">
+            <MenuSection Id="sprk.ThemeMenu.MenuSection"
+                         Title="$LocLabels:sprk.ThemeMenu.SectionTitle"
+                         Sequence="10">
+              <Controls Id="sprk.ThemeMenu.Controls">
+                <!-- Auto Option -->
+                <Button Id="sprk.ThemeMenu.Auto"
+                        Command="sprk.ThemeMenu.SetAuto"
+                        LabelText="$LocLabels:sprk.ThemeMenu.Auto"
+                        Image16by16="$webresource:sprk_ThemeAuto16.svg"
+                        ToolTipTitle="$LocLabels:sprk.ThemeMenu.Auto"
+                        ToolTipDescription="$LocLabels:sprk.ThemeMenu.AutoDesc"
+                        Sequence="10" />
+                <!-- Light Option -->
+                <Button Id="sprk.ThemeMenu.Light"
+                        Command="sprk.ThemeMenu.SetLight"
+                        LabelText="$LocLabels:sprk.ThemeMenu.Light"
+                        Image16by16="$webresource:sprk_ThemeLight16.svg"
+                        ToolTipTitle="$LocLabels:sprk.ThemeMenu.Light"
+                        ToolTipDescription="$LocLabels:sprk.ThemeMenu.LightDesc"
+                        Sequence="20" />
+                <!-- Dark Option -->
+                <Button Id="sprk.ThemeMenu.Dark"
+                        Command="sprk.ThemeMenu.SetDark"
+                        LabelText="$LocLabels:sprk.ThemeMenu.Dark"
+                        Image16by16="$webresource:sprk_ThemeDark16.svg"
+                        ToolTipTitle="$LocLabels:sprk.ThemeMenu.Dark"
+                        ToolTipDescription="$LocLabels:sprk.ThemeMenu.DarkDesc"
+                        Sequence="30" />
+              </Controls>
+            </MenuSection>
+          </Menu>
+        </FlyoutAnchor>
+      </CommandUIDefinition>
+    </CustomAction>
+  </CustomActions>
+
+  <CommandDefinitions>
+    <!-- Flyout parent command -->
+    <CommandDefinition Id="sprk.ThemeMenu.FlyoutCommand">
+      <EnableRules>
+        <EnableRule Id="sprk.AlwaysEnabled" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions />
+    </CommandDefinition>
+
+    <!-- Set Auto Theme -->
+    <CommandDefinition Id="sprk.ThemeMenu.SetAuto">
+      <EnableRules>
+        <EnableRule Id="sprk.AlwaysEnabled" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_ThemeMenu.js"
+                            FunctionName="Spaarke.Theme.setTheme">
+          <StringParameter Value="auto" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+
+    <!-- Set Light Theme -->
+    <CommandDefinition Id="sprk.ThemeMenu.SetLight">
+      <EnableRules>
+        <EnableRule Id="sprk.AlwaysEnabled" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_ThemeMenu.js"
+                            FunctionName="Spaarke.Theme.setTheme">
+          <StringParameter Value="light" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+
+    <!-- Set Dark Theme -->
+    <CommandDefinition Id="sprk.ThemeMenu.SetDark">
+      <EnableRules>
+        <EnableRule Id="sprk.AlwaysEnabled" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_ThemeMenu.js"
+                            FunctionName="Spaarke.Theme.setTheme">
+          <StringParameter Value="dark" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+  </CommandDefinitions>
+
+  <RuleDefinitions>
+    <EnableRules>
+      <EnableRule Id="sprk.AlwaysEnabled">
+        <CustomRule Library="$webresource:sprk_ThemeMenu.js"
+                    FunctionName="Spaarke.Theme.isEnabled"
+                    Default="true" />
+      </EnableRule>
+    </EnableRules>
+  </RuleDefinitions>
+
+  <LocLabels>
+    <LocLabel Id="sprk.ThemeMenu.Label">
+      <Titles><Title languagecode="1033" description="Dark Mode" /></Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.TooltipTitle">
+      <Titles><Title languagecode="1033" description="Dark Mode" /></Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.TooltipDesc">
+      <Titles><Title languagecode="1033" description="Choose your preferred color theme" /></Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.SectionTitle">
+      <Titles><Title languagecode="1033" description="Color Theme" /></Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Auto">
+      <Titles><Title languagecode="1033" description="Auto (follows system)" /></Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.AutoDesc">
+      <Titles><Title languagecode="1033" description="Uses your operating system's theme preference" /></Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Light">
+      <Titles><Title languagecode="1033" description="Light" /></Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.LightDesc">
+      <Titles><Title languagecode="1033" description="Light background with dark text" /></Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Dark">
+      <Titles><Title languagecode="1033" description="Dark" /></Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.DarkDesc">
+      <Titles><Title languagecode="1033" description="Dark background with light text" /></Titles>
+    </LocLabel>
+  </LocLabels>
+</RibbonDiffXml>

@@ -1,0 +1,194 @@
+<?xml version="1.0" encoding="utf-16"?>
+<RibbonDiffXml xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <CustomActions>
+    <CustomAction Id="sprk.Spaarke.Document.AddMultiple.Button.CustomAction" Location="Mscrm.SubGrid.sprk_document.MainTab.Management.Controls._children" Sequence="5">
+      <CommandUIDefinition>
+        <Button Alt="$LocLabels:Spaarke.Document.AddMultiple.Button.Alt" Command="Spaarke.Document.AddMultiple.Command" Id="Spaarke.Document.AddMultiple.Button" Image32by32="/_imgs/ribbon/DocumentAdd_32.png" Image16by16="/_imgs/ribbon/DocumentAdd_16.png" LabelText="$LocLabels:Spaarke.Document.AddMultiple.Button.LabelText" Sequence="5" TemplateAlias="o1" ToolTipTitle="$LocLabels:Spaarke.Document.AddMultiple.Button.ToolTipTitle" ToolTipDescription="$LocLabels:Spaarke.Document.AddMultiple.Button.ToolTipDescription" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.ThemeMenu.FlyoutAnchor.CustomAction" Location="Mscrm.HomepageGrid.sprk_document.MainTab.Actions.Controls._children" Sequence="0">
+      <CommandUIDefinition>
+        <FlyoutAnchor Alt="$LocLabels:sprk.ThemeMenu.FlyoutAnchor.Alt" Command="sprk.ThemeMenu.FlyoutCommand" Id="sprk.ThemeMenu.FlyoutAnchor" Image16by16="$webresource:sprk_ThemeMenu16.svg" Image32by32="$webresource:sprk_ThemeMenu32.svg" LabelText="$LocLabels:sprk.ThemeMenu.FlyoutAnchor.LabelText" Sequence="0" TemplateAlias="o1" ToolTipTitle="$LocLabels:sprk.ThemeMenu.FlyoutAnchor.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.ThemeMenu.FlyoutAnchor.ToolTipDescription" ModernImage="$webresource:sprk_ThemeMenu32.svg">
+          <Menu Id="sprk.ThemeMenu.FlyoutAnchor.Menu">
+            <MenuSection Id="sprk.ThemeMenu.MenuSection" Title="$LocLabels:sprk.ThemeMenu.MenuSection.Title" Sequence="10" DisplayMode="Menu16">
+              <Controls Id="sprk.ThemeMenu.MenuSection.Controls">
+                <Button Alt="$LocLabels:sprk.ThemeMenu.Auto.Alt" Command="sprk.ThemeMenu.SetAuto" Id="sprk.ThemeMenu.Auto" Image16by16="$webresource:sprk_ThemeAuto16.svg" LabelText="$LocLabels:sprk.ThemeMenu.Auto.LabelText" Sequence="10" ToolTipTitle="$LocLabels:sprk.ThemeMenu.Auto.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.ThemeMenu.Auto.ToolTipDescription" ModernImage="$webresource:sprk_ThemeAuto16.svg" />
+                <Button Alt="$LocLabels:sprk.ThemeMenu.Light.Alt" Command="sprk.ThemeMenu.SetLight" Id="sprk.ThemeMenu.Light" Image16by16="$webresource:sprk_ThemeLight16.svg" LabelText="$LocLabels:sprk.ThemeMenu.Light.LabelText" Sequence="20" ToolTipTitle="$LocLabels:sprk.ThemeMenu.Light.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.ThemeMenu.Light.ToolTipDescription" ModernImage="$webresource:sprk_ThemeLight16.svg" />
+                <Button Alt="$LocLabels:sprk.ThemeMenu.Dark.Alt" Command="sprk.ThemeMenu.SetDark" Id="sprk.ThemeMenu.Dark" Image16by16="$webresource:sprk_ThemeDark16.svg" LabelText="$LocLabels:sprk.ThemeMenu.Dark.LabelText" Sequence="30" ToolTipTitle="$LocLabels:sprk.ThemeMenu.Dark.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.ThemeMenu.Dark.ToolTipDescription" ModernImage="$webresource:sprk_ThemeDark16.svg" />
+              </Controls>
+            </MenuSection>
+          </Menu>
+        </FlyoutAnchor>
+      </CommandUIDefinition>
+    </CustomAction>
+  </CustomActions>
+  <Templates>
+    <RibbonTemplates Id="Mscrm.Templates" />
+  </Templates>
+  <CommandDefinitions>
+    <CommandDefinition Id="Spaarke.Document.AddMultiple.Command">
+      <EnableRules>
+        <EnableRule Id="Spaarke.Document.AddMultiple.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke_AddMultipleDocuments" Library="$webresource:sprk_subgrid_commands">
+          <CrmParameter Value="SelectedControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.ThemeMenu.FlyoutCommand">
+      <EnableRules>
+        <EnableRule Id="sprk.ThemeMenu.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions />
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.ThemeMenu.SetAuto">
+      <EnableRules />
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke.Theme.setTheme" Library="$webresource:sprk_ThemeMenu.js">
+          <StringParameter Value="auto" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.ThemeMenu.SetDark">
+      <EnableRules />
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke.Theme.setTheme" Library="$webresource:sprk_ThemeMenu.js">
+          <StringParameter Value="dark" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.ThemeMenu.SetLight">
+      <EnableRules />
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke.Theme.setTheme" Library="$webresource:sprk_ThemeMenu.js">
+          <StringParameter Value="light" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+  </CommandDefinitions>
+  <RuleDefinitions>
+    <TabDisplayRules />
+    <DisplayRules />
+    <EnableRules>
+      <EnableRule Id="Spaarke.Document.AddMultiple.EnableRule">
+        <CrmClientTypeRule Type="Web" />
+      </EnableRule>
+      <EnableRule Id="sprk.ThemeMenu.EnableRule">
+        <CustomRule FunctionName="Spaarke.Theme.isEnabled" Library="$webresource:sprk_ThemeMenu.js" Default="true" />
+      </EnableRule>
+    </EnableRules>
+  </RuleDefinitions>
+  <LocLabels>
+    <LocLabel Id="Spaarke.Document.AddMultiple.Button.LabelText">
+      <Titles>
+        <Title description="Quick Create: Document" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Spaarke.Document.AddMultiple.Button.ToolTipTitle">
+      <Titles>
+        <Title description="Quick Create: Document" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Spaarke.Document.AddMultiple.Button.ToolTipDescription">
+      <Titles>
+        <Title description="Upload multiple documents to SharePoint Embedded and create Document records" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Spaarke.Document.AddMultiple.Button.Alt">
+      <Titles>
+        <Title description="Quick Create: Document" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.FlyoutAnchor.LabelText">
+      <Titles>
+        <Title description="Dark Mode" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.FlyoutAnchor.ToolTipTitle">
+      <Titles>
+        <Title description="Dark Mode" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.FlyoutAnchor.ToolTipDescription">
+      <Titles>
+        <Title description="Choose your preferred color theme" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.FlyoutAnchor.Alt">
+      <Titles>
+        <Title description="Dark Mode" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.MenuSection.Title">
+      <Titles>
+        <Title description="Color Theme" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Auto.LabelText">
+      <Titles>
+        <Title description="Auto (follows system)" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Auto.ToolTipTitle">
+      <Titles>
+        <Title description="Auto" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Auto.ToolTipDescription">
+      <Titles>
+        <Title description="Uses your operating system's theme preference" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Auto.Alt">
+      <Titles>
+        <Title description="Auto" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Light.LabelText">
+      <Titles>
+        <Title description="Light" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Light.ToolTipTitle">
+      <Titles>
+        <Title description="Light" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Light.ToolTipDescription">
+      <Titles>
+        <Title description="Light background with dark text" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Light.Alt">
+      <Titles>
+        <Title description="Light" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Dark.LabelText">
+      <Titles>
+        <Title description="Dark" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Dark.ToolTipTitle">
+      <Titles>
+        <Title description="Dark" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Dark.ToolTipDescription">
+      <Titles>
+        <Title description="Dark background with light text" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.ThemeMenu.Dark.Alt">
+      <Titles>
+        <Title description="Dark" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+  </LocLabels>
+</RibbonDiffXml>

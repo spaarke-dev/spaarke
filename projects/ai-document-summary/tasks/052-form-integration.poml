@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="ai-document-summary">
+  <metadata>
+    <title>DocumentUploadForm Integration (Multi-File)</title>
+    <phase>6: Frontend Integration</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>030, 031, 050, 051</dependencies>
+    <blocks>none</blocks>
+  </metadata>
+
+  <prompt>
+    Integrate AiSummaryCarousel into DocumentUploadForm with opt-out checkbox, multi-file tracking,
+    and background enqueue on dialog close.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in React state management, form handling, and PCF integration.
+    Follow ADR-006 and ADR-012 patterns.
+  </role>
+
+  <goal>
+    DocumentUploadForm shows "Run AI Summary" checkbox (default checked), renders carousel for
+    uploaded documents, and enqueues incomplete summaries on close.
+  </goal>
+
+  <context>
+    <background>
+      The upload form needs to track SPE IDs for uploaded files, show the opt-out checkbox,
+      conditionally render the carousel, and handle the close/enqueue flow.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/UniversalQuickCreate/control/components/DocumentUploadForm.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">Use PCF control pattern</constraint>
+    <constraint source="ADR-012">Use Fluent UI v9 Checkbox component</constraint>
+    <constraint source="project">"Run AI Summary" defaults to checked/true</constraint>
+    <constraint source="project">On dialog close, batch enqueue incomplete summaries only if opted-in</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/reference/adr/ADR-006-prefer-pcf-over-webresources.md</file>
+      <file>projects/ai-document-summary/plan.md</file>
+      <file>src/client/pcf/UniversalQuickCreate/</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent Checkbox" location="@fluentui/react-components">
+        Use Checkbox from Fluent UI v9
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Open DocumentUploadForm.tsx for modification</step>
+    <step order="2">Add runSummary state with useState(true) - defaulted to checked</step>
+    <step order="3">Add uploadedDocs state to track documents with driveId, itemId, fileName</step>
+    <step order="4">Add Checkbox component with "Run AI Summary" label</step>
+    <step order="5">Track uploaded file SPE IDs when upload completes</step>
+    <step order="6">Conditionally render AiSummaryCarousel when runSummary && uploadedDocs.length > 0</step>
+    <step order="7">Pass document array to carousel component</step>
+    <step order="8">On dialog close, check for incomplete summaries</step>
+    <step order="9">If incomplete and opted-in, call enqueue-batch endpoint</step>
+    <step order="10">Add info text: "You can close - summary will complete in background"</step>
+    <step order="11">Write E2E tests for multi-file flow (opt-in and opt-out)</step>
+    <step order="12">Run tests and verify all pass</step>
+    <step order="13">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/React projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/UniversalQuickCreate/control/components/DocumentUploadForm.tsx (modified)</output>
+    <output type="test">src/client/pcf/UniversalQuickCreate/control/__tests__/DocumentUploadForm.e2e.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given form rendered, when visible, then "Run AI Summary" checkbox is checked by default.</criterion>
+    <criterion testable="true">Given checkbox unchecked, when files uploaded, then no summarization occurs.</criterion>
+    <criterion testable="true">Given 3 files uploaded with opt-in, when complete, then carousel shows all 3.</criterion>
+    <criterion testable="true">Given dialog closed with incomplete summaries and opt-in, when closed, then batch enqueue called.</criterion>
+    <criterion testable="true">Given dialog closed with opt-out, when closed, then no enqueue called.</criterion>
+    <criterion testable="true">All E2E tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Single file should show simple panel, not carousel (carousel nav unnecessary for 1 item).
+    Track incomplete by checking document status !== 'complete'.
+  </notes>
+</task>

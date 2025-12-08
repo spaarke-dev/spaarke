@@ -47,6 +47,9 @@ This repository segment packages Spaarke’s Architecture Decision Records (ADRs
 - [ADR-012: Shared Component Library for React/TypeScript Across Modules](docs/adr/ADR-012-shared-component-library.md)
   Create a shared TypeScript/React component library at `src/shared/Spaarke.UI.Components/` for reuse across PCF controls, future SPA, and Office Add-ins.
 
+- [ADR-013: AI Architecture for Azure OpenAI, AI Search, and Document Intelligence](docs/adr/ADR-013-ai-architecture.md)
+  Extends Sprk.Bff.Api with AI capabilities following established ADR patterns; covers chat, semantic search, document indexing for Model 1 and Model 2 deployments.
+
 ## Guides
 
 - **[SDAP_Architecture_Simplification_Guide.md](SDAP_Architecture_Simplification_Guide.md)**  

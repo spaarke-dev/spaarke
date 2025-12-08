@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="ai-document-summary">
+  <metadata>
+    <title>Update Dataverse Solution</title>
+    <phase>5: Dataverse Schema</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>040</dependencies>
+    <blocks>none</blocks>
+  </metadata>
+
+  <prompt>
+    Export the updated Dataverse solution containing the new summary fields.
+    Optionally update the Document form to display summary fields.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse solution management and deployment.
+  </role>
+
+  <goal>
+    Updated solution can be exported and imported into other environments.
+    Fields are visible in appropriate forms if needed.
+  </goal>
+
+  <context>
+    <background>
+      Schema changes need to be captured in the solution for deployment to test and production.
+      Summary display will primarily be in the PCF control, but form visibility may be useful.
+    </background>
+    <relevant-files>
+      <file>infrastructure/dataverse/solutions/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Solution must export cleanly</constraint>
+    <constraint source="project">Solution must import into test environment</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>infrastructure/dataverse/solutions/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Open Spaarke solution in Power Apps maker portal</step>
+    <step order="2">Verify new fields are included in solution</step>
+    <step order="3">Optionally add summary fields to Document main form</step>
+    <step order="4">Export solution as unmanaged</step>
+    <step order="5">Save solution zip to infrastructure/dataverse/solutions/</step>
+    <step order="6">Test import into DEV/TEST environment</step>
+    <step order="7">Verify fields accessible post-import</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI for solution export</tool>
+  </tools>
+
+  <outputs>
+    <output type="solution">infrastructure/dataverse/solutions/Spaarke_X_X_X_X.zip</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given solution export, when executed, then zip file is created without errors.</criterion>
+    <criterion testable="true">Given solution import to test env, when executed, then import succeeds.</criterion>
+    <criterion testable="true">Given imported solution, when Document form opened, then summary fields visible (if added to form).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Summary will primarily show in PCF control, not necessarily the form.
+    Consider adding read-only display of summary on form for administrators.
+  </notes>
+</task>

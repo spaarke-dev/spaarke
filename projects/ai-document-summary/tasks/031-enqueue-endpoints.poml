@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="ai-document-summary">
+  <metadata>
+    <title>Enqueue Endpoints (Single and Batch)</title>
+    <phase>4: API Endpoints</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>021</dependencies>
+    <blocks>052</blocks>
+  </metadata>
+
+  <prompt>
+    Create POST /api/ai/summarize/enqueue for single document and POST /api/ai/summarize/enqueue-batch
+    for multiple documents. Both submit jobs to Service Bus for background processing.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs, Service Bus, and batch operations.
+    Follow ADR-001 for Minimal API patterns and ADR-004 for job submission.
+  </role>
+
+  <goal>
+    Enqueue endpoints accept document IDs, submit jobs to Service Bus, update document status to Pending,
+    and return job IDs. Batch endpoint handles up to 10 documents.
+  </goal>
+
+  <context>
+    <background>
+      When users opt out of real-time streaming or close the dialog early, summaries should still
+      be generated in the background. Batch processing is needed for multi-file uploads.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/SummarizeEndpoints.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API endpoint pattern</constraint>
+    <constraint source="ADR-004">Use JobSubmissionService for Service Bus</constraint>
+    <constraint source="project">Batch endpoint max 10 documents</constraint>
+    <constraint source="project">Return 202 Accepted with job ID(s)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/reference/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>docs/reference/adr/ADR-004-background-job-contract.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/JobSubmissionService.cs</file>
+    </files>
+    <patterns>
+      <pattern name="Job Submission" location="src/server/api/Sprk.Bff.Api/Services/Jobs/JobSubmissionService.cs">
+        Use SubmitJobAsync to enqueue jobs
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add POST /api/ai/summarize/enqueue endpoint to SummarizeEndpoints.cs</step>
+    <step order="2">Validate request has required fields</step>
+    <step order="3">Submit job via JobSubmissionService with job type "ai-summarize"</step>
+    <step order="4">Update document status to Pending via Dataverse</step>
+    <step order="5">Return 202 Accepted with { jobId: guid }</step>
+    <step order="6">Add POST /api/ai/summarize/enqueue-batch endpoint</step>
+    <step order="7">Validate batch size (max 10 documents)</step>
+    <step order="8">Submit jobs for each document (can be parallel)</step>
+    <step order="9">Update all document statuses to Pending</step>
+    <step order="10">Return 202 Accepted with { jobIds: [guid, guid, ...] }</step>
+    <step order="11">Create integration tests for both endpoints</step>
+    <step order="12">Run tests and verify all pass</step>
+    <step order="13">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/SummarizeEndpoints.cs (modified)</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.Tests/Api/SummarizeEnqueueTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given single document request, when enqueue called, then returns 202 with jobId.</criterion>
+    <criterion testable="true">Given batch request with 5 documents, when enqueue-batch called, then returns 202 with 5 jobIds.</criterion>
+    <criterion testable="true">Given batch request with 15 documents, when called, then returns 400 Bad Request.</criterion>
+    <criterion testable="true">Given successful enqueue, when checked, then document status is Pending in Dataverse.</criterion>
+    <criterion testable="true">All integration tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Consider using Task.WhenAll for parallel job submission in batch endpoint.
+    Document status enum: 0=None, 1=Pending, 2=Completed, 3=Failed, 4=NotSupported
+  </notes>
+</task>

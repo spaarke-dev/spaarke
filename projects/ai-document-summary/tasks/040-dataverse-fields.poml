@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="ai-document-summary">
+  <metadata>
+    <title>Add Dataverse Summary Fields</title>
+    <phase>5: Dataverse Schema</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>041</blocks>
+  </metadata>
+
+  <prompt>
+    Add sprk_filesummary, sprk_filesummarystatus, and sprk_filesummarydate fields to the
+    sprk_document entity in Dataverse. Create the summary status choice/option set.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse schema design and Power Platform customization.
+  </role>
+
+  <goal>
+    Three new fields exist on sprk_document entity for storing AI-generated summaries,
+    their status, and generation timestamp.
+  </goal>
+
+  <context>
+    <background>
+      AI summaries need to be persisted in Dataverse so they're visible in the model-driven app
+      and can be queried. The status field tracks the summarization lifecycle.
+    </background>
+    <relevant-files>
+      <file>infrastructure/dataverse/entities/sprk_document/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">sprk_filesummary max length 4000 characters</constraint>
+    <constraint source="project">Status choice values: 0=None, 1=Pending, 2=Completed, 3=Failed, 4=NotSupported</constraint>
+    <constraint source="project">Use sprk_ prefix for all field schema names</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-summary/plan.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Connect to Dataverse environment via PAC CLI or maker portal</step>
+    <step order="2">Create sprk_summarystatus global choice with values: None(0), Pending(1), Completed(2), Failed(3), NotSupported(4)</step>
+    <step order="3">Add sprk_filesummary field to sprk_document (Multi-line Text, max 4000)</step>
+    <step order="4">Add sprk_filesummarystatus field to sprk_document (Choice using sprk_summarystatus)</step>
+    <step order="5">Add sprk_filesummarydate field to sprk_document (DateTime, UTC)</step>
+    <step order="6">Set default value for status to None(0)</step>
+    <step order="7">Publish customizations</step>
+    <step order="8">Verify fields are queryable via Dataverse API</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI for Dataverse operations</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">Dataverse sprk_document entity with new fields</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given sprk_document entity, when queried, then sprk_filesummary field is present.</criterion>
+    <criterion testable="true">Given sprk_filesummarystatus choice, when listed, then has 5 values (None through NotSupported).</criterion>
+    <criterion testable="true">Given new document record, when created, then sprk_filesummarystatus defaults to None.</criterion>
+    <criterion testable="true">Given API update with summary text, when saved, then field contains text up to 4000 chars.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use Power Apps maker portal or PAC CLI to add fields.
+    Consider adding fields to a separate unmanaged solution for easier promotion.
+  </notes>
+</task>

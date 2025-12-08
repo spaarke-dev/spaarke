@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ImportExportXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <Entities>
+    <Entity>
+      <Name LocalizedName="Project" OriginalName="Project">sprk_Project</Name>
+      <EntityInfo>
+        <entity Name="sprk_Project" unmodified="1">
+          <attributes />
+        </entity>
+      </EntityInfo>
+      <RibbonDiffXml>
+        <CustomActions>
+          <CustomAction Id="sprk.ThemeMenu.Project.CustomAction" Location="Mscrm.HomepageGrid.sprk_project.MainTab.Actions.Controls._children" Sequence="900">
+            <CommandUIDefinition>
+              <FlyoutAnchor Id="sprk.ThemeMenu.Project.Flyout" Command="sprk.ThemeMenu.Project.Command" LabelText="Dark Mode" ToolTipTitle="Dark Mode" ToolTipDescription="Choose your preferred color theme" Image16by16="$webresource:sprk_ThemeMenu16.svg" Image32by32="$webresource:sprk_ThemeMenu32.svg" PopulateDynamically="false" TemplateAlias="o1">
+                <Menu Id="sprk.ThemeMenu.Project.Menu">
+                  <MenuSection Id="sprk.ThemeMenu.Project.Section" Title="Color Theme" Sequence="10">
+                    <Controls Id="sprk.ThemeMenu.Project.Controls">
+                      <Button Id="sprk.ThemeMenu.Project.Auto" Command="sprk.ThemeMenu.Project.SetAuto" LabelText="Auto (follows system)" Image16by16="$webresource:sprk_ThemeAuto16.svg" Sequence="10" />
+                      <Button Id="sprk.ThemeMenu.Project.Light" Command="sprk.ThemeMenu.Project.SetLight" LabelText="Light" Image16by16="$webresource:sprk_ThemeLight16.svg" Sequence="20" />
+                      <Button Id="sprk.ThemeMenu.Project.Dark" Command="sprk.ThemeMenu.Project.SetDark" LabelText="Dark" Image16by16="$webresource:sprk_ThemeDark16.svg" Sequence="30" />
+                    </Controls>
+                  </MenuSection>
+                </Menu>
+              </FlyoutAnchor>
+            </CommandUIDefinition>
+          </CustomAction>
+        </CustomActions>
+        <Templates><RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates></Templates>
+        <CommandDefinitions>
+          <CommandDefinition Id="sprk.ThemeMenu.Project.Command"><EnableRules><EnableRule Id="sprk.ThemeMenu.Project.EnableRule" /></EnableRules><DisplayRules /><Actions /></CommandDefinition>
+          <CommandDefinition Id="sprk.ThemeMenu.Project.SetAuto"><EnableRules /><DisplayRules /><Actions><JavaScriptFunction Library="$webresource:sprk_ThemeMenu.js" FunctionName="Spaarke.Theme.setTheme"><StringParameter Value="auto" /></JavaScriptFunction></Actions></CommandDefinition>
+          <CommandDefinition Id="sprk.ThemeMenu.Project.SetLight"><EnableRules /><DisplayRules /><Actions><JavaScriptFunction Library="$webresource:sprk_ThemeMenu.js" FunctionName="Spaarke.Theme.setTheme"><StringParameter Value="light" /></JavaScriptFunction></Actions></CommandDefinition>
+          <CommandDefinition Id="sprk.ThemeMenu.Project.SetDark"><EnableRules /><DisplayRules /><Actions><JavaScriptFunction Library="$webresource:sprk_ThemeMenu.js" FunctionName="Spaarke.Theme.setTheme"><StringParameter Value="dark" /></JavaScriptFunction></Actions></CommandDefinition>
+        </CommandDefinitions>
+        <RuleDefinitions><TabDisplayRules /><DisplayRules /><EnableRules><EnableRule Id="sprk.ThemeMenu.Project.EnableRule"><CustomRule FunctionName="Spaarke.Theme.isEnabled" Library="$webresource:sprk_ThemeMenu.js" Default="true" /></EnableRule></EnableRules></RuleDefinitions>
+        <LocLabels />
+      </RibbonDiffXml>
+    </Entity>
+    <Entity>
+      <Name LocalizedName="Invoice" OriginalName="Invoice">sprk_Invoice</Name>
+      <EntityInfo>
+        <entity Name="sprk_Invoice" unmodified="1">
+          <attributes />
+        </entity>
+      </EntityInfo>
+      <RibbonDiffXml>
+        <CustomActions>
+          <CustomAction Id="sprk.ThemeMenu.Invoice.CustomAction" Location="Mscrm.HomepageGrid.sprk_invoice.MainTab.Actions.Controls._children" Sequence="900">
+            <CommandUIDefinition>
+              <FlyoutAnchor Id="sprk.ThemeMenu.Invoice.Flyout" Command="sprk.ThemeMenu.Invoice.Command" LabelText="Dark Mode" ToolTipTitle="Dark Mode" ToolTipDescription="Choose your preferred color theme" Image16by16="$webresource:sprk_ThemeMenu16.svg" Image32by32="$webresource:sprk_ThemeMenu32.svg" PopulateDynamically="false" TemplateAlias="o1">
+                <Menu Id="sprk.ThemeMenu.Invoice.Menu">
+                  <MenuSection Id="sprk.ThemeMenu.Invoice.Section" Title="Color Theme" Sequence="10">
+                    <Controls Id="sprk.ThemeMenu.Invoice.Controls">
+                      <Button Id="sprk.ThemeMenu.Invoice.Auto" Command="sprk.ThemeMenu.Invoice.SetAuto" LabelText="Auto (follows system)" Image16by16="$webresource:sprk_ThemeAuto16.svg" Sequence="10" />
+                      <Button Id="sprk.ThemeMenu.Invoice.Light" Command="sprk.ThemeMenu.Invoice.SetLight" LabelText="Light" Image16by16="$webresource:sprk_ThemeLight16.svg" Sequence="20" />
+                      <Button Id="sprk.ThemeMenu.Invoice.Dark" Command="sprk.ThemeMenu.Invoice.SetDark" LabelText="Dark" Image16by16="$webresource:sprk_ThemeDark16.svg" Sequence="30" />
+                    </Controls>
+                  </MenuSection>
+                </Menu>
+              </FlyoutAnchor>
+            </CommandUIDefinition>
+          </CustomAction>
+        </CustomActions>
+        <Templates><RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates></Templates>
+        <CommandDefinitions>
+          <CommandDefinition Id="sprk.ThemeMenu.Invoice.Command"><EnableRules><EnableRule Id="sprk.ThemeMenu.Invoice.EnableRule" /></EnableRules><DisplayRules /><Actions /></CommandDefinition>
+          <CommandDefinition Id="sprk.ThemeMenu.Invoice.SetAuto"><EnableRules /><DisplayRules /><Actions><JavaScriptFunction Library="$webresource:sprk_ThemeMenu.js" FunctionName="Spaarke.Theme.setTheme"><StringParameter Value="auto" /></JavaScriptFunction></Actions></CommandDefinition>
+          <CommandDefinition Id="sprk.ThemeMenu.Invoice.SetLight"><EnableRules /><DisplayRules /><Actions><JavaScriptFunction Library="$webresource:sprk_ThemeMenu.js" FunctionName="Spaarke.Theme.setTheme"><StringParameter Value="light" /></JavaScriptFunction></Actions></CommandDefinition>
+          <CommandDefinition Id="sprk.ThemeMenu.Invoice.SetDark"><EnableRules /><DisplayRules /><Actions><JavaScriptFunction Library="$webresource:sprk_ThemeMenu.js" FunctionName="Spaarke.Theme.setTheme"><StringParameter Value="dark" /></JavaScriptFunction></Actions></CommandDefinition>
+        </CommandDefinitions>
+        <RuleDefinitions><TabDisplayRules /><DisplayRules /><EnableRules><EnableRule Id="sprk.ThemeMenu.Invoice.EnableRule"><CustomRule FunctionName="Spaarke.Theme.isEnabled" Library="$webresource:sprk_ThemeMenu.js" Default="true" /></EnableRule></EnableRules></RuleDefinitions>
+        <LocLabels />
+      </RibbonDiffXml>
+    </Entity>
+    <Entity>
+      <Name LocalizedName="Event" OriginalName="Event">sprk_Event</Name>
+      <EntityInfo>
+        <entity Name="sprk_Event" unmodified="1">
+          <attributes />
+        </entity>
+      </EntityInfo>
+      <RibbonDiffXml>
+        <CustomActions>
+          <CustomAction Id="sprk.ThemeMenu.Event.CustomAction" Location="Mscrm.HomepageGrid.sprk_event.MainTab.Actions.Controls._children" Sequence="900">
+            <CommandUIDefinition>
+              <FlyoutAnchor Id="sprk.ThemeMenu.Event.Flyout" Command="sprk.ThemeMenu.Event.Command" LabelText="Dark Mode" ToolTipTitle="Dark Mode" ToolTipDescription="Choose your preferred color theme" Image16by16="$webresource:sprk_ThemeMenu16.svg" Image32by32="$webresource:sprk_ThemeMenu32.svg" PopulateDynamically="false" TemplateAlias="o1">
+                <Menu Id="sprk.ThemeMenu.Event.Menu">
+                  <MenuSection Id="sprk.ThemeMenu.Event.Section" Title="Color Theme" Sequence="10">
+                    <Controls Id="sprk.ThemeMenu.Event.Controls">
+                      <Button Id="sprk.ThemeMenu.Event.Auto" Command="sprk.ThemeMenu.Event.SetAuto" LabelText="Auto (follows system)" Image16by16="$webresource:sprk_ThemeAuto16.svg" Sequence="10" />
+                      <Button Id="sprk.ThemeMenu.Event.Light" Command="sprk.ThemeMenu.Event.SetLight" LabelText="Light" Image16by16="$webresource:sprk_ThemeLight16.svg" Sequence="20" />
+                      <Button Id="sprk.ThemeMenu.Event.Dark" Command="sprk.ThemeMenu.Event.SetDark" LabelText="Dark" Image16by16="$webresource:sprk_ThemeDark16.svg" Sequence="30" />
+                    </Controls>
+                  </MenuSection>
+                </Menu>
+              </FlyoutAnchor>
+            </CommandUIDefinition>
+          </CustomAction>
+        </CustomActions>
+        <Templates><RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates></Templates>
+        <CommandDefinitions>
+          <CommandDefinition Id="sprk.ThemeMenu.Event.Command"><EnableRules><EnableRule Id="sprk.ThemeMenu.Event.EnableRule" /></EnableRules><DisplayRules /><Actions /></CommandDefinition>
+          <CommandDefinition Id="sprk.ThemeMenu.Event.SetAuto"><EnableRules /><DisplayRules /><Actions><JavaScriptFunction Library="$webresource:sprk_ThemeMenu.js" FunctionName="Spaarke.Theme.setTheme"><StringParameter Value="auto" /></JavaScriptFunction></Actions></CommandDefinition>
+          <CommandDefinition Id="sprk.ThemeMenu.Event.SetLight"><EnableRules /><DisplayRules /><Actions><JavaScriptFunction Library="$webresource:sprk_ThemeMenu.js" FunctionName="Spaarke.Theme.setTheme"><StringParameter Value="light" /></JavaScriptFunction></Actions></CommandDefinition>
+          <CommandDefinition Id="sprk.ThemeMenu.Event.SetDark"><EnableRules /><DisplayRules /><Actions><JavaScriptFunction Library="$webresource:sprk_ThemeMenu.js" FunctionName="Spaarke.Theme.setTheme"><StringParameter Value="dark" /></JavaScriptFunction></Actions></CommandDefinition>
+        </CommandDefinitions>
+        <RuleDefinitions><TabDisplayRules /><DisplayRules /><EnableRules><EnableRule Id="sprk.ThemeMenu.Event.EnableRule"><CustomRule FunctionName="Spaarke.Theme.isEnabled" Library="$webresource:sprk_ThemeMenu.js" Default="true" /></EnableRule></EnableRules></RuleDefinitions>
+        <LocLabels />
+      </RibbonDiffXml>
+    </Entity>
+  </Entities>
+  <Roles></Roles>
+  <Workflows></Workflows>
+  <FieldSecurityProfiles></FieldSecurityProfiles>
+  <Templates />
+  <EntityMaps />
+  <EntityRelationships />
+  <OrganizationSettings />
+  <optionsets />
+  <CustomControls />
+  <EntityDataProviders />
+  <Languages>
+    <Language>1033</Language>
+  </Languages>
+</ImportExportXml>

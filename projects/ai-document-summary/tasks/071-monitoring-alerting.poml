@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="071" project="ai-document-summary">
+  <metadata>
+    <title>Monitoring and Alerting</title>
+    <phase>8: Production Hardening</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>none</blocks>
+  </metadata>
+
+  <prompt>
+    Add monitoring instrumentation for AI summarization: request logging, token usage tracking,
+    custom metrics in Application Insights, and alerting for high failure rates.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Application Insights, telemetry, and Azure monitoring.
+  </role>
+
+  <goal>
+    Full observability into AI summarization operations with metrics, logs, and alerts
+    for operational monitoring and cost tracking.
+  </goal>
+
+  <context>
+    <background>
+      AI operations have costs (tokens) and can fail. Operations need visibility into
+      usage patterns, performance, and failure rates.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SummarizeService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Telemetry/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use existing Application Insights integration</constraint>
+    <constraint source="project">Track token usage for cost monitoring</constraint>
+    <constraint source="project">Alert on failure rate > 5%</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Telemetry/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create AiTelemetry static class for custom metrics</step>
+    <step order="2">Add counter for total summarization requests</step>
+    <step order="3">Add counter for successful/failed summarizations</step>
+    <step order="4">Add histogram for summarization duration</step>
+    <step order="5">Track token usage (prompt tokens, completion tokens)</step>
+    <step order="6">Add file size and type to telemetry dimensions</step>
+    <step order="7">Log structured events with document ID and status</step>
+    <step order="8">Create Application Insights custom query for cost dashboard</step>
+    <step order="9">Configure alert rule for high failure rate</step>
+    <step order="10">Document monitoring setup in operations guide</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="az">Azure CLI for alert configuration</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Telemetry/AiTelemetry.cs</output>
+    <output type="docs">docs/operations/ai-monitoring.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given summarization request, when completed, then duration metric is recorded.</criterion>
+    <criterion testable="true">Given OpenAI response, when received, then token usage is logged.</criterion>
+    <criterion testable="true">Given Application Insights, when queried, then custom AI metrics appear.</criterion>
+    <criterion testable="true">Given >5% failure rate, when threshold exceeded, then alert fires.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use System.Diagnostics.Metrics for OpenTelemetry-compatible metrics.
+    Token costs: gpt-4o-mini ~$0.00015/1K input, ~$0.0006/1K output.
+  </notes>
+</task>

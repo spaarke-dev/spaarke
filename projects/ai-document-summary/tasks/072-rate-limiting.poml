@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="072" project="ai-document-summary">
+  <metadata>
+    <title>Rate Limiting and Circuit Breaker</title>
+    <phase>8: Production Hardening</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>none</blocks>
+  </metadata>
+
+  <prompt>
+    Implement per-user rate limiting for streaming endpoints, queue depth monitoring,
+    and circuit breaker for OpenAI failures.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in rate limiting, circuit breaker patterns, and resilience.
+    Follow ADR-009 for Redis caching patterns.
+  </role>
+
+  <goal>
+    System is protected from abuse with per-user rate limits. Circuit breaker prevents
+    cascading failures when OpenAI is unavailable.
+  </goal>
+
+  <context>
+    <background>
+      AI endpoints are expensive and can be abused. Rate limiting prevents cost overruns.
+      Circuit breaker prevents repeated failures when upstream service is down.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/SummarizeEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/OpenAiClient.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-009">Use Redis for distributed rate limit counters</constraint>
+    <constraint source="project">Rate limit: max 10 requests/minute per user for streaming</constraint>
+    <constraint source="project">Circuit breaker: open after 5 failures, half-open after 30s</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/reference/adr/ADR-009-redis-first-caching.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add Microsoft.AspNetCore.RateLimiting NuGet package</step>
+    <step order="2">Configure sliding window rate limiter in Program.cs</step>
+    <step order="3">Use user ID as partition key for rate limiting</step>
+    <step order="4">Apply rate limiter to streaming endpoint</step>
+    <step order="5">Add Polly circuit breaker to OpenAiClient</step>
+    <step order="6">Configure: break after 5 failures, duration 30s</step>
+    <step order="7">Return 503 Service Unavailable when circuit open</step>
+    <step order="8">Add queue depth metric for background jobs</step>
+    <step order="9">Create unit tests for rate limiting and circuit breaker</step>
+    <step order="10">Run tests and verify all pass</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/OpenAiClient.cs (modified)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/RateLimitingTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given user at rate limit, when requesting stream, then returns 429 Too Many Requests.</criterion>
+    <criterion testable="true">Given 5 consecutive OpenAI failures, when next request made, then circuit opens.</criterion>
+    <criterion testable="true">Given open circuit, when request made, then returns 503 immediately.</criterion>
+    <criterion testable="true">Given 30s wait after circuit open, when request made, then circuit is half-open.</criterion>
+    <criterion testable="true">All unit tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use Polly.Extensions.Http for circuit breaker.
+    Consider different limits for batch vs streaming endpoints.
+  </notes>
+</task>

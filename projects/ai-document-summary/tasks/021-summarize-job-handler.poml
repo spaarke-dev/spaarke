@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="ai-document-summary">
+  <metadata>
+    <title>SummarizeJobHandler for Background Processing</title>
+    <phase>3: Summarization Service</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>031</blocks>
+  </metadata>
+
+  <prompt>
+    Create SummarizeJobHandler that processes ai-summarize jobs from Service Bus.
+    Follows existing job handler pattern for background document processing.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in background job processing, Service Bus, and idempotency patterns.
+    Follow ADR-004 for job contract patterns.
+  </role>
+
+  <goal>
+    SummarizeJobHandler implements IJobHandler, processes jobs from queue, and uses existing
+    idempotency infrastructure to prevent duplicate processing.
+  </goal>
+
+  <context>
+    <background>
+      When users close the dialog before streaming completes, or when batch processing multiple documents,
+      jobs are enqueued for background processing. This handler picks up those jobs.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/SummarizeJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/SummarizeJobPayload.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">Use JobContract pattern for Service Bus messages</constraint>
+    <constraint source="project">JobType must be "ai-summarize"</constraint>
+    <constraint source="project">Use existing idempotency service</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/reference/adr/ADR-004-background-job-contract.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/DocumentProcessingJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/IJobHandler.cs</file>
+    </files>
+    <patterns>
+      <pattern name="Job Handler" location="src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/DocumentProcessingJobHandler.cs">
+        Follow existing DocumentProcessingJobHandler pattern
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create SummarizeJobPayload record with DocumentId, DriveId, ItemId</step>
+    <step order="2">Create SummarizeJobHandler implementing IJobHandler</step>
+    <step order="3">Set JobType property to "ai-summarize"</step>
+    <step order="4">Inject SummarizeService and IIdempotencyService</step>
+    <step order="5">Implement HandleAsync: deserialize payload, check idempotency, call SummarizeService</step>
+    <step order="6">Consume the IAsyncEnumerable from SummarizeStreamingAsync (background doesn't stream to client)</step>
+    <step order="7">Log job start, completion, and any failures</step>
+    <step order="8">Register SummarizeJobHandler in DI container</step>
+    <step order="9">Create unit tests</step>
+    <step order="10">Run tests and verify all pass</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/SummarizeJobHandler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/SummarizeJobPayload.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Jobs/SummarizeJobHandlerTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an ai-summarize job message, when processed, then SummarizeService is called.</criterion>
+    <criterion testable="true">Given duplicate job ID, when processed, then idempotency prevents reprocessing.</criterion>
+    <criterion testable="true">Given job failure, when exception thrown, then error is logged and job can retry.</criterion>
+    <criterion testable="true">All unit tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference DocumentProcessingJobHandler for exact pattern.
+    Job handler should fully consume IAsyncEnumerable to complete the summary.
+  </notes>
+</task>

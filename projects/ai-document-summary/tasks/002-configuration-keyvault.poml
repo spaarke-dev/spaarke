@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="ai-document-summary">
+  <metadata>
+    <title>Configuration and KeyVault Integration</title>
+    <phase>1: Infrastructure &amp; Configuration</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>none</blocks>
+  </metadata>
+
+  <prompt>
+    Configure appsettings.json with AI options and set up KeyVault references for secrets.
+    Register AiOptions and OpenAiClient in the DI container.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core configuration, Azure KeyVault, and DI patterns.
+  </role>
+
+  <goal>
+    AI configuration loads correctly in all environments with secrets from KeyVault.
+    Services are registered and injectable.
+  </goal>
+
+  <context>
+    <background>
+      Configuration must support file type toggling, model selection, and secure credential storage.
+      Local development uses appsettings.Development.json while deployed environments use KeyVault.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.json</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.Development.json</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">Maximum 15 non-framework DI registrations total</constraint>
+    <constraint source="project">Secrets must not be committed to source control</constraint>
+    <constraint source="project">Missing configuration should fail fast with clear error</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/reference/adr/ADR-010-di-minimalism.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/</file>
+    </files>
+    <patterns>
+      <pattern name="Options Registration" location="src/server/api/Sprk.Bff.Api/Program.cs">
+        Follow existing options registration pattern
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add Ai section to appsettings.json with all configuration from plan.md</step>
+    <step order="2">Add SupportedFileTypes dictionary with TXT, MD, PDF, DOCX configurations</step>
+    <step order="3">Create appsettings.Development.json with local development values</step>
+    <step order="4">Register AiOptions with services.Configure&lt;AiOptions&gt;() in Program.cs</step>
+    <step order="5">Add validation for required configuration on startup</step>
+    <step order="6">Register OpenAiClient as singleton in DI container</step>
+    <step order="7">Document KeyVault secret names in code comments</step>
+    <step order="8">Test configuration loading with unit test</step>
+    <step order="9">Run tests and verify all pass</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/appsettings.json (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/appsettings.Development.json (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given valid configuration, when app starts, then AiOptions is injectable.</criterion>
+    <criterion testable="true">Given invalid/missing AI config, when app starts, then it fails with clear error message.</criterion>
+    <criterion testable="true">Given SupportedFileTypes config, when checked for .pdf, then returns correct FileTypeConfig.</criterion>
+    <criterion testable="true">All unit tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    KeyVault secrets: ai-openai-endpoint, ai-openai-key, ai-docintel-endpoint, ai-docintel-key
+    Use @Microsoft.KeyVault(SecretUri=...) format for Azure App Service.
+  </notes>
+</task>

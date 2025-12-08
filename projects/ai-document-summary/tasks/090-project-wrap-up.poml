@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="ai-document-summary">
+  <metadata>
+    <title>Project Wrap-up</title>
+    <phase>9: Wrap-up</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>073</dependencies>
+    <blocks>none</blocks>
+  </metadata>
+
+  <prompt>
+    Complete project wrap-up: update README.md and plan.md to reflect completion,
+    verify all tasks are done, and document any lessons learned.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Responsible for project completion and documentation.
+  </role>
+
+  <goal>
+    Project is officially complete with all documentation updated, statuses set,
+    and lessons learned captured.
+  </goal>
+
+  <context>
+    <background>
+      Project wrap-up ensures clean closure, updates tracking systems, and captures
+      knowledge for future projects.
+    </background>
+    <relevant-files>
+      <file>projects/ai-document-summary/README.md</file>
+      <file>projects/ai-document-summary/plan.md</file>
+      <file>projects/ai-document-summary/tasks/TASK-INDEX.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">All tasks must be completed before wrap-up</constraint>
+    <constraint source="project">Update all status fields to reflect completion</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-summary/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify all tasks in TASK-INDEX.md are marked ✅ completed</step>
+    <step order="2">Update README.md Status to "✅ Completed"</step>
+    <step order="3">Add Completed date to README.md header</step>
+    <step order="4">Set Phase to "Complete" and Progress to "100%"</step>
+    <step order="5">Check all Graduation Criteria checkboxes</step>
+    <step order="6">Add completion entry to Changelog</step>
+    <step order="7">Update plan.md Status to "Complete"</step>
+    <step order="8">Update all milestone statuses to ✅ in plan.md</step>
+    <step order="9">Create notes/lessons-learned.md if notable insights</step>
+    <step order="10">Final review of all documentation</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">For any verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-document-summary/README.md (updated)</output>
+    <output type="docs">projects/ai-document-summary/plan.md (updated)</output>
+    <output type="docs">projects/ai-document-summary/notes/lessons-learned.md (if applicable)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given TASK-INDEX.md, when reviewed, then all tasks show ✅ completed.</criterion>
+    <criterion testable="true">Given README.md, when checked, then Status shows "✅ Completed" with date.</criterion>
+    <criterion testable="true">Given Graduation Criteria, when reviewed, then all checkboxes are checked.</criterion>
+    <criterion testable="true">Given Changelog, when reviewed, then completion entry exists.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is the MANDATORY final task for all projects.
+    Do not mark complete until all other tasks are done.
+  </notes>
+</task>

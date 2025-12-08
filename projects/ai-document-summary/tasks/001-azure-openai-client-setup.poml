@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="ai-document-summary">
+  <metadata>
+    <title>Azure OpenAI Client Setup</title>
+    <phase>1: Infrastructure &amp; Configuration</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>002, 020</blocks>
+  </metadata>
+
+  <prompt>
+    Create the Azure OpenAI client wrapper and comprehensive AiOptions configuration class.
+    This establishes the foundation for all AI services in the BFF API.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core, Azure AI services, and configuration patterns.
+    Follow ADR-010 for DI minimalism and ADR-001 for Minimal API patterns.
+  </role>
+
+  <goal>
+    OpenAiClient class and AiOptions configuration ready for dependency injection, supporting
+    both streaming and non-streaming completions with configurable model settings.
+  </goal>
+
+  <context>
+    <background>
+      AI Document Summary feature requires Azure OpenAI integration for generating document summaries.
+      The client should support streaming for real-time UI updates and non-streaming for background jobs.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/AiOptions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/OpenAiClient.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">Keep DI registrations minimal - register as concrete types unless interface needed</constraint>
+    <constraint source="ADR-001">Use Minimal API patterns, avoid controllers</constraint>
+    <constraint source="project">Support model switching via configuration (gpt-4o-mini, gpt-4o, etc.)</constraint>
+    <constraint source="project">Support both streaming and non-streaming completions</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/reference/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/reference/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>docs/reference/adr/ADR-013-ai-architecture.md</file>
+      <file>projects/ai-document-summary/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Options Pattern" location="src/server/api/Sprk.Bff.Api/Configuration/">
+        Use IOptions&lt;T&gt; pattern for configuration classes
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create src/server/api/Sprk.Bff.Api/Configuration/AiOptions.cs with all properties from plan.md</step>
+    <step order="2">Create FileTypeConfig record for SupportedFileTypes dictionary</step>
+    <step order="3">Create src/server/api/Sprk.Bff.Api/Services/Ai/ directory</step>
+    <step order="4">Create OpenAiClient.cs with Azure.AI.OpenAI.OpenAIClient injection</step>
+    <step order="5">Implement StreamCompletionAsync returning IAsyncEnumerable&lt;string&gt;</step>
+    <step order="6">Implement GetCompletionAsync returning Task&lt;string&gt;</step>
+    <step order="7">Add NuGet reference for Azure.AI.OpenAI to Sprk.Bff.Api.csproj</step>
+    <step order="8">Create unit tests with mocked OpenAIClient</step>
+    <step order="9">Run tests and verify all pass</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+    <step order="11">If any deviations from plan, document in projects/ai-document-summary/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Configuration/AiOptions.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/OpenAiClient.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/OpenAiClientTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given AiOptions configured, when OpenAiClient is instantiated, then it connects to Azure OpenAI successfully.</criterion>
+    <criterion testable="true">Given a prompt, when StreamCompletionAsync is called, then tokens are yielded as IAsyncEnumerable.</criterion>
+    <criterion testable="true">Given a prompt, when GetCompletionAsync is called, then complete response string is returned.</criterion>
+    <criterion testable="true">All unit tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use Azure.AI.OpenAI package version 1.0.0-beta.17 or later.
+    Consider using ChatCompletionsOptions for fine-grained control.
+    Temperature and MaxOutputTokens should come from AiOptions.
+  </notes>
+</task>

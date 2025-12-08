@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="ai-document-summary">
+  <metadata>
+    <title>Native Text Extraction Service</title>
+    <phase>2: Text Extraction Service</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>020</blocks>
+  </metadata>
+
+  <prompt>
+    Create TextExtractorService that extracts text from native file types (TXT, MD, JSON, CSV, XML, HTML).
+    This is the foundation for document summarization - text must be extracted before sending to AI.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in file I/O, encoding handling, and text processing in .NET.
+  </role>
+
+  <goal>
+    TextExtractorService can extract text from common text-based file formats with proper encoding detection.
+    Returns NotSupported for unknown file types.
+  </goal>
+
+  <context>
+    <background>
+      Before summarizing a document, we need to extract its text content.
+      Native extraction handles simple text formats directly.
+      PDF/DOCX will be added later via Document Intelligence.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/TextExtractorService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/TextExtractionResult.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Handle BOM (byte order mark) correctly</constraint>
+    <constraint source="project">Support UTF-8, UTF-16 encodings</constraint>
+    <constraint source="project">Check AiOptions.SupportedFileTypes before extraction</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-summary/plan.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create src/server/api/Sprk.Bff.Api/Models/Ai/ directory</step>
+    <step order="2">Create TextExtractionResult record with Text, Success, ErrorMessage, Method properties</step>
+    <step order="3">Create TextExtractionMethod enum (Native, DocumentIntelligence, NotSupported)</step>
+    <step order="4">Create TextExtractorService class with IOptions&lt;AiOptions&gt; injection</step>
+    <step order="5">Implement ExtractAsync(Stream fileStream, string fileName, CancellationToken)</step>
+    <step order="6">Check file extension against SupportedFileTypes configuration</step>
+    <step order="7">Implement encoding detection with StreamReader auto-detect</step>
+    <step order="8">Handle BOM for UTF-8, UTF-16 LE/BE</step>
+    <step order="9">Register TextExtractorService in DI container</step>
+    <step order="10">Create unit tests for each supported file type</step>
+    <step order="11">Run tests and verify all pass</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/TextExtractorService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/TextExtractionResult.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/TextExtractorServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a .txt file, when ExtractAsync is called, then text content is returned with Method=Native.</criterion>
+    <criterion testable="true">Given a .md file, when ExtractAsync is called, then markdown content is returned.</criterion>
+    <criterion testable="true">Given a .pdf file (native mode), when ExtractAsync is called, then NotSupported is returned.</criterion>
+    <criterion testable="true">Given a UTF-16 encoded file, when ExtractAsync is called, then text is correctly decoded.</criterion>
+    <criterion testable="true">All unit tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use StreamReader with detectEncodingFromByteOrderMarks: true for encoding detection.
+    Extension check should be case-insensitive (.TXT and .txt both work).
+  </notes>
+</task>

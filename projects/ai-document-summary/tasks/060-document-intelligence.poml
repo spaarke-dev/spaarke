@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="ai-document-summary">
+  <metadata>
+    <title>Document Intelligence Integration (PDF/DOCX)</title>
+    <phase>7: Document Intelligence</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>none</blocks>
+  </metadata>
+
+  <prompt>
+    Add Azure Document Intelligence integration to TextExtractorService for extracting text
+    from PDF and DOCX files. Use prebuilt-read model for text extraction.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Azure Document Intelligence, PDF processing, and .NET integration.
+  </role>
+
+  <goal>
+    TextExtractorService can extract text from PDF and DOCX files using Azure Document Intelligence.
+    Falls back gracefully if service is unavailable.
+  </goal>
+
+  <context>
+    <background>
+      Phase 7 extends text extraction to support common business document formats.
+      This is deferred from MVP to allow core functionality to ship first.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/TextExtractorService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/AiOptions.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use prebuilt-read model for text extraction</constraint>
+    <constraint source="project">Fall back gracefully if Document Intelligence not configured</constraint>
+    <constraint source="project">Check AiOptions.SupportedFileTypes for extension enablement</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-summary/plan.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add Azure.AI.FormRecognizer NuGet package to Sprk.Bff.Api.csproj</step>
+    <step order="2">Add DocIntelEndpoint and DocIntelKey to AiOptions (if not already present)</step>
+    <step order="3">Inject DocumentAnalysisClient into TextExtractorService</step>
+    <step order="4">Implement ExtractViaDocIntelAsync private method</step>
+    <step order="5">Use AnalyzeDocumentAsync with prebuilt-read model</step>
+    <step order="6">Extract text from AnalyzeResult.Content</step>
+    <step order="7">Update ExtractAsync to route PDF/DOCX to Document Intelligence</step>
+    <step order="8">Handle graceful fallback when DocIntel not configured</step>
+    <step order="9">Create integration tests with real PDF and DOCX files</step>
+    <step order="10">Run tests and verify all pass</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/TextExtractorService.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Configuration/AiOptions.cs (modified)</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.Tests/Services/Ai/TextExtractorDocIntelTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a PDF file, when ExtractAsync called, then text content is extracted via Document Intelligence.</criterion>
+    <criterion testable="true">Given a DOCX file, when ExtractAsync called, then text content is extracted.</criterion>
+    <criterion testable="true">Given DocIntel not configured, when PDF processed, then returns NotSupported gracefully.</criterion>
+    <criterion testable="true">Given large document, when extracted, then text is complete without truncation.</criterion>
+    <criterion testable="true">All integration tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Azure.AI.FormRecognizer version 4.1.0 or later.
+    Consider caching DocumentAnalysisClient as singleton.
+    PDF extraction can be slow for large documents - consider timeout handling.
+  </notes>
+</task>

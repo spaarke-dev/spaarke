@@ -57,7 +57,7 @@ dotnet restore
 dotnet build
 
 # Run API
-dotnet run --project src/server/api/Spe.Bff.Api/
+dotnet run --project src/server/api/Sprk.Bff.Api/
 ```
 
 **API Available**: `https://localhost:5001`
@@ -101,7 +101,7 @@ Create these files in the `config/` directory:
 dotnet test --collect:"XPlat Code Coverage"
 
 # Run specific test suite
-dotnet test tests/unit/Spe.Bff.Api.Tests/
+dotnet test tests/unit/Sprk.Bff.Api.Tests/
 ```
 
 ## 🤝 **Contributing**

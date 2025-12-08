@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="ai-document-summary">
+  <metadata>
+    <title>SSE Client Hook (useSseStream)</title>
+    <phase>6: Frontend Integration</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>052</blocks>
+  </metadata>
+
+  <prompt>
+    Create useSseStream React hook for consuming Server-Sent Events from the streaming endpoint.
+    Handles connection, parsing, errors, and cleanup.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in React hooks, fetch API streaming, and SSE parsing.
+  </role>
+
+  <goal>
+    useSseStream hook provides real-time data streaming with status tracking, error handling,
+    and proper cleanup on component unmount.
+  </goal>
+
+  <context>
+    <background>
+      The streaming endpoint returns SSE format. The client needs to parse this format,
+      accumulate data, track connection status, and support abort/cleanup.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/UniversalQuickCreate/control/services/useSseStream.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Must use fetch API with streaming body reader</constraint>
+    <constraint source="project">Must parse SSE format (data: {...}\n\n)</constraint>
+    <constraint source="project">Must support abort and cleanup on unmount</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-summary/plan.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create useSseStream.ts in UniversalQuickCreate/control/services/</step>
+    <step order="2">Define hook signature: useSseStream(url, body) returns { data, status, error, start, abort }</step>
+    <step order="3">Define SseStreamStatus type: 'idle' | 'connecting' | 'streaming' | 'complete' | 'error'</step>
+    <step order="4">Implement start() function that initiates fetch with streaming response</step>
+    <step order="5">Parse SSE events from response body using ReadableStream</step>
+    <step order="6">Handle "data:" prefix and JSON parsing</step>
+    <step order="7">Accumulate data string as chunks arrive</step>
+    <step order="8">Implement abort() function with AbortController</step>
+    <step order="9">Add cleanup in useEffect return for component unmount</step>
+    <step order="10">Handle network errors and set error state</step>
+    <step order="11">Write unit tests with mocked fetch</step>
+    <step order="12">Run tests and verify all pass</step>
+    <step order="13">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/React projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/UniversalQuickCreate/control/services/useSseStream.ts</output>
+    <output type="test">src/client/pcf/UniversalQuickCreate/control/services/__tests__/useSseStream.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given SSE endpoint URL, when start() called, then status becomes 'connecting' then 'streaming'.</criterion>
+    <criterion testable="true">Given streaming data chunks, when received, then data string accumulates correctly.</criterion>
+    <criterion testable="true">Given done: true in chunk, when received, then status becomes 'complete'.</criterion>
+    <criterion testable="true">Given network error, when occurs, then status becomes 'error' with error message.</criterion>
+    <criterion testable="true">Given abort() called, when streaming, then connection closes and cleanup occurs.</criterion>
+    <criterion testable="true">All unit tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    SSE format: data: {"content": "token", "done": false}\n\n
+    Use TextDecoder for streaming text chunks.
+    Consider debouncing state updates if tokens arrive very rapidly.
+  </notes>
+</task>

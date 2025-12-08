@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="ai-document-summary">
+  <metadata>
+    <title>AI Authorization Filter</title>
+    <phase>4: API Endpoints</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>030, 031</blocks>
+  </metadata>
+
+  <prompt>
+    Create or reuse authorization filter for AI endpoints that verifies user has read access
+    to the sprk_document record before allowing summarization.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core authorization, Dataverse permissions, and endpoint filters.
+    Follow ADR-008 for endpoint filter authorization pattern.
+  </role>
+
+  <goal>
+    AI endpoints use authorization filter that checks Dataverse permissions.
+    Unauthorized users receive 403 Forbidden.
+  </goal>
+
+  <context>
+    <background>
+      Users should only be able to summarize documents they have access to.
+      This prevents unauthorized information disclosure via the AI summary.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/AiAuthorizationFilter.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008">Use endpoint filter pattern - no global middleware</constraint>
+    <constraint source="project">Check read access to sprk_document entity</constraint>
+    <constraint source="project">Reuse existing UAC infrastructure if available</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/reference/adr/ADR-008-endpoint-filters-for-auth.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/</file>
+    </files>
+    <patterns>
+      <pattern name="Authorization Filter" location="src/server/api/Sprk.Bff.Api/Api/Filters/">
+        Follow existing DocumentAuthorizationFilter pattern
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing authorization filters in Api/Filters/</step>
+    <step order="2">Determine if existing filter can be reused or if new filter needed</step>
+    <step order="3">If new: Create AiAuthorizationFilter implementing IEndpointFilter</step>
+    <step order="4">Extract documentId from request body</step>
+    <step order="5">Query Dataverse for user's access to sprk_document record</step>
+    <step order="6">Return 403 Forbidden if not authorized</step>
+    <step order="7">Apply filter to AI endpoints in SummarizeEndpoints.cs</step>
+    <step order="8">Create unit tests for authorization scenarios</step>
+    <step order="9">Run tests and verify all pass</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Filters/AiAuthorizationFilter.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Filters/AiAuthorizationFilterTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given user without document access, when calling AI endpoint, then returns 403.</criterion>
+    <criterion testable="true">Given user with document access, when calling AI endpoint, then request proceeds.</criterion>
+    <criterion testable="true">Given batch request, when user lacks access to any document, then returns 403.</criterion>
+    <criterion testable="true">All unit tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Consider caching permission checks for batch operations to reduce Dataverse queries.
+    Existing DocumentAuthorizationFilter may be directly reusable.
+  </notes>
+</task>

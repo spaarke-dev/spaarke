@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="ai-document-summary">
+  <metadata>
+    <title>Error Handling</title>
+    <phase>8: Production Hardening</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>020, 030</dependencies>
+    <blocks>none</blocks>
+  </metadata>
+
+  <prompt>
+    Implement comprehensive error handling for all failure scenarios: file not found,
+    text extraction failure, OpenAI errors, Dataverse failures, and network timeouts.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in error handling patterns, resilience, and user-friendly error messages.
+  </role>
+
+  <goal>
+    All error scenarios are handled gracefully with appropriate status codes, logging,
+    and user-friendly error messages. Document status reflects failure state.
+  </goal>
+
+  <context>
+    <background>
+      Production systems need robust error handling. Users should see helpful messages,
+      administrators should have detailed logs, and the system should recover gracefully.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SummarizeService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/SummarizeEndpoints.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use ProblemDetails for API error responses</constraint>
+    <constraint source="project">Log errors with correlation IDs</constraint>
+    <constraint source="project">Update document status to Failed on error</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Errors/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review all async operations in SummarizeService for potential failures</step>
+    <step order="2">Add try-catch blocks for SPE file download failures</step>
+    <step order="3">Handle text extraction failures with appropriate error message</step>
+    <step order="4">Handle OpenAI API errors (rate limits, timeouts, service errors)</step>
+    <step order="5">Handle Dataverse update failures</step>
+    <step order="6">Create SummarizationException custom exception class</step>
+    <step order="7">Add global exception handler for AI endpoints</step>
+    <step order="8">Update document status to Failed with error message on failure</step>
+    <step order="9">Add correlation ID to all log entries</step>
+    <step order="10">Write unit tests for each error scenario</step>
+    <step order="11">Run tests and verify all pass</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/SummarizeService.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Exceptions/SummarizationException.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/SummarizeServiceErrorTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given file not found in SPE, when summarizing, then returns appropriate error and status=Failed.</criterion>
+    <criterion testable="true">Given OpenAI rate limit, when streaming, then error chunk sent and status=Failed.</criterion>
+    <criterion testable="true">Given network timeout, when extracting text, then operation fails gracefully with timeout error.</criterion>
+    <criterion testable="true">Given any failure, when logged, then correlation ID is present in log entry.</criterion>
+    <criterion testable="true">All unit tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Consider retry logic for transient failures (network, rate limits).
+    User-facing messages should not expose internal details.
+  </notes>
+</task>
