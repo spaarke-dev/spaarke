@@ -1,6 +1,0 @@
-@Spe.Bff.Api_HostAddress = http://localhost:5073
-
-GET {{Spe.Bff.Api_HostAddress}}/weatherforecast/
-Accept: application/json
-
-###

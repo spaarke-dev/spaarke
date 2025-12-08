@@ -15,7 +15,7 @@ Test projects for validating Spaarke components:
 ```
 tests/
 ├── unit/
-│   ├── Spe.Bff.Api.Tests/        # BFF API unit tests
+│   ├── Sprk.Bff.Api.Tests/       # BFF API unit tests
 │   └── Spaarke.Plugins.Tests/    # Plugin unit tests
 └── integration/
     └── Spe.Integration.Tests/    # API integration tests
@@ -184,7 +184,7 @@ dotnet test --collect:"XPlat Code Coverage" --settings config/coverlet.runsettin
 dotnet test
 
 # Run specific project
-dotnet test tests/unit/Spe.Bff.Api.Tests/
+dotnet test tests/unit/Sprk.Bff.Api.Tests/
 
 # Run with filter
 dotnet test --filter "FullyQualifiedName~AuthorizationService"

@@ -1,0 +1,6 @@
+@Sprk.Bff.Api_HostAddress = http://localhost:5073
+
+GET {{Sprk.Bff.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
