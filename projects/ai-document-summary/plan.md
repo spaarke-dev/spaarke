@@ -1,9 +1,9 @@
 # AI Document Summary - Implementation Plan
 
-> **Version**: 1.2  
-> **Date**: December 8, 2025  
-> **Target Sprint**: 8-10  
-> **Estimated Effort**: ~16 dev days (128 hours)
+> **Version**: 2.0
+> **Date**: December 8, 2025
+> **Target Sprint**: 8-12
+> **Estimated Effort**: ~20 dev days (160 hours)
 
 ---
 
@@ -15,8 +15,9 @@ This plan breaks down the AI Document Summary feature into discrete, testable ta
 - **Multi-file support** - Carousel UI for 1-10 files with concurrent processing
 - **User opt-out option** - "Run AI Summary" checkbox defaulted to checked (status: Skipped when unchecked)
 - **Configurable file types** - Enable/disable extensions via configuration
-- **Configurable models** - Switch between gpt-4o-mini, gpt-4o, gpt-4-vision, etc.
-- **Image file support** - Multimodal summarization via GPT-4 Vision
+- **Configurable models** - Switch between gpt-4.1-mini, gpt-4.1, gpt-5, etc.
+- **Image file support** - Multimodal summarization via GPT-4.1 Vision
+- **Microsoft Foundry integration** - Customers can manage AI resources via [ai.azure.com](https://ai.azure.com)
 - **Streaming + background** - Real-time streaming with background fallback
 
 **Reference Documents:**
@@ -50,7 +51,7 @@ public class AiOptions
     public string OpenAiKey { get; set; }
     
     // Model Configuration
-    public string SummarizeModel { get; set; } = "gpt-4o-mini";
+    public string SummarizeModel { get; set; } = "gpt-4.1-mini";
     public int MaxOutputTokens { get; set; } = 1000;
     public float Temperature { get; set; } = 0.3f;
     
@@ -103,7 +104,7 @@ src/server/api/Sprk.Bff.Api/
     "StreamingEnabled": true,
     "OpenAiEndpoint": "",
     "OpenAiKey": "",
-    "SummarizeModel": "gpt-4o-mini",
+    "SummarizeModel": "gpt-4.1-mini",
     "MaxOutputTokens": 1000,
     "Temperature": 0.3,
     "MaxFileSizeBytes": 10485760,
@@ -701,6 +702,193 @@ src/server/api/Sprk.Bff.Api/
 
 ---
 
+## Phase 10: Deployment
+
+**Goal:** Deploy all components to Azure and Dataverse production environment.
+
+### Task 10.1: Deploy BFF API to Azure App Service
+
+**Deployment targets:**
+- Azure App Service (existing `sprk-bff-api` instance)
+- New code includes AI endpoints, services, and dependencies
+
+**Steps:**
+1. Verify all AI-related code is committed and pushed
+2. Run CI/CD pipeline to build and test
+3. Deploy to staging slot first
+4. Verify health checks pass (`/healthz` endpoint)
+5. Swap to production slot
+
+**Acceptance Criteria:**
+- [ ] API deployed to Azure App Service
+- [ ] Health check returns healthy status
+- [ ] AI endpoints accessible (503 expected until secrets configured)
+- [ ] No startup errors in Application Insights
+
+---
+
+### Task 10.2: Configure Key Vault Secrets
+
+**Secrets to configure:**
+| Secret Name | Description |
+|-------------|-------------|
+| `ai-openai-endpoint` | Azure OpenAI resource endpoint URL |
+| `ai-openai-key` | Azure OpenAI API key |
+| `ai-docintel-endpoint` | Document Intelligence endpoint (optional) |
+| `ai-docintel-key` | Document Intelligence API key (optional) |
+
+**Steps:**
+1. Create or obtain Azure OpenAI resource credentials
+2. Add secrets to Key Vault via Azure Portal or CLI
+3. Configure App Service managed identity access to Key Vault
+4. Restart App Service to pick up new configuration
+5. Verify AI endpoint returns 200 (not 503)
+
+**Acceptance Criteria:**
+- [ ] All required secrets in Key Vault
+- [ ] App Service can read secrets
+- [ ] `GET /api/ai/status` returns `enabled: true`
+- [ ] No secret-related errors in logs
+
+---
+
+### Task 10.3: Deploy Dataverse Solution
+
+**Solution components:**
+- `sprk_filesummary` field on `sprk_document`
+- `sprk_filesummarystatus` choice field on `sprk_document`
+- `sprk_filesummarydate` field on `sprk_document`
+
+**Steps:**
+1. Export solution from dev environment (if not already)
+2. Import solution to target Dataverse environment
+3. Publish all customizations
+4. Verify fields exist on `sprk_document` form
+
+**Acceptance Criteria:**
+- [ ] Solution imported successfully
+- [ ] All 3 fields visible in Dataverse
+- [ ] Fields display correctly on `sprk_document` form
+- [ ] Summary Status choice has all 6 values
+
+---
+
+### Task 10.4: Deploy PCF Controls
+
+**Controls to deploy:**
+- Universal Quick Create (updated with AI Summary checkbox)
+- AiSummaryPanel component (if standalone)
+
+**Steps:**
+1. Build PCF controls with `npm run build`
+2. Package solution with MSBuild
+3. Import solution to Dataverse
+4. Publish customizations
+5. Verify controls load in model-driven app
+
+**Acceptance Criteria:**
+- [ ] PCF controls deployed to Dataverse
+- [ ] Universal Quick Create shows "Run AI Summary" checkbox
+- [ ] Controls load without JavaScript errors
+
+---
+
+## Phase 11: Functional Testing
+
+**Goal:** Verify end-to-end functionality in the deployed environment.
+
+### Task 11.1: API Integration Testing
+
+**Test scenarios:**
+1. **Streaming endpoint** - POST to `/api/ai/summarize/stream` with valid document
+2. **Enqueue endpoint** - POST to `/api/ai/summarize/enqueue` returns job ID
+3. **Batch endpoint** - POST multiple documents, all jobs created
+4. **Rate limiting** - Exceed 10 requests/minute, receive 429
+5. **Error handling** - Submit invalid document, receive proper error response
+
+**Steps:**
+1. Use Postman or similar to call each endpoint
+2. Verify SSE stream returns chunks and completes
+3. Verify background job processes and updates Dataverse
+4. Test rate limiting by rapid requests
+5. Document any issues found
+
+**Acceptance Criteria:**
+- [ ] All API endpoints respond correctly
+- [ ] Streaming returns proper SSE format
+- [ ] Background jobs complete within 60 seconds
+- [ ] Rate limiting enforced correctly
+- [ ] Error responses follow RFC 7807 format
+
+---
+
+### Task 11.2: PCF Functional Testing
+
+**Test scenarios:**
+1. **Single file upload** - Upload .txt file, summary streams in panel
+2. **Multi-file upload** - Upload 3 files, carousel shows all summaries
+3. **Opt-out flow** - Uncheck "Run AI Summary", no summarization triggered
+4. **PDF summarization** - Upload PDF, Document Intelligence extracts text
+5. **Image summarization** - Upload PNG, vision model generates description
+6. **Error display** - Upload unsupported file type, error shown in panel
+
+**Steps:**
+1. Open model-driven app in browser
+2. Navigate to document upload form
+3. Execute each test scenario
+4. Verify summary appears in `sprk_filesummary` field
+5. Document any issues found
+
+**Acceptance Criteria:**
+- [ ] Single file summarization works end-to-end
+- [ ] Multi-file carousel displays correctly
+- [ ] Opt-out checkbox prevents summarization
+- [ ] PDF/DOCX summarization works (if Doc Intel configured)
+- [ ] Image summarization works (if vision model configured)
+- [ ] Errors displayed appropriately in UI
+
+---
+
+### Task 11.3: End-to-End User Acceptance Testing (UAT)
+
+**UAT scenarios:**
+1. **Happy path** - Business user uploads document, reviews summary, saves record
+2. **Batch processing** - User uploads multiple documents, all summarized
+3. **Edit summary** - User views summary, makes manual edits if needed
+4. **Retry failed** - User re-triggers summarization for failed document
+5. **Performance** - Summary completes within 30 seconds for typical document
+
+**Steps:**
+1. Invite business users to test in production environment
+2. Provide test scripts for each scenario
+3. Collect feedback on summary quality and UX
+4. Address any critical issues found
+5. Obtain sign-off from stakeholders
+
+**Acceptance Criteria:**
+- [ ] All UAT scenarios pass
+- [ ] No critical bugs blocking go-live
+- [ ] Summary quality acceptable to business users
+- [ ] Performance meets <30s target
+- [ ] Stakeholder sign-off obtained
+
+---
+
+## Phase 12: Wrap-up
+
+**Goal:** Complete project documentation and cleanup.
+
+### Task 12.1: Project Wrap-up
+
+- Verify all tasks completed
+- Update README.md and plan.md status
+- Check all Graduation Criteria
+- Run `/repo-cleanup` to validate structure
+- Create lessons-learned if notable insights
+- Archive project
+
+---
+
 ## Task Summary
 
 | Phase | Task | Effort | Dependencies |
@@ -725,8 +913,15 @@ src/server/api/Sprk.Bff.Api/
 | 8 | 8.2 Monitoring | 1 day (8h) | 3.1 |
 | 8 | 8.3 Rate Limiting | 1 day (8h) | 4.1 |
 | 8 | 8.4 Documentation | 0.75 day (6h) | All above |
-| 9 | 9.1 Project Wrap-up | 0.5 day (4h) | 8.4 |
-| **Total** | | **~16 days (128h)** | |
+| **10** | **10.1 Deploy BFF API** | **0.5 day (4h)** | 8.4 |
+| **10** | **10.2 Configure Key Vault** | **0.5 day (4h)** | 10.1 |
+| **10** | **10.3 Deploy Dataverse Solution** | **0.5 day (4h)** | 10.1 |
+| **10** | **10.4 Deploy PCF Controls** | **0.5 day (4h)** | 10.3 |
+| **11** | **11.1 API Integration Testing** | **0.5 day (4h)** | 10.2, 10.4 |
+| **11** | **11.2 PCF Functional Testing** | **0.5 day (4h)** | 11.1 |
+| **11** | **11.3 UAT** | **1 day (8h)** | 11.2 |
+| 12 | 12.1 Project Wrap-up | 0.5 day (4h) | 11.3 |
+| **Total** | | **~20 days (160h)** | |
 
 ---
 
@@ -757,7 +952,18 @@ src/server/api/Sprk.Bff.Api/
 18. Task 8.2 - Monitoring
 19. Task 8.3 - Rate Limiting
 20. Task 8.4 - Documentation
-21. Task 9.1 - Project Wrap-up
+
+**Sprint 11 (Deployment) - ~16 hours:**
+21. Task 10.1 - Deploy BFF API to Azure App Service
+22. Task 10.2 - Configure Key Vault Secrets
+23. Task 10.3 - Deploy Dataverse Solution
+24. Task 10.4 - Deploy PCF Controls
+
+**Sprint 12 (Testing & Wrap-up) - ~16 hours:**
+25. Task 11.1 - API Integration Testing
+26. Task 11.2 - PCF Functional Testing
+27. Task 11.3 - User Acceptance Testing (UAT)
+28. Task 12.1 - Project Wrap-up
 
 ---
 
@@ -812,15 +1018,34 @@ Consider adding feature flag for gradual rollout:
 
 ## Definition of Done
 
-- [ ] All tasks completed
+### Implementation Complete
+- [ ] All tasks completed (Phases 1-8)
 - [ ] Multi-file carousel working (1-10 files)
 - [ ] "Run AI Summary" opt-out checkbox works correctly
 - [ ] Configuration supports model/file type changes
 - [ ] Unit tests passing (>80% coverage for new code)
 - [ ] Integration tests passing
-- [ ] E2E test with multiple files in staging
-- [ ] E2E test for opt-out flow
 - [ ] Documentation updated
 - [ ] Code reviewed
 - [ ] No critical/high security issues
+
+### Deployment Complete
+- [ ] BFF API deployed to Azure App Service
+- [ ] Key Vault secrets configured
+- [ ] Dataverse solution deployed with AI fields
+- [ ] PCF controls deployed to Dataverse
+- [ ] All environments accessible
+
+### Testing Complete
+- [ ] API integration tests pass in production
+- [ ] PCF functional tests pass
+- [ ] E2E test with multiple files
+- [ ] E2E test for opt-out flow
+- [ ] UAT sign-off obtained
 - [ ] Performance acceptable (<30s for typical document)
+
+### Project Complete
+- [ ] All Graduation Criteria checked
+- [ ] `/repo-cleanup` validates structure
+- [ ] README and plan status updated
+- [ ] Lessons learned documented (if applicable)

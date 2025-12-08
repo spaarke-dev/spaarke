@@ -1,4 +1,5 @@
 using Microsoft.Graph.Models.ODataErrors;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 
 namespace Sprk.Bff.Api.Infrastructure.Errors;
 
@@ -81,5 +82,74 @@ public static class ProblemDetailsHelper
                errorCode == "accessDenied" ? "Forbidden" :
                !string.IsNullOrEmpty(errorCode) ? errorCode :
                status.ToString();
+    }
+
+    /// <summary>
+    /// Create a Problem Details response from a SummarizationException.
+    /// </summary>
+    public static IResult FromSummarizationException(SummarizationException ex)
+    {
+        var extensions = new Dictionary<string, object?>
+        {
+            ["errorCode"] = ex.Code
+        };
+
+        if (ex.CorrelationId != null)
+        {
+            extensions["correlationId"] = ex.CorrelationId;
+        }
+
+        if (ex.Extensions != null)
+        {
+            foreach (var kvp in ex.Extensions)
+            {
+                extensions[kvp.Key] = kvp.Value;
+            }
+        }
+
+        return Results.Problem(
+            title: ex.Title,
+            detail: ex.Detail,
+            statusCode: ex.StatusCode,
+            extensions: extensions);
+    }
+
+    /// <summary>
+    /// Create an AI service unavailable response.
+    /// </summary>
+    public static IResult AiUnavailable(string reason, string? correlationId = null)
+    {
+        return Results.Problem(
+            title: "AI Service Unavailable",
+            detail: reason,
+            statusCode: 503,
+            extensions: new Dictionary<string, object?>
+            {
+                ["errorCode"] = "ai_unavailable",
+                ["correlationId"] = correlationId
+            });
+    }
+
+    /// <summary>
+    /// Create an AI rate limit exceeded response with optional retry-after.
+    /// </summary>
+    public static IResult AiRateLimited(int? retryAfterSeconds = null, string? correlationId = null)
+    {
+        var extensions = new Dictionary<string, object?>
+        {
+            ["errorCode"] = "ai_rate_limited",
+            ["correlationId"] = correlationId
+        };
+
+        if (retryAfterSeconds.HasValue)
+        {
+            extensions["retryAfterSeconds"] = retryAfterSeconds.Value;
+        }
+
+        return Results.Problem(
+            title: "Rate Limit Exceeded",
+            detail: "Too many requests to the AI service. Please wait before retrying.",
+            statusCode: 429,
+            extensions: extensions);
     }
 }

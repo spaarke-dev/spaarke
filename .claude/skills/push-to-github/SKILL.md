@@ -97,12 +97,15 @@ CHECK for uncommitted changes:
     → STOP
 
 RUN quality checks (ask user first):
-  → "Should I run code review and ADR check before committing? (recommended)"
+  → "Should I run linting, code review, and ADR check before committing? (recommended)"
   IF yes:
+    → Execute linting on changed files:
+      • TypeScript/PCF: cd src/client/pcf && npm run lint
+      • C#: dotnet build --warnaserror (Roslyn analyzers)
     → Execute /code-review on changed files
     → Execute /adr-check on changed files
     → Report any issues found
-    → IF critical issues: STOP and ask user to fix first
+    → IF lint errors OR critical issues: STOP and ask user to fix first
 ```
 
 ### Step 2: Review Changes

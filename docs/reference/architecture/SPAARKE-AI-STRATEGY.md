@@ -150,6 +150,26 @@ Spaarke will build **custom AI capabilities** integrated into the SharePoint Doc
 | **User Identity** | Internal Entra ID users |
 | **Future Options** | Can integrate with customer's M365 Copilot if desired |
 
+#### Customer Management via Microsoft Foundry
+
+With Model 2 (Customer-hosted), customers have **full control** over their AI resources through Microsoft Foundry portal ([ai.azure.com](https://ai.azure.com)):
+
+| Management Capability | Description |
+|----------------------|-------------|
+| **Model Deployments** | Create, update, delete model deployments (e.g., gpt-4.1-mini) |
+| **Quota Management** | Request and manage TPM (tokens per minute) limits |
+| **Usage Monitoring** | View token consumption, costs, and usage patterns |
+| **Content Filtering** | Configure content moderation policies |
+| **Prompt Engineering** | Test and refine prompts in Foundry Playground |
+| **Model Selection** | Switch between models (GPT-4.1, GPT-5, Claude, Mistral) |
+| **Fine-tuning** | Fine-tune models on domain-specific data (future) |
+
+**Benefits of Foundry-based Customer Management:**
+- Self-service: Customers can adjust configurations without Spaarke involvement
+- Transparency: Direct visibility into costs and usage
+- Compliance: Customer maintains control over data governance
+- Flexibility: Customers can experiment with newer models as released
+
 ---
 
 ### 1.3 Feature Parity
@@ -177,7 +197,7 @@ Microsoft Foundry (formerly Azure AI Foundry) is Microsoft's unified AI platform
 
 | Component | Purpose | Spaarke Usage |
 |-----------|---------|---------------|
-| **Foundry Models** | 11,000+ frontier models, model router | Azure OpenAI GPT-4o/4-Turbo, embeddings |
+| **Foundry Models** | 11,000+ frontier models, model router | Azure OpenAI GPT-4.1/5 series, embeddings |
 | **Foundry IQ** | Dynamic RAG, multi-source grounding | Document retrieval, context enrichment |
 | **Foundry Agent Service** | Hosted agents, multi-agent workflows | Future: autonomous document agents |
 | **Foundry Tools** | MCP tool catalog, API connectors | SPE/Dataverse integrations |
@@ -420,15 +440,18 @@ AI features are built as **focused, self-contained tools** rather than a generic
 
 | Deployment | Model | Purpose | TPM (Recommended) |
 |------------|-------|---------|-------------------|
-| `gpt-4-turbo` | gpt-4-turbo-2024-04-09 | Primary chat/reasoning | 80K |
-| `gpt-4o` | gpt-4o-2024-08-06 | Fast responses, multimodal | 150K |
-| `gpt-4o-mini` | gpt-4o-mini-2024-07-18 | Classification, simple tasks | 200K |
+| `gpt-4.1-turbo` | gpt-4.1-turbo | Primary chat/reasoning | 80K |
+| `gpt-4.1` | gpt-4.1 | Fast responses, multimodal | 150K |
+| `gpt-4.1-mini` | gpt-4.1-mini | Classification, simple tasks, summarization | 200K |
+| `gpt-5` | gpt-5 | Highest quality, latest capabilities | 100K |
 | `text-embedding-3-large` | text-embedding-3-large | Document embeddings | 350K |
+
+> **Note:** Model deployment names should match what's configured in [Microsoft Foundry portal](https://ai.azure.com). Customers using BYOK (Model 2) manage their own deployments through Foundry.
 
 **Future Model Options (Available in Foundry):**
 | Model Provider | Models | Consideration |
 |----------------|--------|---------------|
-| **Anthropic** | Claude Sonnet 4.5, Opus 4.1, Haiku 4.5 | Alternative for specific tasks |
+| **Anthropic** | Claude Sonnet 4.5, Opus 4.5, Haiku 4.5 | Alternative for specific tasks |
 | **Mistral** | Mistral Large 3 | Open-weight, cost-effective |
 | **Cohere** | Command R+, Embed | Specialized embedding/retrieval |
 
@@ -765,7 +788,7 @@ Document Upload → Text Extraction → LLM Extraction → Dataverse Update
 | **Confidentiality** | Public, Internal, Confidential, Restricted |
 
 **Approach:**
-- Few-shot classification with GPT-4o-mini
+- Few-shot classification with GPT-4.1-mini
 - Customer-configurable categories
 - Confidence scoring
 
@@ -953,7 +976,7 @@ Add to `appsettings.json`:
     "OpenAi": {
       "Endpoint": "${OPENAI_ENDPOINT}",
       "ApiKey": "@Microsoft.KeyVault(VaultName=${KEY_VAULT_NAME};SecretName=openai-api-key)",
-      "ChatModel": "gpt-4o",
+      "ChatModel": "gpt-4.1",
       "EmbeddingModel": "text-embedding-3-large",
       "MaxTokensPerRequest": 4000
     },
@@ -1078,12 +1101,14 @@ app.MapGroup("/api/ai")
 
 ### 11.1 Azure OpenAI Pricing (Estimated)
 
+> **Note:** Pricing varies by model and is subject to change. Check [Azure OpenAI pricing](https://azure.microsoft.com/pricing/details/cognitive-services/openai-service/) for current rates.
+
 | Model | Price per 1K tokens | Typical usage |
 |-------|---------------------|---------------|
-| GPT-4 Turbo Input | $0.01 | RAG context (4K tokens avg) |
-| GPT-4 Turbo Output | $0.03 | Responses (500 tokens avg) |
-| GPT-4o Input | $0.005 | Fast queries |
-| GPT-4o Output | $0.015 | Fast responses |
+| GPT-4.1 Input | $0.01 | RAG context (4K tokens avg) |
+| GPT-4.1 Output | $0.03 | Responses (500 tokens avg) |
+| GPT-4.1-mini Input | $0.005 | Fast queries, summarization |
+| GPT-4.1-mini Output | $0.015 | Fast responses |
 | text-embedding-3-large | $0.00013 | Document indexing |
 
 **Example: 1 RAG query**
@@ -1131,7 +1156,7 @@ If customers with M365 Copilot licenses want integration:
 
 | Capability | Timeline | Description |
 |------------|----------|-------------|
-| **Multimodal** | 2025 H2 | Process images, diagrams in documents (GPT-4o) |
+| **Multimodal** | 2025 H2 | Process images, diagrams in documents (GPT-4.1/5 with vision) |
 | **Agentic workflows** | 2026 | Multi-step reasoning, tool use via Agent Framework |
 | **Model Router** | 2026 | Dynamic model selection per task (cost/quality) |
 | **Foundry Local** | 2026+ | Edge deployment for offline/privacy scenarios |
@@ -1142,7 +1167,7 @@ If customers with M365 Copilot licenses want integration:
 |------------|----------|-------|
 | **Microsoft Agent Framework GA** | High | Migrate from Semantic Kernel when stable |
 | **Foundry IQ GA** | High | Simplify RAG implementation |
-| **GPT-5 / o3** | High | Performance improvements |
+| **GPT-5.1+ / o3** | High | Performance improvements, latest capabilities |
 | **Anthropic Claude (via Foundry)** | Medium | Alternative for specific tasks |
 | **Mistral Large 3** | Medium | Cost-effective, open-weight |
 | **Foundry Local (Android/iOS)** | Medium | Mobile offline AI |

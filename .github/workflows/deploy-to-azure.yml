@@ -45,7 +45,7 @@ jobs:
       run: echo "Tests temporarily disabled - test project needs interface updates"
 
     - name: Publish API
-      run: dotnet publish src/api/Spe.Bff.Api/Spe.Bff.Api.csproj -c Release -o ./publish
+      run: dotnet publish src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj -c Release -o ./publish
 
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
@@ -144,7 +144,7 @@ jobs:
     - name: Run Integration Tests
       run: |
         export BASE_URL=https://${{ env.APP_SERVICE_NAME }}.azurewebsites.net
-        dotnet test tests/unit/Spe.Bff.Api.Tests --configuration Release --logger trx
+        dotnet test tests/unit/Sprk.Bff.Api.Tests --configuration Release --logger trx
       env:
         ASPNETCORE_ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
         USE_FAKE_GRAPH: 1

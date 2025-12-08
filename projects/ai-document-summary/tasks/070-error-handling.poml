@@ -3,7 +3,7 @@
   <metadata>
     <title>Error Handling</title>
     <phase>8: Production Hardening</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>8</estimated-hours>
     <dependencies>020, 030</dependencies>
     <blocks>none</blocks>

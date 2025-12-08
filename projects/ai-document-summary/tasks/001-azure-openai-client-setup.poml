@@ -3,7 +3,7 @@
   <metadata>
     <title>Azure OpenAI Client Setup</title>
     <phase>1: Infrastructure &amp; Configuration</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>8</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>002, 020</blocks>
@@ -28,6 +28,8 @@
     <background>
       AI Document Summary feature requires Azure OpenAI integration for generating document summaries.
       The client should support streaming for real-time UI updates and non-streaming for background jobs.
+      Supports both Spaarke-hosted (Model 1) and Customer-hosted BYOK (Model 2) deployments.
+      Customers using BYOK can manage their Azure OpenAI resources via Microsoft Foundry (ai.azure.com).
     </background>
     <relevant-files>
       <file>src/server/api/Sprk.Bff.Api/Configuration/AiOptions.cs</file>
@@ -38,7 +40,7 @@
   <constraints>
     <constraint source="ADR-010">Keep DI registrations minimal - register as concrete types unless interface needed</constraint>
     <constraint source="ADR-001">Use Minimal API patterns, avoid controllers</constraint>
-    <constraint source="project">Support model switching via configuration (gpt-4o-mini, gpt-4o, etc.)</constraint>
+    <constraint source="project">Support model switching via configuration (gpt-4.1-mini, gpt-4.1, gpt-5, etc.)</constraint>
     <constraint source="project">Support both streaming and non-streaming completions</constraint>
   </constraints>
 

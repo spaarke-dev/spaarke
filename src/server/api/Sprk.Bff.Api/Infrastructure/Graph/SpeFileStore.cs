@@ -8,7 +8,7 @@ namespace Sprk.Bff.Api.Infrastructure.Graph;
 /// Delegates to specialized operation classes for better maintainability.
 /// Refactored from 604-line god class to cohesive modules (Task 3.2).
 /// </summary>
-public class SpeFileStore
+public class SpeFileStore : ISpeFileOperations
 {
     private readonly ContainerOperations _containerOps;
     private readonly DriveItemOperations _driveItemOps;

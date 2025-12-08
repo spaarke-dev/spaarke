@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="081" project="ai-document-summary">
+  <metadata>
+    <title>Configure Key Vault Secrets</title>
+    <phase>10: Deployment</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>080</dependencies>
+    <blocks>084</blocks>
+  </metadata>
+
+  <prompt>
+    Configure Azure Key Vault with the required secrets for AI services.
+    Verify App Service can read the secrets and AI endpoints become functional.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Responsible for Azure Key Vault configuration and security.
+  </role>
+
+  <goal>
+    All required secrets are in Key Vault, App Service can read them,
+    and AI endpoints return 200 instead of 503.
+  </goal>
+
+  <context>
+    <background>
+      Azure OpenAI and Document Intelligence require API keys and endpoints.
+      These secrets must be stored in Key Vault and referenced via App Service
+      configuration using the @Microsoft.KeyVault() syntax.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.json</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/AiOptions.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="security">Never commit secrets to source control</constraint>
+    <constraint source="security">Use managed identity for Key Vault access</constraint>
+    <constraint source="project">Use @Microsoft.KeyVault() syntax in App Service config</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/ai-document-summary.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Obtain or create Azure OpenAI resource</step>
+    <step order="2">Get Azure OpenAI endpoint URL and API key</step>
+    <step order="3">Add secret ai-openai-endpoint to Key Vault</step>
+    <step order="4">Add secret ai-openai-key to Key Vault</step>
+    <step order="5">Optionally add ai-docintel-endpoint for Document Intelligence</step>
+    <step order="6">Optionally add ai-docintel-key for Document Intelligence</step>
+    <step order="7">Configure App Service managed identity access to Key Vault</step>
+    <step order="8">Add App Service configuration for Ai:OpenAiEndpoint with Key Vault reference</step>
+    <step order="9">Add App Service configuration for Ai:OpenAiKey with Key Vault reference</step>
+    <step order="10">Restart App Service to pick up new configuration</step>
+    <step order="11">Verify GET /api/ai/status returns enabled: true</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI for Key Vault and App Service commands</tool>
+    <tool name="curl">HTTP client for API verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="secret">ai-openai-endpoint in Key Vault</output>
+    <output type="secret">ai-openai-key in Key Vault</output>
+    <output type="secret">ai-docintel-endpoint in Key Vault (optional)</output>
+    <output type="secret">ai-docintel-key in Key Vault (optional)</output>
+    <output type="config">App Service configuration with Key Vault references</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given Key Vault, when listed, then ai-openai-endpoint and ai-openai-key secrets exist.</criterion>
+    <criterion testable="true">Given App Service, when GET /api/ai/status called, then returns enabled: true.</criterion>
+    <criterion testable="true">Given App Service logs, when checked, then no secret-related errors present.</criterion>
+    <criterion testable="true">Given AI endpoint, when called with valid token, then does not return 503 ai_disabled.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Document Intelligence is optional - PDF/DOCX summarization won't work without it.
+    Vision model requires gpt-4o deployment for image summarization.
+  </notes>
+</task>

@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="082" project="ai-document-summary">
+  <metadata>
+    <title>Deploy Dataverse Solution</title>
+    <phase>10: Deployment</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>080</dependencies>
+    <blocks>083</blocks>
+  </metadata>
+
+  <prompt>
+    Deploy the Dataverse solution containing the AI summary fields
+    (sprk_filesummary, sprk_filesummarystatus, sprk_filesummarydate) to the
+    target Dataverse environment.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Responsible for Dataverse solution management and deployment.
+  </role>
+
+  <goal>
+    Dataverse solution is deployed with all 3 AI summary fields on sprk_document entity.
+    Fields are accessible via API and visible on forms.
+  </goal>
+
+  <context>
+    <background>
+      The AI Document Summary feature stores results in Dataverse. Three new fields
+      were added to sprk_document: sprk_filesummary (multiline text),
+      sprk_filesummarystatus (choice with 6 values), and sprk_filesummarydate (datetime).
+    </background>
+    <relevant-files>
+      <file>src/solutions/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use pac CLI for solution operations</constraint>
+    <constraint source="project">Export from dev, import to target</constraint>
+    <constraint source="project">Publish all customizations after import</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify solution contains AI summary fields in dev environment</step>
+    <step order="2">Export solution as managed from dev environment</step>
+    <step order="3">Import solution to target Dataverse environment</step>
+    <step order="4">Publish all customizations</step>
+    <step order="5">Verify sprk_filesummary field exists on sprk_document</step>
+    <step order="6">Verify sprk_filesummarystatus choice field has 6 values (None through Skipped)</step>
+    <step order="7">Verify sprk_filesummarydate field exists</step>
+    <step order="8">Verify fields display correctly on sprk_document form</step>
+    <step order="9">Test updating fields via Dataverse Web API</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI for solution operations</tool>
+    <tool name="curl">HTTP client for Dataverse API verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="solution">Dataverse solution deployed to target environment</output>
+    <output type="schema">sprk_filesummary field on sprk_document</output>
+    <output type="schema">sprk_filesummarystatus choice field on sprk_document</output>
+    <output type="schema">sprk_filesummarydate field on sprk_document</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given target Dataverse, when solution imported, then import succeeds with no errors.</criterion>
+    <criterion testable="true">Given sprk_document entity, when metadata queried, then all 3 AI fields exist.</criterion>
+    <criterion testable="true">Given sprk_filesummarystatus, when options queried, then 6 values returned (None, Pending, Completed, Failed, NotSupported, Skipped).</criterion>
+    <criterion testable="true">Given sprk_document form, when viewed, then AI summary fields are visible.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use dataverse-deploy skill for deployment procedure.
+    Summary Status choice values: 0=None, 1=Pending, 2=Completed, 3=Failed, 4=NotSupported, 5=Skipped
+  </notes>
+</task>

@@ -10,6 +10,7 @@ using Microsoft.Identity.Web;
 using Polly;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api;
+using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Authorization;
 using Sprk.Bff.Api.Infrastructure.DI;
@@ -46,6 +47,14 @@ builder.Services
 builder.Services
     .AddOptions<RedisOptions>()
     .Bind(builder.Configuration.GetSection(RedisOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+
+// AI Options - Azure OpenAI and Document Intelligence configuration
+// Secrets: ai-openai-endpoint, ai-openai-key, ai-docintel-endpoint, ai-docintel-key (KeyVault)
+builder.Services
+    .AddOptions<AiOptions>()
+    .Bind(builder.Configuration.GetSection(AiOptions.SectionName))
     .ValidateDataAnnotations()
     .ValidateOnStart();
 
@@ -273,13 +282,41 @@ builder.Services.AddSingleton<IDataverseService>(sp =>
     return new DataverseServiceClientImpl(configuration, logger);
 });
 
+// ============================================================================
+// AI SERVICES - Azure OpenAI client for document summarization (ADR-013)
+// ============================================================================
+// Singleton: AzureOpenAIClient is thread-safe and benefits from connection reuse
+// Only register if AI is enabled in configuration
+var aiEnabled = builder.Configuration.GetValue<bool>("Ai:Enabled");
+if (aiEnabled)
+{
+    // Telemetry: Singleton for AI metrics (OpenTelemetry-compatible)
+    builder.Services.AddSingleton<Sprk.Bff.Api.Telemetry.AiTelemetry>();
+
+    builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.OpenAiClient>();
+    builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.IOpenAiClient>(sp => sp.GetRequiredService<Sprk.Bff.Api.Services.Ai.OpenAiClient>());
+    builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.TextExtractorService>();
+    builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.ITextExtractor>(sp => sp.GetRequiredService<Sprk.Bff.Api.Services.Ai.TextExtractorService>());
+    // Scoped: SummarizeService depends on SpeFileStore (scoped) for file downloads
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.SummarizeService>();
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.ISummarizeService>(sp => sp.GetRequiredService<Sprk.Bff.Api.Services.Ai.SummarizeService>());
+    Console.WriteLine("✓ AI services enabled (model: {0})", builder.Configuration["Ai:SummarizeModel"] ?? "gpt-4o-mini");
+}
+else
+{
+    Console.WriteLine("⚠ AI services disabled (Ai:Enabled = false)");
+}
+
 // Background Job Processing (ADR-004) - Service Bus Strategy
 // Always register JobSubmissionService (unified entry point)
 builder.Services.AddSingleton<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>();
 
 // Register job handlers
 builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.DocumentProcessingJobHandler>();
-// TODO: Register additional IJobHandler implementations here
+if (aiEnabled)
+{
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.SummarizeJobHandler>();
+}
 
 // Configure Service Bus job processing
 var serviceBusConnectionString = builder.Configuration.GetConnectionString("ServiceBus");
@@ -597,6 +634,40 @@ builder.Services.AddRateLimiter(options =>
         });
     });
 
+    // 7. AI Streaming - Strict limit for costly AI operations (Task 072)
+    options.AddPolicy("ai-stream", context =>
+    {
+        var userId = context.User?.FindFirst("oid")?.Value
+                     ?? context.User?.FindFirst("sub")?.Value
+                     ?? context.Connection.RemoteIpAddress?.ToString()
+                     ?? "unknown";
+
+        return RateLimitPartition.GetSlidingWindowLimiter(userId, _ => new SlidingWindowRateLimiterOptions
+        {
+            Window = TimeSpan.FromMinutes(1),
+            PermitLimit = 10, // 10 streaming requests/minute per user
+            QueueLimit = 2,   // Allow small queue for burst tolerance
+            SegmentsPerWindow = 6 // 10-second segments for smooth limiting
+        });
+    });
+
+    // 8. AI Batch - Moderate limit for background summarization enqueue
+    options.AddPolicy("ai-batch", context =>
+    {
+        var userId = context.User?.FindFirst("oid")?.Value
+                     ?? context.User?.FindFirst("sub")?.Value
+                     ?? context.Connection.RemoteIpAddress?.ToString()
+                     ?? "unknown";
+
+        return RateLimitPartition.GetSlidingWindowLimiter(userId, _ => new SlidingWindowRateLimiterOptions
+        {
+            Window = TimeSpan.FromMinutes(1),
+            PermitLimit = 20, // 20 batch requests/minute per user
+            QueueLimit = 5,
+            SegmentsPerWindow = 4 // 15-second segments
+        });
+    });
+
     // ProblemDetails JSON response for rate limit rejections
     options.OnRejected = async (context, cancellationToken) =>
     {
@@ -787,6 +858,12 @@ app.MapUploadEndpoints();
 
 // OBO endpoints (user-enforced CRUD)
 app.MapOBOEndpoints();
+
+// AI endpoints (only if AI is enabled)
+if (app.Configuration.GetValue<bool>("Ai:Enabled"))
+{
+    app.MapSummarizeEndpoints();
+}
 
 app.Run();
 

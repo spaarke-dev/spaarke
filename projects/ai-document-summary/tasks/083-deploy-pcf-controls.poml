@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="083" project="ai-document-summary">
+  <metadata>
+    <title>Deploy PCF Controls</title>
+    <phase>10: Deployment</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>082</dependencies>
+    <blocks>085</blocks>
+  </metadata>
+
+  <prompt>
+    Deploy the updated PCF controls (Universal Quick Create with AI Summary checkbox)
+    to the target Dataverse environment.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Responsible for PCF control deployment.
+  </role>
+
+  <goal>
+    PCF controls are deployed and functional. Universal Quick Create shows
+    "Run AI Summary" checkbox and can stream summaries from BFF API.
+  </goal>
+
+  <context>
+    <background>
+      The Universal Quick Create PCF control was updated to include AI summary
+      functionality. It has a "Run AI Summary" checkbox (default checked) and
+      displays an AiSummaryCarousel for multi-file uploads.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/UniversalQuickCreate/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Build with npm run build before packaging</constraint>
+    <constraint source="project">Use MSBuild to create solution package</constraint>
+    <constraint source="project">Import solution via pac CLI</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Navigate to UniversalQuickCreate PCF control directory</step>
+    <step order="2">Run npm install to ensure dependencies</step>
+    <step order="3">Run npm run build to compile TypeScript</step>
+    <step order="4">Build solution with MSBuild</step>
+    <step order="5">Import solution to target Dataverse environment</step>
+    <step order="6">Publish all customizations</step>
+    <step order="7">Open model-driven app in browser</step>
+    <step order="8">Navigate to document upload form</step>
+    <step order="9">Verify "Run AI Summary" checkbox is visible</step>
+    <step order="10">Verify control loads without JavaScript errors (check browser console)</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Node package manager for building PCF</tool>
+    <tool name="msbuild">Microsoft Build for solution packaging</tool>
+    <tool name="pac">Power Platform CLI for solution import</tool>
+  </tools>
+
+  <outputs>
+    <output type="solution">PCF solution deployed to target environment</output>
+    <output type="control">Universal Quick Create with AI Summary checkbox</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given target Dataverse, when solution imported, then import succeeds.</criterion>
+    <criterion testable="true">Given model-driven app, when document form opened, then Universal Quick Create control loads.</criterion>
+    <criterion testable="true">Given document upload form, when viewed, then "Run AI Summary" checkbox is visible and checked by default.</criterion>
+    <criterion testable="true">Given browser console, when checked, then no JavaScript errors from PCF control.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use dataverse-deploy skill for deployment procedure.
+    May need to disable Directory.Packages.props before MSBuild.
+  </notes>
+</task>

@@ -105,6 +105,29 @@ CHECK for performance issues:
 FLAG: Critical / Warning / Info
 ```
 
+### Step 4.5: Linting Check
+```
+RUN automated linting before manual review:
+
+✓ TypeScript/PCF (ESLint)
+  cd src/client/pcf && npm run lint
+  - Catches: unused vars, type issues, React hooks rules
+  - Config: src/client/pcf/eslint.config.mjs
+  - Includes: @microsoft/eslint-plugin-power-apps
+
+✓ C# (Roslyn Analyzers)
+  dotnet build --warnaserror
+  - Catches: null refs, async issues, naming conventions
+  - Config: Directory.Build.props (TreatWarningsAsErrors=true)
+  - Nullable reference types enabled
+
+✓ Fix common issues:
+  - TypeScript: npx eslint --fix {files}
+  - C#: dotnet format
+
+FLAG: Critical (lint errors block merge) / Warning (lint warnings)
+```
+
 ### Step 5: Style & Maintainability Review
 ```
 CHECK code quality:
@@ -274,6 +297,7 @@ Run these commands to fix some issues automatically:
 - **adr-check**: Deep-dive on architecture compliance
 - **spaarke-conventions**: Detailed coding standards enforcement
 - **task-create**: Include code review as task deliverable
+- **push-to-github**: Linting runs as pre-flight check before commits
 
 ## Examples
 

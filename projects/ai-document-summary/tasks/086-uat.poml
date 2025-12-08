@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="086" project="ai-document-summary">
+  <metadata>
+    <title>User Acceptance Testing (UAT)</title>
+    <phase>11: Functional Testing</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>085</dependencies>
+    <blocks>090</blocks>
+  </metadata>
+
+  <prompt>
+    Conduct User Acceptance Testing with business users to validate the AI Document
+    Summary feature meets business requirements and user expectations.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Responsible for coordinating UAT and gathering feedback.
+  </role>
+
+  <goal>
+    Business users validate the feature works as expected. Summary quality is acceptable,
+    performance meets targets, and stakeholder sign-off is obtained.
+  </goal>
+
+  <context>
+    <background>
+      The AI Document Summary feature has been deployed and functionally tested.
+      Now business users need to validate it meets their needs and expectations
+      before the project can be considered complete.
+    </background>
+    <relevant-files>
+      <file>projects/ai-document-summary/spec.md</file>
+      <file>projects/ai-document-summary/README.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use production environment for UAT</constraint>
+    <constraint source="project">Document all feedback and issues</constraint>
+    <constraint source="project">Obtain formal sign-off before completion</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-summary/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Prepare UAT test scripts for business users</step>
+    <step order="2">Invite business users to participate in UAT</step>
+    <step order="3">Provide access to production environment</step>
+    <step order="4">Test Scenario 1: Happy path - upload document, review summary, save</step>
+    <step order="5">Test Scenario 2: Batch upload - upload multiple documents, all summarized</step>
+    <step order="6">Test Scenario 3: Edit summary - view summary, make manual edits</step>
+    <step order="7">Test Scenario 4: Retry failed - re-trigger summarization for failed document</step>
+    <step order="8">Test Scenario 5: Performance - verify summary completes within 30 seconds</step>
+    <step order="9">Collect feedback on summary quality (accuracy, length, usefulness)</step>
+    <step order="10">Collect feedback on user experience (UI, workflow, clarity)</step>
+    <step order="11">Document all feedback and issues</step>
+    <step order="12">Address critical issues before sign-off</step>
+    <step order="13">Obtain formal stakeholder sign-off</step>
+    <step order="14">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="email">Communication with stakeholders</tool>
+    <tool name="teams">Video calls for UAT sessions</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">UAT test results and feedback</output>
+    <output type="docs">Bug report (if critical issues found)</output>
+    <output type="signoff">Stakeholder sign-off document</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given all UAT scenarios, when executed by business users, then all pass.</criterion>
+    <criterion testable="true">Given summary quality feedback, when reviewed, then acceptable to business users.</criterion>
+    <criterion testable="true">Given performance tests, when measured, then summary completes within 30 seconds.</criterion>
+    <criterion testable="true">Given UAT, when complete, then no critical bugs blocking go-live.</criterion>
+    <criterion testable="true">Given stakeholders, when asked, then formal sign-off obtained.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Address critical issues before requesting sign-off.
+    Non-critical issues can be logged for future iteration.
+    Performance target: typical document summary in less than 30 seconds.
+  </notes>
+</task>

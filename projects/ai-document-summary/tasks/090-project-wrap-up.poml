@@ -2,10 +2,10 @@
 <task id="090" project="ai-document-summary">
   <metadata>
     <title>Project Wrap-up</title>
-    <phase>9: Wrap-up</phase>
+    <phase>12: Wrap-up</phase>
     <status>not-started</status>
     <estimated-hours>4</estimated-hours>
-    <dependencies>073</dependencies>
+    <dependencies>086</dependencies>
     <blocks>none</blocks>
   </metadata>
 

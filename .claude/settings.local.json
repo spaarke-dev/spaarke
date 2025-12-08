@@ -184,7 +184,12 @@
       "Bash(git mv:*)",
       "Bash(mkdir:*)",
       "Bash(\"/c/Program Files/Microsoft Visual Studio/2022/Professional/MSBuild/Current/Bin/MSBuild.exe\" \"/c/code_files/spaarke/src/client/pcf/SpeFileViewer/SpeFileViewerSolution/SpeFileViewerSolution.cdsproj\" /t:Rebuild /p:Configuration=Release)",
-      "Bash(\"/c/Program Files/Microsoft Visual Studio/2022/Professional/MSBuild/Current/Bin/MSBuild.exe\" SpeFileViewerSolution/SpeFileViewerSolution.cdsproj /t:Rebuild /p:Configuration=Release)"
+      "Bash(\"/c/Program Files/Microsoft Visual Studio/2022/Professional/MSBuild/Current/Bin/MSBuild.exe\" SpeFileViewerSolution/SpeFileViewerSolution.cdsproj /t:Rebuild /p:Configuration=Release)",
+      "Bash(pac solution help:*)",
+      "Bash(pac solution unpack:*)",
+      "Bash(npm test:*)",
+      "Skill(push-to-github)",
+      "Bash(gh auth status:*)"
     ],
     "deny": [],
     "ask": []

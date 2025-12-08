@@ -32,6 +32,8 @@ public static class DocumentsModule
 
         // SPE file store facade (delegates to specialized classes)
         services.AddScoped<SpeFileStore>();
+        // Register interface for DI into AI services (SummarizeService)
+        services.AddScoped<ISpeFileOperations>(sp => sp.GetRequiredService<SpeFileStore>());
 
         // ============================================================================
         // Authorization Filters
