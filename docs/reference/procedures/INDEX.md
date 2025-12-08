@@ -6,12 +6,18 @@ This folder contains modular reference documents for Spaarke's software developm
 
 ## Document Map
 
+### Quick Reference (Start Here)
+
+| Document | Purpose | Size |
+|----------|---------|------|
+| [00-project-quick-start.md](00-project-quick-start.md) | **Cheat sheet** - one-page project lifecycle reference | ~150 lines |
+| [07-quick-start.md](07-quick-start.md) | Step-by-step from design spec to completion | ~180 lines |
+
 ### For All Audiences
 
 | Document | Purpose | Size |
 |----------|---------|------|
 | [01-overview.md](01-overview.md) | Introduction, roles, lifecycle overview | ~300 lines |
-| [07-quick-start.md](07-quick-start.md) | Step-by-step from design spec to completion | ~180 lines |
 
 ### For Product Managers
 
