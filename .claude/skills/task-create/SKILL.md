@@ -89,6 +89,35 @@ FOR each task identified:
 REFERENCE: See adr-aware skill for full mapping table
 ```
 
+### Step 3.6: Add Mandatory Project Wrap-up Task (REQUIRED)
+
+```
+ALWAYS create a final "Project Wrap-up" task as the LAST task in the project.
+
+Task ID: Use highest phase number + 90 (e.g., if last phase is 050, wrap-up is 090)
+         This ensures wrap-up is always at the end regardless of task additions.
+
+This task is MANDATORY for all projects and must:
+  1. Update README.md:
+     - Set Status to "Complete"
+     - Update Last Updated date
+     - Set Phase to "Complete" and Progress to "100%"
+     - Add Completed Date
+     - Check all Graduation Criteria checkboxes
+     - Add completion entry to Changelog
+  
+  2. Update plan.md:
+     - Set Status to "Complete"
+     - Update all milestone statuses to ✅
+  
+  3. Document lessons learned:
+     - Create notes/lessons-learned.md if notable insights
+  
+  4. Final verification:
+     - All task files marked completed in TASK-INDEX.md
+     - All documentation is current
+```
+
 ### Step 4: Generate Task Files
 
 For each task, create `tasks/{NNN}-{task-slug}.poml` as a **valid XML document**:
@@ -207,17 +236,20 @@ Task breakdown:
   Phase 1: {n} tasks (001-00{n})
   Phase 2: {m} tasks (010-01{m})
   ...
+  Wrap-up: 1 task (090-project-wrap-up)
   Total: {total} tasks
 
 Files created:
   - tasks/TASK-INDEX.md
-  - tasks/001-{slug}.md
-  - tasks/002-{slug}.md
+  - tasks/001-{slug}.poml
+  - tasks/002-{slug}.poml
   ...
+  - tasks/090-project-wrap-up.poml  # MANDATORY final task
 
 Execution order recommendation:
   1. Start with task 001 (no dependencies)
   2. ...
+  N. End with task 090 (project-wrap-up) - updates README, plan, documents completion
 
 Run /task-execute 001 to begin implementation.
 ```
