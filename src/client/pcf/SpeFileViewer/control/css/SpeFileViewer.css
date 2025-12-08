@@ -1,21 +1,25 @@
 /**
  * SPE File Viewer PCF Control Styles
  *
- * Layout:
- * - Loading state: Centered spinner
- * - Error state: Message bar with retry button
- * - Preview state: Document header + iframe
- * - Empty state: Informational message
+ * Uses Fluent UI v9 components for buttons/inputs.
+ * This CSS handles layout and container styling only.
+ * Dark mode is handled via context.fluentDesignLanguage.isDarkTheme
+ * and the FluentProvider theme prop.
  */
 
-/* Root container */
+/* ========== Root Container ========== */
 .spe-file-viewer {
     width: 100%;
     height: 100%;
     display: flex;
     flex-direction: column;
-    background-color: #faf9f8; /* Fluent UI neutral background */
-    font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, "Roboto", "Helvetica Neue", sans-serif;
+    background-color: var(--colorNeutralBackground1, #faf9f8);
+    font-family: var(--fontFamilyBase, "Segoe UI", -apple-system, BlinkMacSystemFont, "Roboto", "Helvetica Neue", sans-serif);
+}
+
+/* Dark mode via class (from context.fluentDesignLanguage.isDarkTheme) */
+.spe-file-viewer--dark {
+    background-color: var(--colorNeutralBackground1, #292827);
 }
 
 /* ========== Loading State ========== */
@@ -25,9 +29,10 @@
     align-items: center;
     height: 100%;
     min-height: 200px;
+    flex: 1;
 }
 
-/* Loading overlay (PCF initialization phase) */
+/* Loading overlay (PCF initialization phase - before React renders) */
 .spe-file-viewer-loading-overlay {
     position: absolute;
     inset: 0;
@@ -35,16 +40,16 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    background: rgba(250, 249, 248, 0.95); /* Fluent UI neutral with transparency */
+    background: var(--colorNeutralBackground1, rgba(250, 249, 248, 0.95));
     z-index: 10;
 }
 
-/* Loading spinner */
+/* Loading spinner (native PCF loading) */
 .spe-file-viewer-loading-spinner {
     width: 40px;
     height: 40px;
-    border: 3px solid #f3f3f3;
-    border-top: 3px solid #0078d4; /* Fluent UI primary blue */
+    border: 3px solid var(--colorNeutralStroke1, #f3f3f3);
+    border-top: 3px solid var(--colorBrandForeground1, #0078d4);
     border-radius: 50%;
     animation: spe-file-viewer-spin 1s linear infinite;
 }
@@ -53,7 +58,7 @@
 .spe-file-viewer-loading-text {
     margin-top: 16px;
     font-size: 14px;
-    color: #605e5c; /* Fluent UI secondary text */
+    color: var(--colorNeutralForeground2, #605e5c);
     font-weight: 400;
 }
 
@@ -69,32 +74,7 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
-}
-
-.spe-file-viewer__retry-button {
-    align-self: flex-start;
-    padding: 8px 16px;
-    background-color: #0078d4; /* Fluent UI primary blue */
-    color: white;
-    border: none;
-    border-radius: 2px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background-color 0.2s ease;
-}
-
-.spe-file-viewer__retry-button:hover {
-    background-color: #106ebe;
-}
-
-.spe-file-viewer__retry-button:active {
-    background-color: #005a9e;
-}
-
-.spe-file-viewer__retry-button:focus {
-    outline: 2px solid #605e5c;
-    outline-offset: 2px;
+    align-items: flex-start;
 }
 
 /* ========== Empty State ========== */
@@ -107,138 +87,54 @@
     display: flex;
     flex-direction: column;
     height: 100%;
+    flex: 1;
     overflow: hidden;
 }
 
-/* Action Buttons Container - Top-right above iframe */
+/* Action Buttons Container - Toolbar above iframe */
 .spe-file-viewer__actions {
     display: flex;
-    justify-content: flex-end;
     align-items: center;
     padding: 8px 12px;
     gap: 8px;
-    background-color: #faf9f8; /* Match parent background */
-    border-bottom: 1px solid #edebe9;
-    min-height: 40px;
+    background-color: var(--colorNeutralBackground2, #faf9f8);
+    border-bottom: 1px solid var(--colorNeutralStroke1, #edebe9);
+    min-height: 48px;
+}
+
+/* Dark mode actions bar */
+.spe-file-viewer--dark .spe-file-viewer__actions {
+    background-color: var(--colorNeutralBackground2, #323130);
+    border-bottom-color: var(--colorNeutralStroke1, #484644);
 }
 
 /* Preview iframe - Full frame below actions */
 .spe-file-viewer__iframe {
-    flex: 1 1 auto; /* Take all available space */
+    flex: 1 1 auto;
     width: 100%;
     height: 100%;
     border: none;
-    background-color: #ffffff;
-    overflow: auto; /* Scroll only if content exceeds container */
+    background-color: var(--colorNeutralBackground1, #ffffff);
+    overflow: auto;
 }
 
-/* ========== Action Buttons (Compact) ========== */
-
-.spe-file-viewer__action-button {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 12px;
-    font-size: 13px;
-    font-weight: 600;
-    border-radius: 2px;
-    cursor: pointer;
-    transition: background-color 0.2s ease, border-color 0.2s ease;
-    white-space: nowrap;
+/* Dark mode iframe background */
+.spe-file-viewer--dark .spe-file-viewer__iframe {
+    background-color: var(--colorNeutralBackground1, #1b1a19);
 }
 
-/* Edit button specific styles */
-.spe-file-viewer__edit-btn {
-    /* Uses .spe-file-viewer__action-button--primary base styles */
+/* ========== Dark mode loading overlay ========== */
+.spe-file-viewer--dark .spe-file-viewer-loading-overlay {
+    background: var(--colorNeutralBackground1, rgba(41, 40, 39, 0.95));
 }
 
-/* Edit icon in button */
-.spe-file-viewer__edit-icon {
-    flex-shrink: 0;
+.spe-file-viewer--dark .spe-file-viewer-loading-spinner {
+    border-color: var(--colorNeutralStroke1, #484644);
+    border-top-color: var(--colorBrandForeground1, #4fa7ff);
 }
 
-/* Primary button (Open in Editor) */
-.spe-file-viewer__action-button--primary {
-    background-color: #0078d4; /* Fluent UI primary blue */
-    color: white;
-    border: none;
-}
-
-.spe-file-viewer__action-button--primary:hover {
-    background-color: #106ebe; /* Darker blue on hover */
-}
-
-.spe-file-viewer__action-button--primary:active {
-    background-color: #005a9e; /* Even darker on click */
-}
-
-.spe-file-viewer__action-button--primary:focus {
-    outline: 2px solid #605e5c;
-    outline-offset: 2px;
-}
-
-.spe-file-viewer__action-button--primary:disabled {
-    background-color: #c8c6c4; /* Gray when disabled */
-    cursor: not-allowed;
-    opacity: 0.6;
-}
-
-/* Loading state for action button */
-.spe-file-viewer__action-button--loading {
-    position: relative;
-    cursor: wait;
-}
-
-/* Button spinner (small inline spinner) */
-.spe-file-viewer__button-spinner {
-    display: inline-block;
-    width: 14px;
-    height: 14px;
-    border: 2px solid rgba(255, 255, 255, 0.3);
-    border-top: 2px solid #ffffff;
-    border-radius: 50%;
-    animation: spe-file-viewer-spin 0.8s linear infinite;
-    flex-shrink: 0;
-}
-
-/* Secondary button (Back to Preview) */
-.spe-file-viewer__action-button--secondary {
-    background-color: #ffffff;
-    color: #323130;
-    border: 1px solid #8a8886;
-}
-
-.spe-file-viewer__action-button--secondary:hover {
-    background-color: #f3f2f1; /* Light gray on hover */
-    border-color: #605e5c;
-}
-
-.spe-file-viewer__action-button--secondary:active {
-    background-color: #edebe9; /* Darker gray on click */
-}
-
-.spe-file-viewer__action-button--secondary:focus {
-    outline: 2px solid #605e5c;
-    outline-offset: 2px;
-}
-
-.spe-file-viewer__action-button--secondary:disabled {
-    background-color: #f3f2f1;
-    color: #a19f9d;
-    border-color: #c8c6c4;
-    cursor: not-allowed;
-    opacity: 0.6;
-}
-
-/* Button spinner for secondary buttons (darker color) */
-.spe-file-viewer__action-button--secondary .spe-file-viewer__button-spinner {
-    border: 2px solid rgba(0, 0, 0, 0.15);
-    border-top: 2px solid #323130;
-}
-
-/* Web icon in button */
-.spe-file-viewer__web-icon {
-    flex-shrink: 0;
+.spe-file-viewer--dark .spe-file-viewer-loading-text {
+    color: var(--colorNeutralForeground2, #d2d0ce);
 }
 
 /* ========== Responsive Design ========== */
@@ -247,107 +143,30 @@
 @media (max-width: 599px) {
     .spe-file-viewer__actions {
         padding: 6px 8px;
-        min-height: 36px;
-    }
-
-    .spe-file-viewer__action-button {
-        padding: 3px 10px;
-        font-size: 12px;
-    }
-}
-
-/* Medium screens (600px - 1024px) */
-@media (min-width: 600px) and (max-width: 1024px) {
-    .spe-file-viewer__header {
-        padding: 10px 14px;
-    }
-}
-
-/* Large screens (> 1024px) */
-@media (min-width: 1025px) {
-    .spe-file-viewer__header {
-        padding: 12px 20px;
+        min-height: 40px;
+        gap: 4px;
     }
 }
 
 /* ========== Accessibility ========== */
 
-/* High contrast mode support */
-@media (prefers-contrast: high) {
-    .spe-file-viewer__retry-button {
-        border: 2px solid currentColor;
-    }
-
-    .spe-file-viewer__header {
-        border-bottom-width: 2px;
-    }
-}
-
 /* Reduced motion support */
 @media (prefers-reduced-motion: reduce) {
-    .spe-file-viewer__retry-button {
-        transition: none;
-    }
-
-    .spe-file-viewer-loading-spinner,
-    .spe-file-viewer__button-spinner {
+    .spe-file-viewer-loading-spinner {
         animation: none;
-        border-top-color: #0078d4;
         opacity: 0.8;
     }
 }
 
 /* Focus visible (keyboard navigation) */
 .spe-file-viewer__iframe:focus {
-    outline: 2px solid #0078d4;
+    outline: 2px solid var(--colorBrandForeground1, #0078d4);
     outline-offset: -2px;
-}
-
-/* ========== Dark Mode Support ========== */
-@media (prefers-color-scheme: dark) {
-    .spe-file-viewer {
-        background-color: #292827;
-    }
-
-    .spe-file-viewer__header {
-        background-color: #323130;
-        border-bottom-color: #484644;
-    }
-
-    .spe-file-viewer__document-name {
-        color: #ffffff;
-    }
-
-    .spe-file-viewer__file-type {
-        background-color: #004377;
-        color: #8ddaff;
-    }
-
-    .spe-file-viewer__file-size {
-        color: #d2d0ce;
-    }
-
-    .spe-file-viewer__iframe {
-        background-color: #1b1a19;
-    }
-
-    .spe-file-viewer-loading-overlay {
-        background: rgba(41, 40, 39, 0.95); /* Dark neutral with transparency */
-    }
-
-    .spe-file-viewer-loading-spinner {
-        border-color: #484644;
-        border-top-color: #4fa7ff; /* Lighter blue for dark mode */
-    }
-
-    .spe-file-viewer-loading-text {
-        color: #d2d0ce;
-    }
 }
 
 /* ========== Print Styles ========== */
 @media print {
-    .spe-file-viewer__header {
+    .spe-file-viewer__actions {
         display: none;
     }
 
