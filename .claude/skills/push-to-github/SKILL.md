@@ -33,6 +33,51 @@ Automate the git workflow from staged changes to pull request creation. Ensures 
 
 ---
 
+## When to Create a PR
+
+PRs should be created **early in the project lifecycle** for visibility:
+
+| Stage | Action | PR State |
+|-------|--------|----------|
+| After project artifacts created | Create feature branch | No PR yet |
+| After first meaningful commit | Create draft PR | **Draft** |
+| Implementation complete | Mark PR ready | **Ready for Review** |
+| After code review passes | Merge to master | Merged |
+
+### Recommended Workflow
+
+1. **Project start** (after `/design-to-project` Phase 3):
+   ```powershell
+   git checkout -b feature/{project-name}
+   git add projects/{project-name}/
+   git commit -m "feat({scope}): initialize {project-name} project"
+   git push -u origin feature/{project-name}
+   ```
+
+2. **Create draft PR** (for visibility):
+   ```powershell
+   gh pr create --draft --title "feat({scope}): {project-name}" --body "## Status\n- [ ] Implementation in progress"
+   ```
+
+3. **During implementation** (incremental commits):
+   ```powershell
+   git add .
+   git commit -m "{type}({scope}): {description}"
+   git push
+   ```
+
+4. **When ready for review**:
+   ```powershell
+   gh pr ready  # Converts draft to ready-for-review
+   ```
+
+5. **After approval** (merge to master):
+   ```powershell
+   gh pr merge --squash  # Or merge via GitHub UI
+   ```
+
+---
+
 ## Workflow
 
 ### Step 1: Pre-flight Checks

@@ -154,8 +154,35 @@ Existing files:
 Next steps:
   1. Review README.md and plan.md for accuracy
   2. Run /task-create to decompose plan into tasks
-  3. Begin Phase 1 implementation
+  3. Create feature branch and optionally draft PR (see below)
+  4. Begin Phase 1 implementation
 ```
+
+### Step 8: Create Feature Branch (Recommended)
+
+After project initialization, create a feature branch for isolation:
+
+```powershell
+# Create feature branch (naming matches project folder)
+git checkout -b feature/{project-name}
+
+# Commit project artifacts
+git add projects/{project-name}/
+git commit -m "feat({scope}): initialize {project-name} project"
+
+# Push to remote
+git push -u origin feature/{project-name}
+
+# Optional: Create draft PR for visibility
+gh pr create --draft --title "feat({scope}): {project-name}" \
+  --body "## Summary\nImplementation of {project-name}\n\n## Status\n- [x] Project initialized\n- [ ] Tasks created\n- [ ] Implementation\n- [ ] Ready for review"
+```
+
+**Why create branch now?**
+- Isolates project work from master
+- Enables incremental commits during implementation
+- Draft PR provides visibility to team
+- Clean merge when project completes
 
 ## Conventions
 

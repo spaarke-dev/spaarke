@@ -231,6 +231,31 @@ VERIFY outputs:
   - Dependencies mapped correctly
 ```
 
+#### Step 3.5: Create Feature Branch
+```
+CREATE feature branch for this project:
+
+git checkout -b feature/{project-name}
+
+WHY at this point:
+  - All artifacts created (README, plan, tasks)
+  - Ready for commits that represent meaningful work
+  - PR can be created as draft for visibility
+
+NAMING convention:
+  - feature/{project-name}  ← matches project folder name
+  - Example: feature/ai-document-summary
+
+COMMIT initial artifacts:
+  git add projects/{project-name}/
+  git commit -m "feat({scope}): initialize {project-name} project"
+  git push -u origin feature/{project-name}
+
+OPTIONAL - Create draft PR:
+  gh pr create --draft --title "feat({scope}): {project-name}" \
+    --body "## Summary\nImplementation of {project-name}\n\n## Status\n- [x] Project initialized\n- [ ] Implementation in progress\n- [ ] Code review\n- [ ] Ready for merge"
+```
+
 ### Phase 4: Validate Before Implementation
 
 #### Step 4.1: Cross-Reference Checklist
