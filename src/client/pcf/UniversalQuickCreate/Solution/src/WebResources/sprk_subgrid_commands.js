@@ -345,6 +345,8 @@ function openDocumentUploadDialog(params, selectedControl) {
         position: 2,    // Right side pane (Quick Create style)
         width: { value: 640, unit: 'px' }
         // Height removed - let Custom Page control its own height
+        // NOTE: hideHeader option attempted but caused issues - Custom Page header styling
+        // must be addressed via Canvas App design or CSS injection
     };
 
     console.log("[Spaarke] Page Input:", pageInput);

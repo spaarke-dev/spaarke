@@ -9,7 +9,7 @@ import { FluentProvider } from '@fluentui/react-components';
 import { IInputs, IOutputs } from "./generated/ManifestTypes";
 import { UniversalDatasetGridRoot } from "./components/UniversalDatasetGridRoot";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { resolveTheme } from "./providers/ThemeProvider";
+import { resolveTheme, setupThemeListener } from "./providers/ThemeProvider";
 import { DEFAULT_GRID_CONFIG, GridConfiguration } from "./types";
 import { logger } from "./utils/logger";
 import { MsalAuthProvider } from "./services/auth/MsalAuthProvider";
@@ -19,6 +19,8 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
     private notifyOutputChanged: () => void;
     private config: GridConfiguration;
     private authProvider: MsalAuthProvider;
+    private _cleanupThemeListener: (() => void) | null = null;
+    private _context: ComponentFramework.Context<IInputs> | null = null;
 
     constructor() {
         logger.info('Control', 'Constructor called');
@@ -35,6 +37,7 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
             logger.info('Control', 'Init - Creating single React root');
 
             this.notifyOutputChanged = notifyOutputChanged;
+            this._context = context;
 
             // Initialize MSAL authentication (Phase 1)
             // This will be async in the background; token acquisition happens in Phase 2
@@ -42,6 +45,17 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
 
             // Create single React root
             this.root = ReactDOM.createRoot(container);
+
+            // Set up theme listener for dynamic theme changes
+            this._cleanupThemeListener = setupThemeListener(
+                (isDark) => {
+                    logger.info('Control', `Theme changed: isDark=${isDark}`);
+                    if (this._context && this.root) {
+                        this.renderReactTree(this._context);
+                    }
+                },
+                context
+            );
 
             // Render React tree
             this.renderReactTree(context);
@@ -55,6 +69,9 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
 
     public updateView(context: ComponentFramework.Context<IInputs>): void {
         try {
+            // Store latest context for theme listener callback
+            this._context = context;
+
             const dataset = context.parameters.dataset;
             const recordCount = Object.keys(dataset.records || {}).length;
             const isLoading = dataset.loading;
@@ -79,6 +96,12 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
         try {
             logger.info('Control', 'Destroy - Unmounting React root');
 
+            // Clean up theme listener
+            if (this._cleanupThemeListener) {
+                this._cleanupThemeListener();
+                this._cleanupThemeListener = null;
+            }
+
             // Clear MSAL token cache (optional - sessionStorage will be cleared on tab close)
             if (this.authProvider) {
                 logger.info('Control', 'Destroy - Clearing MSAL token cache');
@@ -89,6 +112,8 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
                 this.root.unmount();
                 this.root = null;
             }
+
+            this._context = null;
         } catch (error) {
             logger.error('Control', 'Destroy failed', error);
         }

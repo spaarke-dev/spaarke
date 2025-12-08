@@ -29,7 +29,7 @@ import {
     MessageBarBody,
     MessageBarTitle
 } from '@fluentui/react-components';
-import { Dismiss24Regular } from '@fluentui/react-icons';
+// Dismiss24Regular removed - Custom Page provides close button
 import { FileSelectionField } from './FileSelectionField';
 import { UploadProgressBar } from './UploadProgressBar';
 import { ErrorMessageList } from './ErrorMessageList';
@@ -60,26 +60,13 @@ const useStyles = makeStyles({
     container: {
         display: 'flex',
         flexDirection: 'column',
-        height: '100vh',
-        backgroundColor: tokens.colorNeutralBackground1
-    },
-    header: {
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: tokens.spacingHorizontalXL,
-        borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
-        backgroundColor: tokens.colorNeutralBackground1
-    },
-    headerTitle: {
-        fontSize: tokens.fontSizeBase500,
-        fontWeight: tokens.fontWeightSemibold,
+        height: '100%', // Changed from 100vh - let Custom Page control height
+        backgroundColor: tokens.colorNeutralBackground1,
         color: tokens.colorNeutralForeground1,
-        margin: 0
+        fontSize: tokens.fontSizeBase300, // 14px base - matches Power Apps MDA
+        fontFamily: tokens.fontFamilyBase
     },
-    closeButton: {
-        minWidth: 'auto'
-    },
+    // Header styles removed - Custom Page provides header
     content: {
         flex: 1,
         overflowY: 'auto',
@@ -248,21 +235,7 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
 
     return (
         <div className={styles.container}>
-            {/* Header */}
-            <div className={styles.header}>
-                <h1 className={styles.headerTitle}>
-                    Add Documents to {parentContext.parentDisplayName}
-                </h1>
-                <Button
-                    appearance="subtle"
-                    icon={<Dismiss24Regular />}
-                    onClick={handleCancel}
-                    className={styles.closeButton}
-                    disabled={isUploading}
-                />
-            </div>
-
-            {/* Content */}
+            {/* Content - Header removed since Custom Page provides its own */}
             <div className={styles.content}>
                 {/* Info Banner */}
                 <MessageBar intent="info" className={styles.infoBanner}>
@@ -326,7 +299,7 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
             {/* Footer */}
             <div className={styles.footer}>
                 <span className={styles.versionText}>
-                    v2.0.0.0 • Built {new Date().toLocaleDateString()}
+                    v3.1.2 • Built 2025-12-07
                 </span>
                 <div className={styles.footerButtons}>
                     <Button

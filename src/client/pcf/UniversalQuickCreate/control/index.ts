@@ -26,7 +26,240 @@ declare const Xrm: any;
 import { IInputs, IOutputs } from "./generated/ManifestTypes";
 import * as React from "react";
 import * as ReactDOM from "react-dom/client";
+import { FluentProvider, webLightTheme, webDarkTheme, Theme } from "@fluentui/react-components";
 import { logInfo, logError, logWarn } from "./utils/logger";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Theme Storage Utilities
+// TODO: Import from '@spaarke/ui-components' when package is published
+// These are inlined for now per ADR-012 transition plan
+// ─────────────────────────────────────────────────────────────────────────────
+
+const STORAGE_KEY = 'spaarke-theme';
+const THEME_CHANGE_EVENT = 'spaarke-theme-change';
+
+type ThemePreference = 'auto' | 'light' | 'dark';
+
+/**
+ * Get the user's theme preference from localStorage
+ * Checks both PCF iframe and parent window localStorage
+ */
+function getUserThemePreference(): ThemePreference {
+    try {
+        // First, check PCF's own localStorage
+        let stored = localStorage.getItem(STORAGE_KEY);
+        if (stored === 'light' || stored === 'dark' || stored === 'auto') {
+            return stored;
+        }
+
+        // Try parent window's localStorage (PCF may be in different iframe)
+        try {
+            const parentStored = window.parent?.localStorage?.getItem(STORAGE_KEY);
+            if (parentStored === 'light' || parentStored === 'dark' || parentStored === 'auto') {
+                return parentStored;
+            }
+        } catch {
+            // Cross-origin access blocked - that's okay
+        }
+
+        // Try top window's localStorage
+        try {
+            const topStored = window.top?.localStorage?.getItem(STORAGE_KEY);
+            if (topStored === 'light' || topStored === 'dark' || topStored === 'auto') {
+                return topStored;
+            }
+        } catch {
+            // Cross-origin access blocked - that's okay
+        }
+    } catch {
+        // localStorage not available (SSR, private browsing, etc.)
+    }
+    return 'auto';
+}
+
+/**
+ * Detect dark mode from URL flag
+ * Power Apps uses ?flags=themeOption%3Ddarkmode for dark mode
+ */
+function detectDarkModeFromUrl(): boolean | null {
+    try {
+        // Check current window
+        if (window.location.href.includes('themeOption%3Ddarkmode') ||
+            window.location.href.includes('themeOption=darkmode')) {
+            return true;
+        }
+
+        // Check parent window URL
+        try {
+            const parentUrl = window.parent?.location?.href;
+            if (parentUrl && (parentUrl.includes('themeOption%3Ddarkmode') ||
+                parentUrl.includes('themeOption=darkmode'))) {
+                return true;
+            }
+        } catch {
+            // Cross-origin access blocked
+        }
+
+        // Check top window URL
+        try {
+            const topUrl = window.top?.location?.href;
+            if (topUrl && (topUrl.includes('themeOption%3Ddarkmode') ||
+                topUrl.includes('themeOption=darkmode'))) {
+                return true;
+            }
+        } catch {
+            // Cross-origin access blocked
+        }
+    } catch {
+        // URL access failed
+    }
+    return null;
+}
+
+/**
+ * Detect dark mode from DOM navbar color (Power Apps fallback)
+ */
+function detectDarkModeFromNavbar(): boolean | null {
+    try {
+        // Check in current document
+        let navbar: Element | null = document.querySelector('[data-id="navbar-container"]');
+
+        // Try parent document if not found
+        if (!navbar) {
+            try {
+                const parentNavbar = window.parent?.document?.querySelector('[data-id="navbar-container"]');
+                if (parentNavbar) navbar = parentNavbar;
+            } catch {
+                // Cross-origin access blocked
+            }
+        }
+
+        // Try top document if still not found
+        if (!navbar) {
+            try {
+                const topNavbar = window.top?.document?.querySelector('[data-id="navbar-container"]');
+                if (topNavbar) navbar = topNavbar;
+            } catch {
+                // Cross-origin access blocked
+            }
+        }
+
+        if (navbar) {
+            const bgColor = window.getComputedStyle(navbar).backgroundColor;
+            // rgb(10, 10, 10) = dark, rgb(240, 240, 240) = light
+            if (bgColor === 'rgb(10, 10, 10)') {
+                return true;
+            }
+            if (bgColor === 'rgb(240, 240, 240)') {
+                return false;
+            }
+        }
+    } catch {
+        // DOM access failed
+    }
+    return null;
+}
+
+/**
+ * Get system theme preference
+ */
+function getSystemThemePreference(): boolean {
+    try {
+        return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Get effective dark mode state considering all sources
+ *
+ * Priority:
+ * 1. localStorage user preference (if not 'auto')
+ * 2. URL flag (Power Apps dark mode URL parameter)
+ * 3. Power Apps context (isDarkTheme)
+ * 4. DOM navbar color fallback
+ * 5. System preference
+ *
+ * @param context - PCF context (optional)
+ * @returns boolean - true if dark mode should be active
+ */
+function getEffectiveDarkMode(context?: ComponentFramework.Context<IInputs>): boolean {
+    const preference = getUserThemePreference();
+
+    // 1. User explicit choice overrides everything
+    if (preference === 'dark') {
+        return true;
+    }
+    if (preference === 'light') {
+        return false;
+    }
+
+    // 2. Check URL flag (Power Apps dark mode flag in URL)
+    const urlDark = detectDarkModeFromUrl();
+    if (urlDark === true) {
+        return true;
+    }
+
+    // 3. Check Power Apps context
+    if (context?.fluentDesignLanguage?.isDarkTheme !== undefined) {
+        return context.fluentDesignLanguage.isDarkTheme;
+    }
+
+    // 4. Check DOM navbar color
+    const navbarDark = detectDarkModeFromNavbar();
+    if (navbarDark !== null) {
+        return navbarDark;
+    }
+
+    // 5. Fall back to system preference
+    return getSystemThemePreference();
+}
+
+/**
+ * Resolve the appropriate Fluent UI theme
+ */
+function resolveTheme(context?: ComponentFramework.Context<IInputs>): Theme {
+    return getEffectiveDarkMode(context) ? webDarkTheme : webLightTheme;
+}
+
+/**
+ * Set up listener for theme changes (localStorage and system preference)
+ *
+ * @param callback - Called when theme changes with new isDark value
+ * @param context - PCF context (optional, for context-based theme detection)
+ * @returns Cleanup function to remove listeners
+ */
+function setupThemeListener(
+    callback: (isDark: boolean) => void,
+    context?: ComponentFramework.Context<IInputs>
+): () => void {
+    // Handle custom theme change event (from ribbon menu)
+    const handleThemeChange = () => {
+        callback(getEffectiveDarkMode(context));
+    };
+
+    // Handle system preference change
+    const handleSystemChange = () => {
+        // Only respond if user preference is 'auto'
+        if (getUserThemePreference() === 'auto') {
+            callback(getEffectiveDarkMode(context));
+        }
+    };
+
+    // Listen for custom event
+    window.addEventListener(THEME_CHANGE_EVENT, handleThemeChange);
+
+    // Listen for system preference changes
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    mediaQuery.addEventListener('change', handleSystemChange);
+
+    // Return cleanup function
+    return () => {
+        window.removeEventListener(THEME_CHANGE_EVENT, handleThemeChange);
+        mediaQuery.removeEventListener('change', handleSystemChange);
+    };
+}
 import { MsalAuthProvider } from "./services/auth/MsalAuthProvider";
 import { MultiFileUploadService } from "./services/MultiFileUploadService";
 import { DocumentRecordService } from "./services/DocumentRecordService";
@@ -67,6 +300,9 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
     // Output property for signaling dialog close
     private shouldClose: boolean = false;
 
+    // Theme listener cleanup
+    private _cleanupThemeListener: (() => void) | null = null;
+
     constructor() {
         logInfo('UniversalDocumentUpload', 'Constructor called');
     }
@@ -101,7 +337,7 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
         state: ComponentFramework.Dictionary,
         container: HTMLDivElement
     ): void {
-    logInfo('UniversalDocumentUpload', 'Initializing PCF control v3.0.6 (File URL field)');
+    logInfo('UniversalDocumentUpload', 'Initializing PCF control v3.1.2 (FluentProvider height fix)');
 
         this.context = context;
         this.notifyOutputChanged = notifyOutputChanged;
@@ -109,19 +345,37 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
     // Always use Custom Page mode (v3.0.4 - Quick Create Form deprecated)
         this.isCustomPageMode = true;
 
-        // Create container
+        // Create container with explicit height to fill parent
+        // The host container (provided by Power Apps) may not have explicit height
+        // so we set both the host and our container to fill available space
+        container.style.height = '100%';
+        container.style.width = '100%';
+        container.style.display = 'flex';
+        container.style.flexDirection = 'column';
+
         this.container = document.createElement("div");
         this.container.className = "universal-document-upload-container";
+        this.container.style.height = '100%';
+        this.container.style.width = '100%';
+        this.container.style.flex = '1';
+        this.container.style.display = 'flex';
+        this.container.style.flexDirection = 'column';
         container.appendChild(this.container);
-
-        // Version badge for debugging
-        const versionBadge = document.createElement("div");
-    versionBadge.textContent = "✓ V3.0.6 - FILE URL - " + new Date().toLocaleTimeString();
-        versionBadge.style.cssText = "padding: 12px; background: #107c10; color: white; font-size: 14px; font-weight: bold; border-radius: 4px; margin-bottom: 8px; text-align: center;";
-        this.container.appendChild(versionBadge);
 
         // Create React root
         this.reactRoot = ReactDOM.createRoot(this.container);
+
+        // Set up theme listener for dynamic theme changes
+        this._cleanupThemeListener = setupThemeListener(
+            (isDark) => {
+                logInfo('UniversalDocumentUpload', `Theme changed: isDark=${isDark}`);
+                // Re-render when theme changes if initialized
+                if (this._initialized && this.reactRoot) {
+                    this.renderReactComponent();
+                }
+            },
+            context
+        );
 
         // NOTE: Do NOT call initializeAsync here - updateView() will call it when params are ready
         // This allows Custom Page parameters to hydrate before initialization
@@ -310,14 +564,30 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
             return;
         }
 
-        // Render DocumentUploadForm
+        // Resolve theme based on user preference and context
+        const theme = resolveTheme(this.context);
+
+        // Render DocumentUploadForm wrapped in FluentProvider
+        // CRITICAL: FluentProvider must have explicit height styles to fill container
         this.reactRoot.render(
-            React.createElement(DocumentUploadForm, {
-                parentContext: this.parentContext,
-                multiFileService: this.multiFileService,
-                documentRecordService: this.documentRecordService,
-                onClose: this.closeDialog.bind(this) // Use closeDialog for both Custom Page and Quick Create Form
-            })
+            React.createElement(
+                FluentProvider,
+                {
+                    theme,
+                    style: {
+                        height: '100%',
+                        width: '100%',
+                        display: 'flex',
+                        flexDirection: 'column'
+                    }
+                },
+                React.createElement(DocumentUploadForm, {
+                    parentContext: this.parentContext,
+                    multiFileService: this.multiFileService,
+                    documentRecordService: this.documentRecordService,
+                    onClose: this.closeDialog.bind(this) // Use closeDialog for both Custom Page and Quick Create Form
+                })
+            )
         );
     }
 
@@ -447,6 +717,12 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
      */
     public destroy(): void {
         logInfo('UniversalDocumentUpload', 'Destroying PCF control');
+
+        // Clean up theme listener
+        if (this._cleanupThemeListener) {
+            this._cleanupThemeListener();
+            this._cleanupThemeListener = null;
+        }
 
         if (this.reactRoot) {
             this.reactRoot.unmount();
