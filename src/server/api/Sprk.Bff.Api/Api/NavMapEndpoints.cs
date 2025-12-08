@@ -100,7 +100,7 @@ public static class NavMapEndpoints
         try
         {
             // Layer 2: Check cache first
-            if (cache.TryGetValue<string>(cacheKey, out var cachedValue))
+            if (cache.TryGetValue<string>(cacheKey, out var cachedValue) && cachedValue != null)
             {
                 logger.LogDebug("EntitySetName for {Entity} retrieved from cache", entityLogicalName);
                 return TypedResults.Ok(new EntitySetNameResponse
@@ -194,7 +194,7 @@ public static class NavMapEndpoints
         try
         {
             // Layer 2: Check cache first
-            if (cache.TryGetValue<LookupNavigationMetadata>(cacheKey, out var cachedMetadata))
+            if (cache.TryGetValue<LookupNavigationMetadata>(cacheKey, out var cachedMetadata) && cachedMetadata != null)
             {
                 logger.LogDebug("Lookup navigation for {Child}.{Relationship} retrieved from cache", childEntity, relationship);
                 return TypedResults.Ok(new LookupNavigationResponse
@@ -300,7 +300,7 @@ public static class NavMapEndpoints
         try
         {
             // Layer 2: Check cache first
-            if (cache.TryGetValue<string>(cacheKey, out var cachedValue))
+            if (cache.TryGetValue<string>(cacheKey, out var cachedValue) && cachedValue != null)
             {
                 logger.LogDebug("Collection navigation for {Parent}.{Relationship} retrieved from cache", parentEntity, relationship);
                 return TypedResults.Ok(new CollectionNavigationResponse

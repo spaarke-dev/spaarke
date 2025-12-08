@@ -132,7 +132,8 @@ public sealed class GraphClientFactory : IGraphClientFactory
         // PHASE 4: Token Caching (ADR-009: Redis-First Caching)
         // ============================================================================
         // Check cache first to avoid expensive OBO exchange (~200ms)
-        var tokenHash = _tokenCache.ComputeTokenHash(userAccessToken);
+        // userAccessToken is guaranteed non-null by method signature and caller validation
+        var tokenHash = _tokenCache.ComputeTokenHash(userAccessToken!);
         var cachedGraphToken = await _tokenCache.GetTokenAsync(tokenHash);
 
         if (cachedGraphToken != null)

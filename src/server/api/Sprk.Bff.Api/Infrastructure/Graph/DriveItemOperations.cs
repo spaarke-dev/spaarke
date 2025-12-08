@@ -412,7 +412,7 @@ public class DriveItemOperations
             var contentType = item.File?.MimeType ?? "application/octet-stream";
 
             // Download content with optional range
-            Stream contentStream;
+            Stream? contentStream;
             long contentLength;
             long? rangeStart = null;
             long? rangeEnd = null;
@@ -468,7 +468,7 @@ public class DriveItemOperations
             }
 
             return new FileContentResponse(
-                Content: contentStream,
+                Content: contentStream!,  // Guaranteed non-null by null checks above
                 ContentLength: contentLength,
                 ContentType: contentType,
                 ETag: item.ETag,

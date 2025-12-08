@@ -79,8 +79,8 @@ public sealed class DocumentStorageResolver : IDocumentStorageResolver
         _logger.LogInformation(
             "Resolved document {DocumentId} to storage pointers (DriveId: {DriveIdPrefix}..., ItemId: {ItemIdPrefix}...)",
             documentId,
-            driveId.Length > 8 ? driveId.Substring(0, 8) : driveId,
-            itemId.Length > 8 ? itemId.Substring(0, 8) : itemId);
+            driveId!.Length > 8 ? driveId.Substring(0, 8) : driveId,
+            itemId!.Length > 8 ? itemId.Substring(0, 8) : itemId);
 
         return (driveId!, itemId!);
     }

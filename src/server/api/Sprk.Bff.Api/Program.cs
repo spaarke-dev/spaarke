@@ -381,7 +381,9 @@ builder.Services.AddHealthChecks()
         try
         {
             // NOTE: BuildServiceProvider() usage explained in comment block above
+            #pragma warning disable ASP0000 // Do not call 'IServiceCollection.BuildServiceProvider' - documented exception
             var cache = builder.Services.BuildServiceProvider().GetRequiredService<Microsoft.Extensions.Caching.Distributed.IDistributedCache>();
+            #pragma warning restore ASP0000
             var testKey = "_health_check_";
             var testValue = DateTimeOffset.UtcNow.ToString("O");
 
