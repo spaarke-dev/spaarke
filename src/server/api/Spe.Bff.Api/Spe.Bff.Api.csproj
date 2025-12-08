@@ -19,7 +19,7 @@
     <!-- Caching -->
     <PackageReference Include="Microsoft.Extensions.Caching.Abstractions" Version="8.0.0" />
     <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="8.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.0" />
 
     <!-- Microsoft Graph SDK v5.x (CRITICAL - must be 5.x or higher) -->
     <PackageReference Include="Microsoft.Graph" Version="5.56.0" />
