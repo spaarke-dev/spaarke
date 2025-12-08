@@ -239,6 +239,19 @@ export interface FilePreviewProps {
     accessToken: string;
     /** Correlation ID for request tracking */
     correlationId: string;
+    /**
+     * Dark mode state from Power Platform context
+     *
+     * When true, the control should render with dark theme colors.
+     * Detected via context.fluentDesignLanguage?.isDarkTheme
+     */
+    isDarkTheme: boolean;
+    /**
+     * Callback to refresh the preview
+     *
+     * Called when user clicks the Refresh button to reload the document.
+     */
+    onRefresh?: () => void;
 }
 
 /**
