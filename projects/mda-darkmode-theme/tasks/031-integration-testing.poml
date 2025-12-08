@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="mda-darkmode-theme">
+  <metadata>
+    <title>Integration Testing (All Controls)</title>
+    <phase>4: Documentation and Testing</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>010, 011, 012, 020</dependencies>
+    <blocks>032</blocks>
+  </metadata>
+
+  <prompt>
+    Perform comprehensive integration testing of the theme system across all PCF controls.
+    Test the command bar menu, localStorage persistence, cross-tab synchronization, system
+    preference detection, and immediate theme application. Document test results and any
+    issues found.
+  </prompt>
+
+  <role>
+    SPAARKE QA engineer. Thorough testing across browsers and scenarios. Document all
+    test cases and results.
+  </role>
+
+  <goal>
+    Complete integration test pass with all tests passing. Any issues identified and
+    resolved or documented for future fix.
+  </goal>
+
+  <context>
+    <background>
+      The theme system involves multiple components working together: command bar menu,
+      JavaScript web resource, shared library utilities, and three PCF controls. Integration
+      testing ensures all parts work together correctly.
+    </background>
+    <relevant-files>
+      <file>projects/mda-darkmode-theme/spec.md Section 6 (test requirements)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Must test all three PCF controls</constraint>
+    <constraint source="spec">Must test cross-tab synchronization</constraint>
+    <constraint source="spec">Must test persistence across browser restart</constraint>
+    <constraint source="spec">Must test keyboard accessibility</constraint>
+    <constraint source="quality">Must test in Edge, Chrome, Firefox</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/mda-darkmode-theme/spec.md Section 6</file>
+    </files>
+    <patterns>
+      <pattern name="Test Categories" location="spec.md Section 6">
+        - Unit Tests (themeStorage.ts)
+        - Integration Tests (command bar + PCF controls)
+        - Per-Control Tests
+        - Accessibility Tests
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Deploy all components to test environment</step>
+    <step order="2">Test: Theme menu visible in command bar More Commands</step>
+    <step order="3">Test: Auto option works (follows system preference)</step>
+    <step order="4">Test: Light option forces light theme</step>
+    <step order="5">Test: Dark option forces dark theme</step>
+    <step order="6">Test: SpeFileViewer updates immediately on theme change</step>
+    <step order="7">Test: UniversalDatasetGrid updates immediately on theme change</step>
+    <step order="8">Test: UniversalQuickCreate updates immediately on theme change</step>
+    <step order="9">Test: No page refresh required</step>
+    <step order="10">Test: Cross-tab sync (change in one tab, verify in another)</step>
+    <step order="11">Test: Persistence (close browser, reopen, verify theme)</step>
+    <step order="12">Test: System preference change in Auto mode triggers update</step>
+    <step order="13">Test: Keyboard navigation (Tab, Arrow, Enter)</step>
+    <step order="14">Test: Screen reader announces menu and options</step>
+    <step order="15">Test: All above in Microsoft Edge</step>
+    <step order="16">Test: All above in Google Chrome</step>
+    <step order="17">Test: All above in Mozilla Firefox</step>
+    <step order="18">Document test results</step>
+    <step order="19">Fix any critical issues found</step>
+    <step order="20">Update TASK-INDEX.md: change status from ⬜ to ✅</step>
+  </steps>
+
+  <tools>
+    <tool name="browser">Microsoft Edge, Chrome, Firefox</tool>
+    <tool name="DevTools">localStorage inspection, console logs</tool>
+    <tool name="screen-reader">Accessibility testing</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/mda-darkmode-theme/notes/test-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Theme menu appears and functions in all browsers</criterion>
+    <criterion testable="true">All three PCF controls respond to theme changes</criterion>
+    <criterion testable="true">Cross-tab synchronization works</criterion>
+    <criterion testable="true">Preference persists across browser restart</criterion>
+    <criterion testable="true">Auto mode respects system preference changes</criterion>
+    <criterion testable="true">Menu is keyboard accessible</criterion>
+    <criterion testable="true">No critical bugs blocking release</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use browser DevTools to:
+    - Inspect localStorage (Application > Storage > Local Storage)
+    - Check console for Spaarke.Theme logs
+    - Simulate system dark mode (Rendering > Emulate CSS prefers-color-scheme)
+
+    Cross-tab testing requires two browser windows (not just tabs in same window).
+
+    Document any browser-specific issues found.
+  </notes>
+</task>

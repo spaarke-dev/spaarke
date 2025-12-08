@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="mda-darkmode-theme">
+  <metadata>
+    <title>Deploy to DEV Environment</title>
+    <phase>4: Documentation and Testing</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>031</dependencies>
+    <blocks>none</blocks>
+  </metadata>
+
+  <prompt>
+    Deploy all theme system components to the DEV environment. This includes the updated
+    PCF controls, web resources, SVG icons, and ribbon customizations. Verify deployment
+    and perform smoke test.
+  </prompt>
+
+  <role>
+    SPAARKE DevOps engineer. Deploy solution components to Dataverse environment.
+    Verify successful deployment.
+  </role>
+
+  <goal>
+    All theme system components deployed to DEV environment, functioning correctly,
+    and ready for user acceptance testing.
+  </goal>
+
+  <context>
+    <background>
+      The DEV environment is used for final integration testing before promotion to
+      higher environments. All components must be deployed as a managed or unmanaged
+      solution depending on environment policy.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeCore/ (solution folder)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ops">Follow standard deployment procedures</constraint>
+    <constraint source="ops">Use pac CLI for deployment</constraint>
+    <constraint source="quality">Verify all components after deployment</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">Ensure all component builds are up to date</step>
+    <step order="2">Build SpeFileViewer PCF solution</step>
+    <step order="3">Build UniversalDatasetGrid PCF solution</step>
+    <step order="4">Build UniversalQuickCreate PCF solution</step>
+    <step order="5">Export SpaarkeCore solution with web resources and ribbon</step>
+    <step order="6">Connect to DEV environment (pac auth)</step>
+    <step order="7">Import PCF control solutions</step>
+    <step order="8">Import SpaarkeCore solution</step>
+    <step order="9">Publish all customizations</step>
+    <step order="10">Verify web resources deployed correctly</step>
+    <step order="11">Verify ribbon customization active</step>
+    <step order="12">Smoke test: Open app, click Theme menu, verify PCF controls update</step>
+    <step order="13">Document deployment status</step>
+    <step order="14">Update TASK-INDEX.md: change status from ⬜ to ✅</step>
+    <step order="15">Update project README.md status to "Complete"</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI for solution management</tool>
+    <tool name="MSBuild">Build PCF solutions</tool>
+    <tool name="browser">Smoke testing</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment">Components deployed to DEV environment</output>
+    <output type="docs">projects/mda-darkmode-theme/notes/deployment-log.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All PCF controls deployed without errors</criterion>
+    <criterion testable="true">Web resources (JS + SVG) present in solution</criterion>
+    <criterion testable="true">Ribbon customization active</criterion>
+    <criterion testable="true">Theme menu visible in command bar</criterion>
+    <criterion testable="true">Theme change updates PCF controls</criterion>
+    <criterion testable="true">No regression in existing functionality</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    PCF solution build command:
+    MSBuild /t:Rebuild /p:Configuration=Release
+
+    Solution import command:
+    pac solution import --path [solution.zip] --async true --publish-changes true
+
+    If deployment fails due to file lock, import the solution.zip directly from
+    obj/PowerAppsToolsTemp_sprk/bin/Debug/ folder.
+  </notes>
+</task>

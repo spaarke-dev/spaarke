@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<manifest>
+  <control namespace="Spaarke" constructor="ThemeEnforcer" version="1.0.0" display-name-key="ThemeEnforcer" description-key="Enforces user theme preference on app load" control-type="standard" >
+    <external-service-usage enabled="false">
+    </external-service-usage>
+    <!-- Output property to indicate current theme status -->
+    <property name="themeStatus" display-name-key="Theme Status" description-key="Current theme enforcement status" of-type="SingleLine.Text" usage="bound" required="false" />
+    <resources>
+      <code path="index.ts" order="1"/>
+    </resources>
+  </control>
+</manifest>

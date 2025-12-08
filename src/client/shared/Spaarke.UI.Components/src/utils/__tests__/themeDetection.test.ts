@@ -32,10 +32,10 @@ describe('themeDetection', () => {
       expect(theme).toBe(mockHostTheme);
     });
 
-    it('should return webDarkTheme when mode is "Host" with isDarkMode=true', () => {
+    it('should return webDarkTheme when mode is "Host" with isDarkTheme=true', () => {
       const mockContext = {
         fluentDesignLanguage: {
-          isDarkMode: true
+          isDarkTheme: true
         }
       };
 
@@ -44,10 +44,10 @@ describe('themeDetection', () => {
       expect(theme).toBe(webDarkTheme);
     });
 
-    it('should return webLightTheme when mode is "Host" with isDarkMode=false', () => {
+    it('should return webLightTheme when mode is "Host" with isDarkTheme=false', () => {
       const mockContext = {
         fluentDesignLanguage: {
-          isDarkMode: false
+          isDarkTheme: false
         }
       };
 
@@ -93,10 +93,10 @@ describe('themeDetection', () => {
   });
 
   describe('isDarkMode', () => {
-    it('should return true when isDarkMode is true', () => {
+    it('should return true when isDarkTheme is true', () => {
       const mockContext = {
         fluentDesignLanguage: {
-          isDarkMode: true
+          isDarkTheme: true
         }
       };
 
@@ -105,10 +105,10 @@ describe('themeDetection', () => {
       expect(result).toBe(true);
     });
 
-    it('should return false when isDarkMode is false', () => {
+    it('should return false when isDarkTheme is false', () => {
       const mockContext = {
         fluentDesignLanguage: {
-          isDarkMode: false
+          isDarkTheme: false
         }
       };
 

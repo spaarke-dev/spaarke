@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="mda-darkmode-theme">
+  <metadata>
+    <title>Create SVG Icons (4 icons)</title>
+    <phase>1: Shared Infrastructure</phase>
+    <status>complete</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>020</blocks>
+  </metadata>
+
+  <prompt>
+    Create SVG icon files for the theme menu: a combined sun/moon icon for the menu itself,
+    and individual icons for Auto (half sun/moon), Light (sun), and Dark (moon) options.
+    Icons must be in both 16x16 and 32x32 sizes, and MUST use currentColor for dark mode
+    compliance per spec.md Section 12 (Icon Compliance for Dark Mode).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Create clean, simple SVG icons that work in the Dynamics 365
+    command bar context. Icons must be monochrome and use currentColor.
+  </role>
+
+  <goal>
+    Eight SVG icon files (16x16 and 32x32 sizes for Menu, Auto, Light, Dark) ready for use
+    as web resources in the Dataverse solution. All icons must use currentColor for theme
+    compliance per spec.md Section 12.
+  </goal>
+
+  <context>
+    <background>
+      The command bar flyout menu needs icons for the parent menu item and each option.
+      Dynamics 365 ribbon icons should be simple, recognizable at small sizes, and work
+      with both light and dark command bar backgrounds (hence currentColor).
+    </background>
+    <relevant-files>
+      <file>src/client/assets/icons/sprk_ThemeMenu16.svg (create)</file>
+      <file>src/client/assets/icons/sprk_ThemeMenu32.svg (create)</file>
+      <file>src/client/assets/icons/sprk_ThemeAuto16.svg (create)</file>
+      <file>src/client/assets/icons/sprk_ThemeLight16.svg (create)</file>
+      <file>src/client/assets/icons/sprk_ThemeDark16.svg (create)</file>
+      <file>projects/mda-darkmode-theme/spec.md Appendix A (reference)</file>
+      <file>projects/mda-darkmode-theme/spec.md Section 12 (icon compliance)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ribbon">Icons must be 16x16 and 32x32 pixels (both sizes required)</constraint>
+    <constraint source="Section 12">MUST use currentColor for fill/stroke (dark mode compliance)</constraint>
+    <constraint source="Section 12">NO hardcoded colors (no fill="#000" or stroke="black")</constraint>
+    <constraint source="clarity">Must be recognizable at 16px size</constraint>
+    <constraint source="ribbon">Must be valid SVG format</constraint>
+    <constraint source="Section 12">Monochrome design only (single color that adapts to theme)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/mda-darkmode-theme/spec.md Appendix A</file>
+      <file>projects/mda-darkmode-theme/spec.md Section 12</file>
+    </files>
+    <patterns>
+      <pattern name="Icon Designs" location="spec.md Appendix A">
+        - Menu: Combined sun/moon split design
+        - Auto: Half-filled circle (day/night)
+        - Light: Sun with rays
+        - Dark: Crescent moon
+      </pattern>
+      <pattern name="Icon Compliance" location="spec.md Section 12">
+        - All SVGs must use currentColor for fill/stroke
+        - No hardcoded colors allowed
+        - Test on both light and dark backgrounds
+        - Simple paths, no gradients or complex effects
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create src/client/assets/icons/ folder if missing</step>
+    <step order="2">Create sprk_ThemeMenu16.svg with sun/moon split design</step>
+    <step order="3">Create sprk_ThemeMenu32.svg (scaled version for command bar)</step>
+    <step order="4">Create sprk_ThemeAuto16.svg with half-filled circle</step>
+    <step order="5">Create sprk_ThemeLight16.svg with sun and rays</step>
+    <step order="6">Create sprk_ThemeDark16.svg with crescent moon</step>
+    <step order="7">Validate all SVGs use currentColor (no hardcoded colors)</step>
+    <step order="8">Validate all SVGs are well-formed XML</step>
+    <step order="9">Test icons on WHITE background (light mode visibility)</step>
+    <step order="10">Test icons on DARK background (dark mode visibility)</step>
+    <step order="11">Update TASK-INDEX.md: change status from ⬜ to ✅</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">File operations</tool>
+    <tool name="browser">Visual testing</tool>
+  </tools>
+
+  <outputs>
+    <output type="asset">src/client/assets/icons/sprk_ThemeMenu16.svg</output>
+    <output type="asset">src/client/assets/icons/sprk_ThemeMenu32.svg</output>
+    <output type="asset">src/client/assets/icons/sprk_ThemeAuto16.svg</output>
+    <output type="asset">src/client/assets/icons/sprk_ThemeLight16.svg</output>
+    <output type="asset">src/client/assets/icons/sprk_ThemeDark16.svg</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">sprk_ThemeMenu16.svg is valid SVG, 16x16, uses currentColor only</criterion>
+    <criterion testable="true">sprk_ThemeMenu32.svg is valid SVG, 32x32, uses currentColor only</criterion>
+    <criterion testable="true">sprk_ThemeAuto16.svg is valid SVG, 16x16, uses currentColor only</criterion>
+    <criterion testable="true">sprk_ThemeLight16.svg is valid SVG, 16x16, uses currentColor only</criterion>
+    <criterion testable="true">sprk_ThemeDark16.svg is valid SVG, 16x16, uses currentColor only</criterion>
+    <criterion testable="true">NO hardcoded colors in any SVG (no #000, black, white, etc.)</criterion>
+    <criterion testable="true">Icons are visually distinct and recognizable at 16px</criterion>
+    <criterion testable="true">Icons visible on WHITE background (light mode test)</criterion>
+    <criterion testable="true">Icons visible on DARK background (dark mode test)</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference spec.md Appendix A for the exact SVG markup.
+    Reference spec.md Section 12 for icon compliance requirements.
+
+    The icons will be registered in Dataverse as:
+    - sprk_ThemeMenu16.svg -> Spaarke Theme Menu Icon (16x16)
+    - sprk_ThemeMenu32.svg -> Spaarke Theme Menu Icon (32x32)
+    - sprk_ThemeAuto16.svg -> Spaarke Theme Auto Icon
+    - sprk_ThemeLight16.svg -> Spaarke Theme Light Icon
+    - sprk_ThemeDark16.svg -> Spaarke Theme Dark Icon
+
+    SVG viewBox should be "0 0 16 16" for 16px icons, "0 0 32 32" for 32px icons.
+
+    CRITICAL: Using fill="currentColor" allows the icon to inherit text color.
+    This is MANDATORY for dark mode compliance - hardcoded colors will break in opposite themes.
+
+    Icon Validation Checklist (from Section 12.6):
+    - [ ] Icon uses currentColor for all fill/stroke attributes
+    - [ ] Icon is visible on white background (light mode)
+    - [ ] Icon is visible on dark background (dark mode)
+    - [ ] Icon maintains semantic meaning in both themes
+  </notes>
+</task>

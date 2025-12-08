@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="mda-darkmode-theme">
+  <metadata>
+    <title>Create sprk_ThemeMenu.js Web Resource</title>
+    <phase>1: Shared Infrastructure</phase>
+    <status>complete</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>020</blocks>
+  </metadata>
+
+  <prompt>
+    Create a minimal JavaScript web resource (sprk_ThemeMenu.js) that handles ribbon command
+    invocations for the theme menu. Per ADR-006, this web resource must contain only invocation
+    logic - actual theme detection should be in the shared library. The script sets localStorage
+    and dispatches custom events for PCF controls to react to.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in JavaScript and Dynamics 365 ribbon customization.
+    Follow ADR-006 for minimal web resource pattern.
+  </role>
+
+  <goal>
+    A minimal sprk_ThemeMenu.js web resource with Spaarke.Theme.setTheme(theme) and
+    Spaarke.Theme.isEnabled() functions for ribbon Button commands. Note: isSelected() is
+    optional since we use Button elements (not ToggleButton) per Fluent V9 pattern.
+  </goal>
+
+  <context>
+    <background>
+      The command bar flyout menu needs JavaScript handlers to respond to user clicks. Per ADR-006,
+      we minimize web resource code and keep logic in the shared library. This script is the thin
+      layer that connects ribbon commands to localStorage and event dispatch.
+    </background>
+    <relevant-files>
+      <file>src/client/webresources/js/sprk_ThemeMenu.js (create)</file>
+      <file>projects/mda-darkmode-theme/spec.md Section 3.3 (reference)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">Minimal code - invocation only, no business logic</constraint>
+    <constraint source="spec">Must use localStorage key 'spaarke-theme'</constraint>
+    <constraint source="spec">Must dispatch 'spaarke-theme-change' custom event</constraint>
+    <constraint source="spec">Must validate theme values against ['auto', 'light', 'dark']</constraint>
+    <constraint source="spec">Must listen for system preference changes when in auto mode</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/reference/adr/ADR-006-prefer-pcf-over-webresources.md</file>
+      <file>projects/mda-darkmode-theme/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Ribbon Handler Pattern" location="spec.md Section 3.3">
+        - Spaarke.Theme.setTheme(theme) - called by ribbon Button action
+        - Spaarke.Theme.isEnabled() - called by ribbon enable rule (always true)
+        - Note: isSelected() not needed - using Button elements per Fluent V9 pattern
+        - Theme change itself provides visual feedback (no checked states in menu)
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create src/client/webresources/js/ folder if missing</step>
+    <step order="2">Create sprk_ThemeMenu.js with IIFE wrapper</step>
+    <step order="3">Define Spaarke.Theme namespace</step>
+    <step order="4">Define STORAGE_KEY constant ('spaarke-theme')</step>
+    <step order="5">Define VALID_THEMES array (['auto', 'light', 'dark'])</step>
+    <step order="6">Implement setTheme(theme) function with validation</step>
+    <step order="7">Add localStorage.setItem call in setTheme</step>
+    <step order="8">Add CustomEvent dispatch in setTheme</step>
+    <step order="9">(Optional) Implement isSelected(theme) function - not required for Button elements</step>
+    <step order="10">Implement isEnabled() function (always returns true)</step>
+    <step order="11">Add system preference change listener for auto mode</step>
+    <step order="12">Add console.log statements for debugging</step>
+    <step order="13">Test manually in browser console</step>
+    <step order="14">Update TASK-INDEX.md: change status from ⬜ to ✅</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">File operations</tool>
+    <tool name="browser">Manual testing in console</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/webresources/js/sprk_ThemeMenu.js</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Spaarke.Theme.setTheme('dark') stores 'dark' in localStorage</criterion>
+    <criterion testable="true">Spaarke.Theme.setTheme('dark') dispatches spaarke-theme-change event</criterion>
+    <criterion testable="true">Spaarke.Theme.setTheme('invalid') logs warning and does nothing</criterion>
+    <criterion testable="true">Spaarke.Theme.isEnabled() always returns true</criterion>
+    <criterion testable="true">System preference change in auto mode dispatches event</criterion>
+    <criterion testable="true">PCF controls update theme immediately when setTheme called</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference spec.md Section 3.3 for the exact implementation.
+
+    The web resource will be registered in Dataverse as:
+    - Name: sprk_ThemeMenu.js
+    - Display Name: Spaarke Theme Menu Script
+    - Type: Script (JScript)
+
+    Use 'use strict' at the top of the IIFE.
+
+    Console logging helps debug ribbon issues - keep it minimal but useful.
+
+    IMPORTANT: We use Button elements (not ToggleButton) per Fluent V9 pattern.
+    This means no checked state is shown in the menu - the theme change itself
+    provides visual feedback. This matches the Power Platform "Show As" menu pattern.
+  </notes>
+</task>

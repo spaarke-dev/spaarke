@@ -10,7 +10,7 @@ import { ThemeMode } from "../types";
 export interface IThemeContext {
   fluentDesignLanguage?: {
     tokenTheme?: Theme;
-    isDarkMode?: boolean;
+    isDarkTheme?: boolean;
   };
 }
 
@@ -36,7 +36,7 @@ export function detectTheme(
       return hostTheme;
     }
     // Fallback to web theme if host theme unavailable
-    const isDark = (context as IThemeContext).fluentDesignLanguage?.isDarkMode;
+    const isDark = (context as IThemeContext).fluentDesignLanguage?.isDarkTheme;
     return isDark ? webDarkTheme : webLightTheme;
   }
 
@@ -51,10 +51,10 @@ export function detectTheme(
 }
 
 /**
- * Detect if dark mode is enabled
+ * Detect if dark mode is enabled from Power Platform context
  * @param context PCF context
  * @returns true if dark mode, false otherwise
  */
 export function isDarkMode(context: any): boolean {
-  return (context as IThemeContext).fluentDesignLanguage?.isDarkMode ?? false;
+  return (context as IThemeContext).fluentDesignLanguage?.isDarkTheme ?? false;
 }

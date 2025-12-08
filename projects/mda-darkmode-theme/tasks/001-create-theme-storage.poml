@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="mda-darkmode-theme">
+  <metadata>
+    <title>Create themeStorage.ts Utilities</title>
+    <phase>1: Shared Infrastructure</phase>
+    <status>complete</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>002, 010, 011, 012, 030</blocks>
+  </metadata>
+
+  <prompt>
+    Create a themeStorage.ts utility module in Spaarke.UI.Components shared library that provides
+    centralized theme persistence and detection for all PCF controls. The module must handle
+    localStorage read/write, system preference detection, event listeners for theme changes,
+    and Fluent UI theme resolution.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in TypeScript and React. Follow ADR-012 for shared
+    components. Ensure cross-browser compatibility.
+  </role>
+
+  <goal>
+    A working themeStorage.ts module with getUserThemePreference(), setUserThemePreference(),
+    getEffectiveDarkMode(), resolveThemeWithUserPreference(), and setupThemeListener() functions,
+    with full unit test coverage.
+  </goal>
+
+  <context>
+    <background>
+      PCF controls currently have inconsistent or no theme support. SpeFileViewer has an internal
+      toggle, UniversalDatasetGrid has local ThemeProvider, and UniversalQuickCreate has none.
+      This task creates shared utilities that all controls will use, ensuring consistency and
+      reducing code duplication per ADR-012.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/utils/themeStorage.ts (create)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/utils/__tests__/themeStorage.test.ts (create)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/utils/index.ts (modify - add export)</file>
+      <file>projects/mda-darkmode-theme/spec.md Section 3.4 (reference)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Must be in shared component library for reuse</constraint>
+    <constraint source="spec">localStorage key must be 'spaarke-theme'</constraint>
+    <constraint source="spec">Valid values: 'auto', 'light', 'dark'</constraint>
+    <constraint source="spec">Default to 'auto' if key not present or invalid</constraint>
+    <constraint source="spec">Must dispatch custom event for same-tab listeners</constraint>
+    <constraint source="spec">Must support cleanup function for listener removal</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/reference/adr/ADR-012-shared-component-library.md</file>
+      <file>projects/mda-darkmode-theme/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Theme Priority" location="spec.md Section 3.5.2">
+        1. localStorage (user's explicit preference)
+        2. Power Platform context (fluentDesignLanguage?.isDarkTheme)
+        3. DOM navbar detection (Custom Pages fallback)
+        4. System preference (prefers-color-scheme)
+      </pattern>
+      <pattern name="Event Names" location="spec.md Section 3.4">
+        - Storage key: 'spaarke-theme'
+        - Custom event: 'spaarke-theme-change'
+      </pattern>
+      <pattern name="Navbar Detection" location="spec.md Section 3.4">
+        - Dark mode: navbar background rgb(10, 10, 10)
+        - Light mode: navbar background rgb(240, 240, 240)
+        - Selector: [data-id='navbar-container']
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create src/client/shared/Spaarke.UI.Components/src/utils/ folder if missing</step>
+    <step order="2">Create themeStorage.ts with constants (THEME_STORAGE_KEY, THEME_CHANGE_EVENT)</step>
+    <step order="3">Define ThemePreference type ('light' | 'dark' | 'auto')</step>
+    <step order="4">Implement getUserThemePreference() - reads from localStorage with validation</step>
+    <step order="5">Implement setUserThemePreference() - writes to localStorage and dispatches event</step>
+    <step order="6">Implement getEffectiveDarkMode(context?) - checks preference, context, navbar, system</step>
+    <step order="7">Implement resolveThemeWithUserPreference(context?) - returns Fluent theme</step>
+    <step order="8">Implement setupThemeListener(onChange, context?) - returns cleanup function</step>
+    <step order="9">Export all functions from utils/index.ts</step>
+    <step order="10">Create __tests__/themeStorage.test.ts with unit tests</step>
+    <step order="11">Test getUserThemePreference with no localStorage</step>
+    <step order="12">Test getUserThemePreference with valid values</step>
+    <step order="13">Test getUserThemePreference with invalid values</step>
+    <step order="14">Test setUserThemePreference updates localStorage and fires event</step>
+    <step order="15">Test getEffectiveDarkMode for each preference value</step>
+    <step order="16">Test setupThemeListener returns working cleanup function</step>
+    <step order="17">Run npm test and verify all tests pass</step>
+    <step order="18">Update TASK-INDEX.md: change status from ⬜ to ✅</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Run build and test (npm run build, npm test)</tool>
+    <tool name="terminal">File operations</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/utils/themeStorage.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/utils/__tests__/themeStorage.test.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/utils/index.ts (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">getUserThemePreference() returns 'auto' when localStorage empty</criterion>
+    <criterion testable="true">getUserThemePreference() returns stored value when valid ('light', 'dark', 'auto')</criterion>
+    <criterion testable="true">getUserThemePreference() returns 'auto' when stored value is invalid</criterion>
+    <criterion testable="true">setUserThemePreference('dark') stores 'dark' and dispatches event</criterion>
+    <criterion testable="true">getEffectiveDarkMode() returns true when preference is 'dark'</criterion>
+    <criterion testable="true">getEffectiveDarkMode() returns false when preference is 'light'</criterion>
+    <criterion testable="true">getEffectiveDarkMode() with 'auto' checks fluentDesignLanguage.isDarkTheme</criterion>
+    <criterion testable="true">getEffectiveDarkMode() with 'auto' falls back to navbar color detection</criterion>
+    <criterion testable="true">getEffectiveDarkMode() with 'auto' respects system preference as final fallback</criterion>
+    <criterion testable="true">setupThemeListener() cleanup function removes all listeners</criterion>
+    <criterion testable="true">All unit tests pass</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference spec.md Section 3.4 for the exact API signatures.
+
+    Import from Fluent UI:
+    - import { Theme, webLightTheme, webDarkTheme } from "@fluentui/react-components";
+
+    The context parameter is the PCF context object with optional fluentDesignLanguage property.
+    Use context.fluentDesignLanguage?.isDarkTheme (NOT isDarkMode) for platform theme detection.
+
+    For Custom Pages fallback, check navbar background color:
+    - Dark mode: document.querySelector("[data-id='navbar-container']") has bg rgb(10, 10, 10)
+    - Light mode: navbar has bg rgb(240, 240, 240)
+
+    Use window.matchMedia('(prefers-color-scheme: dark)') for system preference detection.
+
+    Custom event detail should include: { theme: ThemePreference }
+  </notes>
+</task>

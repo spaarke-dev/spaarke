@@ -1,0 +1,14 @@
+# Dependencies
+node_modules/
+
+# Build output
+out/
+obj/
+bin/
+
+# IDE
+.vs/
+*.user
+
+# Package lock (regenerated)
+package-lock.json
