@@ -181,6 +181,32 @@ Deployment                                        ████
 | Admin guide | {Name} | {X days} | UAT complete |
 | Production deployment | {Name} | {X days} | All tests pass |
 
+### 6.6 Phase 6: Project Wrap-up
+
+| Task | Owner | Estimate | Dependencies |
+|------|-------|----------|--------------|
+| Final README update | {Name} | {0.5 days} | Production deployment |
+| Lessons learned | {Name} | {0.5 days} | Production deployment |
+| Archive project artifacts | {Name} | {0.5 days} | README complete |
+
+> **Project Wrap-up Task Details**
+>
+> The final "Project Wrap-up" task is **mandatory** for all projects. It ensures proper closure and documentation.
+>
+> **README.md updates required:**
+> - Set `Status` to `Complete`
+> - Update `Last Updated` date
+> - Update `Current Status` table: Phase → Complete, Progress → 100%
+> - Add `Completed Date` row if not present
+> - Check all `Graduation Criteria` checkboxes
+> - Update Changelog with completion entry
+>
+> **Additional wrap-up activities:**
+> - Document lessons learned in `notes/lessons-learned.md`
+> - Ensure all task files are marked complete
+> - Update `plan.md` status to Complete
+> - Verify all related documentation is current
+
 ---
 
 ## 7. Resources

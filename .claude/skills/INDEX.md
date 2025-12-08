@@ -9,11 +9,15 @@
 | [adr-aware](adr-aware/SKILL.md) | Proactively load ADRs when creating resources | **Yes** | Auto-applied |
 | [adr-check](adr-check/SKILL.md) | Validate code against Architecture Decision Records | No | `/adr-check`, "check ADRs" |
 | [code-review](code-review/SKILL.md) | Comprehensive code review (security, performance, style) | No | `/code-review`, "review code" |
+| [dataverse-deploy](dataverse-deploy/SKILL.md) | Deploy solutions, PCF controls, web resources to Dataverse | No | "deploy to dataverse", "pac pcf push" |
 | [design-to-project](design-to-project/SKILL.md) | Full design spec to implementation pipeline | No | `/design-to-project`, "implement spec" |
+| [pull-from-github](pull-from-github/SKILL.md) | Pull latest changes from GitHub | No | `/pull-from-github`, "pull from github" |
+| [push-to-github](push-to-github/SKILL.md) | Commit changes and push to GitHub | No | `/push-to-github`, "push to github" |
 | [project-init](project-init/SKILL.md) | Initialize project folder with README, plan, tasks | No | `/project-init`, "create project" |
 | [repo-cleanup](repo-cleanup/SKILL.md) | Repository hygiene audit and ephemeral file cleanup | No | `/repo-cleanup`, "clean up repo" |
 | [spaarke-conventions](spaarke-conventions/SKILL.md) | Coding standards and naming conventions | **Yes** | Auto-applied |
 | [task-create](task-create/SKILL.md) | Decompose plan.md into POML task files | No | `/task-create`, "create tasks" |
+| [ribbon-edit](ribbon-edit/SKILL.md) | Edit Dataverse ribbon via solution export/import | No | "edit ribbon", "add ribbon button" |
 
 ## Skill Categories
 
@@ -31,6 +35,14 @@
 - **code-review** - General code quality review
 - **adr-check** - Architecture compliance validation (post-hoc)
 - **repo-cleanup** - Repository structure validation and hygiene
+
+### ⚙️ Dataverse/Platform
+- **dataverse-deploy** - Deploy solutions, PCF controls, web resources via PAC CLI
+- **ribbon-edit** - Automate ribbon customization via solution export/import
+
+### 🔄 Operations
+- **pull-from-github** - Pull latest changes from GitHub
+- **push-to-github** - Commit changes and push to GitHub
 
 ## Skill Flow
 
@@ -116,13 +128,17 @@ Template location: `_templates/SKILL-TEMPLATE.md`
 │   ├── SKILL.md
 │   └── references/
 │       └── review-checklist.md
+├── dataverse-deploy/             ← Dataverse deployment operations
+│   └── SKILL.md
 ├── design-to-project/
 │   ├── SKILL.md
 │   └── references/
 ├── project-init/
 │   ├── SKILL.md
 │   └── assets/
-├── repo-cleanup/               ← NEW: Repository hygiene
+├── repo-cleanup/               ← Repository hygiene
+│   └── SKILL.md
+├── ribbon-edit/                ← Dataverse ribbon customization
 │   └── SKILL.md
 ├── spaarke-conventions/
 │   ├── SKILL.md

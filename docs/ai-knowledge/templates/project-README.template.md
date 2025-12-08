@@ -23,6 +23,7 @@
 | **Phase** | {Assessment / Design / Development / Testing / Complete} |
 | **Progress** | {0-100}% |
 | **Target Date** | {YYYY-MM-DD} |
+| **Completed Date** | {YYYY-MM-DD or "—" if not complete} |
 | **Owner** | {Team or person responsible} |
 
 ## Problem Statement

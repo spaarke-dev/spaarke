@@ -40,6 +40,72 @@ After completing any task:
 
 ---
 
+## 🛠️ AI Agent Skills (MANDATORY)
+
+**Skills are structured procedures that MUST be followed when triggered.**
+
+### Skill Discovery
+
+**BEFORE starting any project-related work**, check `.claude/skills/INDEX.md` for applicable workflows.
+
+**Skill Location**: `.claude/skills/{skill-name}/SKILL.md`
+
+### Trigger Phrases → Required Skills
+
+When these phrases are detected, **STOP** and load the corresponding skill:
+
+| Trigger Phrase | Skill | Action |
+|----------------|-------|--------|
+| "initialize project", "create project", "start project", "project init" | `project-init` | Load `.claude/skills/project-init/SKILL.md` and follow procedure |
+| "implement spec", "design to project", "transform spec", "process spec" | `design-to-project` | Load `.claude/skills/design-to-project/SKILL.md` and follow 5-phase pipeline |
+| "create tasks", "decompose plan", "generate tasks" | `task-create` | Load `.claude/skills/task-create/SKILL.md` and follow procedure |
+| "review code", "code review" | `code-review` | Load `.claude/skills/code-review/SKILL.md` and follow checklist |
+| "check ADRs", "validate architecture" | `adr-check` | Load `.claude/skills/adr-check/SKILL.md` and validate |
+| "deploy to dataverse", "pac pcf push", "solution import", "deploy control", "publish customizations" | `dataverse-deploy` | Load `.claude/skills/dataverse-deploy/SKILL.md` and follow procedure |
+| "edit ribbon", "add ribbon button", "ribbon customization", "command bar button" | `ribbon-edit` | Load `.claude/skills/ribbon-edit/SKILL.md` and follow procedure |
+| "pull from github", "update from remote", "sync with github", "git pull", "get latest" | `pull-from-github` | Load `.claude/skills/pull-from-github/SKILL.md` and follow procedure |
+| "push to github", "create PR", "commit and push", "ready to merge", "submit changes" | `push-to-github` | Load `.claude/skills/push-to-github/SKILL.md` and follow procedure |
+
+### Auto-Detection Rules
+
+| Condition | Required Skill |
+|-----------|---------------|
+| `projects/{name}/spec.md` exists but `README.md` doesn't | Run `project-init` |
+| `projects/{name}/plan.md` exists but `tasks/` is empty | Run `task-create` |
+| Creating API endpoint, PCF control, or plugin | Apply `adr-aware` (always-apply) |
+| Writing any code | Apply `spaarke-conventions` (always-apply) |
+| Running `pac` commands, deploying to Dataverse | Load `dataverse-deploy` skill first |
+| Modifying ribbon XML, `RibbonDiffXml`, or command bar | Load `ribbon-edit` skill first |
+
+### Always-Apply Skills
+
+These skills are **automatically active** during all coding work:
+
+| Skill | Purpose |
+|-------|---------|
+| `adr-aware` | Proactively load relevant ADRs before creating resources |
+| `spaarke-conventions` | Apply naming conventions and code patterns |
+
+### Slash Commands
+
+Use these commands to explicitly invoke skills:
+
+| Command | Purpose |
+|---------|----------|
+| `/project-status [name]` | Check project status and get next action |
+| `/project-init {path}` | Initialize project from spec |
+| `/design-to-project {path}` | Full spec-to-implementation pipeline |
+| `/task-create {path}` | Decompose plan into task files |
+| `/new-project` | Interactive wizard for new projects |
+| `/code-review` | Review recent changes |
+| `/adr-check` | Validate ADR compliance |
+| `/dataverse-deploy` | Deploy PCF, solutions, or web resources to Dataverse |
+| `/ribbon-edit` | Edit Dataverse ribbon via solution export/import |
+| `/pull-from-github` | Pull latest changes from GitHub |
+| `/push-to-github` | Commit changes and push to GitHub |
+
+---
+
 ## Documentation
 
 Coding-relevant documentation is in `/docs/ai-knowledge/`. Reference these documents for architecture, standards, and workflow guidance.
@@ -87,7 +153,7 @@ src/
 │   ├── office-addins/         # Office Add-ins
 │   └── shared/                # Shared UI components library
 ├── server/                    # Backend services
-│   ├── api/                   # .NET 8 Minimal API (Spe.Bff.Api)
+│   ├── api/                   # .NET 8 Minimal API (Sprk.Bff.Api)
 │   └── shared/                # Shared .NET libraries
 └── solutions/                 # Dataverse solution projects
 
@@ -110,6 +176,20 @@ ADRs are in `/docs/reference/adr/`. The key constraints are summarized here—**
 | ADR-009 | Redis-first caching | **No hybrid L1 cache unless profiling proves need** |
 | ADR-010 | DI minimalism | **≤15 non-framework DI registrations** |
 | ADR-012 | Shared component library | **Reuse `@spaarke/ui-components` across modules** |
+| ADR-013 | AI Architecture | **AI Tool Framework; extend BFF, not separate service** |
+
+## AI Architecture
+
+AI features are built using the **AI Tool Framework** - see `docs/ai-knowledge/guides/SPAARKE-AI-ARCHITECTURE.md`.
+
+| Component | Purpose |
+|-----------|---------|
+| `AiToolEndpoints.cs` | Streaming + enqueue endpoints |
+| `AiToolService` | Tool orchestrator |
+| `IAiToolHandler` | Interface for tool implementations |
+| `AiToolAgent` PCF | Embedded streaming AI UI component |
+
+Key pattern: **Dual Pipeline** - SPE storage + AI processing execute in parallel.
 
 ## Coding Standards
 
@@ -180,7 +260,7 @@ public class ValidationPlugin : IPlugin
 dotnet build
 
 # Build specific project
-dotnet build src/server/api/Spe.Bff.Api/
+dotnet build src/server/api/Sprk.Bff.Api/
 
 # Build PCF controls
 cd src/client/pcf && npm run build
@@ -196,14 +276,14 @@ dotnet test
 dotnet test --collect:"XPlat Code Coverage" --settings config/coverlet.runsettings
 
 # Run specific test project
-dotnet test tests/unit/Spe.Bff.Api.Tests/
+dotnet test tests/unit/Sprk.Bff.Api.Tests/
 ```
 
 ### Running Locally
 
 ```bash
 # Start API
-dotnet run --project src/server/api/Spe.Bff.Api/
+dotnet run --project src/server/api/Sprk.Bff.Api/
 
 # API available at: https://localhost:5001
 # Health check: GET /healthz
@@ -255,24 +335,24 @@ All coding projects follow this process:
 
 ### 🤖 AI-Assisted Development
 
-**When given a design spec, follow the AI Agent Playbook:**
-- **Location**: `docs/templates/AI-AGENT-PLAYBOOK.md`
-- **Purpose**: Step-by-step instructions to process design specs into project artifacts
+**When given a design spec, use the `design-to-project` skill:**
+- **Location**: `.claude/skills/design-to-project/SKILL.md`
+- **Trigger**: `/design-to-project {project-path}` or say "implement this spec"
 
-The playbook guides you through:
+The skill guides you through a **5-phase pipeline**:
 1. **Ingest** - Extract key info from the design spec
 2. **Context** - Gather ADRs, existing code, knowledge base
-3. **Generate** - Create README, plan, tasks using templates
+3. **Generate** - Create README, plan, tasks using templates (via `project-init` + `task-create`)
 4. **Validate** - Cross-reference checklist before coding
 5. **Implement** - Follow patterns and update tasks
 6. **Wrap-up** - Run `/repo-cleanup` to validate structure and remove ephemeral files
 
 ### Before Starting Work
 
-1. **Identify the phase** - What lifecycle phase is this work in?
-2. **Check for existing artifacts** - Look for design specs, assessments
-3. **Follow the spec** - If a design spec exists, implement accordingly
-4. **Use the playbook** - If starting from a design spec, follow `docs/templates/AI-AGENT-PLAYBOOK.md`
+1. **Check for skills** - Review `.claude/skills/INDEX.md` for applicable workflows
+2. **Identify the phase** - What lifecycle phase is this work in?
+3. **Check for existing artifacts** - Look for design specs, assessments
+4. **Follow the spec** - If a design spec exists, run `/design-to-project`
 
 ### After Completing Work
 
