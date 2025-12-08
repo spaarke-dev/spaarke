@@ -3,7 +3,7 @@
   <metadata>
     <title>Monitoring and Alerting</title>
     <phase>8: Production Hardening</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>8</estimated-hours>
     <dependencies>020</dependencies>
     <blocks>none</blocks>
@@ -79,6 +79,6 @@
 
   <notes>
     Use System.Diagnostics.Metrics for OpenTelemetry-compatible metrics.
-    Token costs: gpt-4o-mini ~$0.00015/1K input, ~$0.0006/1K output.
+    Token costs: gpt-4.1-mini ~$0.00015/1K input, ~$0.0006/1K output.
   </notes>
 </task>

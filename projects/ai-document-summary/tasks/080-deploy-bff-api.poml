@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="080" project="ai-document-summary">
+  <metadata>
+    <title>Deploy BFF API to Azure App Service</title>
+    <phase>10: Deployment</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>073</dependencies>
+    <blocks>081, 082</blocks>
+  </metadata>
+
+  <prompt>
+    Deploy the BFF API with all AI-related code to Azure App Service.
+    Verify the deployment is successful and health checks pass.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Responsible for Azure deployments and CI/CD.
+  </role>
+
+  <goal>
+    BFF API is deployed to Azure App Service with all AI endpoints accessible.
+    Health checks pass and no startup errors in Application Insights.
+  </goal>
+
+  <context>
+    <background>
+      The AI Document Summary feature has been fully implemented. Now it needs
+      to be deployed to the production Azure App Service. The API will return
+      503 for AI endpoints until Key Vault secrets are configured in Task 081.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/</file>
+      <file>.github/workflows/ (if CI/CD exists)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Deploy to staging slot first, then swap to production</constraint>
+    <constraint source="project">Verify health checks before swap</constraint>
+    <constraint source="project">No breaking changes to existing endpoints</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/ai-document-summary.md</file>
+      <file>docs/guides/ai-troubleshooting.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify all AI-related code is committed and pushed to main branch</step>
+    <step order="2">Run CI/CD pipeline to build and test the solution</step>
+    <step order="3">Deploy to Azure App Service staging slot</step>
+    <step order="4">Verify /healthz endpoint returns healthy status</step>
+    <step order="5">Verify /api/ai/summarize/stream returns 503 (expected - no secrets yet)</step>
+    <step order="6">Check Application Insights for startup errors</step>
+    <step order="7">Swap staging to production slot</step>
+    <step order="8">Verify production /healthz endpoint returns healthy</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI for deployment commands</tool>
+    <tool name="gh">GitHub CLI for triggering workflows</tool>
+    <tool name="curl">HTTP client for health check verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment">BFF API deployed to Azure App Service</output>
+    <output type="verification">Health check passes</output>
+    <output type="logs">Application Insights shows clean startup</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given production App Service, when GET /healthz called, then returns 200 with healthy status.</criterion>
+    <criterion testable="true">Given production App Service, when GET /api/ai/summarize/stream called, then returns 503 (ai_disabled).</criterion>
+    <criterion testable="true">Given Application Insights, when checked, then no startup errors present.</criterion>
+    <criterion testable="true">Given existing endpoints, when called, then function normally (no regression).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    AI endpoints will return 503 until Key Vault secrets are configured.
+    This is expected behavior - Task 081 will configure secrets.
+  </notes>
+</task>

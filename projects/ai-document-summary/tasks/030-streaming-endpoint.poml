@@ -3,7 +3,7 @@
   <metadata>
     <title>Streaming SSE Endpoint</title>
     <phase>4: API Endpoints</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>8</estimated-hours>
     <dependencies>020, 032</dependencies>
     <blocks>052</blocks>

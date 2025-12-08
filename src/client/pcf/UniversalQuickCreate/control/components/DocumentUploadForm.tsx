@@ -23,19 +23,23 @@ import {
     Field,
     Textarea,
     Input,
+    Checkbox,
+    Text,
     makeStyles,
     tokens,
     MessageBar,
     MessageBarBody,
     MessageBarTitle
 } from '@fluentui/react-components';
-// Dismiss24Regular removed - Custom Page provides close button
+import { SparkleRegular } from '@fluentui/react-icons';
 import { FileSelectionField } from './FileSelectionField';
 import { UploadProgressBar } from './UploadProgressBar';
 import { ErrorMessageList } from './ErrorMessageList';
+import { AiSummaryCarousel } from './AiSummaryCarousel';
 import { FILE_UPLOAD_LIMITS, ParentContext, UploadedFileMetadata, CreateResult } from '../types';
 import { MultiFileUploadService } from '../services/MultiFileUploadService';
 import { DocumentRecordService } from '../services/DocumentRecordService';
+import { useAiSummary, SummaryDocument } from '../services/useAiSummary';
 import { logInfo, logError } from '../utils/logger';
 
 /**
@@ -51,6 +55,12 @@ export interface DocumentUploadFormProps {
 
     /** Callback to close dialog */
     onClose: () => void;
+
+    /** API base URL for AI services (optional) */
+    apiBaseUrl?: string;
+
+    /** Authorization token for AI services (optional) */
+    authToken?: string;
 }
 
 /**
@@ -99,6 +109,27 @@ const useStyles = makeStyles({
     versionText: {
         fontSize: tokens.fontSizeBase200,
         color: tokens.colorNeutralForeground3
+    },
+    // AI Summary section styles
+    aiSummarySection: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: tokens.spacingVerticalM,
+        paddingTop: tokens.spacingVerticalL,
+        borderTop: `1px solid ${tokens.colorNeutralStroke2}`
+    },
+    aiCheckboxRow: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: tokens.spacingHorizontalS
+    },
+    aiIcon: {
+        color: tokens.colorBrandForeground1
+    },
+    aiInfoText: {
+        fontSize: tokens.fontSizeBase200,
+        color: tokens.colorNeutralForeground3,
+        paddingLeft: '28px' // Align with checkbox label
     }
 });
 
@@ -109,7 +140,9 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
     parentContext,
     multiFileService,
     documentRecordService,
-    onClose
+    onClose,
+    apiBaseUrl = '',
+    authToken
 }) => {
     const styles = useStyles();
 
@@ -121,6 +154,17 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
     const [uploadProgress, setUploadProgress] = React.useState<{ current: number; total: number }>({ current: 0, total: 0 });
     const [errors, setErrors] = React.useState<Array<{ fileName: string; error: string }>>([]);
     const [successCount, setSuccessCount] = React.useState<number>(0);
+
+    // AI Summary state
+    const [runAiSummary, setRunAiSummary] = React.useState<boolean>(true);
+
+    // AI Summary hook
+    const aiSummary = useAiSummary({
+        apiBaseUrl,
+        token: authToken,
+        maxConcurrent: 3,
+        autoStart: true
+    });
 
     /**
      * Handle file selection
@@ -201,14 +245,29 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
                 failureCount: failedRecords.length
             });
 
-            // If all successful, close dialog after brief delay
-            if (failedRecords.length === 0) {
-                setTimeout(() => {
-                    onClose();
-                }, 1500);
-            } else {
-                setIsUploading(false);
+            // Phase 3: Start AI Summary if opted-in and has successful records
+            if (runAiSummary && successRecords.length > 0 && apiBaseUrl) {
+                const summaryDocs: SummaryDocument[] = successRecords
+                    .filter(r => r.documentId && r.driveId && r.itemId)
+                    .map(r => ({
+                        documentId: r.documentId!,
+                        driveId: r.driveId!,
+                        itemId: r.itemId!,
+                        fileName: r.fileName
+                    }));
+
+                if (summaryDocs.length > 0) {
+                    logInfo('DocumentUploadForm', 'Starting AI summaries', {
+                        documentCount: summaryDocs.length
+                    });
+                    aiSummary.addDocuments(summaryDocs);
+                }
             }
+
+            setIsUploading(false);
+
+            // Don't auto-close if AI summary is running - let user see progress
+            // User can close manually, which will enqueue incomplete summaries
 
         } catch (error) {
             logError('DocumentUploadForm', 'Upload and save failed', error);
@@ -218,9 +277,19 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
     };
 
     /**
-     * Handle Cancel
+     * Handle Cancel/Close
+     * Enqueues incomplete summaries if opted-in before closing
      */
-    const handleCancel = () => {
+    const handleCancel = async () => {
+        // If AI summary is enabled and there are incomplete summaries, enqueue them
+        if (runAiSummary && aiSummary.hasIncomplete && apiBaseUrl) {
+            logInfo('DocumentUploadForm', 'Enqueueing incomplete summaries before close', {
+                incompleteCount: aiSummary.documents.filter(
+                    d => d.status !== 'complete' && d.status !== 'skipped' && d.status !== 'not-supported'
+                ).length
+            });
+            await aiSummary.enqueueIncomplete();
+        }
         onClose();
     };
 
@@ -294,6 +363,34 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
                         />
                     </Field>
                 </div>
+
+                {/* AI Summary Section */}
+                {apiBaseUrl && (
+                    <div className={styles.aiSummarySection}>
+                        <div className={styles.aiCheckboxRow}>
+                            <SparkleRegular className={styles.aiIcon} />
+                            <Checkbox
+                                checked={runAiSummary}
+                                onChange={(e, data) => setRunAiSummary(data.checked === true)}
+                                label="Run AI Summary"
+                                disabled={isUploading || aiSummary.documents.length > 0}
+                            />
+                        </div>
+
+                        {runAiSummary && aiSummary.hasIncomplete && (
+                            <Text className={styles.aiInfoText}>
+                                You can close anytime - summaries will complete in the background
+                            </Text>
+                        )}
+
+                        {runAiSummary && aiSummary.documents.length > 0 && (
+                            <AiSummaryCarousel
+                                documents={aiSummary.documents}
+                                onRetry={aiSummary.retry}
+                            />
+                        )}
+                    </div>
+                )}
             </div>
 
             {/* Footer */}

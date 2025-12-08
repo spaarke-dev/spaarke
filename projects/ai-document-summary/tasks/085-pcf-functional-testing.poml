@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="085" project="ai-document-summary">
+  <metadata>
+    <title>PCF Functional Testing</title>
+    <phase>11: Functional Testing</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>084</dependencies>
+    <blocks>086</blocks>
+  </metadata>
+
+  <prompt>
+    Execute functional tests for the PCF controls in the deployed Dataverse
+    environment. Test all user flows including single file, multi-file, opt-out,
+    and error scenarios.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Responsible for UI/UX testing and QA.
+  </role>
+
+  <goal>
+    PCF controls function correctly in the deployed environment. All user flows
+    work as designed, summaries stream correctly, and errors display appropriately.
+  </goal>
+
+  <context>
+    <background>
+      The Universal Quick Create PCF control has been deployed with AI summary
+      functionality. Now we need to verify the end-user experience works correctly.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/UniversalQuickCreate/</file>
+      <file>projects/ai-document-summary/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Test in actual model-driven app environment</constraint>
+    <constraint source="project">Use browser dev tools to check for errors</constraint>
+    <constraint source="project">Document all test results</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-summary/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Open model-driven app in browser (Edge/Chrome)</step>
+    <step order="2">Navigate to document upload/quick create form</step>
+    <step order="3">Test single file upload (.txt): verify summary streams in panel</step>
+    <step order="4">Verify summary saved to sprk_filesummary field after completion</step>
+    <step order="5">Test multi-file upload (3 files): verify carousel appears</step>
+    <step order="6">Verify carousel navigation works (previous/next)</step>
+    <step order="7">Verify concurrent streams work (up to 3 simultaneous)</step>
+    <step order="8">Test opt-out flow: uncheck "Run AI Summary" checkbox</step>
+    <step order="9">Verify no summarization triggered when opted out</step>
+    <step order="10">Test PDF upload (if Document Intelligence configured)</step>
+    <step order="11">Test image upload (if vision model configured)</step>
+    <step order="12">Test unsupported file type: verify error displayed in panel</step>
+    <step order="13">Check browser console for JavaScript errors</step>
+    <step order="14">Document any issues found</step>
+    <step order="15">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="browser">Edge or Chrome for testing</tool>
+    <tool name="devtools">Browser developer tools for console errors</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">PCF functional test results</output>
+    <output type="docs">Bug report (if issues found)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given single .txt file upload, when completed, then summary streams in panel and saves to Dataverse.</criterion>
+    <criterion testable="true">Given 3 file upload, when completed, then carousel displays all 3 summaries with navigation.</criterion>
+    <criterion testable="true">Given "Run AI Summary" unchecked, when files uploaded, then no summarization occurs.</criterion>
+    <criterion testable="true">Given PDF file (if configured), when uploaded, then text extracted and summarized.</criterion>
+    <criterion testable="true">Given unsupported file type, when uploaded, then error message displayed in panel.</criterion>
+    <criterion testable="true">Given browser console, when checked, then no JavaScript errors from PCF control.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    PDF/DOCX requires Document Intelligence to be configured.
+    Image summarization requires gpt-4o vision model.
+    Test all 6 summary statuses: None, Pending, Completed, Failed, NotSupported, Skipped.
+  </notes>
+</task>

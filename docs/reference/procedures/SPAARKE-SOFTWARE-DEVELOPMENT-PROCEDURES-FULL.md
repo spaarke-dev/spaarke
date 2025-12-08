@@ -65,6 +65,10 @@ This document defines Spaarke's end-to-end software development procedures, inte
 | | VS Code | Primary development interface |
 | | Claude Code (VS Code Extension) | AI coding agent - code generation, task execution |
 | | GitHub Copilot Chat | AI documentation - design specs, planning |
+| **Linting & Static Analysis** | | |
+| | ESLint | TypeScript/JavaScript static analysis (src/client/pcf/) |
+| | Roslyn Analyzers | C# static analysis, null checks, async patterns |
+| | TreatWarningsAsErrors | Compiler warnings as build errors (Directory.Build.props) |
 | **Quality & Testing** | | |
 | | SpecFlow / Cucumber | BDD - executable specifications |
 | | Storybook | Component documentation and testing |
@@ -912,6 +916,7 @@ For each task, AI follows this protocol:
 │                              ▼                                          │
 │  ┌──────────────────────────────────────────────────────────────────┐  │
 │  │ STEP 5: VERIFY                                                   │  │
+│  │ • Run linting (npm run lint / dotnet build --warnaserror)        │  │
 │  │ • Run tests (dotnet test / npm test)                             │  │
 │  │ • Verify build succeeds                                          │  │
 │  │ • Check acceptance criteria                                      │  │
@@ -993,7 +998,29 @@ Validate that all code meets quality standards, follows ADRs, and satisfies acce
 
 ### 11.2 Process
 
-#### 11.2.1 Automated Testing
+#### 11.2.1 Linting
+
+Run automated static code analysis before tests:
+
+| Language | Tool | Command | Config |
+|----------|------|---------|--------|
+| TypeScript/PCF | ESLint | `cd src/client/pcf && npm run lint` | `eslint.config.mjs` |
+| C# | Roslyn Analyzers | `dotnet build --warnaserror` | `Directory.Build.props` |
+
+**Linting catches**:
+- Syntax errors before runtime
+- Unused variables and imports
+- Type issues and null reference risks
+- Security patterns (via analyzers)
+- React hooks rule violations (TypeScript)
+
+**Auto-fix commands**:
+- TypeScript: `npx eslint --fix {files}`
+- C#: `dotnet format`
+
+> ⚠️ **Lint errors should be fixed before running tests.** CI/CD will fail on lint errors.
+
+#### 11.2.2 Automated Testing
 
 | Test Type | Command | Requirement |
 |-----------|---------|-------------|
@@ -1002,7 +1029,7 @@ Validate that all code meets quality standards, follows ADRs, and satisfies acce
 | E2E Tests | `npx playwright test` | All tests pass |
 | Build | `dotnet build` / `npm run build` | No errors |
 
-#### 11.2.2 ADR Validation
+#### 11.2.3 ADR Validation
 
 **Automated validation** via CI/CD:
 - Runs on every pull request
@@ -1022,10 +1049,11 @@ Validate that all code meets quality standards, follows ADRs, and satisfies acce
 | Medium | Fix in sprint | ADR-002, ADR-008, ADR-010 (maintainability) |
 | Low | Track as tech debt | Pattern deviations |
 
-#### 11.2.3 Code Review
+#### 11.2.4 Code Review
 
 Human developer reviews all AI-generated code:
 
+- [ ] Linting passes (no ESLint errors, no C# warnings)
 - [ ] Code follows project conventions
 - [ ] No security vulnerabilities
 - [ ] Error handling is appropriate
@@ -1037,8 +1065,8 @@ Human developer reviews all AI-generated code:
 
 | Approver | Criteria |
 |----------|----------|
-| Developer | All tests pass, code review complete |
-| CI/CD | Build succeeds, ADR check complete |
+| Developer | Linting passes, all tests pass, code review complete |
+| CI/CD | Build succeeds, lint check passes, ADR check complete |
 
 **Exit Criteria**: All quality gates passed, ready for documentation and merge
 

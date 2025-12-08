@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="084" project="ai-document-summary">
+  <metadata>
+    <title>API Integration Testing</title>
+    <phase>11: Functional Testing</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>081, 083</dependencies>
+    <blocks>085</blocks>
+  </metadata>
+
+  <prompt>
+    Execute API integration tests against the deployed BFF API to verify all
+    AI endpoints work correctly in the production environment.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Responsible for integration testing and QA.
+  </role>
+
+  <goal>
+    All AI API endpoints function correctly in production. SSE streaming works,
+    background jobs process, rate limiting enforces, and errors follow RFC 7807.
+  </goal>
+
+  <context>
+    <background>
+      The BFF API has been deployed and configured. Now we need to verify that
+      all AI endpoints work correctly with real Azure OpenAI and Dataverse.
+    </background>
+    <relevant-files>
+      <file>docs/guides/ai-document-summary.md</file>
+      <file>docs/guides/ai-troubleshooting.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use Postman or similar for API testing</constraint>
+    <constraint source="project">Obtain valid bearer token for authentication</constraint>
+    <constraint source="project">Test with real documents in SPE</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/ai-document-summary.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Obtain valid bearer token for API authentication</step>
+    <step order="2">Upload test document (.txt) to SPE and get driveId/itemId</step>
+    <step order="3">Test POST /api/ai/summarize/stream with valid document</step>
+    <step order="4">Verify SSE stream returns metadata, chunks, and done event</step>
+    <step order="5">Verify summary saved to Dataverse sprk_filesummary field</step>
+    <step order="6">Test POST /api/ai/summarize/enqueue with valid document</step>
+    <step order="7">Verify job ID returned and job processes in background</step>
+    <step order="8">Test POST /api/ai/summarize/enqueue-batch with 3 documents</step>
+    <step order="9">Verify all 3 jobs created and process</step>
+    <step order="10">Test rate limiting: make 11 rapid requests to /stream</step>
+    <step order="11">Verify 429 response with Retry-After header</step>
+    <step order="12">Test error handling: submit invalid document ID</step>
+    <step order="13">Verify RFC 7807 Problem Details error response</step>
+    <step order="14">Document any issues found</step>
+    <step order="15">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="postman">API testing tool</tool>
+    <tool name="curl">HTTP client for API calls</tool>
+    <tool name="az">Azure CLI for token acquisition</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">API integration test results</output>
+    <output type="docs">Bug report (if issues found)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given valid document, when POST /api/ai/summarize/stream called, then SSE stream completes with summary.</criterion>
+    <criterion testable="true">Given valid document, when POST /api/ai/summarize/enqueue called, then job ID returned and summary appears in Dataverse.</criterion>
+    <criterion testable="true">Given 3 valid documents, when batch enqueue called, then 3 job IDs returned.</criterion>
+    <criterion testable="true">Given 11 rapid requests, when made to /stream, then 429 returned with Retry-After header.</criterion>
+    <criterion testable="true">Given invalid document, when submitted, then RFC 7807 Problem Details returned.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use docs/guides/ai-document-summary.md for API reference.
+    Use docs/guides/ai-troubleshooting.md if issues encountered.
+  </notes>
+</task>

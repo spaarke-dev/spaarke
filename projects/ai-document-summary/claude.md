@@ -53,8 +53,35 @@ Build focused features, extract shared code later. This is NOT a framework - it'
 
 ## Implementation Phases
 
-1. **Phase 1**: Backend services + endpoints
-2. **Phase 2**: AiSummaryPanel + UQC integration
-3. **Phase 3**: Dataverse schema + deployment
-4. **Phase 4**: Document Intelligence for PDF/DOCX
-5. **Phase 5**: Production hardening
+### Completed (Code Implementation)
+1. **Phase 1**: Infrastructure & Configuration ✅
+2. **Phase 2**: Text Extraction Service ✅
+3. **Phase 3**: Summarization Service ✅
+4. **Phase 4**: API Endpoints ✅
+5. **Phase 5**: Dataverse Schema ✅
+6. **Phase 6**: Frontend Integration ✅
+7. **Phase 7**: Document Intelligence (PDF/DOCX/Images) ✅
+8. **Phase 8**: Production Hardening ✅
+
+### Remaining (Deployment & Testing)
+9. **Phase 10**: Deployment - Deploy BFF API, configure Key Vault, deploy Dataverse/PCF
+10. **Phase 11**: Functional Testing - API tests, PCF tests, UAT
+11. **Phase 12**: Wrap-up - Final documentation, cleanup
+
+## Deployment Targets
+
+| Component | Target | Notes |
+|-----------|--------|-------|
+| BFF API | Azure App Service (`sprk-bff-api`) | New AI endpoints, services |
+| Secrets | Azure Key Vault | `ai-openai-*`, `ai-docintel-*` |
+| Dataverse | Spaarke solution | 3 new fields on `sprk_document` |
+| PCF | Universal Quick Create solution | Updated with AI Summary checkbox |
+
+## Key Vault Secrets Required
+
+| Secret | Purpose |
+|--------|---------|
+| `ai-openai-endpoint` | Azure OpenAI resource URL |
+| `ai-openai-key` | Azure OpenAI API key |
+| `ai-docintel-endpoint` | Document Intelligence endpoint (optional) |
+| `ai-docintel-key` | Document Intelligence key (optional) |

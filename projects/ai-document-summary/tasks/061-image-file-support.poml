@@ -3,14 +3,14 @@
   <metadata>
     <title>Image File Support (Multimodal)</title>
     <phase>7: Document Intelligence</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>8</estimated-hours>
     <dependencies>060</dependencies>
     <blocks>none</blocks>
   </metadata>
 
   <prompt>
-    Add support for image file summarization using multimodal AI models (GPT-4 Vision).
+    Add support for image file summarization using multimodal AI models (GPT-4.1 Vision).
     Extend TextExtractorService and SummarizeService to handle PNG, JPG, JPEG, GIF, BMP, TIFF files.
   </prompt>
 
@@ -19,14 +19,14 @@
   </role>
 
   <goal>
-    Image files can be summarized using GPT-4 Vision multimodal model. System automatically
+    Image files can be summarized using GPT-4.1 Vision multimodal model. System automatically
     detects image files and routes them to vision-capable model instead of text extraction.
   </goal>
 
   <context>
     <background>
       Users may upload images containing text, diagrams, charts, or other visual information.
-      Multimodal models like GPT-4 Vision can directly analyze images without OCR preprocessing.
+      Multimodal models like GPT-4.1 Vision can directly analyze images without OCR preprocessing.
       This provides better results for complex visuals like charts and diagrams.
     </background>
     <relevant-files>
@@ -38,7 +38,7 @@
   </context>
 
   <constraints>
-    <constraint source="project">Use GPT-4 Vision (gpt-4o or gpt-4-vision-preview) for image analysis</constraint>
+    <constraint source="project">Use GPT-4.1 Vision (gpt-4.1 with vision capabilities) for image analysis</constraint>
     <constraint source="project">Support extensions: .png, .jpg, .jpeg, .gif, .bmp, .tiff</constraint>
     <constraint source="project">Max image size per Azure OpenAI limits (typically 20MB)</constraint>
     <constraint source="project">Check AiOptions.SupportedFileTypes for extension enablement</constraint>
@@ -53,7 +53,7 @@
   </knowledge>
 
   <steps>
-    <step order="1">Add VisionModel configuration to AiOptions (default: gpt-4o)</step>
+    <step order="1">Add VisionModel configuration to AiOptions (default: gpt-4.1)</step>
     <step order="2">Add image extensions to SupportedFileTypes with Method: "Vision"</step>
     <step order="3">Create ImageExtractionMethod enum value in TextExtractionMethod</step>
     <step order="4">Update TextExtractorService to detect image files and return Vision method</step>
@@ -91,9 +91,9 @@
   </acceptance-criteria>
 
   <notes>
-    GPT-4 Vision requires base64-encoded images or image URLs in the API payload.
+    GPT-4.1 Vision requires base64-encoded images or image URLs in the API payload.
     Consider two approaches:
-    1. Direct Vision: Send image to GPT-4 Vision for analysis (better for charts/diagrams)
+    1. Direct Vision: Send image to GPT-4.1 Vision for analysis (better for charts/diagrams)
     2. OCR + Text: Use Document Intelligence OCR then send text to standard model
 
     Default to Direct Vision for simplicity and better results on complex visuals.

@@ -100,10 +100,11 @@ The current SDAP flow supports **up to 10 files** simultaneously. The AI Summary
 - Support for PDF, DOCX, TXT, MD files
 - Summary stored in `sprk_filesummary` field (per document)
 - **Configurable file type support** (enable/disable per extension)
-- **Configurable model selection** (e.g., gpt-4o-mini, gpt-4o)
+- **Configurable model selection** (e.g., gpt-4.1-mini, gpt-4.1, gpt-5)
+- **Microsoft Foundry integration** - Customers can manage AI resources via [ai.azure.com](https://ai.azure.com)
 
 **Out of Scope (MVP):**
-- **Image summarization** (PNG, JPG, TIFF) - Phase 2, requires multimodal model (GPT-4o/GPT-4 Vision)
+- **Image summarization** (PNG, JPG, TIFF) - Phase 2, requires multimodal model (GPT-4.1 or GPT-5 with vision)
 - On-demand re-summarization (future)
 - Configurable summary length/style (future)
 - Multi-language summaries (future)
@@ -116,6 +117,8 @@ The current SDAP flow supports **up to 10 files** simultaneously. The AI Summary
 ### 2.1 BFF Orchestration Pattern
 
 This feature follows the **BFF orchestration pattern** - AI endpoints live in `Sprk.Bff.Api` alongside existing SDAP endpoints, using shared infrastructure:
+
+> **Deployment Models:** This feature supports both Spaarke-hosted (Model 1) and Customer-hosted BYOK (Model 2) deployments. Customers using BYOK can manage their Azure OpenAI resources directly through [Microsoft Foundry portal](https://ai.azure.com). See [SPAARKE-AI-STRATEGY.md](../../docs/reference/architecture/SPAARKE-AI-STRATEGY.md) for details.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -417,7 +420,7 @@ public class SummarizeService
 
     private static string BuildPrompt(string documentText)
     {
-        // Truncate if too long (gpt-4o-mini context: 128K tokens)
+        // Truncate if too long (gpt-4.1-mini context: 128K tokens)
         var maxChars = 100_000;
         var text = documentText.Length > maxChars 
             ? documentText[..maxChars] + "\n\n[Document truncated...]"
@@ -977,9 +980,10 @@ public class AiOptions
     // === Model Configuration ===
     /// <summary>
     /// Model deployment name for summarization.
-    /// Options: "gpt-4o-mini" (fast, cheap), "gpt-4o" (better quality), "gpt-4" (highest quality)
+    /// Options: "gpt-4.1-mini" (fast, cheap), "gpt-4.1" (better quality), "gpt-5" (highest quality)
+    /// Note: Model names should match Azure OpenAI deployment names in Microsoft Foundry portal.
     /// </summary>
-    public string SummarizeModel { get; set; } = "gpt-4o-mini";
+    public string SummarizeModel { get; set; } = "gpt-4.1-mini";
     
     /// <summary>
     /// Max tokens for summary output. Higher = longer summaries.
@@ -1065,7 +1069,7 @@ public enum ExtractionMethod
     "OpenAiEndpoint": "https://{resource}.openai.azure.com/",
     "OpenAiKey": "@Microsoft.KeyVault(SecretUri=https://kv-spaarke.vault.azure.net/secrets/ai-openai-key)",
     
-    "SummarizeModel": "gpt-4o-mini",
+    "SummarizeModel": "gpt-4.1-mini",
     "MaxOutputTokens": 1000,
     "Temperature": 0.3,
     
@@ -1094,7 +1098,7 @@ public enum ExtractionMethod
 
 | Setting | Development | Staging | Production |
 |---------|-------------|---------|------------|
-| `SummarizeModel` | gpt-4o-mini | gpt-4o-mini | gpt-4o-mini |
+| `SummarizeModel` | gpt-4.1-mini | gpt-4.1-mini | gpt-4.1-mini |
 | `Enabled` | true | true | true |
 | `MaxConcurrentStreams` | 5 | 3 | 3 |
 | Image OCR | Enabled | Disabled | Disabled |
@@ -1160,18 +1164,18 @@ Image files (PNG, JPG, TIFF, BMP) require **multimodal AI models** that can proc
 **Why Images Are Different:**
 - Text files → Extract text → Send to any LLM
 - PDF/DOCX → Document Intelligence extracts text → Send to any LLM  
-- **Images → Require multimodal model (GPT-4o, GPT-4 Vision) to "see" the image**
+- **Images → Require multimodal model (GPT-4.1 or GPT-5 with vision) to "see" the image**
 
 **Implementation Options for Images:**
 
 | Approach | Model | Pros | Cons |
 |----------|-------|------|------|
-| **OCR First** | Doc Intelligence + gpt-4o-mini | Cheaper, works with current model | Only extracts visible text, misses context |
-| **Direct Vision** | GPT-4o (multimodal) | Understands diagrams, charts, context | Higher cost (~$0.01/image), requires model switch |
-| **Hybrid** | Doc Intelligence + GPT-4o | Best of both | Most complex, highest cost |
+| **OCR First** | Doc Intelligence + gpt-4.1-mini | Cheaper, works with current model | Only extracts visible text, misses context |
+| **Direct Vision** | GPT-4.1 (multimodal) | Understands diagrams, charts, context | Higher cost (~$0.01/image), requires model switch |
+| **Hybrid** | Doc Intelligence + GPT-4.1 | Best of both | Most complex, highest cost |
 
 **Recommended Approach (Phase 2):**
-1. Use **GPT-4o** (multimodal) for image summarization - it can directly process images
+1. Use **GPT-4.1** (multimodal) for image summarization - it can directly process images
 2. Configure separately: `ImageSummarizeModel` vs `SummarizeModel`
 3. Add config option: `"ImageMethod": "Vision"` or `"ImageMethod": "OCR"`
 
@@ -1179,8 +1183,8 @@ Image files (PNG, JPG, TIFF, BMP) require **multimodal AI models** that can proc
 ```json
 {
   "Ai": {
-    "SummarizeModel": "gpt-4o-mini",
-    "ImageSummarizeModel": "gpt-4o",
+    "SummarizeModel": "gpt-4.1-mini",
+    "ImageSummarizeModel": "gpt-4.1",
     "SupportedFileTypes": {
       ".png": { "Enabled": true, "Method": "VisionOCR" },
       ".jpg": { "Enabled": true, "Method": "VisionOCR" }
@@ -1190,7 +1194,7 @@ Image files (PNG, JPG, TIFF, BMP) require **multimodal AI models** that can proc
 ```
 
 **Cost Impact:**
-- GPT-4o vision: ~$0.01-0.03 per image (depending on size/detail)
+- GPT-4.1 vision: ~$0.01-0.03 per image (depending on size/detail)
 - Significantly higher than text summarization (~$0.005/doc)
 
 ### PDF Handling Strategy
@@ -1211,8 +1215,8 @@ Document Intelligence automatically handles all cases with the `prebuilt-read` m
 | Component | Rate | Estimate |
 |-----------|------|----------|
 | Document Intelligence | $1.50/1K pages | ~$0.0015/doc |
-| gpt-4o-mini input | $0.15/1M tokens | ~$0.003/doc (20K tokens) |
-| gpt-4o-mini output | $0.60/1M tokens | ~$0.0006/doc (1K tokens) |
+| gpt-4.1-mini input | $0.15/1M tokens | ~$0.003/doc (20K tokens) |
+| gpt-4.1-mini output | $0.60/1M tokens | ~$0.0006/doc (1K tokens) |
 | **Total (text)** | | **~$0.005/doc** |
 
 ### With Image OCR (Phase 2)

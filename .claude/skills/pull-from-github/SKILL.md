@@ -210,5 +210,5 @@ git stash drop
 
 ## Related Skills
 
-- `push-to-github` - For pushing after pulling
-- `code-review` - Review pulled changes if needed
+- `push-to-github` - For pushing after pulling (includes linting pre-flight)
+- `code-review` - Review pulled changes if needed (includes linting check)

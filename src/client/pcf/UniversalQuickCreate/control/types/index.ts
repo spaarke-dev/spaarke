@@ -343,6 +343,15 @@ export interface CreateResult {
     /** Created record ID (if successful) */
     recordId?: string;
 
+    /** Document ID (Dataverse GUID, if successful) */
+    documentId?: string;
+
+    /** SharePoint Embedded drive ID (if successful) */
+    driveId?: string;
+
+    /** SharePoint Embedded item ID (if successful) */
+    itemId?: string;
+
     /** Error message (if failed) */
     error?: string;
 }

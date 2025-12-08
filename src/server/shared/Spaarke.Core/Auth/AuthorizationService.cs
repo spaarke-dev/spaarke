@@ -9,7 +9,7 @@ namespace Spaarke.Core.Auth;
 /// Queries user access data from Dataverse via IAccessDataSource.
 /// Implements comprehensive audit logging for security compliance.
 /// </summary>
-public class AuthorizationService
+public class AuthorizationService : IAuthorizationService
 {
     private readonly IAccessDataSource _accessDataSource;
     private readonly IEnumerable<IAuthorizationRule> _rules;
