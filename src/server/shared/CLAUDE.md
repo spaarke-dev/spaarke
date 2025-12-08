@@ -48,7 +48,7 @@ namespace Spaarke.Everything
 ```
 Spaarke.Core       <- No dependencies on other Spaarke libraries
 Spaarke.Dataverse  <- Can depend on Spaarke.Core
-Spe.Bff.Api        <- Can depend on both
+Sprk.Bff.Api       <- Can depend on both
 ```
 
 ### From ADR-010: DI Minimalism

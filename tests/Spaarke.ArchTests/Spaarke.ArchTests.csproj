@@ -19,7 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\server\api\Spe.Bff.Api\Spe.Bff.Api.csproj" />
+    <ProjectReference Include="..\..\src\server\api\Sprk.Bff.Api\Sprk.Bff.Api.csproj" />
     <ProjectReference Include="..\..\src\server\shared\Spaarke.Core\Spaarke.Core.csproj" />
     <ProjectReference Include="..\..\src\server\shared\Spaarke.Dataverse\Spaarke.Dataverse.csproj" />
   </ItemGroup>

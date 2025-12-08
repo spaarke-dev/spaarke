@@ -34,7 +34,7 @@ public class SystemIntegrationTests : IClassFixture<IntegrationTestFixture>
         var serviceInfo = JsonSerializer.Deserialize<JsonElement>(content);
 
         serviceInfo.TryGetProperty("service", out var serviceName).Should().BeTrue();
-        serviceName.GetString().Should().Be("Spe.Bff.Api");
+        serviceName.GetString().Should().Be("Sprk.Bff.Api");
 
         serviceInfo.TryGetProperty("version", out var version).Should().BeTrue();
         version.GetString().Should().NotBeNullOrEmpty();
