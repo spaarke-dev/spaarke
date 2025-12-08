@@ -4,9 +4,9 @@
     <title>AI Authorization Filter</title>
     <phase>4: API Endpoints</phase>
     <status>not-started</status>
-    <estimated-hours>2</estimated-hours>
+    <estimated-hours>4</estimated-hours>
     <dependencies>none</dependencies>
-    <blocks>030, 031</blocks>
+    <blocks>none</blocks>
   </metadata>
 
   <prompt>

@@ -426,6 +426,7 @@ When context reaches 70%, create handoff summary:
 - **code-review**: Phase 5 - quality gate before task completion
 - **spaarke-conventions**: Phase 5 - always-apply during implementation
 - **adr-check**: Phase 5 - architecture validation
+- **repo-cleanup**: Phase 5 (wrap-up) - repository hygiene after project completion
 
 ### Reference Playbook
 - `docs/ai-knowledge/templates/AI-AGENT-PLAYBOOK.md` - Full playbook documentation

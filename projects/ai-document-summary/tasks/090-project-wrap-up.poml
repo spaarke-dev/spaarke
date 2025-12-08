@@ -4,7 +4,7 @@
     <title>Project Wrap-up</title>
     <phase>9: Wrap-up</phase>
     <status>not-started</status>
-    <estimated-hours>2</estimated-hours>
+    <estimated-hours>4</estimated-hours>
     <dependencies>073</dependencies>
     <blocks>none</blocks>
   </metadata>
@@ -57,7 +57,9 @@
     <step order="8">Update all milestone statuses to ✅ in plan.md</step>
     <step order="9">Create notes/lessons-learned.md if notable insights</step>
     <step order="10">Final review of all documentation</step>
-    <step order="11">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+    <step order="11">Run /repo-cleanup projects/ai-document-summary to audit repository structure</step>
+    <step order="12">Review cleanup report and approve removal of ephemeral files</step>
+    <step order="13">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
   </steps>
 
   <tools>
@@ -75,6 +77,7 @@
     <criterion testable="true">Given README.md, when checked, then Status shows "✅ Completed" with date.</criterion>
     <criterion testable="true">Given Graduation Criteria, when reviewed, then all checkboxes are checked.</criterion>
     <criterion testable="true">Given Changelog, when reviewed, then completion entry exists.</criterion>
+    <criterion testable="true">Given repo-cleanup report, when reviewed, then no critical structure violations exist and ephemeral files are removed.</criterion>
   </acceptance-criteria>
 
   <notes>

@@ -11,6 +11,7 @@
 | [code-review](code-review/SKILL.md) | Comprehensive code review (security, performance, style) | No | `/code-review`, "review code" |
 | [design-to-project](design-to-project/SKILL.md) | Full design spec to implementation pipeline | No | `/design-to-project`, "implement spec" |
 | [project-init](project-init/SKILL.md) | Initialize project folder with README, plan, tasks | No | `/project-init`, "create project" |
+| [repo-cleanup](repo-cleanup/SKILL.md) | Repository hygiene audit and ephemeral file cleanup | No | `/repo-cleanup`, "clean up repo" |
 | [spaarke-conventions](spaarke-conventions/SKILL.md) | Coding standards and naming conventions | **Yes** | Auto-applied |
 | [task-create](task-create/SKILL.md) | Decompose plan.md into POML task files | No | `/task-create`, "create tasks" |
 
@@ -24,10 +25,12 @@
 - **design-to-project** - Start here for new features from design specs
 - **project-init** - Create project folder structure
 - **task-create** - Break plan into executable tasks
+- **repo-cleanup** - Clean up after project completion
 
 ### ✅ Quality Assurance
 - **code-review** - General code quality review
 - **adr-check** - Architecture compliance validation (post-hoc)
+- **repo-cleanup** - Repository structure validation and hygiene
 
 ## Skill Flow
 
@@ -52,6 +55,10 @@ Design Spec
 │ spaarke-conventions │  ← DURING: Apply coding standards (always-apply)
 │     adr-check       │  ← AFTER: Validate architecture
 │    code-review      │  ← AFTER: Quality review
+└─────────────────────┘
+    │ on completion ▼
+┌─────────────────────┐
+│    repo-cleanup     │  ← WRAP-UP: Validate structure, remove ephemeral files
 └─────────────────────┘
 ```
 
@@ -99,7 +106,7 @@ Template location: `_templates/SKILL-TEMPLATE.md`
 │       ├── scripts/
 │       ├── references/
 │       └── assets/
-├── adr-aware/                  ← NEW: Proactive ADR loading
+├── adr-aware/                  ← Proactive ADR loading
 │   └── SKILL.md
 ├── adr-check/
 │   ├── SKILL.md
@@ -115,6 +122,8 @@ Template location: `_templates/SKILL-TEMPLATE.md`
 ├── project-init/
 │   ├── SKILL.md
 │   └── assets/
+├── repo-cleanup/               ← NEW: Repository hygiene
+│   └── SKILL.md
 ├── spaarke-conventions/
 │   ├── SKILL.md
 │   └── references/
@@ -125,4 +134,4 @@ Template location: `_templates/SKILL-TEMPLATE.md`
 
 ---
 
-*Last updated: December 4, 2025*
+*Last updated: December 8, 2025*

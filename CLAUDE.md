@@ -248,9 +248,10 @@ All coding projects follow this process:
 | 2. **Solution Assessment** | Evaluate approaches, identify risks | Assessment document |
 | 3. **Detailed Design Specification** | Technical design, data models, APIs | Design spec (.docx or .md) |
 | 4. **Project Plan** | Timeline, milestones, dependencies | `plan.md` in project folder |
-| 5. **Tasks** | Granular work items | `tasks.md` in project folder |
+| 5. **Tasks** | Granular work items | `tasks/*.poml` in project folder |
 | 6. **Product Feature Documentation** | User-facing docs, admin guides | Docs in `docs/guides/` |
 | 7. **Complete Project** | Code complete, tested, deployed | Working feature |
+| 8. **Project Wrap-up** | Cleanup, archive, retrospective | Run `/repo-cleanup` |
 
 ### 🤖 AI-Assisted Development
 
@@ -264,6 +265,7 @@ The playbook guides you through:
 3. **Generate** - Create README, plan, tasks using templates
 4. **Validate** - Cross-reference checklist before coding
 5. **Implement** - Follow patterns and update tasks
+6. **Wrap-up** - Run `/repo-cleanup` to validate structure and remove ephemeral files
 
 ### Before Starting Work
 
@@ -271,6 +273,13 @@ The playbook guides you through:
 2. **Check for existing artifacts** - Look for design specs, assessments
 3. **Follow the spec** - If a design spec exists, implement accordingly
 4. **Use the playbook** - If starting from a design spec, follow `docs/templates/AI-AGENT-PLAYBOOK.md`
+
+### After Completing Work
+
+1. **Run tests** - Ensure all tests pass
+2. **Update task status** - Mark tasks complete in TASK-INDEX.md
+3. **Run `/repo-cleanup`** - Validate repository structure
+4. **Remove ephemeral files** - Clean up notes/debug, notes/spikes, notes/drafts
 
 ## When Making Changes
 

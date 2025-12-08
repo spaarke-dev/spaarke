@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="049" project="ai-document-summary">
+  <metadata>
+    <title>AiSummaryPanel Component (Single File)</title>
+    <phase>6: Frontend Integration</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>050, 052</blocks>
+  </metadata>
+
+  <prompt>
+    Create AiSummaryPanel React component for displaying an AI summary of a single document.
+    This is the base display component used by both single-file uploads and the carousel.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in React, TypeScript, Fluent UI v9, and PCF controls.
+    Follow ADR-006 for PCF patterns and ADR-012 for shared component library.
+  </role>
+
+  <goal>
+    Panel component displays a single document's AI summary with status indicator,
+    streaming text display, and error handling.
+  </goal>
+
+  <context>
+    <background>
+      The AiSummaryPanel is the foundational component for displaying summaries.
+      It is used standalone for single-file uploads and embedded within AiSummaryCarousel
+      for multi-file uploads.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/UniversalQuickCreate/control/components/AiSummaryPanel.tsx</file>
+      <file>src/client/pcf/UniversalQuickCreate/control/components/AiSummaryPanel.styles.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">Use PCF control pattern, not legacy webresources</constraint>
+    <constraint source="ADR-012">Use Fluent UI v9 components from shared library</constraint>
+    <constraint source="project">Support all summary statuses: pending, streaming, complete, error, not-supported, skipped</constraint>
+    <constraint source="project">Accessible - proper aria labels and screen reader support</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/reference/adr/ADR-006-prefer-pcf-over-webresources.md</file>
+      <file>docs/reference/adr/ADR-012-shared-component-library.md</file>
+      <file>projects/ai-document-summary/plan.md</file>
+      <file>src/client/pcf/UniversalQuickCreate/</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent UI Components" location="src/client/pcf/">
+        Use makeStyles for styling, Text/Badge/Spinner from @fluentui/react-components
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create AiSummaryPanel.tsx in UniversalQuickCreate/control/components/</step>
+    <step order="2">Define AiSummaryPanelProps interface with documentId, fileName, summary, status, error</step>
+    <step order="3">Create summary text display area with proper text wrapping</step>
+    <step order="4">Add status badge component showing current state</step>
+    <step order="5">Implement streaming cursor animation (█) for active streaming</step>
+    <step order="6">Add error display with retry option</step>
+    <step order="7">Handle "skipped" status with informational message</step>
+    <step order="8">Create AiSummaryPanel.styles.ts with makeStyles</step>
+    <step order="9">Add aria-live region for streaming text updates</step>
+    <step order="10">Write unit tests with React Testing Library</step>
+    <step order="11">Run tests and verify all pass</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/React projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/UniversalQuickCreate/control/components/AiSummaryPanel.tsx</output>
+    <output type="code">src/client/pcf/UniversalQuickCreate/control/components/AiSummaryPanel.styles.ts</output>
+    <output type="test">src/client/pcf/UniversalQuickCreate/control/components/__tests__/AiSummaryPanel.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a document with status "streaming", when rendered, then shows summary text with cursor animation.</criterion>
+    <criterion testable="true">Given a document with status "complete", when rendered, then shows full summary without cursor.</criterion>
+    <criterion testable="true">Given a document with status "error", when rendered, then shows error message.</criterion>
+    <criterion testable="true">Given a document with status "skipped", when rendered, then shows "Summary skipped by user" message.</criterion>
+    <criterion testable="true">Given streaming updates, when text changes, then aria-live announces to screen readers.</criterion>
+    <criterion testable="true">All unit tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Status badge colors: pending=neutral, streaming=informative, complete=success, error=danger, skipped=warning.
+    Use Fluent UI Spinner for pending state.
+    Consider max-height with scroll for very long summaries.
+  </notes>
+</task>

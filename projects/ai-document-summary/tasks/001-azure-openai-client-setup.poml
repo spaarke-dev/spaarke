@@ -4,7 +4,7 @@
     <title>Azure OpenAI Client Setup</title>
     <phase>1: Infrastructure &amp; Configuration</phase>
     <status>not-started</status>
-    <estimated-hours>4</estimated-hours>
+    <estimated-hours>8</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>002, 020</blocks>
   </metadata>

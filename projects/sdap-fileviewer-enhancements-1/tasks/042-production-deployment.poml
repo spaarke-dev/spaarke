@@ -70,8 +70,9 @@
     <step order="10">If issues: execute rollback procedure</step>
     <step order="11">If success: send completion notification</step>
     <step order="12">Update project status to Complete</step>
-    <step order="13">Update TASK-INDEX.md: change this task's status from 🔲 to ✅</step>
-    <step order="14">Document any implementation deviations or decisions in projects/sdap-fileviewer-enhancements-1/notes/</step>
+    <step order="13">Run /repo-cleanup projects/sdap-fileviewer-enhancements-1 to audit and clean repository</step>
+    <step order="14">Update TASK-INDEX.md: change this task's status from 🔲 to ✅</step>
+    <step order="15">Document any implementation deviations or decisions in projects/sdap-fileviewer-enhancements-1/notes/</step>
   </steps>
 
   <tools>
@@ -109,48 +110,48 @@
 
   <notes>
     Reference spec.md Section 7.4 for deployment strategy.
-    
+
     Pre-deployment checklist:
     - [ ] Pilot validation: GO decision
     - [ ] All tests passing
     - [ ] Rollback procedure tested
     - [ ] Stakeholders notified of window
     - [ ] Support staff on standby
-    
+
     Deployment commands (production):
     # BFF
     az webapp deploy --resource-group rg-spaarke-prod \
         --name app-spe-bff-prod \
         --src-path ./publish
-    
+
     # PCF
     pac solution import --path FileViewer_managed.zip \
         --environment https://spaarke-prod.crm.dynamics.com
-    
+
     Monitoring checklist:
     - [ ] No 500 errors in App Insights
     - [ ] Response times normal
     - [ ] No spike in support tickets
     - [ ] Feature working for random sample
-    
+
     Rollback procedure:
     1. PCF: pac solution import --path FileViewer_previous.zip
     2. BFF: az webapp deployment slot swap --slot staging
     3. Verify rollback successful
     4. Notify stakeholders
-    
+
     Completion notification template:
     Subject: FileViewer Enhancements - Deployed to Production
-    
+
     The FileViewer enhancements have been deployed to production.
-    
+
     New features:
     - "Open in Desktop" button for Word, Excel, PowerPoint
     - Improved loading experience
     - Faster performance
-    
+
     If you encounter issues, contact [support channel].
-    
+
     ## Project Completion
     After successful deployment, update README.md:
     - Status: ✅ Complete

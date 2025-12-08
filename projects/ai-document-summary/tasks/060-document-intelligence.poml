@@ -4,7 +4,7 @@
     <title>Document Intelligence Integration (PDF/DOCX)</title>
     <phase>7: Document Intelligence</phase>
     <status>not-started</status>
-    <estimated-hours>6</estimated-hours>
+    <estimated-hours>8</estimated-hours>
     <dependencies>010</dependencies>
     <blocks>none</blocks>
   </metadata>

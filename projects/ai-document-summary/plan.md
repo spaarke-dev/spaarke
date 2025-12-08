@@ -1,9 +1,9 @@
 # AI Document Summary - Implementation Plan
 
-> **Version**: 1.1  
-> **Date**: December 5, 2025  
+> **Version**: 1.2  
+> **Date**: December 8, 2025  
 > **Target Sprint**: 8-10  
-> **Estimated Effort**: 18-22 dev days
+> **Estimated Effort**: ~16 dev days (128 hours)
 
 ---
 
@@ -13,9 +13,10 @@ This plan breaks down the AI Document Summary feature into discrete, testable ta
 
 **Key Features:**
 - **Multi-file support** - Carousel UI for 1-10 files with concurrent processing
-- **User opt-out option** - "Run AI Summary" checkbox defaulted to checked
+- **User opt-out option** - "Run AI Summary" checkbox defaulted to checked (status: Skipped when unchecked)
 - **Configurable file types** - Enable/disable extensions via configuration
-- **Configurable models** - Switch between gpt-4o-mini, gpt-4o, etc.
+- **Configurable models** - Switch between gpt-4o-mini, gpt-4o, gpt-4-vision, etc.
+- **Image file support** - Multimodal summarization via GPT-4 Vision
 - **Streaming + background** - Real-time streaming with background fallback
 
 **Reference Documents:**
@@ -470,11 +471,13 @@ src/server/api/Sprk.Bff.Api/Api/Filters/
 | 2 | Completed |
 | 3 | Failed |
 | 4 | Not Supported |
+| 5 | Skipped |
 
 **Acceptance Criteria:**
 - [ ] Fields exist in Dataverse
-- [ ] Choice values correct
+- [ ] Choice values correct (6 values: None through Skipped)
 - [ ] Can update fields via API
+- [ ] Skipped status set when user opts out of summarization
 
 ---
 
@@ -702,47 +705,59 @@ src/server/api/Sprk.Bff.Api/
 
 | Phase | Task | Effort | Dependencies |
 |-------|------|--------|--------------|
-| 1 | 1.1 OpenAI Client + AiOptions | 1.5 days | None |
-| 1 | 1.2 Configuration (with file types) | 0.5 day | 1.1 |
-| 2 | 2.1 Text Extraction | 1 day | None |
-| 3 | 3.1 SummarizeService | 2 days | 1.1, 2.1 |
-| 3 | 3.2 JobHandler | 1 day | 3.1 |
-| 4 | 4.1 Stream Endpoint | 1 day | 3.1 |
-| 4 | 4.2 Enqueue + Batch Endpoints | 1 day | 3.2 |
-| 4 | 4.3 Auth Filter | 0.5 day | None |
-| 5 | 5.1 Dataverse Fields | 0.5 day | None |
-| 5 | 5.2 Solution Update | 0.5 day | 5.1 |
-| 6 | 6.1 AiSummaryCarousel (multi-file) | 2.5 days | None |
-| 6 | 6.2 SSE Hook | 1 day | None |
-| 6 | 6.3 Form Integration (multi-file) | 1.5 days | 6.1, 6.2 |
-| 7 | 7.1 Doc Intelligence | 2 days | 2.1 |
-| 8 | 8.1-8.4 Hardening | 3 days | All above |
-| **Total** | | **~20 days** | |
+| 1 | 1.1 OpenAI Client + AiOptions | 1 day (8h) | None |
+| 1 | 1.2 Configuration (with file types) | 0.5 day (4h) | 1.1 |
+| 2 | 2.1 Text Extraction | 1 day (8h) | None |
+| 3 | 3.1 SummarizeService | 1.5 days (12h) | 1.1, 2.1 |
+| 3 | 3.2 JobHandler | 0.5 day (4h) | 3.1 |
+| 4 | 4.1 Stream Endpoint | 1 day (8h) | 3.1, 4.3 |
+| 4 | 4.2 Enqueue + Batch Endpoints | 1 day (8h) | 3.2, 4.3 |
+| 4 | 4.3 Auth Filter | 0.5 day (4h) | None |
+| 5 | 5.1 Dataverse Fields | 0.5 day (4h) | None |
+| 5 | 5.2 Solution Update | 0.5 day (4h) | 5.1 |
+| 6 | 6.0 AiSummaryPanel (single-file) | 0.5 day (4h) | None |
+| 6 | 6.1 AiSummaryCarousel (multi-file) | 0.75 day (6h) | 6.0 |
+| 6 | 6.2 SSE Hook | 0.5 day (4h) | None |
+| 6 | 6.3 Form Integration (multi-file) | 1 day (8h) | 6.0, 6.1, 6.2 |
+| 7 | 7.1 Doc Intelligence | 1 day (8h) | 2.1 |
+| 7 | 7.2 Image File Support | 1 day (8h) | 7.1 |
+| 8 | 8.1 Error Handling | 1 day (8h) | 3.1, 4.1 |
+| 8 | 8.2 Monitoring | 1 day (8h) | 3.1 |
+| 8 | 8.3 Rate Limiting | 1 day (8h) | 4.1 |
+| 8 | 8.4 Documentation | 0.75 day (6h) | All above |
+| 9 | 9.1 Project Wrap-up | 0.5 day (4h) | 8.4 |
+| **Total** | | **~16 days (128h)** | |
 
 ---
 
 ## Implementation Order (Recommended)
 
-**Sprint 8 (Backend Foundation):**
+**Sprint 8 (Backend Foundation) - ~44 hours:**
 1. Task 1.1 - OpenAI Client + AiOptions (comprehensive config)
-2. Task 1.2 - Configuration (with file type support)  
-3. Task 2.1 - Text Extraction (native only)
-4. Task 3.1 - SummarizeService
-5. Task 4.1 - Stream Endpoint
-6. Task 4.3 - Auth Filter
+2. Task 2.1 - Text Extraction (native only)
+3. Task 4.3 - Auth Filter
+4. Task 1.2 - Configuration (with file type support)  
+5. Task 3.1 - SummarizeService
+6. Task 4.1 - Stream Endpoint
 
-**Sprint 9 (Frontend + Integration):**
-7. Task 5.1 - Dataverse Fields
+**Sprint 9 (Frontend + Integration) - ~38 hours:**
+7. Task 5.1 - Dataverse Fields (with Skipped status)
 8. Task 5.2 - Solution Update
-9. Task 6.1 - AiSummaryCarousel (multi-file)
-10. Task 6.2 - SSE Hook
-11. Task 6.3 - Form Integration (multi-file)
+9. Task 6.0 - AiSummaryPanel (single-file) ← NEW
+10. Task 6.1 - AiSummaryCarousel (multi-file)
+11. Task 6.2 - SSE Hook
 12. Task 3.2 - JobHandler
 13. Task 4.2 - Enqueue + Batch Endpoints
+14. Task 6.3 - Form Integration (multi-file)
 
-**Sprint 10 (Polish + PDF Support):**
-14. Task 7.1 - Document Intelligence
-15. Task 8.1-8.4 - Production Hardening
+**Sprint 10 (Polish + PDF/Image Support) - ~46 hours:**
+15. Task 7.1 - Document Intelligence
+16. Task 7.2 - Image File Support (Multimodal) ← NEW
+17. Task 8.1 - Error Handling
+18. Task 8.2 - Monitoring
+19. Task 8.3 - Rate Limiting
+20. Task 8.4 - Documentation
+21. Task 9.1 - Project Wrap-up
 
 ---
 

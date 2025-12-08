@@ -958,6 +958,7 @@ export const DocumentUploadForm: React.FC<Props> = ({ onClose, onSuccess }) => {
 | 2 | Completed | Summary generated |
 | 3 | Failed | Processing failed |
 | 4 | Not Supported | File type not supported |
+| 5 | Skipped | User opted out via checkbox |
 
 ---
 

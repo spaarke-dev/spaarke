@@ -4,7 +4,7 @@
     <title>Native Text Extraction Service</title>
     <phase>2: Text Extraction Service</phase>
     <status>not-started</status>
-    <estimated-hours>4</estimated-hours>
+    <estimated-hours>8</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>020</blocks>
   </metadata>

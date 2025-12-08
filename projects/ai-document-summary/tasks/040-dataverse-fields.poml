@@ -4,7 +4,7 @@
     <title>Add Dataverse Summary Fields</title>
     <phase>5: Dataverse Schema</phase>
     <status>not-started</status>
-    <estimated-hours>2</estimated-hours>
+    <estimated-hours>4</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>041</blocks>
   </metadata>
@@ -35,7 +35,7 @@
 
   <constraints>
     <constraint source="project">sprk_filesummary max length 4000 characters</constraint>
-    <constraint source="project">Status choice values: 0=None, 1=Pending, 2=Completed, 3=Failed, 4=NotSupported</constraint>
+    <constraint source="project">Status choice values: 0=None, 1=Pending, 2=Completed, 3=Failed, 4=NotSupported, 5=Skipped</constraint>
     <constraint source="project">Use sprk_ prefix for all field schema names</constraint>
   </constraints>
 
@@ -47,7 +47,7 @@
 
   <steps>
     <step order="1">Connect to Dataverse environment via PAC CLI or maker portal</step>
-    <step order="2">Create sprk_summarystatus global choice with values: None(0), Pending(1), Completed(2), Failed(3), NotSupported(4)</step>
+    <step order="2">Create sprk_summarystatus global choice with values: None(0), Pending(1), Completed(2), Failed(3), NotSupported(4), Skipped(5)</step>
     <step order="3">Add sprk_filesummary field to sprk_document (Multi-line Text, max 4000)</step>
     <step order="4">Add sprk_filesummarystatus field to sprk_document (Choice using sprk_summarystatus)</step>
     <step order="5">Add sprk_filesummarydate field to sprk_document (DateTime, UTC)</step>
@@ -68,9 +68,10 @@
 
   <acceptance-criteria>
     <criterion testable="true">Given sprk_document entity, when queried, then sprk_filesummary field is present.</criterion>
-    <criterion testable="true">Given sprk_filesummarystatus choice, when listed, then has 5 values (None through NotSupported).</criterion>
+    <criterion testable="true">Given sprk_filesummarystatus choice, when listed, then has 6 values (None through Skipped).</criterion>
     <criterion testable="true">Given new document record, when created, then sprk_filesummarystatus defaults to None.</criterion>
     <criterion testable="true">Given API update with summary text, when saved, then field contains text up to 4000 chars.</criterion>
+    <criterion testable="true">Given user opts out of summary, when saved, then status can be set to Skipped(5).</criterion>
   </acceptance-criteria>
 
   <notes>

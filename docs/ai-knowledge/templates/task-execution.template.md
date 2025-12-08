@@ -553,7 +553,7 @@ projects/{project-name}/notes/
 - ✅ Use subdirectories to organize by purpose
 - ❌ Do NOT store final artifacts here (move to proper location when done)
 - ❌ Do NOT reference in permanent documentation
-- 🗑️ Contents may be deleted when project completes
+- 🗑️ Contents cleaned up when project completes (via `/repo-cleanup` skill)
 
 ### Example Usage in Task Outputs
 ```xml

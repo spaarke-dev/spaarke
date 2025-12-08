@@ -4,7 +4,7 @@
     <title>Configuration and KeyVault Integration</title>
     <phase>1: Infrastructure &amp; Configuration</phase>
     <status>not-started</status>
-    <estimated-hours>2</estimated-hours>
+    <estimated-hours>4</estimated-hours>
     <dependencies>001</dependencies>
     <blocks>none</blocks>
   </metadata>

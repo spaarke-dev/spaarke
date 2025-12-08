@@ -4,7 +4,7 @@
     <title>Documentation</title>
     <phase>8: Production Hardening</phase>
     <status>not-started</status>
-    <estimated-hours>3</estimated-hours>
+    <estimated-hours>6</estimated-hours>
     <dependencies>all</dependencies>
     <blocks>090</blocks>
   </metadata>

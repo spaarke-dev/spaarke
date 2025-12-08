@@ -4,8 +4,8 @@
     <title>DocumentUploadForm Integration (Multi-File)</title>
     <phase>6: Frontend Integration</phase>
     <status>not-started</status>
-    <estimated-hours>6</estimated-hours>
-    <dependencies>030, 031, 050, 051</dependencies>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>030, 031, 049, 050, 051</dependencies>
     <blocks>none</blocks>
   </metadata>
 
@@ -82,7 +82,8 @@
   <acceptance-criteria>
     <criterion testable="true">Given form rendered, when visible, then "Run AI Summary" checkbox is checked by default.</criterion>
     <criterion testable="true">Given checkbox unchecked, when files uploaded, then no summarization occurs.</criterion>
-    <criterion testable="true">Given 3 files uploaded with opt-in, when complete, then carousel shows all 3.</criterion>
+    <criterion testable="true">Given 1 file uploaded with opt-in, when complete, then simple panel shown (not carousel with navigation).</criterion>
+    <criterion testable="true">Given 3 files uploaded with opt-in, when complete, then carousel shows all 3 with navigation.</criterion>
     <criterion testable="true">Given dialog closed with incomplete summaries and opt-in, when closed, then batch enqueue called.</criterion>
     <criterion testable="true">Given dialog closed with opt-out, when closed, then no enqueue called.</criterion>
     <criterion testable="true">All E2E tests pass.</criterion>

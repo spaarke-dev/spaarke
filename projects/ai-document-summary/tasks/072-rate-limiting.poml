@@ -4,7 +4,7 @@
     <title>Rate Limiting and Circuit Breaker</title>
     <phase>8: Production Hardening</phase>
     <status>not-started</status>
-    <estimated-hours>4</estimated-hours>
+    <estimated-hours>8</estimated-hours>
     <dependencies>030</dependencies>
     <blocks>none</blocks>
   </metadata>

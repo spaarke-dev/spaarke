@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="ai-document-summary">
+  <metadata>
+    <title>Image File Support (Multimodal)</title>
+    <phase>7: Document Intelligence</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>060</dependencies>
+    <blocks>none</blocks>
+  </metadata>
+
+  <prompt>
+    Add support for image file summarization using multimodal AI models (GPT-4 Vision).
+    Extend TextExtractorService and SummarizeService to handle PNG, JPG, JPEG, GIF, BMP, TIFF files.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Azure OpenAI multimodal capabilities, image processing, and .NET integration.
+  </role>
+
+  <goal>
+    Image files can be summarized using GPT-4 Vision multimodal model. System automatically
+    detects image files and routes them to vision-capable model instead of text extraction.
+  </goal>
+
+  <context>
+    <background>
+      Users may upload images containing text, diagrams, charts, or other visual information.
+      Multimodal models like GPT-4 Vision can directly analyze images without OCR preprocessing.
+      This provides better results for complex visuals like charts and diagrams.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/TextExtractorService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SummarizeService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/OpenAiClient.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/AiOptions.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use GPT-4 Vision (gpt-4o or gpt-4-vision-preview) for image analysis</constraint>
+    <constraint source="project">Support extensions: .png, .jpg, .jpeg, .gif, .bmp, .tiff</constraint>
+    <constraint source="project">Max image size per Azure OpenAI limits (typically 20MB)</constraint>
+    <constraint source="project">Check AiOptions.SupportedFileTypes for extension enablement</constraint>
+    <constraint source="project">Fall back gracefully if vision model not configured</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-summary/spec.md</file>
+      <file>projects/ai-document-summary/plan.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add VisionModel configuration to AiOptions (default: gpt-4o)</step>
+    <step order="2">Add image extensions to SupportedFileTypes with Method: "Vision"</step>
+    <step order="3">Create ImageExtractionMethod enum value in TextExtractionMethod</step>
+    <step order="4">Update TextExtractorService to detect image files and return Vision method</step>
+    <step order="5">Add GetVisionCompletionAsync method to OpenAiClient</step>
+    <step order="6">Implement image-to-base64 conversion for API payload</step>
+    <step order="7">Update SummarizeService to use vision model for image files</step>
+    <step order="8">Create image-specific prompt template for visual content</step>
+    <step order="9">Add image size validation (max 20MB)</step>
+    <step order="10">Handle graceful fallback when vision model not available</step>
+    <step order="11">Update appsettings with image file type configurations</step>
+    <step order="12">Create integration tests with sample images</step>
+    <step order="13">Run tests and verify all pass</step>
+    <step order="14">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/OpenAiClient.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/SummarizeService.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/TextExtractorService.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Configuration/AiOptions.cs (modified)</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.Tests/Services/Ai/ImageSummarizationTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a PNG image file, when SummarizeStreamingAsync called, then vision model generates description.</criterion>
+    <criterion testable="true">Given a JPG with text content, when summarized, then text is extracted and summarized.</criterion>
+    <criterion testable="true">Given an image with charts/diagrams, when summarized, then visual content is described.</criterion>
+    <criterion testable="true">Given vision model not configured, when image processed, then returns NotSupported gracefully.</criterion>
+    <criterion testable="true">Given image over 20MB, when processed, then returns appropriate error.</criterion>
+    <criterion testable="true">All integration tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    GPT-4 Vision requires base64-encoded images or image URLs in the API payload.
+    Consider two approaches:
+    1. Direct Vision: Send image to GPT-4 Vision for analysis (better for charts/diagrams)
+    2. OCR + Text: Use Document Intelligence OCR then send text to standard model
+
+    Default to Direct Vision for simplicity and better results on complex visuals.
+    Image prompt should instruct model to describe visual content comprehensively.
+
+    Example vision prompt:
+    "Analyze this image and provide a comprehensive summary. If it contains text,
+    extract and summarize the key points. If it contains charts, diagrams, or
+    visual information, describe what is shown and any insights that can be derived."
+  </notes>
+</task>

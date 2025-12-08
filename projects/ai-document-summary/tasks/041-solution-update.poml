@@ -4,7 +4,7 @@
     <title>Update Dataverse Solution</title>
     <phase>5: Dataverse Schema</phase>
     <status>not-started</status>
-    <estimated-hours>2</estimated-hours>
+    <estimated-hours>4</estimated-hours>
     <dependencies>040</dependencies>
     <blocks>none</blocks>
   </metadata>
