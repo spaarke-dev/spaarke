@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="mda-darkmode-theme">
+  <metadata>
+    <title>Update SpeFileViewer to Use Shared Theme</title>
+    <phase>2: PCF Control Updates</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>031</blocks>
+  </metadata>
+
+  <prompt>
+    Update the SpeFileViewer PCF control to use the shared themeStorage utilities from
+    Spaarke.UI.Components. Remove the existing internal theme toggle button and themeOverride
+    state. Add theme listener in index.ts to re-render when theme changes. Ensure the control
+    uses resolveThemeWithUserPreference() for FluentProvider theme.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in TypeScript, React, and PCF controls. Follow the
+    established PCF patterns and ADR-012 for shared components.
+  </role>
+
+  <goal>
+    SpeFileViewer PCF control updated to use shared theme utilities, with internal toggle
+    removed, theme listener active, and immediate re-render on theme change events.
+  </goal>
+
+  <context>
+    <background>
+      SpeFileViewer currently has an internal theme toggle button in FilePreview.tsx and
+      maintains themeOverride state. This per-control approach is being replaced by the
+      global command bar theme menu. The control must now listen for theme changes from
+      the shared system.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/SpeFileViewer/control/index.ts (modify)</file>
+      <file>src/client/pcf/SpeFileViewer/control/FilePreview.tsx (modify - remove toggle)</file>
+      <file>src/client/pcf/SpeFileViewer/control/types.ts (modify if needed)</file>
+      <file>src/client/pcf/SpeFileViewer/package.json (verify dependency)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/utils/themeStorage.ts (reference)</file>
+      <file>projects/mda-darkmode-theme/spec.md Section 3.5.4 (reference)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Must import theme utilities from shared library</constraint>
+    <constraint source="spec">Must remove internal theme toggle button</constraint>
+    <constraint source="spec">Must remove themeOverride state</constraint>
+    <constraint source="spec">Must listen for theme changes via setupThemeListener()</constraint>
+    <constraint source="spec">Must clean up listener in destroy()</constraint>
+    <constraint source="spec">Must re-render immediately on theme change</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/mda-darkmode-theme/spec.md Section 3.5</file>
+      <file>projects/sdap-fileviewer-enhancements-1/spec.md (current implementation)</file>
+    </files>
+    <patterns>
+      <pattern name="PCF Theme Integration" location="spec.md Section 3.5.3">
+        - Import setupThemeListener, resolveThemeWithUserPreference
+        - Store cleanup function in class property
+        - Call setupThemeListener in init()
+        - Call cleanup in destroy()
+        - Re-render in onChange callback
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read current SpeFileViewer/control/index.ts implementation</step>
+    <step order="2">Read current SpeFileViewer/control/FilePreview.tsx implementation</step>
+    <step order="3">Verify @spaarke/ui-components dependency in package.json</step>
+    <step order="4">Add import for setupThemeListener, resolveThemeWithUserPreference</step>
+    <step order="5">Add private cleanupThemeListener property to class</step>
+    <step order="6">In init(), call setupThemeListener with re-render callback</step>
+    <step order="7">Update render method to use resolveThemeWithUserPreference()</step>
+    <step order="8">In destroy(), call cleanupThemeListener if exists</step>
+    <step order="9">In FilePreview.tsx, remove theme toggle button JSX</step>
+    <step order="10">In FilePreview.tsx, remove themeOverride state and related logic</step>
+    <step order="11">Remove unused imports from FilePreview.tsx</step>
+    <step order="12">Update types.ts if theme-related props changed</step>
+    <step order="13">Run npm run build to verify compilation</step>
+    <step order="14">Test locally that theme changes work</step>
+    <step order="15">Update TASK-INDEX.md: change status from ⬜ to ✅</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF control (npm run build)</tool>
+    <tool name="pac">Push PCF control (pac pcf push)</tool>
+    <tool name="terminal">File operations</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/SpeFileViewer/control/index.ts (modified)</output>
+    <output type="code">src/client/pcf/SpeFileViewer/control/FilePreview.tsx (modified)</output>
+    <output type="code">src/client/pcf/SpeFileViewer/control/types.ts (modified if needed)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">index.ts imports theme utilities from shared library</criterion>
+    <criterion testable="true">init() sets up theme listener with cleanup</criterion>
+    <criterion testable="true">destroy() cleans up theme listener</criterion>
+    <criterion testable="true">Theme change event triggers re-render</criterion>
+    <criterion testable="true">FilePreview.tsx has no theme toggle button</criterion>
+    <criterion testable="true">FilePreview.tsx has no themeOverride state</criterion>
+    <criterion testable="true">FluentProvider receives theme from resolveThemeWithUserPreference()</criterion>
+    <criterion testable="true">npm run build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    BREAKING CHANGE: The per-control theme toggle is removed. Users now use the global
+    command bar menu.
+
+    The existing themeDetection.ts in the control may have some overlap - prefer the
+    shared themeStorage.ts utilities for consistency.
+
+    The control already uses FluentProvider - just need to update the theme prop source.
+  </notes>
+</task>

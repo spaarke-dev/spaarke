@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="mda-darkmode-theme">
+  <metadata>
+    <title>Update sdap-pcf-patterns.md with Theming</title>
+    <phase>4: Documentation and Testing</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>none</blocks>
+  </metadata>
+
+  <prompt>
+    Update the PCF architecture documentation (sdap-pcf-patterns.md) to include a new
+    "Theme Support" section documenting the required pattern for all PCF controls. Add
+    implementation checklist, theme priority order, and reference to SpeFileViewer as
+    the canonical example.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer and technical writer. Document architectural patterns
+    clearly for future developers.
+  </role>
+
+  <goal>
+    Updated sdap-pcf-patterns.md with comprehensive theming section that serves as the
+    authoritative guide for PCF theme implementation.
+  </goal>
+
+  <context>
+    <background>
+      Per the spec (Section 11), PCF architecture standards must be updated to require
+      theme support. All future PCF controls must follow this pattern. This documentation
+      ensures consistency across the platform.
+    </background>
+    <relevant-files>
+      <file>docs/ai-knowledge/architecture/sdap-pcf-patterns.md (modify)</file>
+      <file>projects/mda-darkmode-theme/spec.md Section 11 (reference)</file>
+      <file>src/client/pcf/SpeFileViewer/control/index.ts (reference implementation)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Must include implementation checklist</constraint>
+    <constraint source="spec">Must document theme priority order</constraint>
+    <constraint source="spec">Must reference SpeFileViewer as example</constraint>
+    <constraint source="docs">Follow existing documentation style</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/mda-darkmode-theme/spec.md Section 11</file>
+    </files>
+    <patterns>
+      <pattern name="Documentation Content" location="spec.md Section 11.2">
+        - Theme Support (Required) heading
+        - Implementation Checklist
+        - Theme Priority Order
+        - Example code snippet
+        - Reference to canonical implementation
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read current sdap-pcf-patterns.md content</step>
+    <step order="2">Identify appropriate location for Theme Support section</step>
+    <step order="3">Add "## Theme Support (Required)" heading</step>
+    <step order="4">Add introductory paragraph about requirement</step>
+    <step order="5">Add Implementation Checklist with checkboxes</step>
+    <step order="6">Add Theme Priority Order list</step>
+    <step order="7">Add code example showing init/destroy pattern</step>
+    <step order="8">Add reference to SpeFileViewer as canonical example</step>
+    <step order="9">Review for clarity and completeness</step>
+    <step order="10">Update TASK-INDEX.md: change status from ⬜ to ✅</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">File operations</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/ai-knowledge/architecture/sdap-pcf-patterns.md (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Theme Support section exists in sdap-pcf-patterns.md</criterion>
+    <criterion testable="true">Implementation checklist includes all required steps</criterion>
+    <criterion testable="true">Theme priority order documented (localStorage > context > system)</criterion>
+    <criterion testable="true">Code example shows setupThemeListener usage</criterion>
+    <criterion testable="true">Reference to SpeFileViewer implementation included</criterion>
+    <criterion testable="true">Documentation follows existing style</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference spec.md Section 11.2 for the exact content to add.
+
+    The checklist items are:
+    - Import setupThemeListener and resolveThemeWithUserPreference from shared library
+    - Call setupThemeListener() in init() to listen for theme changes
+    - Use resolveThemeWithUserPreference() to get the correct Fluent UI theme
+    - Clean up listener in destroy()
+    - Wrap component tree in FluentProvider with resolved theme
+
+    Make it clear this is REQUIRED for all PCF controls, not optional.
+  </notes>
+</task>

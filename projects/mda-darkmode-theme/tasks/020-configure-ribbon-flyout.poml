@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="mda-darkmode-theme">
+  <metadata>
+    <title>Configure Flyout Menu via Ribbon Workbench</title>
+    <phase>3: Ribbon Configuration</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>002, 003</dependencies>
+    <blocks>031</blocks>
+  </metadata>
+
+  <prompt>
+    Configure the Theme flyout submenu in the model-driven app command bar using Ribbon Workbench.
+    Add the menu to the "More Commands" overflow area with three Button options (Auto, Light, Dark)
+    per Fluent V9 pattern. Each option calls Spaarke.Theme.setTheme() with the appropriate parameter.
+    Add the web resource and SVG icons to the Dataverse solution.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dynamics 365 ribbon customization and Ribbon Workbench.
+    Configure command bar flyout menus with JavaScript actions.
+  </role>
+
+  <goal>
+    Working Theme flyout menu in the model-driven app command bar that appears in "More Commands",
+    with Auto/Light/Dark options that call the JavaScript web resource to change themes.
+  </goal>
+
+  <context>
+    <background>
+      The theme menu needs to be added to the Application Ribbon so it appears on all forms
+      and views. Ribbon Workbench provides a visual editor for ribbon customization. The
+      menu follows the MDA pattern similar to "Show As" with a flyout submenu.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeCore/Ribbon/ApplicationRibbon.xml (modify)</file>
+      <file>src/client/webresources/js/sprk_ThemeMenu.js (reference)</file>
+      <file>src/client/assets/icons/sprk_Theme*.svg (reference)</file>
+      <file>projects/mda-darkmode-theme/spec.md Section 3.6 (reference)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ribbon">Menu must be in "More Commands" overflow</constraint>
+    <constraint source="ribbon">Use FlyoutAnchor with MenuSection</constraint>
+    <constraint source="Fluent V9">Each option uses Button (not ToggleButton) - no checked states</constraint>
+    <constraint source="spec">JavaScript function: Spaarke.Theme.setTheme()</constraint>
+    <constraint source="spec">Menu sequence after "Show As" option</constraint>
+    <constraint source="accessibility">Keyboard navigable</constraint>
+    <constraint source="Fluent V9">Theme change itself provides visual feedback (no menu indicators)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/mda-darkmode-theme/spec.md Section 3.6</file>
+    </files>
+    <patterns>
+      <pattern name="Ribbon XML Structure" location="spec.md Section 3.6.1">
+        - CustomAction with FlyoutAnchor
+        - Menu with MenuSection
+        - Button for each option (not ToggleButton per Fluent V9)
+        - CommandDefinition with JavaScriptFunction
+        - EnableRule for always enabled
+        - LocLabels for localization
+      </pattern>
+      <pattern name="Fluent V9 Menu Pattern" location="spec.md Section 3.2">
+        - Standard Power Platform flyout submenu pattern (like "Show As")
+        - Simple button items with icon + label
+        - No checked/unchecked indicators
+        - Theme change provides visual feedback
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add web resources to Dataverse solution (JS + SVGs)</step>
+    <step order="2">Open Ribbon Workbench and load SpaarkeCore solution</step>
+    <step order="3">Select Application Ribbon (global)</step>
+    <step order="4">Add FlyoutAnchor to Mscrm.GlobalTab.MainTab.More</step>
+    <step order="5">Configure FlyoutAnchor ID, Label, Icons (16x16 and 32x32)</step>
+    <step order="6">Add Menu with MenuSection inside FlyoutAnchor</step>
+    <step order="7">Add Button for Auto option (NOT ToggleButton per Fluent V9)</step>
+    <step order="8">Add Button for Light option</step>
+    <step order="9">Add Button for Dark option</step>
+    <step order="10">Create Command for FlyoutAnchor (display only)</step>
+    <step order="11">Create Command for SetAuto action</step>
+    <step order="12">Create Command for SetLight action</step>
+    <step order="13">Create Command for SetDark action</step>
+    <step order="14">Configure JavaScriptFunction actions with StringParameter</step>
+    <step order="15">Create EnableRule (always enabled)</step>
+    <step order="16">Add LocLabels for all text</step>
+    <step order="17">Publish ribbon customizations</step>
+    <step order="18">Test menu appears and functions correctly</step>
+    <step order="19">Verify theme change provides visual feedback (no checked states needed)</step>
+    <step order="20">Export ribbon XML for version control</step>
+    <step order="21">Update TASK-INDEX.md: change status from ⬜ to ✅</step>
+  </steps>
+
+  <tools>
+    <tool name="Ribbon Workbench">Visual ribbon editor for Dynamics 365</tool>
+    <tool name="pac">Solution import/export</tool>
+    <tool name="browser">Test in model-driven app</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">src/solutions/SpaarkeCore/Ribbon/ApplicationRibbon.xml (modified)</output>
+    <output type="solution">Updated Dataverse solution with web resources</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Theme menu appears in "More Commands" overflow</criterion>
+    <criterion testable="true">Menu has Auto, Light, Dark options with icons</criterion>
+    <criterion testable="true">Clicking Auto calls Spaarke.Theme.setTheme('auto')</criterion>
+    <criterion testable="true">Clicking Light calls Spaarke.Theme.setTheme('light')</criterion>
+    <criterion testable="true">Clicking Dark calls Spaarke.Theme.setTheme('dark')</criterion>
+    <criterion testable="true">Menu navigable via keyboard (Tab, Arrow, Enter)</criterion>
+    <criterion testable="true">PCF controls update immediately when option selected</criterion>
+    <criterion testable="true">Menu visible on all forms and views</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference spec.md Section 3.6.1 for the complete Ribbon XML structure.
+
+    IMPORTANT: Use Button elements (not ToggleButton) per Fluent V9 pattern.
+    This matches the Power Platform "Show As" menu pattern where there are no
+    checked/unchecked indicators. The theme change itself provides visual feedback.
+
+    Web resource paths in ribbon XML use $webresource: prefix.
+
+    Use Sequence="1000" to position after built-in menu items.
+
+    Test in multiple browsers to ensure consistent behavior.
+
+    Pattern Reference: See notes/main-menu-top-level.jpg and notes/menu-sub-level.jpg
+    for the correct Power Platform flyout submenu pattern.
+  </notes>
+</task>
