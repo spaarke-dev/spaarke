@@ -179,18 +179,18 @@ jobs:
         with:
           dotnet-version: '8.x'
 
+      - name: Restore dependencies
+        run: dotnet restore --verbosity minimal
+
       - name: Build for deployment
         run: |
-          dotnet publish src/api/Spe.Bff.Api/Spe.Bff.Api.csproj -c Release -o ./publish/api --no-restore
-          dotnet publish power-platform/plugins/Spaarke.Plugins/Spaarke.Plugins.csproj -c Release -o ./publish/plugins --no-restore
+          dotnet publish src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj -c Release -o ./publish/api --no-restore
 
       - name: Package artifacts
         uses: actions/upload-artifact@v4
         with:
           name: deployment-packages
-          path: |
-            ./publish/**
-            power-platform/solutions/**
+          path: ./publish/**
           retention-days: 30
 
       - name: Environment readiness check
@@ -199,8 +199,6 @@ jobs:
           # Validate configuration templates and deployment readiness
           Write-Host "=== Deployment Readiness Check ==="
           Write-Host "✓ API package built successfully"
-          Write-Host "✓ Plugin package built successfully"
-          Write-Host "✓ Power Platform solutions ready"
           Write-Host "✓ CI/CD pipeline validated"
 
           # Check for deployment configuration
