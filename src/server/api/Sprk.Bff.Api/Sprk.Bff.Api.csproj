@@ -29,9 +29,10 @@
     <PackageReference Include="Microsoft.Kiota.Authentication.Azure" Version="1.1.7" />
 
     <!-- Microsoft Identity (CRITICAL - must be 3.x or higher) -->
-    <PackageReference Include="Microsoft.Identity.Client" Version="4.65.0" />
-    <PackageReference Include="Microsoft.Identity.Web" Version="3.2.2" />
-    <PackageReference Include="Microsoft.Identity.Web.MicrosoftGraph" Version="3.2.2" />
+    <!-- Identity.Web 3.8.2+ fixes CVE-2025-32016; requires Identity.Client >= 4.70.0 -->
+    <PackageReference Include="Microsoft.Identity.Client" Version="4.70.0" />
+    <PackageReference Include="Microsoft.Identity.Web" Version="3.8.2" />
+    <PackageReference Include="Microsoft.Identity.Web.MicrosoftGraph" Version="3.8.2" />
 
     <!-- Observability -->
     <PackageReference Include="OpenTelemetry" Version="1.9.0" />
