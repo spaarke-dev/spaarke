@@ -194,6 +194,10 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     public Task<DocumentAccessLevel> GetDocumentAccessAsync(string documentId, string userId, CancellationToken ct = default)
     {
         // Simplified - assume full access for application user
+        // Reference parameters to avoid IDE0060 (interface implementation requires these signatures)
+        _ = documentId;
+        _ = userId;
+        _ = ct;
         return Task.FromResult(DocumentAccessLevel.FullControl);
     }
 

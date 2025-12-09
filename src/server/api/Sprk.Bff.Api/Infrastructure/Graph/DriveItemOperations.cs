@@ -1,7 +1,7 @@
+using System.Diagnostics;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
 using Sprk.Bff.Api.Models;
-using System.Diagnostics;
 
 namespace Sprk.Bff.Api.Infrastructure.Graph;
 

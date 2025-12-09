@@ -1,3 +1,5 @@
+using System.IO;
+using System.Text.Json;
 using Microsoft.Graph;
 using Microsoft.Graph.Drives.Item.Items.Item.Preview;
 using Microsoft.Graph.Models;
@@ -8,8 +10,6 @@ using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
-using System.IO;
-using System.Text.Json;
 
 namespace Sprk.Bff.Api.Api;
 

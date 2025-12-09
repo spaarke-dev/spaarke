@@ -37,12 +37,12 @@ public record SummarizeResult
         string summary,
         int sourceCharacterCount,
         TextExtractionMethod extractionMethod) => new()
-    {
-        Summary = summary,
-        Success = true,
-        SourceCharacterCount = sourceCharacterCount,
-        ExtractionMethod = extractionMethod
-    };
+        {
+            Summary = summary,
+            Success = true,
+            SourceCharacterCount = sourceCharacterCount,
+            ExtractionMethod = extractionMethod
+        };
 
     /// <summary>
     /// Create a failed summarization result.
