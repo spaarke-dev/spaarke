@@ -137,12 +137,15 @@ public class GraphHttpMessageHandler : DelegatingHandler
     {
         // TODO (Sprint 4): Emit telemetry (Application Insights, Prometheus, etc.)
         // Example: _telemetry.TrackMetric("GraphApi.Retry", attempt, new { StatusCode = (int)statusCode });
+        _ = statusCode;
+        _ = attempt;
     }
 
     private void RecordCircuitBreakerState(string state)
     {
         // TODO (Sprint 4): Emit circuit breaker state change
         // Example: _telemetry.TrackEvent("GraphApi.CircuitBreaker", new { State = state });
+        _ = state;
     }
 
     private void RecordTimeout()

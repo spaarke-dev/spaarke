@@ -2,6 +2,8 @@ using System.Text.Json;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 
+#pragma warning disable IDE0060 // Remove unused parameter - many placeholder methods in this handler await future implementation
+
 namespace Sprk.Bff.Api.Services.Jobs.Handlers;
 
 /// <summary>

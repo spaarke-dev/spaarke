@@ -255,6 +255,10 @@ public static class SummarizeEndpoints
         ILogger logger,
         CancellationToken cancellationToken)
     {
+        // Suppress IDE0060 - parameters will be used when UpdateDocumentRequest is extended
+        _ = dataverseService;
+        _ = cancellationToken;
+
         try
         {
             // Note: UpdateDocumentRequest may need to be extended to include summary status field

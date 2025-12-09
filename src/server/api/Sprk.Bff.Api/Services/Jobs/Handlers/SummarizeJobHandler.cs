@@ -154,6 +154,9 @@ public class SummarizeJobHandler : IJobHandler
         SummarizeResult result,
         CancellationToken ct)
     {
+        // Suppress IDE0060 - result will be used when UpdateDocumentRequest is extended for summary fields
+        _ = result;
+
         try
         {
             // Update Dataverse with summary fields
@@ -184,6 +187,9 @@ public class SummarizeJobHandler : IJobHandler
         SummaryStatus status,
         CancellationToken ct)
     {
+        // Suppress IDE0060 - ct will be used when UpdateDocumentRequest is extended
+        _ = ct;
+
         try
         {
             // Update status only
