@@ -45,10 +45,14 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download deployment artifacts
-        uses: actions/download-artifact@v4
+        uses: dawidd6/action-download-artifact@v3
         with:
+          workflow: sdap-ci.yml
+          workflow_conclusion: success
           name: deployment-packages
           path: ./artifacts
+          branch: master
+          event: push
 
       - name: Azure Login
         uses: azure/login@v1
@@ -101,10 +105,14 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download deployment artifacts
-        uses: actions/download-artifact@v4
+        uses: dawidd6/action-download-artifact@v3
         with:
+          workflow: sdap-ci.yml
+          workflow_conclusion: success
           name: deployment-packages
           path: ./artifacts
+          branch: master
+          event: push
 
       - name: Install Power Platform CLI
         shell: pwsh
