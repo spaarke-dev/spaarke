@@ -1,5 +1,8 @@
 ---
 description: Deploy solutions, PCF controls, and web resources to Dataverse using PAC CLI
+tags: [deploy, dataverse, power-platform, pac-cli, pcf, solutions]
+techStack: [dataverse, pcf-framework, power-platform]
+appliesTo: ["**/Solutions/**", "**/pcf/**", "deploy to dataverse", "pac pcf push"]
 alwaysApply: false
 ---
 
@@ -13,6 +16,28 @@ alwaysApply: false
 ## Purpose
 
 Automate deployment of Dataverse components using PAC CLI. This skill handles the common pitfalls and environment-specific quirks that cause deployment failures, including authentication, Central Package Management conflicts, and solution import issues.
+
+---
+
+## Best Practices: Prevent Stale or Incorrect Deployments
+
+| Practice              | Implementation                                                        |
+|-----------------------|-----------------------------------------------------------------------|
+| **Always build fresh**| Never import from bin/ or obj/ without building first                 |
+| **Delete old artifacts** | Run `npm run clean` or delete bin/obj before building                |
+| **Version footer**    | Every PCF MUST display `vX.Y.Z • Built YYYY-MM-DD` in the UI          |
+| **Version bumping**   | Increment version in 4 locations (see below)                          |
+| **Verify deployment** | ALWAYS run `pac solution list` after import to confirm version        |
+| **CI/CD automation**  | Build pipelines eliminate human error with stale files                 |
+
+### Key Guidance
+
+- **Development Testing:** Use `pac pcf push` for quick iteration. Creates a **temporary solution** - does NOT update named solution version.
+- **Production Releases:** Use full solution workflow (build → pack → import). This is the ONLY way to update named solution version.
+- **Version Locations:** Update ALL four: (1) ControlManifest.Input.xml, (2) UI footer, (3) Solution.xml, (4) extracted ControlManifest.xml
+- **Solution Exports:** Always export solutions directly from the target environment to ensure you have the current state.
+- **Never import old zips:** If a `.zip` solution file already exists, verify its build timestamp. If in doubt, rebuild.
+- **Full Guide:** See `docs/ai-knowledge/guides/PCF-V9-PACKAGING.md` Part B for detailed workflow
 
 ---
 
@@ -284,6 +309,94 @@ Before releasing a PCF update:
 - [ ] Solution packed (`pac solution pack`)
 - [ ] Solution imported with `--publish-changes`
 - [ ] Temp solutions cleaned up
+
+---
+
+### Scenario 1d: PCF Production Release (Full Solution Workflow)
+
+**Use when**: Deploying a PCF control update with proper version tracking (RECOMMENDED for all production releases).
+
+> **⚠️ CRITICAL**: `pac pcf push` does NOT update your named solution's version. Use this workflow for production releases.
+
+#### Why This Workflow?
+
+| Method | Updates Dataverse Control | Updates Named Solution Version | Best For |
+|--------|--------------------------|-------------------------------|----------|
+| `pac pcf push` | ✅ Yes | ❌ No (creates temp solution) | Dev testing |
+| Solution Import | ✅ Yes | ✅ Yes | Production releases |
+
+#### Complete Production Workflow
+
+```bash
+# Step 1: Build the PCF control
+cd src/client/pcf/{ControlName}
+npm run build
+
+# Step 2: Verify bundle was created
+ls -la out/controls/control/bundle.js
+# Expected: bundle.js should exist (500KB-1MB typically)
+
+# Step 3: Update version in 4 locations (manual edits):
+#   - src ControlManifest.Input.xml -> version="X.Y.Z"
+#   - src component footer -> "vX.Y.Z • Built YYYY-MM-DD"
+#   - solution Other/Solution.xml -> <Version>X.Y.Z</Version>
+#   - solution Controls/{...}/ControlManifest.xml -> version="X.Y.Z"
+
+# Step 4: Copy fresh bundle to solution folder
+cp out/controls/control/bundle.js \
+   infrastructure/dataverse/ribbon/temp/{Solution}_extracted/Controls/{namespace}.{ControlName}/
+
+# Step 5: Ensure correct solution structure
+# Files MUST be in Other/ folder for pac solution pack:
+cd infrastructure/dataverse/ribbon/temp/{Solution}_extracted
+mkdir -p Other
+# If files are in root, move them:
+mv solution.xml Other/Solution.xml 2>/dev/null || true
+mv customizations.xml Other/Customizations.xml 2>/dev/null || true
+
+# Step 6: Pack solution
+cd ..
+pac solution pack \
+    --zipfile {SolutionName}_v{X.Y.Z}.zip \
+    --folder {Solution}_extracted \
+    --packagetype Unmanaged
+
+# Step 7: Import solution
+pac solution import \
+    --path {SolutionName}_v{X.Y.Z}.zip \
+    --force-overwrite \
+    --publish-changes
+
+# Step 8: VERIFY deployment (CRITICAL!)
+pac solution list | grep -i "{SolutionName}"
+# Expected: Shows new version number (e.g., 3.2.4)
+```
+
+#### Production Release Checklist
+
+- [ ] Code changes complete and tested
+- [ ] Version updated in ControlManifest.Input.xml (source)
+- [ ] Version updated in UI footer component
+- [ ] PCF rebuilt (`npm run build`)
+- [ ] Bundle.js copied to solution Controls folder
+- [ ] Version updated in Solution.xml (solution folder)
+- [ ] Version updated in ControlManifest.xml (solution folder)
+- [ ] Solution structure correct (Other/Solution.xml, Other/Customizations.xml)
+- [ ] Solution packed successfully
+- [ ] Solution imported successfully
+- [ ] `pac solution list` shows new version
+- [ ] Browser hard refresh shows new footer version
+
+#### Common Errors
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| `pac solution pack` fails | Files in wrong location | Move to `Other/` folder |
+| Old version still shows in `pac solution list` | Used `pac pcf push` instead of solution import | Use full solution workflow |
+| Browser shows old version | Cache | Hard refresh: `Ctrl+Shift+R` |
+| Features missing but version correct | Bundle not rebuilt | Run `npm run build` again |
+
+> **Full Documentation**: See `docs/ai-knowledge/guides/PCF-V9-PACKAGING.md` Part B
 
 ---
 

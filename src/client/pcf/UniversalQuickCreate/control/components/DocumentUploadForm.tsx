@@ -29,7 +29,13 @@ import {
     tokens,
     MessageBar,
     MessageBarBody,
-    MessageBarTitle
+    MessageBarTitle,
+    Dialog,
+    DialogSurface,
+    DialogBody,
+    DialogTitle,
+    DialogContent,
+    DialogActions
 } from '@fluentui/react-components';
 import { SparkleRegular } from '@fluentui/react-icons';
 import { FileSelectionField } from './FileSelectionField';
@@ -59,8 +65,8 @@ export interface DocumentUploadFormProps {
     /** API base URL for AI services (optional) */
     apiBaseUrl?: string;
 
-    /** Authorization token for AI services (optional) */
-    authToken?: string;
+    /** Function to get auth token for AI services (optional) */
+    getAuthToken?: () => Promise<string>;
 }
 
 /**
@@ -142,7 +148,7 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
     documentRecordService,
     onClose,
     apiBaseUrl = '',
-    authToken
+    getAuthToken
 }) => {
     const styles = useStyles();
 
@@ -157,14 +163,32 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
 
     // AI Summary state
     const [runAiSummary, setRunAiSummary] = React.useState<boolean>(true);
+    const [showCompletionDialog, setShowCompletionDialog] = React.useState<boolean>(false);
+    const [uploadCompleted, setUploadCompleted] = React.useState<boolean>(false);
 
-    // AI Summary hook
+    /**
+     * Handle summary completion - save to Dataverse
+     */
+    const handleSummaryComplete = React.useCallback(async (documentId: string, summary: string) => {
+        logInfo('DocumentUploadForm', 'Summary completed, saving to Dataverse', { documentId });
+        await documentRecordService.updateSummary(documentId, summary);
+    }, [documentRecordService]);
+
+    // AI Summary hook - uses getToken for dynamic token acquisition
     const aiSummary = useAiSummary({
         apiBaseUrl,
-        token: authToken,
+        getToken: getAuthToken,
         maxConcurrent: 3,
-        autoStart: true
+        autoStart: true,
+        onSummaryComplete: handleSummaryComplete
     });
+
+    // Show completion dialog when all summaries are done
+    React.useEffect(() => {
+        if (uploadCompleted && runAiSummary && aiSummary.documents.length > 0 && !aiSummary.isProcessing) {
+            setShowCompletionDialog(true);
+        }
+    }, [uploadCompleted, runAiSummary, aiSummary.documents.length, aiSummary.isProcessing]);
 
     /**
      * Handle file selection
@@ -265,6 +289,7 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
             }
 
             setIsUploading(false);
+            setUploadCompleted(true);
 
             // Don't auto-close if AI summary is running - let user see progress
             // User can close manually, which will enqueue incomplete summaries
@@ -298,9 +323,11 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
         ? 'Select Files to Continue'
         : isUploading
             ? 'Uploading...'
-            : `Upload & Create Document${selectedFiles.length > 1 ? 's' : ''}`;
+            : uploadCompleted
+                ? 'Upload Complete'
+                : `Upload & Create Document${selectedFiles.length > 1 ? 's' : ''}`;
 
-    const mainButtonDisabled = selectedFiles.length === 0 || isUploading;
+    const mainButtonDisabled = selectedFiles.length === 0 || isUploading || uploadCompleted;
 
     return (
         <div className={styles.container}>
@@ -344,7 +371,7 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
 
                 {/* Metadata Fields */}
                 <div className={styles.fieldSection}>
-                    <Field label="Document Type (Optional)">
+                    <Field label="Document Type">
                         <Input
                             value={documentType}
                             onChange={(e, data) => setDocumentType(data.value)}
@@ -353,7 +380,7 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
                         />
                     </Field>
 
-                    <Field label="Description (Optional)">
+                    <Field label="Description">
                         <Textarea
                             value={description}
                             onChange={(e, data) => setDescription(data.value)}
@@ -396,7 +423,7 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
             {/* Footer */}
             <div className={styles.footer}>
                 <span className={styles.versionText}>
-                    v3.1.2 • Built 2025-12-07
+                    v3.2.4 • Built 2025-12-09
                 </span>
                 <div className={styles.footerButtons}>
                     <Button
@@ -415,6 +442,35 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
                     </Button>
                 </div>
             </div>
+
+            {/* Summary Completion Dialog */}
+            <Dialog
+                open={showCompletionDialog}
+                onOpenChange={(_, data) => setShowCompletionDialog(data.open)}
+            >
+                <DialogSurface>
+                    <DialogBody>
+                        <DialogTitle>File Summary Completed</DialogTitle>
+                        <DialogContent>
+                            All file summaries have been generated and saved. Would you like to close this form?
+                        </DialogContent>
+                        <DialogActions>
+                            <Button
+                                appearance="secondary"
+                                onClick={() => setShowCompletionDialog(false)}
+                            >
+                                Stay Here
+                            </Button>
+                            <Button
+                                appearance="primary"
+                                onClick={onClose}
+                            >
+                                Close
+                            </Button>
+                        </DialogActions>
+                    </DialogBody>
+                </DialogSurface>
+            </Dialog>
         </div>
     );
 };

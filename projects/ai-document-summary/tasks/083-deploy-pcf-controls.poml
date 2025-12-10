@@ -3,7 +3,7 @@
   <metadata>
     <title>Deploy PCF Controls</title>
     <phase>10: Deployment</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>082</dependencies>
     <blocks>085</blocks>

@@ -14,7 +14,10 @@ Copy everything below this line into your new `SKILL.md`:
 ```yaml
 ---
 description: [Brief phrase (5-10 words) matching how developers will naturally request this skill]
-alwaysApply: false
+tags: [tag1, tag2, tag3]  # Keywords for discovery (use standard vocabulary from INDEX.md)
+techStack: [tech1, tech2]  # Technologies this skill applies to (e.g., aspnet-core, react, azure-openai)
+appliesTo: [pattern1, pattern2]  # File patterns or scenarios (e.g., "**/*.csproj", "PCF controls")
+alwaysApply: false  # Set to true only if this skill should be loaded for EVERY task
 ---
 ```
 

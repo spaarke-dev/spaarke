@@ -2,6 +2,9 @@
 
 ---
 description: Apply Spaarke coding standards from CLAUDE.md - naming, structure, file organization, and technology patterns
+tags: [conventions, standards, naming, code-style, patterns]
+techStack: [csharp, typescript, aspnet-core, react]
+appliesTo: ["**/*.cs", "**/*.ts", "**/*.tsx"]
 alwaysApply: true
 ---
 

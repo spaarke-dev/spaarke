@@ -30,15 +30,15 @@ public class AiOptions
     /// Azure OpenAI endpoint URL.
     /// Example: https://{resource}.openai.azure.com/
     /// Store in Key Vault for production.
+    /// Required when Enabled=true (validated by AiOptionsValidator).
     /// </summary>
-    [Required(ErrorMessage = "Ai:OpenAiEndpoint is required when AI is enabled")]
     public string OpenAiEndpoint { get; set; } = string.Empty;
 
     /// <summary>
     /// Azure OpenAI API key.
     /// Store in Key Vault (production) or user-secrets (development).
+    /// Required when Enabled=true (validated by AiOptionsValidator).
     /// </summary>
-    [Required(ErrorMessage = "Ai:OpenAiKey is required when AI is enabled")]
     public string OpenAiKey { get; set; } = string.Empty;
 
     // === Model Configuration ===

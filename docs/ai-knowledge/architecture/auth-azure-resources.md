@@ -122,13 +122,44 @@ requests
 
 | Property | Value |
 |----------|-------|
-| **Name** | `spe-kv-dev-67e2xz` |
-| **Resource Group** | `spe-infrastructure-westus2` |
-| **Purpose** | Stores BFF API client secret |
+| **Name** | `spaarke-spekvcert` |
+| **Resource Group** | `SharePointEmbedded` |
+| **Purpose** | Stores BFF API secrets including certificates and AI keys |
+
+**Key Vault Secrets**:
+| Secret Name | Purpose |
+|-------------|---------|
+| `ai-openai-endpoint` | Azure OpenAI endpoint URL |
+| `ai-openai-key` | Azure OpenAI API key |
 
 **Secret Reference** (in App Service):
 ```
 @Microsoft.KeyVault(SecretUri=https://spe-kv-dev-67e2xz.vault.azure.net/secrets/API-CLIENT-SECRET/)
+```
+
+---
+
+### Azure OpenAI
+
+| Property | Value |
+|----------|-------|
+| **Name** | `spaarke-openai-dev` |
+| **Resource Group** | `spe-infrastructure-westus2` |
+| **Region** | East US |
+| **Endpoint** | `https://spaarke-openai-dev.openai.azure.com/` |
+| **SKU** | S0 (Standard) |
+
+**Model Deployments**:
+| Deployment Name | Model | Purpose |
+|-----------------|-------|---------|
+| `gpt-4o-mini` | gpt-4o-mini (2024-07-18) | Document summarization |
+
+**App Service Settings**:
+```
+Ai__Enabled=true
+Ai__OpenAiEndpoint=https://spaarke-openai-dev.openai.azure.com/
+Ai__OpenAiKey=(from Key Vault: ai-openai-key)
+Ai__SummarizeModel=gpt-4o-mini
 ```
 
 ---

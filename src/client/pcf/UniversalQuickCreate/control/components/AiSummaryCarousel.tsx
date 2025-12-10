@@ -275,14 +275,14 @@ export const AiSummaryCarousel: React.FC<AiSummaryCarouselProps> = ({
             onKeyDown={handleKeyDown}
             tabIndex={0}
             role="region"
-            aria-label={`AI summaries for ${documents.length} documents`}
+            aria-label={`File summaries for ${documents.length} documents`}
             aria-roledescription="carousel"
         >
             {/* Header with title and navigation */}
             <div className={styles.header}>
                 <div className={styles.headerLeft}>
                     <DocumentMultipleRegular className={styles.headerIcon} />
-                    <Text className={styles.headerTitle}>AI Summaries</Text>
+                    <Text className={styles.headerTitle}>File Summary</Text>
                 </div>
 
                 {/* Navigation controls */}

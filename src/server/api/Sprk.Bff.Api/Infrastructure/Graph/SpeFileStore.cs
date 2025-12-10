@@ -88,12 +88,51 @@ public class SpeFileStore : ISpeFileOperations
         CancellationToken ct = default)
         => _driveItemOps.GetFileMetadataAsync(driveId, itemId, ct);
 
+    public Task<FileHandleDto?> GetFileMetadataAsUserAsync(
+        HttpContext ctx,
+        string driveId,
+        string itemId,
+        CancellationToken ct = default)
+        => _driveItemOps.GetFileMetadataAsUserAsync(ctx, driveId, itemId, ct);
+
+    public Task<Stream?> DownloadFileAsUserAsync(
+        HttpContext ctx,
+        string driveId,
+        string itemId,
+        CancellationToken ct = default)
+        => _driveItemOps.DownloadFileAsUserAsync(ctx, driveId, itemId, ct);
+
     public Task<FilePreviewDto> GetPreviewUrlAsync(
         string driveId,
         string itemId,
         string? correlationId = null,
         CancellationToken ct = default)
         => _driveItemOps.GetPreviewUrlAsync(driveId, itemId, correlationId, ct);
+
+    /// <summary>
+    /// Resolve a container ID to its drive ID.
+    /// Drive IDs start with "b!" (base64-encoded SharePoint site reference).
+    /// Container IDs are GUIDs like "a1234567-89ab-cdef-0123-456789abcdef".
+    /// If the input is already a drive ID, returns it unchanged.
+    /// </summary>
+    public async Task<string> ResolveDriveIdAsync(string containerOrDriveId, CancellationToken ct = default)
+    {
+        // Drive IDs from SharePoint typically start with "b!" (base64-encoded site reference)
+        // If it already starts with "b!", it's a drive ID - return as-is
+        if (containerOrDriveId.StartsWith("b!", StringComparison.OrdinalIgnoreCase))
+        {
+            return containerOrDriveId;
+        }
+
+        // Otherwise, it might be a container ID (GUID format) - try to resolve it
+        var containerDrive = await _containerOps.GetContainerDriveAsync(containerOrDriveId, ct);
+        if (containerDrive == null)
+        {
+            throw new InvalidOperationException($"Could not resolve container {containerOrDriveId} to drive ID");
+        }
+
+        return containerDrive.Id;
+    }
 
     // =============================================================================
     // USER CONTEXT METHODS (OBO Flow)

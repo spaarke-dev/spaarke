@@ -129,10 +129,13 @@ This document provides Spaarke's end-to-end software development procedures, int
 |----------|----------|---------|
 | **ADRs** | `docs/reference/adr/` | Architecture principles (system) |
 | **AIPs** | `docs/reference/protocols/` | AI behavior principles (agent) |
-| Skills | `.claude/skills/` | Workflow definitions |
+| Skills | `.claude/skills/` | Workflow definitions with tags for discovery |
 | Templates | `docs/ai-knowledge/templates/` | Project/task scaffolding |
+| Knowledge | `docs/ai-knowledge/` | Technical guidance with tags for discovery |
 | Root CLAUDE.md | `/CLAUDE.md` | Embedded critical rules |
+
+**Resource Discovery**: Skills and knowledge docs include YAML frontmatter with tags (e.g., `tags: [pcf, dataverse, deploy]`) enabling automatic discovery during project initialization, task creation, and design-to-project workflows. See `.claude/skills/INDEX.md` for standard tag vocabulary.
 
 ---
 
-*Document version: 2.0 | December 4, 2025*
+*Document version: 2.0 | December 9, 2025*

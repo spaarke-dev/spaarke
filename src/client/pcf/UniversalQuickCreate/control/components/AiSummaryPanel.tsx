@@ -107,7 +107,7 @@ const useStyles = makeStyles({
         color: tokens.colorNeutralForeground3
     },
     summaryContainer: {
-        maxHeight: '200px',
+        maxHeight: '400px',
         overflowY: 'auto',
         padding: tokens.spacingVerticalS,
         backgroundColor: tokens.colorNeutralBackground2,

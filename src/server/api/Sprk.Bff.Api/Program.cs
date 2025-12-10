@@ -52,14 +52,15 @@ builder.Services
 
 // AI Options - Azure OpenAI and Document Intelligence configuration
 // Secrets: ai-openai-endpoint, ai-openai-key, ai-docintel-endpoint, ai-docintel-key (KeyVault)
+// Note: Uses custom AiOptionsValidator for conditional validation (only validates when Enabled=true)
 builder.Services
     .AddOptions<AiOptions>()
     .Bind(builder.Configuration.GetSection(AiOptions.SectionName))
-    .ValidateDataAnnotations()
     .ValidateOnStart();
 
 // Custom validation for conditional requirements
 builder.Services.AddSingleton<IValidateOptions<GraphOptions>, GraphOptionsValidator>();
+builder.Services.AddSingleton<IValidateOptions<AiOptions>, AiOptionsValidator>();
 
 // Add startup health check to validate configuration
 builder.Services.AddHostedService<StartupValidationService>();

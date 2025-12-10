@@ -140,7 +140,10 @@ export class DocumentRecordService {
             return {
                 success: true,
                 fileName: file.name,
-                recordId: result.id
+                recordId: result.id,
+                documentId: result.id,              // Dataverse GUID for AI summary
+                driveId: parentContext.containerId, // SPE container = drive
+                itemId: file.id                     // Graph item ID
             };
 
         } catch (error: any) {
@@ -206,6 +209,40 @@ export class DocumentRecordService {
         logInfo('DocumentRecordService', `Payload:`, JSON.stringify(payload, null, 2));
 
         return payload;
+    }
+
+    /**
+     * Update Document record with AI summary
+     *
+     * Updates the sprk_FileSummary and sprk_FileSummaryDate fields.
+     *
+     * @param documentId - Dataverse Document GUID
+     * @param summary - AI-generated summary text
+     * @returns Promise<boolean> - true if successful
+     */
+    async updateSummary(documentId: string, summary: string): Promise<boolean> {
+        try {
+            // Sanitize GUID (remove curly braces, convert to lowercase)
+            const sanitizedGuid = documentId
+                .replace(/[{}]/g, '')
+                .toLowerCase();
+
+            const payload: any = {
+                sprk_filesummary: summary,
+                sprk_filesummarydate: new Date().toISOString()
+            };
+
+            logInfo('DocumentRecordService', `Updating summary for document: ${sanitizedGuid}`);
+
+            await this.context.webAPI.updateRecord('sprk_document', sanitizedGuid, payload);
+
+            logInfo('DocumentRecordService', `Summary updated for document: ${sanitizedGuid}`);
+            return true;
+
+        } catch (error: any) {
+            logError('DocumentRecordService', `Failed to update summary for ${documentId}`, error);
+            return false;
+        }
     }
 
     /**

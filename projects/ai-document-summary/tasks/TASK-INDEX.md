@@ -19,7 +19,7 @@
 | 6: Frontend Integration | 4 | ✅ Completed |
 | 7: Document Intelligence | 2 | ✅ Completed |
 | 8: Production Hardening | 4 | ✅ Completed |
-| 10: Deployment | 4 | 🔲 Not Started |
+| 10: Deployment | 4 | ✅ Completed |
 | 11: Functional Testing | 3 | 🔲 Not Started |
 | 12: Wrap-up | 1 | 🔲 Not Started |
 
@@ -49,10 +49,10 @@
 | 071 | [Monitoring and Alerting](071-monitoring-alerting.poml) | 8 | ✅ completed | 020 | 8 |
 | 072 | [Rate Limiting and Circuit Breaker](072-rate-limiting.poml) | 8 | ✅ completed | 030 | 8 |
 | 073 | [Documentation](073-documentation.poml) | 8 | ✅ completed | all | 6 |
-| 080 | [Deploy BFF API to Azure App Service](080-deploy-bff-api.poml) | 10 | 🔲 not-started | 073 | 4 |
-| 081 | [Configure Key Vault Secrets](081-configure-keyvault.poml) | 10 | 🔲 not-started | 080 | 4 |
-| 082 | [Deploy Dataverse Solution](082-deploy-dataverse-solution.poml) | 10 | 🔲 not-started | 080 | 4 |
-| 083 | [Deploy PCF Controls](083-deploy-pcf-controls.poml) | 10 | 🔲 not-started | 082 | 4 |
+| 080 | [Deploy BFF API to Azure App Service](080-deploy-bff-api.poml) | 10 | ✅ completed | 073 | 4 |
+| 081 | [Configure Key Vault Secrets](081-configure-keyvault.poml) | 10 | ✅ completed | 080 | 4 |
+| 082 | [Deploy Dataverse Solution](082-deploy-dataverse-solution.poml) | 10 | ✅ completed | 080 | 4 |
+| 083 | [Deploy PCF Controls](083-deploy-pcf-controls.poml) | 10 | ✅ completed | 082 | 4 |
 | 084 | [API Integration Testing](084-api-integration-testing.poml) | 11 | 🔲 not-started | 081, 083 | 4 |
 | 085 | [PCF Functional Testing](085-pcf-functional-testing.poml) | 11 | 🔲 not-started | 084 | 4 |
 | 086 | [User Acceptance Testing (UAT)](086-uat.poml) | 11 | 🔲 not-started | 085 | 8 |

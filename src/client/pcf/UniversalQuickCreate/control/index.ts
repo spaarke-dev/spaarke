@@ -290,6 +290,9 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
     // Parent Context (from Custom Page parameters)
     private parentContext: ParentContext | null = null;
 
+    // API Base URL for AI services
+    private apiBaseUrl: string = '';
+
     // Initialization state (Phase 4 fix - idempotent updateView)
     private _initialized = false;
 
@@ -337,7 +340,7 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
         state: ComponentFramework.Dictionary,
         container: HTMLDivElement
     ): void {
-    logInfo('UniversalDocumentUpload', 'Initializing PCF control v3.1.2 (FluentProvider height fix)');
+    logInfo('UniversalDocumentUpload', 'Initializing PCF control v3.2.1 (AI Summary URL fix)');
 
         this.context = context;
         this.notifyOutputChanged = notifyOutputChanged;
@@ -521,6 +524,9 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
             ? rawApiUrl
             : `https://${rawApiUrl}`;
 
+        // Store for AI services
+        this.apiBaseUrl = apiBaseUrl;
+
         // NavMapClient needs base URL without /api suffix (it adds /api/navmap internally)
         const navMapBaseUrl = apiBaseUrl.endsWith('/api')
             ? apiBaseUrl.substring(0, apiBaseUrl.length - 4)  // Remove trailing /api
@@ -585,7 +591,9 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
                     parentContext: this.parentContext,
                     multiFileService: this.multiFileService,
                     documentRecordService: this.documentRecordService,
-                    onClose: this.closeDialog.bind(this) // Use closeDialog for both Custom Page and Quick Create Form
+                    onClose: this.closeDialog.bind(this), // Use closeDialog for both Custom Page and Quick Create Form
+                    apiBaseUrl: this.apiBaseUrl, // Enable AI Summary section
+                    getAuthToken: this.getAuthToken.bind(this) // Pass token getter for AI Summary auth
                 })
             )
         );
@@ -614,6 +622,16 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
             // Form will handle close behavior when user saves the form
             logInfo('UniversalDocumentUpload', 'Quick Create Form mode - not closing dialog (form handles close on save)');
         }
+    }
+
+    /**
+     * Get auth token for AI Summary API calls
+     * Uses MSAL to acquire token for BFF API scope
+     */
+    private async getAuthToken(): Promise<string> {
+        logInfo('UniversalDocumentUpload', 'Acquiring auth token for AI Summary');
+        const token = await this.authProvider.getToken(['api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation']);
+        return token;
     }
 
     /**

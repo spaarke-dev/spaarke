@@ -2,6 +2,9 @@
 
 ---
 description: Initialize a new project folder structure with README, plan, tasks directory, and CLAUDE.md from a design specification
+tags: [project-init, project-structure, planning, scaffolding]
+techStack: [all]
+appliesTo: ["projects/*/", "initialize project", "create project"]
 alwaysApply: false
 ---
 
@@ -69,6 +72,31 @@ LOAD templates:
 LOAD projects/{project-name}/spec.md
 EXTRACT: problem statement, scope, success criteria, technical constraints
 ```
+
+### Step 2.5: Discover Related Resources
+
+**Search for related skills and knowledge docs using spec.md content:**
+
+1. **Extract keywords from spec.md:**
+   - Technology names (e.g., "Azure OpenAI", "Dataverse", "React")
+   - Feature types (e.g., "API endpoint", "PCF control", "plugin")
+   - Operations (e.g., "deploy", "authentication", "caching")
+
+2. **Search `.claude/skills/INDEX.md`:**
+   - Look for skills with matching `tags` or `techStack` in their YAML frontmatter
+   - Read relevant skill files for patterns and procedures
+   - Example: If spec mentions "deploy to Dataverse" → load `dataverse-deploy` skill
+
+3. **Search `docs/ai-knowledge/`:**
+   - Look for guides matching technologies or patterns in spec
+   - Example: If spec mentions "Azure OpenAI" → search for azure, openai, embeddings tags
+   - Load relevant architecture docs and guides
+
+4. **Load referenced ADRs:**
+   - If spec.md contains ADR references (e.g., "ADR-001") → load those ADRs
+   - Check `adr-aware` skill for resource-type mappings
+
+**Output:** Brief summary of discovered resources to use during project initialization.
 
 ### Step 3: Create Folder Structure
 ```

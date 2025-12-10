@@ -209,22 +209,37 @@ public class TextExtractorService : ITextExtractor
 
             var result = operation.Value;
 
-            // Extract text from all pages
-            var textBuilder = new StringBuilder();
-            foreach (var page in result.Pages)
+            // Extract text - prefer Content (for native DOCX/digital PDFs) over Pages/Lines (for scanned docs)
+            string text;
+            if (!string.IsNullOrWhiteSpace(result.Content))
             {
-                foreach (var line in page.Lines)
-                {
-                    textBuilder.AppendLine(line.Content);
-                }
-                // Add page break between pages
-                if (result.Pages.Count > 1)
-                {
-                    textBuilder.AppendLine();
-                }
+                // Native digital documents (DOCX, digital PDFs) have text in Content property
+                text = result.Content.Trim();
+                _logger.LogDebug(
+                    "Extracted {CharCount} chars from {FileName} using Content property",
+                    text.Length, fileName);
             }
-
-            var text = textBuilder.ToString().Trim();
+            else
+            {
+                // Scanned documents have OCR text in Pages/Lines
+                var textBuilder = new StringBuilder();
+                foreach (var page in result.Pages)
+                {
+                    foreach (var line in page.Lines)
+                    {
+                        textBuilder.AppendLine(line.Content);
+                    }
+                    // Add page break between pages
+                    if (result.Pages.Count > 1)
+                    {
+                        textBuilder.AppendLine();
+                    }
+                }
+                text = textBuilder.ToString().Trim();
+                _logger.LogDebug(
+                    "Extracted {CharCount} chars from {FileName} using Pages/Lines ({PageCount} pages)",
+                    text.Length, fileName, result.Pages.Count);
+            }
 
             // Check for empty content
             if (string.IsNullOrWhiteSpace(text))

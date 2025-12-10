@@ -1,8 +1,34 @@
 # AI Knowledge Documentation
 
-> **Last Updated**: December 4, 2025
+> **Last Updated**: December 9, 2025
 >
 > **Purpose**: Index of authoritative, coding-relevant documentation.
+
+---
+
+## Document Metadata
+
+**All documents in this directory SHOULD include YAML frontmatter for discoverability:**
+
+```yaml
+---
+title: Brief document title
+category: architecture | standards | guides | templates
+tags: [tag1, tag2, tag3]  # Keywords for discovery (use standard vocabulary)
+techStack: [tech1, tech2]  # Technologies covered (e.g., aspnet-core, dataverse, react)
+appliesTo: [scenario1, scenario2]  # When to load this doc
+lastUpdated: YYYY-MM-DD
+---
+```
+
+**Standard Tag Vocabulary** (same as skills):
+- **Project:** `project-init`, `project-structure`, `tasks`, `planning`
+- **Development:** `api`, `pcf`, `plugin`, `frontend`, `backend`, `dataverse`, `dynamics`
+- **Azure/AI:** `azure`, `openai`, `ai`, `embeddings`, `semantic-kernel`
+- **Operations:** `deploy`, `git`, `ci-cd`, `devops`, `auth`, `security`
+- **Quality:** `testing`, `security`, `performance`, `code-review`, `troubleshooting`
+
+See `.claude/skills/INDEX.md` for complete vocabulary.
 
 ---
 

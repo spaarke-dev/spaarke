@@ -35,14 +35,17 @@ export interface UseAiSummaryOptions {
     /** Base URL for API endpoints */
     apiBaseUrl: string;
 
-    /** Authorization token */
-    token?: string;
+    /** Function to get authorization token (for dynamic token acquisition) */
+    getToken?: () => Promise<string>;
 
     /** Maximum concurrent streams (default: 3) */
     maxConcurrent?: number;
 
     /** Auto-start streaming when documents added */
     autoStart?: boolean;
+
+    /** Callback when a summary completes successfully */
+    onSummaryComplete?: (documentId: string, summary: string) => void;
 }
 
 /**
@@ -118,9 +121,10 @@ const parseSseLine = (line: string): { content?: string; done?: boolean; error?:
 export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult => {
     const {
         apiBaseUrl,
-        token,
+        getToken,
         maxConcurrent = 3,
-        autoStart = true
+        autoStart = true,
+        onSummaryComplete
     } = options;
 
     const [documents, setDocuments] = useState<DocumentSummaryState[]>([]);
@@ -148,8 +152,11 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
     const streamDocument = useCallback(async (doc: SummaryDocument) => {
         const { documentId, driveId, itemId } = doc;
 
+        console.log('[useAiSummary] Starting stream for document:', { documentId, driveId, itemId, apiBaseUrl });
+
         // Check if already streaming
         if (activeStreamsRef.current.has(documentId)) {
+            console.log('[useAiSummary] Already streaming, skipping:', documentId);
             return;
         }
 
@@ -161,9 +168,23 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
         updateDocument(documentId, { status: 'streaming', summary: '', error: undefined });
 
         let accumulatedData = '';
+        const streamUrl = `${apiBaseUrl}/ai/summarize/stream`;
+        console.log('[useAiSummary] Fetching:', streamUrl);
 
         try {
-            const response = await fetch(`${apiBaseUrl}/api/ai/summarize/stream`, {
+            // Acquire token dynamically before each request
+            let token: string | undefined;
+            if (getToken) {
+                try {
+                    token = await getToken();
+                    console.log('[useAiSummary] Token acquired successfully');
+                } catch (tokenError) {
+                    console.error('[useAiSummary] Failed to acquire token:', tokenError);
+                    throw new Error('Failed to acquire authentication token');
+                }
+            }
+
+            const response = await fetch(streamUrl, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -192,6 +213,10 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
 
                 if (done) {
                     updateDocument(documentId, { status: 'complete' });
+                    // Call completion callback with final summary
+                    if (onSummaryComplete && accumulatedData) {
+                        onSummaryComplete(documentId, accumulatedData);
+                    }
                     break;
                 }
 
@@ -203,13 +228,18 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
                     for (const line of event.split('\n')) {
                         const chunk = parseSseLine(line);
                         if (chunk) {
-                            if (chunk.done) {
-                                updateDocument(documentId, { status: 'complete' });
-                                activeStreamsRef.current.delete(documentId);
-                                return;
-                            }
+                            // Check error FIRST - error chunks have done=true but must be handled as errors
                             if (chunk.error) {
                                 throw new Error(chunk.error);
+                            }
+                            if (chunk.done) {
+                                updateDocument(documentId, { status: 'complete' });
+                                // Call completion callback with final summary
+                                if (onSummaryComplete && accumulatedData) {
+                                    onSummaryComplete(documentId, accumulatedData);
+                                }
+                                activeStreamsRef.current.delete(documentId);
+                                return;
                             }
                             if (chunk.content) {
                                 accumulatedData += chunk.content;
@@ -234,7 +264,7 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
             // Process next in queue
             processQueue();
         }
-    }, [apiBaseUrl, token, updateDocument]);
+    }, [apiBaseUrl, getToken, updateDocument, onSummaryComplete]);
 
     /**
      * Process pending queue respecting concurrent limit
@@ -255,6 +285,8 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
      * Add documents to be summarized
      */
     const addDocuments = useCallback((docs: SummaryDocument[]) => {
+        console.log('[useAiSummary] addDocuments called with:', docs.length, 'documents', docs);
+
         // Add to document map
         docs.forEach(doc => documentMapRef.current.set(doc.documentId, doc));
 
@@ -319,7 +351,17 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
         if (incompleteDocuments.length === 0) return;
 
         try {
-            const response = await fetch(`${apiBaseUrl}/api/ai/summarize/enqueue-batch`, {
+            // Acquire token dynamically
+            let token: string | undefined;
+            if (getToken) {
+                try {
+                    token = await getToken();
+                } catch (tokenError) {
+                    console.error('[useAiSummary] Failed to acquire token for enqueue:', tokenError);
+                }
+            }
+
+            const response = await fetch(`${apiBaseUrl}/ai/summarize/enqueue-batch`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -340,7 +382,7 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
         } catch (error) {
             console.error('Error enqueueing incomplete summaries:', error);
         }
-    }, [documents, apiBaseUrl, token]);
+    }, [documents, apiBaseUrl, getToken]);
 
     /**
      * Clear all documents

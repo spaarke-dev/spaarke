@@ -1,11 +1,19 @@
-# PCF Dataset Component — React/Fluent v9 Best-Practice Review and Fix Plan
+# PCF Controls — Packaging, Versioning, and Deployment Guide
 
-> **Related Skill**: `.claude/skills/dataverse-deploy/SKILL.md` - See Scenario 1b for deployment workflow
+> **Related Skill**: `.claude/skills/dataverse-deploy/SKILL.md` - See deployment scenarios
 >
 > **Last Updated**: December 2025
 
+This document covers two critical aspects of PCF development:
+1. **Part A**: Bundle size optimization (React/Fluent v9 platform libraries)
+2. **Part B**: Deployment workflow and version management (lessons learned from production deployments)
+
+---
+
+## Part A: Bundle Size Optimization (React/Fluent v9)
+
 Date: 2025-10-04
-Scope: This document explains why your current PCF bundle grows past 5 MB, clarifies the correct runtime model for React and Fluent UI in Power Platform, and provides precise code changes and task instructions your AI coding agent (Claude Code) can apply immediately.
+Scope: This section explains why your current PCF bundle grows past 5 MB, clarifies the correct runtime model for React and Fluent UI in Power Platform, and provides precise code changes and task instructions your AI coding agent (Claude Code) can apply immediately.
 
 ## 1. Context and Goal
 You are building a dataset PCF that should render with Fluent UI v9 while staying under Dataverse’s single-file upload cap (commonly 5 MB). The correct approach on Power Platform is to externalize React and Fluent via platform libraries so they are not bundled into your PCF artifact. This keeps your bundle small, aligns with modern theming, and avoids version conflicts.
@@ -332,6 +340,390 @@ export function UniversalDatasetGrid(props: { items: Row[]; theme: any }) {
 
 This code compiles against @fluentui/react-components but at runtime the platform supplies Fluent and React, keeping your bundle small.
 
-## 11. Conclusion
-You do not need to downgrade to React 16 + Fluent v8 to meet the size limit. The correct fix is to stop bundling React and Fluent UI v9 and rely on platform libraries in your manifest. The changes in this document align your control with Microsoft’s modern theming and runtime model, reduce your artifact size well under 5 MB, and keep your component compatible across model-driven and custom page deployments.Start editing…
+## 11. Conclusion (Part A)
+You do not need to downgrade to React 16 + Fluent v8 to meet the size limit. The correct fix is to stop bundling React and Fluent UI v9 and rely on platform libraries in your manifest. The changes in this document align your control with Microsoft's modern theming and runtime model, reduce your artifact size well under 5 MB, and keep your component compatible across model-driven and custom page deployments.
+
+---
+
+## Part B: PCF Deployment Workflow and Version Management
+
+> **Last Updated**: December 2025 (based on production deployment lessons learned)
+
+This section documents the correct PCF deployment workflow, common pitfalls, and their resolutions. Following this process ensures reliable deployments and proper version tracking.
+
+---
+
+## 12. PCF Version Requirements
+
+### 12.1 Mandatory Version Footer
+
+**Every PCF control MUST display a version footer** in the UI with:
+- Version number (semantic versioning: MAJOR.MINOR.PATCH)
+- Build date (ISO format: YYYY-MM-DD)
+
+```typescript
+// Footer component pattern
+<span className={styles.versionText}>
+    v3.2.4 • Built 2025-12-09
+</span>
+```
+
+This allows users and developers to immediately verify which version is running without accessing developer tools.
+
+### 12.2 Version Location Synchronization
+
+PCF versions must be synchronized in **FOUR locations**:
+
+| Location | File | Example |
+|----------|------|---------|
+| **1. Control Manifest** | `ControlManifest.Input.xml` | `version="3.2.4"` |
+| **2. UI Footer** | Component `.tsx` file | `v3.2.4 • Built 2025-12-09` |
+| **3. Solution Manifest** | `solution.xml` or `Solution.xml` | `<Version>3.2.4</Version>` |
+| **4. Dataverse Registry** | Verified via `pac solution list` | Displayed after import |
+
+**CRITICAL**: All four must match. Mismatches cause confusion and deployment failures.
+
+---
+
+## 13. Two Deployment Methods Compared
+
+### 13.1 Method A: `pac pcf push` (Quick Development)
+
+**Best for**: Rapid iteration during development
+
+```bash
+# From control directory (contains .pcfproj)
+pac pcf push --publisher-prefix sprk
+```
+
+**Pros**:
+- Fast and simple
+- Builds and deploys in one step
+
+**Cons**:
+- Creates a **temporary solution** (e.g., `PowerAppsToolsTemp_sprk`)
+- Does NOT update named solution version (e.g., `UniversalQuickCreate` stays at old version)
+- Can cause version confusion when checking `pac solution list`
+
+**When to use**: Development testing only. Not for production releases.
+
+### 13.2 Method B: Solution Import (Production Releases)
+
+**Best for**: Production deployments, version-controlled releases
+
+```bash
+# Full workflow - see Section 14 for detailed steps
+npm run build
+# Update versions in manifest and solution.xml
+# Copy bundle to solution folder
+pac solution pack --zipfile Solution_vX.Y.Z.zip --folder Solution_extracted
+pac solution import --path Solution_vX.Y.Z.zip --force-overwrite --publish-changes
+```
+
+**Pros**:
+- Updates named solution version visible in `pac solution list`
+- Proper audit trail for version tracking
+- Solution can be exported and moved between environments
+
+**Cons**:
+- More steps required
+- Must manage solution folder structure
+
+**When to use**: All production releases and version updates.
+
+---
+
+## 14. Complete Production Deployment Workflow
+
+### Step 1: Build the PCF Control
+
+```bash
+cd src/client/pcf/{ControlName}
+npm run build
+```
+
+Verify the bundle was created:
+```bash
+ls -la out/controls/control/bundle.js
+# Expected: bundle.js should exist (typically 500KB-1MB with platform libraries)
+```
+
+### Step 2: Update Version Numbers
+
+Update ALL four locations:
+
+**A. ControlManifest.Input.xml** (source):
+```xml
+<control ... version="3.2.4" description-key="Feature description (v3.2.4)">
+```
+
+**B. UI Footer** (source component):
+```typescript
+<span>v3.2.4 • Built 2025-12-09</span>
+```
+
+**C. Solution Manifest** (solution folder):
+- Location: `{Solution}_extracted/Other/Solution.xml` OR `{Solution}_extracted/solution.xml`
+```xml
+<Version>3.2.4</Version>
+```
+
+**D. Extracted ControlManifest.xml** (solution folder):
+- Location: `{Solution}_extracted/Controls/{namespace}.{ControlName}/ControlManifest.xml`
+```xml
+<control ... version="3.2.4">
+```
+
+### Step 3: Copy Bundle to Solution Folder
+
+```bash
+# Copy fresh bundle to solution Controls folder
+cp out/controls/control/bundle.js \
+   infrastructure/dataverse/ribbon/temp/{Solution}_extracted/Controls/{namespace}.{ControlName}/
+
+# Verify size (should be similar to source)
+ls -la infrastructure/dataverse/ribbon/temp/{Solution}_extracted/Controls/{namespace}.{ControlName}/bundle.js
+```
+
+### Step 4: Ensure Correct Solution Structure
+
+The `pac solution pack` command requires a specific folder structure:
+
+```
+{Solution}_extracted/
+├── Other/
+│   ├── Solution.xml          # ← REQUIRED here for pac solution pack
+│   └── Customizations.xml    # ← REQUIRED here for pac solution pack
+├── Controls/
+│   └── {namespace}.{ControlName}/
+│       ├── ControlManifest.xml
+│       └── bundle.js
+├── WebResources/             # Optional
+├── CanvasApps/               # If using Custom Pages
+└── [other folders as needed]
+```
+
+**CRITICAL**: If `Solution.xml` and `Customizations.xml` are in the root folder (not `Other/`), move them:
+
+```bash
+cd infrastructure/dataverse/ribbon/temp/{Solution}_extracted
+
+# Create Other folder if needed
+mkdir -p Other
+
+# Move files if they're in root
+mv solution.xml Other/Solution.xml
+mv customizations.xml Other/Customizations.xml
+```
+
+### Step 5: Pack the Solution
+
+```bash
+cd infrastructure/dataverse/ribbon/temp
+
+pac solution pack \
+    --zipfile {SolutionName}_v{X.Y.Z}.zip \
+    --folder {Solution}_extracted \
+    --packagetype Unmanaged
+```
+
+Expected output: `Solution successfully packed to {SolutionName}_v{X.Y.Z}.zip`
+
+### Step 6: Import to Dataverse
+
+```bash
+pac solution import \
+    --path {SolutionName}_v{X.Y.Z}.zip \
+    --force-overwrite \
+    --publish-changes
+```
+
+Expected output: `Solution import succeeded`
+
+### Step 7: Verify Deployment
+
+```bash
+# Check solution version in Dataverse
+pac solution list | grep -i "{SolutionName}"
+```
+
+**Expected output** shows new version:
+```
+UniversalQuickCreate    Universal Quick Create    3.2.4    False
+```
+
+### Step 8: Verify in Browser
+
+1. **Hard refresh** the Power Apps page (`Ctrl+Shift+R`)
+2. Open the control/form using the PCF
+3. Check the **footer shows the new version** (e.g., `v3.2.4 • Built 2025-12-09`)
+
+---
+
+## 15. Common Pitfalls and Resolutions
+
+### Pitfall 1: "pac pcf push worked but solution version didn't change"
+
+**Symptom**: `pac solution list` shows old version (e.g., 2.2.0) even after `pac pcf push`
+
+**Cause**: `pac pcf push` updates the control in Dataverse but creates a temporary solution. It does NOT update your named solution's version.
+
+**Resolution**: Use Method B (Solution Import) for production releases. The named solution version will only update when you import a solution package with an updated `Solution.xml`.
+
+### Pitfall 2: "pac solution pack fails - missing customizations.xml"
+
+**Symptom**: Error about missing `Other/Customizations.xml`
+
+**Cause**: Solution folder has files in wrong location (root instead of `Other/`)
+
+**Resolution**:
+```bash
+mkdir -p Other
+mv solution.xml Other/Solution.xml
+mv customizations.xml Other/Customizations.xml
+```
+
+### Pitfall 3: "Imported solution but old bundle is still running"
+
+**Symptom**: UI shows old version footer, or features missing
+
+**Cause**:
+- Browser cache
+- Bundle.js wasn't copied to solution folder
+- Old bundle.js was in solution folder
+
+**Resolution**:
+1. Verify bundle was copied: `ls -la {Solution}_extracted/Controls/{...}/bundle.js`
+2. Verify file size matches source: compare with `out/controls/control/bundle.js`
+3. Hard refresh browser: `Ctrl+Shift+R`
+4. Check footer version matches expected version
+
+### Pitfall 4: "Version shows correct but features missing"
+
+**Symptom**: Footer shows v3.2.4 but new features don't work
+
+**Cause**: Version was updated in code but bundle wasn't rebuilt
+
+**Resolution**: Always rebuild before deployment:
+```bash
+npm run build
+# Then copy fresh bundle to solution folder
+```
+
+### Pitfall 5: "Canvas App Custom Page shows wrong PCF version"
+
+**Symptom**: Opening Custom Page in Power Apps Studio shows old version or prompts to "Update component"
+
+**Cause**: Canvas Apps have an **embedded copy** of the PCF bundle that must also be updated
+
+**Resolution**: See "Scenario 1c: PCF Control in Custom Page" in `.claude/skills/dataverse-deploy/SKILL.md`
+
+---
+
+## 16. Pre-Deployment Checklist
+
+Before every PCF deployment, verify:
+
+- [ ] **Code changes complete** - All features/fixes implemented
+- [ ] **Version updated in 4 locations**:
+  - [ ] `ControlManifest.Input.xml` (source)
+  - [ ] UI footer in component code
+  - [ ] `Solution.xml` (solution folder)
+  - [ ] `ControlManifest.xml` (solution Controls folder)
+- [ ] **Bundle rebuilt** - `npm run build` completed successfully
+- [ ] **Bundle copied** - Fresh `bundle.js` copied to solution Controls folder
+- [ ] **Bundle size verified** - Similar size to source bundle
+- [ ] **Solution structure correct** - `Other/Solution.xml` and `Other/Customizations.xml` exist
+- [ ] **Solution packed** - `pac solution pack` succeeded
+- [ ] **Solution imported** - `pac solution import` succeeded
+- [ ] **Version verified** - `pac solution list` shows new version
+- [ ] **Browser verified** - Hard refresh shows new footer version
+
+---
+
+## 17. Quick Reference Commands
+
+```bash
+# Build PCF
+cd src/client/pcf/{ControlName}
+npm run build
+
+# Check bundle size
+ls -la out/controls/control/bundle.js
+
+# Copy bundle to solution
+cp out/controls/control/bundle.js \
+   infrastructure/dataverse/ribbon/temp/{Solution}_extracted/Controls/{ns}.{Control}/
+
+# Pack solution
+pac solution pack \
+    --zipfile {Solution}_v{X.Y.Z}.zip \
+    --folder {Solution}_extracted \
+    --packagetype Unmanaged
+
+# Import solution
+pac solution import \
+    --path {Solution}_v{X.Y.Z}.zip \
+    --force-overwrite \
+    --publish-changes
+
+# Verify deployment
+pac solution list | grep -i "{SolutionName}"
+```
+
+---
+
+## 18. Solution Folder Locations (Spaarke)
+
+| Solution | Extracted Folder Location |
+|----------|---------------------------|
+| UniversalQuickCreate | `infrastructure/dataverse/ribbon/temp/UniversalQuickCreate_extracted/` |
+| ApplicationRibbon | `infrastructure/dataverse/ribbon/temp/ApplicationRibbon_extracted/` |
+| SpaarkeCore | `infrastructure/dataverse/ribbon/temp/SpaarkeCore_extracted/` |
+
+---
+
+## 19. Example: Full UniversalQuickCreate Deployment
+
+```bash
+# 1. Build
+cd /c/code_files/spaarke/src/client/pcf/UniversalQuickCreate
+npm run build
+
+# 2. Update versions (manual - edit these files):
+#    - control/ControlManifest.Input.xml -> version="3.2.4"
+#    - control/components/DocumentUploadForm.tsx -> "v3.2.4 • Built 2025-12-09"
+
+# 3. Navigate to solution folder
+cd /c/code_files/spaarke/infrastructure/dataverse/ribbon/temp/UniversalQuickCreate_extracted
+
+# 4. Update solution version
+#    - Edit Other/Solution.xml -> <Version>3.2.4</Version>
+#    - Edit Controls/sprk_Spaarke.Controls.UniversalDocumentUpload/ControlManifest.xml -> version="3.2.4"
+
+# 5. Copy fresh bundle
+cp /c/code_files/spaarke/src/client/pcf/UniversalQuickCreate/out/controls/control/bundle.js \
+   Controls/sprk_Spaarke.Controls.UniversalDocumentUpload/
+
+# 6. Pack solution
+cd ..
+pac solution pack \
+    --zipfile UniversalQuickCreate_v3.2.4.zip \
+    --folder UniversalQuickCreate_extracted \
+    --packagetype Unmanaged
+
+# 7. Import
+pac solution import \
+    --path UniversalQuickCreate_v3.2.4.zip \
+    --force-overwrite \
+    --publish-changes
+
+# 8. Verify
+pac solution list | grep -i UniversalQuickCreate
+# Expected: UniversalQuickCreate    Universal Quick Create    3.2.4    False
+```
+
+---
+
+*End of Part B - Deployment Workflow and Version Management*
         

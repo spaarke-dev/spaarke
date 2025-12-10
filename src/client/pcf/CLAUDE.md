@@ -287,6 +287,59 @@ describe('DocumentGrid', () => {
 | Use logger utility for debugging | Use `console.log` in production |
 | Clean up in `destroy()` method | Leave event listeners attached |
 | Use singleton for MSAL | Create multiple MSAL instances |
+| **Include version footer in UI** | Deploy without visible version |
+
+## Version Footer Requirement (MANDATORY)
+
+**Every PCF control MUST display a version footer** in the UI footer area:
+
+```typescript
+// Footer pattern - REQUIRED for all PCF controls
+<span className={styles.versionText}>
+    v3.2.4 • Built 2025-12-09
+</span>
+```
+
+### Why This Is Required
+
+1. **Instant verification** - Users and devs can confirm which version is running without dev tools
+2. **Deployment validation** - After deployment, hard refresh and check footer matches expected version
+3. **Support debugging** - When issues are reported, know exactly which version is in use
+
+### Version Update Checklist
+
+When releasing a PCF update, update version in **4 locations**:
+
+| Location | File | Example |
+|----------|------|---------|
+| 1. Source Manifest | `ControlManifest.Input.xml` | `version="3.2.4"` |
+| 2. UI Footer | Component `.tsx` | `v3.2.4 • Built 2025-12-09` |
+| 3. Solution Manifest | `solution.xml` or `Other/Solution.xml` | `<Version>3.2.4</Version>` |
+| 4. Solution Control Manifest | `Controls/{...}/ControlManifest.xml` | `version="3.2.4"` |
+
+### Deployment Workflow
+
+For production releases, use full solution workflow (NOT `pac pcf push`):
+
+```bash
+# 1. Build
+npm run build
+
+# 2. Update versions in all 4 locations (manual)
+
+# 3. Copy bundle to solution folder
+cp out/controls/control/bundle.js \
+   infrastructure/dataverse/ribbon/temp/{Solution}_extracted/Controls/{...}/
+
+# 4. Pack and import
+pac solution pack --zipfile Solution_vX.Y.Z.zip --folder {Solution}_extracted
+pac solution import --path Solution_vX.Y.Z.zip --force-overwrite --publish-changes
+
+# 5. VERIFY deployment
+pac solution list | grep -i "{SolutionName}"
+```
+
+> **Full Guide**: See `docs/ai-knowledge/guides/PCF-V9-PACKAGING.md` Part B
 
 ## Common Issues
 

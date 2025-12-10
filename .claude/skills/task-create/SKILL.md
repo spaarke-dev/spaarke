@@ -2,6 +2,9 @@
 
 ---
 description: Decompose a project plan into numbered POML task files for systematic AI-assisted execution
+tags: [tasks, planning, project-structure, poml]
+techStack: [all]
+appliesTo: ["projects/*/plan.md", "create tasks", "decompose plan"]
 alwaysApply: false
 ---
 
@@ -67,6 +70,26 @@ FOR each WBS phase:
     - Phase 3 tasks: 020, 021, 022...
     (10-gap allows inserting tasks later)
 ```
+
+### Step 3.4: Discover Related Resources
+
+**Search for related skills and knowledge docs for each task:**
+
+1. **For each task, identify:**
+   - What is being built (API, PCF control, plugin, etc.)
+   - What technologies are involved (Azure OpenAI, Dataverse, React, etc.)
+   - What operations are needed (deploy, test, authenticate, etc.)
+
+2. **Search `.claude/skills/INDEX.md`:**
+   - Look for skills with matching `tags` or `techStack`
+   - Example: Task involves "deploy to Dataverse" → note `dataverse-deploy` skill
+   - Add relevant skills to task's `<knowledge><files>` section
+
+3. **Search `docs/ai-knowledge/`:**
+   - Look for guides/standards matching task's technology or pattern
+   - Add relevant knowledge docs to task's `<knowledge><files>` section
+
+**Output:** Each task file will include discovered resources in its `<knowledge>` section.
 
 ### Step 3.5: Map ADRs to Tasks (REQUIRED)
 

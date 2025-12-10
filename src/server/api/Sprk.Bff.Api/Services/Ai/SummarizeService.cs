@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using Azure;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
@@ -41,13 +42,15 @@ public class SummarizeService : ISummarizeService
     }
 
     /// <summary>
-    /// Summarize a document with streaming output.
+    /// Summarize a document with streaming output using user context (OBO).
     /// Use this for real-time SSE streaming to the browser.
     /// </summary>
+    /// <param name="httpContext">The HTTP context for user authentication (OBO).</param>
     /// <param name="request">The summarization request.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Async enumerable of SummarizeChunk for streaming.</returns>
     public async IAsyncEnumerable<SummarizeChunk> SummarizeStreamAsync(
+        HttpContext httpContext,
         SummarizeRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
@@ -61,14 +64,39 @@ public class SummarizeService : ISummarizeService
             "Starting streaming summarization for document {DocumentId}, DriveId={DriveId}, ItemId={ItemId}",
             request.DocumentId, request.DriveId, request.ItemId);
 
-        // Step 1: Get file metadata for name
-        var metadata = await _speFileOperations.GetFileMetadataAsync(
-            request.DriveId, request.ItemId, cancellationToken);
+        // Step 0: Resolve containerId to driveId if needed (PCF sends containerId as driveId)
+        string? resolvedDriveId = null;
+        string? driveResolutionError = null;
+        try
+        {
+            resolvedDriveId = await _speFileOperations.ResolveDriveIdAsync(request.DriveId, cancellationToken);
+            if (resolvedDriveId != request.DriveId)
+            {
+                _logger.LogDebug("Resolved container {ContainerId} to drive {DriveId}",
+                    request.DriveId, resolvedDriveId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to resolve drive ID for {DriveId}", request.DriveId);
+            _telemetry?.RecordFailure(stopwatch, "drive_resolution_failed", "streaming");
+            driveResolutionError = "Failed to resolve file storage location.";
+        }
+
+        if (driveResolutionError != null || resolvedDriveId == null)
+        {
+            yield return SummarizeChunk.FromError(driveResolutionError ?? "Failed to resolve file storage location.");
+            yield break;
+        }
+
+        // Step 1: Get file metadata for name (using user OBO for streaming)
+        var metadata = await _speFileOperations.GetFileMetadataAsUserAsync(
+            httpContext, resolvedDriveId, request.ItemId, cancellationToken);
 
         if (metadata == null)
         {
             _logger.LogWarning("File not found: DriveId={DriveId}, ItemId={ItemId}",
-                request.DriveId, request.ItemId);
+                resolvedDriveId, request.ItemId);
             _telemetry?.RecordFailure(stopwatch, "file_not_found", "streaming");
             yield return SummarizeChunk.FromError("File not found in SharePoint Embedded.");
             yield break;
@@ -79,14 +107,14 @@ public class SummarizeService : ISummarizeService
         fileSize = metadata.Size;
         _logger.LogDebug("File metadata retrieved: {FileName}", fileName);
 
-        // Step 2: Download file content
-        using var fileStream = await _speFileOperations.DownloadFileAsync(
-            request.DriveId, request.ItemId, cancellationToken);
+        // Step 2: Download file content (using user OBO for streaming)
+        using var fileStream = await _speFileOperations.DownloadFileAsUserAsync(
+            httpContext, resolvedDriveId, request.ItemId, cancellationToken);
 
         if (fileStream == null)
         {
             _logger.LogWarning("Failed to download file: DriveId={DriveId}, ItemId={ItemId}",
-                request.DriveId, request.ItemId);
+                resolvedDriveId, request.ItemId);
             _telemetry?.RecordFailure(stopwatch, "file_download_failed", "streaming");
             yield return SummarizeChunk.FromError("Failed to download file content.");
             yield break;
@@ -214,14 +242,32 @@ public class SummarizeService : ISummarizeService
             "Starting non-streaming summarization for document {DocumentId}, DriveId={DriveId}, ItemId={ItemId}",
             request.DocumentId, request.DriveId, request.ItemId);
 
+        // Step 0: Resolve containerId to driveId if needed (PCF sends containerId as driveId)
+        string resolvedDriveId;
+        try
+        {
+            resolvedDriveId = await _speFileOperations.ResolveDriveIdAsync(request.DriveId, cancellationToken);
+            if (resolvedDriveId != request.DriveId)
+            {
+                _logger.LogDebug("Resolved container {ContainerId} to drive {DriveId}",
+                    request.DriveId, resolvedDriveId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to resolve drive ID for {DriveId}", request.DriveId);
+            _telemetry?.RecordFailure(stopwatch, "drive_resolution_failed", "batch");
+            return SummarizeResult.Failed("Failed to resolve file storage location.");
+        }
+
         // Step 1: Get file metadata for name
         var metadata = await _speFileOperations.GetFileMetadataAsync(
-            request.DriveId, request.ItemId, cancellationToken);
+            resolvedDriveId, request.ItemId, cancellationToken);
 
         if (metadata == null)
         {
             _logger.LogWarning("File not found: DriveId={DriveId}, ItemId={ItemId}",
-                request.DriveId, request.ItemId);
+                resolvedDriveId, request.ItemId);
             _telemetry?.RecordFailure(stopwatch, "file_not_found", "batch");
             return SummarizeResult.Failed("File not found in SharePoint Embedded.");
         }
@@ -232,12 +278,12 @@ public class SummarizeService : ISummarizeService
 
         // Step 2: Download file content
         using var fileStream = await _speFileOperations.DownloadFileAsync(
-            request.DriveId, request.ItemId, cancellationToken);
+            resolvedDriveId, request.ItemId, cancellationToken);
 
         if (fileStream == null)
         {
             _logger.LogWarning("Failed to download file: DriveId={DriveId}, ItemId={ItemId}",
-                request.DriveId, request.ItemId);
+                resolvedDriveId, request.ItemId);
             _telemetry?.RecordFailure(stopwatch, "file_download_failed", "batch");
             return SummarizeResult.Failed("Failed to download file content.");
         }

@@ -2,6 +2,9 @@
 
 ---
 description: Automatically load and apply relevant ADRs when creating or modifying resources
+tags: [adr, architecture, design, conventions]
+techStack: [all]
+appliesTo: ["**/*.cs", "**/*.ts", "**/*.tsx"]
 alwaysApply: true
 ---
 
