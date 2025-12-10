@@ -210,7 +210,19 @@
       "Bash(az cognitiveservices account show:*)",
       "Bash(timeout 15 az webapp log tail:*)",
       "Bash(cmd.exe:*)",
-      "Skill(dataverse-deploy)"
+      "Skill(dataverse-deploy)",
+      "Bash(gh pr create --title \"feat(ai): AI Document Summary with Streaming SSE (v3.2.4)\" --body \"$(cat <<''EOF''\n## Summary\nComplete implementation of AI-powered document summarization feature with streaming Server-Sent Events (SSE) for real-time display in the UniversalQuickCreate PCF control.\n\n## Changes\n\n### BFF API\n- **SummarizeService**: Azure OpenAI integration with gpt-4o-mini model\n- **Streaming SSE endpoint**: `/api/ai/summarize/stream` for real-time summary display\n- **TextExtractorService**: PDF/DOCX extraction via Azure Document Intelligence, native text for txt/md/json\n- **AiOptions**: Configurable file types, prompts, token limits\n- **AiOptionsValidator**: Startup validation for AI configuration\n\n### PCF Control (UniversalQuickCreate v3.2.4)\n- AI Summary panel with streaming text display\n- Carousel for multi-file summary navigation  \n- `useAiSummary` hook for SSE consumption\n- Version footer: `v3.2.4 • Built 2025-12-09`\n\n### Documentation\n- PCF deployment workflow guide (Part B in PCF-V9-PACKAGING.md)\n- `pac pcf push` vs solution import comparison\n- Version footer requirement in PCF standards\n- Production release checklist\n\n### New Project Spec\n- `ai-file-entity-metadata-extraction` project specification\n- Phase 1a: Structured AI output (TL;DR, keywords, entities)\n- Phase 1b: Dataverse storage + PCF UI\n- Phase 2: Azure AI Search record matching\n\n## Testing\n- [x] AI summary streams correctly for PDF files\n- [x] AI summary works for DOCX files\n- [x] Native text files (txt, md, json) work\n- [x] PCF displays streaming text in real-time\n- [x] Version footer displays correctly\n\n## Deployment\nPCF deployed to Dataverse via solution import workflow:\n- Solution version: 3.2.4\n- Verified via `pac solution list`\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\nEOF\n)\")",
+      "Bash(npm run build:prod:*)",
+      "Bash(timeout 30 az webapp log tail:*)",
+      "Bash(\"DocumentIntelligence__Enabled=true\" )",
+      "Bash(\"DocumentIntelligence__OpenAiEndpoint=https://spaarke-openai-dev.openai.azure.com/\" )",
+      "Bash(\"DocumentIntelligence__OpenAiKey=5ac9b4ba7d524d8d86462e3bbff4a8a4\" )",
+      "Bash(\"DocumentIntelligence__SummarizeModel=gpt-4o-mini\" )",
+      "Bash(\"DocumentIntelligence__DocIntelEndpoint=https://westus2.api.cognitive.microsoft.com/\" )",
+      "Bash(\"DocumentIntelligence__DocIntelKey=1e1fd08f527340d1a52ec10b7f61b7e0\" )",
+      "Bash(\"/c/Program Files (x86)/Microsoft Visual Studio/2019/BuildTools/MSBuild/Current/Bin/amd64/MSBuild.exe\" /c/code_files/spaarke/src/client/pcf/UniversalQuickCreate/solution/UniversalQuickCreateSolution.cdsproj /t:Rebuild /p:Configuration=Release)",
+      "Bash(\"/c/Program Files (x86)/Microsoft Visual Studio/2019/BuildTools/MSBuild/Current/Bin/amd64/MSBuild.exe\" \"/c/code_files/spaarke/src/client/pcf/UniversalQuickCreate/solution/UniversalQuickCreateSolution.cdsproj\" //t:Rebuild //p:Configuration=Release)",
+      "Bash(dotnet add:*)"
     ],
     "deny": [],
     "ask": []

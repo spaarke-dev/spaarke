@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="ai-file-entity-metadata-extraction">
+  <metadata>
+    <title>Update DI Registrations</title>
+    <phase>1a: Structured AI Output + Service Rename</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>001, 002</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, di, config</tags>
+  </metadata>
+
+  <prompt>
+    Update Program.cs to use the renamed DocumentIntelligenceService and
+    DocumentIntelligenceOptions. Ensure the configuration section binding uses
+    "DocumentIntelligence" and the service registration uses the new interface.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core dependency injection.
+  </role>
+
+  <goal>
+    Program.cs updated with new service and options registrations. Application
+    starts successfully and resolves the renamed dependencies correctly.
+  </goal>
+
+  <context>
+    <background>
+      After renaming the service and options files, the DI container registrations
+      in Program.cs need to be updated to use the new names.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/DocumentIntelligenceService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/DocumentIntelligenceOptions.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">Keep DI registrations minimal (≤15 non-framework)</constraint>
+    <constraint source="ADR-010">Use concrete types unless a seam is required</constraint>
+    <constraint source="project">Update existing registrations, don't add new ones</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/reference/adr/ADR-010-di-minimalism.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Open Program.cs and locate existing SummarizeService registration</step>
+    <step order="2">Update service registration to use IDocumentIntelligenceService and DocumentIntelligenceService</step>
+    <step order="3">Locate AiOptions configuration binding</step>
+    <step order="4">Update to bind DocumentIntelligenceOptions from "DocumentIntelligence" section</step>
+    <step order="5">Update any validator registration if AiOptionsValidator was renamed</step>
+    <step order="6">Run dotnet build to verify compilation</step>
+    <step order="7">Run dotnet run briefly to verify application starts</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and run .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Program.cs references DocumentIntelligenceService, not SummarizeService.</criterion>
+    <criterion testable="true">Options binding uses "DocumentIntelligence" section name.</criterion>
+    <criterion testable="true">dotnet build succeeds with no errors.</criterion>
+    <criterion testable="true">Application starts without DI resolution errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task should be quick if tasks 001 and 002 are complete. It's primarily
+    updating the registration calls to use new class names.
+  </notes>
+</task>

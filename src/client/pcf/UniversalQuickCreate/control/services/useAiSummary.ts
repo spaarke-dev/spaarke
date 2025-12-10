@@ -1,15 +1,82 @@
 /**
  * AI Summary Orchestration Hook (useAiSummary)
  *
- * Manages AI summary generation for multiple documents with concurrent streaming,
- * status tracking, and batch enqueue on close.
+ * Manages AI document analysis for multiple documents with concurrent streaming,
+ * status tracking, and batch enqueue on close. Updated for the Document Intelligence
+ * API which returns structured analysis results (summary, TL;DR, keywords, entities).
  *
- * @version 1.0.0.0
+ * @version 2.0.0.0
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { DocumentSummaryState } from '../components/AiSummaryCarousel';
 import { SseStreamStatus } from './useSseStream';
+
+/**
+ * Extracted entities from document analysis
+ */
+export interface ExtractedEntities {
+    /** Organizations mentioned in the document */
+    organizations: string[];
+    /** People mentioned in the document */
+    people: string[];
+    /** Monetary amounts or quantities */
+    amounts: string[];
+    /** Dates or time periods */
+    dates: string[];
+    /** Document type classification */
+    documentType: string;
+    /** Reference numbers (invoice, PO, case numbers, etc.) */
+    references: string[];
+}
+
+/**
+ * Complete result of AI document analysis
+ */
+export interface DocumentAnalysisResult {
+    /** Multi-sentence summary */
+    summary: string;
+    /** TL;DR bullet points (1-3 items) */
+    tldr: string[];
+    /** Comma-separated keywords */
+    keywords: string;
+    /** Extracted named entities */
+    entities: ExtractedEntities;
+    /** Raw AI response (for debugging) */
+    rawResponse?: string;
+    /** Whether parsing was successful */
+    parsedSuccessfully: boolean;
+}
+
+/**
+ * Summary status types
+ */
+export type SummaryStatus = 'pending' | 'streaming' | 'complete' | 'error' | 'skipped' | 'not-supported';
+
+/**
+ * Document summary state for tracking and display
+ */
+export interface DocumentSummaryState {
+    /** Document identifier */
+    documentId: string;
+    /** File name */
+    fileName: string;
+    /** Summary text (may be partial during streaming) */
+    summary?: string;
+    /** Current status */
+    status: SummaryStatus;
+    /** Error message (when status is 'error') */
+    error?: string;
+    /** TL;DR bullet points (available after completion) */
+    tldr?: string[];
+    /** Keywords (available after completion) */
+    keywords?: string;
+    /** Extracted entities (available after completion) */
+    entities?: ExtractedEntities;
+    /** Document type classification (available after completion) */
+    documentType?: string;
+    /** Whether structured parsing was successful */
+    parsedSuccessfully?: boolean;
+}
 
 /**
  * Document to be summarized
@@ -44,7 +111,10 @@ export interface UseAiSummaryOptions {
     /** Auto-start streaming when documents added */
     autoStart?: boolean;
 
-    /** Callback when a summary completes successfully */
+    /** Callback when analysis completes successfully */
+    onAnalysisComplete?: (documentId: string, result: DocumentAnalysisResult) => void;
+
+    /** @deprecated Use onAnalysisComplete instead */
     onSummaryComplete?: (documentId: string, summary: string) => void;
 }
 
@@ -92,9 +162,27 @@ interface StreamState {
 }
 
 /**
+ * SSE chunk from Document Intelligence API
+ */
+interface SseChunk {
+    /** Event type: "text" | "complete" | "error" */
+    type?: string;
+    /** Content for streaming text chunks */
+    content?: string;
+    /** Whether this is the final chunk */
+    done?: boolean;
+    /** Summary text (legacy, for backward compatibility) */
+    summary?: string;
+    /** Structured analysis result (for type="complete") */
+    result?: DocumentAnalysisResult;
+    /** Error message (for type="error") */
+    error?: string;
+}
+
+/**
  * Parse SSE line to extract data
  */
-const parseSseLine = (line: string): { content?: string; done?: boolean; error?: string } | null => {
+const parseSseLine = (line: string): SseChunk | null => {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith(':')) return null;
 
@@ -104,7 +192,7 @@ const parseSseLine = (line: string): { content?: string; done?: boolean; error?:
             return { done: true };
         }
         try {
-            return JSON.parse(jsonStr);
+            return JSON.parse(jsonStr) as SseChunk;
         } catch {
             return { content: jsonStr };
         }
@@ -115,7 +203,7 @@ const parseSseLine = (line: string): { content?: string; done?: boolean; error?:
 /**
  * useAiSummary Hook
  *
- * Orchestrates AI summary generation for multiple documents with
+ * Orchestrates AI document analysis for multiple documents with
  * concurrent streaming and status management.
  */
 export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult => {
@@ -124,6 +212,7 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
         getToken,
         maxConcurrent = 3,
         autoStart = true,
+        onAnalysisComplete,
         onSummaryComplete
     } = options;
 
@@ -147,7 +236,7 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
     }, []);
 
     /**
-     * Stream summary for a single document
+     * Stream document analysis for a single document
      */
     const streamDocument = useCallback(async (doc: SummaryDocument) => {
         const { documentId, driveId, itemId } = doc;
@@ -167,8 +256,9 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
         // Update status to streaming
         updateDocument(documentId, { status: 'streaming', summary: '', error: undefined });
 
-        let accumulatedData = '';
-        const streamUrl = `${apiBaseUrl}/ai/summarize/stream`;
+        let accumulatedSummary = '';
+        // Updated endpoint: /api/ai/document-intelligence/analyze
+        const streamUrl = `${apiBaseUrl}/ai/document-intelligence/analyze`;
         console.log('[useAiSummary] Fetching:', streamUrl);
 
         try {
@@ -212,10 +302,10 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
                 const { done, value } = await reader.read();
 
                 if (done) {
+                    // Stream ended without complete event - mark as complete with accumulated data
                     updateDocument(documentId, { status: 'complete' });
-                    // Call completion callback with final summary
-                    if (onSummaryComplete && accumulatedData) {
-                        onSummaryComplete(documentId, accumulatedData);
+                    if (onSummaryComplete && accumulatedSummary) {
+                        onSummaryComplete(documentId, accumulatedSummary);
                     }
                     break;
                 }
@@ -228,22 +318,47 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
                     for (const line of event.split('\n')) {
                         const chunk = parseSseLine(line);
                         if (chunk) {
-                            // Check error FIRST - error chunks have done=true but must be handled as errors
-                            if (chunk.error) {
-                                throw new Error(chunk.error);
+                            // Handle error event
+                            if (chunk.type === 'error' || chunk.error) {
+                                throw new Error(chunk.error || 'Unknown error');
                             }
-                            if (chunk.done) {
-                                updateDocument(documentId, { status: 'complete' });
-                                // Call completion callback with final summary
-                                if (onSummaryComplete && accumulatedData) {
-                                    onSummaryComplete(documentId, accumulatedData);
+
+                            // Handle complete event with structured result
+                            if (chunk.type === 'complete' || chunk.done) {
+                                const result = chunk.result;
+                                const updates: Partial<DocumentSummaryState> = {
+                                    status: 'complete',
+                                    summary: result?.summary || chunk.summary || accumulatedSummary
+                                };
+
+                                // Add structured data if available
+                                if (result) {
+                                    updates.tldr = result.tldr;
+                                    updates.keywords = result.keywords;
+                                    updates.entities = result.entities;
+                                    updates.documentType = result.entities?.documentType;
+                                    updates.parsedSuccessfully = result.parsedSuccessfully;
+
+                                    // Call new analysis complete callback
+                                    if (onAnalysisComplete) {
+                                        onAnalysisComplete(documentId, result);
+                                    }
                                 }
+
+                                // Legacy callback for backward compatibility
+                                if (onSummaryComplete && updates.summary) {
+                                    onSummaryComplete(documentId, updates.summary);
+                                }
+
+                                updateDocument(documentId, updates);
                                 activeStreamsRef.current.delete(documentId);
                                 return;
                             }
-                            if (chunk.content) {
-                                accumulatedData += chunk.content;
-                                updateDocument(documentId, { summary: accumulatedData });
+
+                            // Handle streaming text content
+                            if (chunk.type === 'text' || chunk.content) {
+                                accumulatedSummary += chunk.content || '';
+                                updateDocument(documentId, { summary: accumulatedSummary });
                             }
                         }
                     }
@@ -264,7 +379,7 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
             // Process next in queue
             processQueue();
         }
-    }, [apiBaseUrl, getToken, updateDocument, onSummaryComplete]);
+    }, [apiBaseUrl, getToken, updateDocument, onAnalysisComplete, onSummaryComplete]);
 
     /**
      * Process pending queue respecting concurrent limit
@@ -294,9 +409,14 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
         const newStates: DocumentSummaryState[] = docs.map(doc => ({
             documentId: doc.documentId,
             fileName: doc.fileName,
-            status: 'pending',
+            status: 'pending' as SummaryStatus,
             summary: undefined,
-            error: undefined
+            error: undefined,
+            tldr: undefined,
+            keywords: undefined,
+            entities: undefined,
+            documentType: undefined,
+            parsedSuccessfully: undefined
         }));
 
         setDocuments(prev => [...prev, ...newStates]);
@@ -325,8 +445,17 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
         const doc = documentMapRef.current.get(documentId);
         if (!doc) return;
 
-        // Reset status to pending
-        updateDocument(documentId, { status: 'pending', summary: undefined, error: undefined });
+        // Reset status to pending and clear all fields
+        updateDocument(documentId, {
+            status: 'pending',
+            summary: undefined,
+            error: undefined,
+            tldr: undefined,
+            keywords: undefined,
+            entities: undefined,
+            documentType: undefined,
+            parsedSuccessfully: undefined
+        });
 
         // Add back to queue
         pendingQueueRef.current.push(doc);
@@ -361,7 +490,8 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
                 }
             }
 
-            const response = await fetch(`${apiBaseUrl}/ai/summarize/enqueue-batch`, {
+            // Updated endpoint: /api/ai/document-intelligence/enqueue-batch
+            const response = await fetch(`${apiBaseUrl}/ai/document-intelligence/enqueue-batch`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

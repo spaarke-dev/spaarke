@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="ai-file-entity-metadata-extraction">
+  <metadata>
+    <title>Project Wrap-up</title>
+    <phase>3: Project Wrap-up</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>all</dependencies>
+    <blocks>none</blocks>
+    <tags>docs, cleanup, project-management</tags>
+  </metadata>
+
+  <prompt>
+    Complete the project wrap-up by updating README.md status to Complete, marking all
+    graduation criteria as checked, updating plan.md milestones, documenting lessons
+    learned, and running repository cleanup.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Responsible for project documentation and closure.
+  </role>
+
+  <goal>
+    Project artifacts updated to reflect completion. README.md shows Complete status,
+    all graduation criteria checked, lessons learned documented, ephemeral files cleaned.
+  </goal>
+
+  <context>
+    <background>
+      Project wrap-up ensures proper closure and documentation. This is a mandatory
+      final task for all projects per the Spaarke development lifecycle.
+    </background>
+    <relevant-files>
+      <file>projects/ai-file-entity-metadata-extraction/README.md</file>
+      <file>projects/ai-file-entity-metadata-extraction/plan.md</file>
+      <file>projects/ai-file-entity-metadata-extraction/tasks/TASK-INDEX.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">All tasks must be completed before this task</constraint>
+    <constraint source="project">README.md Status must be set to "Complete"</constraint>
+    <constraint source="project">All graduation criteria must be checked</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/ai-knowledge/templates/project-plan.template.md (Section 6.6)</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify all previous tasks are marked complete in TASK-INDEX.md</step>
+    <step order="2">Update README.md:
+      - Set Status to "Complete"
+      - Update Last Updated date
+      - Set Phase to "Complete" and Progress to "100%"
+      - Add Completed Date
+      - Check all Graduation Criteria checkboxes</step>
+    <step order="3">Update plan.md:
+      - Set Status to "Complete"
+      - Update all milestone statuses to ✅</step>
+    <step order="4">Create notes/lessons-learned.md with project insights</step>
+    <step order="5">Add completion entry to README.md Changelog</step>
+    <step order="6">Review and clean up notes/debug, notes/spikes, notes/drafts</step>
+    <step order="7">Run /repo-cleanup skill if available</step>
+    <step order="8">Final git commit with project completion</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Run git commands and cleanup</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-file-entity-metadata-extraction/README.md (updated)</output>
+    <output type="docs">projects/ai-file-entity-metadata-extraction/plan.md (updated)</output>
+    <output type="docs">projects/ai-file-entity-metadata-extraction/notes/lessons-learned.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">README.md Status is "Complete".</criterion>
+    <criterion testable="true">All graduation criteria checkboxes are checked.</criterion>
+    <criterion testable="true">All milestones in plan.md show ✅.</criterion>
+    <criterion testable="true">Lessons learned document exists.</criterion>
+    <criterion testable="true">All tasks in TASK-INDEX.md show ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is the final task. Take time to document lessons learned - they are valuable
+    for future projects. Clean up any temporary debug files but keep the lessons-learned.md
+    as a permanent artifact.
+  </notes>
+</task>

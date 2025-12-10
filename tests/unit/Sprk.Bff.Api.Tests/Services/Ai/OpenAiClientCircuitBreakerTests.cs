@@ -13,12 +13,12 @@ namespace Sprk.Bff.Api.Tests.Services.Ai;
 public class OpenAiClientCircuitBreakerTests
 {
     private readonly Mock<ILogger<OpenAiClient>> _loggerMock;
-    private readonly AiOptions _options;
+    private readonly DocumentIntelligenceOptions _options;
 
     public OpenAiClientCircuitBreakerTests()
     {
         _loggerMock = new Mock<ILogger<OpenAiClient>>();
-        _options = new AiOptions
+        _options = new DocumentIntelligenceOptions
         {
             Enabled = true,
             OpenAiEndpoint = "https://test.openai.azure.com",

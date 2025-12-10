@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="017" project="ai-file-entity-metadata-extraction">
+  <metadata>
+    <title>Update Dataverse Save Logic</title>
+    <phase>1b: Dataverse + PCF Integration + Email Support</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>018</blocks>
+    <tags>bff-api, dataverse, services</tags>
+  </metadata>
+
+  <prompt>
+    Update the DocumentRecordService or equivalent to save structured AI output fields
+    (sprk_filetldr, sprk_fileentities, sprk_documenttype) to Dataverse when analysis
+    completes.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse Web API.</role>
+
+  <goal>
+    Structured AI output is persisted to Dataverse fields for retrieval and search.
+  </goal>
+
+  <steps>
+    <step order="1">Identify the service that updates Document records</step>
+    <step order="2">Add mapping for new fields</step>
+    <step order="3">Serialize entities to JSON for sprk_fileentities</step>
+    <step order="4">Join TL;DR bullets with newlines for sprk_filetldr</step>
+    <step order="5">Map document type string to choice value</step>
+    <step order="6">Test save and verify in Dataverse</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/DocumentRecordService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All structured fields saved to Dataverse.</criterion>
+    <criterion testable="true">Entities saved as valid JSON.</criterion>
+    <criterion testable="true">Document type maps correctly to choice value.</criterion>
+  </acceptance-criteria>
+</task>

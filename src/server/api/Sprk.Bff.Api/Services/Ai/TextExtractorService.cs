@@ -2,6 +2,8 @@ using System.Text;
 using Azure;
 using Azure.AI.DocumentIntelligence;
 using Microsoft.Extensions.Options;
+using MimeKit;
+using MsgReader.Outlook;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
 
@@ -13,10 +15,10 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// </summary>
 public class TextExtractorService : ITextExtractor
 {
-    private readonly AiOptions _options;
+    private readonly DocumentIntelligenceOptions _options;
     private readonly ILogger<TextExtractorService> _logger;
 
-    public TextExtractorService(IOptions<AiOptions> options, ILogger<TextExtractorService> logger)
+    public TextExtractorService(IOptions<DocumentIntelligenceOptions> options, ILogger<TextExtractorService> logger)
     {
         _options = options.Value;
         _logger = logger;
@@ -58,6 +60,7 @@ public class TextExtractorService : ITextExtractor
             ExtractionMethod.Native => await ExtractNativeAsync(fileStream, fileName, cancellationToken),
             ExtractionMethod.DocumentIntelligence => await ExtractViaDocIntelAsync(fileStream, fileName, cancellationToken),
             ExtractionMethod.VisionOcr => HandleVisionOcrFile(fileName),
+            ExtractionMethod.Email => await ExtractEmailAsync(fileStream, fileName, cancellationToken),
             _ => TextExtractionResult.NotSupported(extension)
         };
     }
@@ -86,6 +89,197 @@ public class TextExtractorService : ITextExtractor
 
         // Return special result indicating vision processing is required
         return TextExtractionResult.RequiresVision();
+    }
+
+    /// <summary>
+    /// Extract text from email files (.eml and .msg formats).
+    /// Uses MimeKit for .eml (MIME) and MsgReader for .msg (Outlook) formats.
+    /// </summary>
+    private async Task<TextExtractionResult> ExtractEmailAsync(
+        Stream fileStream,
+        string fileName,
+        CancellationToken cancellationToken)
+    {
+        var extension = Path.GetExtension(fileName)?.ToLowerInvariant() ?? string.Empty;
+
+        try
+        {
+            // Check file size
+            if (fileStream.CanSeek && fileStream.Length > _options.MaxFileSizeBytes)
+            {
+                var sizeMb = fileStream.Length / (1024.0 * 1024.0);
+                var maxMb = _options.MaxFileSizeBytes / (1024.0 * 1024.0);
+                return TextExtractionResult.Failed(
+                    $"File size ({sizeMb:F1}MB) exceeds maximum allowed ({maxMb:F1}MB).",
+                    TextExtractionMethod.Email);
+            }
+
+            string text;
+            if (extension == ".eml")
+            {
+                text = await ExtractFromEmlAsync(fileStream, cancellationToken);
+            }
+            else if (extension == ".msg")
+            {
+                text = ExtractFromMsg(fileStream);
+            }
+            else
+            {
+                return TextExtractionResult.Failed(
+                    $"Unsupported email format: {extension}",
+                    TextExtractionMethod.Email);
+            }
+
+            // Check for empty content
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return TextExtractionResult.Failed(
+                    "Email is empty or contains no readable text.",
+                    TextExtractionMethod.Email);
+            }
+
+            // Check estimated token count against limit
+            var estimatedTokens = text.Length / 4;
+            if (estimatedTokens > _options.MaxInputTokens)
+            {
+                _logger.LogWarning(
+                    "Email {FileName} has ~{EstimatedTokens} tokens, exceeding limit of {MaxTokens}. Text will be truncated.",
+                    fileName, estimatedTokens, _options.MaxInputTokens);
+
+                var maxChars = _options.MaxInputTokens * 4;
+                text = text[..Math.Min(text.Length, maxChars)];
+                text += "\n\n[Content truncated due to size limits]";
+            }
+
+            _logger.LogDebug(
+                "Successfully extracted {CharCount} characters from email {FileName}",
+                text.Length, fileName);
+
+            return TextExtractionResult.Succeeded(text, TextExtractionMethod.Email);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to extract text from email {FileName}", fileName);
+            return TextExtractionResult.Failed(
+                $"Failed to extract email content: {ex.Message}",
+                TextExtractionMethod.Email);
+        }
+    }
+
+    /// <summary>
+    /// Extract text from .eml (MIME) email file using MimeKit.
+    /// </summary>
+    private static async Task<string> ExtractFromEmlAsync(Stream fileStream, CancellationToken cancellationToken)
+    {
+        var message = await MimeMessage.LoadAsync(fileStream, cancellationToken);
+        return FormatEmailContent(
+            subject: message.Subject,
+            from: message.From?.ToString(),
+            to: message.To?.ToString(),
+            cc: message.Cc?.ToString(),
+            date: message.Date.LocalDateTime,
+            body: message.TextBody ?? StripHtml(message.HtmlBody));
+    }
+
+    /// <summary>
+    /// Extract text from .msg (Outlook) email file using MsgReader.
+    /// </summary>
+    private static string ExtractFromMsg(Stream fileStream)
+    {
+        using var msg = new Storage.Message(fileStream);
+
+        // Format all recipients (To and CC combined)
+        string? recipients = null;
+        if (msg.Recipients != null && msg.Recipients.Count > 0)
+        {
+            var recipientList = msg.Recipients
+                .Select(r => r.Email ?? r.DisplayName)
+                .Where(s => !string.IsNullOrEmpty(s));
+            recipients = string.Join(", ", recipientList);
+        }
+
+        return FormatEmailContent(
+            subject: msg.Subject,
+            from: msg.Sender?.Email ?? msg.Sender?.DisplayName,
+            to: recipients,
+            cc: null, // MsgReader Recipients property includes all; To/CC not easily distinguishable
+            date: msg.SentOn,
+            body: msg.BodyText ?? StripHtml(msg.BodyHtml));
+    }
+
+    /// <summary>
+    /// Format email content into structured text for AI analysis.
+    /// </summary>
+    private static string FormatEmailContent(
+        string? subject,
+        string? from,
+        string? to,
+        string? cc,
+        DateTime? date,
+        string? body)
+    {
+        var sb = new StringBuilder();
+
+        sb.AppendLine("=== EMAIL MESSAGE ===");
+        sb.AppendLine();
+
+        if (!string.IsNullOrEmpty(subject))
+            sb.AppendLine($"Subject: {subject}");
+
+        if (!string.IsNullOrEmpty(from))
+            sb.AppendLine($"From: {from}");
+
+        if (!string.IsNullOrEmpty(to))
+            sb.AppendLine($"To: {to}");
+
+        if (!string.IsNullOrEmpty(cc))
+            sb.AppendLine($"CC: {cc}");
+
+        if (date.HasValue)
+            sb.AppendLine($"Date: {date.Value:yyyy-MM-dd HH:mm}");
+
+        sb.AppendLine();
+        sb.AppendLine("=== EMAIL BODY ===");
+        sb.AppendLine();
+
+        if (!string.IsNullOrWhiteSpace(body))
+        {
+            sb.Append(body.Trim());
+        }
+        else
+        {
+            sb.AppendLine("[No body content]");
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Strip HTML tags from content to extract plain text.
+    /// Simple implementation for email HTML bodies.
+    /// </summary>
+    private static string? StripHtml(string? html)
+    {
+        if (string.IsNullOrEmpty(html)) return null;
+
+        // Remove script and style blocks
+        var text = System.Text.RegularExpressions.Regex.Replace(html, @"<(script|style)[^>]*>.*?</\1>", "", System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        // Replace <br>, <p>, <div> with newlines
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"<br\s*/?>", "\n", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"</?(p|div)[^>]*>", "\n", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        // Remove remaining HTML tags
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"<[^>]+>", "");
+
+        // Decode HTML entities
+        text = System.Net.WebUtility.HtmlDecode(text);
+
+        // Clean up excessive whitespace
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"\n{3,}", "\n\n");
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"[ \t]+", " ");
+
+        return text.Trim();
     }
 
     /// <summary>

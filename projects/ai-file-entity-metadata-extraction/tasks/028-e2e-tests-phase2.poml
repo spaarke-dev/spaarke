@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="028" project="ai-file-entity-metadata-extraction">
+  <metadata>
+    <title>End-to-End Tests Phase 2</title>
+    <phase>2: Record Matching Service</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>020, 021, 022, 023, 024, 025, 026, 027</dependencies>
+    <blocks>090</blocks>
+    <tags>e2e-test, testing, azure-search, pcf</tags>
+  </metadata>
+
+  <prompt>
+    Create end-to-end tests for Phase 2: full record matching flow from document
+    analysis with entities, through AI Search query, to one-click association and
+    lookup field population.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in end-to-end testing.</role>
+
+  <goal>
+    End-to-end tests validate complete Phase 2 flow. All tests pass.
+  </goal>
+
+  <steps>
+    <step order="1">Test: Sync Dataverse records to index</step>
+    <step order="2">Test: Match API returns ranked suggestions</step>
+    <step order="3">Test: Record type filter applied correctly</step>
+    <step order="4">Test: Associate endpoint populates lookup field</step>
+    <step order="5">Test: Full flow from analysis to association</step>
+    <step order="6">Run all tests and verify pass</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="test">tests/e2e/Phase2RecordMatching.Tests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All e2e tests pass.</criterion>
+    <criterion testable="true">Full record matching flow validated.</criterion>
+  </acceptance-criteria>
+</task>

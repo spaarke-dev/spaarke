@@ -558,6 +558,42 @@ UniversalQuickCreate    Universal Quick Create    3.2.4    False
 2. Open the control/form using the PCF
 3. Check the **footer shows the new version** (e.g., `v3.2.4 • Built 2025-12-09`)
 
+### Step 9: Custom Page Republish and Cache Clearing (CRITICAL)
+
+**Required for all PCF controls used in Custom Pages:**
+
+1. **Open Custom Page in Power Apps Maker**:
+   - Navigate to [make.powerapps.com](https://make.powerapps.com)
+   - Go to **Apps**
+   - Find the Custom Page containing the PCF control
+   - Click **Edit** to open in Power Apps Studio
+
+2. **Save and Publish**:
+   - Click **File** → **Save**
+   - Click **File** → **Publish**
+   - Wait for "Published successfully" message
+   - Close Power Apps Studio
+
+3. **Publish All Customizations**:
+   ```bash
+   pac solution publish-all
+   ```
+   This ensures all Dataverse changes are live.
+
+4. **Clear Browser Cache**:
+   - Open the Spaarke application in browser
+   - Perform hard refresh: `Ctrl+Shift+R` (Windows) or `Cmd+Shift+R` (Mac)
+   - This clears cached PCF control versions
+   - Verify footer shows new version number
+
+**Why This Is Critical**:
+- Custom Pages embed a runtime copy of the PCF bundle
+- Opening and republishing the Custom Page updates this embedded copy
+- Without republishing, users may see the old PCF version even after solution import
+- Browser cache can retain old PCF bundles, requiring hard refresh
+
+**Pitfall**: Skipping these steps causes users to see stale PCF versions, missing features, or incorrect version numbers in the footer.
+
 ---
 
 ## 15. Common Pitfalls and Resolutions
@@ -591,12 +627,15 @@ mv customizations.xml Other/Customizations.xml
 - Browser cache
 - Bundle.js wasn't copied to solution folder
 - Old bundle.js was in solution folder
+- **Custom Page wasn't republished** (if PCF is in Custom Page)
 
 **Resolution**:
 1. Verify bundle was copied: `ls -la {Solution}_extracted/Controls/{...}/bundle.js`
 2. Verify file size matches source: compare with `out/controls/control/bundle.js`
-3. Hard refresh browser: `Ctrl+Shift+R`
-4. Check footer version matches expected version
+3. **If PCF is in Custom Page**: Open Custom Page in Power Apps Maker, Save, and Publish
+4. Run `pac solution publish-all` to publish all customizations
+5. Hard refresh browser: `Ctrl+Shift+R`
+6. Check footer version matches expected version
 
 ### Pitfall 4: "Version shows correct but features missing"
 
@@ -637,6 +676,9 @@ Before every PCF deployment, verify:
 - [ ] **Solution packed** - `pac solution pack` succeeded
 - [ ] **Solution imported** - `pac solution import` succeeded
 - [ ] **Version verified** - `pac solution list` shows new version
+- [ ] **Custom Page republished** - If PCF is in Custom Page: opened in Power Apps Maker, saved, and published
+- [ ] **All customizations published** - `pac solution publish-all` executed
+- [ ] **Browser cache cleared** - Hard refresh (`Ctrl+Shift+R`) performed in Spaarke application
 - [ ] **Browser verified** - Hard refresh shows new footer version
 
 ---

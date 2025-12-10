@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="006" project="ai-file-entity-metadata-extraction">
+  <metadata>
+    <title>Update AI Prompt Template</title>
+    <phase>1a: Structured AI Output + Service Rename</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>005</dependencies>
+    <blocks>007</blocks>
+    <tags>bff-api, azure-openai, ai, config</tags>
+  </metadata>
+
+  <prompt>
+    Update the DocumentIntelligenceOptions to include the new structured analysis prompt
+    template that instructs Azure OpenAI to return JSON with summary, TL;DR bullets,
+    keywords, and entities. The prompt must match the spec.md format exactly.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in prompt engineering for Azure OpenAI.
+  </role>
+
+  <goal>
+    DocumentIntelligenceOptions contains StructuredAnalysisPromptTemplate property with
+    the complete prompt from spec.md Section 4.2.1. The prompt instructs the AI to
+    return structured JSON matching DocumentAnalysisResult model.
+  </goal>
+
+  <context>
+    <background>
+      The AI service currently generates prose summaries. The new prompt template
+      instructs it to return structured JSON with summary, TL;DR bullets, keywords,
+      and extracted entities. This is the core change enabling structured output.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/DocumentIntelligenceOptions.cs</file>
+      <file>projects/ai-file-entity-metadata-extraction/spec.md (Section 4.2.1)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Prompt must instruct AI to return ONLY valid JSON</constraint>
+    <constraint source="spec">TL;DR must be 3-7 bullet points</constraint>
+    <constraint source="spec">Keywords must be searchable terms (proper nouns, technical terms)</constraint>
+    <constraint source="spec">Entities must only include items CLEARLY stated in document</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-file-entity-metadata-extraction/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec.md Section 4.2.1 for exact prompt template</step>
+    <step order="2">Open DocumentIntelligenceOptions.cs</step>
+    <step order="3">Add StructuredAnalysisPromptTemplate property with the full prompt</step>
+    <step order="4">Add StructuredOutputEnabled bool property (default true)</step>
+    <step order="5">Ensure prompt has {documentText} placeholder for content insertion</step>
+    <step order="6">Add XML documentation explaining the prompt structure</step>
+    <step order="7">Run dotnet build to verify compilation</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Configuration/DocumentIntelligenceOptions.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">StructuredAnalysisPromptTemplate property exists and contains full prompt.</criterion>
+    <criterion testable="true">Prompt includes JSON schema example with summary, tldr, keywords, entities.</criterion>
+    <criterion testable="true">Prompt has {documentText} placeholder.</criterion>
+    <criterion testable="true">StructuredOutputEnabled property exists with default true.</criterion>
+    <criterion testable="true">dotnet build succeeds.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The prompt template is critical for reliable JSON output. Copy exactly from spec.md
+    to ensure consistency. Consider adding validation that the prompt contains required
+    placeholders.
+  </notes>
+</task>

@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="029" project="ai-file-entity-metadata-extraction">
+  <metadata>
+    <title>Deploy Phase 2 Components</title>
+    <phase>2-Deploy: Phase 2 Deployment</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>028</dependencies>
+    <blocks>090</blocks>
+    <tags>deploy, azure, dataverse, pcf, azure-search</tags>
+  </metadata>
+
+  <prompt>
+    Deploy all Phase 2 components to their target environments. This includes:
+    1. BFF API updates (RecordMatchService, new endpoints) to Azure App Service
+    2. Azure AI Search index schema deployment (if not done in task 021)
+    3. PCF control updates (RecordTypeSelector, RecordMatchSuggestions) to Dataverse
+    Verify deployments and run integration smoke tests.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Azure deployments and Dataverse solution management.
+    Follow dataverse-deploy skill for PCF/solution deployment.
+  </role>
+
+  <goal>
+    All Phase 2 components deployed and functional:
+    - BFF API running with /api/ai/document-intelligence/match-records and /associate-record endpoints
+    - Azure AI Search index populated with Dataverse records
+    - PCF controls updated with record matching UI
+  </goal>
+
+  <context>
+    <background>
+      Phase 2 implementation and testing is complete. This task deploys all record matching
+      functionality to target environments for final validation.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/</file>
+      <file>src/client/pcf/UniversalQuickCreate/</file>
+      <file>infrastructure/bicep/ai-search.bicep</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Deploy to staging/dev environment first</constraint>
+    <constraint source="project">Run end-to-end smoke tests after deployment</constraint>
+    <constraint source="ADR-006">PCF deployment via pac pcf push or solution import</constraint>
+    <constraint source="project">Verify AI Search index sync before testing match endpoints</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/ai-knowledge/guides/PCF-V9-PACKAGING.md</file>
+      <file>config/app-service-config.local.json</file>
+      <file>config/azure-config.local.json</file>
+      <file>config/ai-config.local.json</file>
+    </files>
+    <skills>
+      <skill>dataverse-deploy</skill>
+    </skills>
+  </knowledge>
+
+  <steps>
+    <step order="1">Build BFF API: dotnet build src/server/api/Sprk.Bff.Api/</step>
+    <step order="2">Deploy BFF API to Azure App Service</step>
+    <step order="3">Verify new endpoints: /api/ai/document-intelligence/match-records, /associate-record</step>
+    <step order="4">Trigger initial Dataverse-to-AI-Search sync (if not automated)</step>
+    <step order="5">Verify AI Search index contains Dataverse records</step>
+    <step order="6">Build PCF control: npm run build in UniversalQuickCreate</step>
+    <step order="7">Deploy PCF using pac pcf push (dev) or solution import (staging)</step>
+    <step order="8">MANUALLY open Custom Page in Power Apps Maker, Save and Publish (make.powerapps.com → Apps → Edit Custom Page → File → Save → File → Publish)</step>
+    <step order="9">Publish all customizations: pac solution publish-all</step>
+    <step order="10">Verify RecordTypeSelector dropdown appears in UI</step>
+    <step order="11">Verify RecordMatchSuggestions displays match results</step>
+    <step order="12">Test one-click association populates lookup field</step>
+    <step order="13">MANUALLY hard refresh Spaarke application (Ctrl+Shift+R) to clear browser cache</step>
+    <step order="14">Run full end-to-end smoke test</step>
+    <step order="15">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET API</tool>
+    <tool name="npm">Build PCF control</tool>
+    <tool name="pac">PAC CLI for Dataverse deployment</tool>
+    <tool name="az">Azure CLI for App Service deployment</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment">Azure App Service - BFF API with record matching endpoints</output>
+    <output type="deployment">Azure AI Search - Index populated and queryable</output>
+    <output type="deployment">Dataverse - PCF control with record matching UI</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">POST /api/ai/document-intelligence/match-records returns ranked suggestions</criterion>
+    <criterion testable="true">POST /api/ai/document-intelligence/associate-record updates lookup field</criterion>
+    <criterion testable="true">AI Search index query returns results for test entities</criterion>
+    <criterion testable="true">RecordTypeSelector allows selection of record types</criterion>
+    <criterion testable="true">RecordMatchSuggestions displays confidence scores and match reasons</criterion>
+    <criterion testable="true">One-click association populates correct lookup field on Document record</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is the final deployment before project wrap-up.
+    Ensure AI Search index is synced before testing match functionality.
+    If DataverseIndexSyncService is background worker, verify it's running.
+    Document any environment-specific configuration needed for production.
+  </notes>
+</task>

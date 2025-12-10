@@ -173,7 +173,7 @@ Enqueue up to 10 documents for background summarization.
 
 **Flow:**
 1. User uploads document to SPE via PCF control
-2. PCF calls `/api/ai/summarize/stream` with document IDs
+2. PCF calls `/api/ai/document-intelligence/analyze` with document IDs
 3. BFF downloads file from SPE, extracts text
 4. BFF streams OpenAI response back via SSE
 5. Summary saved to Dataverse `sprk_document` record

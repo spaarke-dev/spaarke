@@ -30,8 +30,8 @@ public static class AiAuthorizationFilterExtensions
 
 /// <summary>
 /// Authorization filter for AI endpoints.
-/// Validates user has read access to the document being summarized.
-/// Extracts documentId from request body (SummarizeRequest or batch).
+/// Validates user has read access to the document being analyzed.
+/// Extracts documentId from request body (DocumentAnalysisRequest or batch).
 /// </summary>
 /// <remarks>
 /// Follows ADR-008: Use endpoint filters for resource-level authorization.
@@ -120,7 +120,7 @@ public class AiAuthorizationFilter : IEndpointFilter
 
     /// <summary>
     /// Extract document IDs from request arguments.
-    /// Supports both single SummarizeRequest and batch IEnumerable&lt;SummarizeRequest&gt;.
+    /// Supports both single DocumentAnalysisRequest and batch IEnumerable&lt;DocumentAnalysisRequest&gt;.
     /// </summary>
     private static List<Guid> ExtractDocumentIds(EndpointFilterInvocationContext context)
     {
@@ -130,11 +130,11 @@ public class AiAuthorizationFilter : IEndpointFilter
         {
             switch (argument)
             {
-                case SummarizeRequest request:
+                case DocumentAnalysisRequest request:
                     documentIds.Add(request.DocumentId);
                     break;
 
-                case IEnumerable<SummarizeRequest> requests:
+                case IEnumerable<DocumentAnalysisRequest> requests:
                     documentIds.AddRange(requests.Select(r => r.DocumentId));
                     break;
 

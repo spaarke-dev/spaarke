@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="ai-file-entity-metadata-extraction">
+  <metadata>
+    <title>Add EmailExtractorService</title>
+    <phase>1b: Dataverse + PCF Integration + Email Support</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>018</blocks>
+    <tags>bff-api, services, email</tags>
+  </metadata>
+
+  <prompt>
+    Create EmailExtractorService to parse .eml and .msg email files. Extract From, To,
+    Cc, Subject, Date, and Body. Combine subject line with body for AI analysis as
+    specified in spec.md. Use MimeKit for .eml and MsgReader for .msg files.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in email parsing libraries and MIME formats.
+  </role>
+
+  <goal>
+    EmailExtractorService parses email files and returns formatted text including subject,
+    headers, and body suitable for AI analysis. Subject line is prepended to body for
+    comprehensive context.
+  </goal>
+
+  <context>
+    <background>
+      Email files often contain critical context in subject lines (matter references,
+      client names, action items) that may not appear in the body. The extractor must
+      combine subject and body for AI to capture all relevant information.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/TextExtractorService.cs</file>
+      <file>projects/ai-file-entity-metadata-extraction/spec.md (Section 4.2.2)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Support .eml file type (RFC 5322 MIME format)</constraint>
+    <constraint source="spec">Support .msg file type (Outlook format)</constraint>
+    <constraint source="spec">Extract From, To, Cc, Subject, Date, Body</constraint>
+    <constraint source="spec">Prepend subject line to body text for analysis</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-file-entity-metadata-extraction/spec.md (Section 4.2.2)</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add MimeKit NuGet package for .eml parsing</step>
+    <step order="2">Add MsgReader NuGet package for .msg parsing</step>
+    <step order="3">Create IEmailExtractor interface</step>
+    <step order="4">Create EmailExtractorService implementing IEmailExtractor</step>
+    <step order="5">Implement ExtractFromEml(Stream) using MimeKit</step>
+    <step order="6">Implement ExtractFromMsg(Stream) using MsgReader</step>
+    <step order="7">Format output as per spec: Subject, From, To, Date, then Body</step>
+    <step order="8">Convert HTML body to plain text using HtmlAgilityPack</step>
+    <step order="9">Register service in DI container</step>
+    <step order="10">Update TextExtractorService to delegate .eml/.msg to EmailExtractor</step>
+    <step order="11">Add unit tests for email parsing</step>
+    <step order="12">Run dotnet test to verify</step>
+    <step order="13">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="nuget">Add required packages</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/EmailExtractorService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/IEmailExtractor.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/EmailExtractorServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given .eml file, extracts all email metadata and body.</criterion>
+    <criterion testable="true">Given .msg file, extracts all email metadata and body.</criterion>
+    <criterion testable="true">Output format matches spec: Subject first, then headers, then body.</criterion>
+    <criterion testable="true">HTML body is converted to plain text.</criterion>
+    <criterion testable="true">Unit tests pass for both .eml and .msg parsing.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    See spec.md Section 4.2.2 for exact output format. Test with real .eml and .msg
+    sample files. Handle edge cases: missing subject, empty body, multipart MIME.
+    The MsgReader library may need COM interop on Windows - verify compatibility.
+  </notes>
+</task>

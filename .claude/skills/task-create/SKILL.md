@@ -71,25 +71,41 @@ FOR each WBS phase:
     (10-gap allows inserting tasks later)
 ```
 
-### Step 3.4: Discover Related Resources
+### Step 3.4: Discover Related Resources (REQUIRED)
 
-**Search for related skills and knowledge docs for each task:**
+**Every task MUST have a `<knowledge>` section with relevant files based on its tags.**
 
-1. **For each task, identify:**
-   - What is being built (API, PCF control, plugin, etc.)
-   - What technologies are involved (Azure OpenAI, Dataverse, React, etc.)
-   - What operations are needed (deploy, test, authenticate, etc.)
+#### Tag-to-Knowledge Mapping (MANDATORY)
 
-2. **Search `.claude/skills/INDEX.md`:**
-   - Look for skills with matching `tags` or `techStack`
-   - Example: Task involves "deploy to Dataverse" → note `dataverse-deploy` skill
-   - Add relevant skills to task's `<knowledge><files>` section
+When a task has these tags, ALWAYS include these knowledge files:
 
-3. **Search `docs/ai-knowledge/`:**
-   - Look for guides/standards matching task's technology or pattern
-   - Add relevant knowledge docs to task's `<knowledge><files>` section
+| Tag | Required Knowledge Files |
+|-----|-------------------------|
+| `pcf`, `react`, `fluent-ui`, `frontend` | `src/client/pcf/CLAUDE.md`, `docs/ai-knowledge/guides/PCF-V9-PACKAGING.md`, `.claude/skills/dataverse-deploy/SKILL.md` |
+| `bff-api`, `api`, `minimal-api`, `endpoints` | `src/server/api/CLAUDE.md` (if exists), `docs/reference/adr/ADR-001-minimal-api-endpoints.md` |
+| `dataverse`, `solution`, `fields` | `.claude/skills/dataverse-deploy/SKILL.md`, `infrastructure/dataverse/CLAUDE.md` (if exists) |
+| `deploy` | `.claude/skills/dataverse-deploy/SKILL.md`, `docs/ai-knowledge/guides/PCF-V9-PACKAGING.md` |
+| `azure`, `azure-search`, `azure-openai` | `docs/reference/adr/ADR-013-ai-architecture.md` |
+| `testing`, `unit-test`, `integration-test` | `tests/CLAUDE.md` |
 
-**Output:** Each task file will include discovered resources in its `<knowledge>` section.
+**Critical: PCF tasks MUST reference PCF-V9-PACKAGING.md**
+
+The `PCF-V9-PACKAGING.md` guide contains **mandatory version bumping instructions**:
+- Version must be updated in 4 locations before deployment
+- Footer must show version number
+- Failure to follow this results in stale deployments
+
+```
+FOR each task:
+  EXTRACT tags from <metadata><tags>
+  FOR each tag:
+    LOOKUP in Tag-to-Knowledge Mapping
+    ADD all matching files to <knowledge><files>
+  
+  ENSURE <knowledge> section is NOT empty
+  IF no matches found:
+    ADD at minimum: relevant CLAUDE.md for the module being modified
+```
 
 ### Step 3.5: Map ADRs to Tasks (REQUIRED)
 
@@ -112,7 +128,56 @@ FOR each task identified:
 REFERENCE: See adr-aware skill for full mapping table
 ```
 
-### Step 3.6: Add Mandatory Project Wrap-up Task (REQUIRED)
+### Step 3.6: Add Deployment Tasks (REQUIRED)
+
+```
+FOR each deliverable type in the project, CREATE deployment task(s):
+
+DEPLOYMENT TASK MAPPING:
+┌──────────────────────┬────────────────────────────────────────────────────────────┐
+│ Deliverable Type     │ Required Deployment Task(s)                                │
+├──────────────────────┼────────────────────────────────────────────────────────────┤
+│ BFF API Endpoints    │ - Deploy to Azure App Service                              │
+│                      │ - Tags: [deploy, azure, bff-api]                           │
+│                      │ - Skill: (azure deployment commands)                       │
+├──────────────────────┼────────────────────────────────────────────────────────────┤
+│ PCF Controls         │ - Deploy PCF to Dataverse (pac pcf push)                   │
+│                      │ - Tags: [deploy, dataverse, pcf]                           │
+│                      │ - Skill: dataverse-deploy                                  │
+├──────────────────────┼────────────────────────────────────────────────────────────┤
+│ Dataverse Fields     │ - Deploy solution to Dataverse                             │
+│                      │ - Configure Relevance Search (if applicable)               │
+│                      │ - Tags: [deploy, dataverse, solution]                      │
+│                      │ - Skill: dataverse-deploy                                  │
+├──────────────────────┼────────────────────────────────────────────────────────────┤
+│ Azure AI Resources   │ - Provision Azure AI Search/OpenAI resources               │
+│                      │ - Configure connection strings in App Service              │
+│                      │ - Tags: [deploy, azure, azure-ai]                          │
+│                      │ - Skill: (bicep/infrastructure scripts)                    │
+├──────────────────────┼────────────────────────────────────────────────────────────┤
+│ Background Workers   │ - Deploy worker to Azure Container Apps                    │
+│                      │ - Tags: [deploy, azure, worker]                            │
+└──────────────────────┴────────────────────────────────────────────────────────────┘
+
+PLACEMENT:
+  - Deployment tasks should be at the END of each phase (after implementation + testing)
+  - OR create a dedicated "Deployment" phase if multiple deployments needed
+  - Final integration testing task should come AFTER all deployment tasks
+
+EXAMPLE Phase Structure:
+  Phase 1: Implementation
+    001-010: Build features
+    009: Unit tests
+  Phase 1-Deploy:
+    015: Deploy BFF API to Azure
+    016: Deploy PCF to Dataverse
+    017: Integration tests (post-deployment)
+  Phase 2: Next feature set...
+  ...
+  090: Project wrap-up
+```
+
+### Step 3.7: Add Mandatory Project Wrap-up Task (REQUIRED)
 
 ```
 ALWAYS create a final "Project Wrap-up" task as the LAST task in the project.
@@ -155,6 +220,7 @@ For each task, create `tasks/{NNN}-{task-slug}.poml` as a **valid XML document**
     <estimated-hours>{2-4}</estimated-hours>
     <dependencies>{comma-separated task IDs or "none"}</dependencies>
     <blocks>{comma-separated task IDs or "none"}</blocks>
+    <tags>{context tags for Claude Code focus - see Standard Tag Vocabulary}</tags>
   </metadata>
 
   <prompt>
@@ -234,6 +300,14 @@ For each task, create `tasks/{NNN}-{task-slug}.poml` as a **valid XML document**
   <notes>
     {Implementation hints, gotchas to avoid, references to spec.md sections}
   </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in <knowledge><files>.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
 </task>
 ```
 
@@ -285,6 +359,37 @@ Run /task-execute 001 to begin implementation.
 - Slug: 3-5 words, kebab-case (e.g., `setup-redis-connection`)
 - Numbers: 3 digits, zero-padded (001, 010, 100)
 
+### Standard Tag Vocabulary (for `<tags>` element)
+
+Use these standardized tags in the `<metadata><tags>` element to help Claude Code focus context:
+
+| Category | Tags | Purpose |
+|----------|------|---------|
+| **API/Backend** | `bff-api`, `api`, `backend`, `minimal-api`, `endpoints` | BFF API development |
+| **Frontend/PCF** | `pcf`, `react`, `typescript`, `frontend`, `fluent-ui` | PCF control development |
+| **Dataverse** | `dataverse`, `solution`, `fields`, `plugin`, `ribbon` | Dataverse customization |
+| **Azure** | `azure`, `app-service`, `azure-ai`, `azure-search`, `bicep` | Azure infrastructure |
+| **AI/ML** | `azure-openai`, `ai`, `embeddings`, `document-intelligence` | AI features |
+| **Operations** | `deploy`, `ci-cd`, `devops`, `infrastructure` | Deployment tasks |
+| **Quality** | `testing`, `unit-test`, `integration-test`, `e2e-test` | Testing tasks |
+| **Refactoring** | `refactoring`, `rename`, `restructure`, `migration` | Code restructuring |
+| **Configuration** | `config`, `options`, `di`, `settings` | Configuration changes |
+
+**Usage in POML:**
+```xml
+<metadata>
+  <tags>bff-api, refactoring, services</tags>  <!-- Task 001: rename service -->
+  <tags>pcf, react, frontend, fluent-ui</tags>  <!-- Task 013: update panel -->
+  <tags>deploy, dataverse, pcf</tags>           <!-- Task 015: deploy PCF -->
+</metadata>
+```
+
+**Context Loading Benefit:**
+When Claude Code starts a task with `<tags>bff-api, services</tags>`, it can:
+1. Load `src/server/api/CLAUDE.md` for BFF context
+2. Reference `dataverse-deploy` skill for deployment
+3. Skip loading PCF-specific context (saving tokens)
+
 ### Task Sizing
 | Granularity | Hours/Task | Tasks/Phase |
 |-------------|------------|-------------|
@@ -297,7 +402,7 @@ Default to "medium" unless user specifies otherwise.
 ### POML Tag Requirements
 Every task file MUST have these POML sections (valid XML):
 - `<task>` - Root element with id and project attributes
-- `<metadata>` - id, title, phase, status, estimated-hours, dependencies, blocks
+- `<metadata>` - id, title, phase, status, estimated-hours, dependencies, blocks, **tags**
 - `<prompt>` - Natural language task instruction for AI agent
 - `<role>` - Persona/expertise for the AI to adopt
 - `<goal>` - Clear definition of done
@@ -308,9 +413,10 @@ Every task file MUST have these POML sections (valid XML):
 - `<acceptance-criteria>` - Testable criteria with testable="true" attribute
 
 Recommended sections:
-- `<knowledge>` - ADRs, patterns, and reference files
+- `<knowledge>` - ADRs, patterns, and reference files (REQUIRED if task has tags - see Tag-to-Knowledge Mapping)
 - `<tools>` - Available tools for execution
 - `<notes>` - Implementation hints
+- `<execution>` - Reference to task-execute skill and pre-execution protocol
 
 ### Status Values
 - `not-started` - Initial state

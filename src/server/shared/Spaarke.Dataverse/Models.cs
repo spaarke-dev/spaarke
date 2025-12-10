@@ -15,6 +15,9 @@ public class CreateDocumentRequest
 /// </summary>
 public class UpdateDocumentRequest
 {
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Basic Document Properties
+    // ═══════════════════════════════════════════════════════════════════════════
     public string? Name { get; set; }
     public string? Description { get; set; }
     public string? FileName { get; set; }
@@ -24,6 +27,47 @@ public class UpdateDocumentRequest
     public string? GraphDriveId { get; set; }
     public bool? HasFile { get; set; }
     public DocumentStatus? Status { get; set; }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // AI Analysis Fields
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>AI-generated summary of the document.</summary>
+    public string? Summary { get; set; }
+
+    /// <summary>AI-generated TL;DR bullet points (newline-separated).</summary>
+    public string? TlDr { get; set; }
+
+    /// <summary>AI-extracted keywords for search (comma-separated).</summary>
+    public string? Keywords { get; set; }
+
+    /// <summary>AI analysis status: None=0, Pending=1, Completed=2, OptedOut=3, Failed=4.</summary>
+    public int? SummaryStatus { get; set; }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Extracted Entities Fields
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>AI-extracted organization names (newline-separated).</summary>
+    public string? ExtractOrganization { get; set; }
+
+    /// <summary>AI-extracted person names (newline-separated).</summary>
+    public string? ExtractPeople { get; set; }
+
+    /// <summary>AI-extracted monetary amounts (newline-separated).</summary>
+    public string? ExtractFees { get; set; }
+
+    /// <summary>AI-extracted dates (newline-separated).</summary>
+    public string? ExtractDates { get; set; }
+
+    /// <summary>AI-extracted reference numbers (newline-separated).</summary>
+    public string? ExtractReference { get; set; }
+
+    /// <summary>AI-classified document type (raw text value).</summary>
+    public string? ExtractDocumentType { get; set; }
+
+    /// <summary>Document type choice field value (mapped from AI classification).</summary>
+    public int? DocumentType { get; set; }
 }
 
 /// <summary>

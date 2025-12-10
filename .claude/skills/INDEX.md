@@ -17,6 +17,7 @@
 | [repo-cleanup](repo-cleanup/SKILL.md) | Repository hygiene audit and ephemeral file cleanup | No | `/repo-cleanup`, "clean up repo" |
 | [spaarke-conventions](spaarke-conventions/SKILL.md) | Coding standards and naming conventions | **Yes** | Auto-applied |
 | [task-create](task-create/SKILL.md) | Decompose plan.md into POML task files | No | `/task-create`, "create tasks" |
+| [task-execute](task-execute/SKILL.md) | Execute POML task with mandatory knowledge loading | No | "execute task", "run task", "work on task" |
 | [ribbon-edit](ribbon-edit/SKILL.md) | Edit Dataverse ribbon via solution export/import | No | "edit ribbon", "add ribbon button" |
 
 ## Skill Categories
@@ -29,6 +30,7 @@
 - **design-to-project** - Start here for new features from design specs
 - **project-init** - Create project folder structure
 - **task-create** - Break plan into executable tasks
+- **task-execute** - Execute individual tasks with mandatory knowledge loading
 - **repo-cleanup** - Clean up after project completion
 
 ### ✅ Quality Assurance
@@ -61,7 +63,11 @@ Design Spec
 ┌─────────────────────┐
 │    task-create      │  ← Decomposes into tasks
 └─────────────────────┘
-    │ during implementation ▼
+    │ for each task ▼
+┌─────────────────────┐
+│    task-execute     │  ← EXECUTE: Load knowledge, apply constraints
+└─────────────────────┘
+    │ during execution ▼
 ┌─────────────────────┐
 │     adr-aware       │  ← BEFORE: Load relevant ADRs (always-apply)
 │ spaarke-conventions │  ← DURING: Apply coding standards (always-apply)

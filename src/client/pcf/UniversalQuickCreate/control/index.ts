@@ -340,7 +340,7 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
         state: ComponentFramework.Dictionary,
         container: HTMLDivElement
     ): void {
-    logInfo('UniversalDocumentUpload', 'Initializing PCF control v3.2.1 (AI Summary URL fix)');
+    logInfo('UniversalDocumentUpload', 'Initializing PCF control v3.4.0 (Keywords + Entity extraction)');
 
         this.context = context;
         this.notifyOutputChanged = notifyOutputChanged;

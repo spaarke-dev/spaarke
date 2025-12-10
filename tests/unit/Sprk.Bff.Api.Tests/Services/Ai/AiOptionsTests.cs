@@ -4,12 +4,12 @@ using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai;
 
-public class AiOptionsTests
+public class DocumentIntelligenceOptionsTests
 {
     [Fact]
     public void DefaultValues_ShouldBeSetCorrectly()
     {
-        var options = new AiOptions();
+        var options = new DocumentIntelligenceOptions();
 
         options.Enabled.Should().BeTrue();
         options.StreamingEnabled.Should().BeTrue();
@@ -24,7 +24,7 @@ public class AiOptionsTests
     [Fact]
     public void DefaultSupportedFileTypes_ShouldIncludeExpectedTypes()
     {
-        var options = new AiOptions();
+        var options = new DocumentIntelligenceOptions();
 
         options.SupportedFileTypes.Should().ContainKey(".txt");
         options.SupportedFileTypes.Should().ContainKey(".md");
@@ -48,7 +48,7 @@ public class AiOptionsTests
     [InlineData(".unknown", false)]
     public void IsFileTypeSupported_ReturnsCorrectResult(string extension, bool expected)
     {
-        var options = new AiOptions();
+        var options = new DocumentIntelligenceOptions();
 
         var result = options.IsFileTypeSupported(extension);
 
@@ -61,7 +61,7 @@ public class AiOptionsTests
     [InlineData(".Txt", true)] // Mixed case
     public void IsFileTypeSupported_HandlesVariousFormats(string extension, bool expected)
     {
-        var options = new AiOptions();
+        var options = new DocumentIntelligenceOptions();
 
         var result = options.IsFileTypeSupported(extension);
 
@@ -76,7 +76,7 @@ public class AiOptionsTests
     [InlineData(".docx", ExtractionMethod.DocumentIntelligence)]
     public void GetExtractionMethod_ReturnsCorrectMethod(string extension, ExtractionMethod expected)
     {
-        var options = new AiOptions();
+        var options = new DocumentIntelligenceOptions();
 
         var result = options.GetExtractionMethod(extension);
 
@@ -86,7 +86,7 @@ public class AiOptionsTests
     [Fact]
     public void GetExtractionMethod_ReturnsNull_ForUnknownExtension()
     {
-        var options = new AiOptions();
+        var options = new DocumentIntelligenceOptions();
 
         var result = options.GetExtractionMethod(".unknown");
 
@@ -96,7 +96,7 @@ public class AiOptionsTests
     [Fact]
     public void GetExtractionMethod_ReturnsVisionOcr_ForImageExtension()
     {
-        var options = new AiOptions();
+        var options = new DocumentIntelligenceOptions();
 
         // PNG is now enabled by default for vision
         var result = options.GetExtractionMethod(".png");
@@ -107,7 +107,7 @@ public class AiOptionsTests
     [Fact]
     public void GetExtractionMethod_ReturnsNull_WhenExtensionDisabled()
     {
-        var options = new AiOptions();
+        var options = new DocumentIntelligenceOptions();
         // Disable PNG
         options.SupportedFileTypes[".png"] = new FileTypeConfig
         {
@@ -123,7 +123,7 @@ public class AiOptionsTests
     [Fact]
     public void SupportedFileTypes_CanBeModified()
     {
-        var options = new AiOptions();
+        var options = new DocumentIntelligenceOptions();
 
         // Disable PDF
         options.SupportedFileTypes[".pdf"].Enabled = false;
@@ -135,7 +135,7 @@ public class AiOptionsTests
     [Fact]
     public void SupportedFileTypes_CanAddNewExtension()
     {
-        var options = new AiOptions();
+        var options = new DocumentIntelligenceOptions();
 
         options.SupportedFileTypes[".rtf"] = new FileTypeConfig
         {
@@ -150,7 +150,7 @@ public class AiOptionsTests
     [Fact]
     public void NativeTextExtensions_ShouldHaveNativeMethod()
     {
-        var options = new AiOptions();
+        var options = new DocumentIntelligenceOptions();
         var nativeExtensions = new[] { ".txt", ".md", ".json", ".csv", ".xml", ".html" };
 
         foreach (var ext in nativeExtensions)
@@ -164,7 +164,7 @@ public class AiOptionsTests
     [Fact]
     public void DocumentIntelligenceExtensions_ShouldHaveDocIntelMethod()
     {
-        var options = new AiOptions();
+        var options = new DocumentIntelligenceOptions();
         var docIntelExtensions = new[] { ".pdf", ".docx", ".doc" };
 
         foreach (var ext in docIntelExtensions)
@@ -179,7 +179,7 @@ public class AiOptionsTests
     [Fact]
     public void ImageExtensions_ShouldBeEnabledWithVisionOcrMethod()
     {
-        var options = new AiOptions();
+        var options = new DocumentIntelligenceOptions();
         var imageExtensions = new[] { ".png", ".jpg", ".jpeg", ".gif", ".tiff", ".bmp", ".webp" };
 
         foreach (var ext in imageExtensions)
@@ -193,7 +193,7 @@ public class AiOptionsTests
     [Fact]
     public void VisionPromptTemplate_ShouldHaveDefaultValue()
     {
-        var options = new AiOptions();
+        var options = new DocumentIntelligenceOptions();
 
         options.VisionPromptTemplate.Should().NotBeNullOrEmpty();
         options.VisionPromptTemplate.Should().Contain("image");
@@ -230,9 +230,10 @@ public class ExtractionMethodTests
     [Fact]
     public void ExtractionMethod_HasExpectedValues()
     {
-        Enum.GetValues<ExtractionMethod>().Should().HaveCount(3);
+        Enum.GetValues<ExtractionMethod>().Should().HaveCount(4);
         Enum.IsDefined(ExtractionMethod.Native).Should().BeTrue();
         Enum.IsDefined(ExtractionMethod.DocumentIntelligence).Should().BeTrue();
         Enum.IsDefined(ExtractionMethod.VisionOcr).Should().BeTrue();
+        Enum.IsDefined(ExtractionMethod.Email).Should().BeTrue();
     }
 }

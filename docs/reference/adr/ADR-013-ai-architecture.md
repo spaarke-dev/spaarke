@@ -209,7 +209,7 @@ src/server/api/Sprk.Bff.Api/
 │       ├── AiToolResult.cs
 │       └── AiToolJobContract.cs
 └── Configuration/
-    └── AiOptions.cs
+    └── DocumentIntelligenceOptions.cs
 
 src/client/pcf/
 ├── UniversalQuickCreate/               # Embeds AiToolAgent

@@ -115,7 +115,7 @@ const parseSseLine = (line: string): SseDataChunk | null => {
  * @example
  * ```tsx
  * const { data, status, error, start, abort } = useSseStream({
- *     url: '/api/ai/summarize/stream',
+ *     url: '/api/ai/document-intelligence/analyze',
  *     body: { documentId, driveId, itemId },
  *     token: accessToken,
  *     onComplete: (summary) => console.log('Done:', summary)

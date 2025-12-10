@@ -1,6 +1,6 @@
-# AI Document Summary - Developer Guide
+# AI Document Intelligence - Developer Guide
 
-> Complete API documentation for the AI Document Summary feature.
+> Complete API documentation for the AI Document Intelligence feature (document analysis, summarization, entity extraction).
 
 ## Table of Contents
 
@@ -95,7 +95,7 @@ Configure via `SupportedFileTypes` dictionary:
 
 ```json
 {
-  "Ai": {
+  "DocumentIntelligence": {
     "SupportedFileTypes": {
       ".txt": { "Enabled": true, "Method": "Native" },
       ".pdf": { "Enabled": true, "Method": "DocumentIntelligence" },
@@ -109,7 +109,7 @@ Configure via `SupportedFileTypes` dictionary:
 
 ## API Reference
 
-### POST /api/ai/summarize/stream
+### POST /api/ai/document-intelligence/analyze
 
 Stream document summarization via Server-Sent Events.
 
@@ -180,7 +180,7 @@ Enqueue a single document for background summarization.
 
 ---
 
-### POST /api/ai/summarize/enqueue-batch
+### POST /api/ai/document-intelligence/enqueue-batch
 
 Enqueue multiple documents (max 10) for background summarization.
 
@@ -418,7 +418,7 @@ async function streamSummarize(
   onComplete: () => void,
   onError: (error: string) => void
 ): Promise<void> {
-  const response = await fetch('/api/ai/summarize/stream', {
+  const response = await fetch('/api/ai/document-intelligence/analyze', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -472,7 +472,7 @@ public async Task SummarizeInBackgroundAsync(
     var client = _httpClientFactory.CreateClient("BffApi");
 
     var response = await client.PostAsJsonAsync(
-        "/api/ai/summarize/enqueue",
+        "/api/ai/document-intelligence/enqueue",
         new { documentId, driveId, itemId },
         ct);
 

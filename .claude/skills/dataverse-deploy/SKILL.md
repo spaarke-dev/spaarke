@@ -274,6 +274,18 @@ pac solution import --path {Solution}_v{X.Y.Z}.zip --publish-changes
 pac solution list | grep -i "temp\|PowerAppsTools\|PCFUpdate"
 pac solution delete --solution-name "PowerAppsToolsTemp_sprk"  # if exists
 pac solution delete --solution-name "PCFUpdateTemp"           # if exists
+
+# Step 8: MANUALLY open Custom Page in Power Apps Maker and republish
+# CRITICAL: Go to make.powerapps.com → Apps → Open Custom Page in Edit mode
+#           → File → Save → File → Publish
+#           This refreshes the Canvas App runtime bundle
+
+# Step 9: Publish All Customizations
+pac solution publish-all
+
+# Step 10: Hard refresh Spaarke application to clear browser cache
+# CRITICAL: Users MUST hard refresh (Ctrl+Shift+R) to clear cached PCF version
+#           Otherwise they will see old PCF control version
 ```
 
 #### Key Rules

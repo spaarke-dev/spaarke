@@ -1,6 +1,6 @@
 # AI Azure Resources
 
-> **Last Updated**: December 9, 2025
+> **Last Updated**: December 10, 2025
 > **Purpose**: Quick reference for AI-related Azure resource IDs and configuration.
 > **Secrets**: Actual secrets stored in `config/ai-config.local.json` (gitignored)
 
@@ -162,6 +162,55 @@ For local development, copy `config/ai-config.local.json.template` to `config/ai
 The local config file is gitignored and contains:
 - OpenAI endpoint
 - OpenAI API key (for local testing only)
+
+---
+
+## Dataverse Entity Extraction Fields
+
+The following Dataverse fields store AI-extracted entity data on the `sprk_document` entity:
+
+### Extraction Fields
+
+| Display Name | Logical Name | Type | Purpose |
+|--------------|--------------|------|---------|
+| Extract Dates | `sprk_extractdates` | Multiline Text | Dates found in document (newline-separated) |
+| Extract Document Type | `sprk_extractdocumenttype` | Text | AI classification (contract, invoice, etc.) |
+| Extract Fees | `sprk_extractfees` | Multiline Text | Monetary amounts (newline-separated) |
+| Extract Organization | `sprk_extractorganization` | Multiline Text | Organization names (newline-separated) |
+| Extract People | `sprk_extractpeople` | Multiline Text | Person names (newline-separated) |
+| Extract Reference | `sprk_extractreference` | Multiline Text | Reference numbers (newline-separated) |
+
+### Document Type Choice Field
+
+The `sprk_DocumentType` choice field maps AI classifications to validated options:
+
+| Label | Value | AI Mapping |
+|-------|-------|------------|
+| Contract | 100000000 | `contract` |
+| Invoice | 100000001 | `invoice` |
+| Proposal | 100000002 | `proposal` |
+| Report | 100000003 | `report` |
+| Letter | 100000004 | `letter` |
+| Memo | 100000005 | `memo` |
+| Email | 100000006 | `email` |
+| Agreement | 100000007 | `agreement` |
+| Statement | 100000008 | `statement` |
+| Other | 100000009 | `other` (default) |
+
+### Data Flow
+
+```
+Document Upload → AI Analysis → ExtractedEntities model → Dataverse fields
+                                      │
+                                      ├─ Organizations → sprk_extractorganization
+                                      ├─ People → sprk_extractpeople
+                                      ├─ Amounts → sprk_extractfees
+                                      ├─ Dates → sprk_extractdates
+                                      ├─ References → sprk_extractreference
+                                      └─ DocumentType → sprk_extractdocumenttype + sprk_DocumentType (choice)
+```
+
+See [SPAARKE-AI-ARCHITECTURE.md](../guides/SPAARKE-AI-ARCHITECTURE.md#5-entity-extraction--dataverse-integration) for extensibility details.
 
 ---
 

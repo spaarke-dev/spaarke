@@ -30,7 +30,7 @@ public class OpenAiClientTests
     [Fact]
     public void Constructor_WithEmptyEndpoint_ThrowsException()
     {
-        var options = Options.Create(new AiOptions
+        var options = Options.Create(new DocumentIntelligenceOptions
         {
             OpenAiEndpoint = string.Empty,
             OpenAiKey = "test-key"
@@ -44,7 +44,7 @@ public class OpenAiClientTests
     [Fact]
     public void Constructor_WithInvalidEndpointUri_ThrowsException()
     {
-        var options = Options.Create(new AiOptions
+        var options = Options.Create(new DocumentIntelligenceOptions
         {
             OpenAiEndpoint = "not-a-valid-uri",
             OpenAiKey = "test-key"
@@ -129,7 +129,7 @@ public class OpenAiClientTests
     [Fact]
     public void StreamCompletionAsync_UsesConfiguredModel_WhenNoModelOverride()
     {
-        var options = Options.Create(new AiOptions
+        var options = Options.Create(new DocumentIntelligenceOptions
         {
             OpenAiEndpoint = "https://test.openai.azure.com/",
             OpenAiKey = "test-key",
@@ -146,7 +146,7 @@ public class OpenAiClientTests
     [Fact]
     public void StreamVisionCompletionAsync_UsesImageModel_WhenConfigured()
     {
-        var options = Options.Create(new AiOptions
+        var options = Options.Create(new DocumentIntelligenceOptions
         {
             OpenAiEndpoint = "https://test.openai.azure.com/",
             OpenAiKey = "test-key",
@@ -163,7 +163,7 @@ public class OpenAiClientTests
     [Fact]
     public void StreamVisionCompletionAsync_FallsBackToSummarizeModel_WhenImageModelNotConfigured()
     {
-        var options = Options.Create(new AiOptions
+        var options = Options.Create(new DocumentIntelligenceOptions
         {
             OpenAiEndpoint = "https://test.openai.azure.com/",
             OpenAiKey = "test-key",
@@ -177,9 +177,9 @@ public class OpenAiClientTests
         client.Should().NotBeNull();
     }
 
-    private static IOptions<AiOptions> CreateValidOptions()
+    private static IOptions<DocumentIntelligenceOptions> CreateValidOptions()
     {
-        return Options.Create(new AiOptions
+        return Options.Create(new DocumentIntelligenceOptions
         {
             OpenAiEndpoint = "https://test-resource.openai.azure.com/",
             OpenAiKey = "test-api-key-that-is-invalid"
@@ -196,7 +196,7 @@ public class OpenAiClientConfigurationTests
     [InlineData(4000)]
     public void MaxOutputTokens_AcceptsValidRange(int maxTokens)
     {
-        var options = new AiOptions { MaxOutputTokens = maxTokens };
+        var options = new DocumentIntelligenceOptions { MaxOutputTokens = maxTokens };
 
         options.MaxOutputTokens.Should().Be(maxTokens);
     }
@@ -208,7 +208,7 @@ public class OpenAiClientConfigurationTests
     [InlineData(1.0f)]
     public void Temperature_AcceptsValidRange(float temperature)
     {
-        var options = new AiOptions { Temperature = temperature };
+        var options = new DocumentIntelligenceOptions { Temperature = temperature };
 
         options.Temperature.Should().Be(temperature);
     }
@@ -220,7 +220,7 @@ public class OpenAiClientConfigurationTests
     [InlineData("custom-deployment-name")]
     public void SummarizeModel_AcceptsAnyDeploymentName(string model)
     {
-        var options = new AiOptions { SummarizeModel = model };
+        var options = new DocumentIntelligenceOptions { SummarizeModel = model };
 
         options.SummarizeModel.Should().Be(model);
     }

@@ -1,7 +1,7 @@
 # Spaarke AI Architecture
 
-> **Version**: 1.2  
-> **Date**: December 5, 2025  
+> **Version**: 1.3
+> **Date**: December 10, 2025  
 > **Status**: Draft  
 > **Author**: Spaarke Engineering  
 > **Related**: [SPAARKE-AI-STRATEGY.md](../../reference/architecture/SPAARKE-AI-STRATEGY.md)
@@ -195,7 +195,7 @@ src/server/api/Sprk.Bff.Api/
 ├── Configuration/
 │   ├── GraphOptions.cs                   # Existing
 │   ├── RedisOptions.cs                   # Existing
-│   └── AiOptions.cs                      # AI configuration
+│   └── DocumentIntelligenceOptions.cs    # Document Intelligence configuration
 │
 ├── Services/
 │   ├── Ai/                               # AI services folder
@@ -825,9 +825,180 @@ public class EmbeddingService
 
 ---
 
-## 5. Background Processing
+## 5. Entity Extraction & Dataverse Integration
 
-### 5.1 AI Indexing Job Handler
+### 5.1 Document Type Classification
+
+The AI extracts a document type classification that maps to Dataverse choice values.
+
+**AI Prompt Constraint:** The AI is instructed to return ONLY these document type values:
+
+| AI Output Value | Dataverse Choice Label | Dataverse Choice Value |
+|-----------------|------------------------|------------------------|
+| `contract` | Contract | 100000000 |
+| `invoice` | Invoice | 100000001 |
+| `proposal` | Proposal | 100000002 |
+| `report` | Report | 100000003 |
+| `letter` | Letter | 100000004 |
+| `memo` | Memo | 100000005 |
+| `email` | Email | 100000006 |
+| `agreement` | Agreement | 100000007 |
+| `statement` | Statement | 100000008 |
+| `other` | Other | 100000009 |
+
+**Mapping Code:**
+
+```csharp
+// Services/Ai/DocumentTypeMapper.cs
+public static class DocumentTypeMapper
+{
+    private static readonly Dictionary<string, int> AiToDataverseMap = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["contract"] = 100000000,
+        ["invoice"] = 100000001,
+        ["proposal"] = 100000002,
+        ["report"] = 100000003,
+        ["letter"] = 100000004,
+        ["memo"] = 100000005,
+        ["email"] = 100000006,
+        ["agreement"] = 100000007,
+        ["statement"] = 100000008,
+        ["other"] = 100000009
+    };
+
+    public static int? ToDataverseValue(string? aiDocumentType)
+    {
+        if (string.IsNullOrWhiteSpace(aiDocumentType))
+            return null;
+
+        return AiToDataverseMap.TryGetValue(aiDocumentType, out var value)
+            ? value
+            : 100000009; // Default to "Other"
+    }
+}
+```
+
+### 5.2 Extracted Entities Dataverse Fields
+
+AI-extracted entities are stored in dedicated Dataverse text fields on the `sprk_document` entity:
+
+| AI Model Property | Dataverse Field | Type | Storage Format |
+|-------------------|-----------------|------|----------------|
+| `Entities.Organizations` | `sprk_ExtractOrganization` | Multiline Text | Newline-separated |
+| `Entities.People` | `sprk_ExtractPeople` | Multiline Text | Newline-separated |
+| `Entities.Amounts` | `sprk_ExtractFees` | Multiline Text | Newline-separated |
+| `Entities.Dates` | `sprk_ExtractDates` | Multiline Text | Newline-separated |
+| `Entities.References` | `sprk_ExtractReference` | Multiline Text | Newline-separated |
+| `Entities.DocumentType` | `sprk_ExtractDocumentType` | Text | Single value |
+
+**Note:** These are **raw extracted text values**, not validated lookups. Phase 2 (Record Matching) will use these values to suggest matching Dataverse records (Accounts, Contacts, etc.).
+
+### 5.3 Extensibility Model
+
+The `ExtractedEntities` model supports document type-specific extensions via nested objects:
+
+```csharp
+// Models/Ai/ExtractedEntities.cs
+public class ExtractedEntities
+{
+    // ═══════════════════════════════════════════════════════════════════════
+    // COMMON FIELDS (all document types)
+    // ═══════════════════════════════════════════════════════════════════════
+    public List<string> Organizations { get; set; } = [];
+    public List<string> People { get; set; } = [];
+    public List<string> Amounts { get; set; } = [];
+    public List<string> Dates { get; set; } = [];
+    public string DocumentType { get; set; } = "other";
+    public List<string> References { get; set; } = [];
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // TYPE-SPECIFIC EXTENSIONS (null when not applicable)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// <summary>Email-specific metadata. Populated when DocumentType is "email".</summary>
+    public EmailMetadata? Email { get; set; }
+
+    /// <summary>Invoice-specific metadata. Populated when DocumentType is "invoice".</summary>
+    public InvoiceMetadata? Invoice { get; set; }
+
+    /// <summary>Contract-specific metadata. Populated when DocumentType is "contract" or "agreement".</summary>
+    public ContractMetadata? Contract { get; set; }
+}
+
+/// <summary>Metadata extracted from email files (.eml, .msg).</summary>
+public class EmailMetadata
+{
+    public string? Sender { get; set; }
+    public List<string> ToRecipients { get; set; } = [];
+    public List<string> CcRecipients { get; set; } = [];
+    public string? Subject { get; set; }
+    public DateTime? SentDate { get; set; }
+    public bool HasAttachments { get; set; }
+}
+
+/// <summary>Metadata extracted from invoice documents.</summary>
+public class InvoiceMetadata
+{
+    public string? VendorName { get; set; }
+    public string? InvoiceNumber { get; set; }
+    public string? DueDate { get; set; }
+    public string? TotalAmount { get; set; }
+    public string? Currency { get; set; }
+    public string? PurchaseOrderNumber { get; set; }
+    public List<string> LineItems { get; set; } = [];
+}
+
+/// <summary>Metadata extracted from contracts and agreements.</summary>
+public class ContractMetadata
+{
+    public List<string> Parties { get; set; } = [];
+    public string? EffectiveDate { get; set; }
+    public string? ExpirationDate { get; set; }
+    public string? ContractValue { get; set; }
+    public string? GoverningLaw { get; set; }
+}
+```
+
+### 5.4 Adding New Document Type Extensions
+
+To add extraction support for a new document type:
+
+1. **Add metadata class** in `ExtractedEntities.cs`:
+   ```csharp
+   public class NewTypeMetadata
+   {
+       public string? FieldA { get; set; }
+       public List<string> FieldB { get; set; } = [];
+   }
+   ```
+
+2. **Add nullable property** to `ExtractedEntities`:
+   ```csharp
+   public NewTypeMetadata? NewType { get; set; }
+   ```
+
+3. **Update AI prompt** in `DocumentIntelligenceOptions.StructuredAnalysisPromptTemplate` to include the new fields when the document type matches.
+
+4. **Add Dataverse fields** (optional) if the type-specific data should be stored separately:
+   - Create fields: `sprk_ExtractNewTypeFieldA`, etc.
+   - Update `UpdateDocumentRequest` with new properties
+   - Update `DataverseService.UpdateDocumentAsync` to map them
+
+5. **Update JSON parsing** in `DocumentIntelligenceService.ParseStructuredResponse` if special handling is needed.
+
+### 5.5 Storage Strategy
+
+| Data Type | Storage Approach | Rationale |
+|-----------|------------------|-----------|
+| **Common fields** | Dedicated Dataverse columns | Queryable, indexable, reportable |
+| **Type-specific metadata** | JSON in `sprk_ExtractedMetadata` | Flexible, no schema changes needed |
+| **Document type** | Both text + choice field | Text for AI raw output, choice for validated value |
+
+---
+
+## 6. Background Processing
+
+### 6.1 AI Indexing Job Handler
 
 ```csharp
 // Services/Jobs/Handlers/AiIndexingJobHandler.cs
@@ -993,10 +1164,10 @@ public record AiIndexingPayload(string CustomerId, string ContainerId, string Ac
 ### 6.1 AiOptions
 
 ```csharp
-// Configuration/AiOptions.cs
+// Configuration/DocumentIntelligenceOptions.cs
 namespace Sprk.Bff.Api.Configuration;
 
-public class AiOptions
+public class DocumentIntelligenceOptions
 {
     public const string SectionName = "AiServices";
 
@@ -1113,8 +1284,8 @@ public class RateLimitingSettings
 // ============================================================================
 
 builder.Services
-    .AddOptions<AiOptions>()
-    .Bind(builder.Configuration.GetSection(AiOptions.SectionName))
+    .AddOptions<DocumentIntelligenceOptions>()
+    .Bind(builder.Configuration.GetSection(DocumentIntelligenceOptions.SectionName))
     .ValidateDataAnnotations()
     .ValidateOnStart();
 

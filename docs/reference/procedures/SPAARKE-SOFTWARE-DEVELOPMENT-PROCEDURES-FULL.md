@@ -65,6 +65,10 @@ This document defines Spaarke's end-to-end software development procedures, inte
 | | VS Code | Primary development interface |
 | | Claude Code (VS Code Extension) | AI coding agent - code generation, task execution |
 | | GitHub Copilot Chat | AI documentation - design specs, planning |
+| **Linting & Static Analysis** | | |
+| | ESLint | TypeScript/JavaScript static analysis (src/client/pcf/) |
+| | Roslyn Analyzers | C# static analysis, null checks, async patterns |
+| | TreatWarningsAsErrors | Compiler warnings as build errors (Directory.Build.props) |
 | **Quality & Testing** | | |
 | | SpecFlow / Cucumber | BDD - executable specifications |
 | | Storybook | Component documentation and testing |
@@ -1206,29 +1210,6 @@ Skills are reusable AI workflows defined in `.claude/skills/`.
 
 **Skill invocation**: Type trigger phrase in Claude Code chat or use slash command.
 
-#### Skill Metadata and Tagging
-
-**All skills include YAML frontmatter for discoverability:**
-
-```yaml
----
-description: Brief phrase matching natural requests
-tags: [tag1, tag2, tag3]  # Keywords for discovery
-techStack: [tech1, tech2]  # Technologies (aspnet-core, react, etc.)
-appliesTo: [pattern1, pattern2]  # File patterns or scenarios
-alwaysApply: false  # Only true for universal skills
----
-```
-
-**Standard tag vocabulary** (see `.claude/skills/INDEX.md` for complete list):
-- **Project:** `project-init`, `project-structure`, `tasks`, `planning`
-- **Development:** `api`, `pcf`, `plugin`, `frontend`, `backend`, `dataverse`
-- **Azure/AI:** `azure`, `openai`, `ai`, `embeddings`, `semantic-kernel`
-- **Operations:** `deploy`, `git`, `ci-cd`, `auth`, `security`
-- **Quality:** `testing`, `code-review`, `troubleshooting`
-
-**Resource discovery**: During `project-init`, `design-to-project`, and `task-create`, agents search skills and knowledge docs by tags to find relevant resources automatically.
-
 ### 13.3 Architecture Decision Records (ADRs)
 
 ADRs capture significant architectural decisions. All code must comply.
@@ -1255,29 +1236,6 @@ Knowledge articles provide technical guidance and best practices.
 **Location**: `docs/ai-knowledge/` or `docs/KM-*.md`
 
 **Topics**: PCF development, Dataverse patterns, Graph API, OAuth/MSAL, etc.
-
-#### Knowledge Article Metadata
-
-**All knowledge docs SHOULD include YAML frontmatter for discoverability:**
-
-```yaml
----
-title: Brief document title
-category: architecture | standards | guides | templates
-tags: [tag1, tag2, tag3]  # Keywords (use same vocabulary as skills)
-techStack: [tech1, tech2]  # Technologies covered
-appliesTo: [scenario1, scenario2]  # When to load this doc
-lastUpdated: YYYY-MM-DD
----
-```
-
-**Why tagging matters:**
-- Agents can discover relevant docs during project initialization and task creation
-- Developers can search by tag to find related documentation
-- Maintains consistency between skills and knowledge docs
-- Enables self-documenting resource discovery
-
-See `docs/ai-knowledge/CLAUDE.md` and `.claude/skills/INDEX.md` for standard tag vocabulary.
 
 ### 13.5 Embedded @ai-meta Comment Blocks
 
@@ -1341,6 +1299,30 @@ Task metadata for tracking and dependencies.
 - `<estimated-hours>` - Effort estimate
 - `<dependencies>` - Prerequisite task IDs
 - `<blocks>` - Tasks blocked by this one
+- `<tags>` - Context focus tags for Claude Code (see Standard Tag Vocabulary)
+
+#### `<tags>`
+Semantic tags that help Claude Code focus context when executing the task.
+
+**Purpose**: Enable targeted context loading - Claude Code can load relevant CLAUDE.md files, skills, and knowledge docs based on task tags rather than exploring the entire codebase.
+
+**Standard vocabulary**:
+| Category | Tags |
+|----------|------|
+| API/Backend | `bff-api`, `api`, `backend`, `minimal-api`, `endpoints` |
+| Frontend/PCF | `pcf`, `react`, `typescript`, `frontend`, `fluent-ui` |
+| Dataverse | `dataverse`, `solution`, `fields`, `plugin`, `ribbon` |
+| Azure | `azure`, `app-service`, `azure-ai`, `azure-search`, `bicep` |
+| AI/ML | `azure-openai`, `ai`, `embeddings`, `document-intelligence` |
+| Operations | `deploy`, `ci-cd`, `devops`, `infrastructure` |
+| Quality | `testing`, `unit-test`, `integration-test`, `e2e-test` |
+
+**Example**:
+```xml
+<metadata>
+  <tags>bff-api, azure-openai, services</tags>
+</metadata>
+```
 
 #### `<prompt>`
 Natural-language description of the task's intent. The "task narrative" explaining purpose, scope, and expected outcome.

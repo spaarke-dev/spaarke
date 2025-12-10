@@ -335,8 +335,19 @@ cp out/controls/control/bundle.js \
 pac solution pack --zipfile Solution_vX.Y.Z.zip --folder {Solution}_extracted
 pac solution import --path Solution_vX.Y.Z.zip --force-overwrite --publish-changes
 
-# 5. VERIFY deployment
+# 5. CUSTOM PAGE REPUBLISH (if PCF is in Custom Page)
+# CRITICAL: Open Custom Page in Power Apps Maker (make.powerapps.com)
+#           → Apps → Open Custom Page → Edit
+#           → File → Save → File → Publish
+# Then run: pac solution publish-all
+
+# 6. CLEAR BROWSER CACHE
+# Users MUST hard refresh (Ctrl+Shift+R) the Spaarke application
+# to clear cached PCF version
+
+# 7. VERIFY deployment
 pac solution list | grep -i "{SolutionName}"
+# Check footer in browser shows new version
 ```
 
 > **Full Guide**: See `docs/ai-knowledge/guides/PCF-V9-PACKAGING.md` Part B

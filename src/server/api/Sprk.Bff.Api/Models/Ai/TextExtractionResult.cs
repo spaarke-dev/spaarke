@@ -114,6 +114,11 @@ public enum TextExtractionMethod
     VisionOcr,
 
     /// <summary>
+    /// Email parsing for .eml and .msg files.
+    /// </summary>
+    Email,
+
+    /// <summary>
     /// File type not supported.
     /// </summary>
     NotSupported,

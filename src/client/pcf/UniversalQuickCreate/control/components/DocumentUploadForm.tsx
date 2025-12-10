@@ -20,24 +20,18 @@
 import * as React from 'react';
 import {
     Button,
-    Field,
-    Textarea,
-    Input,
     Checkbox,
     Text,
     makeStyles,
     tokens,
     MessageBar,
     MessageBarBody,
-    MessageBarTitle,
-    Dialog,
-    DialogSurface,
-    DialogBody,
-    DialogTitle,
-    DialogContent,
-    DialogActions
+    TabList,
+    Tab,
+    SelectTabEvent,
+    SelectTabData
 } from '@fluentui/react-components';
-import { SparkleRegular } from '@fluentui/react-icons';
+import { SparkleRegular, DocumentRegular, CheckmarkCircle20Regular } from '@fluentui/react-icons';
 import { FileSelectionField } from './FileSelectionField';
 import { UploadProgressBar } from './UploadProgressBar';
 import { ErrorMessageList } from './ErrorMessageList';
@@ -82,22 +76,30 @@ const useStyles = makeStyles({
         fontSize: tokens.fontSizeBase300, // 14px base - matches Power Apps MDA
         fontFamily: tokens.fontFamilyBase
     },
-    // Header styles removed - Custom Page provides header
-    content: {
+    // Tab header area
+    tabHeader: {
+        padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalXXL}`,
+        borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
+        backgroundColor: tokens.colorNeutralBackground1
+    },
+    tabList: {
+        backgroundColor: 'transparent'
+    },
+    disabledTab: {
+        opacity: 0.5,
+        cursor: 'not-allowed'
+    },
+    // Tab content area
+    tabContent: {
         flex: 1,
         overflowY: 'auto',
         padding: tokens.spacingHorizontalXXL,
         display: 'flex',
         flexDirection: 'column',
-        gap: tokens.spacingVerticalXL
+        gap: tokens.spacingVerticalL
     },
     infoBanner: {
         marginBottom: tokens.spacingVerticalM
-    },
-    fieldSection: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: tokens.spacingVerticalL
     },
     footer: {
         display: 'flex',
@@ -116,26 +118,52 @@ const useStyles = makeStyles({
         fontSize: tokens.fontSizeBase200,
         color: tokens.colorNeutralForeground3
     },
-    // AI Summary section styles
-    aiSummarySection: {
+    // AI Summary section styles (for File Upload tab)
+    aiCheckboxSection: {
         display: 'flex',
         flexDirection: 'column',
         gap: tokens.spacingVerticalM,
-        paddingTop: tokens.spacingVerticalL,
+        paddingTop: tokens.spacingVerticalXL,
+        marginTop: tokens.spacingVerticalL,
         borderTop: `1px solid ${tokens.colorNeutralStroke2}`
     },
     aiCheckboxRow: {
         display: 'flex',
         alignItems: 'center',
-        gap: tokens.spacingHorizontalS
+        gap: tokens.spacingHorizontalM
     },
     aiIcon: {
-        color: tokens.colorBrandForeground1
+        color: tokens.colorBrandForeground1,
+        fontSize: '24px'
+    },
+    aiCheckboxLabel: {
+        fontSize: tokens.fontSizeBase400,
+        fontWeight: tokens.fontWeightSemibold
     },
     aiInfoText: {
-        fontSize: tokens.fontSizeBase200,
+        fontSize: tokens.fontSizeBase300,
         color: tokens.colorNeutralForeground3,
-        paddingLeft: '28px' // Align with checkbox label
+        paddingLeft: '48px' // Align with checkbox label (larger icon + gap)
+    },
+    // Summary tab content
+    summaryTabContent: {
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: tokens.spacingVerticalL
+    },
+    summaryPlaceholder: {
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: tokens.spacingVerticalXXL,
+        gap: tokens.spacingVerticalM,
+        color: tokens.colorNeutralForeground3
+    },
+    summaryPlaceholderText: {
+        fontSize: tokens.fontSizeBase400,
+        textAlign: 'center'
     }
 });
 
@@ -154,8 +182,6 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
 
     // State
     const [selectedFiles, setSelectedFiles] = React.useState<File[]>([]);
-    const [description, setDescription] = React.useState<string>('');
-    const [documentType, setDocumentType] = React.useState<string>('');
     const [isUploading, setIsUploading] = React.useState<boolean>(false);
     const [uploadProgress, setUploadProgress] = React.useState<{ current: number; total: number }>({ current: 0, total: 0 });
     const [errors, setErrors] = React.useState<Array<{ fileName: string; error: string }>>([]);
@@ -163,8 +189,10 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
 
     // AI Summary state
     const [runAiSummary, setRunAiSummary] = React.useState<boolean>(true);
-    const [showCompletionDialog, setShowCompletionDialog] = React.useState<boolean>(false);
     const [uploadCompleted, setUploadCompleted] = React.useState<boolean>(false);
+
+    // Tab state
+    const [selectedTab, setSelectedTab] = React.useState<string>('upload');
 
     /**
      * Handle summary completion - save to Dataverse
@@ -183,12 +211,26 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
         onSummaryComplete: handleSummaryComplete
     });
 
-    // Show completion dialog when all summaries are done
+    // Determine if AI processing is complete
+    const aiComplete = uploadCompleted && runAiSummary && aiSummary.documents.length > 0 && !aiSummary.isProcessing;
+
+    // Auto-switch to Summary tab when upload completes with AI summaries
     React.useEffect(() => {
-        if (uploadCompleted && runAiSummary && aiSummary.documents.length > 0 && !aiSummary.isProcessing) {
-            setShowCompletionDialog(true);
+        if (uploadCompleted && runAiSummary && aiSummary.documents.length > 0) {
+            setSelectedTab('summary');
         }
-    }, [uploadCompleted, runAiSummary, aiSummary.documents.length, aiSummary.isProcessing]);
+    }, [uploadCompleted, runAiSummary, aiSummary.documents.length]);
+
+    /**
+     * Handle tab selection
+     */
+    const handleTabSelect = (_event: SelectTabEvent, data: SelectTabData) => {
+        // Only allow switching to summary tab if upload is completed
+        if (data.value === 'summary' && !uploadCompleted) {
+            return;
+        }
+        setSelectedTab(data.value as string);
+    };
 
     /**
      * Handle file selection
@@ -243,9 +285,7 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
 
             // Phase 2: Create Dataverse records
             const formData = {
-                documentName: '', // Auto-generated from file name
-                description: description || undefined,
-                documentType: documentType || undefined
+                documentName: '' // Auto-generated from file name
             };
 
             const createResults = await documentRecordService.createDocuments(
@@ -331,90 +371,121 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
 
     return (
         <div className={styles.container}>
-            {/* Content - Header removed since Custom Page provides its own */}
-            <div className={styles.content}>
-                {/* Info Banner */}
-                <MessageBar intent="info" className={styles.infoBanner}>
-                    <MessageBarBody>
-                        Select up to {FILE_UPLOAD_LIMITS.MAX_FILES} files (max{' '}
-                        {FILE_UPLOAD_LIMITS.MAX_FILE_SIZE / (1024 * 1024)}MB each, total{' '}
-                        {FILE_UPLOAD_LIMITS.MAX_TOTAL_SIZE / (1024 * 1024)}MB)
-                    </MessageBarBody>
-                </MessageBar>
+            {/* Tab Header */}
+            <div className={styles.tabHeader}>
+                <TabList
+                    selectedValue={selectedTab}
+                    onTabSelect={handleTabSelect}
+                    className={styles.tabList}
+                >
+                    <Tab
+                        value="upload"
+                        icon={<DocumentRegular />}
+                    >
+                        Upload Files
+                    </Tab>
+                    <Tab
+                        value="summary"
+                        icon={uploadCompleted && runAiSummary ? <CheckmarkCircle20Regular /> : <SparkleRegular />}
+                        disabled={!uploadCompleted}
+                        className={!uploadCompleted ? styles.disabledTab : undefined}
+                    >
+                        AI Summary
+                    </Tab>
+                </TabList>
+            </div>
 
-                {/* Success Message */}
-                {successCount > 0 && (
-                    <MessageBar intent="success">
-                        <MessageBarBody>
-                            Successfully created {successCount} document{successCount > 1 ? 's' : ''}!
-                        </MessageBarBody>
-                    </MessageBar>
-                )}
+            {/* Tab Content */}
+            <div className={styles.tabContent}>
+                {/* File Upload Tab */}
+                {selectedTab === 'upload' && (
+                    <>
+                        {/* Info Banner */}
+                        <MessageBar intent="info" className={styles.infoBanner}>
+                            <MessageBarBody>
+                                Select up to {FILE_UPLOAD_LIMITS.MAX_FILES} files (max{' '}
+                                {FILE_UPLOAD_LIMITS.MAX_FILE_SIZE / (1024 * 1024)}MB each, total{' '}
+                                {FILE_UPLOAD_LIMITS.MAX_TOTAL_SIZE / (1024 * 1024)}MB)
+                            </MessageBarBody>
+                        </MessageBar>
 
-                {/* Error Messages */}
-                {errors.length > 0 && <ErrorMessageList errors={errors} />}
-
-                {/* File Selection */}
-                <FileSelectionField
-                    selectedFiles={selectedFiles}
-                    onFilesChange={handleFilesChange}
-                    disabled={isUploading}
-                />
-
-                {/* Upload Progress */}
-                {isUploading && (
-                    <UploadProgressBar
-                        current={uploadProgress.current}
-                        total={uploadProgress.total}
-                    />
-                )}
-
-                {/* Metadata Fields */}
-                <div className={styles.fieldSection}>
-                    <Field label="Document Type">
-                        <Input
-                            value={documentType}
-                            onChange={(e, data) => setDocumentType(data.value)}
-                            placeholder="Enter document type"
-                            disabled={isUploading}
-                        />
-                    </Field>
-
-                    <Field label="Description">
-                        <Textarea
-                            value={description}
-                            onChange={(e, data) => setDescription(data.value)}
-                            placeholder="Enter description..."
-                            rows={4}
-                            disabled={isUploading}
-                        />
-                    </Field>
-                </div>
-
-                {/* AI Summary Section */}
-                {apiBaseUrl && (
-                    <div className={styles.aiSummarySection}>
-                        <div className={styles.aiCheckboxRow}>
-                            <SparkleRegular className={styles.aiIcon} />
-                            <Checkbox
-                                checked={runAiSummary}
-                                onChange={(e, data) => setRunAiSummary(data.checked === true)}
-                                label="Run AI Summary"
-                                disabled={isUploading || aiSummary.documents.length > 0}
-                            />
-                        </div>
-
-                        {runAiSummary && aiSummary.hasIncomplete && (
-                            <Text className={styles.aiInfoText}>
-                                You can close anytime - summaries will complete in the background
-                            </Text>
+                        {/* Success Message */}
+                        {successCount > 0 && (
+                            <MessageBar intent="success">
+                                <MessageBarBody>
+                                    Successfully created {successCount} document{successCount > 1 ? 's' : ''}!
+                                </MessageBarBody>
+                            </MessageBar>
                         )}
 
-                        {runAiSummary && aiSummary.documents.length > 0 && (
-                            <AiSummaryCarousel
-                                documents={aiSummary.documents}
-                                onRetry={aiSummary.retry}
+                        {/* Error Messages */}
+                        {errors.length > 0 && <ErrorMessageList errors={errors} />}
+
+                        {/* File Selection */}
+                        <FileSelectionField
+                            selectedFiles={selectedFiles}
+                            onFilesChange={handleFilesChange}
+                            disabled={isUploading || uploadCompleted}
+                        />
+
+                        {/* Upload Progress */}
+                        {isUploading && (
+                            <UploadProgressBar
+                                current={uploadProgress.current}
+                                total={uploadProgress.total}
                             />
+                        )}
+
+                        {/* AI Summary Checkbox */}
+                        {apiBaseUrl && (
+                            <div className={styles.aiCheckboxSection}>
+                                <div className={styles.aiCheckboxRow}>
+                                    <SparkleRegular className={styles.aiIcon} />
+                                    <Checkbox
+                                        checked={runAiSummary}
+                                        onChange={(e, data) => setRunAiSummary(data.checked === true)}
+                                        label={<span className={styles.aiCheckboxLabel}>Run AI Summary after upload</span>}
+                                        disabled={isUploading || uploadCompleted}
+                                    />
+                                </div>
+                                {runAiSummary && !uploadCompleted && (
+                                    <Text className={styles.aiInfoText}>
+                                        AI will analyze uploaded files and extract summaries, keywords, and entities
+                                    </Text>
+                                )}
+                            </div>
+                        )}
+                    </>
+                )}
+
+                {/* AI Summary Tab */}
+                {selectedTab === 'summary' && (
+                    <div className={styles.summaryTabContent}>
+                        {runAiSummary && aiSummary.documents.length > 0 ? (
+                            <>
+                                {aiSummary.hasIncomplete && (
+                                    <MessageBar intent="info">
+                                        <MessageBarBody>
+                                            You can close anytime - summaries will complete in the background
+                                        </MessageBarBody>
+                                    </MessageBar>
+                                )}
+                                <AiSummaryCarousel
+                                    documents={aiSummary.documents}
+                                    onRetry={aiSummary.retry}
+                                />
+                            </>
+                        ) : (
+                            <div className={styles.summaryPlaceholder}>
+                                <SparkleRegular style={{ fontSize: 48 }} />
+                                <Text className={styles.summaryPlaceholderText}>
+                                    {!uploadCompleted
+                                        ? 'Upload files to generate AI summaries'
+                                        : !runAiSummary
+                                            ? 'AI Summary was not enabled for this upload'
+                                            : 'Processing files...'}
+                                </Text>
+                            </div>
                         )}
                     </div>
                 )}
@@ -423,7 +494,7 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
             {/* Footer */}
             <div className={styles.footer}>
                 <span className={styles.versionText}>
-                    v3.2.4 • Built 2025-12-09
+                    v3.9.0 • Built 2025-12-10
                 </span>
                 <div className={styles.footerButtons}>
                     <Button
@@ -438,39 +509,11 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
                         onClick={handleCancel}
                         disabled={isUploading}
                     >
-                        Cancel
+                        {(uploadCompleted && (aiComplete || !runAiSummary)) ? 'Close' : 'Cancel'}
                     </Button>
                 </div>
             </div>
 
-            {/* Summary Completion Dialog */}
-            <Dialog
-                open={showCompletionDialog}
-                onOpenChange={(_, data) => setShowCompletionDialog(data.open)}
-            >
-                <DialogSurface>
-                    <DialogBody>
-                        <DialogTitle>File Summary Completed</DialogTitle>
-                        <DialogContent>
-                            All file summaries have been generated and saved. Would you like to close this form?
-                        </DialogContent>
-                        <DialogActions>
-                            <Button
-                                appearance="secondary"
-                                onClick={() => setShowCompletionDialog(false)}
-                            >
-                                Stay Here
-                            </Button>
-                            <Button
-                                appearance="primary"
-                                onClick={onClose}
-                            >
-                                Close
-                            </Button>
-                        </DialogActions>
-                    </DialogBody>
-                </DialogSurface>
-            </Dialog>
         </div>
     );
 };

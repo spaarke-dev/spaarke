@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="ai-file-entity-metadata-extraction">
+  <metadata>
+    <title>Provision Azure AI Search</title>
+    <phase>2: Record Matching Service</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>019</dependencies>
+    <blocks>021</blocks>
+    <tags>azure, azure-search, infrastructure, bicep</tags>
+  </metadata>
+
+  <prompt>
+    Create Azure AI Search resource using Bicep templates. Configure SKU, replicas,
+    and store API key in Key Vault. Update configuration to reference new resource.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Azure Bicep and AI Search.</role>
+
+  <goal>
+    Azure AI Search resource provisioned and accessible. API key stored securely.
+  </goal>
+
+  <steps>
+    <step order="1">Create infrastructure/bicep/ai-search.bicep template</step>
+    <step order="2">Deploy resource to Azure</step>
+    <step order="3">Store API key in Key Vault</step>
+    <step order="4">Update DocumentIntelligenceOptions with endpoint and key reference</step>
+    <step order="5">Verify connectivity</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">infrastructure/bicep/ai-search.bicep</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Azure AI Search resource exists.</criterion>
+    <criterion testable="true">API key stored in Key Vault.</criterion>
+    <criterion testable="true">Configuration references new resource.</criterion>
+  </acceptance-criteria>
+</task>

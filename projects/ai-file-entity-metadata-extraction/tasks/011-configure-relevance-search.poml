@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="ai-file-entity-metadata-extraction">
+  <metadata>
+    <title>Configure Relevance Search</title>
+    <phase>1b: Dataverse + PCF Integration + Email Support</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>018</blocks>
+    <tags>dataverse, config, search</tags>
+  </metadata>
+
+  <prompt>
+    Enable Dataverse Relevance Search indexing on the sprk_filekeywords field so that
+    AI-extracted keywords improve document discoverability. Configure in Power Platform
+    Admin Center.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse search configuration.
+  </role>
+
+  <goal>
+    sprk_filekeywords field is indexed for Relevance Search. Users can find documents
+    by searching AI-extracted keywords.
+  </goal>
+
+  <context>
+    <background>
+      Relevance Search provides full-text search across Dataverse. By indexing the
+      AI-extracted keywords field, users can discover documents even if they don't
+      know exact terms in the document title or description.
+    </background>
+    <relevant-files>
+      <file>projects/ai-file-entity-metadata-extraction/spec.md (Appendix C)</file>
+    </relevant-files>
+  </context>
+
+  <steps>
+    <step order="1">Navigate to Power Platform Admin Center</step>
+    <step order="2">Select Environment → Settings → Features</step>
+    <step order="3">Enable Dataverse Search if not already enabled</step>
+    <step order="4">Under Searchable Fields, add sprk_filekeywords for sprk_document</step>
+    <step order="5">Wait for index rebuild (may take several hours)</step>
+    <step order="6">Test search with known keywords</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">Relevance Search configuration documented</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">sprk_filekeywords field is listed in Searchable Fields.</criterion>
+    <criterion testable="true">Search for keyword returns documents with matching sprk_filekeywords.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2025-12-09">
+      Task completed manually by user via Power Platform Admin Center.
+      Relevance Search configuration applied to sprk_document entity fields.
+    </note>
+  </notes>
+</task>

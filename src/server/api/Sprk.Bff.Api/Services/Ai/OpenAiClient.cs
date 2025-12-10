@@ -39,7 +39,7 @@ public class OpenAiCircuitBrokenException : Exception
 public class OpenAiClient : IOpenAiClient
 {
     private readonly AzureOpenAIClient _client;
-    private readonly AiOptions _options;
+    private readonly DocumentIntelligenceOptions _options;
     private readonly ILogger<OpenAiClient> _logger;
     private readonly ResiliencePipeline _circuitBreaker;
 
@@ -49,7 +49,7 @@ public class OpenAiClient : IOpenAiClient
     private const double FailureRatio = 0.5;      // 50% failure ratio to trip
     private const int MinimumThroughput = 5;      // Minimum calls before tripping
 
-    public OpenAiClient(IOptions<AiOptions> options, ILogger<OpenAiClient> logger)
+    public OpenAiClient(IOptions<DocumentIntelligenceOptions> options, ILogger<OpenAiClient> logger)
     {
         _options = options.Value;
         _logger = logger;
@@ -96,7 +96,7 @@ public class OpenAiClient : IOpenAiClient
     /// Protected by circuit breaker - throws OpenAiCircuitBrokenException when open.
     /// </summary>
     /// <param name="prompt">The prompt to send to the model.</param>
-    /// <param name="model">Optional model override. Defaults to AiOptions.SummarizeModel.</param>
+    /// <param name="model">Optional model override. Defaults to DocumentIntelligenceOptions.SummarizeModel.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Async enumerable of content chunks.</returns>
     /// <exception cref="OpenAiCircuitBrokenException">Thrown when circuit breaker is open.</exception>
@@ -165,7 +165,7 @@ public class OpenAiClient : IOpenAiClient
     /// Protected by circuit breaker - throws OpenAiCircuitBrokenException when open.
     /// </summary>
     /// <param name="prompt">The prompt to send to the model.</param>
-    /// <param name="model">Optional model override. Defaults to AiOptions.SummarizeModel.</param>
+    /// <param name="model">Optional model override. Defaults to DocumentIntelligenceOptions.SummarizeModel.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The complete response text.</returns>
     /// <exception cref="OpenAiCircuitBrokenException">Thrown when circuit breaker is open.</exception>

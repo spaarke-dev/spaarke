@@ -224,7 +224,7 @@ Microsoft Foundry (formerly Azure AI Foundry) is Microsoft's unified AI platform
 │  │  AI Endpoints                                                        │  │
 │  │  • POST /api/ai/chat              - Conversational Q&A               │  │
 │  │  • POST /api/ai/search            - Semantic document search         │  │
-│  │  • POST /api/ai/summarize         - Document summarization           │  │
+│  │  • POST /api/ai/document-intelligence - Document analysis & extraction │  │
 │  │  • POST /api/ai/extract           - Metadata/entity extraction       │  │
 │  │  • POST /api/ai/classify          - Document classification          │  │
 │  │  • POST /api/ai/compare           - Multi-document comparison        │  │

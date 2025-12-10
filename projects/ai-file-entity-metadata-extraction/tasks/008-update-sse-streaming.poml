@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="008" project="ai-file-entity-metadata-extraction">
+  <metadata>
+    <title>Update SSE Streaming</title>
+    <phase>1a: Structured AI Output + Service Rename</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>007</dependencies>
+    <blocks>009, 012</blocks>
+    <tags>bff-api, endpoints, streaming</tags>
+  </metadata>
+
+  <prompt>
+    Update the SSE streaming endpoint to include structured result at completion.
+    The stream should continue providing real-time text feedback, then send a final
+    "complete" event with the parsed DocumentAnalysisResult JSON.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Server-Sent Events and streaming APIs.
+  </role>
+
+  <goal>
+    SSE stream sends incremental text events during processing, then sends a final
+    "complete" event containing the full DocumentAnalysisResult JSON for PCF consumption.
+  </goal>
+
+  <context>
+    <background>
+      The existing SSE endpoint streams text as it's generated. The enhancement adds
+      a final structured result event so the PCF can display TL;DR bullets and entities
+      after the streaming completes. This maintains real-time feedback while providing
+      structured data at the end.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/DocumentIntelligenceEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/DocumentIntelligenceService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Maintain streaming for real-time feedback</constraint>
+    <constraint source="spec">Response format: data: {"type": "text", "content": "..."} for text</constraint>
+    <constraint source="spec">Response format: data: {"type": "complete", "result": {...}} for final result</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-file-entity-metadata-extraction/spec.md (Section 6.1)</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read current SSE streaming implementation</step>
+    <step order="2">Define SSE event types: SseTextEvent, SseCompleteEvent</step>
+    <step order="3">Update streaming to send type="text" events during generation</step>
+    <step order="4">After AI completes, parse response using task 007 logic</step>
+    <step order="5">Send type="complete" event with DocumentAnalysisResult JSON</step>
+    <step order="6">Handle parse failures - still send complete event with fallback result</step>
+    <step order="7">Run dotnet build to verify compilation</step>
+    <step order="8">Test SSE stream manually with curl or EventSource</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and run .NET projects</tool>
+    <tool name="curl">Test SSE streaming</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/DocumentIntelligenceEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/DocumentIntelligenceService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SSE stream sends text events with type="text" during generation.</criterion>
+    <criterion testable="true">SSE stream sends complete event with type="complete" and full result at end.</criterion>
+    <criterion testable="true">Complete event contains parsed DocumentAnalysisResult JSON.</criterion>
+    <criterion testable="true">Fallback result is sent when JSON parsing fails.</criterion>
+    <criterion testable="true">dotnet build succeeds.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The SSE format is critical for PCF compatibility. Test with EventSource in browser
+    dev tools to verify format. The PCF will parse the complete event to extract
+    structured data for display.
+  </notes>
+</task>

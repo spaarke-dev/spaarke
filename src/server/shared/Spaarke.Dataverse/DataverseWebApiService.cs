@@ -163,6 +163,21 @@ public class DataverseWebApiService : IDataverseService
         if (request.HasFile.HasValue) payload["sprk_hasfile"] = request.HasFile.Value;
         if (request.Status.HasValue) payload["statuscode"] = (int)request.Status.Value;
 
+        // AI Analysis fields
+        if (request.Summary != null) payload["sprk_filesummary"] = request.Summary;
+        if (request.TlDr != null) payload["sprk_filetldr"] = request.TlDr;
+        if (request.Keywords != null) payload["sprk_filekeywords"] = request.Keywords;
+        if (request.SummaryStatus.HasValue) payload["sprk_filesummarystatus"] = request.SummaryStatus.Value;
+
+        // Extracted entities fields
+        if (request.ExtractOrganization != null) payload["sprk_extractorganization"] = request.ExtractOrganization;
+        if (request.ExtractPeople != null) payload["sprk_extractpeople"] = request.ExtractPeople;
+        if (request.ExtractFees != null) payload["sprk_extractfees"] = request.ExtractFees;
+        if (request.ExtractDates != null) payload["sprk_extractdates"] = request.ExtractDates;
+        if (request.ExtractReference != null) payload["sprk_extractreference"] = request.ExtractReference;
+        if (request.ExtractDocumentType != null) payload["sprk_extractdocumenttype"] = request.ExtractDocumentType;
+        if (request.DocumentType.HasValue) payload["sprk_documenttype"] = request.DocumentType.Value;
+
         var url = $"{_entitySetName}({guid})";
         _logger.LogInformation("Updating document: {Id}", id);
 

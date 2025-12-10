@@ -36,7 +36,7 @@ const createMockResponse = (chunks: string[], status = 200) => {
 
 describe('useSseStream', () => {
     const defaultOptions: UseSseStreamOptions = {
-        url: '/api/ai/summarize/stream',
+        url: '/api/ai/document-intelligence/analyze',
         body: { documentId: 'doc-123' }
     };
 

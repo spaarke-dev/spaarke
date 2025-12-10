@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="ai-file-entity-metadata-extraction">
+  <metadata>
+    <title>Add Dataverse Fields</title>
+    <phase>1b: Dataverse + PCF Integration + Email Support</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>Phase 1a complete</dependencies>
+    <blocks>011, 017</blocks>
+    <tags>dataverse, solution, fields</tags>
+  </metadata>
+
+  <prompt>
+    Add new fields to sprk_document entity in Dataverse: sprk_filetldr (Multi-line Text),
+    sprk_fileentities (Multi-line Text for JSON), sprk_documenttype (Choice). Export
+    solution, add fields, import updated solution.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse customization and solution management.
+  </role>
+
+  <goal>
+    Dataverse sprk_document entity has new fields for storing structured AI output.
+    Solution exported and ready for deployment.
+  </goal>
+
+  <context>
+    <background>
+      The structured AI output needs to be persisted in Dataverse for search and display.
+      These fields store TL;DR bullets, extracted entities JSON, and document classification.
+    </background>
+    <relevant-files>
+      <file>projects/ai-file-entity-metadata-extraction/spec.md (Section 5.2)</file>
+      <file>src/solutions/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">sprk_filetldr: Multi-line Text (4000 chars)</constraint>
+    <constraint source="spec">sprk_fileentities: Multi-line Text (8000 chars)</constraint>
+    <constraint source="spec">sprk_documenttype: Choice with defined values</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">Export current Dataverse solution</step>
+    <step order="2">Add sprk_filetldr field to sprk_document entity</step>
+    <step order="3">Add sprk_fileentities field to sprk_document entity</step>
+    <step order="4">Add sprk_documenttype choice field with values from spec</step>
+    <step order="5">Import updated solution to Dataverse</step>
+    <step order="6">Verify fields appear on entity</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeCore/Entities/sprk_document.xml</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">sprk_filetldr field exists on sprk_document entity.</criterion>
+    <criterion testable="true">sprk_fileentities field exists on sprk_document entity.</criterion>
+    <criterion testable="true">sprk_documenttype choice field exists with all defined values.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2025-12-09">
+      All fields added successfully via solution import:
+      - sprk_filetldr (ntext, 4000 chars) - File TL;DR
+      - sprk_fileentities (ntext, 8000 chars) - File Entities JSON
+      - sprk_documenttype (picklist) - Document Type choice field with 10 options
+
+      Document Type choice values (sprk_document_sprk_documenttype):
+      - 100000000: Contract
+      - 100000001: Invoice
+      - 100000002: Proposal
+      - 100000003: Report
+      - 100000004: Letter
+      - 100000005: Memo
+      - 100000006: Email
+      - 100000007: Agreement
+      - 100000008: Statement
+      - 100000009: Other
+
+      Choice field standardizes document types with AI Document Intelligence resources.
+      Solution: src/dataverse/solutions/spaarke_containers_fresh/
+    </note>
+  </notes>
+</task>

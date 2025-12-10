@@ -26,27 +26,11 @@ import {
     ChevronRightRegular,
     DocumentMultipleRegular
 } from '@fluentui/react-icons';
-import { AiSummaryPanel, SummaryStatus } from './AiSummaryPanel';
+import { AiSummaryPanel } from './AiSummaryPanel';
+import { DocumentSummaryState, SummaryStatus } from '../services/useAiSummary';
 
-/**
- * Document summary state for carousel
- */
-export interface DocumentSummaryState {
-    /** Document identifier */
-    documentId: string;
-
-    /** File name */
-    fileName: string;
-
-    /** Summary text (may be partial during streaming) */
-    summary?: string;
-
-    /** Current status */
-    status: SummaryStatus;
-
-    /** Error message (when status is 'error') */
-    error?: string;
-}
+// Re-export for backward compatibility
+export type { DocumentSummaryState, SummaryStatus };
 
 /**
  * Component Props
@@ -76,7 +60,9 @@ const useStyles = makeStyles({
         padding: tokens.spacingVerticalM,
         borderRadius: tokens.borderRadiusMedium,
         backgroundColor: tokens.colorNeutralBackground1,
-        border: `1px solid ${tokens.colorNeutralStroke1}`
+        border: `1px solid ${tokens.colorNeutralStroke1}`,
+        flex: 1,
+        minHeight: 0
     },
     header: {
         display: 'flex',
@@ -112,7 +98,11 @@ const useStyles = makeStyles({
         textAlign: 'center'
     },
     panelContainer: {
-        position: 'relative'
+        position: 'relative',
+        flex: 1,
+        minHeight: 0,
+        display: 'flex',
+        flexDirection: 'column'
     },
     statusSummary: {
         display: 'flex',
@@ -258,6 +248,9 @@ export const AiSummaryCarousel: React.FC<AiSummaryCarouselProps> = ({
                 summary={doc.summary}
                 status={doc.status}
                 error={doc.error}
+                tldr={doc.tldr}
+                keywords={doc.keywords}
+                entities={doc.entities}
                 onRetry={onRetry ? handleRetry : undefined}
                 className={className}
             />
@@ -281,7 +274,6 @@ export const AiSummaryCarousel: React.FC<AiSummaryCarouselProps> = ({
             {/* Header with title and navigation */}
             <div className={styles.header}>
                 <div className={styles.headerLeft}>
-                    <DocumentMultipleRegular className={styles.headerIcon} />
                     <Text className={styles.headerTitle}>File Summary</Text>
                 </div>
 
@@ -332,6 +324,9 @@ export const AiSummaryCarousel: React.FC<AiSummaryCarouselProps> = ({
                     summary={currentDoc.summary}
                     status={currentDoc.status}
                     error={currentDoc.error}
+                    tldr={currentDoc.tldr}
+                    keywords={currentDoc.keywords}
+                    entities={currentDoc.entities}
                     onRetry={onRetry ? handleRetry : undefined}
                 />
             </div>

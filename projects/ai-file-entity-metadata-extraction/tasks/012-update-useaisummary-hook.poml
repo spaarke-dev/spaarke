@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="ai-file-entity-metadata-extraction">
+  <metadata>
+    <title>Update PCF useAiSummary Hook</title>
+    <phase>1b: Dataverse + PCF Integration + Email Support</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>Phase 1a complete</dependencies>
+    <blocks>013</blocks>
+    <tags>pcf, react, typescript, hooks</tags>
+  </metadata>
+
+  <prompt>
+    Update the useAiSummary hook in UniversalQuickCreate PCF to call the renamed
+    endpoint /api/ai/document-intelligence/analyze and parse the structured complete
+    event containing DocumentAnalysisResult.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in React hooks and TypeScript.
+  </role>
+
+  <goal>
+    useAiSummary hook calls new endpoint and returns structured result including
+    summary, tldr, keywords, and entities for display.
+  </goal>
+
+  <context>
+    <background>
+      The PCF hook needs to be updated to use the renamed endpoint and parse the
+      enhanced SSE response that includes structured data in the complete event.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/UniversalQuickCreate/control/services/useAiSummary.ts</file>
+    </relevant-files>
+  </context>
+
+  <steps>
+    <step order="1">Update endpoint URL from /api/ai/summarize/stream to /api/ai/document-intelligence/analyze</step>
+    <step order="2">Add TypeScript interfaces for DocumentAnalysisResult</step>
+    <step order="3">Parse complete event to extract structured result</step>
+    <step order="4">Return structured data from hook</step>
+    <step order="5">Update any consuming components</step>
+    <step order="6">Test with PCF control</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/pcf/UniversalQuickCreate/control/services/useAiSummary.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Hook calls /api/ai/document-intelligence/analyze endpoint.</criterion>
+    <criterion testable="true">Hook returns structured result with tldr, keywords, entities.</criterion>
+    <criterion testable="true">PCF builds without errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2025-12-09">
+      Task completed. Changes made:
+      - Updated endpoint URL from /api/ai/summarize/stream to /api/ai/document-intelligence/analyze
+      - Added TypeScript interfaces: ExtractedEntities, DocumentAnalysisResult, SummaryStatus, DocumentSummaryState
+      - Extended DocumentSummaryState with tldr, keywords, entities, documentType, parsedSuccessfully fields
+      - Updated parseSseLine to handle new SSE chunk format with type, content, result fields
+      - Parse complete event to extract structured DocumentAnalysisResult
+      - Added onAnalysisComplete callback (deprecated onSummaryComplete for backward compatibility)
+      - Updated enqueue endpoint to /api/ai/document-intelligence/enqueue-batch
+      - Updated AiSummaryCarousel and AiSummaryPanel to import types from useAiSummary.ts
+      - PCF builds successfully (12.5 MiB bundle)
+
+      Version bumped to 2.0.0.0
+    </note>
+  </notes>
+</task>
