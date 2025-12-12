@@ -65,14 +65,14 @@ public class DocumentAnalysisResult
         string keywords,
         ExtractedEntities entities,
         string? rawResponse = null) => new()
-    {
-        Summary = summary,
-        TlDr = tldr,
-        Keywords = keywords,
-        Entities = entities,
-        RawResponse = rawResponse,
-        ParsedSuccessfully = true
-    };
+        {
+            Summary = summary,
+            TlDr = tldr,
+            Keywords = keywords,
+            Entities = entities,
+            RawResponse = rawResponse,
+            ParsedSuccessfully = true
+        };
 
     /// <summary>
     /// Creates a fallback result when parsing fails, preserving the raw response.
