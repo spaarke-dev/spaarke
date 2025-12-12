@@ -256,6 +256,35 @@ module docIntelligence '../modules/doc-intelligence.bicep' = {
 }
 
 // ============================================================================
+// AI FOUNDRY (Optional - for Analysis feature Prompt Flow orchestration)
+// ============================================================================
+
+@description('Enable AI Foundry Hub and Project deployment')
+param enableAiFoundry bool = false
+
+@description('SKU for AI Foundry workspace')
+@allowed(['Basic', 'Standard'])
+param aiFoundrySku string = 'Basic'
+
+module aiFoundry '../modules/ai-foundry-hub.bicep' = if (enableAiFoundry) {
+  scope: rg
+  name: 'aiFoundry-${baseName}'
+  params: {
+    hubName: '${baseName}-aif-hub'
+    projectName: '${baseName}-aif-proj'
+    location: location
+    storageAccountId: storage.outputs.storageAccountId
+    keyVaultId: keyVault.outputs.keyVaultId
+    appInsightsId: monitoring.outputs.appInsightsId
+    openAiResourceId: openAi.outputs.openAiId
+    aiSearchResourceId: aiSearch.outputs.searchServiceId
+    sku: aiFoundrySku
+    publicNetworkAccess: 'Enabled'
+    tags: tags
+  }
+}
+
+// ============================================================================
 // OUTPUTS
 // ============================================================================
 
@@ -290,3 +319,10 @@ output storageConnectionString string = storage.outputs.connectionString
 output openAiKey string = openAi.outputs.openAiKey
 #disable-next-line outputs-should-not-contain-secrets
 output aiSearchAdminKey string = aiSearch.outputs.searchServiceAdminKey
+
+// AI Foundry (when enabled)
+output aiFoundryEnabled bool = enableAiFoundry
+output aiFoundryHubId string = enableAiFoundry ? aiFoundry.outputs.hubId : ''
+output aiFoundryProjectId string = enableAiFoundry ? aiFoundry.outputs.projectId : ''
+output promptFlowEndpoint string = enableAiFoundry ? aiFoundry.outputs.promptFlowEndpoint : ''
+output aiFoundryPortalUrl string = enableAiFoundry ? aiFoundry.outputs.aiFoundryPortalUrl : ''

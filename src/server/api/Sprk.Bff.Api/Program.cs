@@ -59,6 +59,15 @@ builder.Services
     .Bind(builder.Configuration.GetSection(DocumentIntelligenceOptions.SectionName))
     .ValidateOnStart();
 
+// Analysis Options - AI-driven document analysis with Prompt Flow and hybrid RAG
+// Supports multi-tenant deployment via Dataverse Environment Variables
+// Maps to: sprk_EnableAiFeatures, sprk_EnableMultiDocumentAnalysis, sprk_PromptFlowEndpoint, etc.
+builder.Services
+    .AddOptions<AnalysisOptions>()
+    .Bind(builder.Configuration.GetSection(AnalysisOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+
 // Custom validation for conditional requirements
 builder.Services.AddSingleton<IValidateOptions<GraphOptions>, GraphOptionsValidator>();
 builder.Services.AddSingleton<IValidateOptions<DocumentIntelligenceOptions>, DocumentIntelligenceOptionsValidator>();
@@ -307,6 +316,33 @@ if (documentIntelligenceEnabled)
 else
 {
     Console.WriteLine("⚠ Document Intelligence services disabled (DocumentIntelligence:Enabled = false)");
+}
+
+// ============================================================================
+// ANALYSIS SERVICES - AI-driven document analysis with configurable scopes
+// ============================================================================
+var analysisEnabled = builder.Configuration.GetValue<bool>("Analysis:Enabled", true);
+if (analysisEnabled && documentIntelligenceEnabled)
+{
+    // Register Analysis configuration
+    builder.Services.Configure<Sprk.Bff.Api.Configuration.AnalysisOptions>(
+        builder.Configuration.GetSection(Sprk.Bff.Api.Configuration.AnalysisOptions.SectionName));
+
+    // Analysis services - all scoped due to SpeFileStore dependency
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IScopeResolverService, Sprk.Bff.Api.Services.Ai.ScopeResolverService>();
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IAnalysisContextBuilder, Sprk.Bff.Api.Services.Ai.AnalysisContextBuilder>();
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IWorkingDocumentService, Sprk.Bff.Api.Services.Ai.WorkingDocumentService>();
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IAnalysisOrchestrationService, Sprk.Bff.Api.Services.Ai.AnalysisOrchestrationService>();
+
+    Console.WriteLine("✓ Analysis services enabled");
+}
+else if (!documentIntelligenceEnabled)
+{
+    Console.WriteLine("⚠ Analysis services disabled (requires DocumentIntelligence:Enabled = true)");
+}
+else
+{
+    Console.WriteLine("⚠ Analysis services disabled (Analysis:Enabled = false)");
 }
 
 // ============================================================================
@@ -889,6 +925,12 @@ app.MapOBOEndpoints();
 if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled"))
 {
     app.MapDocumentIntelligenceEndpoints();
+
+    // Analysis endpoints (requires Document Intelligence)
+    if (app.Configuration.GetValue<bool>("Analysis:Enabled", true))
+    {
+        app.MapAnalysisEndpoints();
+    }
 }
 
 // Record Matching endpoints (Phase 2 - only if enabled)

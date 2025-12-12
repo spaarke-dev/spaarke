@@ -1,9 +1,12 @@
 # ADR-013: AI Architecture for Azure OpenAI, AI Search, and Document Intelligence
 
-**Status:** Accepted
-**Date:** 2025-12-05
-**Authors:** Spaarke Engineering
-**Sprint:** Sprint 7 - AI Foundation
+| Field | Value |
+|-------|-------|
+| Status | **Accepted** |
+| Date | 2025-12-05 |
+| Updated | 2025-12-05 |
+| Authors | Spaarke Engineering |
+| Sprint | Sprint 7 - AI Foundation |
 
 ---
 
@@ -48,23 +51,25 @@ Without a clear architecture decision, we risk:
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                              Sprk.Bff.Api                                    │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│  Endpoints/                                                                  │
-│  ├── AiEndpoints.cs          ← AI API routes                                │
-│  │   ├── POST /api/ai/chat   ← RAG-powered chat                             │
-│  │   ├── POST /api/ai/search ← Semantic/hybrid search                       │
-│  │   └── POST /api/ai/index  ← Trigger document indexing                    │
-│  │                                                                          │
-│  Services/                                                                   │
-│  ├── AiChatService.cs        ← Orchestrates RAG pipeline                    │
-│  ├── AiSearchService.cs      ← Vector + keyword search                      │
-│  ├── EmbeddingService.cs     ← Generates embeddings (cached)                │
-│  └── DocumentProcessorService.cs ← Document Intelligence integration        │
+│  Api/Ai/                                                                     │
+│  ├── DocumentIntelligenceEndpoints.cs  ← /api/ai/document-intelligence/*     │
+│  │   ├── POST /analyze        ← SSE analysis stream                          │
+│  │   ├── POST /enqueue        ← enqueue background analysis (ADR-004)        │
+│  │   └── POST /enqueue-batch  ← enqueue batch background analysis            │
+│  ├── AnalysisEndpoints.cs              ← /api/ai/analysis/*                   │
+│  └── RecordMatchEndpoints.cs           ← record matching/association          │
 │                                                                              │
-│  Jobs/                                                                       │
-│  └── AiIndexingJobHandler.cs ← Async document indexing                      │
+│  Services/Ai/                                                                │
+│  ├── DocumentIntelligenceService.cs    ← summarization/entity extraction      │
+│  ├── AnalysisOrchestrationService.cs   ← orchestration + SSE                  │
+│  └── TextExtractorService.cs           ← text extraction (native/Doc Intel)   │
 │                                                                              │
-│  Filters/                                                                    │
-│  └── AiAuthorizationFilter.cs ← Validates AI access permissions             │
+│  Services/Jobs/Handlers/                                                     │
+│  └── DocumentAnalysisJobHandler.cs     ← JobType: "ai-analyze"                │
+│                                                                              │
+│  Api/Filters/                                                                │
+│  ├── AiAuthorizationFilter.cs         ← document-level checks (ADR-008)      │
+│  └── Analysis*AuthorizationFilter.cs  ← analysis resource checks (ADR-008)   │
 └─────────────────────────────────────────────────────────────────────────────┘
                                       │
                     ┌─────────────────┼─────────────────┐
@@ -84,46 +89,39 @@ Without a clear architecture decision, we risk:
 
 | ADR | Requirement | AI Implementation |
 |-----|-------------|-------------------|
-| ADR-001 | Minimal API pattern | `AiToolEndpoints.MapGroup("/api/ai/tools")` with route handlers |
-| ADR-003 | Lean authorization seams | `AiAuthorizationFilter` validates tenant AI entitlements |
-| ADR-004 | Async job contract | `AiToolJobHandler` implements `IJobHandler<AiToolJobContract>` |
-| ADR-007 | SpeFileStore seam | AI reads documents via `FileIntakeService` → `SpeFileStore` |
-| ADR-008 | Endpoint filters | All AI endpoints use `AddEndpointFilter<AiAuthorizationFilter>()` |
-| ADR-009 | Redis-first caching | Extracted text cached with key `ai:text:{driveId}:{itemId}`, TTL 1h |
-| ADR-010 | DI minimalism | Tool framework: `AiToolService`, `IAiToolHandler` implementations |
+| ADR-001 | Minimal API pattern | `DocumentIntelligenceEndpoints`, `AnalysisEndpoints`, `RecordMatchEndpoints` |
+| ADR-003 | Lean authorization seams | Authorization checks run as endpoint filters + Dataverse-backed access |
+| ADR-004 | Async job contract | Background analysis uses `JobContract` with `JobType: "ai-analyze"` |
+| ADR-007 | SpeFileStore seam | AI file reads/writes use `SpeFileStore` (no Graph SDK leakage) |
+| ADR-008 | Endpoint filters | Analysis endpoints use `Add*AuthorizationFilter()` helpers |
+| ADR-009 | Redis-first caching | Redis-first caching applies to expensive AI results where safe/valuable; cache keys and TTLs are defined in code (single place) and must not be hard-coded in this ADR. |
+| ADR-010 | DI minimalism | Small, focused AI services (`DocumentIntelligenceService`, orchestration) |
 
 ---
 
-## AI Tool Framework
+## Implementation Notes (Current)
 
-AI functionality is implemented through a **reusable Tool Framework** that provides shared infrastructure for all AI features.
+- Streaming is implemented via Server-Sent Events (SSE) on `/api/ai/document-intelligence/analyze` and `/api/ai/analysis/execute`.
+- Background processing uses ADR-004 `JobContract` via `JobSubmissionService` and `ServiceBusJobProcessor`.
+- `ai-analyze` is the current background job type for document intelligence analysis.
 
-### Dual Pipeline Architecture
+### Temporary Exceptions, Hidden/Orphaned Elements, and Exit Criteria
 
-When users upload files, two pipelines execute in parallel:
+AI work frequently introduces **temporary shortcuts** (e.g., temporarily disabled resource-level authorization) and **latent/orphaned elements** (unused flags, unused endpoints, unused infra resources, dead configuration). These are sometimes necessary, but they must never be “silent” or permanent.
 
-1. **SPE Pipeline**: Upload → Store → Create Dataverse record
-2. **AI Pipeline**: Extract text → Process with tool-specific AI → Save results
+**Policy (Required)**
+- No hidden shortcuts: commented-out filters, bypassed auth, disabled checks, or hard-coded “MVP” behavior must be documented here.
+- Every exception/orphan must have a **tracking work item** (issue/story/task ID) and a concrete **exit criteria**.
+- Every exception/orphan must include an **owner** and an **expiry/target milestone**; it must be reviewed on each release.
+- If an element is not required, it must be removed (delete unused code/config/infra rather than leaving it “just in case”).
 
-### Tool Handler Pattern
+**Exception / Orphan Register (Current)**
 
-Each AI tool (Summarize, Translate, etc.) implements `IAiToolHandler`:
-
-```csharp
-public interface IAiToolHandler
-{
-    string ToolName { get; }
-    IAsyncEnumerable<AiToolChunk> ProcessStreamingAsync(AiToolContext context, CancellationToken ct);
-    Task<AiToolResult> ProcessAsync(AiToolContext context, CancellationToken ct);
-    Task SaveResultAsync(AiToolResult result, AiToolContext context, CancellationToken ct);
-}
-```
-
-### Streaming UI Integration
-
-The `AiToolAgent` PCF component embeds in forms/dialogs and connects to streaming endpoints via Server-Sent Events (SSE), providing real-time AI response rendering.
-
-See [AI Tool Framework Spec](../../projects/ai-tool-framework/spec.md) for complete implementation details.
+| Area | Exception / Orphan | Why it exists | Tracking | Exit criteria |
+|------|---------------------|--------------|----------|--------------|
+| Authorization | `DocumentIntelligenceEndpoints` does **not** enforce `.AddAiAuthorizationFilter()` (resource-level document checks) | Dataverse OBO-backed access checks are not yet configured for these endpoints | **REQUIRED:** add work item ID | Configure Dataverse OBO access for document checks; enable the filter on `/analyze`, `/enqueue`, `/enqueue-batch`; add tests proving forbidden access is blocked |
+| Caching | Redis caching for AI outputs is not fully implemented/standardized (do not assume cache coverage) | Implementation is incremental and must avoid caching unsafe/PII-heavy payloads without policy | **REQUIRED:** add work item ID | Define cacheable artifacts + TTLs; implement via ADR-009 patterns; centralize key/TTL definitions; add cache hit/miss telemetry |
+| Data persistence | Some “status update” flows are not fully wired (e.g., placeholder updates for pending/completed states) | Dataverse update schema/fields may still be evolving | **REQUIRED:** add work item ID | Finalize Dataverse fields; implement real updates in all enqueue/handler paths; ensure consistent status transitions and error states |
 
 ---
 
@@ -184,73 +182,59 @@ See [AI Tool Framework Spec](../../projects/ai-tool-framework/spec.md) for compl
 ```
 src/server/api/Sprk.Bff.Api/
 ├── Api/
-│   └── AiToolEndpoints.cs              # Streaming + enqueue endpoints
+│   └── Ai/
+│       ├── DocumentIntelligenceEndpoints.cs
+│       ├── AnalysisEndpoints.cs
+│       └── RecordMatchEndpoints.cs
 ├── Services/
 │   └── Ai/
-│       ├── AiToolService.cs            # Tool orchestrator
-│       ├── FileIntakeService.cs        # File download from SPE
-│       ├── TextExtractorService.cs     # Text extraction (native + Doc Intel)
-│       ├── AiStreamingService.cs       # OpenAI streaming wrapper
-│       ├── AiSearchService.cs          # Vector/hybrid search
-│       ├── EmbeddingService.cs         # Embedding generation
-│       └── Tools/
-│           ├── IAiToolHandler.cs       # Tool interface
-│           ├── SummarizeToolHandler.cs # Summarize implementation
-│           └── TranslateToolHandler.cs # Translate implementation
-├── Jobs/
-│   └── AiToolJobHandler.cs             # Background job processor
-├── Filters/
-│   └── AiAuthorizationFilter.cs
-├── Models/
-│   └── AiTools/
-│       ├── AiToolRequest.cs
-│       ├── AiToolContext.cs
-│       ├── AiToolChunk.cs
-│       ├── AiToolResult.cs
-│       └── AiToolJobContract.cs
+│       ├── DocumentIntelligenceService.cs
+│       ├── AnalysisOrchestrationService.cs
+│       ├── TextExtractorService.cs
+│       └── OpenAiClient.cs
+├── Services/Jobs/
+│   ├── JobContract.cs
+│   ├── ServiceBusJobProcessor.cs
+│   └── Handlers/
+│       └── DocumentAnalysisJobHandler.cs
+├── Api/Filters/
+│   └── Analysis*AuthorizationFilter.cs
 └── Configuration/
     └── DocumentIntelligenceOptions.cs
 
 src/client/pcf/
-├── UniversalQuickCreate/               # Embeds AiToolAgent
-└── AiToolAgent/                        # Reusable streaming AI PCF
-    └── AiToolAgent/
-        ├── components/
-        │   ├── AiToolAgentContainer.tsx
-        │   └── StreamingResponse.tsx
-        └── services/
-            └── SseClient.ts
+├── UniversalQuickCreate/               # Upload + AI summary + record match (SSE client utilities)
+├── AnalysisWorkspace/                  # Interactive analysis surface (SSE streaming)
+├── AnalysisBuilder/                    # Analysis configuration/building blocks
+├── AIMetadataExtractor/                # Metadata extraction tooling/control
+└── shared/                             # Shared PCF React/TS code
 ```
 
 ### Endpoint Registration
 
 ```csharp
-// AiToolEndpoints.cs
-public static class AiToolEndpoints
+// DocumentIntelligenceEndpoints.cs
+public static class DocumentIntelligenceEndpoints
 {
-    public static RouteGroupBuilder MapAiToolEndpoints(this IEndpointRouteBuilder routes)
+    public static IEndpointRouteBuilder MapDocumentIntelligenceEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = routes.MapGroup("/api/ai/tools")
-            .WithTags("AI Tools")
-            .AddEndpointFilter<AiAuthorizationFilter>();
+        var group = app.MapGroup("/api/ai/document-intelligence")
+            .RequireAuthorization()
+            .WithTags("AI");
 
-        // Streaming endpoint - returns SSE
-        group.MapPost("/{toolName}/stream", StreamToolAsync)
-            .WithName("AiToolStream")
+        group.MapPost("/analyze", StreamAnalyze)
+            .RequireRateLimiting("ai-stream")
             .Produces(200, contentType: "text/event-stream");
 
-        // Fire-and-forget endpoint
-        group.MapPost("/{toolName}/enqueue", EnqueueToolAsync)
-            .WithName("AiToolEnqueue")
-            .Produces<EnqueueResponse>(202);
-            .Produces(401);
+        group.MapPost("/enqueue", EnqueueAnalysis)
+            .RequireRateLimiting("ai-batch")
+            .Produces(202);
 
-        group.MapPost("/index", HandleIndexAsync)
-            .WithName("AiIndex")
-            .Produces<JobAcceptedResponse>(202)
-            .Produces(401);
+        group.MapPost("/enqueue-batch", EnqueueBatchAnalysis)
+            .RequireRateLimiting("ai-batch")
+            .Produces(202);
 
-        return group;
+        return app;
     }
 }
 ```

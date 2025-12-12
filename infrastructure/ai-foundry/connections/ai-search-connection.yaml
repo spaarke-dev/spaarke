@@ -1,0 +1,8 @@
+# Azure AI Search Connection for AI Foundry Hub
+$schema: https://azuremlschemas.azureedge.net/latest/azureAISearchConnection.schema.json
+name: ai-search-connection
+type: azure_ai_search
+endpoint: https://spaarke-search-dev.search.windows.net/
+credentials:
+  type: managed_identity
+is_shared: true

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest>
+  <control namespace="Spaarke.Controls" constructor="AnalysisWorkspace" version="1.0.13" display-name-key="Analysis Workspace" description-key="AI Document Analysis Workspace with resizable panels, collapsible panels, and SSE streaming support (v1.0.13)" control-type="standard">
+    <external-service-usage enabled="false">
+    </external-service-usage>
+
+    <!--
+      ANALYSIS WORKSPACE PCF CONTROL
+
+      Purpose: Provides the main AI analysis workspace with:
+      - Two-column layout (Working Document + Source Preview)
+      - Monaco Editor for working document editing
+      - AI Chat panel with SSE streaming
+      - Auto-save functionality
+
+      Used In: Analysis Workspace Custom Page (sprk_analysisworkspace)
+    -->
+
+    <!-- Analysis Record ID (BOUND - binds to sprk_analysisid on form) -->
+    <property name="analysisId" display-name-key="Analysis ID" description-key="GUID of the sprk_analysis record (without curly braces)" of-type="SingleLine.Text" usage="bound" required="true" />
+
+    <!-- Document Record ID (INPUT - optional, fetched from expanded relationship) -->
+    <property name="documentId" display-name-key="Document ID" description-key="GUID of the parent sprk_document record (optional - auto-fetched from Analysis record)" of-type="SingleLine.Text" usage="input" required="false" />
+
+    <!-- Container ID (INPUT - for SPE file access) -->
+    <property name="containerId" display-name-key="Container ID" description-key="SharePoint Embedded Container ID for file access" of-type="SingleLine.Text" usage="input" required="false" />
+
+    <!-- File ID (INPUT - for source preview) -->
+    <property name="fileId" display-name-key="File ID" description-key="SharePoint Embedded File ID for source document preview" of-type="SingleLine.Text" usage="input" required="false" />
+
+    <!-- BFF API Base URL (from Environment Variable) -->
+    <property name="apiBaseUrl" display-name-key="API Base URL" description-key="Base URL for BFF API (from sprk_BffApiBaseUrl environment variable)" of-type="SingleLine.Text" usage="input" required="false" />
+
+    <!-- Working Document Content (OUTPUT - for auto-save binding) -->
+    <property name="workingDocumentContent" display-name-key="Working Document Content" description-key="Current content of the working document (Markdown)" of-type="Multiple" usage="output" required="false" />
+
+    <!-- Chat History (OUTPUT - serialized JSON) -->
+    <property name="chatHistory" display-name-key="Chat History" description-key="Serialized chat message history (JSON array)" of-type="Multiple" usage="output" required="false" />
+
+    <!-- Analysis Status (OUTPUT - for status tracking) -->
+    <property name="analysisStatus" display-name-key="Analysis Status" description-key="Current status: Draft, InProgress, Completed, Failed" of-type="SingleLine.Text" usage="output" required="false" />
+
+    <resources>
+      <code path="index.ts" order="1" />
+      <css path="css/AnalysisWorkspace.css" order="1" />
+      <!-- Host-provided libraries: DO NOT bundle React/Fluent -->
+      <platform-library name="React" version="16.14.0" />
+      <platform-library name="Fluent" version="9.46.2" />
+    </resources>
+
+    <feature-usage>
+      <uses-feature name="WebAPI" required="true" />
+      <uses-feature name="Utility" required="true" />
+    </feature-usage>
+  </control>
+</manifest>

@@ -45,8 +45,16 @@ SDAP requires a single, predictable runtime for synchronous request/response and
 | Entry point | `Program.cs` registers Minimal API, ServiceBusClient, HttpClient policies, ProblemDetails, BackgroundService workers |
 | Workers | `Azure.Messaging.ServiceBus` ServiceBusProcessor with Polly retries and idempotent handlers |
 | Health | `/healthz` probe exposed |
-| Logging | App Insights + Serilog for structured logging |
+| Logging | Application Insights + structured `ILogger` logging (no PII) |
 | Docs | Design documents use "App Service (Minimal API + Workers)" not "Function App / Triggers" |
+
+**Clarification:** “Single middleware pipeline” refers to shared cross-cutting concerns (exception handling/`ProblemDetails`, correlation/telemetry, security headers, rate limiting). Resource authorization remains **endpoint-level** (endpoint filters/policies) per ADR-008.
+
+## AI-Directed Coding Guidance
+
+- New synchronous capabilities: add Minimal API endpoints (route groups), return `ProblemDetails` on errors.
+- New asynchronous capabilities: enqueue ADR-004 `JobContract` jobs and process them in `BackgroundService` workers.
+- Do not introduce Azure Functions/Durable Functions packages, attributes, or separate hosts.
 
 ## Exceptions
 
@@ -71,4 +79,5 @@ SDAP requires a single, predictable runtime for synchronous request/response and
 - [ ] No Azure Functions projects in solution
 - [ ] All async work uses BackgroundService + Service Bus
 - [ ] Endpoints defined in Minimal API style
-- [ ] Single middleware pipeline (no duplicate auth/retry)
+- [ ] Single middleware pipeline for cross-cutting concerns (no duplicate auth/retry stacks across separate hosts)
+- [ ] Resource authorization implemented at the endpoint (ADR-008)

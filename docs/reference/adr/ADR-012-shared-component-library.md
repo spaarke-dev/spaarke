@@ -1,9 +1,12 @@
 # ADR-012: Shared Component Library for React/TypeScript Across Modules
 
-**Status:** Accepted
-**Date:** 2025-10-03
-**Authors:** Spaarke Engineering
-**Sprint:** Sprint 5 - Universal Dataset PCF
+| Field | Value |
+|-------|-------|
+| Status | **Accepted** |
+| Date | 2025-10-03 |
+| Updated | 2025-12-12 |
+| Authors | Spaarke Engineering |
+| Sprint | Sprint 5 - Universal Dataset PCF |
 
 ---
 
@@ -23,15 +26,15 @@ Without a shared component library, we risk:
 - **Violated DRY principle** - Not leveraging existing work
 
 ### Current State
-- **BFF API** (`src/api/Spe.Bff.Api/`) - .NET backend, no React components
-- **PCF Controls** (`power-platform/pcf/`) - React/TypeScript, currently isolated
-- **No shared component library** - Each module would build components independently
+- **BFF API** (`src/server/api/Sprk.Bff.Api/`) - .NET backend
+- **PCF Controls** (`src/client/pcf/`) - React/TypeScript
+- **Shared library location** (`src/client/shared/Spaarke.UI.Components/`) - shared React/TS library
 
 ---
 
 ## Decision
 
-**We will create a shared TypeScript/React component library at `src/shared/Spaarke.UI.Components/` that provides:**
+**We will maintain a shared TypeScript/React component library at `src/client/shared/Spaarke.UI.Components/` that provides:**
 
 1. **Reusable React components** (Fluent UI v9 based)
 2. **Shared TypeScript utilities** (formatters, transformers, validators)
@@ -46,6 +49,18 @@ Without a shared component library, we risk:
 - Follow Fluent UI v9 design system exclusively
 - Maintain strict TypeScript typing
 
+### UI/UX Standards (Required)
+
+| Rule | Requirement |
+|------|-------------|
+| **Fluent UI everywhere** | All custom UI must use Fluent UI v9 components and design tokens as the primary UI/UX system (no bespoke component systems). |
+| **Power Apps MDA fit** | Any custom UI embedded in model-driven apps must match the model-driven look/feel and interaction patterns (density, typography, spacing, dialogs, command patterns, focus/keyboard behavior). |
+| **No hard-coded styling** | No hard-coded colors or “pixel-perfect” one-off styling that diverges from Fluent tokens; prefer semantic tokens and theming. |
+| **Dark-mode compatible** | Everything we build (components, icons, illustrations) must render correctly in dark mode and high-contrast scenarios even if MDA dark mode is not officially shipped everywhere. |
+| **Accessibility** | WCAG-aligned behavior (keyboard nav, focus states, contrast). Treat this as a release requirement for shared components. |
+
+**Note:** If these requirements need to govern *all* UI surfaces (PCF, custom pages, webresources, icons/theme assets) beyond this shared library, create a dedicated ADR (e.g., “UI Theming + Dark Mode Compatibility”) to avoid scattering rules across multiple ADRs.
+
 ---
 
 ## Architecture
@@ -53,7 +68,7 @@ Without a shared component library, we risk:
 ### Directory Structure
 
 ```
-src/shared/Spaarke.UI.Components/
+src/client/shared/Spaarke.UI.Components/
 ├── package.json                    # NPM package definition
 ├── tsconfig.json                   # Shared TypeScript config
 ├── .eslintrc.json                  # Shared linting rules
@@ -101,7 +116,7 @@ src/shared/Spaarke.UI.Components/
 
 ### Consumption Pattern
 
-**PCF Control (power-platform/pcf/UniversalDataset/):**
+**PCF Control (`src/client/pcf/UniversalDatasetGrid/`):**
 ```json
 // package.json
 {
@@ -198,8 +213,8 @@ export const App = () => (
 ```json
 {
   "workspaces": [
-    "src/shared/Spaarke.UI.Components",
-    "power-platform/pcf/*"
+    "src/client/shared/Spaarke.UI.Components",
+    "src/client/pcf/*"
   ]
 }
 ```
@@ -638,6 +653,30 @@ export const formatters = {
 
 ---
 
+## Compliance Checklist
+
+Use this as a **pass/fail** review gate for PRs that add or change shared components.
+
+**Design system & UX**
+- Uses Fluent UI v9 components and tokens; no alternate UI framework introduced.
+- Matches model-driven app interaction patterns when embedded (dialogs, spacing/density, typography, command patterns).
+
+**Theming (including dark mode)**
+- No hard-coded colors (including inline styles); styling is token/semantic-token driven.
+- Component renders correctly with both `spaarkeLight` and `spaarkeDark` themes.
+- Icons/visuals work in dark mode and high-contrast (e.g., use `currentColor`/tokens; avoid fixed-color SVGs unless variants are provided).
+
+**Accessibility**
+- Keyboard navigation works end-to-end; visible focus states are preserved.
+- Text/icon contrast meets accessibility expectations in light, dark, and high-contrast.
+
+**Packaging & API hygiene**
+- Public exports are intentional (barrel exports); no accidental deep import dependencies.
+- Component APIs are typed; breaking changes are versioned appropriately.
+- Shared library does not take dependencies on app-specific modules (keep it reusable across PCF/SPA).
+
+---
+
 ## Related ADRs
 
 - [ADR-006: Prefer PCF Controls Over Web Resources](./ADR-006-prefer-pcf-over-webresources.md) - PCF development strategy
@@ -660,6 +699,7 @@ export const formatters = {
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
 | 2025-10-03 | 1.0 | Initial ADR creation | Spaarke Engineering |
+| 2025-12-12 | 1.1 | Added explicit UI/UX standards and compliance checklist (Fluent + MDA fit + dark-mode compatibility) | Spaarke Engineering |
 
 ---
 

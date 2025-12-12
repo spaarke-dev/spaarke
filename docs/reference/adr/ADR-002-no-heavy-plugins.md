@@ -60,7 +60,8 @@ Complex plugins and custom workflow activities. **Rejected** due to observabilit
    - Target only internal BFF API endpoints (not external services)
    - Include correlation IDs and audit logging
    - Handle timeouts gracefully (default 30s)
-   - Contain no business logic beyond parameter mapping
+   - Contain no business logic or branching beyond parameter mapping
+   - Map BFF failures to predictable Dataverse errors (avoid opaque exceptions; include correlation ID in user-facing message)
 
 ## Success Metrics
 
@@ -72,9 +73,15 @@ Complex plugins and custom workflow activities. **Rejected** due to observabilit
 
 ## Compliance
 
-**Architecture tests:** `ADR002_PluginTests.cs` validates no prohibited dependencies.
+**Architecture tests:** `tests/Spaarke.ArchTests/ADR002_PluginTests.cs` validates no prohibited dependencies.
 
 **Code review checklist:**
 - [ ] No `HttpClient` in ValidationPlugin/ProjectionPlugin
 - [ ] Custom API Proxy targets BFF only
 - [ ] Correlation ID passed through
+
+## AI-Directed Coding Guidance
+
+- If you need orchestration, retries, external calls, or long-running work: implement it in the BFF (`src/server/api/Sprk.Bff.Api/`) and/or a worker (ADR-004), not in a plugin.
+- If Dataverse UX needs to call the BFF: use a **Custom API Proxy plugin** (e.g., `src/dataverse/plugins/Spaarke.CustomApiProxy/.../BaseProxyPlugin.cs`) and keep it parameter-mapping only.
+- Keep standard plugins strictly synchronous and local: validation, stamping, projection/denormalization.

@@ -1,0 +1,29 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./out/controls",
+    "rootDir": "./control",
+    "typeRoots": [
+      "node_modules/@types",
+      "../node_modules/@types"
+    ],
+    "jsx": "react",
+    "jsxFactory": "React.createElement",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true
+  },
+  "include": [
+    "control/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "out"
+  ]
+}

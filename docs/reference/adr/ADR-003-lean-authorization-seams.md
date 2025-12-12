@@ -16,7 +16,7 @@ We need flexibility to enforce Dataverse-backed Unified Access Control (UAC) and
 | Rule | Description |
 |------|-------------|
 | **Concrete AuthorizationService** | Evaluates ordered set of small `IAuthorizationRule` policies |
-| **One UAC seam** | `IAccessDataSource` → `DataverseAccessDataSource` returns coarse, per-request snapshots |
+| **One UAC seam** | `IAccessDataSource` → `DataverseAccessDataSource` returns coarse snapshots scoped to a **single request/job execution** |
 | **One storage seam** | `SpeFileStore` encapsulates Graph/SPE operations (no generic `IResourceStore`) |
 | **Policy separation** | Rules contain policy only; SDK/HTTP usage remains in adapters |
 
@@ -57,7 +57,7 @@ Multiple service interfaces per concern and generic policy engines. **Rejected**
 
 | Pattern | Implementation |
 |---------|----------------|
-| Snapshots | Fetched via `IAccessDataSource`, cached per request |
+| Snapshots | Fetched via `IAccessDataSource`, cached for the lifetime of a **single request/job execution** (never reused across requests/jobs) |
 | Deny codes | Machine-readable (e.g., `sdap.access.deny.team_mismatch`) |
 
 ## Exceptions
@@ -82,3 +82,10 @@ Tenant-specific policies should be delivered as additional `IAuthorizationRule` 
 - [ ] No direct Graph/SPE calls outside `SpeFileStore`
 - [ ] Snapshots cached per request (not per call)
 - [ ] Deny results include reason codes
+
+## AI-Directed Coding Guidance
+
+- If you need new authorization behavior, add an `IAuthorizationRule` (do not add a new service layer).
+- Call authorization before invoking `SpeFileStore` operations.
+- Do not cache authorization decisions; cache only the data snapshots used to evaluate rules.
+- Treat UAC snapshots as **request/job scoped** only: do not store/reuse them beyond the current HTTP request or a single background job execution.

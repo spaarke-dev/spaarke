@@ -403,7 +403,7 @@ Proceed with cleanup? (y/n)
 #### Structure Issues
 | Issue | Location | Severity |
 |-------|----------|----------|
-| Orphaned directory | src/server/api/Spe.Bff.Api/ | Medium |
+| Orphaned directory | src/server/api/Sprk.Bff.Api/ | Medium |
 | Empty directory | src/client/office-addins/ | Low |
 
 #### Missing CLAUDE.md

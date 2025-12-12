@@ -95,7 +95,7 @@ Design Spec
 │  design-to-project    adr-aware (proactive)   adr-check     │
 │  ↓                    ↓                       ↓             │
 │  Identifies ADRs      Loads ADRs before       Validates all │
-│  in Phase 2          writing code            12 ADRs        │
+│  in Phase 2          writing code            ADRs in index  │
 │                                                              │
 │  task-create          Prevents violations     Reports        │
 │  ↓                    before they happen     violations     │

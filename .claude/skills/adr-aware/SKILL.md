@@ -27,6 +27,7 @@ Ensures Architecture Decision Records (ADRs) are automatically considered when A
 | Resource Type | Detection Pattern | Required ADRs |
 |---------------|-------------------|---------------|
 | **API Endpoint** | `*Endpoints.cs`, `*Handler.cs`, `Program.cs` routes | ADR-001, ADR-008, ADR-010 |
+| **AI Endpoint/Service** | `Api/Ai/*`, `*DocumentIntelligence*`, `*Analysis*`, `*Ai*` | ADR-013, ADR-015, ADR-016, ADR-018, ADR-019, ADR-020 |
 | **Authorization** | `*Authorization*.cs`, `*Filter.cs`, `*Policy*.cs` | ADR-003, ADR-008 |
 | **Caching** | `*Cache*.cs`, `IDistributedCache`, `IMemoryCache` | ADR-009 |
 | **Dataverse Plugin** | `*Plugin.cs` in plugins folder | ADR-002 |
@@ -35,6 +36,10 @@ Ensures Architecture Decision Records (ADRs) are automatically considered when A
 | **Webresource** | `*.js` in webresources/ | ADR-006 |
 | **DI Registration** | `Program.cs` DI section, `Add*` extension methods | ADR-010 |
 | **Background Worker** | `*Worker.cs`, `*Service.cs` implementing `BackgroundService` | ADR-001, ADR-004 |
+| **Job Status/Persistence** | `*JobStatus*`, `JobOutcome`, `JobContract` | ADR-004, ADR-017, ADR-020 |
+| **Feature Flags / Kill Switches** | `*Feature*`, `FeatureFlag`, `IOptions*` gates | ADR-018 |
+| **API Errors / ProblemDetails** | `ProblemDetails`, `Results.Problem`, `IResult` error helpers | ADR-019 |
+| **Versioning** | `v1/`, `ApiVersion`, contracts/DTO versioning | ADR-020 |
 | **Storage/Documents** | `*Store*.cs`, `*Document*.cs`, `*File*.cs` | ADR-005, ADR-007 |
 
 ### Rule 2: Automatic ADR Loading
@@ -94,7 +99,7 @@ IF detected violation pattern:
 
 ## ADR Quick Reference
 
-Reference this table for common constraints (full ADRs at `docs/reference/adr/`):
+Reference this table for common constraints. The source of truth is the ADR index: `docs/reference/adr/README-ADRs.md`.
 
 | ADR | Title | Key Constraint | Violation Pattern |
 |-----|-------|----------------|-------------------|
@@ -110,6 +115,14 @@ Reference this table for common constraints (full ADRs at `docs/reference/adr/`)
 | ADR-010 | DI Minimalism | ≤15 DI registrations | Interface for single implementation |
 | ADR-011 | Dataset PCF | PCF for data grids | Native subgrid with custom actions |
 | ADR-012 | Shared Components | Reuse @spaarke/ui-components | Duplicate component implementations |
+| ADR-013 | AI Architecture | No hidden/orphaned AI elements | Undocumented AI endpoints/jobs |
+| ADR-014 | AI Caching | Define cache reuse policy | Ad-hoc caching per endpoint |
+| ADR-015 | AI Data Governance | Minimize/secure AI data flows | Logging prompts/PII, unclear retention |
+| ADR-016 | AI Backpressure | Rate limits + bounded concurrency | Unbounded fanout / no throttling |
+| ADR-017 | Job Status | Persist job status contract | Fire-and-forget without status |
+| ADR-018 | Feature Flags | Kill switches for risky features | No gating for AI/expensive features |
+| ADR-019 | API Errors | ProblemDetails standards | Ad-hoc error payloads/status codes |
+| ADR-020 | Versioning | Version APIs/jobs/contracts | Breaking changes without version bump |
 
 ---
 
@@ -205,4 +218,4 @@ Run `/adr-check` after completing tasks to verify no violations were introduced.
 
 ---
 
-*Last updated: December 4, 2025*
+*Last updated: December 12, 2025*

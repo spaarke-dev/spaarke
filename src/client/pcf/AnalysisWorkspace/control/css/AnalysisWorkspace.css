@@ -1,0 +1,146 @@
+/**
+ * Analysis Workspace PCF Control Styles
+ *
+ * Provides base styles for the workspace layout.
+ * Fluent UI v9 tokens are used for theming.
+ */
+
+/* Reset and base styles */
+.analysis-workspace-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    font-family: var(--fontFamilyBase);
+}
+
+/* Ensure full height in Custom Page context */
+.analysis-workspace-container,
+.analysis-workspace-container > div {
+    min-height: 0;
+}
+
+/* Monaco Editor overrides */
+.monaco-editor-container {
+    height: 100%;
+    width: 100%;
+}
+
+.monaco-editor-container .monaco-editor {
+    position: absolute !important;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--colorNeutralBackground3);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--colorNeutralStroke1);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--colorNeutralStroke1Hover);
+}
+
+/* Chat message styles */
+.chat-message {
+    padding: 8px 12px;
+    border-radius: 8px;
+    margin-bottom: 8px;
+    max-width: 85%;
+}
+
+.chat-message.user {
+    background: var(--colorBrandBackground2);
+    margin-left: auto;
+}
+
+.chat-message.assistant {
+    background: var(--colorNeutralBackground3);
+    margin-right: auto;
+}
+
+.chat-message.streaming::after {
+    content: "▋";
+    animation: blink 1s infinite;
+}
+
+@keyframes blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0; }
+}
+
+/* Save indicator animation */
+.save-indicator {
+    transition: opacity 0.3s ease-in-out;
+}
+
+.save-indicator.saving {
+    animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* Resizable panel styles */
+.resizable-panel {
+    position: relative;
+}
+
+.resize-handle {
+    position: absolute;
+    width: 4px;
+    height: 100%;
+    right: 0;
+    top: 0;
+    cursor: col-resize;
+    background: transparent;
+    transition: background 0.2s;
+}
+
+.resize-handle:hover {
+    background: var(--colorBrandStroke1);
+}
+
+/* Loading overlay */
+.loading-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.8);
+    z-index: 100;
+}
+
+/* Dark theme adjustments */
+@media (prefers-color-scheme: dark) {
+    .loading-overlay {
+        background: rgba(0, 0, 0, 0.8);
+    }
+}
+
+/* Print styles */
+@media print {
+    .analysis-workspace-container {
+        height: auto;
+        overflow: visible;
+    }
+
+    .chat-panel {
+        display: none;
+    }
+}

@@ -1,0 +1,8 @@
+# Azure OpenAI Connection for AI Foundry Hub
+$schema: https://azuremlschemas.azureedge.net/latest/azureOpenAIConnection.schema.json
+name: azure-openai-connection
+type: azure_open_ai
+azure_endpoint: https://spaarke-openai-dev.openai.azure.com/
+credentials:
+  type: managed_identity
+is_shared: true

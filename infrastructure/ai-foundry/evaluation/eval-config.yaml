@@ -1,0 +1,72 @@
+# AI Foundry Evaluation Configuration for Spaarke Analysis
+# Defines metrics and thresholds for analysis quality evaluation
+$schema: https://azuremlschemas.azureedge.net/promptflow/latest/Evaluation.schema.json
+
+name: spaarke-analysis-evaluation
+display_name: "Spaarke Analysis Quality Evaluation"
+description: "Evaluates the quality of document analysis outputs using groundedness, relevance, coherence, and fluency metrics"
+
+# Evaluation metrics to compute
+metrics:
+  # GPT-based metrics (require Azure OpenAI connection)
+  - name: groundedness
+    description: "Measures how well the analysis is grounded in the source document"
+    type: gpt
+    model: gpt-4o-mini
+    threshold: 3.5  # Scale 1-5, minimum acceptable score
+
+  - name: relevance
+    description: "Measures how relevant the analysis is to the document content"
+    type: gpt
+    model: gpt-4o-mini
+    threshold: 3.5
+
+  - name: coherence
+    description: "Measures logical flow and consistency of the analysis"
+    type: gpt
+    model: gpt-4o-mini
+    threshold: 4.0
+
+  - name: fluency
+    description: "Measures language quality and readability"
+    type: gpt
+    model: gpt-4o-mini
+    threshold: 4.0
+
+  # Custom metrics
+  - name: format_compliance
+    description: "Checks if output follows requested format (markdown/json)"
+    type: custom
+    script: metrics/format_compliance.py
+    threshold: 0.9  # 90% compliance rate
+
+  - name: completeness
+    description: "Checks if all required sections are present"
+    type: custom
+    script: metrics/completeness.py
+    threshold: 0.85
+
+# Aggregation settings
+aggregation:
+  # How to aggregate scores across test cases
+  method: mean
+  # Report variance/std dev
+  include_variance: true
+  # Report min/max
+  include_range: true
+
+# Alert thresholds
+alerts:
+  # Trigger alert if any metric falls below threshold
+  on_threshold_breach: true
+  # Trigger if metric drops by more than X% from baseline
+  on_regression:
+    enabled: true
+    percentage: 10
+
+# Baseline settings (optional, for comparison)
+baseline:
+  # Path to baseline results JSON
+  path: baselines/v1.0-baseline.json
+  # Compare new runs against baseline
+  compare_enabled: true

@@ -1,0 +1,3 @@
+# Requirements for analysis-continue prompt flow
+promptflow>=1.10.0
+promptflow-tools>=1.4.0

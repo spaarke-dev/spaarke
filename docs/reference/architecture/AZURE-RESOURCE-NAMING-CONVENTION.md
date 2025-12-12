@@ -1,7 +1,7 @@
 # Azure Resource Naming Convention
 
-> **Version**: 1.0  
-> **Date**: December 5, 2025  
+> **Version**: 1.1
+> **Date**: December 12, 2025
 > **Status**: Proposed
 
 ## Overview
@@ -74,6 +74,12 @@ Where:
 | Storage Account | 24 | `sprk{purpose}{env}sa` | `sprkshareddevsa` | `sprksharedprodsa` |
 | Application Insights | 255 | `sprk-{app}-{env}-insights` | `sprk-bff-dev-insights` | `sprk-bff-prod-insights` |
 | Log Analytics | 63 | `sprk-{purpose}-{env}-logs` | `sprk-shared-dev-logs` | `sprk-shared-prod-logs` |
+| AI Foundry Hub | 63 | `sprk{customer}{env}-aif-hub` | `sprkspaarkedev-aif-hub` | `sprkspaarke-aif-hub` |
+| AI Foundry Project | 63 | `sprk{customer}{env}-aif-proj` | `sprkspaarkedev-aif-proj` | `sprkspaarke-aif-proj` |
+| AI Foundry Storage | 24 | `sprk{customer}{env}aifsa` | `sprkspaarkedevaifsa` | `sprkspaarkeaifsa` |
+| AI Foundry Key Vault | 24 | `sprk{customer}{env}-aif-kv` | `sprkspaarkedev-aif-kv` | `sprkspaarke-aif-kv` |
+| Azure OpenAI | 64 | `spaarke-openai-{env}` | `spaarke-openai-dev` | `spaarke-openai-prod` |
+| Azure AI Search | 60 | `spaarke-search-{env}` | `spaarke-search-dev` | `spaarke-search-prod` |
 
 ---
 
@@ -242,3 +248,6 @@ BFF_API_CLIENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 | App Service | 60 | Alphanumerics and hyphens |
 | Service Bus | 50 | Alphanumerics and hyphens (start with letter) |
 | Redis | 63 | Alphanumerics and hyphens |
+| AI Foundry Hub/Project | 63 | Alphanumerics and hyphens (start with letter) |
+| Azure OpenAI | 64 | Alphanumerics and hyphens (start with letter) |
+| Azure AI Search | 60 | Lowercase alphanumerics and hyphens (start with letter) |

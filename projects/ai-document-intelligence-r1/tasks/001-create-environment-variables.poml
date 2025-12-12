@@ -3,7 +3,7 @@
   <metadata>
     <title>Create Environment Variables in Dataverse Solution</title>
     <phase>Phase 1: Core Infrastructure</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>002, 003, 004, 035, 052, 065</blocks>

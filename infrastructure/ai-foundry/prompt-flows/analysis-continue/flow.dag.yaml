@@ -1,0 +1,58 @@
+# Analysis Continue Prompt Flow
+# Continues an existing analysis via conversational refinement
+$schema: https://azuremlschemas.azureedge.net/promptflow/latest/Flow.schema.json
+
+inputs:
+  working_document:
+    type: string
+    description: "Current working document (analysis result so far)"
+  chat_history:
+    type: list
+    description: "List of previous chat messages [{role, content, timestamp}]"
+    default: []
+  user_message:
+    type: string
+    description: "New user message for refinement"
+  max_history_messages:
+    type: int
+    description: "Maximum number of history messages to include"
+    default: 10
+  max_tokens:
+    type: int
+    description: "Maximum tokens for the response"
+    default: 4096
+
+outputs:
+  refined_analysis:
+    type: string
+    reference: ${generate_continuation.output}
+  token_usage:
+    type: object
+    reference: ${generate_continuation.usage}
+
+nodes:
+  # Node 1: Build continuation prompt with history and context
+  - name: build_continuation_prompt
+    type: python
+    source:
+      type: code
+      path: build_continuation_prompt.py
+    inputs:
+      working_document: ${inputs.working_document}
+      chat_history: ${inputs.chat_history}
+      user_message: ${inputs.user_message}
+      max_history_messages: ${inputs.max_history_messages}
+
+  # Node 2: Generate the continuation using Azure OpenAI
+  - name: generate_continuation
+    type: llm
+    source:
+      type: code
+      path: generate_continuation.jinja2
+    inputs:
+      deployment_name: gpt-4o-mini
+      max_tokens: ${inputs.max_tokens}
+      temperature: 0.3
+      continuation_prompt: ${build_continuation_prompt.output}
+    connection: azure-openai-connection
+    api: chat

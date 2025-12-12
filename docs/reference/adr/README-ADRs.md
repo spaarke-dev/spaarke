@@ -4,51 +4,73 @@ This repository segment packages Spaarke’s Architecture Decision Records (ADRs
 
 ## How to use this bundle
 
-- Place the `docs/adr` folder in your repository at `./docs/adr/`. Keep filenames and numbering intact.
+- In this repository, ADRs live at `docs/reference/adr/`.
+- If you copy this bundle to another repo, place it at `./docs/adr/` (or update links consistently). Keep filenames and numbering intact.
 - Link ADRs from your design documents in the **Runtime Model**, **Security Model**, and **Operations** sections.
 - Treat ADRs as **source of truth** for architectural guardrails. New technology introductions or major deviations must add or supersede an ADR.
 - The AI coding agent should read ADRs **before** making automated changes and use the prompts in the guides.
 
-## Index of ADRs (001–012)
+## Index of ADRs (001–020)
 
-- [ADR-001: Minimal API + BackgroundService; do not use Azure Functions](docs/adr/ADR-001-minimal-api-and-workers.md)
+- [ADR-001: Minimal API + BackgroundService; do not use Azure Functions](./ADR-001-minimal-api-and-workers.md)
   Establishes the single runtime: Minimal API for sync calls, BackgroundService workers for async via Service Bus.
 
-- [ADR-002: Keep Dataverse plugins thin; no orchestration in plugins](docs/adr/ADR-002-no-heavy-plugins.md)
+- [ADR-002: Keep Dataverse plugins thin; no orchestration in plugins](./ADR-002-no-heavy-plugins.md)
   Plugins do validation/projection only. No HTTP/Graph calls or long-running logic; orchestration sits in the BFF/workers.
 
-- [ADR-003: Lean authorization with two seams (UAC data and file storage)](docs/adr/ADR-003-lean-authorization-seams.md)
+- [ADR-003: Lean authorization with two seams (UAC data and file storage)](./ADR-003-lean-authorization-seams.md)
   Concrete `AuthorizationService` + small rules; `IAccessDataSource` for Dataverse UAC; `SpeFileStore` for SPE operations.
 
-- [ADR-004: Async job contract and uniform processing](docs/adr/ADR-004-async-job-contract.md)
+- [ADR-004: Async job contract and uniform processing](./ADR-004-async-job-contract.md)
   One job envelope, idempotent handlers, Polly retries, poison-queue on exhaustion, consistent telemetry.
 
-- [ADR-005: Flat storage model in SharePoint Embedded (SPE)](docs/adr/ADR-005-flat-storage-spe.md)
+- [ADR-005: Flat storage model in SharePoint Embedded (SPE)](./ADR-005-flat-storage-spe.md)
   Flat storage with metadata-based associations; no deep folder trees; app-mediated access.
 
-- [ADR-006: Prefer PCF controls over legacy JavaScript webresources](docs/adr/ADR-006-prefer-pcf-over-webresources.md)
+- [ADR-006: Prefer PCF controls over legacy JavaScript webresources](./ADR-006-prefer-pcf-over-webresources.md)
   Modern, typed UI components and better lifecycle on Power Platform.
 
-- [ADR-007: SPE storage seam minimalism (single focused facade)](docs/adr/ADR-007-spe-storage-seam-minimalism.md)
+- [ADR-007: SPE storage seam minimalism (single focused facade)](./ADR-007-spe-storage-seam-minimalism.md)
   Replace generic `IResourceStore` with a concrete `SpeFileStore` facade; no Graph SDK types leak above the facade.
 
-- [ADR-008: Authorization execution model — endpoint filters over global middleware](docs/adr/ADR-008-authorization-endpoint-filters.md)
+- [ADR-008: Authorization execution model — endpoint filters over global middleware](./ADR-008-authorization-endpoint-filters.md)
   One context middleware; enforce resource-level checks via endpoint filters/policy handlers that call `AuthorizationService`.
 
-- [ADR-009: Caching policy — Redis-first with per-request cache](docs/adr/ADR-009-caching-redis-first.md)
+- [ADR-009: Caching policy — Redis-first with per-request cache](./ADR-009-caching-redis-first.md)
   Distributed cache only for cross-request reuse; add L1 only if profiling proves a need; version keys and keep TTLs short.
 
-- [ADR-010: Dependency Injection minimalism and feature modules](docs/adr/ADR-010-di-minimalism.md)
+- [ADR-010: Dependency Injection minimalism and feature modules](./ADR-010-di-minimalism.md)
   Register concretes unless a seam is required; feature-module registration; one typed client per upstream; Options for config.
 
-- [ADR-011: Dataset PCF Controls Over Native Subgrids](docs/adr/ADR-011-dataset-pcf-over-subgrids.md)
+- [ADR-011: Dataset PCF Controls Over Native Subgrids](./ADR-011-dataset-pcf-over-subgrids.md)
   Build custom Dataset PCF controls instead of using native Power Platform subgrids for list-based scenarios requiring custom UI, actions, or advanced interactions.
 
-- [ADR-012: Shared Component Library for React/TypeScript Across Modules](docs/adr/ADR-012-shared-component-library.md)
-  Create a shared TypeScript/React component library at `src/shared/Spaarke.UI.Components/` for reuse across PCF controls, future SPA, and Office Add-ins.
+- [ADR-012: Shared Component Library for React/TypeScript Across Modules](./ADR-012-shared-component-library.md)
+  Create a shared TypeScript/React component library at `src/client/shared/Spaarke.UI.Components/` for reuse across PCF controls, future SPA, and Office Add-ins.
 
-- [ADR-013: AI Architecture for Azure OpenAI, AI Search, and Document Intelligence](docs/adr/ADR-013-ai-architecture.md)
+- [ADR-013: AI Architecture for Azure OpenAI, AI Search, and Document Intelligence](./ADR-013-ai-architecture.md)
   Extends Sprk.Bff.Api with AI capabilities following established ADR patterns; covers chat, semantic search, document indexing for Model 1 and Model 2 deployments.
+
+- [ADR-014: AI Caching and Reuse Policy](./ADR-014-ai-caching-and-reuse-policy.md)
+  AI-specific caching/reuse rules (keys, TTLs, tenant scoping) layered on ADR-009.
+
+- [ADR-015: AI Data Governance (PII, Retention, Redaction, Logging)](./ADR-015-ai-data-governance.md)
+  Rules for minimization, safe logging/telemetry, and retention for AI inputs/outputs.
+
+- [ADR-016: AI Cost, Rate Limits, and Backpressure Strategy](./ADR-016-ai-cost-rate-limit-and-backpressure.md)
+  Standard approach for throttling, bounded concurrency, and graceful degradation under load.
+
+- [ADR-017: Async Job Status, Persistence, and Client Contract](./ADR-017-async-job-status-and-persistence.md)
+  Uniform job status contract for clients/operators, complementing ADR-004.
+
+- [ADR-018: Feature Flags and Kill Switches (Server + Client)](./ADR-018-feature-flags-and-kill-switches.md)
+  Standard feature-flag approach for safe rollouts and rapid disablement.
+
+- [ADR-019: API Errors and ProblemDetails Standard (including SSE)](./ADR-019-api-errors-and-problemdetails.md)
+  Uniform error responses for HTTP and SSE streaming endpoints.
+
+- [ADR-020: Versioning Strategy (APIs, Jobs, and Client Packages)](./ADR-020-versioning-strategy-apis-jobs-client-packages.md)
+  SemVer and compatibility rules across endpoints, job payloads, and shared packages.
 
 ## Guides
 
@@ -65,6 +87,16 @@ This repository segment packages Spaarke’s Architecture Decision Records (ADRs
 - Authorization is performed via endpoint filters/policy handlers that call `AuthorizationService` ([ADR-008]).
 - Redis is the only cross-request cache; do not introduce hybrid L1 unless profiling drives an ADR update ([ADR-009]).
 - DI registrations should remain near the minimal block shown in the refactor guide ([ADR-010]).
+
+## ADR structure for AI-directed coding (Recommended)
+
+To make ADRs maximally useful for AI-assisted implementation and review, each ADR SHOULD include:
+
+- **Decision rules**: concise “Do/Don’t” rules (tables are preferred)
+- **Scope and non-goals**: what this ADR applies to, and what it explicitly does not
+- **Operationalization**: where this shows up in code (key files/types) and how to enforce it
+- **Failure modes**: what can go wrong if violated, and what telemetry/tests catch it
+- **Compliance checklist**: short, reviewable checklist items
 
 ## Workflow for architectural change
 
@@ -88,7 +120,7 @@ Runs automatically on every PR and push to master. Validates 6 core ADRs (001, 0
 ```bash
 /adr-check
 ```
-Claude Code skill providing guidance for all 12 ADRs with contextual explanations and suggested fixes.
+Claude Code skill providing guidance for the ADR set with contextual explanations and suggested fixes.
 
 ## AI coding agent usage
 
@@ -99,5 +131,6 @@ Claude Code skill providing guidance for all 12 ADRs with contextual explanation
 
 ## Change log
 
-- 2025-12-02: Implemented hybrid ADR validation (NetArchTest + Claude Code skill) covering all 12 ADRs. Added ADR-011 (Dataset PCF) and ADR-012 (Shared components).
+- 2025-12-12: Added ADR-014..ADR-020 (AI caching, governance, backpressure, job status, feature flags, error standards, versioning).
+- 2025-12-02: Implemented hybrid ADR validation (NetArchTest + Claude Code skill) covering the ADR set. Added ADR-011 (Dataset PCF) and ADR-012 (Shared components).
 - 2025-09-27: Initial publication of consolidated ADRs (001–010) and guides with README.

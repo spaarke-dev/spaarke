@@ -1,7 +1,7 @@
 # AI Implementation Status
 
-> **Version**: 1.0
-> **Date**: December 11, 2025
+> **Version**: 1.1
+> **Date**: December 12, 2025
 > **Status**: Current
 > **Author**: Spaarke Engineering
 
@@ -22,9 +22,11 @@ This document describes the **actual deployed state** of Spaarke's AI capabiliti
 | 1b | Email Metadata Extraction | Deployed | Dev |
 | 2 | Record Matching (AI Search) | Deployed | Dev |
 | 2 | PCF Record Suggestions UI | Deployed | Dev |
+| 3 | AI Foundry Hub + Project | Deployed | Dev |
+| 3 | Prompt Flow Templates | Created | Dev |
+| 3 | Evaluation Pipeline Config | Created | Dev |
 | Future | RAG Chat | Not Started | - |
 | Future | Vector Embeddings | Not Started | - |
-| Future | Microsoft Foundry | Not Started | - |
 
 ---
 
@@ -37,6 +39,12 @@ This document describes the **actual deployed state** of Spaarke's AI capabiliti
 | Azure OpenAI | spaarke-openai-dev | Standard | West US 2 |
 | Document Intelligence | spaarke-docintel-dev | Standard | West US 2 |
 | Azure AI Search | spaarke-search-dev | Standard (S1) | West US 2 |
+| AI Foundry Hub | sprkspaarkedev-aif-hub | Basic | West US 2 |
+| AI Foundry Project | sprkspaarkedev-aif-proj | N/A | West US 2 |
+| AI Foundry Storage | sprkspaarkedevaifsa | Standard LRS | West US 2 |
+| AI Foundry Key Vault | sprkspaarkedev-aif-kv | Standard | West US 2 |
+| AI Foundry App Insights | sprkspaarkedev-aif-insights | Per GB | West US 2 |
+| AI Foundry Log Analytics | sprkspaarkedev-aif-logs | Per GB | West US 2 |
 
 ### 1.2 Azure OpenAI Deployments
 
@@ -69,6 +77,120 @@ Semantic Search: Enabled (standard tier)
 | keywords | string | Yes | No |
 | dataverseRecordId | string | No | Yes |
 | dataverseEntityName | string | No | Yes |
+
+### 1.4 AI Foundry Infrastructure
+
+AI Foundry provides a managed platform for prompt engineering, evaluation, and MLOps.
+
+**Architecture Diagram**:
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Azure AI Foundry                             │
+├─────────────────────────────────────────────────────────────────┤
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │          Hub: sprkspaarkedev-aif-hub                     │   │
+│  │  ┌─────────────────┐  ┌─────────────────┐               │   │
+│  │  │ Key Vault       │  │ Storage Account │               │   │
+│  │  │ (Secrets)       │  │ (Artifacts)     │               │   │
+│  │  └─────────────────┘  └─────────────────┘               │   │
+│  │  ┌─────────────────┐  ┌─────────────────┐               │   │
+│  │  │ App Insights    │  │ Log Analytics   │               │   │
+│  │  │ (Monitoring)    │  │ (Diagnostics)   │               │   │
+│  │  └─────────────────┘  └─────────────────┘               │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                              │                                   │
+│                              ▼                                   │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │       Project: sprkspaarkedev-aif-proj                   │   │
+│  │  ┌─────────────────────────────────────────────────────┐ │   │
+│  │  │               Connections                           │ │   │
+│  │  │  ┌──────────────────┐  ┌──────────────────┐        │ │   │
+│  │  │  │ azure-openai-    │  │ ai-search-       │        │ │   │
+│  │  │  │ connection       │  │ connection       │        │ │   │
+│  │  │  │ (Managed ID)     │  │ (Managed ID)     │        │ │   │
+│  │  │  └────────┬─────────┘  └────────┬─────────┘        │ │   │
+│  │  └───────────│─────────────────────│──────────────────┘ │   │
+│  │              │                     │                     │   │
+│  │  ┌───────────▼─────────────────────▼──────────────────┐ │   │
+│  │  │               Prompt Flows                         │ │   │
+│  │  │  ┌──────────────────┐  ┌──────────────────┐       │ │   │
+│  │  │  │ analysis-execute │  │ analysis-continue│       │ │   │
+│  │  │  │ (Doc Analysis)   │  │ (Chat Continue)  │       │ │   │
+│  │  │  └──────────────────┘  └──────────────────┘       │ │   │
+│  │  └────────────────────────────────────────────────────┘ │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                              │                                   │
+│                              ▼                                   │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │                    Evaluation                            │   │
+│  │  Metrics: groundedness, relevance, coherence, fluency    │   │
+│  │  Custom: format_compliance, completeness                 │   │
+│  └──────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+           │                               │
+           ▼                               ▼
+┌─────────────────────┐       ┌─────────────────────┐
+│ spaarke-openai-dev  │       │ spaarke-search-dev  │
+│ (Azure OpenAI)      │       │ (Azure AI Search)   │
+│ gpt-4o-mini         │       │ spaarke-records-    │
+│                     │       │ index               │
+└─────────────────────┘       └─────────────────────┘
+```
+
+**Connections**:
+
+| Connection Name | Type | Target Resource | Auth Method |
+|-----------------|------|-----------------|-------------|
+| azure-openai-connection | azure_open_ai | spaarke-openai-dev | Managed Identity |
+| ai-search-connection | azure_ai_search | spaarke-search-dev | Managed Identity |
+
+**Prompt Flows**:
+
+| Flow Name | Purpose | Inputs | Outputs |
+|-----------|---------|--------|---------|
+| analysis-execute | Document analysis | document_text, action_type, skills, knowledge_context | analysis_output |
+| analysis-continue | Conversational continuation | previous_analysis, user_message, chat_history | continuation_output |
+
+**Evaluation Metrics**:
+
+| Metric | Type | Threshold | Description |
+|--------|------|-----------|-------------|
+| groundedness | GPT-based | 3.5/5 | Analysis grounded in source document |
+| relevance | GPT-based | 3.5/5 | Analysis relevant to document content |
+| coherence | GPT-based | 4.0/5 | Logical flow and consistency |
+| fluency | GPT-based | 4.0/5 | Language quality and readability |
+| format_compliance | Custom | 90% | Output follows markdown/JSON format |
+| completeness | Custom | 85% | All required sections present |
+
+**Infrastructure Files**:
+```
+infrastructure/ai-foundry/
+├── bicep/
+│   └── ai-foundry-hub.bicep           # Hub + Project deployment
+├── connections/
+│   ├── azure-openai-connection.yaml   # OpenAI connection config
+│   └── ai-search-connection.yaml      # AI Search connection config
+├── prompt-flows/
+│   ├── analysis-execute/              # Main analysis flow
+│   │   ├── flow.dag.yaml
+│   │   ├── build_system_prompt.py
+│   │   ├── build_user_prompt.py
+│   │   ├── generate_analysis.jinja2
+│   │   └── requirements.txt
+│   └── analysis-continue/             # Continuation flow
+│       ├── flow.dag.yaml
+│       ├── build_continuation_prompt.py
+│       ├── generate_continuation.jinja2
+│       └── requirements.txt
+├── evaluation/
+│   ├── eval-config.yaml               # Metrics configuration
+│   ├── metrics/
+│   │   ├── format_compliance.py       # Custom format checker
+│   │   └── completeness.py            # Custom section checker
+│   └── test-data/
+│       └── sample-evaluations.jsonl   # Test cases
+└── README.md                          # AI Foundry documentation
+```
 
 ---
 
@@ -362,7 +484,9 @@ UniversalQuickCreate/
 | RAG Chat | Section 3.2 | Not started |
 | Vector Embeddings | Section 4.1 | Not started |
 | Semantic Document Search | Section 4.2 | Not started |
-| Microsoft Foundry Integration | Section 5 | Not started |
+| AI Foundry Hub + Project | Section 5 | **Deployed** (see Section 1.4) |
+| AI Foundry Prompt Flows | Section 5 | **Templates Created** (not deployed to runtime) |
+| AI Foundry Evaluation | Section 5 | **Config Created** (not running) |
 | Multi-modal Vision OCR | - | Partial (config ready, model not deployed) |
 | Background Job Handler | - | Placeholder only |
 
@@ -409,6 +533,24 @@ az cognitiveservices account deployment list \
   --name spaarke-openai-dev \
   --resource-group spe-infrastructure-westus2 \
   -o table
+
+# Check AI Foundry Hub exists
+az ml workspace show \
+  --name sprkspaarkedev-aif-hub \
+  --resource-group spe-infrastructure-westus2 \
+  -o table
+
+# Check AI Foundry Project exists
+az ml workspace show \
+  --name sprkspaarkedev-aif-proj \
+  --resource-group spe-infrastructure-westus2 \
+  -o table
+
+# List AI Foundry connections
+az ml connection list \
+  --workspace-name sprkspaarkedev-aif-proj \
+  --resource-group spe-infrastructure-westus2 \
+  -o table
 ```
 
 ---
@@ -419,10 +561,11 @@ az cognitiveservices account deployment list \
 |----------|---------|
 | [SPAARKE-AI-STRATEGY.md](../../reference/architecture/SPAARKE-AI-STRATEGY.md) | Strategic vision and roadmap |
 | [SPAARKE-AI-ARCHITECTURE.md](./SPAARKE-AI-ARCHITECTURE.md) | Target architecture (aspirational) |
+| [AI Foundry README](../../../infrastructure/ai-foundry/README.md) | AI Foundry infrastructure documentation |
 | [AI-SUMMARY-QUICK-REF.md](../../guides/AI-SUMMARY-QUICK-REF.md) | Quick troubleshooting reference |
 | [TROUBLESHOOTING-AI-SUMMARY.md](../../guides/TROUBLESHOOTING-AI-SUMMARY.md) | Detailed troubleshooting guide |
 
 ---
 
 *Document Owner: Spaarke Engineering*
-*Last Updated: December 11, 2025*
+*Last Updated: December 12, 2025*
