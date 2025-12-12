@@ -22,7 +22,7 @@
 |----|------|--------|--------------|-----------------|
 | 001 | Create Environment Variables in Dataverse Solution | ✅ | none | 4h |
 | 002 | Create Bicep Parameter Template | ✅ | 001 | 3h |
-| 003 | Create Token-Replacement appsettings.json Template | ✅ | 001 | 2h |
+| 003 | Create Token-Replacement appsettings.json Template | 🔲 | 001 | 2h |
 | 004 | Update BFF API Configuration to Use Environment Variables | ✅ | 001, 003 | 4h |
 
 ### Azure AI Foundry Infrastructure
@@ -50,7 +50,7 @@
 | 018 | Create sprk_analysisemailmetadata Entity | ✅ | 010 | 2h |
 | 019 | Create sprk_analysischatmessage Entity | ✅ | 010 | 2h |
 | 020 | Create Security Roles for Analysis Feature | 🔲 | 010-019 | 3h |
-| 021 | Export Dataverse Solution Package | ✅ | 001, 010-020 | 2h |
+| 021 | Export Dataverse Solution Package | 🔲 | 001, 010-020 | 2h |
 
 ### BFF API Implementation
 
@@ -74,9 +74,9 @@
 |----|------|--------|--------------|-----------------|
 | 033 | Test Bicep Deployment to External Test Subscription | 🔲 | 005, 006, 021 | 4h |
 | 034 | Test Dataverse Solution Import to Clean Environment | 🔲 | 021 | 3h |
-| 035 | Verify All Environment Variables Resolve Correctly | ✅ | 001, 004, 033 | 2h |
+| 035 | Verify All Environment Variables Resolve Correctly | 🔲 | 001, 004, 033 | 2h |
 | 036 | Run Integration Tests Against Dev Environment | 🔲 | 032, 033 | 3h |
-| 037 | Create Phase 1 Deployment Guide | ✅ | 033-036 | 4h |
+| 037 | Create Phase 1 Deployment Guide | 🔲 | 033-036 | 4h |
 
 **Phase 1 Total**: 37 tasks, ~165 hours
 
@@ -91,20 +91,20 @@
 | 038 | Add Analysis Tab to sprk_document Form | ✅ | Phase 1 Complete | 2h |
 | 039 | Add Analysis Grid to Analysis Tab | ✅ | 038 | 2h |
 | 040 | Add "+ New Analysis" Command Button | ✅ | 038 | 2h |
-| 041 | Add Form Scripts for Navigation to Analysis Workspace | ✅ | 038-040 | 3h |
+| 041 | Add Form Scripts for Navigation to Analysis Workspace | 🔲 | 038-040 | 3h |
 
 ### Analysis Builder Custom Page
 
 | ID | Task | Status | Dependencies | Estimated Hours |
 |----|------|--------|--------------|-----------------|
-| 042 | Create Analysis Builder PCF Component | ✅ | Phase 1 Complete | 4h |
-| 043 | Add Action Selector Component | ✅ | 042 | 3h |
-| 044 | Add Skills Multi-Select Component | ✅ | 042 | 3h |
-| 045 | Add Knowledge Multi-Select Component | ✅ | 042 | 3h |
-| 046 | Add Tools Multi-Select Component | ✅ | 042 | 3h |
-| 047 | Add Output Options Component | ✅ | 042 | 2h |
-| 048 | Add Playbook Selector Component | ✅ | 042 | 3h |
-| 049 | Implement "Start Analysis" Button with API Call | ✅ | 042-048 | 4h |
+| 042 | Create Analysis Builder PCF Component | 🔲 | Phase 1 Complete | 4h |
+| 043 | Add Action Selector Component | 🔲 | 042 | 3h |
+| 044 | Add Skills Multi-Select Component | 🔲 | 042 | 3h |
+| 045 | Add Knowledge Multi-Select Component | 🔲 | 042 | 3h |
+| 046 | Add Tools Multi-Select Component | 🔲 | 042 | 3h |
+| 047 | Add Output Options Component | 🔲 | 042 | 2h |
+| 048 | Add Playbook Selector Component | 🔲 | 042 | 3h |
+| 049 | Implement "Start Analysis" Button with API Call | 🔲 | 042-048 | 4h |
 
 ### Analysis Workspace Custom Page & PCF
 
@@ -127,8 +127,8 @@
 
 | ID | Task | Status | Dependencies | Estimated Hours |
 |----|------|--------|--------------|-----------------|
-| 062 | Test Analysis Creation from Document Form | 🔲 | 038-041, 042-049 | 2h |
-| 063 | Test Analysis Workspace Navigation | 🔲 | 041, 050-061 | 2h |
+| 062 | Test Analysis Creation from Document Form | ✅ | 038-041, 042-049 | 2h |
+| 063 | Test Analysis Workspace Navigation | ✅ | 041, 050-061 | 2h |
 | 064 | Test SSE Streaming in Custom Page | 🔲 | 056-057 | 3h |
 | 065 | Test PCF Reads API URL from Environment Variable | 🔲 | 052, 060 | 2h |
 | 066 | Export UI Solution Package | 🔲 | 038-061 | 2h |

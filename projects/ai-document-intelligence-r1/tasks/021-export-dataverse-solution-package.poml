@@ -3,7 +3,7 @@
   <metadata>
     <title>Export Dataverse Solution Package</title>
     <phase>Phase 1: Core Infrastructure (Week 1-2)</phase>
-    <status>completed</status>
+    <status>not-started</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>001, 010-020</dependencies>
     <blocks>none</blocks>
