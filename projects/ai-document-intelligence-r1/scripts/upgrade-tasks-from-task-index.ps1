@@ -1,6 +1,8 @@
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
 param(
-    [switch]$Apply
+    [switch]$Apply,
+    [switch]$IncludeCompleted,
+    [switch]$IncludeCancelled
 )
 
 Set-StrictMode -Version Latest
@@ -349,10 +351,8 @@ foreach ($t in $tasks) {
         continue
     }
 
-    # Respect TASK-INDEX as source of truth; don't churn completed/cancelled tasks.
-    if ($t.Status -in @('completed', 'cancelled')) {
-        continue
-    }
+    $allowCompleted = $IncludeCompleted.IsPresent
+    $allowCancelled = $IncludeCancelled.IsPresent
 
     $existingTags = Get-ExistingTaskTags -Path $existing.FullName
     $t | Add-Member -NotePropertyName Tags -NotePropertyValue (Get-InferredTaskTags -Title $t.Title -ExistingTags $existingTags) -Force
@@ -374,6 +374,33 @@ foreach ($t in $tasks) {
     $targetName = ("{0}-{1}.poml" -f $t.Id, $slug)
     $targetPath = Join-Path $tasksDir $targetName
 
+    # Rename ONLY generic placeholder filenames (e.g., 044-task.poml) to a slugged name.
+    # Avoid renaming non-placeholder tasks to reduce churn.
+    # Note: do this regardless of status so we can still normalize filenames for completed work.
+    $isGenericName = $existing.Name -match '^[0-9]{3}-task\.poml$'
+    if ($isGenericName -and $existing.FullName -ne $targetPath) {
+        if ($PSCmdlet.ShouldProcess($existing.Name, "Rename to $targetName")) {
+            if ($Apply) {
+                if (Test-Path $targetPath) {
+                    Write-Warning "Target exists, not renaming: $targetName"
+                }
+                else {
+                    Move-Item -Path $existing.FullName -Destination $targetPath
+                    $existing = Get-Item -Path $targetPath
+                    $changed++
+                }
+            }
+        }
+    }
+
+    # Respect TASK-INDEX as source of truth; don't churn completed/cancelled tasks unless explicitly requested.
+    if ($t.Status -eq 'completed' -and -not $allowCompleted) {
+        continue
+    }
+    if ($t.Status -eq 'cancelled' -and -not $allowCancelled) {
+        continue
+    }
+
     if (-not $isAlreadyCompliant) {
         $doc = Build-TaskXml -ProjectName $projectName -Task $t
 
@@ -390,23 +417,6 @@ foreach ($t in $tasks) {
                 $writer.Close()
 
                 $changed++
-            }
-        }
-    }
-
-    # Rename ONLY generic placeholder filenames (e.g., 044-task.poml) to a slugged name.
-    # Avoid renaming non-placeholder tasks to reduce churn.
-    $isGenericName = $existing.Name -match '^[0-9]{3}-task\.poml$'
-    if ($isGenericName -and $existing.FullName -ne $targetPath) {
-        if ($PSCmdlet.ShouldProcess($existing.Name, "Rename to $targetName")) {
-            if ($Apply) {
-                if (Test-Path $targetPath) {
-                    Write-Warning "Target exists, not renaming: $targetName"
-                }
-                else {
-                    Move-Item -Path $existing.FullName -Destination $targetPath
-                    $changed++
-                }
             }
         }
     }

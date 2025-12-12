@@ -10,6 +10,9 @@ param(
     [switch]$ShowIds,
 
     [Parameter()]
+    [switch]$CheckCompletedCompliance,
+
+    [Parameter()]
     [ValidateRange(1, 500)]
     [int]$MaxIds = 50
 )
@@ -66,7 +69,7 @@ foreach ($f in $files) {
 
 $missing = @()
 $duplicates = @()
-$incompleteNonCompliant = @()
+$nonCompliant = @()
 
 foreach ($r in $rows) {
     if (-not $filesById.ContainsKey($r.Id)) {
@@ -79,16 +82,22 @@ foreach ($r in $rows) {
         $duplicates += $r.Id
     }
 
-    if ($r.StatusKey -ne 'complete') {
+    if ($CheckCompletedCompliance -or $r.StatusKey -ne 'complete') {
         $txt = Get-Content -Raw -Path $candidates[0].FullName
-        $isNewFormat = $txt -match ('<task\s+id="' + $r.Id + '"')
-        $hasInputs = $txt -match '<inputs[\s>]' 
+        $hasTaskId = $txt -match ('<task\s+id="' + $r.Id + '"')
+        $hasRole = $txt -match '<role[\s>]' 
+        $hasGoal = $txt -match '<goal[\s>]' 
         $hasKnowledge = $txt -match '<knowledge[\s>]' 
         $hasSteps = $txt -match '<steps[\s>]' 
         $hasAcceptance = $txt -match '<acceptance-criteria[\s>]' 
 
-        if (-not ($isNewFormat -and $hasInputs -and $hasKnowledge -and $hasSteps -and $hasAcceptance)) {
-            $incompleteNonCompliant += $r.Id
+        # Accept either:
+        # - New template format (has <inputs>), OR
+        # - Legacy rich format that may omit <inputs> but includes <context>.
+        $hasInputsOrContext = ($txt -match '<inputs[\s>]' ) -or ($txt -match '<context[\s>]' )
+
+        if (-not ($hasTaskId -and $hasRole -and $hasGoal -and $hasInputsOrContext -and $hasKnowledge -and $hasSteps -and $hasAcceptance)) {
+            $nonCompliant += $r.Id
         }
     }
 }
@@ -100,7 +109,7 @@ $summary = [pscustomobject]@{
     TaskFiles = $files.Count
     MissingFiles = $missing.Count
     DuplicateIds = $duplicates.Count
-    IncompleteNonCompliant = $incompleteNonCompliant.Count
+    NonCompliant = $nonCompliant.Count
     StatusCounts = ($byStatus | ForEach-Object { "{0}={1}" -f $_.Name, $_.Count }) -join '; '
 }
 
@@ -116,8 +125,8 @@ if ($ShowIds) {
         "Duplicate IDs (first $MaxIds):" | Write-Output
         $duplicates | Select-Object -First $MaxIds | ForEach-Object { "- $_" }
     }
-    if ($incompleteNonCompliant.Count -gt 0) {
-        "Incomplete non-compliant IDs (first $MaxIds):" | Write-Output
-        $incompleteNonCompliant | Select-Object -First $MaxIds | ForEach-Object { "- $_" }
+    if ($nonCompliant.Count -gt 0) {
+        "Non-compliant IDs (first $MaxIds):" | Write-Output
+        $nonCompliant | Select-Object -First $MaxIds | ForEach-Object { "- $_" }
     }
 }
