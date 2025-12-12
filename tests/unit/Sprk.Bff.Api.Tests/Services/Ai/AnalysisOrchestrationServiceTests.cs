@@ -5,6 +5,7 @@ using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Xunit;
@@ -18,6 +19,8 @@ namespace Sprk.Bff.Api.Tests.Services.Ai;
 public class AnalysisOrchestrationServiceTests
 {
     private readonly Mock<IDataverseService> _dataverseServiceMock;
+    private readonly Mock<ISpeFileOperations> _speFileOperationsMock;
+    private readonly Mock<ITextExtractor> _textExtractorMock;
     private readonly Mock<IOpenAiClient> _openAiClientMock;
     private readonly Mock<IScopeResolverService> _scopeResolverMock;
     private readonly Mock<IAnalysisContextBuilder> _contextBuilderMock;
@@ -29,6 +32,8 @@ public class AnalysisOrchestrationServiceTests
     public AnalysisOrchestrationServiceTests()
     {
         _dataverseServiceMock = new Mock<IDataverseService>();
+        _speFileOperationsMock = new Mock<ISpeFileOperations>();
+        _textExtractorMock = new Mock<ITextExtractor>();
         _openAiClientMock = new Mock<IOpenAiClient>();
         _scopeResolverMock = new Mock<IScopeResolverService>();
         _contextBuilderMock = new Mock<IAnalysisContextBuilder>();
@@ -43,6 +48,8 @@ public class AnalysisOrchestrationServiceTests
 
         _service = new AnalysisOrchestrationService(
             _dataverseServiceMock.Object,
+            _speFileOperationsMock.Object,
+            _textExtractorMock.Object,
             _openAiClientMock.Object,
             _scopeResolverMock.Object,
             _contextBuilderMock.Object,
