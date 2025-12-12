@@ -10,6 +10,7 @@ using Microsoft.Identity.Web;
 using Polly;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api;
+using Sprk.Bff.Api.Api.Admin;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Authorization;
@@ -308,6 +309,24 @@ else
     Console.WriteLine("⚠ Document Intelligence services disabled (DocumentIntelligence:Enabled = false)");
 }
 
+// ============================================================================
+// RECORD MATCHING SERVICES - Azure AI Search for document-to-record matching (Phase 2)
+// ============================================================================
+var recordMatchingEnabled = builder.Configuration.GetValue<bool>("DocumentIntelligence:RecordMatchingEnabled");
+if (recordMatchingEnabled)
+{
+    builder.Services.AddHttpClient<Sprk.Bff.Api.Services.RecordMatching.DataverseIndexSyncService>();
+    builder.Services.AddSingleton<Sprk.Bff.Api.Services.RecordMatching.IDataverseIndexSyncService>(sp =>
+        sp.GetRequiredService<Sprk.Bff.Api.Services.RecordMatching.DataverseIndexSyncService>());
+    builder.Services.AddSingleton<Sprk.Bff.Api.Services.RecordMatching.IRecordMatchService,
+        Sprk.Bff.Api.Services.RecordMatching.RecordMatchService>();
+    Console.WriteLine("✓ Record Matching services enabled (index: {0})", builder.Configuration["DocumentIntelligence:AiSearchIndexName"] ?? "spaarke-records-index");
+}
+else
+{
+    Console.WriteLine("⚠ Record Matching services disabled (DocumentIntelligence:RecordMatchingEnabled = false)");
+}
+
 // Background Job Processing (ADR-004) - Service Bus Strategy
 // Always register JobSubmissionService (unified entry point)
 builder.Services.AddSingleton<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>();
@@ -414,11 +433,15 @@ builder.Services.AddHealthChecks()
 // ============================================================================
 var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>();
 
+// Helper to check if running in non-production test environment
+var isTestOrDevelopment = builder.Environment.IsDevelopment() ||
+                          builder.Environment.EnvironmentName == "Testing";
+
 // Validate configuration
 if (allowedOrigins == null || allowedOrigins.Length == 0)
 {
-    // In development, allow localhost as fallback
-    if (builder.Environment.IsDevelopment())
+    // In development/testing, allow localhost as fallback
+    if (isTestOrDevelopment)
     {
         var logger = LoggerFactory.Create(config => config.AddConsole()).CreateLogger("Program");
         logger.LogWarning(
@@ -458,7 +481,7 @@ foreach (var origin in allowedOrigins)
             $"CORS: Invalid origin URL '{origin}'. Must be absolute URL (e.g., https://example.com).");
     }
 
-    if (uri.Scheme != "https" && !builder.Environment.IsDevelopment())
+    if (uri.Scheme != "https" && !isTestOrDevelopment)
     {
         throw new InvalidOperationException(
             $"CORS: Non-HTTPS origin '{origin}' is not allowed in {builder.Environment.EnvironmentName} environment. " +
@@ -866,6 +889,13 @@ app.MapOBOEndpoints();
 if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled"))
 {
     app.MapDocumentIntelligenceEndpoints();
+}
+
+// Record Matching endpoints (Phase 2 - only if enabled)
+if (app.Configuration.GetValue<bool>("DocumentIntelligence:RecordMatchingEnabled"))
+{
+    app.MapRecordMatchEndpoints();
+    app.MapRecordMatchingAdminEndpoints();
 }
 
 app.Run();

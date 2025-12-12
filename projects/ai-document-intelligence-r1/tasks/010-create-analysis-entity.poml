@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="ai-document-intelligence-r1">
+  <metadata>
+    <title>Create sprk_analysis Entity with Fields and Relationships</title>
+    <phase>Phase 1: Core Infrastructure</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>016, 017, 018, 019, 022, 023, 024, 025, 026</blocks>
+  </metadata>
+
+  <prompt>
+    Create the primary `sprk_analysis` entity in Dataverse to store analysis execution records. This entity represents a single AI-driven analysis on a document, tracking configuration (action, scopes), execution state (status, working document), and results (final output, token usage).
+
+    The Analysis entity is the core of the entire feature - all other entities relate to it.
+  </prompt>
+
+  <role>
+    Senior Dataverse developer with expertise in entity design, relationships, and solution management.
+  </role>
+
+  <goal>
+    Create the `sprk_analysis` entity with all required fields, lookups, and relationships as defined in SPEC.md Section 4.2. Add the entity to the Spaarke_DocumentIntelligence solution and export.
+  </goal>
+
+  <context>
+    <background>
+      The Analysis entity is the hub of the Analysis feature. It stores:
+      - Configuration: Which document, which action, which scopes
+      - Execution state: Status (NotStarted, InProgress, Completed, Failed)
+      - Working document: Editable markdown output during refinement
+      - Final output: Completed analysis result
+      - Metadata: Timestamps, token usage, error messages
+
+      Key relationships:
+      - N:1 to sprk_document (parent document)
+      - N:1 to sprk_analysisaction (action definition)
+      - N:N to sprk_analysisskill (applied skills)
+      - N:N to sprk_analysisknowledge (knowledge sources)
+      - N:N to sprk_analysistool (tools used)
+      - 1:N to sprk_analysischatmessage (chat history)
+      - 1:N to sprk_analysisworkingversion (version history)
+
+      The entity follows Spaarke naming conventions (sprk_ prefix) and standard Dataverse patterns (statecode/statuscode for state management).
+    </background>
+
+    <relevant-files>
+      <file>projects/ai-document-intelligence-r1/SPEC.md</file>
+      <file>src/sprk.bff.api/Services/Dataverse/ (existing entity patterns)</file>
+    </relevant-files>
+
+    <dependencies>
+      <dependency id="none" status="n/a">Can be created independently</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Entity must use "sprk_" prefix (sprk_analysis)</constraint>
+    <constraint source="project">Must follow existing Spaarke entity patterns</constraint>
+    <constraint source="project">Working document field must support markdown (multiline text, max length)</constraint>
+    <constraint source="project">Must have standard statecode/statuscode for state management</constraint>
+    <constraint source="project">Must be added to Spaarke_DocumentIntelligence solution</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r1/SPEC.md (Section 4.2 - sprk_analysis entity)</file>
+      <file>docs/reference/procedures/04-ai-execution-protocol.md</file>
+    </files>
+    <patterns>
+      <pattern name="Entity Naming">sprk_{entityname} (lowercase)</pattern>
+      <pattern name="Field Naming">sprk_{fieldname} (lowercase)</pattern>
+      <pattern name="Lookup Naming">sprk_{entityname}id</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review SPEC.md Section 4.2 for complete field list and data types</step>
+    <step order="2">Open Power Platform maker portal in Spaarke dev environment</step>
+    <step order="3">Navigate to Tables and click "New table"</step>
+    <step order="4">Set Display Name: "Analysis", Plural Name: "Analyses", Schema Name: "sprk_analysis"</step>
+    <step order="5">Enable for "Activities" and "Notes"</step>
+    <step order="6">Create primary name field: "sprk_name" (Text, 200 characters)</step>
+    <step order="7">Add all fields from SPEC.md table:
+      - sprk_documentid (Lookup to sprk_document, Required)
+      - sprk_actionid (Lookup to sprk_analysisaction, Required)
+      - sprk_status (Choice: NotStarted, InProgress, Completed, Failed, Required)
+      - sprk_workingdocument (Multiline Text, 100,000 characters)
+      - sprk_workingdocumentfile (File - SPE reference)
+      - sprk_sessionid (Text, 50 characters)
+      - sprk_finaloutput (Multiline Text, 100,000 characters)
+      - sprk_outputfileid (Lookup to sprk_document)
+      - sprk_startedon (DateTime)
+      - sprk_completedon (DateTime)
+      - sprk_errormessage (Multiline Text, 2000 characters)
+      - sprk_inputtokens (Whole Number)
+      - sprk_outputtokens (Whole Number)
+    </step>
+    <step order="8">Configure Status Reason (statuscode) values:
+      - Active: NotStarted (default), InProgress
+      - Inactive: Completed, Failed
+    </step>
+    <step order="9">Set security roles: Grant Analysis User role read/write access</step>
+    <step order="10">Add entity to Spaarke_DocumentIntelligence solution</step>
+    <step order="11">Export solution (unmanaged)</step>
+    <step order="12">Commit solution to: infrastructure/dataverse/solutions/</step>
+    <step order="13">Update TASK-INDEX.md status to ✅ Complete</step>
+  </steps>
+
+  <tools>
+    <tool name="power-platform-maker">Create and manage Dataverse entities</tool>
+    <tool name="file-system">Save solution export</tool>
+  </tools>
+
+  <outputs>
+    <output type="solution">infrastructure/dataverse/solutions/Spaarke_DocumentIntelligence_1_0_0_0.zip (updated)</output>
+    <output type="schema">Entity created in Dataverse</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Entity "sprk_analysis" created with correct schema name</criterion>
+    <criterion>All 13 fields created with correct data types and max lengths</criterion>
+    <criterion>Lookup to sprk_document configured (N:1 relationship)</criterion>
+    <criterion>Lookup to sprk_analysisaction configured (N:1 relationship)</criterion>
+    <criterion>Status choice field has 4 values (NotStarted, InProgress, Completed, Failed)</criterion>
+    <criterion>Working document field supports 100KB of text</criterion>
+    <criterion>Entity enabled for Activities and Notes</criterion>
+    <criterion>Security roles grant appropriate access</criterion>
+    <criterion>Entity added to solution successfully</criterion>
+    <criterion>Solution exports without errors</criterion>
+    <criterion>Solution imports cleanly to test environment</criterion>
+    <criterion>TASK-INDEX.md updated to show task complete</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note>Field Details from SPEC.md:
+      | Display Name | Schema Name | Type | Required |
+      |--------------|-------------|------|----------|
+      | Name | sprk_name | Text (200) | ✅ |
+      | Document | sprk_documentid | Lookup (sprk_document) | ✅ |
+      | Action | sprk_actionid | Lookup (sprk_analysisaction) | ✅ |
+      | Status | sprk_status | Choice | ✅ |
+      | Working Document | sprk_workingdocument | Multiline Text | ❌ |
+      | Working Document File | sprk_workingdocumentfile | File (SPE) | ❌ |
+      | Session ID | sprk_sessionid | Text (50) | ❌ |
+      | Final Output | sprk_finaloutput | Multiline Text | ❌ |
+      | Output File | sprk_outputfileid | Lookup (sprk_document) | ❌ |
+      | Started On | sprk_startedon | DateTime | ❌ |
+      | Completed On | sprk_completedon | DateTime | ❌ |
+      | Error Message | sprk_errormessage | Multiline Text | ❌ |
+      | Input Tokens | sprk_inputtokens | Whole Number | ❌ |
+      | Output Tokens | sprk_outputtokens | Whole Number | ❌ |
+    </note>
+    <note>N:N relationships will be created in later tasks when target entities exist</note>
+    <note>This entity BLOCKS many subsequent tasks - prioritize completion</note>
+  </notes>
+</task>

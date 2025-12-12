@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task>
+  <metadata>
+    <id>019</id>
+    <title>Create sprk_analysischatmessage Entity</title>
+    <phase>1</phase>
+    <estimate>3 hours</estimate>
+    <tags>dataverse,bff-api,phase1</tags>
+    <status>not-started</status>
+  </metadata>
+  <prompt>
+    <role>Senior Developer</role>
+    <goal>Create sprk_analysischatmessage Entity</goal>
+    <context>Part of Phase 1 Core Infrastructure. See SPEC.md Section 4 (Data Model) and Section 5 (API Design).</context>
+    <knowledge>
+      - projects/ai-document-intelligence-r1/SPEC.md
+      - projects/ai-document-intelligence-r1/PLAN.md
+    </knowledge>
+    <steps>
+      1. Review SPEC.md for detailed requirements
+      2. Implement according to design
+      3. Test implementation
+      4. Update documentation
+    </steps>
+    <acceptance-criteria>
+      - [ ] Implementation complete per SPEC
+      - [ ] Tests passing
+      - [ ] Documentation updated
+    </acceptance-criteria>
+  </prompt>
+</task>

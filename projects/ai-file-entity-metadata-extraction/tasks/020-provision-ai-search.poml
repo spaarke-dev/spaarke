@@ -3,7 +3,7 @@
   <metadata>
     <title>Provision Azure AI Search</title>
     <phase>2: Record Matching Service</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>019</dependencies>
     <blocks>021</blocks>

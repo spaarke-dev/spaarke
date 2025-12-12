@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task>
+  <metadata>
+    <id>005</id>
+    <title>Create Parameterized Bicep for AI Foundry Hub</title>
+    <phase>1</phase>
+    <estimate>6 hours</estimate>
+    <tags>bicep,azure,ai-foundry,infrastructure</tags>
+    <dependencies>002</dependencies>
+    <status>not-started</status>
+  </metadata>
+  <prompt>
+    <role>Senior Developer</role>
+    <goal>Create Parameterized Bicep for AI Foundry Hub</goal>
+    <context>See SPEC.md and PLAN.md for details</context>
+    <knowledge>
+      - projects/ai-document-intelligence-r1/SPEC.md
+      - projects/ai-document-intelligence-r1/PLAN.md
+    </knowledge>
+    <steps>
+      1. Review SPEC.md section for this task
+      2. Implement according to requirements
+      3. Test implementation
+      4. Document changes
+    </steps>
+    <acceptance-criteria>
+      - [ ] Implementation complete
+      - [ ] Tests passing
+      - [ ] Documentation updated
+    </acceptance-criteria>
+  </prompt>
+</task>

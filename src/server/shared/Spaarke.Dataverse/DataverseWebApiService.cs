@@ -194,6 +194,14 @@ public class DataverseWebApiService : IDataverseService
         if (request.ParentDocumentLookup.HasValue)
             payload["sprk_ParentDocumentName@odata.bind"] = $"/sprk_documents({request.ParentDocumentLookup.Value})";
 
+        // Record association lookups (Phase 2 - Record Matching)
+        if (request.MatterLookup.HasValue)
+            payload["sprk_Matter@odata.bind"] = $"/sprk_matters({request.MatterLookup.Value})";
+        if (request.ProjectLookup.HasValue)
+            payload["sprk_Project@odata.bind"] = $"/sprk_projects({request.ProjectLookup.Value})";
+        if (request.InvoiceLookup.HasValue)
+            payload["sprk_Invoice@odata.bind"] = $"/sprk_invoices({request.InvoiceLookup.Value})";
+
         var url = $"{_entitySetName}({guid})";
 
         // Log the actual payload for debugging email field persistence

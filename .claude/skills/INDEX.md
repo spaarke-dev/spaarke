@@ -14,6 +14,7 @@
 | [pull-from-github](pull-from-github/SKILL.md) | Pull latest changes from GitHub | No | `/pull-from-github`, "pull from github" |
 | [push-to-github](push-to-github/SKILL.md) | Commit changes and push to GitHub | No | `/push-to-github`, "push to github" |
 | [project-init](project-init/SKILL.md) | Initialize project folder with README, plan, tasks | No | `/project-init`, "create project" |
+| [project-pipeline](project-pipeline/SKILL.md) | **🚀 RECOMMENDED**: Automated pipeline from SPEC.md → ready tasks | No | `/project-pipeline`, "start project" |
 | [repo-cleanup](repo-cleanup/SKILL.md) | Repository hygiene audit and ephemeral file cleanup | No | `/repo-cleanup`, "clean up repo" |
 | [spaarke-conventions](spaarke-conventions/SKILL.md) | Coding standards and naming conventions | **Yes** | Auto-applied |
 | [task-create](task-create/SKILL.md) | Decompose plan.md into POML task files | No | `/task-create`, "create tasks" |
@@ -27,9 +28,10 @@
 - **spaarke-conventions** - Naming, patterns, file organization
 
 ### 🚀 Project Lifecycle
-- **design-to-project** - Start here for new features from design specs
-- **project-init** - Create project folder structure
-- **task-create** - Break plan into executable tasks
+- **project-pipeline** - **⭐ RECOMMENDED**: Automated pipeline from SPEC.md → ready tasks with human-in-loop
+- **design-to-project** - Alternative: Full design spec to implementation pipeline
+- **project-init** - Manual: Create project folder structure
+- **task-create** - Manual: Break plan into executable tasks
 - **task-execute** - Execute individual tasks with mandatory knowledge loading
 - **repo-cleanup** - Clean up after project completion
 

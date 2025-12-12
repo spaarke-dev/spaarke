@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task>
+  <metadata>
+    <id>163</id>
+    <title>Deploy BFF API Production</title>
+    <phase>5</phase>
+    <estimate>4 hours</estimate>
+    <tags>bff-api,deploy,production</tags>
+    <status>not-started</status>
+  </metadata>
+  <prompt>
+    <role>Senior Developer</role>
+    <goal>Deploy BFF API Production</goal>
+    <context>Phase 5. See SPEC.md and PLAN.md.</context>
+    <knowledge>
+      - projects/ai-document-intelligence-r1/SPEC.md
+      - projects/ai-document-intelligence-r1/PLAN.md
+    </knowledge>
+    <steps>
+      1. Review requirements
+      2. Implement
+      3. Test
+      4. Document
+    </steps>
+    <acceptance-criteria>
+      - [ ] Complete per SPEC
+      - [ ] Tests pass
+      - [ ] Documented
+    </acceptance-criteria>
+  </prompt>
+</task>

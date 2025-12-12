@@ -104,6 +104,19 @@ public class UpdateDocumentRequest
 
     /// <summary>Parent Graph item ID (for attachments). Maps to sprk_ParentGraphItemId.</summary>
     public string? ParentGraphItemId { get; set; }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Record Association Lookups (Phase 2 - Record Matching)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>Matter lookup (sprk_matter). Maps to sprk_Matter@odata.bind.</summary>
+    public Guid? MatterLookup { get; set; }
+
+    /// <summary>Project lookup (sprk_project). Maps to sprk_Project@odata.bind.</summary>
+    public Guid? ProjectLookup { get; set; }
+
+    /// <summary>Invoice lookup (sprk_invoice). Maps to sprk_Invoice@odata.bind.</summary>
+    public Guid? InvoiceLookup { get; set; }
 }
 
 /// <summary>
