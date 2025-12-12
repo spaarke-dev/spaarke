@@ -215,6 +215,16 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         if (request.ParentDocumentLookup.HasValue)
             document["sprk_parentdocumentname"] = new EntityReference("sprk_document", request.ParentDocumentLookup.Value);
 
+        // ═══════════════════════════════════════════════════════════════════════════
+        // Record Association Lookups (Phase 2 - Record Matching)
+        // ═══════════════════════════════════════════════════════════════════════════
+        if (request.MatterLookup.HasValue)
+            document["sprk_matter"] = new EntityReference("sprk_matter", request.MatterLookup.Value);
+        if (request.ProjectLookup.HasValue)
+            document["sprk_project"] = new EntityReference("sprk_project", request.ProjectLookup.Value);
+        if (request.InvoiceLookup.HasValue)
+            document["sprk_invoice"] = new EntityReference("sprk_invoice", request.InvoiceLookup.Value);
+
         await _serviceClient.UpdateAsync(document, ct);
         _logger.LogInformation("Document updated: {DocumentId} ({FieldCount} fields)", id, document.Attributes.Count);
     }

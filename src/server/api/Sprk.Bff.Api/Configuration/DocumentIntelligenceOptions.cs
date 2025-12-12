@@ -176,6 +176,47 @@ public class DocumentIntelligenceOptions
         - Focus on the most important information visible in the image
         """;
 
+    // === Azure AI Search Settings (Phase 2: Record Matching) ===
+
+    /// <summary>
+    /// Enable record matching suggestions using Azure AI Search.
+    /// When true, documents can be matched to existing Dataverse records (Matters, Projects, etc.).
+    /// </summary>
+    public bool RecordMatchingEnabled { get; set; } = false;
+
+    /// <summary>
+    /// Azure AI Search endpoint URL.
+    /// Example: https://{resource}.search.windows.net
+    /// Store in Key Vault for production.
+    /// Required when RecordMatchingEnabled=true.
+    /// </summary>
+    public string? AiSearchEndpoint { get; set; }
+
+    /// <summary>
+    /// Azure AI Search API key (admin key for indexing, query key for searching).
+    /// Store in Key Vault (production) or user-secrets (development).
+    /// Required when RecordMatchingEnabled=true.
+    /// </summary>
+    public string? AiSearchKey { get; set; }
+
+    /// <summary>
+    /// Azure AI Search index name for Dataverse records.
+    /// Default: "spaarke-records-index"
+    /// </summary>
+    public string AiSearchIndexName { get; set; } = "spaarke-records-index";
+
+    /// <summary>
+    /// Maps Dataverse record types to their corresponding Document lookup field names.
+    /// Used when associating a document with a matched record.
+    /// </summary>
+    public Dictionary<string, string> RecordTypeLookupMapping { get; set; } = new()
+    {
+        ["sprk_matter"] = "sprk_matter",
+        ["sprk_project"] = "sprk_project",
+        ["sprk_invoice"] = "sprk_invoice",
+        ["account"] = "sprk_account",
+    };
+
     // === Structured Output Settings ===
 
     /// <summary>

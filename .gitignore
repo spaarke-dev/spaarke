@@ -94,3 +94,5 @@ clientsecret.txt
 # AI workspace temporary files
 dev/ai-workspace/active-context/*.tmp
 dev/ai-workspace/sessions/*/temp/
+# Claude Code local settings (contains secrets)
+.claude/settings.local.json

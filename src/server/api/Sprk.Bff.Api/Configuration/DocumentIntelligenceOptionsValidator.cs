@@ -45,6 +45,25 @@ public class DocumentIntelligenceOptionsValidator : IValidateOptions<DocumentInt
             failures.Add("DocumentIntelligence:MaxConcurrentStreams must be between 1 and 10");
         }
 
+        // Validate Azure AI Search settings when record matching is enabled
+        if (options.RecordMatchingEnabled)
+        {
+            if (string.IsNullOrWhiteSpace(options.AiSearchEndpoint))
+            {
+                failures.Add("DocumentIntelligence:AiSearchEndpoint is required when DocumentIntelligence:RecordMatchingEnabled=true");
+            }
+
+            if (string.IsNullOrWhiteSpace(options.AiSearchKey))
+            {
+                failures.Add("DocumentIntelligence:AiSearchKey is required when DocumentIntelligence:RecordMatchingEnabled=true");
+            }
+
+            if (string.IsNullOrWhiteSpace(options.AiSearchIndexName))
+            {
+                failures.Add("DocumentIntelligence:AiSearchIndexName is required when DocumentIntelligence:RecordMatchingEnabled=true");
+            }
+        }
+
         return failures.Count > 0
             ? ValidateOptionsResult.Fail(failures)
             : ValidateOptionsResult.Success;

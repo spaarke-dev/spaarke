@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="ai-document-intelligence-r1">
+  <metadata>
+    <title>Create Environment Variables in Dataverse Solution</title>
+    <phase>Phase 1: Core Infrastructure</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>002, 003, 004, 035, 052, 065</blocks>
+  </metadata>
+
+  <prompt>
+    Create 15 Environment Variables in a Dataverse solution to support multi-tenant deployment of the Analysis feature. These environment variables will parameterize all tenant-specific configuration (API endpoints, Azure resource URLs, feature flags) enabling customers to deploy Spaarke in their own tenant without code changes.
+
+    This is the FIRST and MOST CRITICAL task for multi-tenant readiness. All subsequent tasks depend on these environment variables being defined and accessible.
+  </prompt>
+
+  <role>
+    Senior Power Platform developer with expertise in Dataverse solutions, Environment Variables, and multi-tenant architecture.
+  </role>
+
+  <goal>
+    Create and export a Dataverse solution containing 15 Environment Variables with appropriate data types, default values, and descriptions. The solution must be importable to any Dataverse environment and support customer-specific value overrides.
+  </goal>
+
+  <context>
+    <background>
+      The Analysis feature must support "Model 2 deployment" where customers deploy Spaarke in their own Azure subscription and Power Platform tenant. This requires ALL configuration to be parameterized via Environment Variables - no hard-coded URLs, tenant IDs, or resource names.
+
+      Environment Variables in Power Platform:
+      - Stored in Dataverse (environmentvariabledefinition table)
+      - Can have default values (for dev/test)
+      - Can be overridden per environment (for production)
+      - Accessible from PCF controls via Xrm.Utility.getGlobalContext()
+      - Accessible from Canvas Apps via Environment() function
+      - Can reference Azure Key Vault secrets
+
+      Reference: https://learn.microsoft.com/en-us/power-apps/maker/data-platform/environmentvariables
+    </background>
+
+    <relevant-files>
+      <file>projects/ai-document-intelligence-r1/SPEC.md</file>
+      <file>projects/ai-document-intelligence-r1/PLAN.md</file>
+    </relevant-files>
+
+    <dependencies>
+      <dependency id="none" status="n/a">This is the first task</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Must be in a Dataverse solution named "Spaarke_DocumentIntelligence"</constraint>
+    <constraint source="project">Must use "sprk_" prefix for all schema names</constraint>
+    <constraint source="project">Default values should work for Spaarke dev environment</constraint>
+    <constraint source="project">Customer-specific values (tenant IDs, resource names) should have empty defaults</constraint>
+    <constraint source="project">All environment variables must have clear display names and descriptions</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/reference/procedures/04-ai-execution-protocol.md</file>
+      <file>projects/ai-document-intelligence-r1/SPEC.md (Section 3: Multi-Tenant Deployment)</file>
+    </files>
+    <patterns>
+      <pattern name="Environment Variable Naming">sprk_{PascalCase}</pattern>
+      <pattern name="Solution Naming">Spaarke_{Feature}_{Version}</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review SPEC.md Section 3.2 for complete list of required Environment Variables</step>
+    <step order="2">Open Power Platform maker portal (https://make.powerapps.com) in Spaarke dev environment</step>
+    <step order="3">Create new solution "Spaarke_DocumentIntelligence" (version 1.0.0.0, publisher "Spaarke")</step>
+    <step order="4">For each environment variable in the spec:
+      - Click "New" → "More" → "Environment variable"
+      - Enter Display Name, Schema Name, Data Type
+      - Enter Default Value (if applicable)
+      - Enter Description
+      - Click "Save"
+    </step>
+    <step order="5">Add all 15 environment variables to the solution</step>
+    <step order="6">Export solution as unmanaged (.zip file)</step>
+    <step order="7">Commit solution .zip to repository at: infrastructure/dataverse/solutions/</step>
+    <step order="8">Document environment variables in: projects/ai-document-intelligence-r1/docs/environment-variables.md</step>
+    <step order="9">Update TASK-INDEX.md status to ✅ Complete</step>
+  </steps>
+
+  <tools>
+    <tool name="power-platform-maker">Create and manage Dataverse solutions</tool>
+    <tool name="file-system">Save solution export and documentation</tool>
+  </tools>
+
+  <outputs>
+    <output type="solution">infrastructure/dataverse/solutions/Spaarke_DocumentIntelligence_1_0_0_0.zip</output>
+    <output type="docs">projects/ai-document-intelligence-r1/docs/environment-variables.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>15 Environment Variables created with correct data types</criterion>
+    <criterion>All environment variables have "sprk_" prefix</criterion>
+    <criterion>Default values provided for Spaarke dev environment (where applicable)</criterion>
+    <criterion>Customer-specific variables (tenant IDs, resource names) have empty defaults</criterion>
+    <criterion>All environment variables have clear descriptions (50+ characters)</criterion>
+    <criterion>Solution exports successfully as .zip file</criterion>
+    <criterion>Solution imports cleanly to test environment</criterion>
+    <criterion>Documentation file lists all variables with purpose and configuration guidance</criterion>
+    <criterion>TASK-INDEX.md updated to show task complete</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note>Environment Variables Required (from SPEC.md Section 3.2):
+      1. sprk_BffApiBaseUrl (Text, default: https://spe-api-dev.azurewebsites.net)
+      2. sprk_AzureOpenAiEndpoint (Text, empty default)
+      3. sprk_AzureOpenAiKey (Secret - Key Vault reference, empty default)
+      4. sprk_DocumentIntelligenceEndpoint (Text, empty default)
+      5. sprk_DocumentIntelligenceKey (Secret - Key Vault reference, empty default)
+      6. sprk_AzureAiSearchEndpoint (Text, empty default)
+      7. sprk_AzureAiSearchKey (Secret - Key Vault reference, empty default)
+      8. sprk_PromptFlowEndpoint (Text, empty default)
+      9. sprk_EnableAiFeatures (Yes/No, default: Yes)
+      10. sprk_EnableMultiDocumentAnalysis (Yes/No, default: No - for Phase 2)
+      11. sprk_RedisConnectionString (Secret - Key Vault reference, empty default)
+      12. sprk_ApplicationInsightsKey (Secret - Key Vault reference, empty default)
+      13. sprk_KeyVaultUrl (Text, empty default)
+      14. sprk_CustomerTenantId (Text, empty default - for cross-tenant scenarios)
+      15. sprk_DeploymentEnvironment (Text, default: Development)
+    </note>
+    <note>Secret Type Variables: Use "Data Source: Azure Key Vault" and provide secret reference format in description</note>
+    <note>This task MUST be completed before any other Phase 1 tasks can proceed</note>
+  </notes>
+</task>

@@ -1,0 +1,161 @@
+{
+  "name": "spaarke-records-index",
+  "fields": [
+    {
+      "name": "id",
+      "type": "Edm.String",
+      "key": true,
+      "searchable": false,
+      "filterable": false,
+      "sortable": false,
+      "facetable": false
+    },
+    {
+      "name": "recordType",
+      "type": "Edm.String",
+      "searchable": false,
+      "filterable": true,
+      "sortable": true,
+      "facetable": true
+    },
+    {
+      "name": "recordName",
+      "type": "Edm.String",
+      "searchable": true,
+      "filterable": false,
+      "sortable": true,
+      "facetable": false,
+      "analyzer": "standard.lucene"
+    },
+    {
+      "name": "recordDescription",
+      "type": "Edm.String",
+      "searchable": true,
+      "filterable": false,
+      "sortable": false,
+      "facetable": false,
+      "analyzer": "standard.lucene"
+    },
+    {
+      "name": "organizations",
+      "type": "Collection(Edm.String)",
+      "searchable": true,
+      "filterable": true,
+      "sortable": false,
+      "facetable": true,
+      "analyzer": "standard.lucene"
+    },
+    {
+      "name": "people",
+      "type": "Collection(Edm.String)",
+      "searchable": true,
+      "filterable": true,
+      "sortable": false,
+      "facetable": true,
+      "analyzer": "standard.lucene"
+    },
+    {
+      "name": "referenceNumbers",
+      "type": "Collection(Edm.String)",
+      "searchable": true,
+      "filterable": true,
+      "sortable": false,
+      "facetable": false,
+      "analyzer": "keyword"
+    },
+    {
+      "name": "keywords",
+      "type": "Edm.String",
+      "searchable": true,
+      "filterable": false,
+      "sortable": false,
+      "facetable": false,
+      "analyzer": "standard.lucene"
+    },
+    {
+      "name": "contentVector",
+      "type": "Collection(Edm.Single)",
+      "searchable": true,
+      "filterable": false,
+      "sortable": false,
+      "facetable": false,
+      "dimensions": 3072,
+      "vectorSearchProfile": "default-vector-profile"
+    },
+    {
+      "name": "lastModified",
+      "type": "Edm.DateTimeOffset",
+      "searchable": false,
+      "filterable": true,
+      "sortable": true,
+      "facetable": false
+    },
+    {
+      "name": "dataverseRecordId",
+      "type": "Edm.String",
+      "searchable": false,
+      "filterable": true,
+      "sortable": false,
+      "facetable": false
+    },
+    {
+      "name": "dataverseEntityName",
+      "type": "Edm.String",
+      "searchable": false,
+      "filterable": true,
+      "sortable": false,
+      "facetable": true
+    }
+  ],
+  "vectorSearch": {
+    "algorithms": [
+      {
+        "name": "hnsw-algorithm",
+        "kind": "hnsw",
+        "hnswParameters": {
+          "m": 4,
+          "efConstruction": 400,
+          "efSearch": 500,
+          "metric": "cosine"
+        }
+      }
+    ],
+    "profiles": [
+      {
+        "name": "default-vector-profile",
+        "algorithm": "hnsw-algorithm"
+      }
+    ]
+  },
+  "semantic": {
+    "configurations": [
+      {
+        "name": "default-semantic-config",
+        "prioritizedFields": {
+          "titleField": {
+            "fieldName": "recordName"
+          },
+          "prioritizedContentFields": [
+            {
+              "fieldName": "recordDescription"
+            },
+            {
+              "fieldName": "keywords"
+            }
+          ],
+          "prioritizedKeywordsFields": [
+            {
+              "fieldName": "organizations"
+            },
+            {
+              "fieldName": "people"
+            },
+            {
+              "fieldName": "referenceNumbers"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -3,7 +3,7 @@
   <metadata>
     <title>End-to-End Tests Phase 2</title>
     <phase>2: Record Matching Service</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>020, 021, 022, 023, 024, 025, 026, 027</dependencies>
     <blocks>090</blocks>
