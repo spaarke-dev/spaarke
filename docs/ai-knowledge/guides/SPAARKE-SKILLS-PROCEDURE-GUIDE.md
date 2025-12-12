@@ -307,11 +307,19 @@ code .claude/skills/[new-skill-name]/SKILL.md
 When creating a new skill, verify:
 
 - [ ] Description matches natural language requests
+- [ ] **YAML frontmatter includes tags, techStack, appliesTo** (see `.claude/skills/INDEX.md` for standard vocabulary)
 - [ ] SKILL.md is under 5,000 words
 - [ ] Workflow steps are concrete and executable
 - [ ] All referenced scripts/resources exist
 - [ ] `allowed-tools` includes only what's needed
 - [ ] Tested with representative requests
+- [ ] **Skill added to `.claude/skills/INDEX.md`** with tags listed
+
+**Tagging Requirements:**
+- Use standard tag vocabulary from `.claude/skills/INDEX.md`
+- Include relevant technology stack values (aspnet-core, react, dataverse, etc.)
+- Specify file patterns or scenarios where skill applies
+- Only set `alwaysApply: true` for universal skills like conventions
 
 ---
 

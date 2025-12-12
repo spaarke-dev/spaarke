@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="ai-file-entity-metadata-extraction">
+  <metadata>
+    <title>Rename Service Files</title>
+    <phase>1a: Structured AI Output + Service Rename</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>003, 004</blocks>
+    <tags>bff-api, refactoring, services</tags>
+  </metadata>
+
+  <prompt>
+    Rename the SummarizeService and ISummarizeService files to DocumentIntelligenceService.
+    Update all internal class names, interface names, and method references while maintaining
+    the same functionality. This is a pure refactoring task with no behavior changes.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Follow ADRs strictly. Expert in C# refactoring and
+    .NET dependency injection patterns.
+  </role>
+
+  <goal>
+    SummarizeService.cs renamed to DocumentIntelligenceService.cs with all internal references
+    updated. Interface renamed from ISummarizeService to IDocumentIntelligenceService.
+    All consuming code updated to use new names.
+  </goal>
+
+  <context>
+    <background>
+      The Summarize services are being renamed to DocumentIntelligence to better reflect
+      their expanded scope as the gateway to Azure AI Document Intelligence capabilities.
+      This is part of Phase 1a preparation for structured output support.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SummarizeService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ISummarizeService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/SummarizeEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">Keep DI registrations minimal - update existing registration, don't add new ones</constraint>
+    <constraint source="project">Maintain exact same functionality - no behavior changes in this task</constraint>
+    <constraint source="project">Update all references in consuming code</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/reference/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/reference/adr/ADR-013-ai-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="Service interface pattern" location="src/server/api/Sprk.Bff.Api/Services/">
+        Follow existing interface + implementation pattern in Services folder
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read current SummarizeService.cs and ISummarizeService.cs to understand structure</step>
+    <step order="2">Rename SummarizeService.cs to DocumentIntelligenceService.cs</step>
+    <step order="3">Rename ISummarizeService.cs to IDocumentIntelligenceService.cs</step>
+    <step order="4">Update class name from SummarizeService to DocumentIntelligenceService</step>
+    <step order="5">Update interface name from ISummarizeService to IDocumentIntelligenceService</step>
+    <step order="6">Update all method signatures and internal references</step>
+    <step order="7">Search codebase for all references to old names and update</step>
+    <step order="8">Run dotnet build to verify no compilation errors</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+    <step order="10">If any deviations from plan, document in projects/ai-file-entity-metadata-extraction/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and verify .NET projects</tool>
+    <tool name="grep">Search for references to old names</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/DocumentIntelligenceService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/IDocumentIntelligenceService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SummarizeService.cs no longer exists in the codebase.</criterion>
+    <criterion testable="true">DocumentIntelligenceService.cs exists and compiles.</criterion>
+    <criterion testable="true">IDocumentIntelligenceService.cs exists with updated interface name.</criterion>
+    <criterion testable="true">dotnet build succeeds with no errors.</criterion>
+    <criterion testable="true">All references to old names are updated (grep returns no results).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is a pure refactoring task. Use IDE rename refactoring features if available.
+    The endpoint paths will be updated in task 003, so leave those unchanged here.
+  </notes>
+</task>

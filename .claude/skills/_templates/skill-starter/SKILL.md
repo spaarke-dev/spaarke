@@ -1,7 +1,10 @@
 ```yaml
 ---
-description: [Replace with skill description]
-alwaysApply: false
+description: [Replace with brief phrase matching natural requests (5-10 words)]
+tags: [tag1, tag2, tag3]  # Keywords for discovery - use standard vocabulary from INDEX.md
+techStack: [tech1, tech2]  # Technologies this applies to (aspnet-core, react, dataverse, etc.)
+appliesTo: [pattern1, pattern2]  # File patterns or scenarios
+alwaysApply: false  # Set to true only if this should load for EVERY task
 ---
 ```
 

@@ -1299,6 +1299,30 @@ Task metadata for tracking and dependencies.
 - `<estimated-hours>` - Effort estimate
 - `<dependencies>` - Prerequisite task IDs
 - `<blocks>` - Tasks blocked by this one
+- `<tags>` - Context focus tags for Claude Code (see Standard Tag Vocabulary)
+
+#### `<tags>`
+Semantic tags that help Claude Code focus context when executing the task.
+
+**Purpose**: Enable targeted context loading - Claude Code can load relevant CLAUDE.md files, skills, and knowledge docs based on task tags rather than exploring the entire codebase.
+
+**Standard vocabulary**:
+| Category | Tags |
+|----------|------|
+| API/Backend | `bff-api`, `api`, `backend`, `minimal-api`, `endpoints` |
+| Frontend/PCF | `pcf`, `react`, `typescript`, `frontend`, `fluent-ui` |
+| Dataverse | `dataverse`, `solution`, `fields`, `plugin`, `ribbon` |
+| Azure | `azure`, `app-service`, `azure-ai`, `azure-search`, `bicep` |
+| AI/ML | `azure-openai`, `ai`, `embeddings`, `document-intelligence` |
+| Operations | `deploy`, `ci-cd`, `devops`, `infrastructure` |
+| Quality | `testing`, `unit-test`, `integration-test`, `e2e-test` |
+
+**Example**:
+```xml
+<metadata>
+  <tags>bff-api, azure-openai, services</tags>
+</metadata>
+```
 
 #### `<prompt>`
 Natural-language description of the task's intent. The "task narrative" explaining purpose, scope, and expected outcome.

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="026" project="ai-file-entity-metadata-extraction">
+  <metadata>
+    <title>Add RecordMatchSuggestions PCF</title>
+    <phase>2: Record Matching Service</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>024</dependencies>
+    <blocks>027</blocks>
+    <tags>pcf, react, fluent-ui, frontend</tags>
+  </metadata>
+
+  <prompt>
+    Create RecordMatchSuggestions component to display ranked match suggestions with
+    confidence scores and match reasons. Each suggestion should be selectable for
+    one-click association.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in React and Fluent UI v9.</role>
+
+  <goal>
+    Users see ranked record suggestions and can select one to associate with document.
+  </goal>
+
+  <steps>
+    <step order="1">Create RecordMatchSuggestions component</step>
+    <step order="2">Display record name, type, confidence score</step>
+    <step order="3">Show match reasons as tooltip or expand</step>
+    <step order="4">Add select button for each suggestion</step>
+    <step order="5">Handle no suggestions gracefully</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/pcf/UniversalQuickCreate/control/components/RecordMatchSuggestions.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Suggestions display with confidence scores.</criterion>
+    <criterion testable="true">Match reasons visible.</criterion>
+    <criterion testable="true">Selection triggers association.</criterion>
+  </acceptance-criteria>
+</task>

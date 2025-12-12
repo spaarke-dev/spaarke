@@ -17,6 +17,7 @@
 | [repo-cleanup](repo-cleanup/SKILL.md) | Repository hygiene audit and ephemeral file cleanup | No | `/repo-cleanup`, "clean up repo" |
 | [spaarke-conventions](spaarke-conventions/SKILL.md) | Coding standards and naming conventions | **Yes** | Auto-applied |
 | [task-create](task-create/SKILL.md) | Decompose plan.md into POML task files | No | `/task-create`, "create tasks" |
+| [task-execute](task-execute/SKILL.md) | Execute POML task with mandatory knowledge loading | No | "execute task", "run task", "work on task" |
 | [ribbon-edit](ribbon-edit/SKILL.md) | Edit Dataverse ribbon via solution export/import | No | "edit ribbon", "add ribbon button" |
 
 ## Skill Categories
@@ -29,6 +30,7 @@
 - **design-to-project** - Start here for new features from design specs
 - **project-init** - Create project folder structure
 - **task-create** - Break plan into executable tasks
+- **task-execute** - Execute individual tasks with mandatory knowledge loading
 - **repo-cleanup** - Clean up after project completion
 
 ### ✅ Quality Assurance
@@ -61,7 +63,11 @@ Design Spec
 ┌─────────────────────┐
 │    task-create      │  ← Decomposes into tasks
 └─────────────────────┘
-    │ during implementation ▼
+    │ for each task ▼
+┌─────────────────────┐
+│    task-execute     │  ← EXECUTE: Load knowledge, apply constraints
+└─────────────────────┘
+    │ during execution ▼
 ┌─────────────────────┐
 │     adr-aware       │  ← BEFORE: Load relevant ADRs (always-apply)
 │ spaarke-conventions │  ← DURING: Apply coding standards (always-apply)
@@ -101,10 +107,40 @@ Design Spec
 
 1. Copy `_templates/skill-starter/` to `.claude/skills/{skill-name}/`
 2. Edit `SKILL.md` following the template structure
-3. Add references, scripts, assets as needed
-4. Update this INDEX.md
+3. **Add YAML frontmatter with metadata** (tags, techStack, appliesTo, alwaysApply)
+4. Add references, scripts, assets as needed
+5. Update this INDEX.md with skill entry and tags
 
 Template location: `_templates/SKILL-TEMPLATE.md`
+
+### Skill Metadata (YAML Frontmatter)
+
+Each skill MUST include YAML frontmatter for discoverability:
+
+```yaml
+---
+description: Brief phrase (5-10 words) matching natural requests
+tags: [tag1, tag2, tag3]  # Keywords for discovery
+techStack: [tech1, tech2]  # Technologies (aspnet-core, react, azure-openai, etc.)
+appliesTo: [pattern1, pattern2]  # File patterns or scenarios
+alwaysApply: false  # Only true for universal skills like conventions
+---
+```
+
+**Standard Tag Vocabulary:**
+- **Project:** `project-init`, `project-structure`, `tasks`, `planning`
+- **Development:** `api`, `pcf`, `plugin`, `frontend`, `backend`
+- **Azure/AI:** `azure`, `openai`, `ai`, `embeddings`, `semantic-kernel`
+- **Dataverse:** `dataverse`, `dynamics`, `power-platform`, `crm`
+- **Operations:** `deploy`, `git`, `ci-cd`, `devops`
+- **Quality:** `testing`, `security`, `performance`, `code-review`
+- **Architecture:** `adr`, `design`, `patterns`, `conventions`
+
+**Standard Tech Stack Values:**
+- `aspnet-core`, `csharp`, `react`, `typescript`, `powershell`
+- `azure-openai`, `semantic-kernel`, `azure-ai-search`
+- `dataverse`, `power-platform`, `pcf-framework`
+- `sharepoint`, `microsoft-graph`
 
 ## Skill File Structure
 

@@ -163,13 +163,68 @@ public class DataverseWebApiService : IDataverseService
         if (request.HasFile.HasValue) payload["sprk_hasfile"] = request.HasFile.Value;
         if (request.Status.HasValue) payload["statuscode"] = (int)request.Status.Value;
 
+        // AI Analysis fields
+        if (request.Summary != null) payload["sprk_filesummary"] = request.Summary;
+        if (request.TlDr != null) payload["sprk_filetldr"] = request.TlDr;
+        if (request.Keywords != null) payload["sprk_filekeywords"] = request.Keywords;
+        if (request.SummaryStatus.HasValue) payload["sprk_filesummarystatus"] = request.SummaryStatus.Value;
+
+        // Extracted entities fields
+        if (request.ExtractOrganization != null) payload["sprk_extractorganization"] = request.ExtractOrganization;
+        if (request.ExtractPeople != null) payload["sprk_extractpeople"] = request.ExtractPeople;
+        if (request.ExtractFees != null) payload["sprk_extractfees"] = request.ExtractFees;
+        if (request.ExtractDates != null) payload["sprk_extractdates"] = request.ExtractDates;
+        if (request.ExtractReference != null) payload["sprk_extractreference"] = request.ExtractReference;
+        if (request.ExtractDocumentType != null) payload["sprk_extractdocumenttype"] = request.ExtractDocumentType;
+        if (request.DocumentType.HasValue) payload["sprk_documenttype"] = request.DocumentType.Value;
+
+        // Email metadata fields (for .eml and .msg files)
+        if (request.EmailSubject != null) payload["sprk_emailsubject"] = request.EmailSubject;
+        if (request.EmailFrom != null) payload["sprk_emailfrom"] = request.EmailFrom;
+        if (request.EmailTo != null) payload["sprk_emailto"] = request.EmailTo;
+        if (request.EmailDate.HasValue) payload["sprk_emaildate"] = request.EmailDate.Value;
+        if (request.EmailBody != null) payload["sprk_emailbody"] = request.EmailBody;
+        if (request.Attachments != null) payload["sprk_attachments"] = request.Attachments;
+
+        // Parent document fields (for email attachments)
+        if (request.ParentDocumentId != null) payload["sprk_parentdocumentid"] = request.ParentDocumentId;
+        if (request.ParentFileName != null) payload["sprk_parentfilename"] = request.ParentFileName;
+        if (request.ParentGraphItemId != null) payload["sprk_parentgraphitemid"] = request.ParentGraphItemId;
+        // ParentDocumentLookup uses @odata.bind for lookup fields
+        if (request.ParentDocumentLookup.HasValue)
+            payload["sprk_ParentDocumentName@odata.bind"] = $"/sprk_documents({request.ParentDocumentLookup.Value})";
+
         var url = $"{_entitySetName}({guid})";
-        _logger.LogInformation("Updating document: {Id}", id);
+
+        // Log the actual payload for debugging email field persistence
+        var payloadJson = JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = false });
+        _logger.LogInformation(
+            "Updating document {Id} with payload ({FieldCount} fields): {Payload}",
+            id, payload.Count, payloadJson);
+
+        // Check specifically for email fields in the payload
+        var emailFieldsInPayload = payload.Keys.Where(k => k.StartsWith("sprk_email")).ToList();
+        if (emailFieldsInPayload.Any())
+        {
+            _logger.LogInformation(
+                "Email fields in payload for document {Id}: {EmailFields}",
+                id, string.Join(", ", emailFieldsInPayload));
+        }
 
         var response = await _httpClient.PatchAsJsonAsync(url, payload, ct);
+
+        // Log response status and any error details
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorContent = await response.Content.ReadAsStringAsync(ct);
+            _logger.LogError(
+                "Failed to update document {Id}: Status={Status}, Response={Response}",
+                id, response.StatusCode, errorContent);
+        }
+
         response.EnsureSuccessStatusCode();
 
-        _logger.LogInformation("Document updated successfully: {Id}", id);
+        _logger.LogInformation("Document updated successfully: {Id}, Status={Status}", id, response.StatusCode);
     }
 
     public async Task DeleteDocumentAsync(string id, CancellationToken ct = default)

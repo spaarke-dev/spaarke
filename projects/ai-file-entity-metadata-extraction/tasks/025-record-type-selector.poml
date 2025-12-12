@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="ai-file-entity-metadata-extraction">
+  <metadata>
+    <title>Add RecordTypeSelector PCF</title>
+    <phase>2: Record Matching Service</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>024</dependencies>
+    <blocks>026</blocks>
+    <tags>pcf, react, fluent-ui, frontend</tags>
+  </metadata>
+
+  <prompt>
+    Create RecordTypeSelector dropdown component in UniversalQuickCreate PCF that
+    allows users to select target record type(s) for matching (Matters, Projects,
+    Invoices, or All).
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in React and Fluent UI v9.</role>
+
+  <goal>
+    Users can select which record types to match against before triggering matching.
+  </goal>
+
+  <steps>
+    <step order="1">Create RecordTypeSelector component</step>
+    <step order="2">Use Fluent UI Dropdown</step>
+    <step order="3">Options: Matters, Projects, Invoices, All</step>
+    <step order="4">Pass selected value to match API</step>
+    <step order="5">Style consistently with other controls</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/pcf/UniversalQuickCreate/control/components/RecordTypeSelector.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Dropdown displays record type options.</criterion>
+    <criterion testable="true">Selected value passed to match API.</criterion>
+  </acceptance-criteria>
+</task>

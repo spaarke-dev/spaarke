@@ -125,12 +125,12 @@ This feature follows the **BFF orchestration pattern** - AI endpoints live in `S
 │                              Sprk.Bff.Api                                   │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│   POST /api/ai/summarize/stream    (new)                                    │
-│   POST /api/ai/summarize/enqueue   (new)                                    │
+│   POST /api/ai/document-intelligence/analyze     (new)                      │
+│   POST /api/ai/document-intelligence/enqueue    (new)                       │
 │         │                                                                   │
 │         ▼                                                                   │
 │   ┌─────────────────────────────────────────────────────────────────────┐  │
-│   │  SummarizeService (new)                                             │  │
+│   │  DocumentIntelligenceService (new)                                  │  │
 │   │  ──────────────────────────────────────────────────────────────     │  │
 │   │  1. Get file from SPE via SpeFileStore (existing)                   │  │
 │   │  2. Extract text via TextExtractorService (new)                     │  │
@@ -150,26 +150,26 @@ This feature follows the **BFF orchestration pattern** - AI endpoints live in `S
 src/server/api/Sprk.Bff.Api/
 ├── Api/
 │   └── Ai/
-│       └── SummarizeEndpoints.cs        # NEW: Summarization endpoints
+│       └── DocumentIntelligenceEndpoints.cs # NEW: Document Intelligence endpoints
 │
 ├── Services/
 │   └── Ai/
-│       ├── SummarizeService.cs          # NEW: Orchestrates summarization
-│       ├── TextExtractorService.cs      # NEW: Text extraction (native + Doc Intel)
-│       └── OpenAiClient.cs              # NEW: Azure OpenAI wrapper (shared)
+│       ├── DocumentIntelligenceService.cs   # NEW: Orchestrates analysis
+│       ├── TextExtractorService.cs          # NEW: Text extraction (native + Doc Intel)
+│       └── OpenAiClient.cs                  # NEW: Azure OpenAI wrapper (shared)
 │
 ├── Jobs/
 │   └── Handlers/
-│       └── SummarizeJobHandler.cs       # NEW: Background job handler
+│       └── DocumentAnalysisJobHandler.cs    # NEW: Background job handler
 │
 ├── Models/
 │   └── Ai/
-│       ├── SummarizeRequest.cs          # NEW
-│       ├── SummarizeResponse.cs         # NEW
-│       └── SummarizeJobContract.cs      # NEW
+│       ├── DocumentAnalysisRequest.cs       # NEW
+│       ├── DocumentAnalysisResponse.cs      # NEW
+│       └── DocumentAnalysisJobContract.cs   # NEW
 │
 └── Configuration/
-    └── AiOptions.cs                     # NEW: AI configuration
+    └── DocumentIntelligenceOptions.cs       # NEW: AI configuration
 
 src/client/pcf/
 └── UniversalQuickCreate/
@@ -206,7 +206,7 @@ data: {"content": "", "done": true, "summary": "Full summary text"}
 ### 3.2 Background Endpoint (Single Document)
 
 ```
-POST /api/ai/summarize/enqueue
+POST /api/ai/document-intelligence/enqueue
 Content-Type: application/json
 
 {
@@ -224,7 +224,7 @@ Response: 202 Accepted
 ### 3.3 Batch Enqueue Endpoint (Multiple Documents)
 
 ```
-POST /api/ai/summarize/enqueue-batch
+POST /api/ai/document-intelligence/enqueue-batch
 Content-Type: application/json
 
 {
@@ -259,7 +259,7 @@ public static class SummarizeEndpoints
 {
     public static IEndpointRouteBuilder MapSummarizeEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/ai/summarize")
+        var group = app.MapGroup("/api/ai/document-intelligence")
             .RequireAuthorization()
             .AddEndpointFilter<AiAuthorizationFilter>()
             .WithTags("AI");
@@ -349,7 +349,7 @@ public class SummarizeService
         _logger = logger;
     }
 
-    public async IAsyncEnumerable<SummarizeChunk> SummarizeStreamingAsync(
+    public async IAsyncEnumerable<AnalysisChunk> AnalyzeStreamingAsync(
         SummarizeRequest request,
         [EnumeratorCancellation] CancellationToken ct)
     {
@@ -361,7 +361,7 @@ public class SummarizeService
         
         if (string.IsNullOrWhiteSpace(text))
         {
-            yield return new SummarizeChunk("Unable to extract text from this file.", Done: true);
+            yield return new AnalysisChunk("Unable to extract text from this file.", Done: true);
             await UpdateStatusAsync(request.DocumentId, SummaryStatus.NotSupported, ct);
             yield break;
         }
@@ -373,14 +373,14 @@ public class SummarizeService
         await foreach (var chunk in _openAi.StreamCompletionAsync(prompt, ct))
         {
             fullSummary.Append(chunk);
-            yield return new SummarizeChunk(chunk, Done: false);
+            yield return new AnalysisChunk(chunk, Done: false);
         }
 
         // 4. Save to Dataverse
         var summary = fullSummary.ToString();
         await SaveSummaryAsync(request.DocumentId, summary, ct);
         
-        yield return new SummarizeChunk(string.Empty, Done: true, Summary: summary);
+        yield return new AnalysisChunk(string.Empty, Done: true, Summary: summary);
     }
 
     public async Task<string> EnqueueAsync(SummarizeRequest request, CancellationToken ct)
@@ -388,7 +388,7 @@ public class SummarizeService
         var job = new SummarizeJobContract
         {
             JobId = Guid.NewGuid().ToString(),
-            JobType = "ai-summarize",
+            JobType = "ai-analyze",
             DocumentId = request.DocumentId,
             DriveId = request.DriveId,
             ItemId = request.ItemId
@@ -513,10 +513,10 @@ namespace Sprk.Bff.Api.Services.Ai;
 public class OpenAiClient
 {
     private readonly OpenAIClient _client;
-    private readonly AiOptions _options;
+    private readonly DocumentIntelligenceOptions _options;
     private readonly ILogger<OpenAiClient> _logger;
 
-    public OpenAiClient(OpenAIClient client, IOptions<AiOptions> options, ILogger<OpenAiClient> logger)
+    public OpenAiClient(OpenAIClient client, IOptions<DocumentIntelligenceOptions> options, ILogger<OpenAiClient> logger)
     {
         _client = client;
         _options = options.Value;
@@ -810,7 +810,7 @@ export const AiSummaryPanel: React.FC<AiSummaryPanelProps> = ({
     setSummary('');
     
     try {
-      const response = await fetch('/api/ai/summarize/stream', {
+      const response = await fetch('/api/ai/document-intelligence/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ documentId, driveId, itemId })

@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="ai-file-entity-metadata-extraction">
+  <metadata>
+    <title>Update Endpoint Paths</title>
+    <phase>1a: Structured AI Output + Service Rename</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>008</blocks>
+    <tags>bff-api, minimal-api, endpoints</tags>
+  </metadata>
+
+  <prompt>
+    Rename SummarizeEndpoints.cs to DocumentIntelligenceEndpoints.cs and update all
+    endpoint paths from /api/ai/summarize/* to /api/ai/document-intelligence/*. Update
+    the endpoint group registration in Program.cs.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core Minimal API routing.
+  </role>
+
+  <goal>
+    Endpoint file renamed, all routes updated to new paths, and endpoint group
+    registration updated. API consumers will use new /api/ai/document-intelligence/* paths.
+  </goal>
+
+  <context>
+    <background>
+      The endpoint paths are being updated to match the service rename. This is a
+      breaking change for API consumers (PCF control), so the PCF must be updated
+      to use new paths in task 012.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/SummarizeEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API endpoint pattern</constraint>
+    <constraint source="ADR-008">Maintain endpoint filter for authorization</constraint>
+    <constraint source="project">Change /api/ai/summarize/* to /api/ai/document-intelligence/*</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/reference/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>docs/reference/adr/ADR-008-endpoint-filters.md</file>
+    </files>
+    <patterns>
+      <pattern name="Endpoint registration" location="src/server/api/Sprk.Bff.Api/Api/">
+        Follow existing endpoint group pattern with MapGroup and extension methods
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read current SummarizeEndpoints.cs structure</step>
+    <step order="2">Rename SummarizeEndpoints.cs to DocumentIntelligenceEndpoints.cs</step>
+    <step order="3">Update class name to DocumentIntelligenceEndpoints</step>
+    <step order="4">Update MapGroup path from "ai/summarize" to "ai/document-intelligence"</step>
+    <step order="5">Update extension method name (MapSummarizeEndpoints → MapDocumentIntelligenceEndpoints)</step>
+    <step order="6">Update Program.cs to call new extension method</step>
+    <step order="7">Verify endpoint filters are still applied</step>
+    <step order="8">Run dotnet build to verify compilation</step>
+    <step order="9">Test endpoint with curl or Postman to verify routing</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and run .NET projects</tool>
+    <tool name="curl">Test endpoint routing</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/DocumentIntelligenceEndpoints.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SummarizeEndpoints.cs no longer exists.</criterion>
+    <criterion testable="true">DocumentIntelligenceEndpoints.cs exists and compiles.</criterion>
+    <criterion testable="true">Endpoint routes use /api/ai/document-intelligence/* path.</criterion>
+    <criterion testable="true">dotnet build succeeds with no errors.</criterion>
+    <criterion testable="true">GET /api/ai/document-intelligence/analyze returns expected response (after running API).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The existing streaming endpoint path changes from /api/ai/summarize/stream to
+    /api/ai/document-intelligence/analyze. The verb "analyze" better describes
+    the expanded functionality.
+  </notes>
+</task>

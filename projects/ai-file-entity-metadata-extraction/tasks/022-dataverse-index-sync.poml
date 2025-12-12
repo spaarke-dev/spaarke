@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="ai-file-entity-metadata-extraction">
+  <metadata>
+    <title>Implement DataverseIndexSyncService</title>
+    <phase>2: Record Matching Service</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>021</dependencies>
+    <blocks>023</blocks>
+    <tags>bff-api, services, dataverse, azure-search</tags>
+  </metadata>
+
+  <prompt>
+    Create DataverseIndexSyncService to sync Dataverse records (Matters, Projects,
+    Invoices) to Azure AI Search index. Support bulk initial load and incremental sync.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse Web API and Azure AI Search SDK.</role>
+
+  <goal>
+    Service syncs Dataverse records to search index for record matching queries.
+  </goal>
+
+  <steps>
+    <step order="1">Create IDataverseIndexSyncService interface</step>
+    <step order="2">Implement BulkSyncAsync for initial load</step>
+    <step order="3">Implement IncrementalSyncAsync for updates</step>
+    <step order="4">Query Dataverse for Matter, Project, Invoice records</step>
+    <step order="5">Transform to index documents</step>
+    <step order="6">Upload to Azure AI Search</step>
+    <step order="7">Add admin endpoint to trigger sync</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/DocumentIntelligence/DataverseIndexSyncService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Bulk sync populates index with Dataverse records.</criterion>
+    <criterion testable="true">Incremental sync updates changed records.</criterion>
+    <criterion testable="true">Admin endpoint triggers sync.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="ai-file-entity-metadata-extraction">
+  <metadata>
+    <title>Add Match Endpoints</title>
+    <phase>2: Record Matching Service</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>023</dependencies>
+    <blocks>025, 026</blocks>
+    <tags>bff-api, minimal-api, endpoints</tags>
+  </metadata>
+
+  <prompt>
+    Add POST /api/ai/document-intelligence/match-records and
+    POST /api/ai/document-intelligence/associate-record endpoints per spec.md Section 6.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in ASP.NET Core Minimal API.</role>
+
+  <goal>
+    API endpoints for record matching and association are available and documented.
+  </goal>
+
+  <steps>
+    <step order="1">Add match-records endpoint</step>
+    <step order="2">Add associate-record endpoint</step>
+    <step order="3">Add request/response models</step>
+    <step order="4">Apply authorization filters</step>
+    <step order="5">Test endpoints with curl</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/DocumentIntelligence/RecordMatchEndpoints.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">match-records endpoint returns suggestions.</criterion>
+    <criterion testable="true">associate-record endpoint updates Document record.</criterion>
+    <criterion testable="true">Authorization filters applied.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="007" project="ai-file-entity-metadata-extraction">
+  <metadata>
+    <title>Add JSON Parsing with Fallback</title>
+    <phase>1a: Structured AI Output + Service Rename</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>005, 006</dependencies>
+    <blocks>008</blocks>
+    <tags>bff-api, services, azure-openai</tags>
+  </metadata>
+
+  <prompt>
+    Update DocumentIntelligenceService to parse the AI response as JSON into
+    DocumentAnalysisResult. Implement robust fallback logic that uses raw text as
+    summary when JSON parsing fails. The service must gracefully handle malformed responses.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in JSON parsing and error handling in C#.
+  </role>
+
+  <goal>
+    DocumentIntelligenceService parses structured JSON from AI, populates DocumentAnalysisResult,
+    and falls back to using raw text as Summary when parsing fails. ParsedSuccessfully
+    flag indicates which mode was used.
+  </goal>
+
+  <context>
+    <background>
+      AI responses can be unpredictable. While the prompt instructs JSON output, the AI
+      may occasionally return malformed JSON or unexpected formats. Robust fallback
+      ensures the feature degrades gracefully rather than failing completely.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/DocumentIntelligenceService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/DocumentAnalysisResult.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Fallback gracefully if JSON parsing fails (use raw text as summary)</constraint>
+    <constraint source="project">Set ParsedSuccessfully = false when fallback is used</constraint>
+    <constraint source="project">Store RawResponse for debugging</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-file-entity-metadata-extraction/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="JSON parsing" location="System.Text.Json">
+        Use System.Text.Json for parsing with try/catch for error handling
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read current DocumentIntelligenceService implementation</step>
+    <step order="2">Add method to parse AI response: ParseStructuredResponse(string aiResponse)</step>
+    <step order="3">Use JsonSerializer.Deserialize with try/catch</step>
+    <step order="4">On success: set ParsedSuccessfully = true, populate all fields</step>
+    <step order="5">On failure: set ParsedSuccessfully = false, use raw text as Summary</step>
+    <step order="6">Always set RawResponse for debugging</step>
+    <step order="7">Update service method that calls AI to use new parsing</step>
+    <step order="8">Add logging for parse failures (warn level)</step>
+    <step order="9">Run dotnet build to verify compilation</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/DocumentIntelligenceService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given valid JSON response, DocumentAnalysisResult is fully populated with ParsedSuccessfully = true.</criterion>
+    <criterion testable="true">Given malformed JSON, fallback uses raw text as Summary with ParsedSuccessfully = false.</criterion>
+    <criterion testable="true">RawResponse is always populated regardless of parse success.</criterion>
+    <criterion testable="true">Parse failures are logged at warn level.</criterion>
+    <criterion testable="true">dotnet build succeeds.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Consider using JsonSerializerOptions with PropertyNameCaseInsensitive = true for
+    flexibility. Test with various malformed JSON inputs to ensure robustness.
+    The fallback is critical for user experience - never throw to the user.
+  </notes>
+</task>

@@ -2,21 +2,19 @@
  * AI Summary Panel
  *
  * Displays an AI-generated summary for a single document with status indicator,
- * streaming text display, and error handling.
+ * streaming text display, TL;DR bullet points, keyword tags, and entity details.
  *
  * ADR Compliance:
  * - ADR-006: PCF control pattern
  * - ADR-012: Fluent UI v9 components from shared library
  *
- * @version 1.0.0.0
+ * @version 3.0.0.0
  */
 
 import * as React from 'react';
 import {
     Badge,
     Button,
-    Card,
-    CardHeader,
     Spinner,
     Text,
     makeStyles,
@@ -26,21 +24,18 @@ import {
 import {
     DocumentRegular,
     ArrowClockwiseRegular,
-    CheckmarkCircleRegular,
     DismissCircleRegular,
-    InfoRegular
+    InfoRegular,
+    OrganizationRegular,
+    PersonRegular,
+    MoneyRegular,
+    CalendarRegular,
+    DocumentCopyRegular
 } from '@fluentui/react-icons';
+import { SummaryStatus, ExtractedEntities } from '../services/useAiSummary';
 
-/**
- * Summary status values
- */
-export type SummaryStatus =
-    | 'pending'
-    | 'streaming'
-    | 'complete'
-    | 'error'
-    | 'not-supported'
-    | 'skipped';
+// Re-export for backward compatibility
+export type { SummaryStatus };
 
 /**
  * Component Props
@@ -61,6 +56,15 @@ export interface AiSummaryPanelProps {
     /** Error message (when status is 'error') */
     error?: string;
 
+    /** TL;DR bullet points (available after completion) */
+    tldr?: string[];
+
+    /** Comma-separated keywords (available after completion) */
+    keywords?: string;
+
+    /** Extracted entities (available after completion) */
+    entities?: ExtractedEntities;
+
     /** Callback for retry action */
     onRetry?: () => void;
 
@@ -79,7 +83,10 @@ const useStyles = makeStyles({
         padding: tokens.spacingVerticalM,
         borderRadius: tokens.borderRadiusMedium,
         backgroundColor: tokens.colorNeutralBackground1,
-        border: `1px solid ${tokens.colorNeutralStroke1}`
+        border: `1px solid ${tokens.colorNeutralStroke1}`,
+        flex: 1,
+        minHeight: 0, // Allow flex shrinking
+        overflow: 'hidden'
     },
     header: {
         display: 'flex',
@@ -95,8 +102,8 @@ const useStyles = makeStyles({
         flex: 1
     },
     fileName: {
-        fontSize: tokens.fontSizeBase300,
-        fontWeight: tokens.fontWeightSemibold,
+        fontSize: tokens.fontSizeBase500,
+        fontWeight: tokens.fontWeightBold,
         color: tokens.colorNeutralForeground1,
         overflow: 'hidden',
         textOverflow: 'ellipsis',
@@ -104,18 +111,20 @@ const useStyles = makeStyles({
     },
     fileIcon: {
         flexShrink: 0,
-        color: tokens.colorNeutralForeground3
+        color: tokens.colorNeutralForeground3,
+        fontSize: '20px'
     },
     summaryContainer: {
-        maxHeight: '200px',
+        flex: 1,
+        minHeight: 0,
         overflowY: 'auto',
-        padding: tokens.spacingVerticalS,
+        padding: tokens.spacingVerticalL,
         backgroundColor: tokens.colorNeutralBackground2,
         borderRadius: tokens.borderRadiusSmall
     },
     summaryText: {
-        fontSize: tokens.fontSizeBase300,
-        lineHeight: tokens.lineHeightBase300,
+        fontSize: tokens.fontSizeBase400,
+        lineHeight: tokens.lineHeightBase400,
         color: tokens.colorNeutralForeground1,
         whiteSpace: 'pre-wrap',
         wordBreak: 'break-word'
@@ -132,6 +141,41 @@ const useStyles = makeStyles({
         },
         animationDuration: '1s',
         animationIterationCount: 'infinite'
+    },
+    // TL;DR styles
+    tldrContainer: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: tokens.spacingVerticalM,
+        marginBottom: tokens.spacingVerticalXXL
+    },
+    sectionHeader: {
+        color: tokens.colorBrandForeground1,
+        fontSize: tokens.fontSizeBase400,
+        fontWeight: tokens.fontWeightSemibold
+    },
+    tldrList: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: tokens.spacingVerticalXS,
+        margin: 0,
+        paddingLeft: tokens.spacingHorizontalL,
+        listStyleType: 'disc'
+    },
+    tldrItem: {
+        fontSize: tokens.fontSizeBase300,
+        lineHeight: tokens.lineHeightBase400,
+        color: tokens.colorNeutralForeground1,
+        '::marker': {
+            color: tokens.colorBrandForeground1
+        }
+    },
+    // Summary section
+    summarySection: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: tokens.spacingVerticalM,
+        marginBottom: tokens.spacingVerticalXXL
     },
     pendingContainer: {
         display: 'flex',
@@ -192,6 +236,59 @@ const useStyles = makeStyles({
     badgeNotSupported: {
         backgroundColor: tokens.colorNeutralBackground4,
         color: tokens.colorNeutralForeground3
+    },
+    // Keywords styles
+    keywordsContainer: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: tokens.spacingVerticalM,
+        marginBottom: tokens.spacingVerticalXXL
+    },
+    keywordsList: {
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: tokens.spacingHorizontalS
+    },
+    keywordTag: {
+        backgroundColor: tokens.colorBrandBackground2,
+        color: tokens.colorBrandForeground1,
+        fontSize: tokens.fontSizeBase300,
+        padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}`,
+        borderRadius: tokens.borderRadiusMedium
+    },
+    // Entities section styles (no accordion)
+    entitiesContainer: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: tokens.spacingVerticalL,
+        marginTop: tokens.spacingVerticalXL
+    },
+    entitySection: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: tokens.spacingVerticalS,
+        marginBottom: tokens.spacingVerticalM
+    },
+    entityTypeHeader: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: tokens.spacingHorizontalS,
+        color: tokens.colorNeutralForeground2,
+        fontSize: tokens.fontSizeBase300,
+        fontWeight: tokens.fontWeightSemibold
+    },
+    entityList: {
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: tokens.spacingHorizontalS,
+        paddingLeft: tokens.spacingHorizontalL
+    },
+    entityItem: {
+        fontSize: tokens.fontSizeBase400,
+        color: tokens.colorNeutralForeground1,
+        backgroundColor: tokens.colorNeutralBackground3,
+        padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}`,
+        borderRadius: tokens.borderRadiusSmall
     }
 });
 
@@ -221,7 +318,7 @@ const getStatusConfig = (status: SummaryStatus) => {
  * AI Summary Panel Component
  *
  * Displays a single document's AI summary with status indicator,
- * streaming text display, and error handling.
+ * streaming text display, TL;DR bullets, and error handling.
  */
 export const AiSummaryPanel: React.FC<AiSummaryPanelProps> = ({
     documentId,
@@ -229,11 +326,32 @@ export const AiSummaryPanel: React.FC<AiSummaryPanelProps> = ({
     summary,
     status,
     error,
+    tldr,
+    keywords,
+    entities,
     onRetry,
     className
 }) => {
     const styles = useStyles();
     const statusConfig = getStatusConfig(status);
+
+    // Parse keywords string into array
+    const keywordsList = React.useMemo(() => {
+        if (!keywords) return [];
+        return keywords.split(',').map(k => k.trim()).filter(k => k.length > 0);
+    }, [keywords]);
+
+    // Check if entities has any data
+    const hasEntities = React.useMemo(() => {
+        if (!entities) return false;
+        return (
+            entities.organizations?.length > 0 ||
+            entities.people?.length > 0 ||
+            entities.amounts?.length > 0 ||
+            entities.dates?.length > 0 ||
+            entities.references?.length > 0
+        );
+    }, [entities]);
 
     // Render status badge
     const renderStatusBadge = () => (
@@ -245,6 +363,119 @@ export const AiSummaryPanel: React.FC<AiSummaryPanelProps> = ({
             {statusConfig.label}
         </Badge>
     );
+
+    // Render keyword tags
+    const renderKeywords = () => {
+        if (keywordsList.length === 0) return null;
+
+        return (
+            <div className={styles.keywordsContainer}>
+                <span className={styles.sectionHeader}>Keywords</span>
+                <div className={styles.keywordsList} role="list" aria-label="Document keywords">
+                    {keywordsList.map((keyword, index) => (
+                        <Badge
+                            key={index}
+                            appearance="filled"
+                            className={styles.keywordTag}
+                            size="small"
+                        >
+                            {keyword}
+                        </Badge>
+                    ))}
+                </div>
+            </div>
+        );
+    };
+
+    // Render an entity type section
+    const renderEntityType = (
+        icon: React.ReactNode,
+        label: string,
+        items: string[] | undefined
+    ) => {
+        if (!items || items.length === 0) return null;
+
+        return (
+            <div className={styles.entitySection}>
+                <div className={styles.entityTypeHeader}>
+                    {icon}
+                    <span>{label}</span>
+                </div>
+                <div className={styles.entityList} role="list">
+                    {items.map((item, index) => (
+                        <span key={index} className={styles.entityItem}>
+                            {item}
+                        </span>
+                    ))}
+                </div>
+            </div>
+        );
+    };
+
+    // Render entities section (Document Type, Organizations, People, Amounts, Dates, References)
+    const renderEntities = () => {
+        // Check if we have any entities including document type
+        const hasAnyEntities = hasEntities || entities?.documentType;
+        if (!hasAnyEntities) return null;
+
+        return (
+            <div className={styles.entitiesContainer}>
+                <span className={styles.sectionHeader}>Extracted Details</span>
+                {/* Document Type */}
+                {entities?.documentType && (
+                    <div className={styles.entitySection}>
+                        <div className={styles.entityTypeHeader}>
+                            <span>Document Type:</span>
+                            <span style={{ fontWeight: tokens.fontWeightRegular }}>{entities.documentType}</span>
+                        </div>
+                    </div>
+                )}
+                {renderEntityType(
+                    <OrganizationRegular />,
+                    'Organizations',
+                    entities?.organizations
+                )}
+                {renderEntityType(
+                    <PersonRegular />,
+                    'People',
+                    entities?.people
+                )}
+                {renderEntityType(
+                    <MoneyRegular />,
+                    'Amounts',
+                    entities?.amounts
+                )}
+                {renderEntityType(
+                    <CalendarRegular />,
+                    'Dates',
+                    entities?.dates
+                )}
+                {renderEntityType(
+                    <DocumentCopyRegular />,
+                    'References',
+                    entities?.references
+                )}
+            </div>
+        );
+    };
+
+    // Render TL;DR bullet list
+    const renderTldr = () => {
+        if (!tldr || tldr.length === 0) return null;
+
+        return (
+            <div className={styles.tldrContainer}>
+                <span className={styles.sectionHeader}>TL;DR</span>
+                <ul className={styles.tldrList} role="list">
+                    {tldr.map((bullet, index) => (
+                        <li key={index} className={styles.tldrItem}>
+                            {bullet}
+                        </li>
+                    ))}
+                </ul>
+            </div>
+        );
+    };
 
     // Render content based on status
     const renderContent = () => {
@@ -258,24 +489,44 @@ export const AiSummaryPanel: React.FC<AiSummaryPanelProps> = ({
                 );
 
             case 'streaming':
-            case 'complete':
+                // Show streaming text with cursor during generation
                 return (
                     <div
                         className={styles.summaryContainer}
                         role="region"
                         aria-label="Document summary"
-                        aria-live={status === 'streaming' ? 'polite' : 'off'}
+                        aria-live="polite"
                         aria-atomic="false"
                     >
                         <Text className={styles.summaryText}>
                             {summary || ''}
-                            {status === 'streaming' && (
-                                <span
-                                    className={styles.cursor}
-                                    aria-hidden="true"
-                                />
-                            )}
+                            <span
+                                className={styles.cursor}
+                                aria-hidden="true"
+                            />
                         </Text>
+                    </div>
+                );
+
+            case 'complete':
+                // Full height scrollable content: TL;DR → Keywords → Summary → Extracted Details
+                return (
+                    <div className={styles.summaryContainer} role="region" aria-label="Document analysis">
+                        {/* TL;DR bullets */}
+                        {renderTldr()}
+                        {/* Keywords */}
+                        {renderKeywords()}
+                        {/* Summary section */}
+                        {summary && (
+                            <div className={styles.summarySection}>
+                                <span className={styles.sectionHeader}>Summary</span>
+                                <Text className={styles.summaryText}>
+                                    {summary}
+                                </Text>
+                            </div>
+                        )}
+                        {/* Extracted Details (includes Document Type) */}
+                        {renderEntities()}
                     </div>
                 );
 

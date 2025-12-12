@@ -26,6 +26,12 @@ public record TextExtractionResult
     public TextExtractionMethod Method { get; init; }
 
     /// <summary>
+    /// Structured email metadata. Only populated for email files (.eml, .msg).
+    /// Contains sender, recipients, subject, date, body, and attachments.
+    /// </summary>
+    public EmailMetadata? EmailMetadata { get; init; }
+
+    /// <summary>
     /// Character count of extracted text. 0 if extraction failed.
     /// </summary>
     public int CharacterCount => Text?.Length ?? 0;
@@ -35,6 +41,11 @@ public record TextExtractionResult
     /// Used for checking against MaxInputTokens limit.
     /// </summary>
     public int EstimatedTokenCount => CharacterCount / 4;
+
+    /// <summary>
+    /// Returns true if this result contains email metadata.
+    /// </summary>
+    public bool IsEmail => Method == TextExtractionMethod.Email && EmailMetadata != null;
 
     /// <summary>
     /// Create a successful extraction result.
@@ -88,6 +99,19 @@ public record TextExtractionResult
     };
 
     /// <summary>
+    /// Create a successful email extraction result with structured metadata.
+    /// </summary>
+    /// <param name="text">The formatted email text for AI analysis.</param>
+    /// <param name="emailMetadata">Structured email metadata (from, to, subject, etc.).</param>
+    public static TextExtractionResult SucceededWithEmail(string text, EmailMetadata emailMetadata) => new()
+    {
+        Text = text,
+        Success = true,
+        Method = TextExtractionMethod.Email,
+        EmailMetadata = emailMetadata
+    };
+
+    /// <summary>
     /// Returns true if this file should be processed by vision model directly (images).
     /// </summary>
     public bool IsVisionRequired => Method == TextExtractionMethod.VisionOcr && Success && Text == null;
@@ -112,6 +136,11 @@ public enum TextExtractionMethod
     /// Azure Vision / GPT-4 Vision for images.
     /// </summary>
     VisionOcr,
+
+    /// <summary>
+    /// Email parsing for .eml and .msg files.
+    /// </summary>
+    Email,
 
     /// <summary>
     /// File type not supported.

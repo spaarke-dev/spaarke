@@ -1,6 +1,6 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="UniversalDocumentUpload" version="3.1.2" display-name-key="Universal Document Upload" description-key="Multi-file upload with dark mode support, responsive layout (v3.1.2)" control-type="standard">
+  <control namespace="Spaarke.Controls" constructor="UniversalDocumentUpload" version="3.9.0" display-name-key="Universal Document Upload" description-key="Tabbed multi-file upload with AI Summary, keywords, and entity extraction (v3.9.0)" control-type="standard">
     <external-service-usage enabled="false">
     </external-service-usage>
     <!--
@@ -23,6 +23,9 @@
     <resources>
       <code path="index.ts" order="1" />
       <css path="css/UniversalQuickCreate.css" order="1" />
+      <!-- Host-provided libraries: DO NOT bundle React/Fluent -->
+      <platform-library name="React" version="16.14.0" />
+      <platform-library name="Fluent" version="9.46.2" />
     </resources>
     <feature-usage>
       <uses-feature name="WebAPI" required="true" />

@@ -2,6 +2,8 @@ using System.Text;
 using Azure;
 using Azure.AI.DocumentIntelligence;
 using Microsoft.Extensions.Options;
+using MimeKit;
+using MsgReader.Outlook;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
 
@@ -13,10 +15,10 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// </summary>
 public class TextExtractorService : ITextExtractor
 {
-    private readonly AiOptions _options;
+    private readonly DocumentIntelligenceOptions _options;
     private readonly ILogger<TextExtractorService> _logger;
 
-    public TextExtractorService(IOptions<AiOptions> options, ILogger<TextExtractorService> logger)
+    public TextExtractorService(IOptions<DocumentIntelligenceOptions> options, ILogger<TextExtractorService> logger)
     {
         _options = options.Value;
         _logger = logger;
@@ -58,6 +60,7 @@ public class TextExtractorService : ITextExtractor
             ExtractionMethod.Native => await ExtractNativeAsync(fileStream, fileName, cancellationToken),
             ExtractionMethod.DocumentIntelligence => await ExtractViaDocIntelAsync(fileStream, fileName, cancellationToken),
             ExtractionMethod.VisionOcr => HandleVisionOcrFile(fileName),
+            ExtractionMethod.Email => await ExtractEmailAsync(fileStream, fileName, cancellationToken),
             _ => TextExtractionResult.NotSupported(extension)
         };
     }
@@ -86,6 +89,318 @@ public class TextExtractorService : ITextExtractor
 
         // Return special result indicating vision processing is required
         return TextExtractionResult.RequiresVision();
+    }
+
+    /// <summary>
+    /// Extract text from email files (.eml and .msg formats).
+    /// Uses MimeKit for .eml (MIME) and MsgReader for .msg (Outlook) formats.
+    /// Returns both formatted text for AI and structured metadata for Dataverse.
+    /// </summary>
+    private async Task<TextExtractionResult> ExtractEmailAsync(
+        Stream fileStream,
+        string fileName,
+        CancellationToken cancellationToken)
+    {
+        var extension = Path.GetExtension(fileName)?.ToLowerInvariant() ?? string.Empty;
+
+        try
+        {
+            // Check file size
+            if (fileStream.CanSeek && fileStream.Length > _options.MaxFileSizeBytes)
+            {
+                var sizeMb = fileStream.Length / (1024.0 * 1024.0);
+                var maxMb = _options.MaxFileSizeBytes / (1024.0 * 1024.0);
+                return TextExtractionResult.Failed(
+                    $"File size ({sizeMb:F1}MB) exceeds maximum allowed ({maxMb:F1}MB).",
+                    TextExtractionMethod.Email);
+            }
+
+            string text;
+            EmailMetadata metadata;
+
+            if (extension == ".eml")
+            {
+                (text, metadata) = await ExtractFromEmlAsync(fileStream, cancellationToken);
+            }
+            else if (extension == ".msg")
+            {
+                (text, metadata) = ExtractFromMsg(fileStream);
+            }
+            else
+            {
+                return TextExtractionResult.Failed(
+                    $"Unsupported email format: {extension}",
+                    TextExtractionMethod.Email);
+            }
+
+            // Check for empty content
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return TextExtractionResult.Failed(
+                    "Email is empty or contains no readable text.",
+                    TextExtractionMethod.Email);
+            }
+
+            // Check estimated token count against limit
+            var estimatedTokens = text.Length / 4;
+            if (estimatedTokens > _options.MaxInputTokens)
+            {
+                _logger.LogWarning(
+                    "Email {FileName} has ~{EstimatedTokens} tokens, exceeding limit of {MaxTokens}. Text will be truncated.",
+                    fileName, estimatedTokens, _options.MaxInputTokens);
+
+                var maxChars = _options.MaxInputTokens * 4;
+                text = text[..Math.Min(text.Length, maxChars)];
+                text += "\n\n[Content truncated due to size limits]";
+            }
+
+            // Truncate email body in metadata if needed (max 10K chars for Dataverse field)
+            const int maxBodyChars = 10000;
+            if (metadata.Body?.Length > maxBodyChars)
+            {
+                metadata.Body = metadata.Body[..maxBodyChars] + "\n\n[Content truncated]";
+            }
+
+            _logger.LogDebug(
+                "Successfully extracted {CharCount} characters from email {FileName} ({AttachmentCount} attachments)",
+                text.Length, fileName, metadata.Attachments.Count);
+
+            return TextExtractionResult.SucceededWithEmail(text, metadata);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to extract text from email {FileName}", fileName);
+            return TextExtractionResult.Failed(
+                $"Failed to extract email content: {ex.Message}",
+                TextExtractionMethod.Email);
+        }
+    }
+
+    /// <summary>
+    /// Extract text and metadata from .eml (MIME) email file using MimeKit.
+    /// </summary>
+    private static async Task<(string Text, EmailMetadata Metadata)> ExtractFromEmlAsync(
+        Stream fileStream,
+        CancellationToken cancellationToken)
+    {
+        var message = await MimeMessage.LoadAsync(fileStream, cancellationToken);
+
+        var body = message.TextBody ?? StripHtml(message.HtmlBody);
+
+        // Extract attachments
+        var attachments = new List<EmailAttachment>();
+        foreach (var attachment in message.Attachments)
+        {
+            var mimeAttachment = attachment as MimePart;
+            if (mimeAttachment != null)
+            {
+                attachments.Add(new EmailAttachment
+                {
+                    Filename = mimeAttachment.FileName ?? "unnamed",
+                    MimeType = mimeAttachment.ContentType?.MimeType,
+                    ContentId = mimeAttachment.ContentId,
+                    IsInline = mimeAttachment.ContentDisposition?.Disposition == ContentDisposition.Inline
+                });
+            }
+        }
+
+        // Also check body parts for inline attachments
+        if (message.Body is Multipart multipart)
+        {
+            ExtractAttachmentsFromMultipart(multipart, attachments);
+        }
+
+        var metadata = new EmailMetadata
+        {
+            Subject = message.Subject,
+            From = message.From?.ToString(),
+            To = message.To?.ToString(),
+            Cc = message.Cc?.ToString(),
+            Date = message.Date.LocalDateTime,
+            Body = body,
+            Attachments = attachments.DistinctBy(a => a.Filename).ToList()
+        };
+
+        var text = FormatEmailContent(
+            metadata.Subject, metadata.From, metadata.To, metadata.Cc, metadata.Date, body);
+
+        return (text, metadata);
+    }
+
+    /// <summary>
+    /// Recursively extract attachments from multipart MIME structure.
+    /// </summary>
+    private static void ExtractAttachmentsFromMultipart(Multipart multipart, List<EmailAttachment> attachments)
+    {
+        foreach (var part in multipart)
+        {
+            if (part is Multipart nested)
+            {
+                ExtractAttachmentsFromMultipart(nested, attachments);
+            }
+            else if (part is MimePart mimePart)
+            {
+                // Skip text/plain and text/html body parts
+                if (mimePart.ContentType.MimeType == "text/plain" ||
+                    mimePart.ContentType.MimeType == "text/html")
+                {
+                    if (mimePart.ContentDisposition?.Disposition != ContentDisposition.Attachment)
+                        continue;
+                }
+
+                var attachment = new EmailAttachment
+                {
+                    Filename = mimePart.FileName ?? mimePart.ContentId ?? "unnamed",
+                    MimeType = mimePart.ContentType?.MimeType,
+                    ContentId = mimePart.ContentId,
+                    IsInline = mimePart.ContentDisposition?.Disposition == ContentDisposition.Inline,
+                    SizeBytes = 0 // Size unknown at extraction time
+                };
+
+                attachments.Add(attachment);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Extract text and metadata from .msg (Outlook) email file using MsgReader.
+    /// </summary>
+    private static (string Text, EmailMetadata Metadata) ExtractFromMsg(Stream fileStream)
+    {
+        using var msg = new Storage.Message(fileStream);
+
+        // Format all recipients
+        string? recipients = null;
+        if (msg.Recipients != null && msg.Recipients.Count > 0)
+        {
+            var recipientList = msg.Recipients
+                .Select(r => r.Email ?? r.DisplayName)
+                .Where(s => !string.IsNullOrEmpty(s));
+            recipients = string.Join(", ", recipientList);
+        }
+
+        var body = msg.BodyText ?? StripHtml(msg.BodyHtml);
+
+        // Extract attachments from MSG
+        var attachments = new List<EmailAttachment>();
+        if (msg.Attachments != null)
+        {
+            foreach (var attachment in msg.Attachments)
+            {
+                if (attachment is Storage.Attachment msgAttachment)
+                {
+                    attachments.Add(new EmailAttachment
+                    {
+                        Filename = msgAttachment.FileName ?? "unnamed",
+                        MimeType = msgAttachment.MimeType,
+                        SizeBytes = msgAttachment.Data?.Length ?? 0,
+                        ContentId = msgAttachment.ContentId,
+                        IsInline = msgAttachment.IsInline
+                    });
+                }
+                else if (attachment is Storage.Message embeddedMsg)
+                {
+                    // Embedded email as attachment
+                    attachments.Add(new EmailAttachment
+                    {
+                        Filename = embeddedMsg.Subject ?? "embedded-email.msg",
+                        MimeType = "message/rfc822",
+                        IsInline = false
+                    });
+                }
+            }
+        }
+
+        var metadata = new EmailMetadata
+        {
+            Subject = msg.Subject,
+            From = msg.Sender?.Email ?? msg.Sender?.DisplayName,
+            To = recipients,
+            Cc = null, // MsgReader Recipients includes all; To/CC not easily distinguishable
+            Date = msg.SentOn,
+            Body = body,
+            Attachments = attachments
+        };
+
+        var text = FormatEmailContent(
+            metadata.Subject, metadata.From, metadata.To, metadata.Cc, metadata.Date, body);
+
+        return (text, metadata);
+    }
+
+    /// <summary>
+    /// Format email content into structured text for AI analysis.
+    /// </summary>
+    private static string FormatEmailContent(
+        string? subject,
+        string? from,
+        string? to,
+        string? cc,
+        DateTime? date,
+        string? body)
+    {
+        var sb = new StringBuilder();
+
+        sb.AppendLine("=== EMAIL MESSAGE ===");
+        sb.AppendLine();
+
+        if (!string.IsNullOrEmpty(subject))
+            sb.AppendLine($"Subject: {subject}");
+
+        if (!string.IsNullOrEmpty(from))
+            sb.AppendLine($"From: {from}");
+
+        if (!string.IsNullOrEmpty(to))
+            sb.AppendLine($"To: {to}");
+
+        if (!string.IsNullOrEmpty(cc))
+            sb.AppendLine($"CC: {cc}");
+
+        if (date.HasValue)
+            sb.AppendLine($"Date: {date.Value:yyyy-MM-dd HH:mm}");
+
+        sb.AppendLine();
+        sb.AppendLine("=== EMAIL BODY ===");
+        sb.AppendLine();
+
+        if (!string.IsNullOrWhiteSpace(body))
+        {
+            sb.Append(body.Trim());
+        }
+        else
+        {
+            sb.AppendLine("[No body content]");
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Strip HTML tags from content to extract plain text.
+    /// Simple implementation for email HTML bodies.
+    /// </summary>
+    private static string? StripHtml(string? html)
+    {
+        if (string.IsNullOrEmpty(html)) return null;
+
+        // Remove script and style blocks
+        var text = System.Text.RegularExpressions.Regex.Replace(html, @"<(script|style)[^>]*>.*?</\1>", "", System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        // Replace <br>, <p>, <div> with newlines
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"<br\s*/?>", "\n", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"</?(p|div)[^>]*>", "\n", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        // Remove remaining HTML tags
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"<[^>]+>", "");
+
+        // Decode HTML entities
+        text = System.Net.WebUtility.HtmlDecode(text);
+
+        // Clean up excessive whitespace
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"\n{3,}", "\n\n");
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"[ \t]+", " ");
+
+        return text.Trim();
     }
 
     /// <summary>
@@ -209,22 +524,37 @@ public class TextExtractorService : ITextExtractor
 
             var result = operation.Value;
 
-            // Extract text from all pages
-            var textBuilder = new StringBuilder();
-            foreach (var page in result.Pages)
+            // Extract text - prefer Content (for native DOCX/digital PDFs) over Pages/Lines (for scanned docs)
+            string text;
+            if (!string.IsNullOrWhiteSpace(result.Content))
             {
-                foreach (var line in page.Lines)
-                {
-                    textBuilder.AppendLine(line.Content);
-                }
-                // Add page break between pages
-                if (result.Pages.Count > 1)
-                {
-                    textBuilder.AppendLine();
-                }
+                // Native digital documents (DOCX, digital PDFs) have text in Content property
+                text = result.Content.Trim();
+                _logger.LogDebug(
+                    "Extracted {CharCount} chars from {FileName} using Content property",
+                    text.Length, fileName);
             }
-
-            var text = textBuilder.ToString().Trim();
+            else
+            {
+                // Scanned documents have OCR text in Pages/Lines
+                var textBuilder = new StringBuilder();
+                foreach (var page in result.Pages)
+                {
+                    foreach (var line in page.Lines)
+                    {
+                        textBuilder.AppendLine(line.Content);
+                    }
+                    // Add page break between pages
+                    if (result.Pages.Count > 1)
+                    {
+                        textBuilder.AppendLine();
+                    }
+                }
+                text = textBuilder.ToString().Trim();
+                _logger.LogDebug(
+                    "Extracted {CharCount} chars from {FileName} using Pages/Lines ({PageCount} pages)",
+                    text.Length, fileName, result.Pages.Count);
+            }
 
             // Check for empty content
             if (string.IsNullOrWhiteSpace(text))

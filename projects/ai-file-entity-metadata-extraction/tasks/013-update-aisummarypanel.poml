@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="ai-file-entity-metadata-extraction">
+  <metadata>
+    <title>Update AiSummaryPanel for TL;DR</title>
+    <phase>1b: Dataverse + PCF Integration + Email Support</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>012</dependencies>
+    <blocks>014, 015</blocks>
+    <tags>pcf, react, fluent-ui, frontend</tags>
+  </metadata>
+
+  <prompt>
+    Update AiSummaryPanel component to display TL;DR as a bullet list after streaming
+    completes. Maintain streaming text display during generation, then render structured
+    TL;DR bullets when complete event is received.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in React components and Fluent UI.
+  </role>
+
+  <goal>
+    AiSummaryPanel displays streaming text during AI generation, then shows TL;DR
+    bullets in a clean list format after completion.
+  </goal>
+
+  <context>
+    <background>
+      Users want quick scannable bullet points instead of just prose paragraphs.
+      The panel should show both: streaming text for real-time feedback, and TL;DR
+      bullets for quick scanning once complete.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/UniversalQuickCreate/control/components/AiSummaryPanel.tsx</file>
+    </relevant-files>
+  </context>
+
+  <steps>
+    <step order="1">Add state for structured result (tldr array)</step>
+    <step order="2">Update to receive structured result from useAiSummary hook</step>
+    <step order="3">Create TL;DR bullet list component using Fluent UI List</step>
+    <step order="4">Show streaming text during generation</step>
+    <step order="5">Replace or augment with TL;DR bullets when complete</step>
+    <step order="6">Style bullets for readability</step>
+    <step order="7">Test rendering with sample data</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/pcf/UniversalQuickCreate/control/components/AiSummaryPanel.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">TL;DR bullets display as a list after streaming completes.</criterion>
+    <criterion testable="true">Streaming text still displays during AI generation.</criterion>
+    <criterion testable="true">Bullets are styled consistently with Fluent UI.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2025-12-09">
+      Task completed. Changes made:
+      - Added tldr prop to AiSummaryPanelProps interface
+      - Created TL;DR bullet list UI with styled header and bullet points
+      - Show streaming text with cursor during generation (status='streaming')
+      - Show TL;DR bullets with full summary below when complete (status='complete')
+      - Added Fluent UI v9 tokens for consistent styling
+      - Updated AiSummaryCarousel to pass tldr prop to AiSummaryPanel
+      - PCF builds successfully
+
+      Component version bumped to 2.0.0.0
+    </note>
+  </notes>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/ai-knowledge/guides/PCF-V9-PACKAGING.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent UI v9 components" location="src/client/pcf/UniversalQuickCreate/control/components/">
+        Follow existing component patterns for styling and state management
+      </pattern>
+    </patterns>
+  </knowledge>
+</task>

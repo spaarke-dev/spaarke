@@ -1,0 +1,99 @@
+# Spaarke Document Intelligence – Analysis Feature  
+Design Specification for AI-Directed Coding
+
+Version: 0.1  
+Date: 2025-12-11  
+Owner: Spaarke Product / Document Intelligence  
+Intended Consumers: Claude Code (AI coding agent), Spaarke Dev Team
+
+---
+
+## 1. Purpose and Objectives
+
+This specification defines the design for the new **Analysis** feature in the Spaarke Document Intelligence service.
+
+Goal:  
+Enable users to run AI-driven **Analyses** on a single Document (with associated file), store the results as reusable Analysis records, and continue iterating using conversational AI, all within the Spaarke model-driven app.
+
+High-level objectives:
+
+- Add an **Analysis tab** to the Document main form showing a list of Analyses for that Document.
+- Provide an **Analysis Builder** (modal) to configure a new Analysis based on:
+  - Action (what the AI should do)
+  - Scopes: Skills, Knowledge, Tools
+  - Output type (Doc, Email, Teams, System Notification, Workflow trigger)
+  - Optional Playbooks (saved configurations)
+- Execute Analyses via Spaarke’s Azure-based Document Intelligence backend.
+- Present a two-column **Analysis Workspace**:
+  - Left: working Analysis document (editable)
+  - Right: original source file preview
+  - With AI chat to refine and iterate the Analysis.
+- Allow export, email, and save of resulting work product, creating new Document records and SPE files when needed.
+- Persist Analysis history (inputs, outputs, chat history) and link to the parent Document.
+
+Non-goals in this phase:
+
+- Multi-document Analyses.
+- Cross-matter or portfolio-level Analyses.
+- Complex agent-to-agent orchestration (single Analysis is one primary AI workflow plus chat).
+
+---
+
+## 2. Core Concepts
+
+- **Document**  
+  Existing Spaarke entity representing a document and its associated file in SharePoint Embedded (SPE).
+
+- **Analysis**  
+  A single AI-defined and AI-executed action performed on a Document.  
+  Example Actions: “Write a Summary”, “Review an Agreement”, “Prepare a Response”.
+
+- **Scopes**  
+  Configurable components that tailor an Analysis:
+  - Skills: Prompt templates describing how the agent should work.
+  - Knowledge: Grounding sources (RAG, rules, policies, templates).
+  - Tools: Function-style helpers (extractors, analyzers, generators).
+
+- **Playbook**  
+  A saved combination of Action + Scopes + Output settings that can be applied quickly to a Document.
+
+- **Analysis Workspace**  
+  The UI workspace for a single Analysis instance:
+  - Working document (editable)
+  - Original file preview
+  - AI chat conversation tied to this Analysis
+
+---
+
+## 3. High-Level Architecture
+
+### 3.1 Components
+
+1. **Dataverse / Model-Driven App**
+   - `sprk_document` (existing)
+   - `sprk_analysis` (new)
+   - Configuration entities for Actions, Skills, Knowledge, Tools, Playbooks
+   - Relationships between Document and Analyses
+
+2. **Power Apps UI**
+   - Document form:
+     - New “Analysis” tab with grid of Analyses
+     - Command to “+ New Analysis”
+   - Custom Page:
+     - Analysis Builder (modal)
+     - Analysis Workspace with two-column layout and chat
+
+3. **Azure Backend (Document Intelligence)**
+   - Azure Functions or App Service (HTTP APIs):
+     - Run Analysis
+     - Continue Analysis via chat
+     - Retrieve and persist working document and chat history
+   - Azure OpenAI for model inference and chat
+   - SharePoint Embedded for file retrieval and saving
+
+4. **Integrations**
+   - Email: Power Apps email dialog, using generated content and optional attachments
+   - Teams: Optional creation of Teams message content
+   - Workflow triggers: Optional follow-on Power Automate flows
+
+---

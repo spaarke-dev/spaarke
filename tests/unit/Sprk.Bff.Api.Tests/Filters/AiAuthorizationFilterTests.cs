@@ -80,7 +80,7 @@ public class AiAuthorizationFilterTests
     public async Task InvokeAsync_NoUserIdentity_Returns401()
     {
         // Arrange
-        var context = CreateContext(CreateAnonymousUser(), new SummarizeRequest(Guid.NewGuid(), "drive", "item"));
+        var context = CreateContext(CreateAnonymousUser(), new DocumentAnalysisRequest(Guid.NewGuid(), "drive", "item"));
 
         // Act
         var result = await _filter.InvokeAsync(context.Object, NextDelegate);
@@ -100,7 +100,7 @@ public class AiAuthorizationFilterTests
     {
         // Arrange
         var documentId = Guid.NewGuid();
-        var request = new SummarizeRequest(documentId, "drive-id", "item-id");
+        var request = new DocumentAnalysisRequest(documentId, "drive-id", "item-id");
         var context = CreateContext(CreateUser(), request);
 
         _authServiceMock
@@ -122,7 +122,7 @@ public class AiAuthorizationFilterTests
     {
         // Arrange
         var documentId = Guid.NewGuid();
-        var request = new SummarizeRequest(documentId, "drive-id", "item-id");
+        var request = new DocumentAnalysisRequest(documentId, "drive-id", "item-id");
         var context = CreateContext(CreateUser(), request);
 
         _authServiceMock
@@ -163,7 +163,7 @@ public class AiAuthorizationFilterTests
         // Arrange
         var docId1 = Guid.NewGuid();
         var docId2 = Guid.NewGuid();
-        var requests = new List<SummarizeRequest>
+        var requests = new List<DocumentAnalysisRequest>
         {
             new(docId1, "drive-1", "item-1"),
             new(docId2, "drive-2", "item-2")
@@ -188,7 +188,7 @@ public class AiAuthorizationFilterTests
         // Arrange
         var docId1 = Guid.NewGuid();
         var docId2 = Guid.NewGuid();
-        var requests = new List<SummarizeRequest>
+        var requests = new List<DocumentAnalysisRequest>
         {
             new(docId1, "drive-1", "item-1"),
             new(docId2, "drive-2", "item-2")
@@ -215,7 +215,7 @@ public class AiAuthorizationFilterTests
     {
         // Arrange
         var docId = Guid.NewGuid();
-        var requests = new List<SummarizeRequest>
+        var requests = new List<DocumentAnalysisRequest>
         {
             new(docId, "drive-1", "item-1"),
             new(docId, "drive-1", "item-1") // Same document twice
@@ -244,7 +244,7 @@ public class AiAuthorizationFilterTests
     {
         // Arrange
         var documentId = Guid.NewGuid();
-        var request = new SummarizeRequest(documentId, "drive-id", "item-id");
+        var request = new DocumentAnalysisRequest(documentId, "drive-id", "item-id");
         var context = CreateContext(CreateUser(), request);
 
         _authServiceMock

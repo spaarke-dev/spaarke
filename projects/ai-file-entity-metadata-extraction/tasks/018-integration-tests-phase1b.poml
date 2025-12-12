@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="018" project="ai-file-entity-metadata-extraction">
+  <metadata>
+    <title>Integration Tests Phase 1b</title>
+    <phase>1b: Dataverse + PCF Integration + Email Support</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>010, 011, 012, 013, 014, 015, 016, 017</dependencies>
+    <blocks>020</blocks>
+    <tags>integration-test, testing, bff-api, pcf</tags>
+  </metadata>
+
+  <prompt>
+    Create integration tests for Phase 1b: end-to-end flow from file upload through
+    AI analysis to Dataverse storage. Test email file extraction and PCF rendering
+    of structured output.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in integration testing.</role>
+
+  <goal>
+    Integration tests validate full Phase 1b flow. All tests pass.
+  </goal>
+
+  <steps>
+    <step order="1">Create integration test project if needed</step>
+    <step order="2">Test: Upload file → AI analysis → Structured response</step>
+    <step order="3">Test: Structured fields saved to Dataverse</step>
+    <step order="4">Test: Email file (.eml) extraction and analysis</step>
+    <step order="5">Test: Email file (.msg) extraction and analysis</step>
+    <step order="6">Run all tests and verify pass</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="test">tests/integration/Phase1b.Tests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All integration tests pass.</criterion>
+    <criterion testable="true">End-to-end flow validated.</criterion>
+  </acceptance-criteria>
+</task>

@@ -224,42 +224,42 @@ src/server/api/Sprk.Bff.Api/Configuration/
 ```
 src/server/api/Sprk.Bff.Api/
 ├── Services/Ai/
-│   └── SummarizeService.cs
+│   └── DocumentIntelligenceService.cs
 ├── Models/Ai/
-│   ├── SummarizeRequest.cs
-│   ├── SummarizeResponse.cs
-│   └── SummarizeChunk.cs
+│   ├── DocumentAnalysisRequest.cs
+│   ├── DocumentAnalysisResponse.cs
+│   └── AnalysisChunk.cs
 ```
 
-**SummarizeRequest:**
+**DocumentAnalysisRequest:**
 ```csharp
-public record SummarizeRequest(
+public record DocumentAnalysisRequest(
     Guid DocumentId,
     string DriveId,
     string ItemId);
 ```
 
-**SummarizeChunk:**
+**AnalysisChunk:**
 ```csharp
-public record SummarizeChunk(
+public record AnalysisChunk(
     string Content,
     bool Done,
     string? Summary = null,
     string? Error = null);
 ```
 
-**SummarizeService:**
+**DocumentIntelligenceService:**
 ```csharp
-public class SummarizeService
+public class DocumentIntelligenceService
 {
     // Dependencies: SpeFileStore, TextExtractorService, OpenAiClient, IDataverseClient
     
-    IAsyncEnumerable<SummarizeChunk> SummarizeStreamingAsync(
-        SummarizeRequest request, 
+    IAsyncEnumerable<AnalysisChunk> AnalyzeStreamingAsync(
+        DocumentAnalysisRequest request, 
         CancellationToken ct);
     
     Task<string> EnqueueAsync(
-        SummarizeRequest request, 
+        DocumentAnalysisRequest request, 
         CancellationToken ct);
 }
 ```
@@ -335,7 +335,7 @@ public record SummarizeJobPayload(
 
 ## Phase 4: API Endpoints
 
-**Goal:** Expose summarization via REST endpoints.
+**Goal:** Expose document intelligence via REST endpoints.
 
 ### Task 4.1: Streaming Endpoint
 
@@ -800,8 +800,8 @@ src/server/api/Sprk.Bff.Api/
 ### Task 11.1: API Integration Testing
 
 **Test scenarios:**
-1. **Streaming endpoint** - POST to `/api/ai/summarize/stream` with valid document
-2. **Enqueue endpoint** - POST to `/api/ai/summarize/enqueue` returns job ID
+1. **Analysis endpoint** - POST to `/api/ai/document-intelligence/analyze` with valid document
+2. **Enqueue endpoint** - POST to `/api/ai/document-intelligence/enqueue` returns job ID
 3. **Batch endpoint** - POST multiple documents, all jobs created
 4. **Rate limiting** - Exceed 10 requests/minute, receive 429
 5. **Error handling** - Submit invalid document, receive proper error response

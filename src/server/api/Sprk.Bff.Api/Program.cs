@@ -50,16 +50,17 @@ builder.Services
     .ValidateDataAnnotations()
     .ValidateOnStart();
 
-// AI Options - Azure OpenAI and Document Intelligence configuration
+// Document Intelligence Options - Azure OpenAI and Document Intelligence configuration
 // Secrets: ai-openai-endpoint, ai-openai-key, ai-docintel-endpoint, ai-docintel-key (KeyVault)
+// Note: Uses custom DocumentIntelligenceOptionsValidator for conditional validation (only validates when Enabled=true)
 builder.Services
-    .AddOptions<AiOptions>()
-    .Bind(builder.Configuration.GetSection(AiOptions.SectionName))
-    .ValidateDataAnnotations()
+    .AddOptions<DocumentIntelligenceOptions>()
+    .Bind(builder.Configuration.GetSection(DocumentIntelligenceOptions.SectionName))
     .ValidateOnStart();
 
 // Custom validation for conditional requirements
 builder.Services.AddSingleton<IValidateOptions<GraphOptions>, GraphOptionsValidator>();
+builder.Services.AddSingleton<IValidateOptions<DocumentIntelligenceOptions>, DocumentIntelligenceOptionsValidator>();
 
 // Add startup health check to validate configuration
 builder.Services.AddHostedService<StartupValidationService>();
@@ -283,12 +284,12 @@ builder.Services.AddSingleton<IDataverseService>(sp =>
 });
 
 // ============================================================================
-// AI SERVICES - Azure OpenAI client for document summarization (ADR-013)
+// DOCUMENT INTELLIGENCE SERVICES - Azure OpenAI client for document analysis (ADR-013)
 // ============================================================================
 // Singleton: AzureOpenAIClient is thread-safe and benefits from connection reuse
-// Only register if AI is enabled in configuration
-var aiEnabled = builder.Configuration.GetValue<bool>("Ai:Enabled");
-if (aiEnabled)
+// Only register if Document Intelligence is enabled in configuration
+var documentIntelligenceEnabled = builder.Configuration.GetValue<bool>("DocumentIntelligence:Enabled");
+if (documentIntelligenceEnabled)
 {
     // Telemetry: Singleton for AI metrics (OpenTelemetry-compatible)
     builder.Services.AddSingleton<Sprk.Bff.Api.Telemetry.AiTelemetry>();
@@ -297,14 +298,14 @@ if (aiEnabled)
     builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.IOpenAiClient>(sp => sp.GetRequiredService<Sprk.Bff.Api.Services.Ai.OpenAiClient>());
     builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.TextExtractorService>();
     builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.ITextExtractor>(sp => sp.GetRequiredService<Sprk.Bff.Api.Services.Ai.TextExtractorService>());
-    // Scoped: SummarizeService depends on SpeFileStore (scoped) for file downloads
-    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.SummarizeService>();
-    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.ISummarizeService>(sp => sp.GetRequiredService<Sprk.Bff.Api.Services.Ai.SummarizeService>());
-    Console.WriteLine("✓ AI services enabled (model: {0})", builder.Configuration["Ai:SummarizeModel"] ?? "gpt-4o-mini");
+    // Scoped: DocumentIntelligenceService depends on SpeFileStore (scoped) for file downloads
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.DocumentIntelligenceService>();
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IDocumentIntelligenceService>(sp => sp.GetRequiredService<Sprk.Bff.Api.Services.Ai.DocumentIntelligenceService>());
+    Console.WriteLine("✓ Document Intelligence services enabled (model: {0})", builder.Configuration["DocumentIntelligence:SummarizeModel"] ?? "gpt-4o-mini");
 }
 else
 {
-    Console.WriteLine("⚠ AI services disabled (Ai:Enabled = false)");
+    Console.WriteLine("⚠ Document Intelligence services disabled (DocumentIntelligence:Enabled = false)");
 }
 
 // Background Job Processing (ADR-004) - Service Bus Strategy
@@ -313,9 +314,9 @@ builder.Services.AddSingleton<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>()
 
 // Register job handlers
 builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.DocumentProcessingJobHandler>();
-if (aiEnabled)
+if (documentIntelligenceEnabled)
 {
-    builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.SummarizeJobHandler>();
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.DocumentAnalysisJobHandler>();
 }
 
 // Configure Service Bus job processing
@@ -861,10 +862,10 @@ app.MapUploadEndpoints();
 // OBO endpoints (user-enforced CRUD)
 app.MapOBOEndpoints();
 
-// AI endpoints (only if AI is enabled)
-if (app.Configuration.GetValue<bool>("Ai:Enabled"))
+// Document Intelligence endpoints (only if enabled)
+if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled"))
 {
-    app.MapSummarizeEndpoints();
+    app.MapDocumentIntelligenceEndpoints();
 }
 
 app.Run();

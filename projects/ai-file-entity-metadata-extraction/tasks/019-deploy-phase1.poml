@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="019" project="ai-file-entity-metadata-extraction">
+  <metadata>
+    <title>Deploy Phase 1 Components</title>
+    <phase>1b-Deploy: Phase 1 Deployment</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>009, 018</dependencies>
+    <blocks>020</blocks>
+    <tags>deploy, azure, dataverse, pcf</tags>
+  </metadata>
+
+  <prompt>
+    Deploy all Phase 1 components to their target environments. This includes:
+    1. BFF API to Azure App Service (Phase 1a changes - renamed services, structured output)
+    2. Dataverse solution with new fields (sprk_filetldr, sprk_fileentities, sprk_documenttype)
+    3. PCF control updates to Dataverse (AiSummaryPanel changes)
+    Verify each deployment and run smoke tests.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Azure deployments and Dataverse solution management.
+    Follow dataverse-deploy skill for PCF/solution deployment.
+  </role>
+
+  <goal>
+    All Phase 1 components deployed and functional:
+    - BFF API running on Azure App Service with new /api/ai/document-intelligence/* endpoints
+    - Dataverse solution imported with new fields visible on sprk_document entity
+    - PCF control updated and displaying TL;DR, keywords, and entities
+  </goal>
+
+  <context>
+    <background>
+      Phase 1 implementation is complete. This task deploys all changes to the target
+      environments so they can be validated in a real environment before Phase 2.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/</file>
+      <file>src/client/pcf/UniversalQuickCreate/</file>
+      <file>infrastructure/dataverse/solutions/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Deploy to staging/dev environment first</constraint>
+    <constraint source="project">Run smoke tests after each deployment</constraint>
+    <constraint source="ADR-006">PCF deployment via pac pcf push or solution import</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/ai-knowledge/guides/PCF-V9-PACKAGING.md</file>
+      <file>config/app-service-config.local.json</file>
+      <file>config/azure-config.local.json</file>
+      <file>config/ai-config.local.json</file>
+    </files>
+    <skills>
+      <skill>dataverse-deploy</skill>
+    </skills>
+  </knowledge>
+
+  <steps>
+    <step order="1">Build BFF API: dotnet publish src/server/api/Sprk.Bff.Api/ -c Release -o publish/bff/</step>
+    <step order="2">Deploy BFF API using: az webapp deploy --resource-group spe-infrastructure-westus2 --name spe-api-dev-67e2xz --src-path publish/bff/ --type zip (see config/app-service-config.local.json for details)</step>
+    <step order="3">Verify BFF API deployment: curl https://spe-api-dev-67e2xz.azurewebsites.net/health</step>
+    <step order="4">Export Dataverse solution from dev environment</step>
+    <step order="5">Build and pack Dataverse solution with updated fields</step>
+    <step order="6">Import solution to target environment</step>
+    <step order="7">Verify new fields exist on sprk_document entity</step>
+    <step order="8">Build PCF control: npm run build in UniversalQuickCreate</step>
+    <step order="9">Deploy PCF using pac pcf push (dev) or solution import (staging)</step>
+    <step order="10">MANUALLY open Custom Page in Power Apps Maker, Save and Publish (make.powerapps.com → Apps → Edit Custom Page → File → Save → File → Publish)</step>
+    <step order="11">Publish all customizations: pac solution publish-all</step>
+    <step order="12">Verify PCF displays structured output correctly</step>
+    <step order="13">MANUALLY hard refresh Spaarke application (Ctrl+Shift+R) to clear browser cache</step>
+    <step order="14">Run end-to-end smoke test: upload file, verify TL;DR/keywords/entities display</step>
+    <step order="15">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET API</tool>
+    <tool name="npm">Build PCF control</tool>
+    <tool name="pac">PAC CLI for Dataverse deployment</tool>
+    <tool name="az">Azure CLI for App Service deployment</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment">Azure App Service - BFF API updated</output>
+    <output type="deployment">Dataverse - Solution with new fields imported</output>
+    <output type="deployment">Dataverse - PCF control updated</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">BFF API health endpoint returns 200 OK</criterion>
+    <criterion testable="true">/api/ai/document-intelligence/analyze endpoint exists and responds</criterion>
+    <criterion testable="true">sprk_filetldr, sprk_fileentities, sprk_documenttype fields visible in Dataverse</criterion>
+    <criterion testable="true">UniversalQuickCreate PCF displays TL;DR bullets after analysis</criterion>
+    <criterion testable="true">Keyword tags render correctly in PCF</criterion>
+    <criterion testable="true">Entities section is collapsible and displays extracted data</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is a critical deployment gate. Phase 2 depends on Phase 1 being deployed and verified.
+    If any deployment fails, troubleshoot before proceeding.
+    For dev environment, use pac pcf push for quick iteration.
+    For staging/production, use full solution workflow.
+  </notes>
+</task>

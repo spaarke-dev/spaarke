@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="ai-file-entity-metadata-extraction">
+  <metadata>
+    <title>Add Keyword Tags Display</title>
+    <phase>1b: Dataverse + PCF Integration + Email Support</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>013</dependencies>
+    <blocks>018</blocks>
+    <tags>pcf, react, fluent-ui, frontend</tags>
+  </metadata>
+
+  <prompt>
+    Add keyword tags/chips display below the summary in AiSummaryPanel. Parse the
+    comma-separated keywords string and render as clickable tag chips using Fluent UI.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in React and Fluent UI v9.</role>
+
+  <goal>
+    Keywords display as styled tag chips below the AI summary for quick scanning.
+  </goal>
+
+  <steps>
+    <step order="1">Parse keywords string into array</step>
+    <step order="2">Create KeywordTags component using Fluent UI Tag/Badge</step>
+    <step order="3">Render tags below summary section</step>
+    <step order="4">Style for visual consistency</step>
+    <step order="5">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/pcf/UniversalQuickCreate/control/components/AiSummaryPanel.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Keywords display as tag chips.</criterion>
+    <criterion testable="true">Tags are styled with Fluent UI v9.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2025-12-09">
+      Task completed. Changes made:
+      - Added keywords prop to AiSummaryPanelProps interface
+      - Parse comma-separated keywords string with useMemo
+      - Created renderKeywords() function using Fluent UI Badge components
+      - Added styled keyword tags with brand colors and border radius
+      - Keywords display below TL;DR or summary section
+      - PCF version bumped to 3.4.0
+
+      Implementation integrated directly into AiSummaryPanel.tsx rather than
+      creating a separate component, following existing patterns.
+    </note>
+  </notes>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/ai-knowledge/guides/PCF-V9-PACKAGING.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent UI v9 Tag components" location="src/client/pcf/UniversalQuickCreate/control/components/">
+        Use Tag or Badge components from @fluentui/react-components
+      </pattern>
+    </patterns>
+  </knowledge>
+</task>

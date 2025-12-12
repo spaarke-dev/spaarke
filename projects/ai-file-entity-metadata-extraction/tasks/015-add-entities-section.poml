@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="ai-file-entity-metadata-extraction">
+  <metadata>
+    <title>Add Entities Collapsible Section</title>
+    <phase>1b: Dataverse + PCF Integration + Email Support</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>013</dependencies>
+    <blocks>018</blocks>
+    <tags>pcf, react, fluent-ui, frontend</tags>
+  </metadata>
+
+  <prompt>
+    Add a collapsible section to display extracted entities (organizations, people,
+    amounts, dates, references) in AiSummaryPanel. Use Fluent UI Accordion for the
+    collapsible behavior.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in React and Fluent UI v9.</role>
+
+  <goal>
+    Extracted entities display in a collapsible accordion section, organized by
+    entity type for easy scanning.
+  </goal>
+
+  <steps>
+    <step order="1">Create EntitiesSection component</step>
+    <step order="2">Use Fluent UI Accordion for collapsible behavior</step>
+    <step order="3">Group entities by type (Organizations, People, etc.)</step>
+    <step order="4">Render each entity type as a subsection</step>
+    <step order="5">Handle empty entity arrays gracefully</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/pcf/UniversalQuickCreate/control/components/AiSummaryPanel.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Entities display in collapsible accordion.</criterion>
+    <criterion testable="true">Entities grouped by type.</criterion>
+    <criterion testable="true">Empty entity types are hidden or show placeholder.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2025-12-09">
+      Task completed. Changes made:
+      - Added entities prop (ExtractedEntities type) to AiSummaryPanelProps
+      - Imported Accordion, AccordionHeader, AccordionItem, AccordionPanel from Fluent UI
+      - Added hasEntities useMemo to check for non-empty entity arrays
+      - Created renderEntityType() helper for each entity category with icons
+      - Created renderEntities() with collapsible Accordion component
+      - Shows document type at top of accordion panel
+      - Groups: Organizations, People, Amounts, Dates, References
+      - Empty entity types are automatically hidden
+      - Icons: OrganizationRegular, PersonRegular, MoneyRegular, CalendarRegular, DocumentCopyRegular
+      - PCF version bumped to 3.4.0
+
+      Implementation integrated directly into AiSummaryPanel.tsx rather than
+      creating a separate component, following existing patterns.
+    </note>
+  </notes>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/ai-knowledge/guides/PCF-V9-PACKAGING.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent UI v9 Accordion" location="src/client/pcf/UniversalQuickCreate/control/components/">
+        Use Accordion component from @fluentui/react-components for collapsible sections
+      </pattern>
+    </patterns>
+  </knowledge>
+</task>

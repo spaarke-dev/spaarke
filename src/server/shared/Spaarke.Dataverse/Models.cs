@@ -15,6 +15,9 @@ public class CreateDocumentRequest
 /// </summary>
 public class UpdateDocumentRequest
 {
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Basic Document Properties
+    // ═══════════════════════════════════════════════════════════════════════════
     public string? Name { get; set; }
     public string? Description { get; set; }
     public string? FileName { get; set; }
@@ -24,6 +27,83 @@ public class UpdateDocumentRequest
     public string? GraphDriveId { get; set; }
     public bool? HasFile { get; set; }
     public DocumentStatus? Status { get; set; }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // AI Analysis Fields
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>AI-generated summary of the document.</summary>
+    public string? Summary { get; set; }
+
+    /// <summary>AI-generated TL;DR bullet points (newline-separated).</summary>
+    public string? TlDr { get; set; }
+
+    /// <summary>AI-extracted keywords for search (comma-separated).</summary>
+    public string? Keywords { get; set; }
+
+    /// <summary>AI analysis status OptionSet values (Dataverse 100000000+ range):
+    /// None=100000000, Pending=100000001, Completed=100000002, OptedOut=100000003,
+    /// Failed=100000004, NotSupported=100000005, Skipped=100000006.</summary>
+    public int? SummaryStatus { get; set; }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Extracted Entities Fields
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>AI-extracted organization names (newline-separated).</summary>
+    public string? ExtractOrganization { get; set; }
+
+    /// <summary>AI-extracted person names (newline-separated).</summary>
+    public string? ExtractPeople { get; set; }
+
+    /// <summary>AI-extracted monetary amounts (newline-separated).</summary>
+    public string? ExtractFees { get; set; }
+
+    /// <summary>AI-extracted dates (newline-separated).</summary>
+    public string? ExtractDates { get; set; }
+
+    /// <summary>AI-extracted reference numbers (newline-separated).</summary>
+    public string? ExtractReference { get; set; }
+
+    /// <summary>AI-classified document type (raw text value).</summary>
+    public string? ExtractDocumentType { get; set; }
+
+    /// <summary>Document type choice field value (mapped from AI classification).</summary>
+    public int? DocumentType { get; set; }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Email Metadata Fields (for .eml and .msg files)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>Email subject line. Maps to sprk_EmailSubject.</summary>
+    public string? EmailSubject { get; set; }
+
+    /// <summary>Email sender address(es). Maps to sprk_EmailFrom.</summary>
+    public string? EmailFrom { get; set; }
+
+    /// <summary>Email recipient address(es). Maps to sprk_EmailTo.</summary>
+    public string? EmailTo { get; set; }
+
+    /// <summary>Email sent date/time. Maps to sprk_EmailDate.</summary>
+    public DateTime? EmailDate { get; set; }
+
+    /// <summary>Email body content (truncated to 10K chars). Maps to sprk_EmailBody.</summary>
+    public string? EmailBody { get; set; }
+
+    /// <summary>JSON array of attachment metadata. Maps to sprk_Attachments.</summary>
+    public string? Attachments { get; set; }
+
+    /// <summary>Parent document GUID (for attachments). Maps to sprk_ParentDocumentId.</summary>
+    public string? ParentDocumentId { get; set; }
+
+    /// <summary>Parent document lookup. Maps to sprk_ParentDocumentName.</summary>
+    public Guid? ParentDocumentLookup { get; set; }
+
+    /// <summary>Parent file name (for attachments). Maps to sprk_ParentFileName.</summary>
+    public string? ParentFileName { get; set; }
+
+    /// <summary>Parent Graph item ID (for attachments). Maps to sprk_ParentGraphItemId.</summary>
+    public string? ParentGraphItemId { get; set; }
 }
 
 /// <summary>

@@ -9,6 +9,9 @@ out/
 dist/
 build/
 publish/
+publish-*/
+deploy.zip
+deploy-*.zip
 
 # IDE files
 .vs/
@@ -27,6 +30,7 @@ Thumbs.db
 *.log
 logs/
 webapp-logs/
+webapp-logs-*/
 
 # Environment variables
 .env
@@ -53,6 +57,9 @@ coverage/
 *.msapp
 *.zip
 temp/
+*_backup/
+*_fresh/
+*_extracted/
 
 # Office Add-ins
 manifest*.xml.bak

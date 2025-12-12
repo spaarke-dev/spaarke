@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="ai-file-entity-metadata-extraction">
+  <metadata>
+    <title>Rename Options Class</title>
+    <phase>1a: Structured AI Output + Service Rename</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>004</blocks>
+    <tags>bff-api, refactoring, config</tags>
+  </metadata>
+
+  <prompt>
+    Rename AiOptions class to DocumentIntelligenceOptions and update the configuration
+    section name from "Ai" to "DocumentIntelligence". Update all references in the codebase
+    and ensure appsettings.json uses the new section name.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core configuration and options pattern.
+  </role>
+
+  <goal>
+    AiOptions.cs renamed to DocumentIntelligenceOptions.cs with SectionName constant
+    updated to "DocumentIntelligence". All configuration bindings and references updated.
+  </goal>
+
+  <context>
+    <background>
+      The options class naming is being aligned with the service rename from Summarize
+      to DocumentIntelligence. The configuration section also needs updating to match.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/AiOptions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.json</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.Development.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">Configuration should remain simple and focused</constraint>
+    <constraint source="project">Update both class name AND SectionName constant</constraint>
+    <constraint source="project">Maintain backward compatibility note for transition period</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/reference/adr/ADR-010-di-minimalism.md</file>
+    </files>
+    <patterns>
+      <pattern name="Options pattern" location="src/server/api/Sprk.Bff.Api/Configuration/">
+        Follow existing options class pattern with SectionName constant
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read current AiOptions.cs to understand structure</step>
+    <step order="2">Rename AiOptions.cs to DocumentIntelligenceOptions.cs</step>
+    <step order="3">Update class name from AiOptions to DocumentIntelligenceOptions</step>
+    <step order="4">Update SectionName constant from "Ai" to "DocumentIntelligence"</step>
+    <step order="5">Update appsettings.json section name from "Ai" to "DocumentIntelligence"</step>
+    <step order="6">Update appsettings.Development.json if it has the section</step>
+    <step order="7">Update Program.cs configuration binding to use new class name</step>
+    <step order="8">Search for all AiOptions references and update</step>
+    <step order="9">Run dotnet build to verify no compilation errors</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and verify .NET projects</tool>
+    <tool name="grep">Search for references to old names</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Configuration/DocumentIntelligenceOptions.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AiOptions.cs no longer exists in the codebase.</criterion>
+    <criterion testable="true">DocumentIntelligenceOptions.cs exists and compiles.</criterion>
+    <criterion testable="true">SectionName constant equals "DocumentIntelligence".</criterion>
+    <criterion testable="true">appsettings.json has "DocumentIntelligence" section (not "Ai").</criterion>
+    <criterion testable="true">dotnet build succeeds with no errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The options class may have a validator (AiOptionsValidator). If so, rename that too
+    to DocumentIntelligenceOptionsValidator in the same task.
+  </notes>
+</task>

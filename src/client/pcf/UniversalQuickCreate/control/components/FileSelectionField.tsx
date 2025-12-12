@@ -48,7 +48,7 @@ const useStyles = makeStyles({
     container: {
         display: 'flex',
         flexDirection: 'column',
-        gap: tokens.spacingVerticalM
+        gap: tokens.spacingVerticalXL
     },
     fileInputWrapper: {
         display: 'flex',

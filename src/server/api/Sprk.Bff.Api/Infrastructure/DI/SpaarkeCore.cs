@@ -17,7 +17,11 @@ public static class SpaarkeCore
         // Don't add authorization here since it's already in Program.cs
 
         // SDAP Authorization services
+        // Register both concrete and interface for compatibility:
+        // - Concrete: Used by DocumentAuthorizationFilter and ResourceAccessHandler
+        // - Interface: Used by AiAuthorizationFilter
         services.AddScoped<Spaarke.Core.Auth.AuthorizationService>();
+        services.AddScoped<Spaarke.Core.Auth.IAuthorizationService>(sp => sp.GetRequiredService<Spaarke.Core.Auth.AuthorizationService>());
 
         // Register HttpClient for DataverseAccessDataSource (shares Dataverse base URL configuration)
         services.AddHttpClient<IAccessDataSource, DataverseAccessDataSource>((sp, client) =>

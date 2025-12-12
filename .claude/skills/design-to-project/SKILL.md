@@ -2,6 +2,9 @@
 
 ---
 description: Full AI-AGENT-PLAYBOOK orchestration - transforms a design specification into project artifacts and begins implementation
+tags: [design, planning, project-init, tasks, implementation, orchestration]
+techStack: [all]
+appliesTo: ["projects/*/spec.md", "implement spec", "design to project"]
 alwaysApply: false
 ---
 
@@ -103,7 +106,27 @@ Proceeding to Phase 2: Context Gathering...
 
 ### Phase 2: Gather Context
 
-#### Step 2.1: Check ADRs
+#### Step 2.1: Discover Related Resources
+
+**Search for related skills and knowledge docs:**
+
+1. **Extract keywords from spec.md:**
+   - Technology names (e.g., "Azure OpenAI", "Dataverse", "React", "PCF")
+   - Feature types (e.g., "API endpoint", "PCF control", "plugin")
+   - Operations (e.g., "deploy", "authentication", "caching")
+
+2. **Search `.claude/skills/INDEX.md`:**
+   - Look for skills with matching `tags` or `techStack` in their YAML frontmatter
+   - Read relevant skill files for patterns and procedures
+   - Example: If spec mentions "PCF control" → load relevant PCF skills
+
+3. **Search `docs/ai-knowledge/`:**
+   - Look for guides matching technologies or patterns in spec
+   - Load relevant architecture docs, guides, and standards
+
+**Output:** List of discovered skills and knowledge docs to use throughout pipeline.
+
+#### Step 2.2: Check ADRs
 ```
 READ: docs/ai-knowledge/CLAUDE.md for relevant articles
 READ: docs/reference/adr/ index

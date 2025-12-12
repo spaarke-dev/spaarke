@@ -639,6 +639,127 @@ public class DriveItemOperations
     }
 
     /// <summary>
+    /// Get file metadata using user OBO authentication.
+    /// Used by AI services that need to access user-uploaded files.
+    /// </summary>
+    public async Task<FileHandleDto?> GetFileMetadataAsUserAsync(
+        HttpContext ctx,
+        string driveId,
+        string itemId,
+        CancellationToken ct = default)
+    {
+        using var activity = Activity.Current;
+        activity?.SetTag("operation", "GetFileMetadataAsUser");
+        activity?.SetTag("driveId", driveId);
+        activity?.SetTag("itemId", itemId);
+
+        _logger.LogInformation("Getting metadata for file {ItemId} from drive {DriveId} (OBO)",
+            itemId, driveId);
+
+        try
+        {
+            var graphClient = await _factory.ForUserAsync(ctx, ct);
+
+            var item = await graphClient.Drives[driveId].Items[itemId]
+                .GetAsync(cancellationToken: ct);
+
+            if (item == null)
+            {
+                _logger.LogWarning("File {ItemId} not found in drive {DriveId}", itemId, driveId);
+                return null;
+            }
+
+            _logger.LogInformation("Successfully retrieved metadata for file {ItemId} (OBO)", itemId);
+
+            return new FileHandleDto(
+                item.Id!,
+                item.Name!,
+                item.ParentReference?.Id,
+                item.Size,
+                item.CreatedDateTime ?? DateTimeOffset.UtcNow,
+                item.LastModifiedDateTime ?? DateTimeOffset.UtcNow,
+                item.ETag,
+                item.Folder != null,
+                item.WebUrl);
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
+        {
+            _logger.LogWarning("File {ItemId} not found in drive {DriveId}", itemId, driveId);
+            return null;
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.Forbidden)
+        {
+            _logger.LogWarning("Access denied getting metadata for file {ItemId}: {Error}", itemId, ex.Message);
+            throw new UnauthorizedAccessException($"Access denied to file {itemId}", ex);
+        }
+        catch (ServiceException ex)
+        {
+            _logger.LogError(ex, "Graph API error getting file metadata: {Error}", ex.Message);
+            throw new InvalidOperationException($"Failed to get file metadata: {ex.Message}", ex);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error getting file metadata: {Error}", ex.Message);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Download file content using user OBO authentication.
+    /// Used by AI services that need to access user-uploaded files.
+    /// </summary>
+    public async Task<Stream?> DownloadFileAsUserAsync(
+        HttpContext ctx,
+        string driveId,
+        string itemId,
+        CancellationToken ct = default)
+    {
+        using var activity = Activity.Current;
+        activity?.SetTag("operation", "DownloadFileAsUser");
+        activity?.SetTag("driveId", driveId);
+        activity?.SetTag("itemId", itemId);
+
+        _logger.LogInformation("Downloading file {ItemId} from drive {DriveId} (OBO)", itemId, driveId);
+
+        try
+        {
+            var graphClient = await _factory.ForUserAsync(ctx, ct);
+
+            var stream = await graphClient.Drives[driveId].Items[itemId].Content
+                .GetAsync(cancellationToken: ct);
+
+            if (stream == null)
+            {
+                _logger.LogWarning("Failed to download file {ItemId} - stream is null", itemId);
+                return null;
+            }
+
+            _logger.LogInformation("Successfully downloaded file {ItemId} (OBO)", itemId);
+            return stream;
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
+        {
+            _logger.LogWarning("File {ItemId} not found in drive {DriveId}", itemId, driveId);
+            return null;
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.Forbidden)
+        {
+            _logger.LogWarning("Access denied downloading file {ItemId}: {Error}", itemId, ex.Message);
+            throw new UnauthorizedAccessException($"Access denied to file {itemId}", ex);
+        }
+        catch (ServiceException ex)
+        {
+            _logger.LogError(ex, "Graph API error downloading file: {Error}", ex.Message);
+            throw new InvalidOperationException($"Failed to download file: {ex.Message}", ex);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error downloading file: {Error}", ex.Message);
+            throw;
+        }
+    }
+
+    /// <summary>
     /// Get preview URL for a file using app-only authentication.
     /// Returns ephemeral URL that expires in ~10 minutes.
     /// Used for server-side file viewing with correlation ID tracking.

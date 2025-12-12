@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="009" project="ai-file-entity-metadata-extraction">
+  <metadata>
+    <title>Unit Tests for Phase 1a</title>
+    <phase>1a: Structured AI Output + Service Rename</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>001, 002, 003, 004, 005, 006, 007, 008</dependencies>
+    <blocks>010</blocks>
+    <tags>bff-api, unit-test, testing</tags>
+  </metadata>
+
+  <prompt>
+    Create comprehensive unit tests for Phase 1a changes: JSON parsing, fallback logic,
+    SSE streaming with complete event, and renamed service/endpoint functionality.
+    Tests must cover success, failure, and edge cases.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in xUnit testing and mocking with NSubstitute.
+  </role>
+
+  <goal>
+    Unit test coverage for DocumentIntelligenceService including JSON parsing success,
+    JSON parsing failure/fallback, and SSE event formatting. All tests pass.
+  </goal>
+
+  <context>
+    <background>
+      Unit tests validate the Phase 1a implementation before integration. Focus on
+      the JSON parsing logic and fallback behavior which are critical for reliability.
+    </background>
+    <relevant-files>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/DocumentIntelligenceService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use xUnit for test framework</constraint>
+    <constraint source="project">Use NSubstitute for mocking</constraint>
+    <constraint source="project">≥80% code coverage for new code</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-file-entity-metadata-extraction/spec.md (Appendix A - Example outputs)</file>
+    </files>
+    <patterns>
+      <pattern name="Test patterns" location="tests/unit/">
+        Follow existing test class naming and structure conventions
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create DocumentIntelligenceServiceTests.cs in test project</step>
+    <step order="2">Add test: ParseStructuredResponse_ValidJson_ReturnsPopulatedResult</step>
+    <step order="3">Add test: ParseStructuredResponse_MalformedJson_ReturnsFallbackResult</step>
+    <step order="4">Add test: ParseStructuredResponse_EmptyResponse_ReturnsFallbackResult</step>
+    <step order="5">Add test: ParseStructuredResponse_PartialJson_ReturnsFallbackResult</step>
+    <step order="6">Add test: SSE_StreamsTextEvents_ThenCompleteEvent</step>
+    <step order="7">Add test: ParsedSuccessfully_TrueWhenJsonValid_FalseWhenFallback</step>
+    <step order="8">Run dotnet test to verify all tests pass</step>
+    <step order="9">Check coverage meets ≥80% threshold</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/DocumentIntelligenceServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All unit tests pass.</criterion>
+    <criterion testable="true">Tests cover valid JSON parsing scenario.</criterion>
+    <criterion testable="true">Tests cover malformed JSON fallback scenario.</criterion>
+    <criterion testable="true">Tests cover empty response fallback scenario.</criterion>
+    <criterion testable="true">Code coverage ≥80% for DocumentIntelligenceService.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use example JSON from spec.md Appendix A for test fixtures. Consider parameterized
+    tests (Theory) for multiple fallback scenarios. Mock Azure OpenAI client to avoid
+    external calls in unit tests.
+  </notes>
+</task>

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="027" project="ai-file-entity-metadata-extraction">
+  <metadata>
+    <title>Add One-Click Association</title>
+    <phase>2: Record Matching Service</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>026</dependencies>
+    <blocks>028</blocks>
+    <tags>pcf, dataverse, frontend</tags>
+  </metadata>
+
+  <prompt>
+    Implement one-click association: when user selects a match suggestion, call
+    associate-record endpoint to populate the correct lookup field on the Document
+    record (e.g., sprk_matter, sprk_project).
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in React and Dataverse Web API.</role>
+
+  <goal>
+    Selecting a match automatically populates the correct Document lookup field.
+  </goal>
+
+  <steps>
+    <step order="1">Wire up selection event in RecordMatchSuggestions</step>
+    <step order="2">Call associate-record endpoint with lookupFieldName</step>
+    <step order="3">Show success/failure feedback</step>
+    <step order="4">Refresh Document record state</step>
+    <step order="5">Test end-to-end flow</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/pcf/UniversalQuickCreate/control/components/RecordMatchSuggestions.tsx (updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Selecting match calls associate endpoint.</criterion>
+    <criterion testable="true">Correct lookup field populated on Document.</criterion>
+    <criterion testable="true">User sees success feedback.</criterion>
+  </acceptance-criteria>
+</task>

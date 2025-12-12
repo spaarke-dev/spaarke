@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="ai-file-entity-metadata-extraction">
+  <metadata>
+    <title>Create Index Schema</title>
+    <phase>2: Record Matching Service</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>022</blocks>
+    <tags>azure-search, config, schema</tags>
+  </metadata>
+
+  <prompt>
+    Define and create the spaarke-records-index schema in Azure AI Search per spec.md
+    Section 4.2.4. Include fields for recordType, recordName, organizations, people,
+    referenceNumbers, and contentVector for hybrid search.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Azure AI Search index design.</role>
+
+  <goal>
+    Index schema created with all required fields and vector search configuration.
+  </goal>
+
+  <steps>
+    <step order="1">Create index schema JSON matching spec</step>
+    <step order="2">Configure vector search profile for hybrid search</step>
+    <step order="3">Create index using Azure CLI or SDK</step>
+    <step order="4">Verify index exists and has correct schema</step>
+    <step order="5">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">infrastructure/ai-search/spaarke-records-index.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Index exists in Azure AI Search.</criterion>
+    <criterion testable="true">Schema matches spec.md Section 4.2.4.</criterion>
+    <criterion testable="true">Vector search profile configured.</criterion>
+  </acceptance-criteria>
+</task>
