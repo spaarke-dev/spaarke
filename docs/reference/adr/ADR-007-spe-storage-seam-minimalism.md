@@ -46,9 +46,9 @@ SharePoint Embedded (SPE) is integrated via Microsoft Graph, which already provi
 
 | Aspect | Approach |
 |--------|----------|
-| `GraphServiceClient` | Injected once into `SpeFileStore` |
-| Retry | SDK retry handler enabled |
-| Correlation | Delegating handler for correlation |
+| Graph client | `IGraphClientFactory` creates `GraphServiceClient` per auth mode (app-only vs OBO) |
+| Retry/timeout | Centralized via named `HttpClient` + `GraphHttpMessageHandler` resilience |
+| Correlation | Propagate correlation ID into Graph requests (via shared handlers/logging) |
 | Callers | Never reference Graph types |
 
 ## Exceptions
@@ -72,3 +72,8 @@ If a second provider becomes a real requirement, introduce `IFileStore` with met
 - [ ] No Graph SDK types in endpoint DTOs
 - [ ] All SPE operations route through `SpeFileStore`
 - [ ] Correlation ID passed to Graph requests
+
+## AI-Directed Coding Guidance
+
+- If you need a new SPE capability, add a focused method to `SpeFileStore` and expose SDAP DTOs only.
+- Do not bubble up Graph SDK types beyond the facade.

@@ -1,0 +1,72 @@
+# Analysis Execute Prompt Flow
+# Executes AI-driven document analysis with configurable actions and scopes
+$schema: https://azuremlschemas.azureedge.net/promptflow/latest/Flow.schema.json
+
+inputs:
+  document_text:
+    type: string
+    description: "Extracted text content from the document to analyze"
+  action_system_prompt:
+    type: string
+    description: "System prompt from the selected analysis action"
+  skills_instructions:
+    type: string
+    description: "Combined instructions from selected skills"
+    default: ""
+  knowledge_context:
+    type: string
+    description: "Inline knowledge content or RAG-retrieved context"
+    default: ""
+  output_format:
+    type: string
+    description: "Requested output format (markdown, structured_json)"
+    default: "markdown"
+  max_tokens:
+    type: int
+    description: "Maximum tokens for the response"
+    default: 4096
+
+outputs:
+  analysis_result:
+    type: string
+    reference: ${generate_analysis.output}
+  token_usage:
+    type: object
+    reference: ${generate_analysis.usage}
+
+nodes:
+  # Node 1: Build the system prompt with action and skills
+  - name: build_system_prompt
+    type: python
+    source:
+      type: code
+      path: build_system_prompt.py
+    inputs:
+      action_system_prompt: ${inputs.action_system_prompt}
+      skills_instructions: ${inputs.skills_instructions}
+      output_format: ${inputs.output_format}
+
+  # Node 2: Build the user prompt with document and knowledge
+  - name: build_user_prompt
+    type: python
+    source:
+      type: code
+      path: build_user_prompt.py
+    inputs:
+      document_text: ${inputs.document_text}
+      knowledge_context: ${inputs.knowledge_context}
+
+  # Node 3: Generate the analysis using Azure OpenAI
+  - name: generate_analysis
+    type: llm
+    source:
+      type: code
+      path: generate_analysis.jinja2
+    inputs:
+      deployment_name: gpt-4o-mini
+      max_tokens: ${inputs.max_tokens}
+      temperature: 0.3
+      system_prompt: ${build_system_prompt.output}
+      user_prompt: ${build_user_prompt.output}
+    connection: azure-openai-connection
+    api: chat

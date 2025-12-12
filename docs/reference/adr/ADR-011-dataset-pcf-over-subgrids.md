@@ -223,6 +223,12 @@ All exceptions require **explicit approval** from tech lead with documented rati
 - [ ] Accessibility testing completed
 - [ ] No new native subgrids without tech lead approval
 
+## AI-Directed Coding Guidance
+
+- Default for list-based document UX: implement/extend the Dataset PCF under `src/client/pcf/UniversalDatasetGrid/`.
+- Reuse shared components from `src/client/shared/Spaarke.UI.Components/` rather than duplicating UI primitives.
+- Avoid adding new native subgrids or bespoke JS webresources; if you must, document an explicit exception and plan the PCF replacement.
+
 ---
 
 ## References

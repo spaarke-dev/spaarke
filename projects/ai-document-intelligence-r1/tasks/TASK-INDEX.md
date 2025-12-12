@@ -1,8 +1,8 @@
 # Task Index - AI Document Intelligence R1
 
 > **Project**: ai-document-intelligence-r1  
-> **Last Updated**: December 11, 2025  
-> **Total Tasks**: 50
+> **Last Updated**: December 12, 2025  
+> **Total Tasks**: 178
 
 ## Task Status Legend
 
@@ -20,53 +20,53 @@
 
 | ID | Task | Status | Dependencies | Estimated Hours |
 |----|------|--------|--------------|-----------------|
-| 001 | Create Environment Variables in Dataverse Solution | 🔲 | none | 4h |
-| 002 | Create Bicep Parameter Template | 🔲 | 001 | 3h |
-| 003 | Create Token-Replacement appsettings.json Template | 🔲 | 001 | 2h |
-| 004 | Update BFF API Configuration to Use Environment Variables | 🔲 | 001, 003 | 4h |
+| 001 | Create Environment Variables in Dataverse Solution | ✅ | none | 4h |
+| 002 | Create Bicep Parameter Template | ✅ | 001 | 3h |
+| 003 | Create Token-Replacement appsettings.json Template | ✅ | 001 | 2h |
+| 004 | Update BFF API Configuration to Use Environment Variables | ✅ | 001, 003 | 4h |
 
 ### Azure AI Foundry Infrastructure
 
 | ID | Task | Status | Dependencies | Estimated Hours |
 |----|------|--------|--------------|-----------------|
-| 005 | Create Parameterized Bicep Template for AI Foundry Hub | 🔲 | 002 | 6h |
-| 006 | Deploy AI Foundry Hub and Project | 🔲 | 005 | 4h |
-| 007 | Create Prompt Flow: analysis-execute | 🔲 | 006 | 8h |
-| 008 | Create Prompt Flow: analysis-continue | 🔲 | 006 | 6h |
-| 009 | Configure AI Foundry Evaluation Pipeline | 🔲 | 006 | 4h |
+| 005 | Create Parameterized Bicep Template for AI Foundry Hub | ✅ | 002 | 6h |
+| 006 | Deploy AI Foundry Hub and Project | ✅ | 005 | 4h |
+| 007 | Create Prompt Flow: analysis-execute | ✅ | 006 | 8h |
+| 008 | Create Prompt Flow: analysis-continue | ✅ | 006 | 6h |
+| 009 | Configure AI Foundry Evaluation Pipeline | ✅ | 006 | 4h |
 
 ### Dataverse Entities
 
 | ID | Task | Status | Dependencies | Estimated Hours |
 |----|------|--------|--------------|-----------------|
-| 010 | Create sprk_analysis Entity with Fields and Relationships | 🔲 | none | 4h |
-| 011 | Create sprk_analysisaction Entity | 🔲 | none | 2h |
-| 012 | Create sprk_analysisskill Entity | 🔲 | none | 2h |
-| 013 | Create sprk_analysisknowledge Entity | 🔲 | none | 3h |
-| 014 | Create sprk_knowledgedeployment Entity | 🔲 | none | 3h |
-| 015 | Create sprk_analysistool Entity | 🔲 | none | 2h |
-| 016 | Create sprk_analysisplaybook Entity with N:N Relationships | 🔲 | 010-015 | 4h |
-| 017 | Create sprk_analysisworkingversion Entity | 🔲 | 010 | 3h |
-| 018 | Create sprk_analysisemailmetadata Entity | 🔲 | 010 | 2h |
-| 019 | Create sprk_analysischatmessage Entity | 🔲 | 010 | 2h |
+| 010 | Create sprk_analysis Entity with Fields and Relationships | ✅ | none | 4h |
+| 011 | Create sprk_analysisaction Entity | ✅ | none | 2h |
+| 012 | Create sprk_analysisskill Entity | ✅ | none | 2h |
+| 013 | Create sprk_analysisknowledge Entity | ✅ | none | 3h |
+| 014 | Create sprk_knowledgedeployment Entity | ✅ | none | 3h |
+| 015 | Create sprk_analysistool Entity | ✅ | none | 2h |
+| 016 | Create sprk_analysisplaybook Entity with N:N Relationships | ✅ | 010-015 | 4h |
+| 017 | Create sprk_analysisworkingversion Entity | ✅ | 010 | 3h |
+| 018 | Create sprk_analysisemailmetadata Entity | ✅ | 010 | 2h |
+| 019 | Create sprk_analysischatmessage Entity | ✅ | 010 | 2h |
 | 020 | Create Security Roles for Analysis Feature | 🔲 | 010-019 | 3h |
-| 021 | Export Dataverse Solution Package | 🔲 | 001, 010-020 | 2h |
+| 021 | Export Dataverse Solution Package | ✅ | 001, 010-020 | 2h |
 
 ### BFF API Implementation
 
 | ID | Task | Status | Dependencies | Estimated Hours |
 |----|------|--------|--------------|-----------------|
-| 022 | Create AnalysisEndpoints.cs with POST /execute | 🔲 | 010, 004 | 4h |
-| 023 | Create AnalysisEndpoints.cs with POST /continue | 🔲 | 022 | 3h |
-| 024 | Create AnalysisEndpoints.cs with POST /save | 🔲 | 022 | 3h |
-| 025 | Create AnalysisEndpoints.cs with POST /export | 🔲 | 022 | 3h |
-| 026 | Create AnalysisOrchestrationService | 🔲 | 022-025 | 8h |
-| 027 | Create ScopeResolverService with Redis Caching | 🔲 | 026 | 6h |
-| 028 | Create AnalysisContextBuilder with Prompt Flow Integration | 🔲 | 007, 008, 026 | 6h |
-| 029 | Create WorkingDocumentVersionService with SPE Storage | 🔲 | 026 | 6h |
-| 030 | Create AnalysisAuthorizationFilter | 🔲 | 022-025 | 3h |
-| 031 | Add Unit Tests for Analysis Services | 🔲 | 026-029 | 8h |
-| 032 | Add Integration Tests for Analysis Endpoints | 🔲 | 022-025, 026-029 | 6h |
+| 022 | Create AnalysisEndpoints.cs with POST /execute | ✅ | 010, 004 | 4h |
+| 023 | Create AnalysisEndpoints.cs with POST /continue | ✅ | 022 | 3h |
+| 024 | Create AnalysisEndpoints.cs with POST /save | ✅ | 022 | 3h |
+| 025 | Create AnalysisEndpoints.cs with POST /export | ✅ | 022 | 3h |
+| 026 | Create AnalysisOrchestrationService | ✅ | 022-025 | 8h |
+| 027 | Create ScopeResolverService with Redis Caching | ✅ | 026 | 6h |
+| 028 | Create AnalysisContextBuilder with Prompt Flow Integration | ✅ | 007, 008, 026 | 6h |
+| 029 | Create WorkingDocumentVersionService with SPE Storage | ✅ | 026 | 6h |
+| 030 | Create AnalysisAuthorizationFilter | ✅ | 022-025 | 3h |
+| 031 | Add Unit Tests for Analysis Services | ✅ | 026-029 | 8h |
+| 032 | Add Integration Tests for Analysis Endpoints | ✅ | 022-025, 026-029 | 6h |
 
 ### Deployment & Verification
 
@@ -74,9 +74,9 @@
 |----|------|--------|--------------|-----------------|
 | 033 | Test Bicep Deployment to External Test Subscription | 🔲 | 005, 006, 021 | 4h |
 | 034 | Test Dataverse Solution Import to Clean Environment | 🔲 | 021 | 3h |
-| 035 | Verify All Environment Variables Resolve Correctly | 🔲 | 001, 004, 033 | 2h |
+| 035 | Verify All Environment Variables Resolve Correctly | ✅ | 001, 004, 033 | 2h |
 | 036 | Run Integration Tests Against Dev Environment | 🔲 | 032, 033 | 3h |
-| 037 | Create Phase 1 Deployment Guide | 🔲 | 033-036 | 4h |
+| 037 | Create Phase 1 Deployment Guide | ✅ | 033-036 | 4h |
 
 **Phase 1 Total**: 37 tasks, ~165 hours
 
@@ -88,40 +88,40 @@
 
 | ID | Task | Status | Dependencies | Estimated Hours |
 |----|------|--------|--------------|-----------------|
-| 038 | Add Analysis Tab to sprk_document Form | 🔲 | Phase 1 Complete | 2h |
-| 039 | Add Analysis Grid to Analysis Tab | 🔲 | 038 | 2h |
-| 040 | Add "+ New Analysis" Command Button | 🔲 | 038 | 2h |
-| 041 | Add Form Scripts for Navigation to Analysis Workspace | 🔲 | 038-040 | 3h |
+| 038 | Add Analysis Tab to sprk_document Form | ✅ | Phase 1 Complete | 2h |
+| 039 | Add Analysis Grid to Analysis Tab | ✅ | 038 | 2h |
+| 040 | Add "+ New Analysis" Command Button | ✅ | 038 | 2h |
+| 041 | Add Form Scripts for Navigation to Analysis Workspace | ✅ | 038-040 | 3h |
 
 ### Analysis Builder Custom Page
 
 | ID | Task | Status | Dependencies | Estimated Hours |
 |----|------|--------|--------------|-----------------|
-| 042 | Create Analysis Builder Custom Page in Power Apps | 🔲 | Phase 1 Complete | 4h |
-| 043 | Add Action Selector Component | 🔲 | 042 | 3h |
-| 044 | Add Skills Multi-Select Component | 🔲 | 042 | 3h |
-| 045 | Add Knowledge Multi-Select Component | 🔲 | 042 | 3h |
-| 046 | Add Tools Multi-Select Component | 🔲 | 042 | 3h |
-| 047 | Add Output Options Component | 🔲 | 042 | 2h |
-| 048 | Add Playbook Selector Component | 🔲 | 042 | 3h |
-| 049 | Implement "Start Analysis" Button with API Call | 🔲 | 042-048 | 4h |
+| 042 | Create Analysis Builder PCF Component | ✅ | Phase 1 Complete | 4h |
+| 043 | Add Action Selector Component | ✅ | 042 | 3h |
+| 044 | Add Skills Multi-Select Component | ✅ | 042 | 3h |
+| 045 | Add Knowledge Multi-Select Component | ✅ | 042 | 3h |
+| 046 | Add Tools Multi-Select Component | ✅ | 042 | 3h |
+| 047 | Add Output Options Component | ✅ | 042 | 2h |
+| 048 | Add Playbook Selector Component | ✅ | 042 | 3h |
+| 049 | Implement "Start Analysis" Button with API Call | ✅ | 042-048 | 4h |
 
 ### Analysis Workspace Custom Page & PCF
 
 | ID | Task | Status | Dependencies | Estimated Hours |
 |----|------|--------|--------------|-----------------|
-| 050 | Create Analysis Workspace Custom Page | 🔲 | Phase 1 Complete | 4h |
-| 051 | Create AnalysisWorkspace PCF Control Project | 🔲 | none | 3h |
-| 052 | Implement PCF Environment Variable Access Pattern | 🔲 | 051 | 4h |
-| 053 | Implement Two-Column Layout (Working Doc + Source Preview) | 🔲 | 051, 052 | 6h |
-| 054 | Integrate Monaco Editor for Working Document | 🔲 | 053 | 4h |
-| 055 | Integrate SpeFileViewer PCF for Source Preview | 🔲 | 053 | 3h |
-| 056 | Implement SSE Client for Chat Streaming | 🔲 | 052 | 6h |
-| 057 | Implement AI Chat Panel with Message History | 🔲 | 056 | 4h |
-| 058 | Implement Working Document Auto-Save | 🔲 | 054 | 3h |
-| 059 | Build and Package AnalysisWorkspace PCF | 🔲 | 051-058 | 2h |
-| 060 | Deploy PCF to Dev Environment | 🔲 | 059 | 2h |
-| 061 | Add AnalysisWorkspace PCF to Custom Page | 🔲 | 050, 060 | 2h |
+| 050 | Create Analysis Workspace Custom Page (3-Column Layout) | ✅ | Phase 1 Complete | 4h |
+| 051 | Create AnalysisWorkspace PCF Control Project | ✅ | none | 3h |
+| 052 | Implement PCF Environment Variable Access Pattern | ✅ | 051 | 4h |
+| 053 | Implement Three-Column Layout (Analysis + Source + Chat) | ✅ | 051, 052 | 6h |
+| 054 | Integrate Monaco Editor for Working Document | ✅ | 053 | 4h |
+| 055 | Integrate SpeFileViewer PCF for Source Preview | ✅ | 053 | 3h |
+| 056 | Implement SSE Client for Chat Streaming | ✅ | 052 | 6h |
+| 057 | Implement AI Chat Panel with Message History | ✅ | 056 | 4h |
+| 058 | Implement Working Document Auto-Save | ✅ | 054 | 3h |
+| 059 | Build and Package AnalysisWorkspace PCF | ✅ | 051-058 | 2h |
+| 060 | Deploy PCF to Dev Environment | ✅ | 059 | 2h |
+| 061 | Add AnalysisWorkspace PCF to Custom Page/Form | ✅ | 050, 060 | 2h |
 
 ### UI Testing & Documentation
 

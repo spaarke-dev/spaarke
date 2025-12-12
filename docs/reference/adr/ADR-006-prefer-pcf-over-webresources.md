@@ -39,8 +39,10 @@ Continue with webresources. **Rejected** due to maintainability and lifecycle li
 | Model-driven forms | PCF (TypeScript) | `src/client/pcf/` |
 | Subgrid replacement | Dataset PCF | `src/client/pcf/UniversalDatasetGrid/` |
 | Quick create dialogs | PCF + FluentUI | `src/client/pcf/UniversalQuickCreate/` |
-| External SPAs | React | `src/client/apps/` |
-| Office add-ins | React | `src/office-addins/` |
+| Shared UI components | React | `src/client/shared/Spaarke.UI.Components/` |
+| Office add-ins | React | `src/client/office-addins/` |
+| Legacy webresources (Dataverse) | JS/HTML | `src/dataverse/webresources/` |
+| Legacy webresources (client packaging) | JS | `src/client/webresources/` |
 
 ## Exceptions
 
@@ -49,7 +51,7 @@ Continue with webresources. **Rejected** due to maintainability and lifecycle li
 | File | Purpose | Status |
 |------|---------|--------|
 | `sprk_subgrid_commands.js` | Ribbon/command bar button invocation | ✅ Allowed (minimal, invocation only) |
-| `DocumentOperations.js` | Legacy SPE utility (859 LoC) | ⚠️ Legacy - no new features; refactor to PCF planned |
+| `src/dataverse/webresources/spaarke_documents/DocumentOperations.js` | Legacy SPE utility | ⚠️ Legacy - no new features; refactor to PCF planned |
 
 ### Exception Rules
 
@@ -74,3 +76,9 @@ Continue with webresources. **Rejected** due to maintainability and lifecycle li
 - [ ] No new `.js` files in `webresources/` without approval
 - [ ] Command bar scripts contain invocation only
 - [ ] PCF used for all new interactive UI
+
+## AI-Directed Coding Guidance
+
+- New interactive UI in model-driven apps: implement as PCF under `src/client/pcf/`.
+- Ribbon/command bar: keep JS webresource as a thin invoker (no remote calls, no business rules); call BFF endpoints.
+- If you think you need a new legacy webresource: stop and write an explicit exception with justification and a migration plan to PCF.

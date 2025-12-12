@@ -16,7 +16,7 @@ A hybrid cache (`IMemoryCache` + Redis + custom HybridCacheService) adds complex
 | Rule | Description |
 |------|-------------|
 | **Redis as L2** | Use distributed cache (Redis) as the only cross-request cache |
-| **Per-request L1** | Tiny per-request cache via `HttpContext.Items` to collapse duplicate reads |
+| **Per-request L1** | `RequestCache` (scoped) to collapse duplicate reads within a request |
 | **No hybrid L1+L2** | Do not implement hybrid without profiling proof |
 | **Key versioning** | Version cache keys (rowversion/etag); short TTLs for security data |
 
@@ -37,8 +37,8 @@ Custom HybridCacheService wrapping L1+L2. **Rejected** as premature complexity.
 
 | Pattern | Implementation |
 |---------|----------------|
-| Distributed cache | `IDistributedCache` with `GetOrCreateAsync` helper |
-| Per-request cache | `HttpContext.Items` for single-flight within request |
+| Distributed cache | `IDistributedCache` + `DistributedCacheExtensions.GetOrCreateAsync(...)` |
+| Per-request cache | `RequestCache` (scoped) |
 | Cache targets | UAC snapshots, document metadata |
 | Never cache | Authorization decisions |
 | Instrumentation | Hit/miss rates, payload sizes |
@@ -82,3 +82,9 @@ Custom HybridCacheService wrapping L1+L2. **Rejected** as premature complexity.
 - [ ] Metadata caching has appropriate TTL (≤15 min)
 - [ ] Non-metadata L1 has profiling justification
 - [ ] Authorization decisions not cached
+
+## AI-Directed Coding Guidance
+
+- Prefer `IDistributedCache` + `DistributedCacheExtensions.GetOrCreateAsync(...)` for cross-request caching.
+- Use `RequestCache` for within-request de-dupe; do not add new ad-hoc `HttpContext.Items` caching.
+- `IMemoryCache` is allowed only for explicitly documented metadata hotspots (see `NavMapEndpoints.cs`).

@@ -19,7 +19,7 @@ The BFF accumulated 20+ service registrations driven by interface sprawl, duplic
 | **Two core seams only** | `IAccessDataSource` and `IEnumerable<IAuthorizationRule>` |
 | **Feature modules** | Group registrations via extension methods (`AddSpaarkeCore`, `AddDocumentsModule`, `AddWorkersModule`) |
 | **One HttpClient per upstream** | Single typed `HttpClient` for Dataverse |
-| **GraphServiceClient singleton** | Built once with retry/correlation |
+| **Graph client factory singleton** | `IGraphClientFactory` is singleton; creates `GraphServiceClient` with centralized resilience |
 | **Options pattern** | `AddOptions<T>().Bind().ValidateOnStart()` |
 | **Redis only** | `IDistributedCache` + small `RequestCache`; no hybrid cache services |
 
@@ -92,3 +92,9 @@ Any new interface requires an ADR when doing so.
 - [ ] No duplicate HttpClient registrations
 - [ ] Options validated on start
 - [ ] Feature module extension used (not inline registration)
+
+## AI-Directed Coding Guidance
+
+- Prefer adding services via feature modules (`AddSpaarkeCore`, `AddDocumentsModule`, `AddWorkersModule`) instead of inlining registrations.
+- Do not inject `GraphServiceClient` into endpoints; use `SpeFileStore` or `IGraphClientFactory` inside the storage layer.
+- Add a new interface only when it is a true seam (multiple implementations, extension point, or process boundary).

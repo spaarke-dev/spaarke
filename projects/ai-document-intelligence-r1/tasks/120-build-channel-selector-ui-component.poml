@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="120" project="ai-document-intelligence-r1">
+  <metadata>
+    <title>Build Channel Selector UI Component</title>
+    <phase>Phase 4: Playbooks &amp; Export (Week 7-8)</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api,service,workflow</tags>
+  </metadata>
+  <prompt>Implement: Build Channel Selector UI Component. Follow SPEC.md/PLAN.md and ADRs; update tests and docs as appropriate.</prompt>
+  <role>Senior .NET developer familiar with ASP.NET Core Minimal APIs, endpoint filters, and DI minimalism.</role>
+  <goal>A complete, reviewed implementation of 'Build Channel Selector UI Component' with verification steps completed.</goal>
+  <inputs>
+    <file purpose="design-spec">projects/ai-document-intelligence-r1/SPEC.md</file>
+    <file purpose="project-plan">projects/ai-document-intelligence-r1/PLAN.md</file>
+    <file purpose="task-index">projects/ai-document-intelligence-r1/tasks/TASK-INDEX.md</file>
+  </inputs>
+  <constraints>
+    <constraint source="project">Follow applicable ADRs under docs/reference/adr/ and module CLAUDE.md guidance.</constraint>
+  </constraints>
+  <knowledge>
+    <topic>bff-api,service,workflow</topic>
+    <files>
+      <file>docs/reference/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>docs/reference/adr/ADR-008-authorization-endpoint-filters.md</file>
+      <file>docs/reference/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/reference/adr/ADR-019-api-errors-and-problemdetails.md</file>
+      <file>projects/ai-document-intelligence-r1/PLAN.md</file>
+      <file>projects/ai-document-intelligence-r1/SPEC.md</file>
+      <file>projects/ai-document-intelligence-r1/tasks/TASK-INDEX.md</file>
+    </files>
+  </knowledge>
+  <context>
+    <background>Phase 4: Playbooks &amp; Export (Week 7-8). See TASK-INDEX.md for dependencies and ordering.</background>
+    <dependencies />
+  </context>
+  <steps>
+    <step order="0" name="Context Check">If context &gt; 70%, create a handoff summary and start a new chat.</step>
+    <step order="1" name="Review">Read SPEC.md, PLAN.md, TASK-INDEX.md; verify dependencies.</step>
+    <step order="2" name="Gather">Read all files in &lt;inputs&gt; and &lt;knowledge&gt;; extract ADR constraints.</step>
+    <step order="3" name="Plan">List files to change, outline approach, and define verification.</step>
+    <step order="4" name="Implement">Implement the change with minimal scope; add/update tests.</step>
+    <step order="5" name="Verify">Run relevant builds/tests; ensure acceptance criteria met.</step>
+    <step order="6" name="Document">Update TASK-INDEX.md status; document any decisions or follow-ups.</step>
+  </steps>
+  <outputs>
+    <output>Code and/or configuration changes per task goal.</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Implementation matches SPEC/PLAN intent.</criterion>
+    <criterion>Relevant tests/builds pass.</criterion>
+    <criterion>Documentation and TASK-INDEX updated as needed.</criterion>
+  </acceptance-criteria>
+</task>

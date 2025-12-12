@@ -7,7 +7,7 @@
     <estimate>2 hours</estimate>
     <tags>bff-api,configuration,multi-tenant</tags>
     <dependencies>001</dependencies>
-    <status>not-started</status>
+    <status>completed</status>
   </metadata>
   <prompt>
     <role>Senior Developer</role>

@@ -7,7 +7,7 @@
     <estimate>6 hours</estimate>
     <tags>bicep,azure,ai-foundry,infrastructure</tags>
     <dependencies>002</dependencies>
-    <status>not-started</status>
+    <status>completed</status>
   </metadata>
   <prompt>
     <role>Senior Developer</role>

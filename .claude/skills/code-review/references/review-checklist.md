@@ -89,6 +89,8 @@ grep -rn "^\s*//.*{" --include="*.cs"
 
 ## ADR Quick Checks
 
+Note: For full ADR validation (including ADR-013+), use `/adr-check` which loads `.claude/skills/adr-check/references/adr-validation-rules.md` and the ADR index in `docs/reference/adr/README-ADRs.md`.
+
 ### ADR-001: No Azure Functions
 ```
 grep -rn "Microsoft.Azure.Functions" --include="*.cs" --include="*.csproj"
@@ -98,8 +100,8 @@ grep -rn "\[FunctionName" --include="*.cs"
 ### ADR-002: Thin Plugins
 ```
 # Check plugin folder for HttpClient
-grep -rn "HttpClient" power-platform/plugins/
-grep -rn "System.Net.Http" power-platform/plugins/
+grep -rn "HttpClient" src/dataverse/plugins/
+grep -rn "System.Net.Http" src/dataverse/plugins/
 ```
 
 ### ADR-007: Graph Isolation
@@ -112,8 +114,8 @@ grep -rn "DriveItem" --include="*.cs" | grep -v "Infrastructure"
 ### ADR-008: Endpoint Filters
 ```
 # Should NOT have global auth middleware
-grep -rn "UseAuthorization" src/api/ --include="*.cs"
-grep -rn "app.Use.*Auth" src/api/ --include="*.cs"
+grep -rn "UseAuthorization" src/server/api/Sprk.Bff.Api/ --include="*.cs"
+grep -rn "app.Use.*Auth" src/server/api/Sprk.Bff.Api/ --include="*.cs"
 ```
 
 ### ADR-010: DI Minimalism

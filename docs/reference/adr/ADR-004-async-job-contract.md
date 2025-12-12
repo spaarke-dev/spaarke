@@ -17,7 +17,8 @@ Ad-hoc background processing patterns cause inconsistent retries, missing idempo
 |------|-------------|
 | **One Job Contract** | Standard message format for all async work |
 | **BackgroundService workers** | `ServiceBusProcessor` per JobType |
-| **Idempotent handlers** | Centralized Polly retry policies |
+| **Idempotent handlers** | Handlers must be safe under at-least-once delivery (dedupe + safe replays) |
+| **Central retry policy** | Standard Polly retry/backoff/jitter policy applied consistently across handlers |
 | **Poison queue** | On retry exhaustion |
 | **Observable outcomes** | Persist and emit `JobOutcome` events |
 
@@ -27,11 +28,38 @@ Ad-hoc background processing patterns cause inconsistent retries, missing idempo
 |-------|------|-------------|
 | `JobId` | GUID | Unique job identifier |
 | `JobType` | string | Determines handler routing |
-| `SubjectId` | GUID | Entity being processed |
-| `CorrelationId` | GUID | Request correlation |
+| `SubjectId` | string | Entity being processed (commonly a GUID string) |
+| `CorrelationId` | string | Request correlation (commonly a GUID string) |
 | `IdempotencyKey` | string | Deduplication key |
 | `Attempt` | int | Current attempt number |
 | `MaxAttempts` | int | Retry limit |
+| `Payload` | JSON | Job-specific payload (must not include large blobs/PII) |
+| `CreatedAt` | datetime | When the job was created |
+
+### JSON Example (as sent on Service Bus)
+
+The implementation serializes using `camelCase` JSON.
+
+```json
+{
+	"jobId": "00000000-0000-0000-0000-000000000001",
+	"jobType": "ai-indexing",
+	"subjectId": "00000000-0000-0000-0000-000000000002",
+	"correlationId": "00000000-0000-0000-0000-000000000003",
+	"idempotencyKey": "doc-00000000-0000-0000-0000-000000000002-v5",
+	"attempt": 1,
+	"maxAttempts": 3,
+	"payload": {
+		"action": "index"
+	},
+	"createdAt": "2025-12-12T00:00:00+00:00"
+}
+```
+
+**Payload rules (Required):**
+- Do not place document bytes, attachment bytes, or email bodies in `payload`.
+- Keep payloads small and fetch required data from Dataverse/SPE at processing time.
+- Prefer stable identifiers (GUIDs) and configuration flags only.
 
 ## Consequences
 
@@ -55,6 +83,16 @@ Durable Functions orchestration. **Rejected** due to host fragmentation and addi
 | Correlation | Centralized propagation |
 | Logging | Structured metrics for queue depth and age |
 | Health | Worker liveness checks |
+
+## AI-Directed Coding Guidance
+
+When adding new background work:
+
+- Define a new `JobType` string and a handler implementing `IJobHandler`.
+- Set `SubjectId` to the primary entity being processed.
+- Use deterministic `IdempotencyKey` patterns (e.g., `doc-{docId}-v{rowVersion}`) so replays are safe.
+- Treat job handling as at-least-once: correctness must not depend on exactly-once delivery.
+- Emit/persist a `JobOutcome` for `Completed`, `Failed` (retryable vs permanent), and `Poisoned`.
 
 ## Exceptions
 

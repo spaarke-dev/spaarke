@@ -15,7 +15,7 @@ Validate code against Architecture Decision Records (ADRs).
 
 ## What This Command Does
 
-This command executes the `adr-check` skill to validate that code complies with all 12 Spaarke ADRs.
+This command executes the `adr-check` skill to validate that code complies with the current ADR index in `docs/reference/adr/README-ADRs.md` (currently ADR-001–ADR-020).
 
 ## Execution Instructions
 
@@ -32,20 +32,7 @@ This command executes the `adr-check` skill to validate that code complies with 
 
 ## ADRs Validated
 
-| ADR | Title | Key Check |
-|-----|-------|-----------|
-| ADR-001 | Minimal API + BackgroundService | No Azure Functions |
-| ADR-002 | Thin Dataverse plugins | No HTTP calls in plugins, <50ms |
-| ADR-003 | Lean authorization | UAC + file storage seams |
-| ADR-004 | Async job contract | Standard JobContract format |
-| ADR-005 | Flat SPE storage | No folder hierarchies |
-| ADR-006 | PCF over webresources | No new legacy JS |
-| ADR-007 | SpeFileStore facade | No Graph SDK leakage |
-| ADR-008 | Endpoint filters | No global auth middleware |
-| ADR-009 | Redis-first caching | No hybrid L1 without proof |
-| ADR-010 | DI minimalism | ≤15 registrations |
-| ADR-011 | Convention types | Fluent UI v9, Tailwind banned |
-| ADR-012 | Shared component library | Use @spaarke/ui-components |
+All ADRs listed in `docs/reference/adr/README-ADRs.md`.
 
 ## Output Format
 

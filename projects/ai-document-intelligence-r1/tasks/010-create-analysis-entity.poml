@@ -84,7 +84,6 @@
     <step order="7">Add all fields from SPEC.md table:
       - sprk_documentid (Lookup to sprk_document, Required)
       - sprk_actionid (Lookup to sprk_analysisaction, Required)
-      - sprk_status (Choice: NotStarted, InProgress, Completed, Failed, Required)
       - sprk_workingdocument (Multiline Text, 100,000 characters)
       - sprk_workingdocumentfile (File - SPE reference)
       - sprk_sessionid (Text, 50 characters)
@@ -95,10 +94,18 @@
       - sprk_errormessage (Multiline Text, 2000 characters)
       - sprk_inputtokens (Whole Number)
       - sprk_outputtokens (Whole Number)
+      NOTE: Do NOT create custom sprk_status field - use standard statuscode instead
     </step>
-    <step order="8">Configure Status Reason (statuscode) values:
-      - Active: NotStarted (default), InProgress
-      - Inactive: Completed, Failed
+    <step order="8">Configure standard Status Reason (statuscode) field values:
+      | Label       | Value       | State    |
+      |-------------|-------------|----------|
+      | Draft       | 1           | Active   |
+      | In Progress | 100,000,001 | Active   |
+      | In Review   | 100,000,002 | Active   |
+      | Closed      | 2           | Inactive |
+      | Completed   | 100,000,003 | Inactive |
+
+      IMPORTANT: Use standard Power Apps statuscode field, not custom sprk_status
     </step>
     <step order="9">Set security roles: Grant Analysis User role read/write access</step>
     <step order="10">Add entity to Spaarke_DocumentIntelligence solution</step>
@@ -122,7 +129,7 @@
     <criterion>All 13 fields created with correct data types and max lengths</criterion>
     <criterion>Lookup to sprk_document configured (N:1 relationship)</criterion>
     <criterion>Lookup to sprk_analysisaction configured (N:1 relationship)</criterion>
-    <criterion>Status choice field has 4 values (NotStarted, InProgress, Completed, Failed)</criterion>
+    <criterion>Standard statuscode field has 5 values (Draft=1, In Progress=100000001, In Review=100000002, Closed=2, Completed=100000003)</criterion>
     <criterion>Working document field supports 100KB of text</criterion>
     <criterion>Entity enabled for Activities and Notes</criterion>
     <criterion>Security roles grant appropriate access</criterion>
@@ -133,13 +140,13 @@
   </acceptance-criteria>
 
   <notes>
-    <note>Field Details from SPEC.md:
+    <note>Field Details from SPEC.md (UPDATED - no custom status field):
       | Display Name | Schema Name | Type | Required |
       |--------------|-------------|------|----------|
       | Name | sprk_name | Text (200) | ✅ |
       | Document | sprk_documentid | Lookup (sprk_document) | ✅ |
       | Action | sprk_actionid | Lookup (sprk_analysisaction) | ✅ |
-      | Status | sprk_status | Choice | ✅ |
+      | Status | statuscode | Standard Status Reason | ✅ |
       | Working Document | sprk_workingdocument | Multiline Text | ❌ |
       | Working Document File | sprk_workingdocumentfile | File (SPE) | ❌ |
       | Session ID | sprk_sessionid | Text (50) | ❌ |
@@ -150,6 +157,10 @@
       | Error Message | sprk_errormessage | Multiline Text | ❌ |
       | Input Tokens | sprk_inputtokens | Whole Number | ❌ |
       | Output Tokens | sprk_outputtokens | Whole Number | ❌ |
+    </note>
+    <note>STATUS FIELD DECISION (Dec 2025): Use standard Power Apps Status Reason (statuscode)
+      field instead of custom sprk_status. Values configured:
+      Draft=1, In Progress=100000001, In Review=100000002, Closed=2, Completed=100000003
     </note>
     <note>N:N relationships will be created in later tasks when target entities exist</note>
     <note>This entity BLOCKS many subsequent tasks - prioritize completion</note>

@@ -1,0 +1,445 @@
+using System.Runtime.CompilerServices;
+using System.Text;
+using Microsoft.Extensions.Options;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.Ai;
+using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Models.Ai;
+
+namespace Sprk.Bff.Api.Services.Ai;
+
+/// <summary>
+/// Orchestrates analysis execution across Dataverse, SPE, and Azure OpenAI.
+/// Implements the BFF orchestration pattern per ADR-001 and ADR-013.
+/// </summary>
+/// <remarks>
+/// Document text extraction flow:
+/// 1. Get DocumentEntity from Dataverse (metadata with GraphDriveId, GraphItemId)
+/// 2. Download file from SPE via ISpeFileOperations
+/// 3. Extract text via ITextExtractor (supports PDF, DOCX, TXT, etc.)
+/// 4. Pass extracted text to Azure OpenAI for analysis
+/// </remarks>
+public class AnalysisOrchestrationService : IAnalysisOrchestrationService
+{
+    private readonly IDataverseService _dataverseService;
+    private readonly ISpeFileOperations _speFileStore;
+    private readonly ITextExtractor _textExtractor;
+    private readonly IOpenAiClient _openAiClient;
+    private readonly IScopeResolverService _scopeResolver;
+    private readonly IAnalysisContextBuilder _contextBuilder;
+    private readonly IWorkingDocumentService _workingDocumentService;
+    private readonly AnalysisOptions _options;
+    private readonly ILogger<AnalysisOrchestrationService> _logger;
+
+    // In-memory store for Phase 1 (will be replaced with Dataverse in Task 032)
+    private static readonly Dictionary<Guid, AnalysisInternalModel> _analysisStore = new();
+
+    public AnalysisOrchestrationService(
+        IDataverseService dataverseService,
+        ISpeFileOperations speFileStore,
+        ITextExtractor textExtractor,
+        IOpenAiClient openAiClient,
+        IScopeResolverService scopeResolver,
+        IAnalysisContextBuilder contextBuilder,
+        IWorkingDocumentService workingDocumentService,
+        IOptions<AnalysisOptions> options,
+        ILogger<AnalysisOrchestrationService> logger)
+    {
+        _dataverseService = dataverseService;
+        _speFileStore = speFileStore;
+        _textExtractor = textExtractor;
+        _openAiClient = openAiClient;
+        _scopeResolver = scopeResolver;
+        _contextBuilder = contextBuilder;
+        _workingDocumentService = workingDocumentService;
+        _options = options.Value;
+        _logger = logger;
+    }
+
+    /// <inheritdoc />
+    public async IAsyncEnumerable<AnalysisStreamChunk> ExecuteAnalysisAsync(
+        AnalysisExecuteRequest request,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        // Phase 1: Process only the first document
+        var documentId = request.DocumentIds[0];
+
+        _logger.LogInformation("Starting analysis for document {DocumentId}, action {ActionId}",
+            documentId, request.ActionId);
+
+        // 1. Get document details from Dataverse
+        var document = await _dataverseService.GetDocumentAsync(documentId.ToString(), cancellationToken)
+            ?? throw new KeyNotFoundException($"Document {documentId} not found");
+
+        // 2. Create analysis record (in-memory for Phase 1)
+        var analysisId = Guid.NewGuid();
+        var sessionId = Guid.NewGuid().ToString("N")[..12];
+
+        var analysis = new AnalysisInternalModel
+        {
+            Id = analysisId,
+            DocumentId = documentId,
+            DocumentName = document.Name ?? "Unknown",
+            ActionId = request.ActionId,
+            Status = "InProgress",
+            StartedOn = DateTime.UtcNow,
+            ChatHistory = []
+        };
+        _analysisStore[analysisId] = analysis;
+
+        _logger.LogDebug("Created analysis record {AnalysisId} with session {SessionId}", analysisId, sessionId);
+
+        // Emit metadata chunk
+        yield return AnalysisStreamChunk.Metadata(analysisId, document.Name ?? "Unknown");
+
+        // 3. Resolve scopes (Skills, Knowledge, Tools)
+        var scopes = request.PlaybookId.HasValue
+            ? await _scopeResolver.ResolvePlaybookScopesAsync(request.PlaybookId.Value, cancellationToken)
+            : await _scopeResolver.ResolveScopesAsync(
+                request.SkillIds ?? [],
+                request.KnowledgeIds ?? [],
+                request.ToolIds ?? [],
+                cancellationToken);
+
+        // 4. Get action definition
+        var action = await _scopeResolver.GetActionAsync(request.ActionId, cancellationToken)
+            ?? throw new KeyNotFoundException($"Action {request.ActionId} not found");
+
+        // 5. Extract document text from SPE via TextExtractor
+        var documentText = await ExtractDocumentTextAsync(document, cancellationToken);
+
+        // 6. Build prompts
+        var systemPrompt = _contextBuilder.BuildSystemPrompt(action, scopes.Skills);
+        var userPrompt = await _contextBuilder.BuildUserPromptAsync(
+            documentText, scopes.Knowledge, cancellationToken);
+
+        // 7. Stream AI completion
+        var outputBuilder = new StringBuilder();
+        var inputTokens = EstimateTokens(systemPrompt + userPrompt);
+        var outputTokens = 0;
+
+        var fullPrompt = BuildFullPrompt(systemPrompt, userPrompt);
+
+        await foreach (var token in _openAiClient.StreamCompletionAsync(fullPrompt, cancellationToken: cancellationToken))
+        {
+            outputBuilder.Append(token);
+            outputTokens = EstimateTokens(outputBuilder.ToString());
+
+            // Stream chunk to client
+            yield return AnalysisStreamChunk.TextChunk(token);
+
+            // Update working document periodically (every 500 chars)
+            if (outputBuilder.Length % 500 == 0)
+            {
+                await _workingDocumentService.UpdateWorkingDocumentAsync(
+                    analysisId, outputBuilder.ToString(), cancellationToken);
+            }
+        }
+
+        // 8. Finalize analysis
+        var finalOutput = outputBuilder.ToString();
+        analysis = analysis with
+        {
+            WorkingDocument = finalOutput,
+            FinalOutput = finalOutput,
+            Status = "Completed",
+            CompletedOn = DateTime.UtcNow,
+            InputTokens = inputTokens,
+            OutputTokens = outputTokens
+        };
+        _analysisStore[analysisId] = analysis;
+
+        await _workingDocumentService.FinalizeAnalysisAsync(analysisId, inputTokens, outputTokens, cancellationToken);
+
+        _logger.LogInformation("Analysis {AnalysisId} completed: {InputTokens} input, {OutputTokens} output tokens",
+            analysisId, inputTokens, outputTokens);
+
+        // Emit completion chunk
+        yield return AnalysisStreamChunk.Completed(analysisId, new TokenUsage(inputTokens, outputTokens));
+    }
+
+    /// <inheritdoc />
+    public async IAsyncEnumerable<AnalysisStreamChunk> ContinueAnalysisAsync(
+        Guid analysisId,
+        string userMessage,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("Continuing analysis {AnalysisId}", analysisId);
+
+        // Get analysis from in-memory store
+        if (!_analysisStore.TryGetValue(analysisId, out var analysis))
+        {
+            throw new KeyNotFoundException($"Analysis {analysisId} not found");
+        }
+
+        // Build continuation prompt
+        var continuationPrompt = _contextBuilder.BuildContinuationPrompt(
+            analysis.ChatHistory,
+            userMessage,
+            analysis.WorkingDocument ?? string.Empty);
+
+        // Update chat history with user message
+        var chatHistory = analysis.ChatHistory.ToList();
+        chatHistory.Add(new ChatMessageModel("user", userMessage, DateTime.UtcNow));
+
+        // Stream AI completion
+        var outputBuilder = new StringBuilder();
+        var inputTokens = EstimateTokens(continuationPrompt);
+
+        await foreach (var token in _openAiClient.StreamCompletionAsync(
+            continuationPrompt,
+            cancellationToken: cancellationToken))
+        {
+            outputBuilder.Append(token);
+            yield return AnalysisStreamChunk.TextChunk(token);
+        }
+
+        // Save assistant response
+        var response = outputBuilder.ToString();
+        var outputTokens = EstimateTokens(response);
+        chatHistory.Add(new ChatMessageModel("assistant", response, DateTime.UtcNow));
+
+        // Update analysis in store
+        analysis = analysis with
+        {
+            WorkingDocument = response,
+            ChatHistory = chatHistory.ToArray(),
+            InputTokens = analysis.InputTokens + inputTokens,
+            OutputTokens = analysis.OutputTokens + outputTokens
+        };
+        _analysisStore[analysisId] = analysis;
+
+        await _workingDocumentService.UpdateWorkingDocumentAsync(analysisId, response, cancellationToken);
+
+        _logger.LogInformation("Analysis continuation completed for {AnalysisId}", analysisId);
+
+        yield return AnalysisStreamChunk.Completed(analysisId, new TokenUsage(inputTokens, outputTokens));
+    }
+
+    /// <inheritdoc />
+    public Task<SavedDocumentResult> SaveWorkingDocumentAsync(
+        Guid analysisId,
+        AnalysisSaveRequest request,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("Saving working document for analysis {AnalysisId}", analysisId);
+
+        if (!_analysisStore.TryGetValue(analysisId, out var analysis))
+        {
+            throw new KeyNotFoundException($"Analysis {analysisId} not found");
+        }
+
+        if (string.IsNullOrWhiteSpace(analysis.WorkingDocument))
+        {
+            throw new InvalidOperationException("Analysis has no working document to save");
+        }
+
+        // Convert working document to requested format
+        var (content, contentType) = ConvertToFormat(analysis.WorkingDocument, request.Format);
+
+        // Save to SPE via working document service
+        return _workingDocumentService.SaveToSpeAsync(
+            analysisId,
+            request.FileName,
+            content,
+            contentType,
+            cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public Task<ExportResult> ExportAnalysisAsync(
+        Guid analysisId,
+        AnalysisExportRequest request,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("Exporting analysis {AnalysisId} to {Format}", analysisId, request.Format);
+
+        if (!_analysisStore.TryGetValue(analysisId, out var analysis))
+        {
+            throw new KeyNotFoundException($"Analysis {analysisId} not found");
+        }
+
+        // Phase 1: Return not implemented for export formats that require Dataverse
+        return Task.FromResult(new ExportResult
+        {
+            ExportType = request.Format,
+            Success = false,
+            Error = $"Export to {request.Format} will be implemented in Task 032 when Dataverse entity operations are added."
+        });
+    }
+
+    /// <inheritdoc />
+    public Task<AnalysisDetailResult> GetAnalysisAsync(
+        Guid analysisId,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogDebug("Retrieving analysis {AnalysisId}", analysisId);
+
+        if (!_analysisStore.TryGetValue(analysisId, out var analysis))
+        {
+            throw new KeyNotFoundException($"Analysis {analysisId} not found");
+        }
+
+        return Task.FromResult(new AnalysisDetailResult
+        {
+            Id = analysis.Id,
+            DocumentId = analysis.DocumentId,
+            DocumentName = analysis.DocumentName,
+            Action = new AnalysisActionInfo(analysis.ActionId, analysis.ActionName),
+            Status = analysis.Status,
+            WorkingDocument = analysis.WorkingDocument,
+            FinalOutput = analysis.FinalOutput,
+            ChatHistory = analysis.ChatHistory
+                .Select(m => new ChatMessageInfo(m.Role, m.Content, m.Timestamp))
+                .ToArray(),
+            TokenUsage = analysis.InputTokens > 0 || analysis.OutputTokens > 0
+                ? new TokenUsage(analysis.InputTokens, analysis.OutputTokens)
+                : null,
+            StartedOn = analysis.StartedOn,
+            CompletedOn = analysis.CompletedOn
+        });
+    }
+
+    // === Private Helper Methods ===
+
+    /// <summary>
+    /// Extract text from a document stored in SharePoint Embedded.
+    /// Downloads the file and uses TextExtractor to extract readable text.
+    /// </summary>
+    private async Task<string> ExtractDocumentTextAsync(
+        DocumentEntity document,
+        CancellationToken cancellationToken)
+    {
+        // Check if document has a file
+        if (!document.HasFile || string.IsNullOrEmpty(document.GraphDriveId) || string.IsNullOrEmpty(document.GraphItemId))
+        {
+            _logger.LogWarning(
+                "Document {DocumentId} has no file attached (HasFile={HasFile}, DriveId={DriveId}, ItemId={ItemId})",
+                document.Id, document.HasFile, document.GraphDriveId, document.GraphItemId);
+
+            return $"[Document: {document.Name}]\n\nNo file content available for this document.";
+        }
+
+        // Check if file type is supported for extraction
+        var fileName = document.FileName ?? document.Name ?? "unknown";
+        var extension = Path.GetExtension(fileName)?.ToLowerInvariant() ?? string.Empty;
+
+        if (!_textExtractor.IsSupported(extension))
+        {
+            _logger.LogWarning(
+                "File type {Extension} is not supported for text extraction (Document: {DocumentId})",
+                extension, document.Id);
+
+            return $"[Document: {document.Name}]\n\nFile type '{extension}' is not supported for text extraction.";
+        }
+
+        try
+        {
+            _logger.LogDebug(
+                "Downloading document {DocumentId} from SPE (Drive={DriveId}, Item={ItemId})",
+                document.Id, document.GraphDriveId, document.GraphItemId);
+
+            // Download file from SharePoint Embedded
+            using var fileStream = await _speFileStore.DownloadFileAsync(
+                document.GraphDriveId,
+                document.GraphItemId,
+                cancellationToken);
+
+            if (fileStream == null)
+            {
+                _logger.LogWarning("Failed to download document {DocumentId} from SPE", document.Id);
+                return $"[Document: {document.Name}]\n\nFailed to download file from storage.";
+            }
+
+            _logger.LogDebug("Extracting text from {FileName} ({FileSize} bytes)", fileName, document.FileSize);
+
+            // Extract text using TextExtractor
+            var extractionResult = await _textExtractor.ExtractAsync(fileStream, fileName, cancellationToken);
+
+            if (!extractionResult.Success)
+            {
+                _logger.LogWarning(
+                    "Text extraction failed for document {DocumentId}: {Error}",
+                    document.Id, extractionResult.ErrorMessage);
+
+                return $"[Document: {document.Name}]\n\nText extraction failed: {extractionResult.ErrorMessage}";
+            }
+
+            // Check for vision-required files (images)
+            if (extractionResult.IsVisionRequired)
+            {
+                _logger.LogInformation(
+                    "Document {DocumentId} is an image file requiring vision model processing",
+                    document.Id);
+
+                // For now, return a note that image analysis would be here
+                // Full vision integration is a separate enhancement
+                return $"[Document: {document.Name}]\n\n[Image file - vision analysis not yet integrated for Analysis feature]";
+            }
+
+            _logger.LogInformation(
+                "Successfully extracted {CharCount} characters from document {DocumentId} via {Method}",
+                extractionResult.Text?.Length ?? 0, document.Id, extractionResult.Method);
+
+            return extractionResult.Text ?? string.Empty;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error extracting text from document {DocumentId}", document.Id);
+            return $"[Document: {document.Name}]\n\nError extracting text: {ex.Message}";
+        }
+    }
+
+    private static (byte[] Content, string ContentType) ConvertToFormat(string markdown, SaveDocumentFormat format)
+    {
+        // Phase 1: Return markdown as text for all formats
+        // Full DOCX/PDF generation will be added in later tasks
+        return format switch
+        {
+            SaveDocumentFormat.Md => (Encoding.UTF8.GetBytes(markdown), "text/markdown"),
+            SaveDocumentFormat.Txt => (Encoding.UTF8.GetBytes(markdown), "text/plain"),
+            SaveDocumentFormat.Docx => (Encoding.UTF8.GetBytes(markdown), "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+            SaveDocumentFormat.Pdf => (Encoding.UTF8.GetBytes(markdown), "application/pdf"),
+            _ => (Encoding.UTF8.GetBytes(markdown), "text/plain")
+        };
+    }
+
+    private static string BuildFullPrompt(string systemPrompt, string userPrompt)
+    {
+        return $"{systemPrompt}\n\n---\n\n{userPrompt}";
+    }
+
+    private static int EstimateTokens(string text)
+    {
+        // Rough estimation: ~4 characters per token
+        return (int)Math.Ceiling(text.Length / 4.0);
+    }
+}
+
+// === Internal Models (will be moved to Spaarke.Dataverse in Task 032) ===
+
+/// <summary>
+/// Internal model for analysis with chat history.
+/// </summary>
+public record AnalysisInternalModel
+{
+    public Guid Id { get; init; }
+    public Guid DocumentId { get; init; }
+    public string DocumentName { get; init; } = string.Empty;
+    public Guid ActionId { get; init; }
+    public string ActionName { get; init; } = string.Empty;
+    public string Status { get; init; } = string.Empty;
+    public string? WorkingDocument { get; init; }
+    public string? FinalOutput { get; init; }
+    public int InputTokens { get; init; }
+    public int OutputTokens { get; init; }
+    public DateTime? StartedOn { get; init; }
+    public DateTime? CompletedOn { get; init; }
+    public ChatMessageModel[] ChatHistory { get; init; } = [];
+}
+
+/// <summary>
+/// Internal model for chat message.
+/// </summary>
+public record ChatMessageModel(string Role, string Content, DateTime Timestamp);

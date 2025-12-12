@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest>
+  <control namespace="Spaarke.Controls" constructor="AnalysisBuilder" version="1.0.0" display-name-key="Analysis Builder" description-key="AI Analysis configuration dialog with playbook selection, action/scope configuration, and execution (v1.0.0)" control-type="standard">
+    <external-service-usage enabled="false">
+    </external-service-usage>
+
+    <!--
+      ANALYSIS BUILDER PCF CONTROL
+
+      Purpose: Modal dialog for configuring and executing AI document analyses
+      - Playbook selector (card-based)
+      - Tab-based scope configuration (Action, Skills, Knowledge, Tools, Output)
+      - Checkbox selection for each scope type
+      - Execute analysis with streaming response
+
+      Used In: Analysis Builder Custom Page (sprk_analysisbuilder)
+      Design Reference: UI Screenshots/01-ANALYSIS-BUILDER-MODAL.jpg
+    -->
+
+    <!-- Document ID (INPUT - the document being analyzed) -->
+    <property name="documentId" display-name-key="Document ID" description-key="GUID of the sprk_document record to analyze" of-type="SingleLine.Text" usage="input" required="true" />
+
+    <!-- Document Name (INPUT - for display) -->
+    <property name="documentName" display-name-key="Document Name" description-key="Display name of the document" of-type="SingleLine.Text" usage="input" required="false" />
+
+    <!-- Container ID (INPUT - for file access) -->
+    <property name="containerId" display-name-key="Container ID" description-key="SharePoint Embedded Container ID" of-type="SingleLine.Text" usage="input" required="false" />
+
+    <!-- File ID (INPUT - SPE file reference) -->
+    <property name="fileId" display-name-key="File ID" description-key="SharePoint Embedded File ID" of-type="SingleLine.Text" usage="input" required="false" />
+
+    <!-- BFF API Base URL -->
+    <property name="apiBaseUrl" display-name-key="API Base URL" description-key="Base URL for BFF API (from environment variable)" of-type="SingleLine.Text" usage="input" required="false" />
+
+    <!-- Selected Playbook ID (OUTPUT) -->
+    <property name="selectedPlaybookId" display-name-key="Selected Playbook ID" description-key="GUID of selected playbook (if any)" of-type="SingleLine.Text" usage="output" required="false" />
+
+    <!-- Selected Action ID (OUTPUT) -->
+    <property name="selectedActionId" display-name-key="Selected Action ID" description-key="GUID of selected action" of-type="SingleLine.Text" usage="output" required="false" />
+
+    <!-- Selected Skill IDs (OUTPUT - comma-separated) -->
+    <property name="selectedSkillIds" display-name-key="Selected Skill IDs" description-key="Comma-separated GUIDs of selected skills" of-type="SingleLine.Text" usage="output" required="false" />
+
+    <!-- Selected Knowledge IDs (OUTPUT - comma-separated) -->
+    <property name="selectedKnowledgeIds" display-name-key="Selected Knowledge IDs" description-key="Comma-separated GUIDs of selected knowledge sources" of-type="SingleLine.Text" usage="output" required="false" />
+
+    <!-- Selected Tool IDs (OUTPUT - comma-separated) -->
+    <property name="selectedToolIds" display-name-key="Selected Tool IDs" description-key="Comma-separated GUIDs of selected tools" of-type="SingleLine.Text" usage="output" required="false" />
+
+    <!-- Analysis ID (OUTPUT - created analysis record) -->
+    <property name="createdAnalysisId" display-name-key="Created Analysis ID" description-key="GUID of the created sprk_analysis record after execution" of-type="SingleLine.Text" usage="output" required="false" />
+
+    <!-- Should Close (OUTPUT - signals dialog should close) -->
+    <property name="shouldClose" display-name-key="Should Close" description-key="Set to true when analysis execution starts - Custom Page should navigate to workspace" of-type="TwoOptions" usage="output" required="false" />
+
+    <resources>
+      <code path="index.ts" order="1" />
+      <css path="css/AnalysisBuilder.css" order="1" />
+      <!-- Host-provided libraries -->
+      <platform-library name="React" version="16.14.0" />
+      <platform-library name="Fluent" version="9.46.2" />
+    </resources>
+
+    <feature-usage>
+      <uses-feature name="WebAPI" required="true" />
+      <uses-feature name="Utility" required="true" />
+    </feature-usage>
+  </control>
+</manifest>

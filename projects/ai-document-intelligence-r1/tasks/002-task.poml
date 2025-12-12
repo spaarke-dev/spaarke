@@ -7,7 +7,7 @@
     <estimate>3 hours</estimate>
     <tags>bicep,infrastructure,multi-tenant</tags>
     <dependencies>001</dependencies>
-    <status>not-started</status>
+    <status>completed</status>
   </metadata>
   <prompt>
     <role>Senior Developer</role>

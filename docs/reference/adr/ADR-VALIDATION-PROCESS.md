@@ -1,11 +1,11 @@
 # ADR Validation Process
 
-**Last Updated:** December 2, 2025
+**Last Updated:** December 12, 2025
 **Status:** Active
 
 ## Overview
 
-This document defines the process for validating code changes against SDAP's 12 Architecture Decision Records (ADRs). The validation system uses a hybrid approach combining automated CI/CD testing (NetArchTest) and interactive pre-commit guidance (Claude Code skill).
+This document defines the process for validating code changes against SDAP's Architecture Decision Records (ADRs). The validation system uses a hybrid approach combining automated CI/CD testing (NetArchTest) and interactive pre-commit guidance (Claude Code skill).
 
 ## Components and Tools
 
@@ -34,7 +34,7 @@ dotnet test tests/Spaarke.ArchTests/
 
 **Location:** `.claude/skills/adr-check.md`
 **Purpose:** Interactive pre-commit validation with contextual guidance
-**Coverage:** All 12 ADRs (including those not covered by NetArchTest)
+**Coverage:** ADR guidance beyond what NetArchTest enforces
 
 **Capabilities:**
 - Validates specific files or recent git changes
@@ -233,7 +233,7 @@ dotnet test tests/Spaarke.ArchTests/
 
 **Step 2: Understand Context**
 - Read the violation message carefully
-- Review referenced ADR document in `docs/adr/ADR-XXX-*.md`
+- Review referenced ADR document in `docs/reference/adr/ADR-XXX-*.md` (this repo)
 - Use Claude skill for additional guidance: `/adr-check`
 
 **Step 3: Fix Violation**
@@ -278,7 +278,7 @@ dotnet test tests/Spaarke.ArchTests/
 **Step 1: Create ADR Document**
 ```bash
 # Create new ADR file
-touch docs/adr/ADR-013-new-decision.md
+touch docs/reference/adr/ADR-013-new-decision.md
 
 # Use standard ADR template with sections:
 # - Context, Decision, Consequences, Alternatives, Operationalization
@@ -360,11 +360,11 @@ grep -r "pattern" --include="*.cs"
 
 **Step 5: Update Documentation**
 
-Update `docs/adr/README-ADRs.md`:
+Update `docs/reference/adr/README-ADRs.md`:
 ```markdown
-## Index of ADRs (001–013)
+## Index of ADRs (001–020)
 
-- [ADR-013: New decision title](docs/adr/ADR-013-new-decision.md)
+- [ADR-013: New decision title](./ADR-013-new-decision.md)
   Brief description of the decision
 ```
 
@@ -376,7 +376,7 @@ Update PR template `.github/pull_request_template.md`:
 
 **Step 6: Update Changelog**
 
-Add entry to `docs/adr/README-ADRs.md`:
+Add entry to `docs/reference/adr/README-ADRs.md`:
 ```markdown
 ## Change log
 - 2025-XX-XX: Added ADR-013 (New decision title) with NetArchTest validation
@@ -463,6 +463,14 @@ dotnet test tests/Spaarke.ArchTests/
 | 010 | DI minimalism | ✅ (4 tests) | ✅ | Pattern validation |
 | 011 | Dataset PCF over subgrids | ❌ | ✅ | Usage patterns |
 | 012 | Shared component library | ❌ | ✅ | Project structure |
+| 013 | AI architecture | ❌ | ✅ | Runtime patterns |
+| 014 | AI caching and reuse policy | ❌ | ❌ | New; add validation as patterns stabilize |
+| 015 | AI data governance | ❌ | ❌ | New; primarily policy/process + code review |
+| 016 | AI cost/rate-limit & backpressure | ❌ | ❌ | New; may be partially enforced via rate limiter + tests |
+| 017 | Async job status & persistence | ❌ | ❌ | New; contract + runtime behavior |
+| 018 | Feature flags and kill switches | ❌ | ❌ | New; add validation for required options gating |
+| 019 | API errors and ProblemDetails standard | ❌ | ❌ | New; add helpers/tests incrementally |
+| 020 | Versioning strategy | ❌ | ❌ | New; enforced via review + tooling as needed |
 
 **Legend:**
 - ✅ Fully validated
@@ -502,7 +510,7 @@ dotnet test tests/Spaarke.ArchTests/
 
 ## References
 
-- **ADR Documents:** `docs/adr/ADR-*.md` (12 ADRs)
+- **ADR Documents:** `docs/reference/adr/ADR-*.md`
 - **Test Project:** `tests/Spaarke.ArchTests/`
 - **Claude Skill:** `.claude/skills/adr-check.md`
 - **CI/CD Workflow:** `.github/workflows/sdap-ci.yml`

@@ -15,7 +15,7 @@ Multiple authorization middlewares (`DataverseSecurityContext`, `DocumentAuthori
 
 | Rule | Description |
 |------|-------------|
-| **One context middleware** | `SpaarkeContextMiddleware` resolves minimal request context (user/tenant/principal/correlation) |
+| **Minimal global middleware** | Keep global middleware limited to cross-cutting concerns (security headers, exception handling, correlation/telemetry) |
 | **Endpoint-level auth** | Resource-based authorization via endpoint filters (Minimal API) or policy/handlers (Controllers) |
 | **Remove global auth** | No global middlewares performing resource checks |
 
@@ -39,14 +39,15 @@ Monolithic `DocumentSecurityMiddleware`. **Rejected** because it lacks route/bod
 | Order | Middleware | Purpose |
 |-------|------------|---------|
 | 1 | Standard ASP.NET (auth, routing) | Framework |
-| 2 | `SpaarkeContextMiddleware` | Enrich context (user, tenant, correlation) |
-| 3 | Endpoint executes | With authorization filter |
+| 2 | Exception handling + security headers | Consistent RFC7807 errors + hardening |
+| 3 | Endpoint executes | With endpoint authorization filter(s) |
 
 ### Authorization Patterns
 
 | Pattern | Implementation |
 |---------|----------------|
 | Single resource | Endpoint filter: `DocumentAuthorizationFilter(Operation.Read)` |
+| AI analysis | Endpoint filters via `AnalysisAuthorizationFilterExtensions` helpers |
 | Composite checks | Handler calls `AuthorizationService` directly |
 | Bulk operations | Handler calls `AuthorizationService` for each item |
 | List endpoints | Authorization at query construction (scoped to caller) |
@@ -67,7 +68,15 @@ Bulk/list endpoints apply authorization at query construction time inside handle
 ## Compliance
 
 **Code review checklist:**
-- [ ] No global authorization middlewares (except `SpaarkeContextMiddleware`)
+- [ ] No global authorization middleware performing resource checks
 - [ ] Protected endpoints have explicit authorization filter
 - [ ] Bulk handlers authorize each item
 - [ ] List queries scoped to caller's permissions
+
+## AI-Directed Coding Guidance
+
+- Default: `.RequireAuthorization()` on the route group + add explicit endpoint filters for resource checks.
+- Use existing filters/helpers:
+	- `DocumentAuthorizationFilter` for document operations
+	- `AnalysisAuthorizationFilterExtensions` for analysis routes
+- Do not add new global middleware to perform resource authorization; it will not have the right route/body context and will be harder to audit.

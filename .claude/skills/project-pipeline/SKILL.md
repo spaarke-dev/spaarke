@@ -126,6 +126,12 @@ LOAD:
   - docs/ai-knowledge/templates/task-execution.template.md (POML format)
   - Tag-to-knowledge mapping (from task-create skill)
 
+REQUIREMENTS (from task-create):
+  - Each task file MUST follow the task-execution.template.md structure (root <task id="..." project="...">)
+  - Each task MUST include <knowledge><files> and it MUST NOT be empty
+  - PCF tasks MUST include docs/ai-knowledge/guides/PCF-V9-PACKAGING.md and src/client/pcf/CLAUDE.md
+  - Applicable ADRs MUST be included via docs/reference/adr/*.md (see task-create Step 3.5)
+
 CREATE directory:
   - projects/{project-name}/tasks/
 

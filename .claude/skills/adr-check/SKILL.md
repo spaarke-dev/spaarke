@@ -12,7 +12,7 @@ alwaysApply: false
 
 ## Purpose
 
-Validate code changes against Spaarke's 12 Architecture Decision Records (ADRs) before committing. This skill helps developers identify architectural violations early, ensuring code aligns with established constraints.
+Validate code changes against Spaarke's Architecture Decision Records (ADRs) before committing. This skill helps developers identify architectural violations early, ensuring code aligns with established constraints.
 
 ---
 
@@ -42,7 +42,8 @@ Determine what code to validate:
 
 ### Step 2: Load ADR Context
 
-Reference the ADR validation rules in `references/adr-validation-rules.md` for detailed checks per ADR.
+1. Use the ADR index as the source of truth: `docs/reference/adr/README-ADRs.md`
+2. Use `references/adr-validation-rules.md` for grep/pattern-based checks (where available)
 
 Quick reference of key constraints:
 
@@ -55,6 +56,8 @@ Quick reference of key constraints:
 | ADR-008 | Endpoint filters | Global `UseAuthorization` middleware |
 | ADR-009 | Redis-first | `IMemoryCache` for cross-request caching |
 | ADR-010 | DI minimalism | Interfaces with single implementation |
+
+Note: This table is not exhaustive. Validate against the full ADR index in `docs/reference/adr/README-ADRs.md`.
 
 ### Step 3: Run Validation Checks
 
@@ -78,11 +81,11 @@ For each violation:
 
 ## Conventions
 
-- Always check all 12 ADRs, even if some seem irrelevant
+- Always check all ADRs in the current ADR index (`docs/reference/adr/README-ADRs.md`)
 - Report warnings for potential issues that need human judgment
 - Provide specific file paths and line numbers for violations
 - Reference ADR documents by full path: `/docs/reference/adr/ADR-XXX-*.md`
-- Suggest running NetArchTest after fixes: `dotnet test tests/Spaarke.Bff.Api.ArchTests/`
+- Suggest running ArchTests after fixes: `dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj`
 
 ---
 
@@ -117,7 +120,7 @@ For each violation:
 ### ❌ Violations (Must Fix)
 
 - **ADR-007:** Graph types found outside Infrastructure layer
-  - **File:** `src/api/Spe.Bff.Api/Api/FileEndpoints.cs:42`
+  - **File:** `src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs:42`
   - **Code:** `Microsoft.Graph.DriveItem item = ...`
   - **Fix:** Replace with `FileHandleDto` and route through `SpeFileStore`
 
@@ -155,7 +158,7 @@ Claude runs `git diff --name-only`, identifies changed files, validates each aga
 
 **Input:**
 ```
-Developer: "Validate src/api/Spe.Bff.Api/Api/DocumentEndpoints.cs against ADRs"
+Developer: "Validate src/server/api/Sprk.Bff.Api/Api/DocumentsEndpoints.cs against ADRs"
 ```
 
 **Output:**
@@ -192,7 +195,8 @@ Claude scans all source directories, producing a comprehensive report across all
 
 ## Tips for AI
 
-- Be thorough: check all 12 ADRs even when changes seem small
+- Be thorough: check all ADRs in the ADR index even when changes seem small
+- Be thorough: check all ADRs in the ADR index, even when changes seem small
 - Be specific: always include file paths and line numbers
 - Be actionable: provide concrete fixes, not just problem descriptions
 - When in doubt, report as warning rather than skipping
