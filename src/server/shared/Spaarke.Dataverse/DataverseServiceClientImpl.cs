@@ -110,6 +110,9 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     {
         var document = new Entity("sprk_document", Guid.Parse(id));
 
+        // ═══════════════════════════════════════════════════════════════════════════
+        // Basic Document Properties
+        // ═══════════════════════════════════════════════════════════════════════════
         if (request.Name != null)
             document["sprk_documentname"] = request.Name;
 
@@ -126,7 +129,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             document["sprk_filesize"] = request.FileSize.Value;
 
         if (request.MimeType != null)
-            document["sprk_mimetype"] = request.MimeType;
+            document["sprk_filetype"] = request.MimeType;
 
         if (request.GraphItemId != null)
             document["sprk_graphitemid"] = request.GraphItemId;
@@ -134,14 +137,91 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         if (request.GraphDriveId != null)
             document["sprk_graphdriveid"] = request.GraphDriveId;
 
+        if (request.Status.HasValue)
+            document["statuscode"] = new OptionSetValue((int)request.Status.Value);
+
+        // ═══════════════════════════════════════════════════════════════════════════
+        // AI Analysis Fields
+        // ═══════════════════════════════════════════════════════════════════════════
+        if (request.Summary != null)
+            document["sprk_filesummary"] = request.Summary;
+
+        if (request.TlDr != null)
+            document["sprk_filetldr"] = request.TlDr;
+
+        if (request.Keywords != null)
+            document["sprk_filekeywords"] = request.Keywords;
+
+        if (request.SummaryStatus.HasValue)
+            document["sprk_filesummarystatus"] = new OptionSetValue(request.SummaryStatus.Value);
+
+        // ═══════════════════════════════════════════════════════════════════════════
+        // Extracted Entities Fields
+        // ═══════════════════════════════════════════════════════════════════════════
+        if (request.ExtractOrganization != null)
+            document["sprk_extractorganization"] = request.ExtractOrganization;
+
+        if (request.ExtractPeople != null)
+            document["sprk_extractpeople"] = request.ExtractPeople;
+
+        if (request.ExtractFees != null)
+            document["sprk_extractfees"] = request.ExtractFees;
+
+        if (request.ExtractDates != null)
+            document["sprk_extractdates"] = request.ExtractDates;
+
+        if (request.ExtractReference != null)
+            document["sprk_extractreference"] = request.ExtractReference;
+
+        if (request.ExtractDocumentType != null)
+            document["sprk_extractdocumenttype"] = request.ExtractDocumentType;
+
+        if (request.DocumentType.HasValue)
+            document["sprk_documenttype"] = new OptionSetValue(request.DocumentType.Value);
+
+        // ═══════════════════════════════════════════════════════════════════════════
+        // Email Metadata Fields (for .eml and .msg files)
+        // ═══════════════════════════════════════════════════════════════════════════
+        if (request.EmailSubject != null)
+            document["sprk_emailsubject"] = request.EmailSubject;
+
+        if (request.EmailFrom != null)
+            document["sprk_emailfrom"] = request.EmailFrom;
+
+        if (request.EmailTo != null)
+            document["sprk_emailto"] = request.EmailTo;
+
+        if (request.EmailDate.HasValue)
+            document["sprk_emaildate"] = request.EmailDate.Value;
+
+        if (request.EmailBody != null)
+            document["sprk_emailbody"] = request.EmailBody;
+
+        if (request.Attachments != null)
+            document["sprk_attachments"] = request.Attachments;
+
+        // ═══════════════════════════════════════════════════════════════════════════
+        // Parent Document Fields (for email attachments)
+        // ═══════════════════════════════════════════════════════════════════════════
+        if (request.ParentDocumentId != null)
+            document["sprk_parentdocumentid"] = request.ParentDocumentId;
+
+        if (request.ParentFileName != null)
+            document["sprk_parentfilename"] = request.ParentFileName;
+
+        if (request.ParentGraphItemId != null)
+            document["sprk_parentgraphitemid"] = request.ParentGraphItemId;
+
+        if (request.ParentDocumentLookup.HasValue)
+            document["sprk_parentdocumentname"] = new EntityReference("sprk_document", request.ParentDocumentLookup.Value);
+
         await _serviceClient.UpdateAsync(document, ct);
-        _logger.LogInformation("Document updated: {DocumentId}", id);
+        _logger.LogInformation("Document updated: {DocumentId} ({FieldCount} fields)", id, document.Attributes.Count);
     }
 
-    public Task DeleteDocumentAsync(string id, CancellationToken ct = default)
+    public async Task DeleteDocumentAsync(string id, CancellationToken ct = default)
     {
-        _serviceClient.DeleteAsync("sprk_document", Guid.Parse(id), ct);
-        return Task.CompletedTask;
+        await _serviceClient.DeleteAsync("sprk_document", Guid.Parse(id), ct);
     }
 
     public async Task<IEnumerable<DocumentEntity>> GetDocumentsByContainerAsync(string containerId, CancellationToken ct = default)

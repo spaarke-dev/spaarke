@@ -222,7 +222,13 @@
       "Bash(\"DocumentIntelligence__DocIntelKey=1e1fd08f527340d1a52ec10b7f61b7e0\" )",
       "Bash(\"/c/Program Files (x86)/Microsoft Visual Studio/2019/BuildTools/MSBuild/Current/Bin/amd64/MSBuild.exe\" /c/code_files/spaarke/src/client/pcf/UniversalQuickCreate/solution/UniversalQuickCreateSolution.cdsproj /t:Rebuild /p:Configuration=Release)",
       "Bash(\"/c/Program Files (x86)/Microsoft Visual Studio/2019/BuildTools/MSBuild/Current/Bin/amd64/MSBuild.exe\" \"/c/code_files/spaarke/src/client/pcf/UniversalQuickCreate/solution/UniversalQuickCreateSolution.cdsproj\" //t:Rebuild //p:Configuration=Release)",
-      "Bash(dotnet add:*)"
+      "Bash(dotnet add:*)",
+      "Bash(gh pr view:*)",
+      "Bash(timeout 120 az webapp log tail:*)",
+      "Bash(pac modelbuilder help:*)",
+      "Bash(az monitor:*)",
+      "Skill(code-review)",
+      "Bash(dir /S \"c:\\code_files\\spaarke\\infrastructure\\dataverse\\ribbon\\temp\"*.zip)"
     ],
     "deny": [],
     "ask": []

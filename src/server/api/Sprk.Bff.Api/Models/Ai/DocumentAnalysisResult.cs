@@ -49,6 +49,14 @@ public class DocumentAnalysisResult
     public bool ParsedSuccessfully { get; set; }
 
     /// <summary>
+    /// Email metadata extracted from email files (.eml, .msg).
+    /// Only populated when the document is an email file.
+    /// Contains structured fields: from, to, cc, subject, date, body, attachments.
+    /// </summary>
+    [JsonPropertyName("emailMetadata")]
+    public EmailMetadata? EmailMetadata { get; set; }
+
+    /// <summary>
     /// Creates a successful analysis result with parsed structured data.
     /// </summary>
     public static DocumentAnalysisResult Success(

@@ -1,9 +1,9 @@
 # Task Index: AI File Entity Metadata Extraction
 
-> **Last Updated**: 2025-12-09
+> **Last Updated**: 2025-12-11
 >
 > **Total Tasks**: 26
-> **Completed**: 15
+> **Completed**: 19
 
 ## Phase 1a: Structured AI Output + Service Rename
 
@@ -29,15 +29,15 @@
 | 013 | [Update AiSummaryPanel for TL;DR](./013-update-aisummarypanel.poml) | ✅ completed | 012 | pcf, react, fluent-ui |
 | 014 | [Add keyword tags display](./014-add-keyword-tags.poml) | ✅ completed | 013 | pcf, fluent-ui |
 | 015 | [Add entities collapsible section](./015-add-entities-section.poml) | ✅ completed | 013 | pcf, fluent-ui |
-| 016 | [Add EmailExtractorService](./016-add-email-extractor.poml) | 🔲 not-started | none | bff-api, services |
-| 017 | [Update Dataverse save logic](./017-update-dataverse-save.poml) | 🔲 not-started | 010 | bff-api, dataverse |
-| 018 | [Integration tests Phase 1b](./018-integration-tests-phase1b.poml) | 🔲 not-started | 010-017 | integration-test |
+| 016 | [Add EmailExtractorService](./016-add-email-extractor.poml) | ✅ completed | none | bff-api, services |
+| 017 | [Update Dataverse save logic](./017-update-dataverse-save.poml) | ✅ completed | 010 | bff-api, dataverse |
+| 018 | [Integration tests Phase 1b](./018-integration-tests-phase1b.poml) | ✅ completed | 010-017 | integration-test |
 
 ## Phase 1 Deployment
 
 | ID | Title | Status | Dependencies | Tags |
 |----|-------|--------|--------------|------|
-| 019 | [Deploy Phase 1 Components](./019-deploy-phase1.poml) | 🔲 not-started | 009, 018 | deploy, azure, dataverse, pcf |
+| 019 | [Deploy Phase 1 Components](./019-deploy-phase1.poml) | ✅ completed | 009, 018 | deploy, azure, dataverse, pcf |
 
 ## Phase 2: Record Matching Service
 

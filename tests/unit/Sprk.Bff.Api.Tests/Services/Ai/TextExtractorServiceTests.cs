@@ -427,6 +427,211 @@ public class TextExtractorServiceTests
 
     #endregion
 
+    #region Email Metadata Tests
+
+    [Fact]
+    public async Task ExtractAsync_EmlFile_ReturnsEmailMetadata()
+    {
+        var message = new MimeMessage();
+        message.From.Add(new MailboxAddress("Sender Name", "sender@example.com"));
+        message.To.Add(new MailboxAddress("Recipient Name", "recipient@example.com"));
+        message.Subject = "Test Email Subject";
+        message.Date = new DateTimeOffset(2024, 6, 15, 10, 30, 0, TimeSpan.Zero);
+        message.Body = new TextPart("plain") { Text = "This is the email body content." };
+
+        using var stream = new MemoryStream();
+        await message.WriteToAsync(stream);
+        stream.Position = 0;
+
+        var result = await _service.ExtractAsync(stream, "test.eml");
+
+        result.Success.Should().BeTrue();
+        result.IsEmail.Should().BeTrue();
+        result.EmailMetadata.Should().NotBeNull();
+        result.EmailMetadata!.Subject.Should().Be("Test Email Subject");
+        result.EmailMetadata.From.Should().Contain("sender@example.com");
+        result.EmailMetadata.To.Should().Contain("recipient@example.com");
+        // Date is converted to local time, so just check date part
+        result.EmailMetadata.Date.Should().HaveYear(2024);
+        result.EmailMetadata.Date.Should().HaveMonth(6);
+        result.EmailMetadata.Date.Should().HaveDay(15);
+        result.EmailMetadata.Body.Should().Contain("This is the email body content.");
+    }
+
+    [Fact]
+    public async Task ExtractAsync_EmlFile_WithCc_IncludesCcInMetadata()
+    {
+        var message = new MimeMessage();
+        message.From.Add(new MailboxAddress("Sender", "sender@example.com"));
+        message.To.Add(new MailboxAddress("To Person", "to@example.com"));
+        message.Cc.Add(new MailboxAddress("CC Person", "cc@example.com"));
+        message.Subject = "Email with CC";
+        message.Body = new TextPart("plain") { Text = "Body text" };
+
+        using var stream = new MemoryStream();
+        await message.WriteToAsync(stream);
+        stream.Position = 0;
+
+        var result = await _service.ExtractAsync(stream, "cc-email.eml");
+
+        result.EmailMetadata.Should().NotBeNull();
+        result.EmailMetadata!.Cc.Should().Contain("cc@example.com");
+    }
+
+    [Fact]
+    public async Task ExtractAsync_EmlFile_WithAttachment_IncludesAttachmentInMetadata()
+    {
+        var message = new MimeMessage();
+        message.From.Add(new MailboxAddress("Sender", "sender@example.com"));
+        message.To.Add(new MailboxAddress("Recipient", "recipient@example.com"));
+        message.Subject = "Email with Attachment";
+
+        var multipart = new Multipart("mixed");
+        multipart.Add(new TextPart("plain") { Text = "Email body with attachment." });
+
+        var attachment = new MimePart("application", "pdf")
+        {
+            Content = new MimeContent(new MemoryStream(Encoding.UTF8.GetBytes("fake pdf content"))),
+            ContentDisposition = new ContentDisposition(ContentDisposition.Attachment),
+            FileName = "document.pdf"
+        };
+        multipart.Add(attachment);
+
+        message.Body = multipart;
+
+        using var stream = new MemoryStream();
+        await message.WriteToAsync(stream);
+        stream.Position = 0;
+
+        var result = await _service.ExtractAsync(stream, "attachment-email.eml");
+
+        result.Success.Should().BeTrue();
+        result.EmailMetadata.Should().NotBeNull();
+        result.EmailMetadata!.HasAttachments.Should().BeTrue();
+        result.EmailMetadata.Attachments.Should().HaveCount(1);
+        result.EmailMetadata.Attachments[0].Filename.Should().Be("document.pdf");
+        result.EmailMetadata.Attachments[0].MimeType.Should().Be("application/pdf");
+    }
+
+    [Fact]
+    public async Task ExtractAsync_EmlFile_WithMultipleAttachments_IncludesAllAttachments()
+    {
+        var message = new MimeMessage();
+        message.From.Add(new MailboxAddress("Sender", "sender@example.com"));
+        message.To.Add(new MailboxAddress("Recipient", "recipient@example.com"));
+        message.Subject = "Email with Multiple Attachments";
+
+        var multipart = new Multipart("mixed");
+        multipart.Add(new TextPart("plain") { Text = "Email body with multiple attachments." });
+
+        // Add first attachment
+        var attachment1 = new MimePart("application", "pdf")
+        {
+            Content = new MimeContent(new MemoryStream(Encoding.UTF8.GetBytes("pdf content"))),
+            ContentDisposition = new ContentDisposition(ContentDisposition.Attachment),
+            FileName = "document.pdf"
+        };
+        multipart.Add(attachment1);
+
+        // Add second attachment
+        var attachment2 = new MimePart("image", "png")
+        {
+            Content = new MimeContent(new MemoryStream(Encoding.UTF8.GetBytes("image content"))),
+            ContentDisposition = new ContentDisposition(ContentDisposition.Attachment),
+            FileName = "image.png"
+        };
+        multipart.Add(attachment2);
+
+        message.Body = multipart;
+
+        using var stream = new MemoryStream();
+        await message.WriteToAsync(stream);
+        stream.Position = 0;
+
+        var result = await _service.ExtractAsync(stream, "multiple-attachments.eml");
+
+        result.EmailMetadata.Should().NotBeNull();
+        result.EmailMetadata!.Attachments.Should().HaveCount(2);
+        result.EmailMetadata.Attachments.Should().Contain(a => a.Filename == "document.pdf");
+        result.EmailMetadata.Attachments.Should().Contain(a => a.Filename == "image.png");
+    }
+
+    [Fact]
+    public async Task ExtractAsync_EmlFile_WithInlineAttachment_SetsIsInlineFlag()
+    {
+        var message = new MimeMessage();
+        message.From.Add(new MailboxAddress("Sender", "sender@example.com"));
+        message.To.Add(new MailboxAddress("Recipient", "recipient@example.com"));
+        message.Subject = "Email with Inline Image";
+
+        var multipart = new Multipart("related");
+        multipart.Add(new TextPart("html") { Text = "<html><body><img src=\"cid:image1\"/></body></html>" });
+
+        var inlineImage = new MimePart("image", "png")
+        {
+            Content = new MimeContent(new MemoryStream(Encoding.UTF8.GetBytes("image content"))),
+            ContentDisposition = new ContentDisposition(ContentDisposition.Inline),
+            ContentId = "image1",
+            FileName = "inline-image.png"
+        };
+        multipart.Add(inlineImage);
+
+        message.Body = multipart;
+
+        using var stream = new MemoryStream();
+        await message.WriteToAsync(stream);
+        stream.Position = 0;
+
+        var result = await _service.ExtractAsync(stream, "inline-image.eml");
+
+        result.EmailMetadata.Should().NotBeNull();
+        result.EmailMetadata!.Attachments.Should().Contain(a =>
+            a.Filename == "inline-image.png" && a.IsInline && a.ContentId == "image1");
+    }
+
+    [Fact]
+    public async Task ExtractAsync_EmlFile_TruncatesLargeBody()
+    {
+        var options = Options.Create(new DocumentIntelligenceOptions
+        {
+            MaxInputTokens = 100000 // Large enough to not truncate the AI text
+        });
+        var service = new TextExtractorService(options, _loggerMock.Object);
+
+        // Create email with body larger than 10K chars
+        var largeBody = new string('x', 15000);
+        using var emlStream = CreateEmlStream(
+            subject: "Large Body Email",
+            from: "sender@example.com",
+            to: "recipient@example.com",
+            body: largeBody);
+
+        var result = await service.ExtractAsync(emlStream, "large-body.eml");
+
+        result.Success.Should().BeTrue();
+        result.EmailMetadata.Should().NotBeNull();
+        result.EmailMetadata!.Body.Should().HaveLength(10000 + "\n\n[Content truncated]".Length);
+        result.EmailMetadata.Body.Should().EndWith("[Content truncated]");
+    }
+
+    [Fact]
+    public async Task ExtractAsync_EmlFile_NoAttachments_HasAttachmentsFalse()
+    {
+        using var emlStream = CreateEmlStream(
+            subject: "Simple Email",
+            from: "sender@example.com",
+            to: "recipient@example.com",
+            body: "No attachments here.");
+
+        var result = await _service.ExtractAsync(emlStream, "simple.eml");
+
+        result.EmailMetadata.Should().NotBeNull();
+        result.EmailMetadata!.HasAttachments.Should().BeFalse();
+        result.EmailMetadata.Attachments.Should().BeEmpty();
+    }
+
+    #endregion
+
     [Fact]
     public async Task ExtractAsync_UnknownExtension_ReturnsNotSupported()
     {
@@ -735,5 +940,58 @@ public class TextExtractionResultTests
         var result = TextExtractionResult.Failed("not configured", TextExtractionMethod.VisionOcr);
 
         result.IsVisionRequired.Should().BeFalse();
+    }
+
+    [Fact]
+    public void SucceededWithEmail_CreatesEmailResult()
+    {
+        var metadata = new EmailMetadata
+        {
+            Subject = "Test Subject",
+            From = "sender@example.com",
+            To = "recipient@example.com",
+            Date = new DateTime(2024, 6, 15),
+            Body = "Email body content"
+        };
+
+        var result = TextExtractionResult.SucceededWithEmail("formatted text", metadata);
+
+        result.Success.Should().BeTrue();
+        result.Text.Should().Be("formatted text");
+        result.Method.Should().Be(TextExtractionMethod.Email);
+        result.EmailMetadata.Should().BeSameAs(metadata);
+        result.IsEmail.Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsEmail_ReturnsTrue_WhenEmailMethodWithMetadata()
+    {
+        var metadata = new EmailMetadata { Subject = "Test" };
+        var result = TextExtractionResult.SucceededWithEmail("text", metadata);
+
+        result.IsEmail.Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsEmail_ReturnsFalse_WhenNativeMethod()
+    {
+        var result = TextExtractionResult.Succeeded("content", TextExtractionMethod.Native);
+
+        result.IsEmail.Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsEmail_ReturnsFalse_WhenEmailMethodButNoMetadata()
+    {
+        // Edge case: Email method but EmailMetadata is null
+        var result = new TextExtractionResult
+        {
+            Success = true,
+            Text = "text",
+            Method = TextExtractionMethod.Email,
+            EmailMetadata = null
+        };
+
+        result.IsEmail.Should().BeFalse();
     }
 }

@@ -226,6 +226,26 @@ public class DocumentIntelligenceService : IDocumentIntelligenceService
         if (_options.StructuredOutputEnabled)
         {
             var result = ParseStructuredResponse(completeSummary);
+
+            // Include email metadata if this was an email file
+            _logger.LogInformation(
+                "Email check for document {DocumentId}: Method={Method}, IsEmail={IsEmail}, HasEmailMetadata={HasMetadata}",
+                request.DocumentId,
+                extractionResult.Method,
+                extractionResult.IsEmail,
+                extractionResult.EmailMetadata != null);
+
+            if (extractionResult.IsEmail)
+            {
+                result.EmailMetadata = extractionResult.EmailMetadata;
+                _logger.LogInformation(
+                    "Attached email metadata for document {DocumentId}: From={From}, Subject={Subject}, Attachments={AttachmentCount}",
+                    request.DocumentId,
+                    extractionResult.EmailMetadata?.From,
+                    extractionResult.EmailMetadata?.Subject,
+                    extractionResult.EmailMetadata?.Attachments.Count ?? 0);
+            }
+
             yield return AnalysisChunk.Completed(result);
         }
         else
@@ -374,6 +394,19 @@ public class DocumentIntelligenceService : IDocumentIntelligenceService
         if (_options.StructuredOutputEnabled)
         {
             var structuredResult = ParseStructuredResponse(summary);
+
+            // Include email metadata if this was an email file
+            if (extractionResult.IsEmail)
+            {
+                structuredResult.EmailMetadata = extractionResult.EmailMetadata;
+                _logger.LogDebug(
+                    "Attached email metadata for document {DocumentId}: From={From}, Subject={Subject}, Attachments={AttachmentCount}",
+                    request.DocumentId,
+                    extractionResult.EmailMetadata?.From,
+                    extractionResult.EmailMetadata?.Subject,
+                    extractionResult.EmailMetadata?.Attachments.Count ?? 0);
+            }
+
             _logger.LogDebug(
                 "Parsed structured result for document {DocumentId}: ParsedSuccessfully={Parsed}, TlDrCount={TlDr}, EntitiesCount={Orgs}+{People}",
                 request.DocumentId,

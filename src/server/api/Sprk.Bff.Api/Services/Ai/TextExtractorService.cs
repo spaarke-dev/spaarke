@@ -94,6 +94,7 @@ public class TextExtractorService : ITextExtractor
     /// <summary>
     /// Extract text from email files (.eml and .msg formats).
     /// Uses MimeKit for .eml (MIME) and MsgReader for .msg (Outlook) formats.
+    /// Returns both formatted text for AI and structured metadata for Dataverse.
     /// </summary>
     private async Task<TextExtractionResult> ExtractEmailAsync(
         Stream fileStream,
@@ -115,13 +116,15 @@ public class TextExtractorService : ITextExtractor
             }
 
             string text;
+            EmailMetadata metadata;
+
             if (extension == ".eml")
             {
-                text = await ExtractFromEmlAsync(fileStream, cancellationToken);
+                (text, metadata) = await ExtractFromEmlAsync(fileStream, cancellationToken);
             }
             else if (extension == ".msg")
             {
-                text = ExtractFromMsg(fileStream);
+                (text, metadata) = ExtractFromMsg(fileStream);
             }
             else
             {
@@ -151,11 +154,18 @@ public class TextExtractorService : ITextExtractor
                 text += "\n\n[Content truncated due to size limits]";
             }
 
-            _logger.LogDebug(
-                "Successfully extracted {CharCount} characters from email {FileName}",
-                text.Length, fileName);
+            // Truncate email body in metadata if needed (max 10K chars for Dataverse field)
+            const int maxBodyChars = 10000;
+            if (metadata.Body?.Length > maxBodyChars)
+            {
+                metadata.Body = metadata.Body[..maxBodyChars] + "\n\n[Content truncated]";
+            }
 
-            return TextExtractionResult.Succeeded(text, TextExtractionMethod.Email);
+            _logger.LogDebug(
+                "Successfully extracted {CharCount} characters from email {FileName} ({AttachmentCount} attachments)",
+                text.Length, fileName, metadata.Attachments.Count);
+
+            return TextExtractionResult.SucceededWithEmail(text, metadata);
         }
         catch (Exception ex)
         {
@@ -167,28 +177,99 @@ public class TextExtractorService : ITextExtractor
     }
 
     /// <summary>
-    /// Extract text from .eml (MIME) email file using MimeKit.
+    /// Extract text and metadata from .eml (MIME) email file using MimeKit.
     /// </summary>
-    private static async Task<string> ExtractFromEmlAsync(Stream fileStream, CancellationToken cancellationToken)
+    private static async Task<(string Text, EmailMetadata Metadata)> ExtractFromEmlAsync(
+        Stream fileStream,
+        CancellationToken cancellationToken)
     {
         var message = await MimeMessage.LoadAsync(fileStream, cancellationToken);
-        return FormatEmailContent(
-            subject: message.Subject,
-            from: message.From?.ToString(),
-            to: message.To?.ToString(),
-            cc: message.Cc?.ToString(),
-            date: message.Date.LocalDateTime,
-            body: message.TextBody ?? StripHtml(message.HtmlBody));
+
+        var body = message.TextBody ?? StripHtml(message.HtmlBody);
+
+        // Extract attachments
+        var attachments = new List<EmailAttachment>();
+        foreach (var attachment in message.Attachments)
+        {
+            var mimeAttachment = attachment as MimePart;
+            if (mimeAttachment != null)
+            {
+                attachments.Add(new EmailAttachment
+                {
+                    Filename = mimeAttachment.FileName ?? "unnamed",
+                    MimeType = mimeAttachment.ContentType?.MimeType,
+                    ContentId = mimeAttachment.ContentId,
+                    IsInline = mimeAttachment.ContentDisposition?.Disposition == ContentDisposition.Inline
+                });
+            }
+        }
+
+        // Also check body parts for inline attachments
+        if (message.Body is Multipart multipart)
+        {
+            ExtractAttachmentsFromMultipart(multipart, attachments);
+        }
+
+        var metadata = new EmailMetadata
+        {
+            Subject = message.Subject,
+            From = message.From?.ToString(),
+            To = message.To?.ToString(),
+            Cc = message.Cc?.ToString(),
+            Date = message.Date.LocalDateTime,
+            Body = body,
+            Attachments = attachments.DistinctBy(a => a.Filename).ToList()
+        };
+
+        var text = FormatEmailContent(
+            metadata.Subject, metadata.From, metadata.To, metadata.Cc, metadata.Date, body);
+
+        return (text, metadata);
     }
 
     /// <summary>
-    /// Extract text from .msg (Outlook) email file using MsgReader.
+    /// Recursively extract attachments from multipart MIME structure.
     /// </summary>
-    private static string ExtractFromMsg(Stream fileStream)
+    private static void ExtractAttachmentsFromMultipart(Multipart multipart, List<EmailAttachment> attachments)
+    {
+        foreach (var part in multipart)
+        {
+            if (part is Multipart nested)
+            {
+                ExtractAttachmentsFromMultipart(nested, attachments);
+            }
+            else if (part is MimePart mimePart)
+            {
+                // Skip text/plain and text/html body parts
+                if (mimePart.ContentType.MimeType == "text/plain" ||
+                    mimePart.ContentType.MimeType == "text/html")
+                {
+                    if (mimePart.ContentDisposition?.Disposition != ContentDisposition.Attachment)
+                        continue;
+                }
+
+                var attachment = new EmailAttachment
+                {
+                    Filename = mimePart.FileName ?? mimePart.ContentId ?? "unnamed",
+                    MimeType = mimePart.ContentType?.MimeType,
+                    ContentId = mimePart.ContentId,
+                    IsInline = mimePart.ContentDisposition?.Disposition == ContentDisposition.Inline,
+                    SizeBytes = 0 // Size unknown at extraction time
+                };
+
+                attachments.Add(attachment);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Extract text and metadata from .msg (Outlook) email file using MsgReader.
+    /// </summary>
+    private static (string Text, EmailMetadata Metadata) ExtractFromMsg(Stream fileStream)
     {
         using var msg = new Storage.Message(fileStream);
 
-        // Format all recipients (To and CC combined)
+        // Format all recipients
         string? recipients = null;
         if (msg.Recipients != null && msg.Recipients.Count > 0)
         {
@@ -198,13 +279,53 @@ public class TextExtractorService : ITextExtractor
             recipients = string.Join(", ", recipientList);
         }
 
-        return FormatEmailContent(
-            subject: msg.Subject,
-            from: msg.Sender?.Email ?? msg.Sender?.DisplayName,
-            to: recipients,
-            cc: null, // MsgReader Recipients property includes all; To/CC not easily distinguishable
-            date: msg.SentOn,
-            body: msg.BodyText ?? StripHtml(msg.BodyHtml));
+        var body = msg.BodyText ?? StripHtml(msg.BodyHtml);
+
+        // Extract attachments from MSG
+        var attachments = new List<EmailAttachment>();
+        if (msg.Attachments != null)
+        {
+            foreach (var attachment in msg.Attachments)
+            {
+                if (attachment is Storage.Attachment msgAttachment)
+                {
+                    attachments.Add(new EmailAttachment
+                    {
+                        Filename = msgAttachment.FileName ?? "unnamed",
+                        MimeType = msgAttachment.MimeType,
+                        SizeBytes = msgAttachment.Data?.Length ?? 0,
+                        ContentId = msgAttachment.ContentId,
+                        IsInline = msgAttachment.IsInline
+                    });
+                }
+                else if (attachment is Storage.Message embeddedMsg)
+                {
+                    // Embedded email as attachment
+                    attachments.Add(new EmailAttachment
+                    {
+                        Filename = embeddedMsg.Subject ?? "embedded-email.msg",
+                        MimeType = "message/rfc822",
+                        IsInline = false
+                    });
+                }
+            }
+        }
+
+        var metadata = new EmailMetadata
+        {
+            Subject = msg.Subject,
+            From = msg.Sender?.Email ?? msg.Sender?.DisplayName,
+            To = recipients,
+            Cc = null, // MsgReader Recipients includes all; To/CC not easily distinguishable
+            Date = msg.SentOn,
+            Body = body,
+            Attachments = attachments
+        };
+
+        var text = FormatEmailContent(
+            metadata.Subject, metadata.From, metadata.To, metadata.Cc, metadata.Date, body);
+
+        return (text, metadata);
     }
 
     /// <summary>

@@ -77,10 +77,12 @@ public static class DocumentIntelligenceEndpoints
 
     /// <summary>
     /// Stream document analysis endpoint using Server-Sent Events.
+    /// Saves the final result to Dataverse after streaming completes.
     /// </summary>
     private static async Task StreamAnalyze(
         DocumentAnalysisRequest request,
         IDocumentIntelligenceService documentIntelligenceService,
+        IDataverseService dataverseService,
         HttpContext context,
         ILogger<DocumentIntelligenceService> logger)
     {
@@ -96,14 +98,42 @@ public static class DocumentIntelligenceEndpoints
             "Starting SSE stream for document {DocumentId}, TraceId={TraceId}",
             request.DocumentId, context.TraceIdentifier);
 
+        DocumentAnalysisResult? finalResult = null;
+
         try
         {
             await foreach (var chunk in documentIntelligenceService.AnalyzeStreamAsync(context, request, cancellationToken))
             {
                 await WriteSSEAsync(response, chunk, cancellationToken);
+
+                // Capture the final result for Dataverse persistence
+                if (chunk.Done && chunk.Result != null)
+                {
+                    finalResult = chunk.Result;
+                    logger.LogInformation(
+                        "Captured final result for document {DocumentId}: HasEmailMetadata={HasEmail}, Summary={SummaryLength}",
+                        request.DocumentId,
+                        chunk.Result.EmailMetadata != null,
+                        chunk.Result.Summary?.Length ?? 0);
+                }
             }
 
-            logger.LogDebug("SSE stream completed successfully for document {DocumentId}", request.DocumentId);
+            logger.LogInformation("SSE stream completed for document {DocumentId}, HasFinalResult={HasResult}",
+                request.DocumentId, finalResult != null);
+
+            // Save the result to Dataverse after streaming completes
+            if (finalResult != null)
+            {
+                logger.LogInformation(
+                    "Saving to Dataverse for document {DocumentId}: HasEmailMetadata={HasEmail}",
+                    request.DocumentId, finalResult.EmailMetadata != null);
+                await SaveAnalysisToDataverseAsync(
+                    dataverseService, request.DocumentId, finalResult, logger, CancellationToken.None);
+            }
+            else
+            {
+                logger.LogWarning("No final result to save for document {DocumentId}", request.DocumentId);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -282,6 +312,133 @@ public static class DocumentIntelligenceEndpoints
             logger.LogWarning(ex,
                 "Failed to update status for document {DocumentId} to {Status}",
                 documentId, status);
+        }
+    }
+
+    /// <summary>
+    /// Save the analysis result to Dataverse after streaming completes.
+    /// Replicates the persistence logic from DocumentAnalysisJobHandler for consistency.
+    /// </summary>
+    private static async Task SaveAnalysisToDataverseAsync(
+        IDataverseService dataverseService,
+        Guid documentId,
+        DocumentAnalysisResult result,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var updateRequest = new UpdateDocumentRequest
+            {
+                Summary = result.Summary,
+                SummaryStatus = (int)AnalysisStatus.Completed
+            };
+
+            // TL;DR as newline-separated string
+            if (result.TlDr.Length > 0)
+            {
+                updateRequest.TlDr = string.Join("\n", result.TlDr);
+            }
+
+            // Keywords (already comma-separated from AI)
+            if (!string.IsNullOrWhiteSpace(result.Keywords))
+            {
+                updateRequest.Keywords = result.Keywords;
+            }
+
+            // Extracted entities - convert arrays to newline-separated strings
+            var entities = result.Entities;
+
+            if (entities.Organizations.Length > 0)
+            {
+                updateRequest.ExtractOrganization = string.Join("\n", entities.Organizations);
+            }
+
+            if (entities.People.Length > 0)
+            {
+                updateRequest.ExtractPeople = string.Join("\n", entities.People);
+            }
+
+            if (entities.Amounts.Length > 0)
+            {
+                updateRequest.ExtractFees = string.Join("\n", entities.Amounts);
+            }
+
+            if (entities.Dates.Length > 0)
+            {
+                updateRequest.ExtractDates = string.Join("\n", entities.Dates);
+            }
+
+            if (entities.References.Length > 0)
+            {
+                updateRequest.ExtractReference = string.Join("\n", entities.References);
+            }
+
+            // Document type - both raw text and mapped choice value
+            if (!string.IsNullOrWhiteSpace(entities.DocumentType))
+            {
+                updateRequest.ExtractDocumentType = entities.DocumentType;
+                updateRequest.DocumentType = DocumentTypeMapper.ToDataverseValue(entities.DocumentType);
+            }
+
+            // Email metadata - populate when document is an email file (.eml, .msg)
+            logger.LogInformation(
+                "Email metadata check for document {DocumentId}: EmailMetadata={HasEmailMetadata}",
+                documentId, result.EmailMetadata != null);
+
+            if (result.EmailMetadata != null)
+            {
+                var email = result.EmailMetadata;
+
+                // Log the SOURCE values before copying
+                logger.LogInformation(
+                    "Email SOURCE values for {DocumentId}: Subject={Subject}, From={From}, To={To}, Date={Date}, BodyLength={BodyLength}",
+                    documentId,
+                    email.Subject ?? "(null)",
+                    email.From ?? "(null)",
+                    email.To ?? "(null)",
+                    email.Date?.ToString("o") ?? "(null)",
+                    email.Body?.Length ?? 0);
+
+                updateRequest.EmailSubject = email.Subject;
+                updateRequest.EmailFrom = email.From;
+                updateRequest.EmailTo = email.To;
+                updateRequest.EmailDate = email.Date;
+                updateRequest.EmailBody = email.Body;
+
+                // Serialize attachments list to JSON for storage
+                if (email.HasAttachments)
+                {
+                    updateRequest.Attachments = JsonSerializer.Serialize(email.Attachments);
+                }
+
+                // Log the TARGET values after copying
+                logger.LogInformation(
+                    "Email TARGET values for {DocumentId}: Subject={Subject}, From={From}, To={To}, Date={Date}, Attachments={Attachments}",
+                    documentId,
+                    updateRequest.EmailSubject ?? "(null)",
+                    updateRequest.EmailFrom ?? "(null)",
+                    updateRequest.EmailTo ?? "(null)",
+                    updateRequest.EmailDate?.ToString("o") ?? "(null)",
+                    updateRequest.Attachments ?? "(null)");
+            }
+
+            await dataverseService.UpdateDocumentAsync(documentId.ToString(), updateRequest, cancellationToken);
+
+            logger.LogInformation(
+                "Saved analysis to Dataverse for document {DocumentId}: Summary={SummaryLength}, Orgs={Orgs}, People={People}, IsEmail={IsEmail}",
+                documentId,
+                result.Summary?.Length ?? 0,
+                entities.Organizations.Length,
+                entities.People.Length,
+                result.EmailMetadata != null);
+        }
+        catch (Exception ex)
+        {
+            // Log but don't fail the request - the SSE stream already completed successfully
+            logger.LogWarning(ex,
+                "Failed to save analysis to Dataverse for document {DocumentId}",
+                documentId);
         }
     }
 }

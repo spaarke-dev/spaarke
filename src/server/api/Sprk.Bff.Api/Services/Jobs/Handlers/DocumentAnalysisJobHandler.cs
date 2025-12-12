@@ -220,6 +220,32 @@ public class DocumentAnalysisJobHandler : IJobHandler
                     entities.Organizations.Length,
                     entities.People.Length,
                     entities.DocumentType);
+
+                // Email metadata - populate when document is an email file (.eml, .msg)
+                if (structured.EmailMetadata != null)
+                {
+                    var email = structured.EmailMetadata;
+
+                    updateRequest.EmailSubject = email.Subject;
+                    updateRequest.EmailFrom = email.From;
+                    updateRequest.EmailTo = email.To;
+                    updateRequest.EmailDate = email.Date;
+                    updateRequest.EmailBody = email.Body;
+
+                    // Serialize attachments list to JSON for storage
+                    if (email.HasAttachments)
+                    {
+                        updateRequest.Attachments = System.Text.Json.JsonSerializer.Serialize(email.Attachments);
+                    }
+
+                    _logger.LogDebug(
+                        "Saving email metadata for document {DocumentId}: From={From}, To={To}, Subject={Subject}, Attachments={AttachmentCount}",
+                        documentId,
+                        email.From,
+                        email.To,
+                        email.Subject,
+                        email.Attachments.Count);
+                }
             }
 
             await _dataverseService.UpdateDocumentAsync(documentId.ToString(), updateRequest, ct);
@@ -264,12 +290,15 @@ public class DocumentAnalysisJobHandler : IJobHandler
 
 /// <summary>
 /// Analysis status values matching Dataverse sprk_filesummarystatus choice.
+/// Values must match the Dataverse OptionSet exactly.
 /// </summary>
 public enum AnalysisStatus
 {
-    None = 0,
-    Pending = 1,
-    Completed = 2,
-    OptedOut = 3,
-    Failed = 4
+    None = 100000000,
+    Pending = 100000001,
+    Completed = 100000002,
+    OptedOut = 100000003,
+    Failed = 100000004,
+    NotSupported = 100000005,
+    Skipped = 100000006
 }
