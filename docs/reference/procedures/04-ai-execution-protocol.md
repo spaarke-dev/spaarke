@@ -10,6 +10,11 @@
 
 This document defines the execution protocol AI agents must follow when executing tasks. It specifies context management, human-in-the-loop triggers, and session handoff procedures.
 
+Before executing **Task 001** in a project, ensure the project is in a safe, “ready-to-execute” state:
+- You are working on a non-`master` branch (see `09-repo-and-github-process.md`)
+- `tasks/TASK-INDEX.md` matches the task files present in `tasks/`
+- If `projects/{project-name}/scripts/audit-tasks.ps1` exists, run it and require a passing result
+
 ---
 
 ## Task Execution Protocol
@@ -129,8 +134,9 @@ When context exceeds 70%, create a handoff summary:
 {Key information the next session needs to continue}
 
 ## Resources to Load
-- `docs/adr/ADR-XXX.md`
+- `docs/reference/adr/ADR-XXX.md`
 - `src/path/to/pattern-file.cs`
+
 ```
 
 ### After Creating Handoff

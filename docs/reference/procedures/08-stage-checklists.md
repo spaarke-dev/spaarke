@@ -63,16 +63,16 @@
 - [ ] Testing approach defined
 - [ ] Peer review complete
 - [ ] PM + Dev approval obtained
-- [ ] spec.md created in projects folder
+- [ ] SPEC.md created in projects folder
 
 ---
 
 ## Stage 4: Project Initialization
 
 - [ ] Project folder created at `projects/{project-name}/`
-- [ ] spec.md in place
+- [ ] SPEC.md in place
 - [ ] README.md generated and reviewed
-- [ ] plan.md generated and reviewed
+- [ ] PLAN.md generated and reviewed
 - [ ] CLAUDE.md generated
 - [ ] tasks/ directory created
 - [ ] notes/ directory created with subdirectories
@@ -82,7 +82,7 @@
 
 ## Stage 5: Task Decomposition
 
-- [ ] All plan.md phases have tasks
+- [ ] All PLAN.md phases have tasks
 - [ ] Task numbering follows convention (001, 010, 020...)
 - [ ] Tasks sized appropriately (2-4 hours)
 - [ ] Dependencies form valid sequence
@@ -90,6 +90,7 @@
 - [ ] Each task has all required POML sections
 - [ ] Acceptance criteria are testable
 - [ ] TASK-INDEX.md updated
+- [ ] Task audit passes (if `scripts/audit-tasks.ps1` exists)
 - [ ] Developer approval obtained
 
 ---

@@ -1,7 +1,7 @@
 # Power Apps Custom Pages - Reference Guide
 
 > **Purpose**: Reference for building Custom Pages in Power Apps (Canvas-like pages within Model-Driven Apps)
-> **Last Updated**: December 11, 2025
+> **Last Updated**: December 14, 2025
 > **Applies To**: Custom page development, PCF integration, Analysis Workspace implementation
 
 ---
@@ -33,6 +33,40 @@ Custom Pages are **Canvas-like pages** embedded in Model-Driven Apps. Use for ri
 - ✅ Interactive data visualizations
 - ❌ Simple data entry (use forms)
 - ❌ List views (use grids)
+
+---
+
+## Display Settings (Critical for Dialogs)
+
+When using Custom Pages in dialogs (modal windows), display settings are **critical** for proper sizing.
+
+### Settings → Display → Layout
+
+| Setting | Use Case | Behavior |
+|---------|----------|----------|
+| **Responsive** | Dialogs, varying screen sizes | Page resizes with container |
+| **Fixed** | Legacy, specific dimensions | Page stays at fixed size |
+
+**For PCF controls in dialogs: Always use "Responsive"**
+
+### How to Configure
+
+1. Open Custom Page in Power Apps Studio
+2. Click **Settings** (gear icon) → **Display**
+3. Select **"Responsive"** (not "Fixed")
+4. Save and Publish
+
+### Why This Matters
+
+```
+Fixed Mode:
+  Dialog opens at 60%x70% → 1152x756px
+  Custom Page stays at 640x520 → ❌ Wasted space
+
+Responsive Mode:
+  Dialog opens at 60%x70% → 1152x756px
+  Custom Page fills dialog → 1152x756px → ✅ Full use
+```
 
 ---
 
@@ -94,10 +128,10 @@ Xrm.Navigation.navigateTo(
     entityName: "sprk_analysis"       // Optional: Entity context
   },
   {
-    target: 2,        // 1 = Dialog, 2 = Inline (replace main), 3 = New window
+    target: 2,        // 1 = Inline (full page), 2 = Dialog (modal)
+    position: 1,      // 1 = Center
     width: { value: 80, unit: "%" },
-    height: { value: 90, unit: "%" },
-    position: 1       // 1 = Center
+    height: { value: 90, unit: "%" }
   }
 ).then(
   (success) => console.log("Custom page opened"),
@@ -241,7 +275,153 @@ If(
 
 ---
 
+## PCF Controls in Dialog Custom Pages
+
+When hosting PCF controls in Custom Pages opened as dialogs, follow this **complete pattern** for responsive sizing.
+
+### Architecture Overview
+
+```
+Dialog (opened via Xrm.Navigation.navigateTo)
+  └── Custom Page (Responsive mode)
+       └── Screen (Max(App.Width/Height, MinScreen*))
+            └── PCF Control (Parent.Width/Height)
+                 └── trackContainerResize(true) receives dimensions
+```
+
+### Step 1: JavaScript Navigation (Ribbon/Form Script)
+
+```javascript
+// Open Custom Page as a responsive dialog
+Xrm.Navigation.navigateTo(
+  {
+    pageType: "custom",
+    name: "sprk_analysisbuilder_40af8"  // Custom Page logical name
+  },
+  {
+    target: 2,                          // 2 = Dialog (modal)
+    position: 1,                        // 1 = Center
+    width: { value: 60, unit: '%' },    // 60% of viewport width
+    height: { value: 70, unit: '%' }    // 70% of viewport height
+  }
+);
+```
+
+### Step 2: Custom Page Display Settings
+
+In Power Apps Studio:
+1. **Settings** → **Display** → Select **"Responsive"**
+
+### Step 3: Screen Sizing (PowerFx)
+
+**Important:** Screens cannot use `Parent.Width`. Use these formulas:
+
+| Property | Formula |
+|----------|---------|
+| **Width** | `Max(App.Width, App.MinScreenWidth)` |
+| **Height** | `Max(App.Height, App.MinScreenHeight)` |
+
+### Step 4: PCF Control Sizing (PowerFx)
+
+The PCF control inside the screen **can** use `Parent`:
+
+| Property | Value |
+|----------|-------|
+| **Width** | `Parent.Width` |
+| **Height** | `Parent.Height` |
+| **X** | `0` |
+| **Y** | `0` |
+
+### Step 5: PCF Control Code (TypeScript)
+
+In your PCF `index.ts`, enable container resize tracking:
+
+```typescript
+public init(
+  context: ComponentFramework.Context<IInputs>,
+  notifyOutputChanged: () => void,
+  state: ComponentFramework.Dictionary,
+  container: HTMLDivElement
+): void {
+  // CRITICAL: Enable resize tracking to receive dimensions
+  context.mode.trackContainerResize(true);
+
+  // Set container styles for responsive sizing
+  container.style.display = "flex";
+  container.style.flexDirection = "column";
+  container.style.width = "100%";
+  container.style.height = "100%";
+  container.style.overflow = "hidden";
+}
+
+private renderComponent(): void {
+  // Get allocated dimensions from Custom Page
+  const allocatedWidth = this._context.mode.allocatedWidth;
+  const allocatedHeight = this._context.mode.allocatedHeight;
+
+  // Apply dimensions (-1 means fill available, use 100%)
+  if (allocatedWidth > 0) {
+    this._container.style.width = `${allocatedWidth}px`;
+  } else {
+    this._container.style.width = "100%";
+  }
+
+  if (allocatedHeight > 0) {
+    this._container.style.height = `${allocatedHeight}px`;
+  } else {
+    this._container.style.height = "100%";
+  }
+}
+```
+
+### Complete Sizing Chain
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ Viewport (1920x1080)                                            │
+│ ┌─────────────────────────────────────────────────────────────┐ │
+│ │ Dialog (60% x 70% = 1152x756px)                             │ │
+│ │ ┌─────────────────────────────────────────────────────────┐ │ │
+│ │ │ Custom Page (Responsive → fills dialog)                 │ │ │
+│ │ │ ┌─────────────────────────────────────────────────────┐ │ │ │
+│ │ │ │ Screen (Max formulas → 1152x756)                    │ │ │ │
+│ │ │ │ ┌─────────────────────────────────────────────────┐ │ │ │ │
+│ │ │ │ │ PCF Control (Parent.Width/Height → 1152x756)    │ │ │ │ │
+│ │ │ │ │                                                 │ │ │ │ │
+│ │ │ │ │  trackContainerResize receives: 1152x756       │ │ │ │ │
+│ │ │ │ └─────────────────────────────────────────────────┘ │ │ │ │
+│ │ │ └─────────────────────────────────────────────────────┘ │ │ │
+│ │ └─────────────────────────────────────────────────────────┘ │ │
+│ └─────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Troubleshooting
+
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| PCF shows at fixed size | Screen uses fixed Width/Height | Use `Max(App.Width, ...)` formulas |
+| PCF smaller than dialog | PCF uses fixed Width/Height | Set PCF to `Parent.Width/Height` |
+| PCF doesn't resize | Missing `trackContainerResize` | Add `context.mode.trackContainerResize(true)` |
+| Display mode is Fixed | Settings → Display → Fixed | Change to "Responsive" |
+
+---
+
 ## Layout Patterns for Custom Pages
+
+### Sizing Formula Reference
+
+**Critical:** Screens and controls have different sizing capabilities.
+
+| Element | Width Formula | Height Formula |
+|---------|---------------|----------------|
+| **Screen** | `Max(App.Width, App.MinScreenWidth)` | `Max(App.Height, App.MinScreenHeight)` |
+| **Container** | `Parent.Width` | `Parent.Height` |
+| **PCF Control** | `Parent.Width` | `Parent.Height` |
+| **Button/Label** | `Parent.Width` or fixed | `Parent.Height` or fixed |
+
+> **Why?** Screens are top-level and don't have a "Parent". They use `App` properties.
+> Controls inside screens inherit from their container, so they use `Parent`.
 
 ### Two-Column Layout (Analysis Workspace)
 
@@ -496,16 +676,25 @@ https://make.powerapps.com/environments/{envId}/monitor
 - PCF control events
 - Navigation events
 
-### Browser DevTools
+### Browser DevTools (for PCF Debugging)
 
 ```javascript
-// In browser console (when page is open)
-// Access Power Apps object
-window.Power Apps
+// In browser console (F12) when Custom Page is open
 
-// View page variables
-// (Limited access, more useful for PCF debugging)
+// Check if PCF received correct dimensions
+console.log("Allocated:", context.mode.allocatedWidth, context.mode.allocatedHeight);
+
+// Inspect PCF container
+document.querySelector('[data-control-name="YourPCFControlName"]');
+
+// Check for JavaScript errors in Console tab
+// Look for "[YourPCF]" prefixed log messages
 ```
+
+**Tips:**
+- Use `console.log` in your PCF `init()` and `updateView()` to trace sizing
+- Check Network tab for failed API calls from PCF
+- Elements tab to inspect PCF container dimensions
 
 ### Common Issues
 
@@ -656,5 +845,5 @@ Set(varWorkingDocument,
 
 ---
 
-*Last Updated: December 11, 2025*
-*Next Review: Phase 2 (after initial implementation)*
+*Last Updated: December 14, 2025*
+*Based on: AnalysisBuilder PCF implementation in Custom Page dialog*

@@ -109,7 +109,7 @@ This document defines Spaarke's end-to-end software development procedures, inte
 |----------|-------------|-------|
 | Technical feasibility assessment | Solution Assessment document | Stage 2 |
 | Architecture and detailed design | Design Specification | Stage 3 |
-| Review AI-generated project artifacts | Approved plan.md, tasks | Stage 4-5 |
+| Review AI-generated project artifacts | Approved PLAN.md, tasks | Stage 4-5 |
 | Oversee AI task execution | Working code | Stage 6 |
 | Code review and testing | Validated code | Stage 7 |
 | Technical documentation | Updated docs | Stage 8 |
@@ -158,7 +158,7 @@ This document defines Spaarke's end-to-end software development procedures, inte
 │                           ✋ GATE: Design complete and approved         │
 │                                                                         │
 │  Stage 4 ──► Stage 5      Dev review of project artifacts              │
-│                           ⚡ CHECKPOINT: README and plan.md reviewed    │
+│                           ⚡ CHECKPOINT: README and PLAN.md reviewed    │
 │                                                                         │
 │  Stage 5 ──► Stage 6      Dev review of task decomposition             │
 │                           ⚡ CHECKPOINT: Task list validated            │
@@ -233,7 +233,7 @@ This document defines Spaarke's end-to-end software development procedures, inte
 │         │ AI + Dev review   │ AI + Dev review   │ AI + Dev spot-check   │
 │         ▼                   ▼                   ▼                       │
 │    [README.md]         [.poml files]       [Code + Tests]              │
-│    [plan.md]           [TASK-INDEX.md]                                 │
+│    [PLAN.md]           [TASK-INDEX.md]                                 │
 │    [CLAUDE.md]                                                         │
 │                                                 │                       │
 │   ════════════════════════════════════════════════════════════════     │
@@ -263,8 +263,8 @@ This document defines Spaarke's end-to-end software development procedures, inte
 | 1 | Feature Request | PM | Discovery findings | Feature Request doc | Notion/Confluence |
 | 2 | Solution Assessment | PM + Dev | Feature Request | RFC, Solution Assessment | Notion, Figma |
 | 3 | Design Specification | Dev (lead) | Solution Assessment | Design Spec + BDD scenarios | Figma, Gherkin |
-| 4 | Project Initialization | AI + Dev | Design Spec | README.md, plan.md, CLAUDE.md | Claude Code |
-| 5 | Task Decomposition | AI + Dev | plan.md | Task files (.poml) | Claude Code |
+| 4 | Project Initialization | AI + Dev | Design Spec | README.md, PLAN.md, CLAUDE.md | Claude Code |
+| 5 | Task Decomposition | AI + Dev | PLAN.md | Task files (.poml) | Claude Code |
 | 6 | Task Execution | AI + Dev | Task files | Code, tests | Claude Code |
 | 7 | Testing & Validation | Dev | Code | Test results, ADR report | SpecFlow, dotnet test |
 | 8 | Documentation & Completion | Dev + PM | All | Feature docs, merged PR | GitHub |
@@ -278,7 +278,7 @@ This document defines Spaarke's end-to-end software development procedures, inte
 | 3 | Design doc + BDD | Notion + Gherkin | Executable specs, unambiguous |
 | 4-8 | Markdown (.md) / POML (.poml) | VS Code, Claude | AI-optimized, version control friendly |
 
-**Conversion Point**: Design Spec is converted to `spec.md` and placed in `projects/{project-name}/` to begin AI-directed development.
+**Conversion Point**: Design Spec is converted to `SPEC.md` and placed in `projects/{project-name}/` to begin AI-directed development.
 
 ---
 
@@ -555,7 +555,7 @@ Create a complete technical design with **executable specifications** (BDD) that
 
 ### 7.4 Output: Design Specification Document
 
-**Location**: Notion/Confluence + exported to `projects/{project-name}/spec.md`
+**Location**: Notion/Confluence + exported to `projects/{project-name}/SPEC.md`
 
 **Template sections**:
 
@@ -675,14 +675,14 @@ At Stage 3, Figma designs must be **high-fidelity and dev-ready**:
 | **Design tokens used** | Colors, typography from design system |
 | **Dev mode annotations** | CSS/styling information for developers |
 
-**Link Figma designs** in spec.md for AI reference.
+**Link Figma designs** in SPEC.md for AI reference.
 
-### 7.7 Conversion to spec.md
+### 7.7 Conversion to SPEC.md
 
 Before Stage 4, convert the Design Spec to markdown:
 
 1. Create project folder: `projects/{project-name}/`
-2. Export/convert to: `projects/{project-name}/spec.md`
+2. Export/convert to: `projects/{project-name}/SPEC.md`
 3. Include Gherkin scenarios in the `## Acceptance Criteria` section
 4. Embed or link Figma designs
 5. This becomes the permanent design reference
@@ -695,7 +695,7 @@ Before Stage 4, convert the Design Spec to markdown:
 | Product Manager | Design meets requirements, BDD scenarios approved |
 | (Optional) Architect | Architecture is sound |
 
-**Exit Criteria**: Design Spec approved, spec.md created with BDD scenarios, ready for AI-directed development
+**Exit Criteria**: Design Spec approved, SPEC.md created with BDD scenarios, ready for AI-directed development
 
 ---
 
@@ -703,24 +703,29 @@ Before Stage 4, convert the Design Spec to markdown:
 
 ### 8.1 Purpose
 
-Create the project folder structure and generate initial artifacts (README, plan, CLAUDE.md) from the design specification.
+Create the project folder structure and generate initial artifacts (README, PLAN.md, CLAUDE.md) from the design specification.
 
 ### 8.2 Inputs
 
-- `projects/{project-name}/spec.md` (converted design spec)
+- `projects/{project-name}/SPEC.md` (converted design spec)
 
 ### 8.3 Process
+
+**Recommended**: `project-pipeline` (adds repo safety + checkpoints)  
+**Trigger**: `/project-pipeline projects/{project-name}`
+
+Or (manual / older flow):
 
 **Skill**: `project-init`  
 **Trigger**: `/project-init projects/{project-name}` or "initialize project"
 
-1. **AI reads spec.md** and extracts key information
+1. **AI reads SPEC.md** and extracts key information
 2. **AI generates folder structure**:
    ```
    projects/{project-name}/
-   ├── spec.md             # Design specification (input)
+  ├── SPEC.md             # Design specification (input)
    ├── README.md           # Project overview (generated)
-   ├── plan.md             # Implementation plan (generated)
+  ├── PLAN.md             # Implementation plan (generated)
    ├── CLAUDE.md           # AI context file (generated)
    ├── tasks/              # Task files (created empty)
    │   └── TASK-INDEX.md   # Task registry (generated)
@@ -731,14 +736,14 @@ Create the project folder structure and generate initial artifacts (README, plan
        └── handoffs/
    ```
 3. **Developer reviews** generated artifacts
-4. **Checkpoint** - Confirm README and plan.md are accurate
+4. **Checkpoint** - Confirm README and PLAN.md are accurate
 
 ### 8.4 Outputs
 
 | File | Purpose | Content Source |
 |------|---------|----------------|
-| `README.md` | Project overview, goals, graduation criteria | Extracted from spec.md |
-| `plan.md` | Implementation plan with WBS phases | Derived from spec.md |
+| `README.md` | Project overview, goals, graduation criteria | Extracted from SPEC.md |
+| `PLAN.md` | Implementation plan with WBS phases | Derived from SPEC.md |
 | `CLAUDE.md` | AI context for this project | Generated with project metadata |
 | `tasks/TASK-INDEX.md` | Task registry (initially empty) | Generated scaffold |
 
@@ -747,7 +752,7 @@ Create the project folder structure and generate initial artifacts (README, plan
 Before proceeding to Stage 5, developer reviews:
 
 - [ ] README.md accurately reflects project goals
-- [ ] plan.md phases align with design spec
+- [ ] PLAN.md phases align with design spec
 - [ ] Graduation criteria are measurable
 - [ ] CLAUDE.md has correct constraints
 
@@ -763,15 +768,15 @@ Break down the implementation plan into discrete, executable task files that AI 
 
 ### 9.2 Inputs
 
-- `projects/{project-name}/plan.md`
-- `projects/{project-name}/spec.md` (for reference)
+- `projects/{project-name}/PLAN.md`
+- `projects/{project-name}/SPEC.md` (for reference)
 
 ### 9.3 Process
 
 **Skill**: `task-create`  
 **Trigger**: `/task-create {project-name}` or "create tasks"
 
-1. **AI reads plan.md** and extracts WBS phases
+1. **AI reads PLAN.md** and extracts WBS phases
 2. **AI decomposes phases** into discrete tasks (2-4 hours each)
 3. **AI generates task files** in POML format:
    ```
@@ -785,6 +790,10 @@ Break down the implementation plan into discrete, executable task files that AI 
 4. **AI updates TASK-INDEX.md** with all tasks
 5. **Developer reviews** task decomposition
 6. **Checkpoint** - Confirm tasks are correctly scoped
+
+**Hardened gate (before executing Task 001):**
+- Verify `tasks/TASK-INDEX.md` is accurate
+- If `projects/{project-name}/scripts/audit-tasks.ps1` exists, run it and require a pass
 
 ### 9.4 Task Numbering Convention
 
@@ -835,7 +844,7 @@ See [Appendix A: POML Reference](#appendix-a-poml-reference) for complete tag de
 
 Before proceeding to Stage 6, developer reviews:
 
-- [ ] All plan.md phases have corresponding tasks
+- [ ] All PLAN.md phases have corresponding tasks
 - [ ] Tasks are appropriately sized (2-4 hours)
 - [ ] Dependencies form a valid sequence (no circular refs)
 - [ ] First tasks have no unmet dependencies
@@ -1164,7 +1173,7 @@ spaarke/
 ├── .github/                    # GitHub workflows, PR templates
 ├── .vscode/                    # VS Code settings
 ├── docs/                       # Documentation
-│   ├── adr/                    # Architecture Decision Records
+│   ├── reference/adr/           # Architecture Decision Records
 │   ├── ai-knowledge/           # AI context and templates
 │   │   └── templates/          # Task, project templates
 │   ├── reference/              # Reference documentation
@@ -1172,9 +1181,9 @@ spaarke/
 │   └── user/                   # User documentation
 ├── projects/                   # Active development projects
 │   └── {project-name}/
-│       ├── spec.md
+│       ├── SPEC.md
 │       ├── README.md
-│       ├── plan.md
+│       ├── PLAN.md
 │       ├── CLAUDE.md
 │       ├── tasks/
 │       └── notes/
@@ -1204,6 +1213,7 @@ Skills are reusable AI workflows defined in `.claude/skills/`.
 | `adr-check` | Validate code against ADRs | `/adr-check` |
 | `code-review` | Comprehensive code review | `/code-review` |
 | `design-to-project` | Full design-to-implementation pipeline | `/design-to-project` |
+| `project-pipeline` | Recommended pipeline: SPEC → PLAN → tasks with checkpoints | `/project-pipeline` |
 | `project-init` | Initialize project folder structure | `/project-init` |
 | `spaarke-conventions` | Coding standards (always applied) | Auto |
 | `task-create` | Decompose plan into task files | `/task-create` |
@@ -1214,8 +1224,8 @@ Skills are reusable AI workflows defined in `.claude/skills/`.
 
 ADRs capture significant architectural decisions. All code must comply.
 
-**Location**: `docs/adr/`  
-**Index**: `docs/adr/README-ADRs.md`
+**Location**: `docs/reference/adr/`  
+**Index**: `docs/reference/adr/README-ADRs.md`
 
 **Key ADRs**:
 
@@ -1530,14 +1540,14 @@ Claude Code has ~200,000 token context window encompassing:
 - [ ] Testing approach defined
 - [ ] Peer review complete
 - [ ] PM + Dev approval obtained
-- [ ] spec.md created in projects folder
+- [ ] SPEC.md created in projects folder
 
 ### D.4 Stage 4: Project Initialization Checklist
 
 - [ ] Project folder created at `projects/{project-name}/`
-- [ ] spec.md in place
+- [ ] SPEC.md in place
 - [ ] README.md generated and reviewed
-- [ ] plan.md generated and reviewed
+- [ ] PLAN.md generated and reviewed
 - [ ] CLAUDE.md generated
 - [ ] tasks/ directory created
 - [ ] notes/ directory created with subdirectories
@@ -1545,7 +1555,7 @@ Claude Code has ~200,000 token context window encompassing:
 
 ### D.5 Stage 5: Task Decomposition Checklist
 
-- [ ] All plan.md phases have tasks
+- [ ] All PLAN.md phases have tasks
 - [ ] Task numbering follows convention (001, 010, 020...)
 - [ ] Tasks sized appropriately (2-4 hours)
 - [ ] Dependencies form valid sequence
@@ -1606,8 +1616,8 @@ Per task:
 
 Before starting, ensure you have:
 - [ ] Approved Design Specification (Stage 3 complete)
-- [ ] Design Spec converted to `spec.md`
-- [ ] BDD scenarios (Gherkin) included in spec.md
+- [ ] Design Spec converted to `SPEC.md`
+- [ ] BDD scenarios (Gherkin) included in SPEC.md
 - [ ] VS Code with Claude Code extension installed
 - [ ] Access to the spaarke repository
 
@@ -1621,12 +1631,12 @@ Before starting, ensure you have:
 │  STEP 1: CREATE PROJECT FOLDER                                         │
 │  ─────────────────────────────────────────────────────────────────────  │
 │  mkdir projects/{project-name}                                         │
-│  # Copy spec.md into the folder                                        │
+│  # Copy SPEC.md into the folder                                        │
 │                                                                         │
 │  STEP 2: INITIALIZE PROJECT (Claude Code)                              │
 │  ─────────────────────────────────────────────────────────────────────  │
-│  Prompt: "/project-init projects/{project-name}"                       │
-│  Review: README.md, plan.md, CLAUDE.md                                 │
+│  Prompt: "/project-pipeline projects/{project-name}"                   │
+│  Review: README.md, PLAN.md, CLAUDE.md                                 │
 │  ⚡ CHECKPOINT: Developer reviews artifacts                            │
 │                                                                         │
 │  STEP 3: CREATE TASKS (Claude Code)                                    │
@@ -1635,21 +1645,26 @@ Before starting, ensure you have:
 │  Review: tasks/*.poml, TASK-INDEX.md                                   │
 │  ⚡ CHECKPOINT: Developer reviews task decomposition                   │
 │                                                                         │
-│  STEP 4: EXECUTE TASKS (Claude Code - repeat for each task)            │
+│  STEP 4: AUDIT TASKS (Developer)                                       │
+│  ─────────────────────────────────────────────────────────────────────  │
+│  Run: projects/{project-name}/scripts/audit-tasks.ps1 -FailOnIssues    │
+│  ✋ GATE: Audit passes (no compliance/integrity issues)                 │
+│                                                                         │
+│  STEP 5: EXECUTE TASKS (Claude Code - repeat for each task)            │
 │  ─────────────────────────────────────────────────────────────────────  │
 │  Prompt: "Execute task defined in:                                     │
 │           projects/{project-name}/tasks/001-task-name.poml"            │
 │  Monitor: Context usage, code quality                                  │
 │  ⚡ CHECKPOINT: Spot-check code every 2-3 tasks                        │
 │                                                                         │
-│  STEP 5: VALIDATE (Developer)                                          │
+│  STEP 6: VALIDATE (Developer)                                          │
 │  ─────────────────────────────────────────────────────────────────────  │
 │  Run: dotnet test / npm test                                           │
 │  Run: /adr-check                                                       │
 │  Review: All tests pass, no ADR violations                             │
 │  ✋ GATE: Quality gates passed                                          │
 │                                                                         │
-│  STEP 6: COMPLETE (Developer + PM)                                     │
+│  STEP 7: COMPLETE (Developer + PM)                                     │
 │  ─────────────────────────────────────────────────────────────────────  │
 │  Update: Feature documentation                                         │
 │  Create: Pull request                                                  │
@@ -1667,11 +1682,11 @@ Before starting, ensure you have:
 # Create project folder
 mkdir projects/{project-name}
 
-# Copy your spec.md into the folder
-# Ensure spec.md includes BDD scenarios in Gherkin format
+# Copy your SPEC.md into the folder
+# Ensure SPEC.md includes BDD scenarios in Gherkin format
 ```
 
-**Verify spec.md contains**:
+**Verify SPEC.md contains**:
 - Problem statement
 - Solution design
 - API contracts (if applicable)
@@ -1685,25 +1700,25 @@ mkdir projects/{project-name}
 **In Claude Code (VS Code Extension)**:
 
 ```
-/project-init projects/{project-name}
+/project-pipeline projects/{project-name}
 ```
 
 Or use natural language:
 ```
 Initialize the project at projects/{project-name}. 
-Read the spec.md and create README.md, plan.md, and CLAUDE.md.
+Read the SPEC.md and create README.md, PLAN.md, and CLAUDE.md.
 ```
 
 **AI generates**:
 - `README.md` - Project overview and graduation criteria
-- `plan.md` - Implementation plan with WBS phases
+- `PLAN.md` - Implementation plan with WBS phases
 - `CLAUDE.md` - AI context for this project
 - `tasks/` directory
 - `notes/` directory with subdirectories
 
 **Developer reviews**:
 - [ ] README.md reflects project goals
-- [ ] plan.md phases match design spec
+- [ ] PLAN.md phases match design spec
 - [ ] Graduation criteria are measurable
 
 #### Step 3: Create Tasks
@@ -1716,7 +1731,7 @@ Read the spec.md and create README.md, plan.md, and CLAUDE.md.
 
 Or:
 ```
-Create tasks for {project-name} from the plan.md.
+Create tasks for {project-name} from the PLAN.md.
 Decompose each phase into 2-4 hour tasks.
 ```
 
@@ -1731,6 +1746,10 @@ Decompose each phase into 2-4 hour tasks.
 - [ ] Tasks are 2-4 hours each
 - [ ] Dependencies are valid
 - [ ] Acceptance criteria are testable
+
+**Hardened gate (before executing Task 001):**
+- Verify `tasks/TASK-INDEX.md` is accurate
+- If `projects/{project-name}/scripts/audit-tasks.ps1` exists, run it and require a pass
 
 #### Step 4: Execute Tasks
 
@@ -1798,10 +1817,10 @@ dotnet test tests/Spaarke.ArchTests/
 
 **Create PR**:
 ```powershell
-git checkout -b feature/{project-name}
+git switch -c work/{project-name}
 git add .
 git commit -m "feat: {description}"
-git push origin feature/{project-name}
+git push -u origin work/{project-name}
 ```
 
 **PR description should include**:

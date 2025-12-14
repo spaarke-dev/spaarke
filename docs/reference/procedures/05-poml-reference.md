@@ -133,7 +133,7 @@ Reference technical approaches and best practices.
 ```xml
 <knowledge>
   <files>
-    <file>docs/adr/ADR-008-authorization-endpoint-filters.md</file>
+    <file>docs/reference/adr/ADR-008-authorization-endpoint-filters.md</file>
   </files>
   <patterns>
     <pattern name="Endpoint Filter">src/api/Filters/AuthorizationFilter.cs</pattern>
@@ -284,7 +284,7 @@ Implementation hints, gotchas, references to spec sections.
 
   <knowledge>
     <files>
-      <file>docs/adr/ADR-008-authorization-endpoint-filters.md</file>
+      <file>docs/reference/adr/ADR-008-authorization-endpoint-filters.md</file>
     </files>
     <patterns>
       <pattern name="Minimal API">src/api/Endpoints/SpeEndpoints.cs</pattern>

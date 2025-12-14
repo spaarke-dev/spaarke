@@ -10,7 +10,7 @@
 |---|--------|--------|
 | 1 | Create project folder | `projects/{project-name}/` |
 | 2 | Draft feature request | Word doc, notes, any format |
-| 3 | Refine spec with AI assist | `projects/{project-name}/spec.md` |
+| 3 | Refine spec with AI assist | `projects/{project-name}/SPEC.md` |
 
 ---
 
@@ -24,6 +24,10 @@ or
 ```
 /design-to-project projects/{project-name}
 ```
+or (recommended)
+```
+/project-pipeline projects/{project-name}
+```
 
 ---
 
@@ -31,9 +35,9 @@ or
 
 | Phase | Claude Code Does | Output |
 |-------|------------------|--------|
-| Ingest | Read spec.md, extract requirements | Summary |
+| Ingest | Read SPEC.md, extract requirements | Summary |
 | Context | Identify ADRs, find reusable code | Constraints list |
-| Generate | Create project artifacts | README.md, plan.md, CLAUDE.md, tasks/ |
+| Generate | Create project artifacts | README.md, PLAN.md, CLAUDE.md, tasks/ |
 | Validate | Cross-reference checklist | Ready confirmation |
 
 ---
@@ -42,7 +46,7 @@ or
 
 | Prompt | Your Response | When |
 |--------|---------------|------|
-| "Create feature branch?" | `yes` | After artifacts generated |
+| "Create work branch?" | `yes` | Before generating artifacts |
 | "Create draft PR?" | `yes` | After branch pushed |
 | "Ready to implement?" | `go` | After validation |
 | "Commit changes?" | `yes` or modify message | After code changes |
@@ -52,7 +56,7 @@ or
 
 ## What You Do Manually
 
-- Review generated README.md, plan.md, tasks
+- Review generated README.md, PLAN.md, tasks
 - Adjust estimates if needed
 - Approve/merge PR in GitHub UI
 
@@ -65,11 +69,11 @@ YOU                          CLAUDE CODE                    GITHUB
 ───                          ───────────                    ──────
 Create folder ─────────────►
 Draft spec ────────────────►
-Refine spec.md ────────────►
+Refine SPEC.md ────────────►
                              
 "start project" ───────────► Phases 1-4 (auto)
                              ◄─── "Create branch?" 
-"yes" ─────────────────────► git checkout -b feature/...
+"yes" ─────────────────────► git switch -c work/...
                              ◄─── "Create draft PR?"
 "yes" ─────────────────────► gh pr create --draft ────────► Draft PR created
                              ◄─── "Ready to implement?"
@@ -92,6 +96,7 @@ Merge ────────────────────────�
 | Command | Purpose |
 |---------|---------|
 | `/design-to-project projects/{name}` | Full pipeline: spec → implementation |
+| `/project-pipeline projects/{name}` | **Recommended**: SPEC → PLAN → tasks with human checkpoints |
 | `/project-init projects/{name}` | Create project artifacts only |
 | `/task-create {project-name}` | Generate task files from plan |
 
@@ -142,10 +147,10 @@ Merge ────────────────────────�
 
 | Issue | Solution |
 |-------|----------|
-| Claude doesn't see spec.md | Verify path: `projects/{name}/spec.md` |
-| Tasks seem wrong | Review plan.md first, then regenerate tasks |
+| Claude doesn't see SPEC.md | Verify path: `projects/{name}/SPEC.md` |
+| Tasks seem wrong | Review PLAN.md first, then regenerate tasks |
 | Context limit hit | Ask for handoff summary, start new chat |
-| PR not updating | Check you're on the feature branch |
+| PR not updating | Check you're on the work branch |
 | ADR violations | Review `docs/reference/adr/` for constraints |
 
 ---

@@ -92,7 +92,7 @@ When context > 70%:
 - Choice A because {reason}
 
 ## Resources to Load
-- `docs/adr/ADR-XXX.md`
+- `docs/reference/adr/ADR-XXX.md`
 ```
 
 ---

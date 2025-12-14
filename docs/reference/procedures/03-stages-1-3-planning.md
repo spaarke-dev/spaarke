@@ -179,7 +179,7 @@ Create a complete technical design with **executable specifications** (BDD) that
 
 ### Output: Design Specification Document
 
-**Location**: Notion/Confluence + exported to `projects/{project-name}/spec.md`
+**Location**: Notion/Confluence + exported to `projects/{project-name}/SPEC.md`
 
 | Section | Content |
 |---------|---------|
@@ -270,12 +270,12 @@ At Stage 3, Figma designs must be **high-fidelity and dev-ready**:
 | Responsive behavior | How component adapts to sizes |
 | Dev mode annotations | CSS/styling information |
 
-### Conversion to spec.md
+### Conversion to SPEC.md
 
 Before Stage 4:
 
 1. Create project folder: `projects/{project-name}/`
-2. Export/convert to: `projects/{project-name}/spec.md`
+2. Export/convert to: `projects/{project-name}/SPEC.md`
 3. Include Gherkin scenarios in `## Acceptance Criteria` section
 4. Embed or link Figma designs
 5. This becomes the permanent design reference
@@ -287,7 +287,7 @@ Before Stage 4:
 | Lead Developer | Design is complete and implementable |
 | Product Manager | Design meets requirements, BDD scenarios approved |
 
-**Exit Criteria**: Design Spec approved, spec.md created with BDD scenarios, ready for AI-directed development
+**Exit Criteria**: Design Spec approved, SPEC.md created with BDD scenarios, ready for AI-directed development
 
 ---
 
@@ -326,7 +326,7 @@ Before Stage 4:
 - [ ] ADR compliance documented
 - [ ] Peer review complete
 - [ ] PM + Dev approval obtained
-- [ ] spec.md created in projects folder
+- [ ] SPEC.md created in projects folder
 
 ---
 

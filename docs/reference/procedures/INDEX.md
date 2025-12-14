@@ -12,6 +12,7 @@ This folder contains modular reference documents for Spaarke's software developm
 |----------|---------|------|
 | [00-project-quick-start.md](00-project-quick-start.md) | **Cheat sheet** - one-page project lifecycle reference | ~150 lines |
 | [07-quick-start.md](07-quick-start.md) | Step-by-step from design spec to completion | ~180 lines |
+| [09-repo-and-github-process.md](09-repo-and-github-process.md) | Branching + commit cadence + PR flow (prevents lost work/drift) | ~120 lines |
 
 ### For All Audiences
 
@@ -71,7 +72,7 @@ docs/reference/procedures/04-ai-execution-protocol.md
 
 | Resource | Location | Purpose |
 |----------|----------|---------|
-| ADRs | `docs/adr/` | Architecture constraints |
+| ADRs | `docs/reference/adr/` | Architecture constraints |
 | Skills | `.claude/skills/` | AI workflow definitions |
 | Templates | `docs/ai-knowledge/templates/` | Project/task templates |
 | Root CLAUDE.md | `/CLAUDE.md` | Repository-wide AI context |
