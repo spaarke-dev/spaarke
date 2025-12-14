@@ -50,7 +50,7 @@
 | 018 | Create sprk_analysisemailmetadata Entity | ✅ | 010 | 2h |
 | 019 | Create sprk_analysischatmessage Entity | ✅ | 010 | 2h |
 | 020 | Create Security Roles for Analysis Feature | ✅ | 010-019 | 3h |
-| 021 | Export Dataverse Solution Package | 🔲 | 001, 010-020 | 2h |
+| 021 | Export Dataverse Solution Package | ✅ | 001, 010-020 | 2h |
 
 ### BFF API Implementation
 

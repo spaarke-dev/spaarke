@@ -23,7 +23,7 @@ This specification defines the **Email-to-Document Automation** feature that con
 - **Smart Filtering**: Rules engine prevents storage of unnecessary emails (signatures, logos, spam)
 
 **Architecture Alignment:**
-- **ADR-001**: BackgroundService worker (not Azure Functions or Power Automate)
+- **ADR-001**: BackgroundService worker + Service Bus; **no Azure Functions/Durable Functions** (exceptions require an ADR addendum)
 - **ADR-002**: No heavy plugins; orchestration in BFF API
 - **ADR-004**: Uniform async job contract for email processing
 - **ADR-007**: All file operations via SpeFileStore facade

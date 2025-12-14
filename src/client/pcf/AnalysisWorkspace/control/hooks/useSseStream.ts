@@ -110,15 +110,13 @@ export function useSseStream(options: ISseStreamOptions): [ISseStreamState, ISse
         logInfo("useSseStream", `Starting stream for analysis: ${analysisId}`);
 
         try {
-            // Build request body
+            // Build request body - only message, analysisId is in URL path
             const requestBody = {
-                analysisId,
-                message,
-                chatHistory: chatHistory || []
+                message
             };
 
-            // Make fetch request
-            const response = await fetch(`${apiBaseUrl}/analysis/chat/stream`, {
+            // Make fetch request to BFF API continue endpoint
+            const response = await fetch(`${apiBaseUrl}/api/ai/analysis/${analysisId}/continue`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -163,7 +161,7 @@ export function useSseStream(options: ISseStreamOptions): [ISseStreamState, ISse
                     if (line.startsWith("data: ")) {
                         const data = line.slice(6).trim();
 
-                        // Check for stream end marker
+                        // Check for stream end marker (legacy format)
                         if (data === "[DONE]") {
                             continue;
                         }
@@ -171,16 +169,34 @@ export function useSseStream(options: ISseStreamOptions): [ISseStreamState, ISse
                         try {
                             const parsed = JSON.parse(data);
 
+                            // BFF API AnalysisStreamChunk format:
+                            // { type: "chunk"|"done"|"error"|"metadata", content, done, error }
+                            if (parsed.type === "chunk" && parsed.content) {
+                                accumulatedText += parsed.content;
+                                setResponseText(accumulatedText);
+                                onToken(parsed.content);
+                            }
+
+                            // Handle legacy format with "token" field
                             if (parsed.token) {
                                 accumulatedText += parsed.token;
                                 setResponseText(accumulatedText);
                                 onToken(parsed.token);
                             }
 
-                            if (parsed.error) {
-                                throw new Error(parsed.error);
+                            if (parsed.type === "error" || parsed.error) {
+                                throw new Error(parsed.error || "Unknown error");
+                            }
+
+                            // Check for stream completion
+                            if (parsed.done === true || parsed.type === "done") {
+                                logInfo("useSseStream", "Received done signal from server");
                             }
                         } catch (parseError) {
+                            // If parse error is from our thrown error, re-throw it
+                            if (parseError instanceof Error && parseError.message !== "Unexpected token") {
+                                throw parseError;
+                            }
                             // If it's not JSON, treat as raw token
                             if (data && data !== "[DONE]") {
                                 accumulatedText += data;
