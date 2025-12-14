@@ -43,8 +43,8 @@ import { SourceDocumentViewer } from "./SourceDocumentViewer";
 import { useSseStream } from "../hooks/useSseStream";
 
 // Build info for version footer
-const VERSION = "1.0.13";
-const BUILD_DATE = "2025-12-12";
+const VERSION = "1.0.14";
+const BUILD_DATE = "2025-12-14";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles - 3-Column Layout
