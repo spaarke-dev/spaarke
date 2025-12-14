@@ -22,7 +22,7 @@
 |----|------|--------|--------------|-----------------|
 | 001 | Create Environment Variables in Dataverse Solution | ✅ | none | 4h |
 | 002 | Create Bicep Parameter Template | ✅ | 001 | 3h |
-| 003 | Create Token-Replacement appsettings.json Template | 🔲 | 001 | 2h |
+| 003 | Create Token-Replacement appsettings.json Template | ✅ | 001 | 2h |
 | 004 | Update BFF API Configuration to Use Environment Variables | ✅ | 001, 003 | 4h |
 
 ### Azure AI Foundry Infrastructure
@@ -49,7 +49,7 @@
 | 017 | Create sprk_analysisworkingversion Entity | ✅ | 010 | 3h |
 | 018 | Create sprk_analysisemailmetadata Entity | ✅ | 010 | 2h |
 | 019 | Create sprk_analysischatmessage Entity | ✅ | 010 | 2h |
-| 020 | Create Security Roles for Analysis Feature | 🔲 | 010-019 | 3h |
+| 020 | Create Security Roles for Analysis Feature | ✅ | 010-019 | 3h |
 | 021 | Export Dataverse Solution Package | 🔲 | 001, 010-020 | 2h |
 
 ### BFF API Implementation
@@ -97,14 +97,14 @@
 
 | ID | Task | Status | Dependencies | Estimated Hours |
 |----|------|--------|--------------|-----------------|
-| 042 | Create Analysis Builder PCF Component | 🔲 | Phase 1 Complete | 4h |
-| 043 | Add Action Selector Component | 🔲 | 042 | 3h |
-| 044 | Add Skills Multi-Select Component | 🔲 | 042 | 3h |
-| 045 | Add Knowledge Multi-Select Component | 🔲 | 042 | 3h |
-| 046 | Add Tools Multi-Select Component | 🔲 | 042 | 3h |
-| 047 | Add Output Options Component | 🔲 | 042 | 2h |
-| 048 | Add Playbook Selector Component | 🔲 | 042 | 3h |
-| 049 | Implement "Start Analysis" Button with API Call | 🔲 | 042-048 | 4h |
+| 042 | Create Analysis Builder PCF Component | ✅ | Phase 1 Complete | 4h |
+| 043 | Add Action Selector Component | ✅ | 042 | 3h |
+| 044 | Add Skills Multi-Select Component | ✅ | 042 | 3h |
+| 045 | Add Knowledge Multi-Select Component | ✅ | 042 | 3h |
+| 046 | Add Tools Multi-Select Component | ✅ | 042 | 3h |
+| 047 | Add Output Options Component | ✅ | 042 | 2h |
+| 048 | Add Playbook Selector Component | ✅ | 042 | 3h |
+| 049 | Implement "Start Analysis" Button with API Call | ✅ | 042-048 | 4h |
 
 ### Analysis Workspace Custom Page & PCF
 
