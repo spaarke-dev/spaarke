@@ -9,6 +9,38 @@
  */
 
 /* ─────────────────────────────────────────────────────────────────────────────
+   PCF Root Container - CRITICAL for filling parent height
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* Target the PCF control container to fill parent */
+:host {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+}
+
+/* Ensure Fluent Provider fills container */
+.fui-FluentProvider {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Hide Custom Page Dialog Close Button (X)
+   Note: This targets the Power Apps modal header elements
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* Try to hide the close button in various Power Apps modal containers */
+[data-lp-id*="closeButton"],
+[aria-label="Close"],
+.ms-Dialog-button--close,
+button[data-automationid="ModalDialogCloseButton"] {
+    display: none !important;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
    Container & Layout
    ───────────────────────────────────────────────────────────────────────────── */
 

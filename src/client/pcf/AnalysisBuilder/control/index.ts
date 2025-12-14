@@ -22,9 +22,6 @@
  * @version 1.0.0
  */
 
-// Declare global Xrm
-declare const Xrm: ComponentFramework.Xrm;
-
 import { IInputs, IOutputs } from "./generated/ManifestTypes";
 import * as React from "react";
 import * as ReactDOM from "react-dom/client";
@@ -123,7 +120,6 @@ export class AnalysisBuilder implements ComponentFramework.StandardControl<IInpu
 
     // Environment variable loaded API URL
     private _apiBaseUrl: string = "";
-    private _configLoaded: boolean = false;
 
     constructor() {
         logInfo("AnalysisBuilder", "Constructor called");
@@ -140,6 +136,16 @@ export class AnalysisBuilder implements ComponentFramework.StandardControl<IInpu
         this._context = context;
         this._container = container;
         this._notifyOutputChanged = notifyOutputChanged;
+
+        // CRITICAL: Enable container resize tracking for responsive sizing
+        // This allows the PCF to receive allocatedWidth/allocatedHeight from the Custom Page
+        context.mode.trackContainerResize(true);
+
+        // Set container base styles
+        this._container.style.display = "flex";
+        this._container.style.flexDirection = "column";
+        this._container.style.boxSizing = "border-box";
+        this._container.style.overflow = "hidden";
 
         // Set up theme
         this._currentTheme = getResolvedTheme();
@@ -164,20 +170,17 @@ export class AnalysisBuilder implements ComponentFramework.StandardControl<IInpu
             const inputUrl = this._context.parameters.apiBaseUrl?.raw;
             if (inputUrl && inputUrl.trim() !== "") {
                 this._apiBaseUrl = inputUrl;
-                this._configLoaded = true;
                 this.renderComponent();
                 return;
             }
 
             // Load from Dataverse environment variable
             this._apiBaseUrl = await getApiBaseUrl(this._context.webAPI);
-            this._configLoaded = true;
             this.renderComponent();
         } catch (error) {
             logError("AnalysisBuilder", "Failed to load configuration from environment variables", error);
             // Use default fallback for development
             this._apiBaseUrl = "https://spe-api-dev-67e2xz.azurewebsites.net/api";
-            this._configLoaded = true;
             this.renderComponent();
         }
     }
@@ -214,6 +217,27 @@ export class AnalysisBuilder implements ComponentFramework.StandardControl<IInpu
     // ─────────────────────────────────────────────────────────────────────────
 
     private renderComponent(): void {
+        // Get allocated dimensions from Custom Page (responsive sizing)
+        const allocatedWidth = this._context.mode.allocatedWidth;
+        const allocatedHeight = this._context.mode.allocatedHeight;
+
+        // Apply dimensions to container
+        // -1 means "fill available space" (use 100%)
+        // Positive values are explicit pixel dimensions from Custom Page
+        if (allocatedWidth > 0) {
+            this._container.style.width = `${allocatedWidth}px`;
+        } else {
+            this._container.style.width = "100%";
+        }
+
+        if (allocatedHeight > 0) {
+            this._container.style.height = `${allocatedHeight}px`;
+        } else {
+            this._container.style.height = "100%";
+        }
+
+        logInfo("AnalysisBuilder", `Container size: ${allocatedWidth}x${allocatedHeight}`);
+
         // Get input parameters
         const documentId = this._context.parameters.documentId?.raw || "";
         const documentName = this._context.parameters.documentName?.raw || "";
@@ -289,6 +313,54 @@ export class AnalysisBuilder implements ComponentFramework.StandardControl<IInpu
     private handleCancel(): void {
         this._shouldClose = true;
         this._notifyOutputChanged();
+
+        // Close the custom page dialog
+        this.closeDialog();
+    }
+
+    private closeDialog(): void {
+        try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const xrm = (window as any).Xrm;
+
+            // Try navigateBack for custom pages opened as dialogs
+            if (xrm?.Navigation?.navigateBack) {
+                xrm.Navigation.navigateBack();
+                return;
+            }
+
+            // Try closing the form/dialog via closeForm (works in some scenarios)
+            if (xrm?.Page?.ui?.close) {
+                xrm.Page.ui.close();
+                return;
+            }
+
+            // Fallback to window methods
+            this.tryWindowClose();
+        } catch (err) {
+            logError("AnalysisBuilder", "closeDialog error, trying fallback", err);
+            this.tryWindowClose();
+        }
+    }
+
+    private tryWindowClose(): void {
+        try {
+            // Try history.back() first - often works for custom pages
+            if (window.history.length > 1) {
+                window.history.back();
+                return;
+            }
+
+            // For dialogs in iframe, message the parent
+            if (window.parent !== window) {
+                window.parent.postMessage({ type: "ANALYSIS_BUILDER_CLOSE" }, "*");
+            }
+
+            // Try window.close as last resort
+            window.close();
+        } catch {
+            logError("AnalysisBuilder", "Failed to close dialog");
+        }
     }
 
     private setupThemeListeners(): void {

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <RibbonDiffXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <CustomActions>
-    <!-- + New Analysis button on sprk_document Form (Analysis Tab Command Bar) -->
+    <!-- + New Analysis button on sprk_document Form Command Bar -->
     <CustomAction Id="sprk.Analysis.NewAnalysis.Button.CustomAction"
                   Location="Mscrm.Form.sprk_document.MainTab.Actions.Controls._children"
                   Sequence="10">
@@ -13,28 +13,10 @@
           LabelText="$LocLabels:Spaarke.Analysis.NewAnalysis.Button.LabelText"
           ToolTipTitle="$LocLabels:Spaarke.Analysis.NewAnalysis.Button.ToolTipTitle"
           ToolTipDescription="$LocLabels:Spaarke.Analysis.NewAnalysis.Button.ToolTipDescription"
-          Image16by16="/_imgs/ribbon/aianalysis_16.png"
-          Image32by32="/_imgs/ribbon/aianalysis_32.png"
+          Image16by16="$webresource:sprk_AnalysisIcon16.svg"
+          Image32by32="$webresource:sprk_AnalysisIcon32.svg"
+          ModernImage="$webresource:sprk_AnalysisIcon32.svg"
           Sequence="10"
-          TemplateAlias="o1" />
-      </CommandUIDefinition>
-    </CustomAction>
-
-    <!-- + New Analysis button on Analysis Subgrid (sprk_analysis) -->
-    <CustomAction Id="sprk.Analysis.NewAnalysisSubgrid.Button.CustomAction"
-                  Location="Mscrm.SubGrid.sprk_analysis.MainTab.Management.Controls._children"
-                  Sequence="5">
-      <CommandUIDefinition>
-        <Button
-          Id="Spaarke.Analysis.NewAnalysisSubgrid.Button"
-          Command="Spaarke.Analysis.NewAnalysisSubgrid.Command"
-          Alt="$LocLabels:Spaarke.Analysis.NewAnalysis.Button.Alt"
-          LabelText="$LocLabels:Spaarke.Analysis.NewAnalysis.Button.LabelText"
-          ToolTipTitle="$LocLabels:Spaarke.Analysis.NewAnalysis.Button.ToolTipTitle"
-          ToolTipDescription="$LocLabels:Spaarke.Analysis.NewAnalysis.Button.ToolTipDescription"
-          Image16by16="/_imgs/ribbon/aianalysis_16.png"
-          Image32by32="/_imgs/ribbon/aianalysis_32.png"
-          Sequence="5"
           TemplateAlias="o1" />
       </CommandUIDefinition>
     </CustomAction>
@@ -45,7 +27,7 @@
   </Templates>
 
   <CommandDefinitions>
-    <!-- Form Command: + New Analysis -->
+    <!-- Form Command: + New Analysis (on Document form command bar) -->
     <CommandDefinition Id="Spaarke.Analysis.NewAnalysis.Command">
       <EnableRules>
         <EnableRule Id="Spaarke.Analysis.NewAnalysis.EnableRule" />
@@ -59,42 +41,13 @@
         </JavaScriptFunction>
       </Actions>
     </CommandDefinition>
-
-    <!-- Subgrid Command: + New Analysis -->
-    <CommandDefinition Id="Spaarke.Analysis.NewAnalysisSubgrid.Command">
-      <EnableRules>
-        <EnableRule Id="Spaarke.Analysis.NewAnalysisSubgrid.EnableRule" />
-      </EnableRules>
-      <DisplayRules>
-        <DisplayRule Id="Spaarke.Analysis.NewAnalysis.DisplayRule" />
-      </DisplayRules>
-      <Actions>
-        <JavaScriptFunction FunctionName="Spaarke_NewAnalysisFromSubgrid" Library="$webresource:sprk_analysis_commands.js">
-          <CrmParameter Value="SelectedControl" />
-        </JavaScriptFunction>
-      </Actions>
-    </CommandDefinition>
-
-    <!-- Subgrid Row Double-Click: Open Analysis Workspace -->
-    <CommandDefinition Id="Spaarke.Analysis.OpenWorkspace.Command">
-      <EnableRules>
-        <EnableRule Id="Spaarke.Analysis.OpenWorkspace.EnableRule" />
-      </EnableRules>
-      <DisplayRules />
-      <Actions>
-        <JavaScriptFunction FunctionName="Spaarke_OpenAnalysisWorkspaceFromSubgrid" Library="$webresource:sprk_analysis_commands.js">
-          <CrmParameter Value="SelectedControlSelectedItemReferences" />
-          <CrmParameter Value="SelectedControl" />
-        </JavaScriptFunction>
-      </Actions>
-    </CommandDefinition>
   </CommandDefinitions>
 
   <RuleDefinitions>
     <TabDisplayRules />
 
     <DisplayRules>
-      <!-- Always display the button -->
+      <!-- Always display the button on web client -->
       <DisplayRule Id="Spaarke.Analysis.NewAnalysis.DisplayRule">
         <CrmClientTypeRule Type="Web" />
       </DisplayRule>
@@ -106,18 +59,6 @@
         <CustomRule FunctionName="Spaarke_EnableNewAnalysis" Library="$webresource:sprk_analysis_commands.js" Default="false">
           <CrmParameter Value="PrimaryControl" />
         </CustomRule>
-      </EnableRule>
-
-      <!-- Subgrid button enable rule -->
-      <EnableRule Id="Spaarke.Analysis.NewAnalysisSubgrid.EnableRule">
-        <CustomRule FunctionName="Spaarke_EnableNewAnalysisSubgrid" Library="$webresource:sprk_analysis_commands.js" Default="false">
-          <CrmParameter Value="SelectedControl" />
-        </CustomRule>
-      </EnableRule>
-
-      <!-- Open Workspace enable rule: Enable when row selected -->
-      <EnableRule Id="Spaarke.Analysis.OpenWorkspace.EnableRule">
-        <SelectionCountRule AppliesTo="SelectedEntity" Minimum="1" Maximum="1" />
       </EnableRule>
     </EnableRules>
   </RuleDefinitions>

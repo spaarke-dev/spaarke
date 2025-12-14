@@ -69,7 +69,7 @@ This document defines Spaarke's end-to-end software development procedures, inte
 |----------|-------------|-------|
 | Technical feasibility assessment | Solution Assessment document | Stage 2 |
 | Architecture and detailed design | Design Specification | Stage 3 |
-| Review AI-generated project artifacts | Approved plan.md, tasks | Stage 4-5 |
+| Review AI-generated project artifacts | Approved PLAN.md, tasks | Stage 4-5 |
 | Oversee AI task execution | Working code | Stage 6 |
 | Code review and testing | Validated code | Stage 7 |
 | Technical documentation | Updated docs | Stage 8 |
@@ -113,7 +113,7 @@ This document defines Spaarke's end-to-end software development procedures, inte
 │                           ✋ GATE: Design complete and approved         │
 │                                                                         │
 │  Stage 4 ──► Stage 5      Dev review of project artifacts              │
-│                           ⚡ CHECKPOINT: README and plan.md reviewed    │
+│                           ⚡ CHECKPOINT: README and PLAN.md reviewed    │
 │                                                                         │
 │  Stage 5 ──► Stage 6      Dev review of task decomposition             │
 │                           ⚡ CHECKPOINT: Task list validated            │
@@ -177,7 +177,7 @@ This document defines Spaarke's end-to-end software development procedures, inte
 │         │ AI + Dev          │ AI + Dev          │ AI + Dev             │
 │         ▼                   ▼                   ▼                       │
 │    [README.md]         [.poml files]       [Code + Tests]              │
-│    [plan.md]           [TASK-INDEX.md]                                 │
+│    [PLAN.md]           [TASK-INDEX.md]                                 │
 │                                                 │                       │
 │   ═══════════════════════════════════════════════════════════════       │
 │   ║            QUALITY GATES                                     ║      │
@@ -199,8 +199,8 @@ This document defines Spaarke's end-to-end software development procedures, inte
 | 1 | Feature Request | PM | Discovery findings | Feature Request doc |
 | 2 | Solution Assessment | PM + Dev | Feature Request | RFC, Solution Assessment |
 | 3 | Design Specification | Dev (lead) | Solution Assessment | Design Spec + BDD scenarios |
-| 4 | Project Initialization | AI + Dev | Design Spec | README.md, plan.md, CLAUDE.md |
-| 5 | Task Decomposition | AI + Dev | plan.md | Task files (.poml) |
+| 4 | Project Initialization | AI + Dev | Design Spec | README.md, PLAN.md, CLAUDE.md |
+| 5 | Task Decomposition | AI + Dev | PLAN.md | Task files (.poml) |
 | 6 | Task Execution | AI + Dev | Task files | Code, tests |
 | 7 | Testing & Validation | Dev | Code | Test results, ADR report |
 | 8 | Documentation & Completion | Dev + PM | All | Feature docs, merged PR |
@@ -213,7 +213,7 @@ This document defines Spaarke's end-to-end software development procedures, inte
 | 3 | Design doc + BDD (Gherkin) | Executable specs, unambiguous |
 | 4-8 | Markdown (.md) / POML (.poml) | AI-optimized, version control friendly |
 
-**Conversion Point**: Design Spec is converted to `spec.md` and placed in `projects/{project-name}/` to begin AI-directed development.
+**Conversion Point**: Design Spec is converted to `SPEC.md` and placed in `projects/{project-name}/` to begin AI-directed development.
 
 ---
 

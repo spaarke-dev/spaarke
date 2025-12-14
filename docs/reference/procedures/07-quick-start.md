@@ -10,8 +10,8 @@
 
 Before starting, ensure you have:
 - [ ] Approved Design Specification (Stage 3 complete)
-- [ ] Design Spec converted to `spec.md`
-- [ ] BDD scenarios (Gherkin) included in spec.md
+- [ ] Design Spec converted to `SPEC.md`
+- [ ] BDD scenarios (Gherkin) included in SPEC.md
 - [ ] VS Code with Claude Code extension installed
 - [ ] Access to the spaarke repository
 
@@ -26,15 +26,15 @@ Before starting, ensure you have:
 │                                                                         │
 │  STEP 1: CREATE PROJECT FOLDER                                         │
 │  mkdir projects/{project-name}                                         │
-│  # Copy spec.md into the folder                                        │
+│  # Copy SPEC.md into the folder                                        │
 │                                                                         │
 │  STEP 2: INITIALIZE PROJECT (Claude Code)                              │
-│  "/project-init projects/{project-name}"                               │
-│  ⚡ CHECKPOINT: Review README.md, plan.md                              │
+│  "/project-pipeline projects/{project-name}"                           │
+│  ⚡ CHECKPOINT: Review README.md, PLAN.md                               │
 │                                                                         │
 │  STEP 3: CREATE TASKS (Claude Code)                                    │
 │  "/task-create {project-name}"                                         │
-│  ⚡ CHECKPOINT: Review task decomposition                              │
+│  ⚡ CHECKPOINT: Review TASK-INDEX.md, then run task audit gate          │
 │                                                                         │
 │  STEP 4: EXECUTE TASKS (Claude Code - per task)                        │
 │  "Execute task: projects/{project-name}/tasks/001-xxx.poml"            │
@@ -62,10 +62,10 @@ Before starting, ensure you have:
 # Create project folder
 mkdir projects/{project-name}
 
-# Copy your spec.md into the folder
+# Copy your SPEC.md into the folder
 ```
 
-**Verify spec.md contains**:
+**Verify SPEC.md contains**:
 - Problem statement
 - Solution design
 - API contracts (if applicable)
@@ -77,7 +77,12 @@ mkdir projects/{project-name}
 
 ### Step 2: Initialize Project
 
-**In Claude Code**:
+**In Claude Code (recommended)**:
+```
+/project-pipeline projects/{project-name}
+```
+
+Or (manual / older flow):
 ```
 /project-init projects/{project-name}
 ```
@@ -85,19 +90,19 @@ mkdir projects/{project-name}
 Or natural language:
 ```
 Initialize the project at projects/{project-name}. 
-Read spec.md and create README.md, plan.md, and CLAUDE.md.
+Read SPEC.md and create README.md, PLAN.md, and CLAUDE.md.
 ```
 
 **AI generates**:
 - `README.md` - Project overview and graduation criteria
-- `plan.md` - Implementation plan with WBS phases
+- `PLAN.md` - Implementation plan with WBS phases
 - `CLAUDE.md` - AI context for this project
 - `tasks/` directory with `TASK-INDEX.md`
 - `notes/` directory
 
 **Developer reviews**:
 - [ ] README.md reflects project goals
-- [ ] plan.md phases match design spec
+- [ ] PLAN.md phases match design spec
 - [ ] Graduation criteria are measurable
 
 ---
@@ -120,6 +125,11 @@ Read spec.md and create README.md, plan.md, and CLAUDE.md.
 - [ ] Tasks are 2-4 hours each
 - [ ] Dependencies are valid
 - [ ] Acceptance criteria are testable
+
+**Hardened gate (must pass before executing Task 001):**
+```powershell
+pwsh -NoProfile -File "projects/{project-name}/scripts/audit-tasks.ps1" -CheckCompletedCompliance -FailOnIssues
+```
 
 ---
 
@@ -177,10 +187,10 @@ npm test
 
 **Create PR**:
 ```powershell
-git checkout -b feature/{project-name}
+git switch -c work/{project-name}
 git add .
 git commit -m "feat: {description}"
-git push origin feature/{project-name}
+git push -u origin work/{project-name}
 ```
 
 **After merge**:

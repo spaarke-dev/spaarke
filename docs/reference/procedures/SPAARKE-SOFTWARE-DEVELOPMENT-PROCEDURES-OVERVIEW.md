@@ -78,7 +78,7 @@ This document provides Spaarke's end-to-end software development procedures, int
 │                        Init       Decompose  Execute     │              │
 │                            │          │         │        │              │
 │                            ▼          ▼         ▼        │              │
-│                       [plan.md]  [.poml]    [Code]       │              │
+│                       [PLAN.md]  [.poml]    [Code]       │              │
 │                                                 │        │              │
 │                                        ┌───────┘        │              │
 │                                        ▼                │              │

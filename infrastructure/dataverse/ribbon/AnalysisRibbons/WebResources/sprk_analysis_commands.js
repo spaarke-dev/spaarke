@@ -58,17 +58,20 @@ function Spaarke_NewAnalysis(primaryControl) {
         const containerId = getAttributeValue(formContext, "sprk_containerid");
         console.log("[Spaarke.Analysis] Container ID:", containerId);
 
-        // Get file ID for SPE access
-        const fileId = getAttributeValue(formContext, "sprk_fileid");
-        console.log("[Spaarke.Analysis] File ID:", fileId);
+        // Get file path for SPE access (sprk_filepath indicates file is associated)
+        const filePath = getAttributeValue(formContext, "sprk_filepath");
+        console.log("[Spaarke.Analysis] File Path:", filePath);
 
-        if (!fileId) {
+        if (!filePath) {
             showErrorDialog(
                 "This document does not have an associated file.\n\n" +
                 "Please upload a file before creating an analysis."
             );
             return;
         }
+
+        // Get file ID for SPE access (optional, may not be on form)
+        const fileId = getAttributeValue(formContext, "sprk_fileid");
 
         // Open Analysis Builder Custom Page
         openAnalysisBuilderDialog({
@@ -93,13 +96,30 @@ function Spaarke_NewAnalysis(primaryControl) {
 function Spaarke_NewAnalysisFromSubgrid(selectedControl) {
     try {
         console.log("[Spaarke.Analysis] NewAnalysisFromSubgrid: Starting");
+        console.log("[Spaarke.Analysis] selectedControl:", selectedControl);
 
         // Get form context from subgrid
         const formContext = getParentFormContext(selectedControl);
+        console.log("[Spaarke.Analysis] formContext:", formContext);
+
         if (!formContext) {
             console.error("[Spaarke.Analysis] Failed to get form context from subgrid");
             showErrorDialog("Unable to access form context. Please refresh the page and try again.");
             return;
+        }
+
+        // Debug: Log entity info
+        if (formContext.data && formContext.data.entity) {
+            console.log("[Spaarke.Analysis] Entity name:", formContext.data.entity.getEntityName());
+            console.log("[Spaarke.Analysis] Entity ID:", formContext.data.entity.getId());
+        }
+
+        // Debug: Log all attributes
+        if (formContext.data && formContext.data.entity && formContext.data.entity.attributes) {
+            console.log("[Spaarke.Analysis] Available attributes:");
+            formContext.data.entity.attributes.forEach(function(attr) {
+                console.log("  - " + attr.getName() + ": " + attr.getValue());
+            });
         }
 
         // Delegate to main function
@@ -301,71 +321,111 @@ function getAttributeValue(formContext, attributeName) {
 }
 
 /**
+ * Get environment variable value from Dataverse
+ *
+ * @param {string} schemaName - The schema name of the environment variable
+ * @returns {Promise<string|null>} The value or null if not found
+ */
+async function getEnvironmentVariable(schemaName) {
+    try {
+        var defResult = await Xrm.WebApi.retrieveMultipleRecords(
+            "environmentvariabledefinition",
+            "?$filter=schemaname eq '" + schemaName + "'&$select=environmentvariabledefinitionid,defaultvalue"
+        );
+        if (defResult.entities.length === 0) {
+            console.log("[Spaarke.Analysis] Environment variable '" + schemaName + "' not found");
+            return null;
+        }
+        var defId = defResult.entities[0].environmentvariabledefinitionid;
+        var defaultValue = defResult.entities[0].defaultvalue;
+        var valueResult = await Xrm.WebApi.retrieveMultipleRecords(
+            "environmentvariablevalue",
+            "?$filter=_environmentvariabledefinitionid_value eq '" + defId + "'&$select=value"
+        );
+        if (valueResult.entities.length > 0 && valueResult.entities[0].value) {
+            return valueResult.entities[0].value;
+        }
+        return defaultValue || null;
+    } catch (error) {
+        console.error("[Spaarke.Analysis] Error getting environment variable:", error);
+        return null;
+    }
+}
+
+/**
  * Open Analysis Builder Custom Page dialog
  *
  * @param {object} params - Dialog parameters
  * @param {object} formContext - Form context for refresh
  */
-function openAnalysisBuilderDialog(params, formContext) {
+async function openAnalysisBuilderDialog(params, formContext) {
     console.log("[Spaarke.Analysis] Opening Analysis Builder with parameters:", params);
 
-    // Prepare data payload
-    const dataPayload = JSON.stringify({
+    // Get API URL from environment variable
+    var apiBaseUrl = await getEnvironmentVariable("sprk_BffApiBaseUrl");
+    if (!apiBaseUrl) {
+        apiBaseUrl = "https://spe-api-dev.azurewebsites.net";
+        console.log("[Spaarke.Analysis] Using fallback API URL:", apiBaseUrl);
+    }
+
+    // Prepare data payload (includes API URL for Custom Page)
+    const dataPayload = {
         documentId: params.documentId,
         documentName: params.documentName,
         containerId: params.containerId,
-        fileId: params.fileId
-    });
-
-    const pageInput = {
-        pageType: "custom",
-        name: "sprk_analysisbuilder_xxxxx",  // Custom Page logical name (update with actual suffix)
-        recordId: dataPayload  // Pass data via recordId (dialog workaround)
+        fileId: params.fileId,
+        apiBaseUrl: apiBaseUrl
     };
 
-    // Get app ID if available
+    // Use Xrm.Navigation.navigateTo - minimal parameters
     try {
-        const globalContext = Xrm.Utility.getGlobalContext();
-        if (globalContext && globalContext.client && typeof globalContext.client.getAppId === 'function') {
-            pageInput.appId = globalContext.client.getAppId();
-        }
-    } catch (e) {
-        console.log("[Spaarke.Analysis] Could not get appId:", e.message);
-    }
+        // Store data in sessionStorage FIRST for the custom page to retrieve
+        sessionStorage.setItem("analysisBuilderParams", JSON.stringify(dataPayload));
+        console.log("[Spaarke.Analysis] Stored params in sessionStorage:", dataPayload);
 
-    // Dialog options
-    const navigationOptions = {
-        target: 2,      // Dialog
-        position: 1,    // Center
-        width: { value: 800, unit: 'px' },
-        height: { value: 600, unit: 'px' }
-    };
+        const pageInput = {
+            pageType: "custom",
+            name: "sprk_analysisbuilder_40af8"
+        };
 
-    console.log("[Spaarke.Analysis] Page Input:", pageInput);
-    console.log("[Spaarke.Analysis] Navigation Options:", navigationOptions);
+        // Dialog options for Analysis Builder - percentage-based for responsive sizing
+        const navigationOptions = {
+            target: 2,      // Dialog
+            position: 1,    // Center
+            width: { value: 60, unit: '%' },
+            height: { value: 70, unit: '%' }
+        };
 
-    Xrm.Navigation.navigateTo(pageInput, navigationOptions).then(
-        function success(result) {
-            console.log("[Spaarke.Analysis] Analysis Builder dialog closed", result);
+        console.log("[Spaarke.Analysis] Opening Analysis Builder with pageInput:", pageInput);
+        console.log("[Spaarke.Analysis] Navigation options:", navigationOptions);
 
-            // Refresh the Analysis subgrid to show new analysis
-            try {
-                const analysisGrid = formContext.getControl("Analysis_Subgrid");
-                if (analysisGrid && typeof analysisGrid.refresh === "function") {
-                    console.log("[Spaarke.Analysis] Refreshing Analysis subgrid");
-                    analysisGrid.refresh();
+        Xrm.Navigation.navigateTo(pageInput, navigationOptions).then(
+            function success(result) {
+                console.log("[Spaarke.Analysis] Analysis Builder dialog closed", result);
+                // Clean up sessionStorage
+                sessionStorage.removeItem("analysisBuilderParams");
+                // Refresh the subgrid if available
+                if (formContext && formContext.getControl) {
+                    var subgrid = formContext.getControl("Subgrid_analysis");
+                    if (subgrid && typeof subgrid.refresh === "function") {
+                        subgrid.refresh();
+                    }
                 }
-            } catch (e) {
-                console.log("[Spaarke.Analysis] Could not refresh subgrid:", e.message);
+            },
+            function error(err) {
+                console.error("[Spaarke.Analysis] navigateTo error:", err);
+                sessionStorage.removeItem("analysisBuilderParams");
+                // errorCode 2 means user closed the dialog - not an error
+                if (err && err.errorCode !== 2) {
+                    showErrorDialog("Error opening Analysis Builder: " + (err.message || "Unknown error"));
+                }
             }
-        },
-        function error(err) {
-            console.log("[Spaarke.Analysis] Dialog error or cancelled:", err);
-            if (err && err.errorCode !== 2) {
-                showErrorDialog("Error opening Analysis Builder: " + (err.message || "Unknown error"));
-            }
-        }
-    );
+        );
+
+    } catch (navError) {
+        console.error("[Spaarke.Analysis] Exception in navigateTo:", navError);
+        showErrorDialog("Error opening Analysis Builder: " + (navError.message || "Unknown error"));
+    }
 }
 
 /**
@@ -401,9 +461,9 @@ function Spaarke_EnableNewAnalysis(primaryControl) {
             return false;
         }
 
-        // Check if file exists
-        const fileId = getAttributeValue(formContext, "sprk_fileid");
-        return !!fileId;
+        // Check if file exists (use sprk_filepath to determine if document has file)
+        const filePath = getAttributeValue(formContext, "sprk_filepath");
+        return !!filePath;
 
     } catch (error) {
         console.error("[Spaarke.Analysis] EnableNewAnalysis Error:", error);
@@ -464,8 +524,8 @@ RIBBON CONFIGURATION:
    - Icon: AnalysisAdd or custom icon
 
 CUSTOM PAGE NAMES:
-- Update "sprk_analysisbuilder_xxxxx" with actual Custom Page logical name after creation
-- Update "sprk_analysisworkspace_xxxxx" with actual Custom Page logical name after creation
+- Analysis Builder: sprk_analysisbuilder_40af8
+- Analysis Workspace: sprk_analysisworkspace_xxxxx (TODO: update after creation)
 
 VERSION HISTORY:
 - 1.0.0: Initial release for AI Document Intelligence Phase 2

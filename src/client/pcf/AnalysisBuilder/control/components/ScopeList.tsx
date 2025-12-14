@@ -46,18 +46,15 @@ const useStyles = makeStyles({
         display: "flex",
         alignItems: "flex-start",
         gap: "12px",
-        padding: "12px",
-        border: `1px solid ${tokens.colorNeutralStroke1}`,
+        paddingTop: "12px",
+        paddingBottom: "12px",
+        paddingLeft: "12px",
+        paddingRight: "12px",
         borderRadius: tokens.borderRadiusMedium,
         backgroundColor: tokens.colorNeutralBackground1,
-        transition: "all 0.15s ease",
-        ":hover": {
-            borderColor: tokens.colorNeutralStroke1Hover,
-            backgroundColor: tokens.colorNeutralBackground1Hover
-        }
+        cursor: "pointer"
     },
     itemSelected: {
-        borderColor: tokens.colorBrandStroke1,
         backgroundColor: tokens.colorBrandBackground2
     },
     selector: {
