@@ -3,6 +3,11 @@
  *
  * Footer action buttons for Analysis Builder.
  * Design Reference: UI Screenshots/01-ANALYSIS-BUILDER-MODAL.jpg
+ *
+ * Features:
+ * - Execute confirmation dialog with save options
+ * - Save Playbook and Save As buttons
+ * - Designed for mini modal size (works in all sizes)
  */
 
 import * as React from "react";
@@ -10,32 +15,58 @@ import {
     Button,
     Spinner,
     makeStyles,
-    tokens
+    tokens,
+    Dialog,
+    DialogSurface,
+    DialogTitle,
+    DialogBody,
+    DialogActions,
+    DialogContent
 } from "@fluentui/react-components";
 import {
     Save24Regular,
-    SaveAs24Regular,
-    Dismiss24Regular,
-    Play24Filled
+    SaveCopy24Regular,
+    Play24Filled,
+    Dismiss24Regular
 } from "@fluentui/react-icons";
 import { IFooterActionsProps } from "../types";
 
 const useStyles = makeStyles({
     container: {
         display: "flex",
-        justifyContent: "space-between",
+        flexDirection: "row",
         alignItems: "center",
-        padding: "16px 24px",
-        borderTop: `1px solid ${tokens.colorNeutralStroke1}`,
-        backgroundColor: tokens.colorNeutralBackground2
+        justifyContent: "flex-end",
+        paddingTop: "8px",
+        paddingBottom: "8px",
+        paddingLeft: "8px",
+        paddingRight: "8px",
+        borderTopWidth: "1px",
+        borderTopStyle: "solid",
+        borderTopColor: tokens.colorNeutralStroke1,
+        backgroundColor: tokens.colorNeutralBackground2,
+        boxSizing: "border-box",
+        minHeight: "48px"
     },
-    leftGroup: {
+    buttonGroup: {
         display: "flex",
-        gap: "8px"
+        flexDirection: "row",
+        alignItems: "center",
+        gap: "4px"
     },
-    rightGroup: {
+    dialogContent: {
+        paddingTop: "8px",
+        paddingBottom: "16px"
+    },
+    dialogActions: {
+        paddingTop: "8px"
+    },
+    dialogButtonRow: {
         display: "flex",
-        gap: "8px"
+        gap: "8px",
+        justifyContent: "flex-end",
+        flexWrap: "nowrap",
+        whiteSpace: "nowrap"
     }
 });
 
@@ -49,48 +80,119 @@ export const FooterActions: React.FC<IFooterActionsProps> = ({
     canExecute
 }) => {
     const styles = useStyles();
+    const [showExecuteDialog, setShowExecuteDialog] = React.useState(false);
+
+    const handleExecuteClick = (): void => {
+        setShowExecuteDialog(true);
+    };
+
+    const handleSaveAndExecute = async (): Promise<void> => {
+        setShowExecuteDialog(false);
+        await onSavePlaybook();
+        await onExecute();
+    };
+
+    const handleSaveAsAndExecute = async (): Promise<void> => {
+        setShowExecuteDialog(false);
+        await onSaveAs();
+        await onExecute();
+    };
+
+    const handleExecuteWithoutSave = async (): Promise<void> => {
+        setShowExecuteDialog(false);
+        await onExecute();
+    };
 
     return (
         <div className={styles.container}>
-            {/* Left side - Save actions */}
-            <div className={styles.leftGroup}>
+            <div className={styles.buttonGroup}>
                 <Button
                     appearance="subtle"
                     icon={<Save24Regular />}
                     onClick={onSavePlaybook}
                     disabled={!canSave || isExecuting}
+                    size="small"
                 >
-                    Save Playbook
+                    Save
                 </Button>
                 <Button
                     appearance="subtle"
-                    icon={<SaveAs24Regular />}
+                    icon={<SaveCopy24Regular />}
                     onClick={onSaveAs}
                     disabled={isExecuting}
+                    size="small"
                 >
-                    Save As...
+                    Save As
                 </Button>
-            </div>
-
-            {/* Right side - Cancel and Execute */}
-            <div className={styles.rightGroup}>
                 <Button
                     appearance="secondary"
-                    icon={<Dismiss24Regular />}
                     onClick={onCancel}
                     disabled={isExecuting}
+                    size="small"
                 >
                     Cancel
                 </Button>
                 <Button
                     appearance="primary"
                     icon={isExecuting ? <Spinner size="tiny" /> : <Play24Filled />}
-                    onClick={onExecute}
+                    onClick={handleExecuteClick}
                     disabled={!canExecute || isExecuting}
+                    size="small"
                 >
-                    {isExecuting ? "Executing..." : "Execute"}
+                    {isExecuting ? "Running..." : "Execute"}
                 </Button>
             </div>
+
+            {/* Save Configuration Dialog - all buttons in one row */}
+            <Dialog
+                open={showExecuteDialog}
+                onOpenChange={(_, data) => setShowExecuteDialog(data.open)}
+            >
+                <DialogSurface>
+                    <DialogBody>
+                        <DialogTitle
+                            action={
+                                <Button
+                                    appearance="subtle"
+                                    aria-label="close"
+                                    icon={<Dismiss24Regular />}
+                                    onClick={() => setShowExecuteDialog(false)}
+                                />
+                            }
+                        >
+                            Save Configuration
+                        </DialogTitle>
+                        <DialogContent className={styles.dialogContent}>
+                            Do you want to save the Analysis configuration before executing?
+                        </DialogContent>
+                        <DialogActions className={styles.dialogActions}>
+                            <div className={styles.dialogButtonRow}>
+                                <Button
+                                    appearance="primary"
+                                    icon={<Save24Regular />}
+                                    onClick={handleSaveAndExecute}
+                                    disabled={!canSave}
+                                >
+                                    Save Playbook
+                                </Button>
+                                <Button
+                                    appearance="primary"
+                                    icon={<SaveCopy24Regular />}
+                                    onClick={handleSaveAsAndExecute}
+                                >
+                                    Save As
+                                </Button>
+                                <Button
+                                    appearance="secondary"
+                                    onClick={handleExecuteWithoutSave}
+                                >
+                                    Do Not Save
+                                </Button>
+                            </div>
+                        </DialogActions>
+                    </DialogBody>
+                </DialogSurface>
+            </Dialog>
         </div>
     );
 };

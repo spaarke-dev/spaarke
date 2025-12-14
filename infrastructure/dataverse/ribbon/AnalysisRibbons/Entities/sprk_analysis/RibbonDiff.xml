@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RibbonDiffXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <CustomActions>
+    <!-- + New Analysis button on sprk_analysis SubGrid (shown on Document form) -->
+    <CustomAction Id="sprk.Analysis.NewAnalysisSubgrid.Button.CustomAction"
+                  Location="Mscrm.SubGrid.sprk_analysis.MainTab.Management.Controls._children"
+                  Sequence="5">
+      <CommandUIDefinition>
+        <Button
+          Id="Spaarke.Analysis.NewAnalysisSubgrid.Button"
+          Command="Spaarke.Analysis.NewAnalysisSubgrid.Command"
+          Alt="$LocLabels:Spaarke.Analysis.NewAnalysis.Button.Alt"
+          LabelText="$LocLabels:Spaarke.Analysis.NewAnalysis.Button.LabelText"
+          ToolTipTitle="$LocLabels:Spaarke.Analysis.NewAnalysis.Button.ToolTipTitle"
+          ToolTipDescription="$LocLabels:Spaarke.Analysis.NewAnalysis.Button.ToolTipDescription"
+          Image16by16="/_imgs/ribbon/AddNew_16.png"
+          Image32by32="/_imgs/ribbon/entity32_add.png"
+          ModernImage="Add"
+          Sequence="5"
+          TemplateAlias="o1" />
+      </CommandUIDefinition>
+    </CustomAction>
+  </CustomActions>
+
+  <!-- Hide standard subgrid buttons we don't want -->
+  <HideCustomActions>
+    <!-- Hide Add Existing Record buttons -->
+    <HideCustomAction HideActionId="Mscrm.SubGrid.sprk_analysis.AddExistingStandard" />
+    <HideCustomAction HideActionId="Mscrm.SubGrid.sprk_analysis.AddExistingAssoc" />
+    <!-- Hide Flow button -->
+    <HideCustomAction HideActionId="Mscrm.SubGrid.sprk_analysis.Flow" />
+    <!-- Hide Run Report -->
+    <HideCustomAction HideActionId="Mscrm.SubGrid.sprk_analysis.RunReport" />
+    <!-- Hide Excel Templates -->
+    <HideCustomAction HideActionId="Mscrm.SubGrid.sprk_analysis.ExcelTemplates" />
+    <!-- Hide Export to Excel -->
+    <HideCustomAction HideActionId="Mscrm.SubGrid.sprk_analysis.ExportToExcel" />
+    <!-- Hide See Associated Records / View Related -->
+    <HideCustomAction HideActionId="Mscrm.SubGrid.sprk_analysis.OpenAssociatedGridViewButton" />
+    <!-- Hide standard Add New button (we have our custom one) -->
+    <HideCustomAction HideActionId="Mscrm.SubGrid.sprk_analysis.AddNewStandard" />
+  </HideCustomActions>
+
+  <Templates>
+    <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>
+  </Templates>
+
+  <CommandDefinitions>
+    <!-- Subgrid Command: + New Analysis -->
+    <CommandDefinition Id="Spaarke.Analysis.NewAnalysisSubgrid.Command">
+      <EnableRules>
+        <EnableRule Id="Spaarke.Analysis.NewAnalysisSubgrid.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="Spaarke.Analysis.NewAnalysis.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke_NewAnalysisFromSubgrid" Library="$webresource:sprk_analysis_commands.js">
+          <CrmParameter Value="SelectedControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+
+    <!-- Subgrid Row Double-Click: Open Analysis Workspace -->
+    <CommandDefinition Id="Spaarke.Analysis.OpenWorkspace.Command">
+      <EnableRules>
+        <EnableRule Id="Spaarke.Analysis.OpenWorkspace.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke_OpenAnalysisWorkspaceFromSubgrid" Library="$webresource:sprk_analysis_commands.js">
+          <CrmParameter Value="SelectedControlSelectedItemReferences" />
+          <CrmParameter Value="SelectedControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+  </CommandDefinitions>
+
+  <RuleDefinitions>
+    <TabDisplayRules />
+
+    <DisplayRules>
+      <!-- Always display the button on web client -->
+      <DisplayRule Id="Spaarke.Analysis.NewAnalysis.DisplayRule">
+        <CrmClientTypeRule Type="Web" />
+      </DisplayRule>
+    </DisplayRules>
+
+    <EnableRules>
+      <!-- Subgrid button enable rule: Check parent document has file -->
+      <EnableRule Id="Spaarke.Analysis.NewAnalysisSubgrid.EnableRule">
+        <CustomRule FunctionName="Spaarke_EnableNewAnalysisSubgrid" Library="$webresource:sprk_analysis_commands.js" Default="false">
+          <CrmParameter Value="SelectedControl" />
+        </CustomRule>
+      </EnableRule>
+
+      <!-- Open Workspace enable rule: Enable when row selected -->
+      <EnableRule Id="Spaarke.Analysis.OpenWorkspace.EnableRule">
+        <SelectionCountRule AppliesTo="SelectedEntity" Minimum="1" Maximum="1" />
+      </EnableRule>
+    </EnableRules>
+  </RuleDefinitions>
+
+  <LocLabels>
+    <LocLabel Id="Spaarke.Analysis.NewAnalysis.Button.Alt">
+      <Titles>
+        <Title description="+ New Analysis" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Spaarke.Analysis.NewAnalysis.Button.LabelText">
+      <Titles>
+        <Title description="+ New Analysis" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Spaarke.Analysis.NewAnalysis.Button.ToolTipTitle">
+      <Titles>
+        <Title description="Create New Analysis" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Spaarke.Analysis.NewAnalysis.Button.ToolTipDescription">
+      <Titles>
+        <Title description="Create a new AI-powered analysis for this document. Configure actions, skills, and output options." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+  </LocLabels>
+</RibbonDiffXml>

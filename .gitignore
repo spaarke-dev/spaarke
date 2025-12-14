@@ -42,6 +42,7 @@ webapp-logs-*/
 # Temporary files
 *.tmp
 *.temp
+*.bak
 .tmp/
 
 # Package files
@@ -62,7 +63,6 @@ temp/
 *_extracted/
 
 # Office Add-ins
-manifest*.xml.bak
 
 # Azure
 .azure/

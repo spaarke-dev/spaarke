@@ -42,56 +42,62 @@ const useStyles = makeStyles({
         display: "flex",
         flexDirection: "column",
         height: "100%",
-        minHeight: "500px",
-        backgroundColor: tokens.colorNeutralBackground1
-    },
-    header: {
-        padding: "16px 24px",
-        borderBottom: `1px solid ${tokens.colorNeutralStroke1}`
-    },
-    title: {
-        fontSize: tokens.fontSizeBase500,
-        fontWeight: tokens.fontWeightSemibold,
-        color: tokens.colorNeutralForeground1,
-        margin: 0,
-        marginBottom: "4px"
-    },
-    subtitle: {
-        fontSize: tokens.fontSizeBase200,
-        color: tokens.colorNeutralForeground2,
-        margin: 0
+        width: "100%",
+        flex: 1,
+        minHeight: 0,
+        backgroundColor: tokens.colorNeutralBackground1,
+        overflow: "hidden",
+        boxSizing: "border-box"
     },
     content: {
         flex: 1,
         overflow: "hidden",
         display: "flex",
-        flexDirection: "column"
+        flexDirection: "column",
+        minHeight: 0 // Important for flex child overflow
+    },
+    scrollableContent: {
+        flex: 1,
+        overflow: "auto",
+        display: "flex",
+        flexDirection: "column",
+        minHeight: 0
     },
     scopeContent: {
         flex: 1,
         overflow: "auto",
-        padding: "16px 24px"
+        paddingTop: "12px",
+        paddingBottom: "12px",
+        paddingLeft: "16px",
+        paddingRight: "16px",
+        minHeight: 0
     },
     loadingContainer: {
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        padding: "48px",
+        flex: 1,
         gap: "16px"
+    },
+    footerWrapper: {
+        flexShrink: 0,
+        marginTop: "auto",
+        backgroundColor: tokens.colorNeutralBackground2
     },
     version: {
         fontSize: tokens.fontSizeBase100,
         color: tokens.colorNeutralForeground3,
         textAlign: "center" as const,
-        padding: "8px",
-        borderTop: `1px solid ${tokens.colorNeutralStroke1}`
+        paddingTop: "4px",
+        paddingBottom: "4px",
+        backgroundColor: tokens.colorNeutralBackground1
     }
 });
 
 // Build date for version footer
 const BUILD_DATE = new Date().toISOString().split("T")[0];
-const VERSION = "1.0.0";
+const VERSION = "1.5.0";
 
 export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (props) => {
     const styles = useStyles();
@@ -487,14 +493,6 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (props) =>
 
     return (
         <div className={styles.container}>
-            {/* Header */}
-            <div className={styles.header}>
-                <h2 className={styles.title}>Configure Analysis</h2>
-                <p className={styles.subtitle}>
-                    {documentName || "Select configuration for document analysis"}
-                </p>
-            </div>
-
             {/* Error message */}
             {error && (
                 <MessageBar intent="error">
@@ -502,43 +500,46 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (props) =>
                 </MessageBar>
             )}
 
-            {/* Content */}
+            {/* Scrollable Content Area */}
             <div className={styles.content}>
-                {/* Playbook Selector */}
-                <PlaybookSelector
-                    playbooks={playbooks}
-                    selectedPlaybookId={selectedPlaybook?.id}
-                    onSelect={handlePlaybookSelect}
-                    isLoading={isLoading}
-                />
+                <div className={styles.scrollableContent}>
+                    {/* Playbook Selector */}
+                    <PlaybookSelector
+                        playbooks={playbooks}
+                        selectedPlaybookId={selectedPlaybook?.id}
+                        onSelect={handlePlaybookSelect}
+                        isLoading={isLoading}
+                    />
 
-                {/* Scope Tabs */}
-                <ScopeTabs
-                    activeTab={activeTab}
-                    tabs={tabs}
-                    onTabChange={handleTabChange}
-                />
+                    {/* Scope Tabs */}
+                    <ScopeTabs
+                        activeTab={activeTab}
+                        tabs={tabs}
+                        onTabChange={handleTabChange}
+                    />
 
-                {/* Tab Content */}
-                <div className={styles.scopeContent}>
-                    {renderTabContent()}
+                    {/* Tab Content - scrollable */}
+                    <div className={styles.scopeContent}>
+                        {renderTabContent()}
+                    </div>
                 </div>
             </div>
 
-            {/* Footer Actions */}
-            <FooterActions
-                onSavePlaybook={handleSavePlaybook}
-                onSaveAs={handleSaveAs}
-                onCancel={onCancel}
-                onExecute={handleExecute}
-                isExecuting={isExecuting}
-                canSave={!!selectedPlaybook}
-                canExecute={!!selectedActionId}
-            />
-
-            {/* Version footer */}
-            <div className={styles.version}>
-                v{VERSION} • Built {BUILD_DATE}
+            {/* Footer - fixed at bottom */}
+            <div className={styles.footerWrapper}>
+                <FooterActions
+                    onSavePlaybook={handleSavePlaybook}
+                    onSaveAs={handleSaveAs}
+                    onCancel={onCancel}
+                    onExecute={handleExecute}
+                    isExecuting={isExecuting}
+                    canSave={!!selectedPlaybook}
+                    canExecute={!!selectedActionId}
+                />
+                {/* Version footer */}
+                <div className={styles.version}>
+                    v{VERSION} • Built {BUILD_DATE}
+                </div>
             </div>
         </div>
     );
