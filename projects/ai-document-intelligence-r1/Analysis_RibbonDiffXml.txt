@@ -1,5 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
-<RibbonDiffXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+<RibbonDiffXml>
   <CustomActions>
     <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_analysis.Activate.Hide" Location="Mscrm.HomepageGrid.sprk_analysis.Activate" />
     <HideCustomAction HideActionId="sprk.Mscrm.HomepageGrid.sprk_analysis.Charts.Hide" Location="Mscrm.HomepageGrid.sprk_analysis.Charts" />
