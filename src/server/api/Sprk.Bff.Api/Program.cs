@@ -374,6 +374,40 @@ if (documentIntelligenceEnabled)
     builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.DocumentAnalysisJobHandler>();
 }
 
+// Register AI Analysis Tool Framework (ADR-013)
+// Tool handlers are discovered via IAnalysisToolHandler and routed by ToolType
+builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Tools.IAnalysisToolService, Sprk.Bff.Api.Services.Ai.Tools.AnalysisToolService>();
+builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Tools.IAnalysisToolHandler, Sprk.Bff.Api.Services.Ai.Tools.Handlers.EntityExtractorHandler>();
+builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Tools.IAnalysisToolHandler, Sprk.Bff.Api.Services.Ai.Tools.Handlers.ClauseAnalyzerHandler>();
+builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Tools.IAnalysisToolHandler, Sprk.Bff.Api.Services.Ai.Tools.Handlers.DocumentClassifierHandler>();
+Console.WriteLine("✓ AI Analysis Tool Framework registered (3 handlers)");
+
+// Register RAG Services (ADR-013, Task 082-083)
+// Hybrid search with Azure AI Search - only register if AI Search is configured
+var aiSearchEndpoint = builder.Configuration["DocumentIntelligence:AiSearchEndpoint"];
+if (!string.IsNullOrEmpty(aiSearchEndpoint))
+{
+    // Register RagService as concrete type (inner service)
+    builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Rag.RagService>();
+
+    // Register IRagService with caching decorator (ADR-009: Redis-First Caching)
+    builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Rag.IRagService>(sp =>
+    {
+        var inner = sp.GetRequiredService<Sprk.Bff.Api.Services.Ai.Rag.RagService>();
+        var cache = sp.GetRequiredService<Microsoft.Extensions.Caching.Distributed.IDistributedCache>();
+        var logger = sp.GetRequiredService<ILogger<Sprk.Bff.Api.Services.Ai.Rag.RagCacheService>>();
+        var metrics = sp.GetService<Sprk.Bff.Api.Telemetry.CacheMetrics>();
+        return new Sprk.Bff.Api.Services.Ai.Rag.RagCacheService(inner, cache, logger, metrics);
+    });
+
+    builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Rag.IKnowledgeDeploymentService, Sprk.Bff.Api.Services.Ai.Rag.KnowledgeDeploymentService>();
+    Console.WriteLine("✓ RAG services registered (hybrid search + caching + knowledge deployment)");
+}
+else
+{
+    Console.WriteLine("⚠ RAG services skipped (DocumentIntelligence:AiSearchEndpoint not configured)");
+}
+
 // Configure Service Bus job processing
 var serviceBusConnectionString = builder.Configuration.GetConnectionString("ServiceBus");
 if (string.IsNullOrWhiteSpace(serviceBusConnectionString))

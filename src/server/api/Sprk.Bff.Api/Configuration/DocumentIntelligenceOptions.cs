@@ -206,6 +206,12 @@ public class DocumentIntelligenceOptions
     public string AiSearchIndexName { get; set; } = "spaarke-records-index";
 
     /// <summary>
+    /// Azure AI Search index name for knowledge chunks (RAG).
+    /// Default: "spaarke-knowledge-shared"
+    /// </summary>
+    public string KnowledgeIndexName { get; set; } = "spaarke-knowledge-shared";
+
+    /// <summary>
     /// Maps Dataverse record types to their corresponding Document lookup field names.
     /// Used when associating a document with a matched record.
     /// </summary>

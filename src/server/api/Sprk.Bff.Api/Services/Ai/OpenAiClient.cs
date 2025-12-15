@@ -4,6 +4,7 @@ using Azure;
 using Azure.AI.OpenAI;
 using Microsoft.Extensions.Options;
 using OpenAI.Chat;
+using OpenAI.Embeddings;
 using Polly;
 using Polly.CircuitBreaker;
 using Sprk.Bff.Api.Configuration;
@@ -48,6 +49,9 @@ public class OpenAiClient : IOpenAiClient
     private static readonly TimeSpan BreakDuration = TimeSpan.FromSeconds(30); // Half-open after 30s
     private const double FailureRatio = 0.5;      // 50% failure ratio to trip
     private const int MinimumThroughput = 5;      // Minimum calls before tripping
+
+    // Embedding model for RAG (Task 081)
+    private const string DefaultEmbeddingModel = "text-embedding-3-small";
 
     public OpenAiClient(IOptions<DocumentIntelligenceOptions> options, ILogger<OpenAiClient> logger)
     {
@@ -358,6 +362,58 @@ public class OpenAiClient : IOpenAiClient
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to get vision completion with model {Model}", deploymentName);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Generate embedding vector for text using text-embedding-3-small.
+    /// Used for RAG indexing and vector search (Task 081).
+    /// Protected by circuit breaker - throws OpenAiCircuitBrokenException when open.
+    /// </summary>
+    /// <param name="text">Text to embed.</param>
+    /// <param name="model">Optional model override. Defaults to text-embedding-3-small.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Embedding vector (1536 dimensions for text-embedding-3-small).</returns>
+    /// <exception cref="OpenAiCircuitBrokenException">Thrown when circuit breaker is open.</exception>
+    public async Task<float[]> GenerateEmbeddingAsync(
+        string text,
+        string? model = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(text);
+
+        var deploymentName = model ?? DefaultEmbeddingModel;
+        var embeddingClient = _client.GetEmbeddingClient(deploymentName);
+
+        _logger.LogDebug(
+            "Generating embedding with model {Model}, TextLength={Length}",
+            deploymentName, text.Length);
+
+        try
+        {
+            // Circuit breaker: wrap the embedding call
+            var response = await _circuitBreaker.ExecuteAsync(async ct =>
+            {
+                return await embeddingClient.GenerateEmbeddingAsync(text, cancellationToken: ct);
+            }, cancellationToken);
+
+            var embedding = response.Value.ToFloats().ToArray();
+
+            _logger.LogDebug(
+                "Embedding generated for model {Model}, Dimensions={Dimensions}",
+                deploymentName, embedding.Length);
+
+            return embedding;
+        }
+        catch (BrokenCircuitException)
+        {
+            _logger.LogWarning("OpenAI circuit breaker is open. Rejecting embedding request.");
+            throw new OpenAiCircuitBrokenException(BreakDuration);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to generate embedding with model {Model}", deploymentName);
             throw;
         }
     }

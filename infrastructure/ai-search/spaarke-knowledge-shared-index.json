@@ -1,0 +1,184 @@
+{
+  "name": "spaarke-knowledge-shared",
+  "fields": [
+    {
+      "name": "id",
+      "type": "Edm.String",
+      "key": true,
+      "searchable": false,
+      "filterable": false,
+      "sortable": false,
+      "facetable": false
+    },
+    {
+      "name": "customerId",
+      "type": "Edm.String",
+      "searchable": false,
+      "filterable": true,
+      "sortable": false,
+      "facetable": true,
+      "analyzer": null
+    },
+    {
+      "name": "knowledgeSourceId",
+      "type": "Edm.String",
+      "searchable": false,
+      "filterable": true,
+      "sortable": false,
+      "facetable": true
+    },
+    {
+      "name": "documentId",
+      "type": "Edm.String",
+      "searchable": false,
+      "filterable": true,
+      "sortable": false,
+      "facetable": false
+    },
+    {
+      "name": "chunkIndex",
+      "type": "Edm.Int32",
+      "searchable": false,
+      "filterable": true,
+      "sortable": true,
+      "facetable": false
+    },
+    {
+      "name": "chunkContent",
+      "type": "Edm.String",
+      "searchable": true,
+      "filterable": false,
+      "sortable": false,
+      "facetable": false,
+      "analyzer": "standard.lucene"
+    },
+    {
+      "name": "contentVector",
+      "type": "Collection(Edm.Single)",
+      "searchable": true,
+      "filterable": false,
+      "sortable": false,
+      "facetable": false,
+      "dimensions": 1536,
+      "vectorSearchProfile": "knowledge-vector-profile"
+    },
+    {
+      "name": "documentTitle",
+      "type": "Edm.String",
+      "searchable": true,
+      "filterable": true,
+      "sortable": true,
+      "facetable": false,
+      "analyzer": "standard.lucene"
+    },
+    {
+      "name": "documentFileName",
+      "type": "Edm.String",
+      "searchable": true,
+      "filterable": true,
+      "sortable": true,
+      "facetable": false
+    },
+    {
+      "name": "knowledgeType",
+      "type": "Edm.String",
+      "searchable": false,
+      "filterable": true,
+      "sortable": false,
+      "facetable": true
+    },
+    {
+      "name": "category",
+      "type": "Edm.String",
+      "searchable": false,
+      "filterable": true,
+      "sortable": true,
+      "facetable": true
+    },
+    {
+      "name": "tags",
+      "type": "Collection(Edm.String)",
+      "searchable": true,
+      "filterable": true,
+      "sortable": false,
+      "facetable": true
+    },
+    {
+      "name": "isPublic",
+      "type": "Edm.Boolean",
+      "searchable": false,
+      "filterable": true,
+      "sortable": false,
+      "facetable": true
+    },
+    {
+      "name": "createdAt",
+      "type": "Edm.DateTimeOffset",
+      "searchable": false,
+      "filterable": true,
+      "sortable": true,
+      "facetable": false
+    },
+    {
+      "name": "updatedAt",
+      "type": "Edm.DateTimeOffset",
+      "searchable": false,
+      "filterable": true,
+      "sortable": true,
+      "facetable": false
+    },
+    {
+      "name": "sourceMetadata",
+      "type": "Edm.String",
+      "searchable": false,
+      "filterable": false,
+      "sortable": false,
+      "facetable": false
+    }
+  ],
+  "vectorSearch": {
+    "algorithms": [
+      {
+        "name": "hnsw-knowledge",
+        "kind": "hnsw",
+        "hnswParameters": {
+          "m": 4,
+          "efConstruction": 400,
+          "efSearch": 500,
+          "metric": "cosine"
+        }
+      }
+    ],
+    "profiles": [
+      {
+        "name": "knowledge-vector-profile",
+        "algorithm": "hnsw-knowledge"
+      }
+    ]
+  },
+  "semantic": {
+    "configurations": [
+      {
+        "name": "knowledge-semantic-config",
+        "prioritizedFields": {
+          "titleField": {
+            "fieldName": "documentTitle"
+          },
+          "prioritizedContentFields": [
+            {
+              "fieldName": "chunkContent"
+            }
+          ],
+          "prioritizedKeywordsFields": [
+            {
+              "fieldName": "tags"
+            },
+            {
+              "fieldName": "category"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
