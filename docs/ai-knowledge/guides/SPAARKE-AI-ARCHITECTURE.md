@@ -1,7 +1,7 @@
 # Spaarke AI Architecture
 
-> **Version**: 1.3
-> **Date**: December 10, 2025  
+> **Version**: 1.4
+> **Date**: December 15, 2025
 > **Status**: Draft  
 > **Author**: Spaarke Engineering  
 > **Related**: [SPAARKE-AI-STRATEGY.md](../../reference/architecture/SPAARKE-AI-STRATEGY.md)
@@ -26,6 +26,9 @@ For strategic context, use cases, and Microsoft Foundry platform details, see th
 | **File Access** | `SpeFileStore` facade (existing) |
 | **AI Client** | `OpenAiClient` (new, shared across tools) |
 | **Text Extraction** | `TextExtractorService` (native + Document Intelligence) |
+| **Scope Resolution** | `ScopeResolverService` (Actions, Skills, Knowledge from Dataverse) |
+| **Prompt Construction** | `AnalysisContextBuilder` (builds system/user prompts from scopes) |
+| **Tool Framework** | `IAnalysisToolHandler` (extensible tool execution) |
 | **Background Jobs** | Service Bus + `IJobHandler` pattern (existing) |
 | **Caching** | Redis with TTL-based invalidation (existing) |
 
@@ -996,9 +999,192 @@ To add extraction support for a new document type:
 
 ---
 
-## 6. Background Processing
+## 6. Scope System Architecture
 
-### 6.1 AI Indexing Job Handler
+The Scope System enables configurable AI analysis through Dataverse-managed entities that control prompt construction.
+
+### 6.1 Scope Entities
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          Scope System                                        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐             │
+│  │ sprk_analysis   │  │ sprk_analysis   │  │ sprk_analysis   │             │
+│  │ action          │  │ skill           │  │ knowledge       │             │
+│  │ ─────────────── │  │ ─────────────── │  │ ─────────────── │             │
+│  │ SystemPrompt    │  │ PromptFragment  │  │ Content         │             │
+│  │ (AI persona)    │  │ (instructions)  │  │ (reference)     │             │
+│  │ SortOrder       │  │ Category        │  │ Type (enum)     │             │
+│  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘             │
+│           │                    │                    │                       │
+│           └────────────────────┼────────────────────┘                       │
+│                                │                                            │
+│                                ▼                                            │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │              AnalysisContextBuilder                                  │   │
+│  │  ─────────────────────────────────────────────────────────────────   │   │
+│  │  BuildSystemPrompt(action, skills[])                                 │   │
+│  │  BuildUserPromptAsync(documentText, knowledge[])                     │   │
+│  │  BuildContinuationPrompt(history[], userMessage, workingDoc)         │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                │                                            │
+│                                ▼                                            │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │              OpenAI API                                              │   │
+│  │  System: {Action.SystemPrompt} + ## Instructions + {Skills[]}        │   │
+│  │  User: # Document to Analyze + # Reference Materials + {Knowledge[]} │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 6.2 KnowledgeType Enum
+
+Knowledge sources are typed to control inclusion in prompts. Values match Dataverse `sprk_type` option set:
+
+```csharp
+// Services/Ai/IScopeResolverService.cs
+public enum KnowledgeType
+{
+    /// <summary>Reference document (inline if has content).</summary>
+    Document = 100000000,
+
+    /// <summary>Business rules/guidelines (always inline).</summary>
+    Rule = 100000001,
+
+    /// <summary>Template documents (always inline).</summary>
+    Template = 100000002,
+
+    /// <summary>RAG index reference (async retrieval, not inline).</summary>
+    RagIndex = 100000003
+}
+```
+
+| Type | Dataverse Value | Prompt Behavior |
+|------|-----------------|-----------------|
+| Document | 100000000 | Included inline if `Content` is non-empty |
+| Rule | 100000001 | Always included inline with `(Rule)` label |
+| Template | 100000002 | Always included inline with `(Template)` label |
+| RagIndex | 100000003 | Excluded from inline; requires async RAG retrieval |
+
+### 6.3 AnalysisContextBuilder
+
+The `AnalysisContextBuilder` constructs prompts from scope components:
+
+```csharp
+// Services/Ai/AnalysisContextBuilder.cs
+public class AnalysisContextBuilder : IAnalysisContextBuilder
+{
+    /// <summary>
+    /// Build system prompt: Action.SystemPrompt + Skills as ## Instructions
+    /// </summary>
+    public string BuildSystemPrompt(AnalysisAction action, AnalysisSkill[] skills);
+
+    /// <summary>
+    /// Build user prompt: Document + Knowledge (Rule, Template, Document with content)
+    /// RAG knowledge excluded - requires async retrieval
+    /// </summary>
+    public Task<string> BuildUserPromptAsync(
+        string documentText,
+        AnalysisKnowledge[] knowledge,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Build continuation prompt for chat: Current analysis + History + New request
+    /// </summary>
+    public string BuildContinuationPrompt(
+        ChatMessageModel[] history,
+        string userMessage,
+        string currentWorkingDocument);
+}
+```
+
+**Prompt Output Format**:
+
+```
+SYSTEM PROMPT:
+─────────────
+{Action.SystemPrompt}
+
+## Instructions
+- {Skill[0].PromptFragment}
+- {Skill[1].PromptFragment}
+...
+
+## Output Format
+Provide your analysis in Markdown format with appropriate headings and structure.
+
+USER PROMPT:
+────────────
+# Document to Analyze
+{documentText}
+
+# Reference Materials
+## {Knowledge[0].Name} (Rule)
+{Knowledge[0].Content}
+
+## {Knowledge[1].Name} (Template)
+{Knowledge[1].Content}
+
+---
+Please analyze the document above according to the instructions.
+```
+
+### 6.4 Tool Handler Framework
+
+Extensible tool system for specialized AI operations:
+
+```csharp
+// Services/Ai/Tools/IAnalysisToolHandler.cs
+public interface IAnalysisToolHandler
+{
+    string ToolName { get; }
+    ToolType Type { get; }
+    Task<ToolResult> ExecuteAsync(ToolContext context, CancellationToken ct);
+}
+
+public enum ToolType
+{
+    EntityExtractor = 0,
+    ClauseAnalyzer = 1,
+    Custom = 2
+}
+```
+
+**Built-in Tools**:
+| Tool | Type | Purpose |
+|------|------|---------|
+| EntityExtractor | 0 | Extract structured entities from text |
+| ClauseAnalyzer | 1 | Analyze contract clauses |
+| DocumentClassifier | Custom | Classify document types |
+
+### 6.5 Playbook System (Phase 4)
+
+Playbooks are pre-configured scope combinations stored in `sprk_analysisplaybook`:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                 sprk_analysisplaybook                            │
+├─────────────────────────────────────────────────────────────────┤
+│  Name: "Contract Review Playbook"                                │
+│  Description: "Full contract analysis with risk assessment"      │
+│  IsPublic: true                                                  │
+│                                                                  │
+│  N:N Relationships:                                              │
+│  ├── Actions → [Review Agreement]                                │
+│  ├── Skills → [Identify Terms, Extract Dates, Identify Risks]   │
+│  ├── Knowledge → [Company Policies, Legal Reference]            │
+│  └── Tools → [EntityExtractor, ClauseAnalyzer]                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 7. Background Processing
+
+### 7.1 AI Indexing Job Handler
 
 ```csharp
 // Services/Jobs/Handlers/AiIndexingJobHandler.cs
@@ -1159,9 +1345,9 @@ public record AiIndexingPayload(string CustomerId, string ContainerId, string Ac
 
 ---
 
-## 6. Configuration
+## 8. Configuration
 
-### 6.1 AiOptions
+### 8.1 AiOptions
 
 ```csharp
 // Configuration/DocumentIntelligenceOptions.cs
@@ -1239,7 +1425,7 @@ public class RateLimitingSettings
 }
 ```
 
-### 6.2 appsettings.json
+### 8.2 appsettings.json
 
 ```json
 {
@@ -1274,7 +1460,7 @@ public class RateLimitingSettings
 }
 ```
 
-### 6.3 Program.cs Registration
+### 8.3 Program.cs Registration
 
 ```csharp
 // Program.cs additions for AI services
@@ -1342,9 +1528,9 @@ builder.Services.AddRateLimiter(options =>
 
 ---
 
-## 7. Authorization Filter
+## 9. Authorization Filter
 
-### 7.1 AiAuthorizationFilter
+### 9.1 AiAuthorizationFilter
 
 ```csharp
 // Api/Filters/AiAuthorizationFilter.cs
@@ -1418,9 +1604,9 @@ public class AiAuthorizationFilter : IEndpointFilter
 
 ---
 
-## 8. Index Schema
+## 10. Index Schema
 
-### 8.1 Azure AI Search Index Definition
+### 10.1 Azure AI Search Index Definition
 
 ```json
 {
@@ -1473,9 +1659,9 @@ public class AiAuthorizationFilter : IEndpointFilter
 
 ---
 
-## 9. Testing
+## 11. Testing
 
-### 9.1 Unit Test Example
+### 11.1 Unit Test Example
 
 ```csharp
 // Tests/Unit/Sprk.Bff.Api.Tests/Services/Ai/AiSearchServiceTests.cs
@@ -1547,9 +1733,9 @@ public class AiSearchServiceTests
 
 ---
 
-## 10. Deployment Checklist
+## 12. Deployment Checklist
 
-### 10.1 Pre-Deployment
+### 12.1 Pre-Deployment
 
 - [ ] Azure OpenAI resource provisioned with required model deployments
 - [ ] Azure AI Search resource provisioned with index created
@@ -1558,13 +1744,13 @@ public class AiSearchServiceTests
 - [ ] Service Bus queue `ai-indexing` created
 - [ ] Rate limiting configuration reviewed per environment
 
-### 10.2 Configuration
+### 12.2 Configuration
 
 - [ ] `appsettings.{Environment}.json` updated with AI configuration
 - [ ] Key Vault references validated
 - [ ] Redis instance sized appropriately for embedding cache
 
-### 10.3 Testing
+### 12.3 Testing
 
 - [ ] Unit tests passing
 - [ ] Integration tests with AI services validated
@@ -1584,4 +1770,4 @@ public class AiSearchServiceTests
 ---
 
 *Document Owner: Spaarke Engineering*  
-*Last Updated: December 5, 2025*
+*Last Updated: December 15, 2025*

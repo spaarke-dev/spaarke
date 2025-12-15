@@ -1,0 +1,165 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<forms xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <systemform>
+    <formid>{53e2eb58-c473-f011-b4cb-6045bdd8b757}</formid>
+    <IntroducedVersion>1.0.0.0</IntroducedVersion>
+    <FormPresentation>1</FormPresentation>
+    <FormActivationState>1</FormActivationState>
+    <form headerdensity="HighWithControls">
+      <tabs>
+        <tab verticallayout="true" id="{64b19a53-e08e-4c87-b2ed-aef95b98dbb4}" IsUserDefined="1" labelid="{2b405fff-671c-4ef6-becb-03d2bc44336a}">
+          <labels>
+            <label description="General" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section showlabel="false" showbar="false" IsUserDefined="0" id="{d7e245f9-09a3-40bd-8554-7ff9b8a5d945}" labelid="{9eca3f62-6b21-41d1-b6d2-36e4629f53a9}">
+                  <labels>
+                    <label description="General" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{d96b798b-c789-4cb1-a6ec-b78a58992fce}" labelid="{ed5dc26c-a9c2-442c-9812-77d75a0f672b}">
+                        <labels>
+                          <label description="Project Number" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_projectnumber" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="sprk_projectnumber" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{48a90c62-9635-475a-a8a4-ba0dc995bee8}" labelid="{1353b113-775e-4dce-ab9b-a9d022fb8fbf}">
+                        <labels>
+                          <label description="Owner" languagecode="1033" />
+                        </labels>
+                        <control id="ownerid" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="ownerid" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+        <tab name="tab_documents" id="27c2f0e6-ff5c-4844-bd46-9f7181ac2307" IsUserDefined="0" locklevel="0" showlabel="true">
+          <labels>
+            <label description="Documents" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section name="tab_documents_section_documents" id="ea73186e-6af2-4d7e-bd5c-2d02b970ae47" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="115">
+                  <labels>
+                    <label description="DOCUMENTS" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell locklevel="0" id="{308a9bfd-ac46-4d7e-98d7-3636d66cfdc4}" rowspan="4" colspan="1" auto="false" showlabel="false">
+                        <labels>
+                          <label description="New SG control 1760930890297" languagecode="1033" />
+                        </labels>
+                        <control indicationOfSubgrid="true" id="Subgrid_new_1" classid="{E7A81278-8635-4D9E-8D4D-59480B391C5B}">
+                          <parameters>
+                            <RecordsPerPage>4</RecordsPerPage>
+                            <AutoExpand>Fixed</AutoExpand>
+                            <EnableQuickFind>false</EnableQuickFind>
+                            <EnableViewPicker>false</EnableViewPicker>
+                            <EnableChartPicker>true</EnableChartPicker>
+                            <ChartGridMode>All</ChartGridMode>
+                            <RelationshipName>sprk_Project_Document_1n</RelationshipName>
+                            <TargetEntityType>sprk_document</TargetEntityType>
+                            <ViewId>{A2A31A92-40A5-F011-BBD3-7C1E5217CD7C}</ViewId>
+                            <ViewIds>{82D75343-F530-4743-AC74-C2D13E83B1C0},{A2A31A92-40A5-F011-BBD3-7C1E5217CD7C}</ViewIds>
+                          </parameters>
+                        </control>
+                      </cell>
+                    </row>
+                    <row />
+                    <row />
+                    <row />
+                  </rows>
+                </section>
+                <section name="tab_documents_section_3" id="7c671d95-679f-430f-8a0b-f2ffe6921f25" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="115">
+                  <labels>
+                    <label description="CONTAINER" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell id="{90d1928e-d888-4431-a26e-9dee0cbc069e}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Container Id" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_containerid" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_containerid" disabled="false" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+      </tabs>
+      <header id="{ce58619f-be2e-4d67-a337-c264f467f963}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
+        <rows>
+          <row>
+            <cell id="{2b58a300-2f81-41ae-898e-1b7afd3dcffc}" showlabel="false" labelid="{b2553aa6-d308-47f2-a3cc-5588d1ddcf6f}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{bf561f55-0338-48c2-8264-f21572b99bf3}" showlabel="false" labelid="{13483e7c-0ed8-48ce-b383-ea969ba430f7}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{3fbd2bf4-984e-457e-983d-7ae78c7b6fcd}" showlabel="false" labelid="{d68be27d-a2b3-496d-a76a-c77ab83c52a1}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{c6c0f7de-35a8-44ce-8f0c-2f0afb37c7d8}" locklevel="0" colspan="1" rowspan="1">
+              <labels>
+                <label description="Status Reason" languagecode="1033" />
+              </labels>
+              <control id="header_statuscode" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="statuscode" disabled="false" />
+            </cell>
+          </row>
+        </rows>
+      </header>
+      <footer id="{e4062234-ee39-43c6-9c08-61cd5bc65ecf}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
+        <rows>
+          <row>
+            <cell id="{ad743683-62ca-4518-bc2c-d659e48f6cab}" showlabel="false" labelid="{8a740439-dcc6-433d-b1f9-a7844e65414e}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{68253236-3194-44dc-8963-efcf460a8a54}" showlabel="false" labelid="{1db29af4-587d-4bf0-b256-63ddd0036afd}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{77b59ad0-902e-4f35-8918-24cd082cdd5d}" showlabel="false" labelid="{6d28d444-7b69-4aa0-8ace-e7f92173d973}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+          </row>
+        </rows>
+      </footer>
+      <DisplayConditions Order="1" FallbackForm="true">
+        <Everyone />
+      </DisplayConditions>
+    </form>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <LocalizedNames>
+      <LocalizedName description="Project" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="Project main form version 1" languagecode="1033" />
+    </Descriptions>
+  </systemform>
+</forms>

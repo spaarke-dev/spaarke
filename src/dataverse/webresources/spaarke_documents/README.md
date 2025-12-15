@@ -5,21 +5,22 @@ Web resources for the `spaarke_documents` Dataverse solution.
 ## Files
 
 ### DocumentOperations.js
-**Purpose**: File management operations for Document entity forms
-**Version**: 1.0.0
+**Purpose**: File management operations for Document entity ribbon commands
+**Version**: 1.1.0
 **Namespace**: `Spaarke.Documents`
 
 Provides ribbon button commands for individual Document records:
-- ✅ **Upload File** - Upload file to new document
-- ✅ **Download File** - Download file from document
-- ✅ **Replace File** - Replace existing file
-- ✅ **Delete File** - Delete file from document
+- **Upload File** - Upload file to new document
+- **Download File** - Download file from document
+- **Replace File** - Replace existing file
+- **Delete File** - Delete file from document
 
 #### Architecture
 ```
-Document Form (sprk_document)
-  ↓ Ribbon Button (Upload/Download/Replace/Delete)
+Ribbon Button (Upload/Download/Replace/Delete)
+  ↓ Calls function with primaryControl
 DocumentOperations.js
+  ↓ Lazy initialization (ensureInitialized)
   ↓ Gets Container ID from sprk_containerid lookup
   ↓ Calls BFF API endpoints
 SDAP BFF API
@@ -29,6 +30,7 @@ SharePoint Embedded
 ```
 
 #### Key Features
+- **No form attachment required** - Uses lazy initialization
 - Environment auto-detection (DEV/UAT/PROD)
 - File validation (type whitelist, 4MB max)
 - Correlation ID tracking for all API calls
@@ -40,19 +42,21 @@ SharePoint Embedded
 
 #### Usage
 
-**Form OnLoad Event:**
-```javascript
-// Function: Spaarke.Documents.onFormLoad
-// Pass execution context: Yes
-```
-
-**Ribbon Button Commands:**
+**Ribbon Button Commands (pass primaryControl):**
 ```javascript
 // Upload: Spaarke.Documents.uploadFile(primaryControl)
 // Download: Spaarke.Documents.downloadFile(primaryControl)
 // Replace: Spaarke.Documents.replaceFile(primaryControl)
 // Delete: Spaarke.Documents.deleteFile(primaryControl)
 ```
+
+**No form OnLoad/OnSave configuration needed.** The library initializes lazily when any ribbon command is invoked.
+
+#### Deprecated Functions
+The following functions are deprecated and should be removed from form configuration:
+- `onFormLoad` - No longer required
+- `onFormSave` - No longer required
+- `updateButtonVisibility` - Use ribbon EnableRules instead
 
 #### Dependencies
 - Xrm API (native Dataverse)
@@ -84,7 +88,22 @@ SharePoint Embedded
 - Add to Document entity main form ribbon
 - Set commands to call appropriate functions
 - Pass `primaryControl` parameter
+- **Do NOT add to form OnLoad/OnSave events**
+
+## Changelog
+
+### v1.1.0 (2025-12-15)
+- Removed form attachment dependency (ADR-006 compliance)
+- Added lazy initialization via `ensureInitialized()`
+- Deprecated `onFormLoad`, `onFormSave`, `updateButtonVisibility`
+- Ribbon commands now self-initialize
+
+### v1.0.0 (2025-12-03)
+- Initial release
+- File upload, download, replace, delete operations
+- Environment auto-detection
+- Form OnLoad initialization (now deprecated)
 
 ## Status
 
-✅ Production-Ready | Last Updated: 2025-12-03
+Production-Ready | Last Updated: 2025-12-15

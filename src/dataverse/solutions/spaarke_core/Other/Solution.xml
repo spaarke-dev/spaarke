@@ -1,0 +1,270 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ImportExportXml version="9.2.25122.138" SolutionPackageVersion="9.2" languagecode="1033" generatedBy="CrmLive" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" OrganizationVersion="9.2.25122.138" OrganizationSchemaType="Standard" CRMServerServiceabilityVersion="9.2.25122.00138">
+  <SolutionManifest>
+    <UniqueName>spaarke_core</UniqueName>
+    <LocalizedNames>
+      <LocalizedName description="Spaarke Core" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions />
+    <Version>1.0.0.0</Version>
+    <Managed>0</Managed>
+    <Publisher>
+      <UniqueName>Spaarke</UniqueName>
+      <LocalizedNames>
+        <LocalizedName description="Spaarke" languagecode="1033" />
+      </LocalizedNames>
+      <Descriptions>
+        <Description description="Spaarke Publisher" languagecode="1033" />
+      </Descriptions>
+      <EMailAddress xsi:nil="true"></EMailAddress>
+      <SupportingWebsiteUrl xsi:nil="true"></SupportingWebsiteUrl>
+      <CustomizationPrefix>sprk</CustomizationPrefix>
+      <CustomizationOptionValuePrefix>10000</CustomizationOptionValuePrefix>
+      <Addresses>
+        <Address>
+          <AddressNumber>1</AddressNumber>
+          <AddressTypeCode>1</AddressTypeCode>
+          <City xsi:nil="true"></City>
+          <County xsi:nil="true"></County>
+          <Country xsi:nil="true"></Country>
+          <Fax xsi:nil="true"></Fax>
+          <FreightTermsCode xsi:nil="true"></FreightTermsCode>
+          <ImportSequenceNumber xsi:nil="true"></ImportSequenceNumber>
+          <Latitude xsi:nil="true"></Latitude>
+          <Line1 xsi:nil="true"></Line1>
+          <Line2 xsi:nil="true"></Line2>
+          <Line3 xsi:nil="true"></Line3>
+          <Longitude xsi:nil="true"></Longitude>
+          <Name xsi:nil="true"></Name>
+          <PostalCode xsi:nil="true"></PostalCode>
+          <PostOfficeBox xsi:nil="true"></PostOfficeBox>
+          <PrimaryContactName xsi:nil="true"></PrimaryContactName>
+          <ShippingMethodCode xsi:nil="true"></ShippingMethodCode>
+          <StateOrProvince xsi:nil="true"></StateOrProvince>
+          <Telephone1 xsi:nil="true"></Telephone1>
+          <Telephone2 xsi:nil="true"></Telephone2>
+          <Telephone3 xsi:nil="true"></Telephone3>
+          <TimeZoneRuleVersionNumber xsi:nil="true"></TimeZoneRuleVersionNumber>
+          <UPSZone xsi:nil="true"></UPSZone>
+          <UTCOffset xsi:nil="true"></UTCOffset>
+          <UTCConversionTimeZoneCode xsi:nil="true"></UTCConversionTimeZoneCode>
+        </Address>
+      </Addresses>
+    </Publisher>
+    <RootComponents>
+      <RootComponent type="1" schemaName="account" behavior="1" />
+      <RootComponent type="1" schemaName="businessunit" behavior="2" />
+      <RootComponent type="1" schemaName="contact" behavior="1" />
+      <RootComponent type="1" schemaName="email" behavior="1" />
+      <RootComponent type="1" schemaName="sprk_accounttype_ref" behavior="1" />
+      <RootComponent type="1" schemaName="sprk_contacttype_ref" behavior="1" />
+      <RootComponent type="1" schemaName="sprk_container" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_countryregion_ref" behavior="2" />
+      <RootComponent type="1" schemaName="sprk_document" behavior="1" />
+      <RootComponent type="1" schemaName="sprk_documenttype" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_matter" behavior="1" />
+      <RootComponent type="1" schemaName="sprk_matterassignment" behavior="1" />
+      <RootComponent type="1" schemaName="sprk_mattersubtype_ref" behavior="1" />
+      <RootComponent type="1" schemaName="sprk_mattertype_ref" behavior="1" />
+      <RootComponent type="1" schemaName="sprk_practicearea_ref" behavior="1" />
+      <RootComponent type="1" schemaName="sprk_project" behavior="1" />
+      <RootComponent type="1" schemaName="sprk_recordtype_ref" behavior="1" />
+      <RootComponent type="1" schemaName="sprk_uploadcontext" behavior="0" />
+      <RootComponent type="300" schemaName="sprk_documentuploaddialog_e52db" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_DocumentOperations" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_subgrid_commands" behavior="0" />
+    </RootComponents>
+    <MissingDependencies>
+      <MissingDependency>
+        <Required type="1" schemaName="sprk_accounttype_ref" displayName="Account Type" solution="Active" />
+        <Dependent type="1" schemaName="sprk_accounttype_ref" displayName="Account Type" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="sprk_analysis" displayName="Analysis" solution="Active" />
+        <Dependent type="60" displayName="Document main form" parentDisplayName="Document" id="{acde4484-349e-f011-bbd3-7c1e5217cd7c}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="sprk_contacttype_ref" displayName="Contact Type" solution="Active" />
+        <Dependent type="1" schemaName="sprk_contacttype_ref" displayName="Contact Type" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="sprk_countryregion_ref" displayName="Country Region" solution="Active" />
+        <Dependent type="1" schemaName="sprk_countryregion_ref" displayName="Country Region" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="sprk_document" displayName="Document" solution="Active" />
+        <Dependent type="1" schemaName="sprk_document" displayName="Document" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="sprk_matter" displayName="Matter" solution="Active" />
+        <Dependent type="1" schemaName="sprk_matter" displayName="Matter" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="sprk_matterassignment" displayName="Matter Assignment" solution="Active" />
+        <Dependent type="1" schemaName="sprk_matterassignment" displayName="Matter Assignment" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="sprk_mattersubtype_ref" displayName="Matter Subtype" solution="Active" />
+        <Dependent type="1" schemaName="sprk_mattersubtype_ref" displayName="Matter Subtype" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="sprk_mattertype_ref" displayName="Matter Type" solution="Active" />
+        <Dependent type="1" schemaName="sprk_mattertype_ref" displayName="Matter Type" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="sprk_practicearea_ref" displayName="Practice Area" solution="Active" />
+        <Dependent type="1" schemaName="sprk_practicearea_ref" displayName="Practice Area" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="sprk_project" displayName="Project" solution="Active" />
+        <Dependent type="1" schemaName="sprk_project" displayName="Project" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="sprk_recordtype_ref" displayName="Record Type" solution="Active" />
+        <Dependent type="1" schemaName="sprk_recordtype_ref" displayName="Record Type" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="10" schemaName="sprk_document_analysis_document" displayName="sprk_document_analysis_document" parentSchemaName="sprk_document" parentDisplayName="Document" solution="Active" />
+        <Dependent type="60" displayName="Document main form" parentDisplayName="Document" id="{acde4484-349e-f011-bbd3-7c1e5217cd7c}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="10" schemaName="sprk_matter_Email_1n" displayName="sprk_matter_Email_1n" parentSchemaName="sprk_matter" parentDisplayName="Matter" solution="Active" />
+        <Dependent type="60" displayName="Matter" parentDisplayName="Matter" id="{4fa382f2-c273-f011-b4cb-6045bdd6a665}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="2" schemaName="accountid" displayName="accountid" parentSchemaName="contact" solution="System (5.0)" />
+        <Dependent type="2" schemaName="accountid" displayName="accountid" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="2" schemaName="address1_composite" displayName="address1_composite" parentSchemaName="account" solution="System (5.0)" />
+        <Dependent type="2" schemaName="address1_composite" displayName="address1_composite" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="2" schemaName="createdon" displayName="Created On" parentSchemaName="sprk_matter" parentDisplayName="Matter" solution="Active" />
+        <Dependent type="26" schemaName="Inactive Matters" displayName="Inactive Matters" parentSchemaName="sprk_matter" parentDisplayName="Matter" id="{15b26b82-665d-43f7-839b-a918f1916a7c}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="2" schemaName="createdon" displayName="Created On" parentSchemaName="sprk_matter" parentDisplayName="Matter" solution="Active" />
+        <Dependent type="26" schemaName="Active Matters" displayName="Active Matters" parentSchemaName="sprk_matter" parentDisplayName="Matter" id="{3ba2301f-692e-4a29-be2e-365c923b01dd}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="2" schemaName="modifiedon" displayName="Modified On" parentSchemaName="sprk_matter" parentDisplayName="Matter" solution="Active" />
+        <Dependent type="60" displayName="Matter" parentDisplayName="Matter" id="{4fa382f2-c273-f011-b4cb-6045bdd6a665}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="2" schemaName="ownerid" displayName="Owner" parentSchemaName="sprk_project" parentDisplayName="Project" solution="Active" />
+        <Dependent type="60" displayName="Project" parentDisplayName="Project" id="{53e2eb58-c473-f011-b4cb-6045bdd8b757}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="2" schemaName="sprk_filesummary" displayName="File Summary" parentSchemaName="sprk_document" parentDisplayName="Document" solution="Active" />
+        <Dependent type="60" displayName="Document main form" parentDisplayName="Document" id="{acde4484-349e-f011-bbd3-7c1e5217cd7c}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="2" schemaName="sprk_filesummarydate" displayName="File Summary Date" parentSchemaName="sprk_document" parentDisplayName="Document" solution="Active" />
+        <Dependent type="60" displayName="Document main form" parentDisplayName="Document" id="{acde4484-349e-f011-bbd3-7c1e5217cd7c}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="2" schemaName="sprk_projectnumber" displayName="Project Number" parentSchemaName="sprk_project" parentDisplayName="Project" solution="Active" />
+        <Dependent type="60" displayName="Project" parentDisplayName="Project" id="{53e2eb58-c473-f011-b4cb-6045bdd8b757}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="2" schemaName="statecode" displayName="Status" parentSchemaName="sprk_matter" parentDisplayName="Matter" solution="Active" />
+        <Dependent type="26" schemaName="Inactive Matters" displayName="Inactive Matters" parentSchemaName="sprk_matter" parentDisplayName="Matter" id="{15b26b82-665d-43f7-839b-a918f1916a7c}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="2" schemaName="statecode" displayName="Status" parentSchemaName="sprk_matter" parentDisplayName="Matter" solution="Active" />
+        <Dependent type="26" schemaName="Active Matters" displayName="Active Matters" parentSchemaName="sprk_matter" parentDisplayName="Matter" id="{3ba2301f-692e-4a29-be2e-365c923b01dd}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="2" schemaName="statuscode" displayName="Status Reason" parentSchemaName="sprk_matter" parentDisplayName="Matter" solution="Active" />
+        <Dependent type="60" displayName="Matter" parentDisplayName="Matter" id="{4fa382f2-c273-f011-b4cb-6045bdd6a665}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="2" schemaName="statuscode" displayName="Status Reason" parentSchemaName="sprk_project" parentDisplayName="Project" solution="Active" />
+        <Dependent type="60" displayName="Project" parentDisplayName="Project" id="{53e2eb58-c473-f011-b4cb-6045bdd8b757}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="26" schemaName="Active Analyses" displayName="Active Analyses" parentSchemaName="sprk_analysis" parentDisplayName="Analysis" solution="Active" id="{574d6636-49af-4877-9174-5c601554963c}" />
+        <Dependent type="60" displayName="Document main form" parentDisplayName="Document" id="{acde4484-349e-f011-bbd3-7c1e5217cd7c}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="26" schemaName="All Accounts" displayName="All Accounts" parentSchemaName="account" parentDisplayName="Account" solution="msdynce_AppCommon (9.0.4.0066)" id="{65ffaf9a-e8c5-432d-860b-32f841b00d87}">
+          <package appName="msdynce_AppCommon" version="9.0.25113.10001">msdynce_AppCommonAnchor (9.0.25113.10001)</package>
+        </Required>
+        <Dependent type="60" displayName="Matter" parentDisplayName="Matter" id="{4fa382f2-c273-f011-b4cb-6045bdd6a665}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="26" schemaName="All Contacts" displayName="All Contacts" parentSchemaName="contact" parentDisplayName="Contact" solution="msdynce_AppCommon (9.0.4.0066)" id="{0d5d377b-5e7c-47b5-bab1-a5cb8b4ac105}">
+          <package appName="msdynce_AppCommon" version="9.0.25113.10001">msdynce_AppCommonAnchor (9.0.25113.10001)</package>
+        </Required>
+        <Dependent type="60" displayName="Matter" parentDisplayName="Matter" id="{4fa382f2-c273-f011-b4cb-6045bdd6a665}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="59" schemaName="Emails by Month Due" displayName="Emails by Month Due" parentSchemaName="email" parentDisplayName="Email" solution="msdynce_AppCommon (9.0.4.0066)" id="{1ec1872a-23de-4294-9d7f-1b76272a5fd5}">
+          <package appName="msdynce_AppCommon" version="9.0.25113.10001">msdynce_AppCommonAnchor (9.0.25113.10001)</package>
+        </Required>
+        <Dependent type="60" displayName="Matter" parentDisplayName="Matter" id="{4fa382f2-c273-f011-b4cb-6045bdd6a665}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="60" displayName="Contact" parentDisplayName="Contact" solution="msdynce_AppCommon (9.0.4.0066)" id="{1fed44d1-ae68-4a41-bd2b-f13acac4acfa}">
+          <package appName="msdynce_AppCommon" version="9.0.25113.10001">msdynce_AppCommonAnchor (9.0.25113.10001)</package>
+        </Required>
+        <Dependent type="60" displayName="Contact" parentDisplayName="Contact" id="{1fed44d1-ae68-4a41-bd2b-f13acac4acfa}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="60" displayName="Contact Quick Create" parentDisplayName="Contact" solution="msdynce_AppCommon (9.0.4.0066)" id="{661157fe-2fc9-4eaa-835f-5bfa2f7b64f7}">
+          <package appName="msdynce_AppCommon" version="9.0.25113.10001">msdynce_AppCommonAnchor (9.0.25113.10001)</package>
+        </Required>
+        <Dependent type="60" displayName="Contact Quick Create" parentDisplayName="Contact" id="{661157fe-2fc9-4eaa-835f-5bfa2f7b64f7}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="60" displayName="Account" parentDisplayName="Account" solution="msdynce_AppCommon (9.0.4.0066)" id="{8448b78f-8f42-454e-8e2a-f8196b0419af}">
+          <package appName="msdynce_AppCommon" version="9.0.25113.10001">msdynce_AppCommonAnchor (9.0.25113.10001)</package>
+        </Required>
+        <Dependent type="60" displayName="Account" parentDisplayName="Account" id="{8448b78f-8f42-454e-8e2a-f8196b0419af}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="60" displayName="Account Quick Create" parentDisplayName="Account" solution="msdynce_AppCommon (9.0.4.0066)" id="{c9e7ec2d-efca-4e4c-b3e3-f63c4bba5e4b}">
+          <package appName="msdynce_AppCommon" version="9.0.25113.10001">msdynce_AppCommonAnchor (9.0.25113.10001)</package>
+        </Required>
+        <Dependent type="60" displayName="Account Quick Create" parentDisplayName="Account" id="{c9e7ec2d-efca-4e4c-b3e3-f63c4bba5e4b}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="61" schemaName="sprk_calendarcomponent" displayName="sprk_calendarcomponent" solution="Active" />
+        <Dependent type="60" displayName="Matter" parentDisplayName="Matter" id="{4fa382f2-c273-f011-b4cb-6045bdd6a665}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="61" schemaName="sprk_SPRK_Matter_FolderOpen" displayName="sprk_SPRK_Matter_FolderOpen" solution="Active" />
+        <Dependent type="1" schemaName="sprk_matter" displayName="Matter" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="61" schemaName="sprk_SPRK_Project_Wrench" displayName="sprk_SPRK_Project_Wrench" solution="Active" />
+        <Dependent type="1" schemaName="sprk_project" displayName="Project" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2512.1015)">
+          <package appName="Base Custom Controls" version="9.0.2512.1015">BaseCustomControlsCore (9.0.2512.1015)</package>
+        </Required>
+        <Dependent type="60" displayName="Matter" parentDisplayName="Matter" id="{4fa382f2-c273-f011-b4cb-6045bdd6a665}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="MscrmControls.CardFeedContainer.CardFeedContainer" displayName="MscrmControls.CardFeedContainer.CardFeedContainer" solution="BaseCustomControlsCore (9.0.2512.1015)">
+          <package appName="Base Custom Controls" version="9.0.2512.1015">BaseCustomControlsCore (9.0.2512.1015)</package>
+        </Required>
+        <Dependent type="60" displayName="Contact" parentDisplayName="Contact" id="{1fed44d1-ae68-4a41-bd2b-f13acac4acfa}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="sprk_Spaarke.Controls.UniversalDocumentUpload" displayName="sprk_Spaarke.Controls.UniversalDocumentUpload" solution="Active" />
+        <Dependent type="300" schemaName="sprk_documentuploaddialog_e52db" displayName="File Upload" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="sprk_Spaarke.Controls.UniversalDocumentUpload" displayName="sprk_Spaarke.Controls.UniversalDocumentUpload" solution="Active" />
+        <Dependent type="60" displayName="Upload Documents" parentDisplayName="Upload Context" id="{7d547ccd-e0a6-f011-bbd3-7c1e5217cd7c}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="sprk_Spaarke.SpeFileViewer" displayName="sprk_Spaarke.SpeFileViewer" solution="Active" />
+        <Dependent type="60" displayName="Document main form" parentDisplayName="Document" id="{acde4484-349e-f011-bbd3-7c1e5217cd7c}" />
+      </MissingDependency>
+    </MissingDependencies>
+  </SolutionManifest>
+</ImportExportXml>

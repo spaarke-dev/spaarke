@@ -1,7 +1,7 @@
 # AI Implementation Status
 
-> **Version**: 1.1
-> **Date**: December 12, 2025
+> **Version**: 1.2
+> **Date**: December 15, 2025
 > **Status**: Current
 > **Author**: Spaarke Engineering
 
@@ -25,6 +25,9 @@ This document describes the **actual deployed state** of Spaarke's AI capabiliti
 | 3 | AI Foundry Hub + Project | Deployed | Dev |
 | 3 | Prompt Flow Templates | Created | Dev |
 | 3 | Evaluation Pipeline Config | Created | Dev |
+| 3 | Scope System (Actions, Skills, Knowledge) | Deployed | Dev |
+| 3 | Tool Handler Framework | Deployed | Dev |
+| 3 | Seed Data (Actions, Skills, Knowledge) | Deployed | Dev |
 | Future | RAG Chat | Not Started | - |
 | Future | Vector Embeddings | Not Started | - |
 
@@ -445,9 +448,140 @@ The RecordMatchService uses weighted entity matching:
 
 ---
 
-## 7. PCF Control Integration
+## 7. Scope System (Phase 3)
 
-### 7.1 UniversalQuickCreate (v3.5.0)
+The Scope System enables configurable AI analysis through Dataverse-managed Actions, Skills, Knowledge, and Tools.
+
+### 7.1 Dataverse Entities
+
+| Entity | Table Name | Purpose | Seed Records |
+|--------|------------|---------|--------------|
+| Actions | sprk_analysisaction | System prompt templates | 5 |
+| Skills | sprk_analysisskill | Instruction fragments added to prompts | 10 |
+| Knowledge | sprk_analysisknowledge | Reference materials for context | 5 |
+| Knowledge Deployments | sprk_knowledgedeployment | Groups knowledge sources by deployment model | 1 |
+| Tools | sprk_analysistool | External tool handlers | 3 |
+| Playbooks | sprk_analysisplaybook | Pre-configured scope combinations | 0 (Phase 4) |
+
+### 7.2 KnowledgeType Enum
+
+Knowledge sources are typed to control how they're included in prompts:
+
+| Type | Dataverse Value | Behavior |
+|------|-----------------|----------|
+| Document | 100000000 | Reference document (inline if has content) |
+| Rule | 100000001 | Business rules/guidelines (always inline) |
+| Template | 100000002 | Template documents (always inline) |
+| RagIndex | 100000003 | RAG index reference (async retrieval, not inline) |
+
+**Code Location**: `src/server/api/Sprk.Bff.Api/Services/Ai/IScopeResolverService.cs`
+
+```csharp
+public enum KnowledgeType
+{
+    Document = 100000000,
+    Rule = 100000001,
+    Template = 100000002,
+    RagIndex = 100000003
+}
+```
+
+### 7.3 Prompt Construction (AnalysisContextBuilder)
+
+The `AnalysisContextBuilder` constructs prompts from scope components:
+
+**System Prompt Structure**:
+```
+{Action.SystemPrompt}
+
+## Instructions
+- {Skill[0].PromptFragment}
+- {Skill[1].PromptFragment}
+...
+
+## Output Format
+Provide your analysis in Markdown format with appropriate headings and structure.
+```
+
+**User Prompt Structure**:
+```
+# Document to Analyze
+{documentText}
+
+# Reference Materials
+## {Knowledge[0].Name} (Rule)
+{Knowledge[0].Content}
+
+## {Knowledge[1].Name} (Template)
+{Knowledge[1].Content}
+...
+
+---
+Please analyze the document above according to the instructions.
+```
+
+**Code Location**: `src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisContextBuilder.cs`
+
+### 7.4 Seed Data
+
+**Actions** (5 total):
+| Name | System Prompt Summary |
+|------|----------------------|
+| Summarize Document | AI assistant for document summaries |
+| Review Agreement | Legal analyst for contract review |
+| Extract Entities | Entity extraction specialist |
+| Compare Documents | Document comparison analyst |
+| Analyze Risk | Risk assessment specialist |
+
+**Skills** (10 total):
+| Name | Prompt Fragment Summary |
+|------|------------------------|
+| Identify Terms | List all defined terms |
+| Extract Dates | Extract key dates and deadlines |
+| Identify Parties | Identify all parties mentioned |
+| Extract Obligations | List contractual obligations |
+| Identify Risks | Highlight potential risks |
+| Summarize Sections | Summarize each section |
+| Extract Financials | Extract monetary amounts |
+| Identify Compliance | Check compliance requirements |
+| Compare Clauses | Compare similar clauses |
+| Generate Timeline | Create timeline of events |
+
+**Knowledge Sources** (5 total):
+| Name | Type |
+|------|------|
+| Standard Contract Templates | Template |
+| Company Policies | Rule |
+| Business Writing Guidelines | Rule |
+| Legal Reference Materials | Document |
+| Example Analyses | RagIndex |
+
+### 7.5 Tool Handler Framework
+
+Extensible tool system for AI-powered analysis:
+
+| Interface | Purpose |
+|-----------|---------|
+| `IAnalysisToolHandler` | Base interface for tool implementations |
+| `EntityExtractor` | Extract structured entities from text |
+| `ClauseAnalyzer` | Analyze contract clauses |
+| `DocumentClassifier` | Classify document types |
+
+**Code Location**: `src/server/api/Sprk.Bff.Api/Services/Ai/Tools/`
+
+```csharp
+public interface IAnalysisToolHandler
+{
+    string ToolName { get; }
+    Task<ToolResult> ExecuteAsync(ToolContext context, CancellationToken ct);
+}
+```
+
+---
+
+## 8. PCF Control Integration
+
+### 8.1 UniversalQuickCreate (v3.5.0)
 
 **Location**: `src/client/pcf/UniversalQuickCreate/`
 
@@ -459,7 +593,7 @@ The RecordMatchService uses weighted entity matching:
 
 **Control Version**: 3.5.0 (deployed December 2025)
 
-### 7.2 Key Components
+### 8.2 Key Components
 
 ```
 UniversalQuickCreate/
@@ -475,9 +609,9 @@ UniversalQuickCreate/
 
 ---
 
-## 8. What's NOT Implemented
+## 9. What's NOT Implemented
 
-### 8.1 From Strategy Document (Future Work)
+### 9.1 From Strategy Document (Future Work)
 
 | Feature | Strategy Section | Status |
 |---------|------------------|--------|
@@ -490,7 +624,7 @@ UniversalQuickCreate/
 | Multi-modal Vision OCR | - | Partial (config ready, model not deployed) |
 | Background Job Handler | - | Placeholder only |
 
-### 8.2 Architecture Document vs Reality
+### 9.2 Architecture Document vs Reality
 
 The [SPAARKE-AI-ARCHITECTURE.md](./SPAARKE-AI-ARCHITECTURE.md) describes a more comprehensive system. Here's what's different:
 
@@ -505,9 +639,9 @@ The [SPAARKE-AI-ARCHITECTURE.md](./SPAARKE-AI-ARCHITECTURE.md) describes a more 
 
 ---
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 
-### 9.1 Common Issues
+### 10.1 Common Issues
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
@@ -516,7 +650,7 @@ The [SPAARKE-AI-ARCHITECTURE.md](./SPAARKE-AI-ARCHITECTURE.md) describes a more 
 | Empty analysis results | OpenAI deployment name wrong | Match `SummarizeModel` to Azure deployment |
 | PDF extraction fails | Document Intelligence not configured | Add `DocIntelEndpoint` and `DocIntelKey` |
 
-### 9.2 Health Check Commands
+### 10.2 Health Check Commands
 
 ```bash
 # Check API is running
@@ -555,7 +689,7 @@ az ml connection list \
 
 ---
 
-## 10. Related Documentation
+## 11. Related Documentation
 
 | Document | Purpose |
 |----------|---------|
@@ -568,4 +702,4 @@ az ml connection list \
 ---
 
 *Document Owner: Spaarke Engineering*
-*Last Updated: December 12, 2025*
+*Last Updated: December 15, 2025*

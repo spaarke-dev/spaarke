@@ -1,0 +1,15 @@
+<aiskillconfig uniquename="ais_FormFillFieldOptOut_businessunit_sprk_containerid">
+  <aiskill>FormFillFieldOptOut</aiskill>
+  <attribute>
+    <entityid.logicalname>businessunit</entityid.logicalname>
+    <logicalname>sprk_containerid</logicalname>
+  </attribute>
+  <description>businessunit - Container ID Form fill opt out</description>
+  <entity>
+    <logicalname>businessunit</logicalname>
+  </entity>
+  <iscustomizable>1</iscustomizable>
+  <scope>1</scope>
+  <statecode>0</statecode>
+  <statuscode>1</statuscode>
+</aiskillconfig>

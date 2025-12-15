@@ -1,0 +1,11 @@
+<aiskillconfig uniquename="ais_FormFillFieldOptOut_sprk_document_sprk_filesize">
+  <aiskill>FormFillFieldOptOut</aiskill>
+  <description>sprk_document - File Size Form fill opt out</description>
+  <entity>
+    <logicalname>sprk_document</logicalname>
+  </entity>
+  <iscustomizable>1</iscustomizable>
+  <scope>1</scope>
+  <statecode>0</statecode>
+  <statuscode>1</statuscode>
+</aiskillconfig>

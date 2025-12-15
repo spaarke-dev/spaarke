@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<entities>
+  <entity name="sprk_analysisskill" displayname="Analysis Skill">
+    <records>
+      <!-- TONE SKILLS (Category: 717820000) -->
+
+      <!-- Skill 1: Professional Tone -->
+      <record id="00000000-0002-0000-0001-000000000001">
+        <field name="sprk_name" value="Professional Tone"/>
+        <field name="sprk_description" value="Write in a formal, professional business tone suitable for executive communication."/>
+        <field name="sprk_promptfragment" value="Write in a formal, professional tone. Use business-appropriate language, avoid colloquialisms and casual expressions. Maintain objectivity and convey authority while remaining accessible."/>
+        <field name="sprk_category" value="717820000"/>
+        <field name="statecode" value="0"/>
+        <field name="statuscode" value="1"/>
+      </record>
+
+      <!-- Skill 2: Friendly Tone -->
+      <record id="00000000-0002-0000-0001-000000000002">
+        <field name="sprk_name" value="Friendly Tone"/>
+        <field name="sprk_description" value="Write in a warm, approachable tone suitable for client-facing communication."/>
+        <field name="sprk_promptfragment" value="Write in a warm, friendly tone while maintaining professionalism. Use approachable language, show empathy, and create a positive impression. Be personable but not overly casual."/>
+        <field name="sprk_category" value="717820000"/>
+        <field name="statecode" value="0"/>
+        <field name="statuscode" value="1"/>
+      </record>
+
+      <!-- STYLE SKILLS (Category: 717820001) -->
+
+      <!-- Skill 3: Concise Writing -->
+      <record id="00000000-0002-0000-0001-000000000003">
+        <field name="sprk_name" value="Concise Writing"/>
+        <field name="sprk_description" value="Write with brevity and clarity. Get to the point quickly."/>
+        <field name="sprk_promptfragment" value="Be concise and direct. Eliminate unnecessary words and redundancies. Use short sentences and paragraphs. Get to the main points quickly while ensuring clarity. Avoid filler phrases."/>
+        <field name="sprk_category" value="717820001"/>
+        <field name="statecode" value="0"/>
+        <field name="statuscode" value="1"/>
+      </record>
+
+      <!-- Skill 4: Detailed Explanation -->
+      <record id="00000000-0002-0000-0001-000000000004">
+        <field name="sprk_name" value="Detailed Explanation"/>
+        <field name="sprk_description" value="Provide comprehensive explanations with supporting details and context."/>
+        <field name="sprk_promptfragment" value="Provide thorough, detailed explanations. Include relevant context, examples, and supporting information. Explain concepts step-by-step. Anticipate and address potential questions. Ensure readers have a complete understanding."/>
+        <field name="sprk_category" value="717820001"/>
+        <field name="statecode" value="0"/>
+        <field name="statuscode" value="1"/>
+      </record>
+
+      <!-- Skill 5: Action-Oriented -->
+      <record id="00000000-0002-0000-0001-000000000005">
+        <field name="sprk_name" value="Action-Oriented"/>
+        <field name="sprk_description" value="Focus on actionable recommendations and clear next steps."/>
+        <field name="sprk_promptfragment" value="Focus on actionable outcomes. Provide clear, specific recommendations. Include concrete next steps with defined responsibilities. Use action verbs. Prioritize recommendations by urgency or impact."/>
+        <field name="sprk_category" value="717820001"/>
+        <field name="statecode" value="0"/>
+        <field name="statuscode" value="1"/>
+      </record>
+
+      <!-- FORMAT SKILLS (Category: 717820002) -->
+
+      <!-- Skill 6: Executive Summary Format -->
+      <record id="00000000-0002-0000-0001-000000000006">
+        <field name="sprk_name" value="Executive Summary Format"/>
+        <field name="sprk_description" value="Structure output as an executive summary with key insights upfront."/>
+        <field name="sprk_promptfragment" value="Format the output as an executive summary. Lead with the most important findings or recommendations. Use a pyramid structure: conclusion first, then supporting details. Include bullet points for key takeaways. Keep it scannable for busy executives."/>
+        <field name="sprk_category" value="717820002"/>
+        <field name="statecode" value="0"/>
+        <field name="statuscode" value="1"/>
+      </record>
+
+      <!-- Skill 7: Structured with Headers -->
+      <record id="00000000-0002-0000-0001-000000000007">
+        <field name="sprk_name" value="Structured with Headers"/>
+        <field name="sprk_description" value="Organize content with clear section headers and logical flow."/>
+        <field name="sprk_promptfragment" value="Organize the output with clear markdown headers (##, ###). Create a logical section structure. Use bullet points and numbered lists where appropriate. Include a table of contents for longer documents. Ensure each section has a clear purpose."/>
+        <field name="sprk_category" value="717820002"/>
+        <field name="statecode" value="0"/>
+        <field name="statuscode" value="1"/>
+      </record>
+
+      <!-- EXPERTISE SKILLS (Category: 717820003) -->
+
+      <!-- Skill 8: Legal Expertise -->
+      <record id="00000000-0002-0000-0001-000000000008">
+        <field name="sprk_name" value="Legal Expertise"/>
+        <field name="sprk_description" value="Apply legal analysis framework and terminology appropriate for legal documents."/>
+        <field name="sprk_promptfragment" value="Apply legal analysis expertise. Use appropriate legal terminology and conventions. Consider statutory and regulatory implications. Identify potential legal risks and liabilities. Note standard vs. non-standard clauses. Provide analysis without giving legal advice - recommend consultation with legal counsel for specific advice."/>
+        <field name="sprk_category" value="717820003"/>
+        <field name="statecode" value="0"/>
+        <field name="statuscode" value="1"/>
+      </record>
+
+      <!-- Skill 9: Financial Expertise -->
+      <record id="00000000-0002-0000-0001-000000000009">
+        <field name="sprk_name" value="Financial Expertise"/>
+        <field name="sprk_description" value="Apply financial analysis framework for documents with monetary content."/>
+        <field name="sprk_promptfragment" value="Apply financial analysis expertise. Identify and analyze monetary terms, payment schedules, and financial obligations. Calculate totals and percentages where relevant. Note financial risks and opportunities. Use standard financial terminology. Consider cash flow implications."/>
+        <field name="sprk_category" value="717820003"/>
+        <field name="statecode" value="0"/>
+        <field name="statuscode" value="1"/>
+      </record>
+
+      <!-- Skill 10: Technical Expertise -->
+      <record id="00000000-0002-0000-0001-000000000010">
+        <field name="sprk_name" value="Technical Expertise"/>
+        <field name="sprk_description" value="Apply technical analysis for documents with technical specifications or requirements."/>
+        <field name="sprk_promptfragment" value="Apply technical analysis expertise. Identify technical specifications, requirements, and standards. Evaluate feasibility and implementation considerations. Note integration points and dependencies. Use appropriate technical terminology. Consider scalability, security, and maintainability aspects."/>
+        <field name="sprk_category" value="717820003"/>
+        <field name="statecode" value="0"/>
+        <field name="statuscode" value="1"/>
+      </record>
+    </records>
+  </entity>
+</entities>

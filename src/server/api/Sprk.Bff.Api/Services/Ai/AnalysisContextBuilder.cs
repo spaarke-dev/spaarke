@@ -72,10 +72,16 @@ public class AnalysisContextBuilder : IAnalysisContextBuilder
         // Add knowledge context
         if (knowledge.Length > 0)
         {
-            var inlineKnowledge = knowledge.Where(k => k.Type == KnowledgeType.Inline).ToArray();
+            // Inline content knowledge: Rule, Template, and Document types with content
+            var inlineKnowledge = knowledge
+                .Where(k => k.Type is KnowledgeType.Rule or KnowledgeType.Template or KnowledgeType.Document
+                            && !string.IsNullOrEmpty(k.Content))
+                .ToArray();
+
+            // RAG knowledge requires async search
             var ragKnowledge = knowledge.Where(k => k.Type == KnowledgeType.RagIndex).ToArray();
 
-            // Inline knowledge as reference materials
+            // Reference materials section
             if (inlineKnowledge.Length > 0)
             {
                 sb.AppendLine("# Reference Materials");
@@ -83,7 +89,14 @@ public class AnalysisContextBuilder : IAnalysisContextBuilder
 
                 foreach (var k in inlineKnowledge)
                 {
-                    sb.AppendLine($"## {k.Name}");
+                    var typeLabel = k.Type switch
+                    {
+                        KnowledgeType.Rule => "Rule",
+                        KnowledgeType.Template => "Template",
+                        KnowledgeType.Document => "Document",
+                        _ => "Reference"
+                    };
+                    sb.AppendLine($"## {k.Name} ({typeLabel})");
                     sb.AppendLine(k.Content);
                     sb.AppendLine();
                 }

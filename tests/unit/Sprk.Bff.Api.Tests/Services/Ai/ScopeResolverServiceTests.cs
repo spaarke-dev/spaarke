@@ -93,7 +93,7 @@ public class ScopeResolverServiceTests
         result.Should().NotBeNull();
         result!.Id.Should().Be(SummarizeActionId);
         result.Name.Should().Be("Summarize Document");
-        result.SystemPrompt.Should().Contain("summary");
+        result.SystemPrompt.Should().Contain("summar"); // matches "summaries" or "summary"
         result.SortOrder.Should().Be(1);
     }
 
@@ -211,7 +211,7 @@ public class ScopeModelsTests
     {
         // Arrange
         var skills = new[] { new AnalysisSkill { Id = Guid.NewGuid(), Name = "Skill1", PromptFragment = "Do X" } };
-        var knowledge = new[] { new AnalysisKnowledge { Id = Guid.NewGuid(), Name = "K1", Type = KnowledgeType.Inline } };
+        var knowledge = new[] { new AnalysisKnowledge { Id = Guid.NewGuid(), Name = "K1", Type = KnowledgeType.Rule } };
         var tools = new[] { new AnalysisTool { Id = Guid.NewGuid(), Name = "Tool1", Type = ToolType.EntityExtractor } };
 
         // Act
@@ -246,10 +246,11 @@ public class ScopeModelsTests
     [Fact]
     public void KnowledgeType_HasExpectedValues()
     {
-        // Assert
-        ((int)KnowledgeType.Inline).Should().Be(0);
-        ((int)KnowledgeType.Document).Should().Be(1);
-        ((int)KnowledgeType.RagIndex).Should().Be(2);
+        // Assert - values match Dataverse sprk_type option set
+        ((int)KnowledgeType.Document).Should().Be(100000000);
+        ((int)KnowledgeType.Rule).Should().Be(100000001);
+        ((int)KnowledgeType.Template).Should().Be(100000002);
+        ((int)KnowledgeType.RagIndex).Should().Be(100000003);
     }
 
     [Fact]

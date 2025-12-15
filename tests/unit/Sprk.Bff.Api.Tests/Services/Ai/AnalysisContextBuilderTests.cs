@@ -107,14 +107,14 @@ public class AnalysisContextBuilderTests
     }
 
     [Fact]
-    public async Task BuildUserPromptAsync_WithInlineKnowledge_IncludesReferenceMaterials()
+    public async Task BuildUserPromptAsync_WithRuleKnowledge_IncludesReferenceMaterials()
     {
         // Arrange
         var documentText = "Contract content.";
         var knowledge = new[]
         {
-            CreateKnowledge("Guidelines", "Always check for compliance.", KnowledgeType.Inline),
-            CreateKnowledge("Standards", "ISO compliance required.", KnowledgeType.Inline)
+            CreateKnowledge("Guidelines", "Always check for compliance.", KnowledgeType.Rule),
+            CreateKnowledge("Standards", "ISO compliance required.", KnowledgeType.Rule)
         };
 
         // Act
@@ -122,9 +122,9 @@ public class AnalysisContextBuilderTests
 
         // Assert
         result.Should().Contain("# Reference Materials");
-        result.Should().Contain("## Guidelines");
+        result.Should().Contain("## Guidelines (Rule)");
         result.Should().Contain("Always check for compliance.");
-        result.Should().Contain("## Standards");
+        result.Should().Contain("## Standards (Rule)");
         result.Should().Contain("ISO compliance required.");
     }
 
@@ -147,25 +147,136 @@ public class AnalysisContextBuilderTests
     }
 
     [Fact]
-    public async Task BuildUserPromptAsync_MixedKnowledge_OnlyIncludesInline()
+    public async Task BuildUserPromptAsync_MixedKnowledge_IncludesAllWithContentExceptRag()
     {
         // Arrange
         var documentText = "Document.";
         var knowledge = new[]
         {
-            CreateKnowledge("Inline Ref", "Inline content", KnowledgeType.Inline),
-            CreateKnowledge("RAG Ref", "RAG content", KnowledgeType.RagIndex),
-            CreateKnowledge("Doc Ref", "Doc content", KnowledgeType.Document)
+            CreateKnowledge("Rule Ref", "Rule content", KnowledgeType.Rule),
+            CreateKnowledge("Template Ref", "Template content", KnowledgeType.Template),
+            CreateKnowledge("Doc Ref", "Doc content", KnowledgeType.Document),
+            CreateKnowledge("RAG Ref", "RAG content", KnowledgeType.RagIndex)
+        };
+
+        // Act
+        var result = await _builder.BuildUserPromptAsync(documentText, knowledge, CancellationToken.None);
+
+        // Assert - Rule, Template, Document with content are included; RAG is not
+        result.Should().Contain("## Rule Ref (Rule)");
+        result.Should().Contain("Rule content");
+        result.Should().Contain("## Template Ref (Template)");
+        result.Should().Contain("Template content");
+        result.Should().Contain("## Doc Ref (Document)");
+        result.Should().Contain("Doc content");
+        result.Should().NotContain("RAG Ref"); // RAG requires async retrieval
+    }
+
+    [Fact]
+    public async Task BuildUserPromptAsync_WithTemplateKnowledge_IncludesTemplateLabel()
+    {
+        // Arrange
+        var documentText = "Document.";
+        var knowledge = new[]
+        {
+            CreateKnowledge("Contract Template", "Standard NDA template content.", KnowledgeType.Template)
         };
 
         // Act
         var result = await _builder.BuildUserPromptAsync(documentText, knowledge, CancellationToken.None);
 
         // Assert
-        result.Should().Contain("## Inline Ref");
-        result.Should().Contain("Inline content");
-        result.Should().NotContain("RAG Ref");
-        result.Should().NotContain("Doc Ref");
+        result.Should().Contain("# Reference Materials");
+        result.Should().Contain("## Contract Template (Template)");
+        result.Should().Contain("Standard NDA template content.");
+    }
+
+    [Fact]
+    public async Task BuildUserPromptAsync_DocumentWithoutContent_IsExcluded()
+    {
+        // Arrange - Document type with empty content should not be included
+        var documentText = "Document.";
+        var knowledge = new[]
+        {
+            CreateKnowledge("Empty Doc", "", KnowledgeType.Document),
+            CreateKnowledge("Null Doc", null!, KnowledgeType.Document),
+            CreateKnowledge("Valid Rule", "Has content", KnowledgeType.Rule)
+        };
+
+        // Act
+        var result = await _builder.BuildUserPromptAsync(documentText, knowledge, CancellationToken.None);
+
+        // Assert - Only the Rule with content should be included
+        result.Should().Contain("## Valid Rule (Rule)");
+        result.Should().NotContain("Empty Doc");
+        result.Should().NotContain("Null Doc");
+    }
+
+    #endregion
+
+    #region Full Scope Combination Tests
+
+    [Fact]
+    public async Task FullScopeConstruction_ActionWithSkillsAndKnowledge_ProducesCompletePrompts()
+    {
+        // Arrange - Using seed data-like values
+        var action = CreateAction("You are a legal document analyst specializing in contract review.");
+        var skills = new[]
+        {
+            CreateSkill("Identify and list all defined terms."),
+            CreateSkill("Extract key dates, deadlines, and time-sensitive clauses.")
+        };
+        var knowledge = new[]
+        {
+            CreateKnowledge("Company Policies", "All contracts must comply with internal guidelines.", KnowledgeType.Rule),
+            CreateKnowledge("Standard Templates", "Reference template structure here.", KnowledgeType.Template)
+        };
+        var documentText = "This Service Agreement is entered into between Company A and Company B...";
+
+        // Act
+        var systemPrompt = _builder.BuildSystemPrompt(action, skills);
+        var userPrompt = await _builder.BuildUserPromptAsync(documentText, knowledge, CancellationToken.None);
+
+        // Assert System Prompt
+        systemPrompt.Should().Contain("You are a legal document analyst");
+        systemPrompt.Should().Contain("## Instructions");
+        systemPrompt.Should().Contain("- Identify and list all defined terms.");
+        systemPrompt.Should().Contain("- Extract key dates, deadlines");
+        systemPrompt.Should().Contain("## Output Format");
+        systemPrompt.Should().Contain("Markdown format");
+
+        // Assert User Prompt
+        userPrompt.Should().Contain("# Document to Analyze");
+        userPrompt.Should().Contain("This Service Agreement is entered into");
+        userPrompt.Should().Contain("# Reference Materials");
+        userPrompt.Should().Contain("## Company Policies (Rule)");
+        userPrompt.Should().Contain("## Standard Templates (Template)");
+        userPrompt.Should().Contain("Please analyze the document above");
+    }
+
+    [Fact]
+    public async Task FullScopeConstruction_AllFourKnowledgeTypes_HandlesCorrectly()
+    {
+        // Arrange - All four knowledge types
+        var action = CreateAction("Analyze this document.");
+        var knowledge = new[]
+        {
+            CreateKnowledge("Legal Glossary", "Contract definitions.", KnowledgeType.Document),
+            CreateKnowledge("Compliance Rules", "Must follow regulations.", KnowledgeType.Rule),
+            CreateKnowledge("Report Template", "Standard format.", KnowledgeType.Template),
+            CreateKnowledge("Case Index", "Search index ref.", KnowledgeType.RagIndex)
+        };
+        var documentText = "Document text.";
+
+        // Act
+        var systemPrompt = _builder.BuildSystemPrompt(action, []);
+        var userPrompt = await _builder.BuildUserPromptAsync(documentText, knowledge, CancellationToken.None);
+
+        // Assert - Only Document, Rule, Template with content are included; RAG is excluded
+        userPrompt.Should().Contain("## Legal Glossary (Document)");
+        userPrompt.Should().Contain("## Compliance Rules (Rule)");
+        userPrompt.Should().Contain("## Report Template (Template)");
+        userPrompt.Should().NotContain("Case Index"); // RAG excluded
     }
 
     #endregion

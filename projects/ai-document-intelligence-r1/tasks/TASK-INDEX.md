@@ -1,4 +1,4 @@
-# Task Index - AI Document Intelligence R1
+﻿# Task Index - AI Document Intelligence R1
 
 > **Project**: ai-document-intelligence-r1  
 > **Last Updated**: December 12, 2025  
@@ -91,7 +91,7 @@
 | 038 | Add Analysis Tab to sprk_document Form | ✅ | Phase 1 Complete | 2h |
 | 039 | Add Analysis Grid to Analysis Tab | ✅ | 038 | 2h |
 | 040 | Add "+ New Analysis" Command Button | ✅ | 038 | 2h |
-| 041 | Add Form Scripts for Navigation to Analysis Workspace | 🔲 | 038-040 | 3h |
+| 041 | Add Form Scripts for Navigation to Analysis Workspace | ✅ | 038-040 | 3h |
 
 ### Analysis Builder Custom Page
 
@@ -144,12 +144,12 @@
 
 | ID | Task | Status | Dependencies | Estimated Hours |
 |----|------|--------|--------------|-----------------|
-| 068 | Create Model-Driven Forms for sprk_analysisaction | 🔲 | Phase 1 Complete | 2h |
-| 069 | Create Model-Driven Forms for sprk_analysisskill | 🔲 | Phase 1 Complete | 2h |
-| 070 | Create Model-Driven Forms for sprk_analysisknowledge | 🔲 | Phase 1 Complete | 3h |
-| 071 | Create Model-Driven Forms for sprk_analysistool | 🔲 | Phase 1 Complete | 2h |
-| 072 | Create Admin Views with Filtering and Search | 🔲 | 068-071 | 3h |
-| 073 | Add Validation Rules for Scope Entities | 🔲 | 068-071 | 2h |
+| 068 | Create Model-Driven Forms for sprk_analysisaction | ✅ | Phase 1 Complete | 2h |
+| 069 | Create Model-Driven Forms for sprk_analysisskill | ✅ | Phase 1 Complete | 2h |
+| 070 | Create Model-Driven Forms for sprk_analysisknowledge | ✅ | Phase 1 Complete | 3h |
+| 071 | Create Model-Driven Forms for sprk_analysistool | ✅ | Phase 1 Complete | 2h |
+| 072 | Create Admin Views with Filtering and Search | ✅ | 068-071 | 3h |
+| 073 | Add Validation Rules for Scope Entities | ✅ | 068-071 | 2h |
 
 ### Hybrid RAG Infrastructure
 
@@ -182,12 +182,12 @@
 
 | ID | Task | Status | Dependencies | Estimated Hours |
 |----|------|--------|--------------|-----------------|
-| 091 | Create Seed Data: 5 Default Actions | 🔲 | Phase 1 Complete | 2h |
-| 092 | Create Seed Data: 10 Default Skills | 🔲 | Phase 1 Complete | 2h |
-| 093 | Create Seed Data: 5 Sample Knowledge Sources | 🔲 | 070, 075 | 3h |
-| 094 | Create Seed Data: Default KnowledgeDeployment (Shared Model) | 🔲 | 075 | 2h |
-| 095 | Test Prompt Construction with All Scope Combinations | 🔲 | 091-094 | 4h |
-| 096 | Performance Test RAG Retrieval (<500ms P95) | 🔲 | 082-083 | 4h |
+| 091 | Create Seed Data: 5 Default Actions | ✅ | Phase 1 Complete | 2h |
+| 092 | Create Seed Data: 10 Default Skills | ✅ | Phase 1 Complete | 2h |
+| 093 | Create Seed Data: 5 Sample Knowledge Sources | ✅ | 070, 075 | 3h |
+| 094 | Create Seed Data: Default KnowledgeDeployment (Shared Model) | ✅ | 075 | 2h |
+| 095 | Test Prompt Construction with All Scope Combinations | ✅ | 091-094 | 4h |
+| 096 | Performance Test RAG Retrieval (<500ms P95) | ✅ | 082-083 | 4h |
 | 097 | Test Cross-Tenant RAG Authentication | 🔲 | 079 | 4h |
 
 **Phase 3 Total**: 30 tasks, ~105 hours

@@ -1,0 +1,109 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<RibbonDiffXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <CustomActions>
+    <CustomAction Id="sprk.Spaarke.Document.AddMultiple.Button.CustomAction" Location="Mscrm.SubGrid.sprk_document.MainTab.Management.Controls._children" Sequence="5">
+      <CommandUIDefinition>
+        <Button Alt="$LocLabels:Spaarke.Document.AddMultiple.Button.Alt" Command="Spaarke.Document.AddMultiple.Command" Id="Spaarke.Document.AddMultiple.Button" Image32by32="/_imgs/ribbon/DocumentAdd_32.png" Image16by16="/_imgs/ribbon/DocumentAdd_16.png" LabelText="$LocLabels:Spaarke.Document.AddMultiple.Button.LabelText" Sequence="5" TemplateAlias="o1" ToolTipTitle="$LocLabels:Spaarke.Document.AddMultiple.Button.ToolTipTitle" ToolTipDescription="$LocLabels:Spaarke.Document.AddMultiple.Button.ToolTipDescription" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <CustomAction Id="sprk.ThemeMenu.FlyoutAnchor.CustomAction" Location="Mscrm.HomepageGrid.sprk_document.MainTab.Actions.Controls._children" Sequence="900">
+      <CommandUIDefinition>
+        <FlyoutAnchor Id="sprk.ThemeMenu.FlyoutAnchor" Command="sprk.ThemeMenu.FlyoutCommand" LabelText="Dark Mode" ToolTipTitle="Dark Mode" ToolTipDescription="Choose your preferred color theme" Image16by16="$webresource:sprk_ThemeMenu16.svg" Image32by32="$webresource:sprk_ThemeMenu32.svg" PopulateDynamically="false" TemplateAlias="o1">
+          <Menu Id="sprk.ThemeMenu.Menu">
+            <MenuSection Id="sprk.ThemeMenu.MenuSection" Title="Color Theme" Sequence="10">
+              <Controls Id="sprk.ThemeMenu.Controls">
+                <Button Id="sprk.ThemeMenu.Auto" Command="sprk.ThemeMenu.SetAuto" LabelText="Auto (follows system)" Image16by16="$webresource:sprk_ThemeAuto16.svg" ToolTipTitle="Auto" ToolTipDescription="Uses your operating system's theme preference" Sequence="10" />
+                <Button Id="sprk.ThemeMenu.Light" Command="sprk.ThemeMenu.SetLight" LabelText="Light" Image16by16="$webresource:sprk_ThemeLight16.svg" ToolTipTitle="Light" ToolTipDescription="Light background with dark text" Sequence="20" />
+                <Button Id="sprk.ThemeMenu.Dark" Command="sprk.ThemeMenu.SetDark" LabelText="Dark" Image16by16="$webresource:sprk_ThemeDark16.svg" ToolTipTitle="Dark" ToolTipDescription="Dark background with light text" Sequence="30" />
+              </Controls>
+            </MenuSection>
+          </Menu>
+        </FlyoutAnchor>
+      </CommandUIDefinition>
+    </CustomAction>
+  </CustomActions>
+  <Templates>
+    <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>
+  </Templates>
+  <CommandDefinitions>
+    <CommandDefinition Id="Spaarke.Document.AddMultiple.Command">
+      <EnableRules>
+        <EnableRule Id="Spaarke.Document.AddMultiple.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction FunctionName="Spaarke_AddMultipleDocuments" Library="$webresource:sprk_subgrid_commands">
+          <CrmParameter Value="SelectedControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.ThemeMenu.FlyoutCommand">
+      <EnableRules>
+        <EnableRule Id="sprk.ThemeMenu.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions />
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.ThemeMenu.SetAuto">
+      <EnableRules />
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_ThemeMenu.js" FunctionName="Spaarke.Theme.setTheme">
+          <StringParameter Value="auto" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.ThemeMenu.SetDark">
+      <EnableRules />
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_ThemeMenu.js" FunctionName="Spaarke.Theme.setTheme">
+          <StringParameter Value="dark" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <CommandDefinition Id="sprk.ThemeMenu.SetLight">
+      <EnableRules />
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_ThemeMenu.js" FunctionName="Spaarke.Theme.setTheme">
+          <StringParameter Value="light" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+  </CommandDefinitions>
+  <RuleDefinitions>
+    <TabDisplayRules />
+    <DisplayRules />
+    <EnableRules>
+      <EnableRule Id="Spaarke.Document.AddMultiple.EnableRule">
+        <CrmClientTypeRule Type="Web" />
+      </EnableRule>
+      <EnableRule Id="sprk.ThemeMenu.EnableRule">
+        <CustomRule FunctionName="Spaarke.Theme.isEnabled" Library="$webresource:sprk_ThemeMenu.js" Default="true" />
+      </EnableRule>
+    </EnableRules>
+  </RuleDefinitions>
+  <LocLabels>
+    <LocLabel Id="Spaarke.Document.AddMultiple.Button.Alt">
+      <Titles>
+        <Title description="Quick Create: Document" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Spaarke.Document.AddMultiple.Button.LabelText">
+      <Titles>
+        <Title description="Quick Create: Document" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Spaarke.Document.AddMultiple.Button.ToolTipDescription">
+      <Titles>
+        <Title description="Upload multiple documents to SharePoint Embedded and create Document records" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="Spaarke.Document.AddMultiple.Button.ToolTipTitle">
+      <Titles>
+        <Title description="Quick Create: Document" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+  </LocLabels>
+</RibbonDiffXml>

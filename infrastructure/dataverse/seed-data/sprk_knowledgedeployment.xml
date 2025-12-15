@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<entities>
+  <entity name="sprk_knowledgedeployment" displayname="Knowledge Deployment">
+    <records>
+      <!-- Default Shared Knowledge Deployment -->
+      <record id="00000000-0003-0000-0001-000000000001">
+        <field name="sprk_name" value="Spaarke Shared Knowledge"/>
+        <field name="sprk_description" value="Shared knowledge index hosted by Spaarke. Contains common document templates, best practices, and reference materials available to all customers."/>
+        <field name="sprk_indexname" value="spaarke-knowledge-shared"/>
+        <field name="sprk_deploymentmodel" value="717820000"/>
+        <field name="statecode" value="0"/>
+        <field name="statuscode" value="1"/>
+      </record>
+    </records>
+  </entity>
+</entities>

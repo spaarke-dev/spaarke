@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{02409e9f-19d2-f011-8543-7ced8d1a8360}</WebResourceId>
+  <Name>sprk_ThemeAuto16.svg</Name>
+  <DisplayName>sprk_ThemeAuto16</DisplayName>
+  <WebResourceType>11</WebResourceType>
+  <IntroducedVersion>1.0.0.1</IntroducedVersion>
+  <IsEnabledForMobileClient>0</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_ThemeAuto16svg02409E9F-19D2-F011-8543-7CED8D1A8360</FileName>
+</WebResource>

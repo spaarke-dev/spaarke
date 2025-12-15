@@ -88,18 +88,21 @@ public record AnalysisKnowledge
 }
 
 /// <summary>
-/// Knowledge source type.
+/// Knowledge source type - values match Dataverse sprk_type option set.
 /// </summary>
 public enum KnowledgeType
 {
-    /// <summary>Inline text content.</summary>
-    Inline = 0,
+    /// <summary>Reference to a document in SPE (may have extracted content).</summary>
+    Document = 100000000,
 
-    /// <summary>Reference to a document in SPE.</summary>
-    Document = 1,
+    /// <summary>Business rule or guideline (inline content).</summary>
+    Rule = 100000001,
 
-    /// <summary>RAG index reference.</summary>
-    RagIndex = 2
+    /// <summary>Template document (inline content).</summary>
+    Template = 100000002,
+
+    /// <summary>RAG index reference (requires async search).</summary>
+    RagIndex = 100000003
 }
 
 /// <summary>

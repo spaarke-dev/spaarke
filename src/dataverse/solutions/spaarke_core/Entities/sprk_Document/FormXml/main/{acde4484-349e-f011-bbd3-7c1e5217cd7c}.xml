@@ -1,0 +1,361 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<forms xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <systemform>
+    <formid>{acde4484-349e-f011-bbd3-7c1e5217cd7c}</formid>
+    <IntroducedVersion>1.0.0.0</IntroducedVersion>
+    <FormPresentation>1</FormPresentation>
+    <FormActivationState>1</FormActivationState>
+    <form headerdensity="HighWithControls" shownavigationbar="false">
+      <tabs>
+        <tab verticallayout="true" id="{ef8694e8-5c51-46a9-bffd-72fb62cb8b67}" IsUserDefined="1" labelid="{16866aa4-b5dd-45a9-9e62-4a71514fe7e0}" name="tab_fileviewer" expanded="false">
+          <labels>
+            <label description="File" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="66%">
+              <sections>
+                <section name="General_section_SPEIntegrationID" id="12f94ff2-9c1b-454f-beb2-1fd08015b5db" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Top" columns="1" labelwidth="115" visible="false">
+                  <labels>
+                    <label description="SPE INTEGRATION GUIDS" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell id="{1961d757-bb1b-438e-ab4f-6a098f92c71d}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="File Name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_filename" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_filename" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{5f9e3406-b6da-4379-b9be-96fd83412da5}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Has File" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_hasfile" classid="{67FAC785-CD58-4F9F-ABB3-4B7DDC6ED5ED}" datafieldname="sprk_hasfile" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{9f986376-efc7-4ced-9926-c79160f339c2}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Drive Item Id" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_driveitemid" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_driveitemid" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{26b8fcb3-cb7b-472f-9848-5ded089208f0}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Graph Item Id" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_graphitemid" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_graphitemid" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{1f7a1fcb-ec82-4604-8267-6cde4d2d40ed}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Graph Drive Id" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_graphdriveid" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_graphdriveid" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{cd2ef086-3753-4374-ae48-2112bd491130}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Attachments" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_attachments" classid="{E0DECE4B-6FC8-4A8F-A065-082708572369}" datafieldname="sprk_attachments" disabled="false" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+                <section name="tab_general_section_document" id="46aa1e57-3c61-4e5c-a23c-676440e19213" IsUserDefined="0" locklevel="0" showlabel="false" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Top" columns="1" labelwidth="115">
+                  <labels>
+                    <label description="FILE VIEWER" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell locklevel="0" id="{f8cef5c7-4d8f-40e5-bda6-c0ca774ae27b}" colspan="1" rowspan="1" showlabel="false">
+                        <labels>
+                          <label description="Document Name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_documentname" classid="{F9A8A302-114E-466A-B582-6771B2AE0D92}" datafieldname="sprk_documentname" uniqueid="{96a2a794-9bd2-4ae6-990b-48c974ba37ae}" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+            <column width="34%">
+              <sections>
+                <section showlabel="true" showbar="false" IsUserDefined="0" id="{bca65220-d1d6-461d-ae51-494fa6bcade1}" labelid="{d6324c3a-79fc-47f8-8c5c-14525641f2cd}" name="section_profile" celllabelposition="Left" visible="true">
+                  <labels>
+                    <label description="PROFILE" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{bc7194ae-5a47-4c85-b904-09571693770a}" locklevel="0" colspan="1" rowspan="1" visible="false">
+                        <labels>
+                          <label description="Status" languagecode="1033" />
+                        </labels>
+                        <control id="statecode" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="statecode" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{998cbeea-424c-4489-a119-ff4ef640e0cf}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="File URL" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_filepath" classid="{71716B6C-711E-476C-8AB8-5D11542BFB47}" datafieldname="sprk_filepath" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{aa5aae44-baee-4af4-bfd9-8d18e48d2e5a}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Matter" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_matter" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_matter" disabled="false" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+                <section name="tab_fileviewer_section_filesummary" id="7e5a6524-ec6a-4f1e-9513-d20869c7aa92" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Top" columns="1" labelwidth="115">
+                  <labels>
+                    <label description="FILE SUMMARY" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell id="{73717e96-c0af-4755-90fd-84414559b910}" locklevel="0" colspan="1" rowspan="10" showlabel="false">
+                        <labels>
+                          <label description="File Summary" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_filesummary" classid="{E0DECE4B-6FC8-4A8F-A065-082708572369}" datafieldname="sprk_filesummary" disabled="false" />
+                      </cell>
+                    </row>
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row />
+                    <row>
+                      <cell id="{51a28f4e-6467-43a6-830e-042bea8cb289}" locklevel="0" colspan="1" rowspan="1" showlabel="false">
+                        <labels>
+                          <label description="File Summary Date" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_filesummarydate" classid="{5B773807-9FB2-42DB-97C3-7A91EFF8ADFF}" datafieldname="sprk_filesummarydate" disabled="false" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+        <tab name="tab_analysis" id="e9e75d8f-c369-40a7-a98d-5df91b0c5dc1" IsUserDefined="0" locklevel="0" showlabel="true" expanded="false">
+          <labels>
+            <label description="Analysis" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section name="tab_analysis_section_analysisprojects" id="fe2e2c20-ac39-4357-97ad-f48860f8e8a5" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="115">
+                  <labels>
+                    <label description="ANALYSIS PROJECTS" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell locklevel="0" id="{bcbd1ba8-847d-46cc-b2a8-89a411ccdd78}" rowspan="4" colspan="1" auto="false" showlabel="false">
+                        <labels>
+                          <label description="Analysis" languagecode="1033" />
+                        </labels>
+                        <control indicationOfSubgrid="true" id="Subgrid_analysis" classid="{E7A81278-8635-4D9E-8D4D-59480B391C5B}">
+                          <parameters>
+                            <RecordsPerPage>5</RecordsPerPage>
+                            <AutoExpand>Fixed</AutoExpand>
+                            <EnableQuickFind>false</EnableQuickFind>
+                            <EnableViewPicker>false</EnableViewPicker>
+                            <EnableChartPicker>false</EnableChartPicker>
+                            <ChartGridMode>Grid</ChartGridMode>
+                            <RelationshipName>sprk_document_analysis_document</RelationshipName>
+                            <TargetEntityType>sprk_analysis</TargetEntityType>
+                            <ViewId>{574d6636-49af-4877-9174-5c601554963c}</ViewId>
+                            <ViewIds>{574d6636-49af-4877-9174-5c601554963c}</ViewIds>
+                          </parameters>
+                        </control>
+                      </cell>
+                    </row>
+                    <row />
+                    <row />
+                    <row />
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+        <tab name="tab_related" id="bbe63a5d-a7d9-4bb4-a094-799530dfcdbb" IsUserDefined="0" locklevel="0" showlabel="true" expanded="false">
+          <labels>
+            <label description="Related" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section name="tab_4_section_1" id="a55a473e-8a75-4275-9838-d85d7449e8d6" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="115">
+                  <labels>
+                    <label description="New Section" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+        <tab name="tab_history" id="b5fd384d-b7e1-4c90-815d-eb211c93cc74" IsUserDefined="0" locklevel="0" showlabel="true" expanded="false">
+          <labels>
+            <label description="History" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section name="tab_3_section_1" id="c5a55b16-3844-45b4-b57d-f8f762ee454f" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="115">
+                  <labels>
+                    <label description="New Section" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+      </tabs>
+      <header id="{47613210-a15d-484d-8e80-82cd8296fab5}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
+        <rows>
+          <row>
+            <cell id="{d965c9b1-c01b-4fd9-9f3a-f35d03305edd}" showlabel="false" labelid="{4effabdd-82e9-4ceb-a6e8-f7a3dbd897b1}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{5fb617c3-8082-4c02-bc32-7ea23493a7d7}" showlabel="false" labelid="{3f241242-d6ac-4108-9eb9-86bd3053123f}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{e7b0059a-6cfe-4d28-9c6c-ea32c8d2194e}" showlabel="false" labelid="{88bb7856-8441-4245-878d-72f7fe94189a}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{27ea4c4e-9a1b-4c32-9b2d-dcde969617c8}" locklevel="0" colspan="1" rowspan="1">
+              <labels>
+                <label description="Status Reason" languagecode="1033" />
+              </labels>
+              <control id="header_statuscode" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="statuscode" disabled="false" />
+            </cell>
+            <cell id="{6cc64d42-bb69-45de-97a2-85f6d46d6bff}" locklevel="0" colspan="1" rowspan="1">
+              <labels>
+                <label description="Version Tag" languagecode="1033" />
+              </labels>
+              <control id="header_sprk_etag" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_etag" disabled="false" />
+            </cell>
+            <cell id="{19919d10-6454-47c7-9a5d-3679ea9a5486}" labelid="{19eb4c68-8e8b-46f1-96bc-40b9d77a16d4}" colspan="1" rowspan="1">
+              <labels>
+                <label description="Owner" languagecode="1033" />
+              </labels>
+              <control id="header_ownerid" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="ownerid" />
+            </cell>
+            <cell id="{013e8a3f-86b3-4fd8-9689-95db7d6c6a3b}" locklevel="0" colspan="1" rowspan="1">
+              <labels>
+                <label description="Owning Business Unit" languagecode="1033" />
+              </labels>
+              <control id="header_owningbusinessunit" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="owningbusinessunit" disabled="false" />
+            </cell>
+          </row>
+        </rows>
+      </header>
+      <footer id="{f127ba95-2d27-4e99-8526-d079da187832}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
+        <rows>
+          <row>
+            <cell id="{2498fc20-3db8-4c31-9066-9b5c3ec9c02c}" showlabel="false" labelid="{74f418ca-3e5f-4281-9e6b-f4730638d426}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{76a86c1e-f983-4e62-bf2c-abf61fcf37f2}" showlabel="false" labelid="{80a03f66-5511-45e4-8fc8-c038f5ffede6}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{48097627-fc2d-4ea7-86f6-1f4c79e6c0ea}" showlabel="false" labelid="{8bff861c-fd49-4cc7-b1bb-6cc20ee618f9}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+          </row>
+        </rows>
+      </footer>
+      <DisplayConditions Order="1" FallbackForm="true">
+        <Everyone />
+      </DisplayConditions>
+      <controlDescriptions>
+        <controlDescription forControl="{96a2a794-9bd2-4ae6-990b-48c974ba37ae}">
+          <customControl id="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}">
+            <parameters>
+              <datafieldname>sprk_documentname</datafieldname>
+            </parameters>
+          </customControl>
+          <customControl formFactor="0" name="sprk_Spaarke.SpeFileViewer">
+            <parameters>
+              <value type="SingleLine.Text">sprk_documentname</value>
+              <bffApiUrl type="SingleLine.Text" static="true">https://spe-api-dev-67e2xz.azurewebsites.net</bffApiUrl>
+              <clientAppId type="SingleLine.Text" static="true">b36e9b91-ee7d-46e6-9f6a-376871cc9d54</clientAppId>
+              <bffAppId type="SingleLine.Text" static="true">1e40baad-e065-4aea-a8d4-4b7ab273458c</bffAppId>
+              <tenantId type="SingleLine.Text" static="true">a221a95e-6abc-4434-aecc-e48338a1b2f2</tenantId>
+              <controlHeight type="Whole.None" static="true">1100</controlHeight>
+            </parameters>
+          </customControl>
+          <customControl formFactor="2" name="sprk_Spaarke.SpeFileViewer">
+            <parameters>
+              <value type="SingleLine.Text">sprk_documentname</value>
+              <bffApiUrl type="SingleLine.Text" static="true">https://spe-api-dev-67e2xz.azurewebsites.net</bffApiUrl>
+              <clientAppId type="SingleLine.Text" static="true">b36e9b91-ee7d-46e6-9f6a-376871cc9d54</clientAppId>
+              <bffAppId type="SingleLine.Text" static="true">1e40baad-e065-4aea-a8d4-4b7ab273458c</bffAppId>
+              <tenantId type="SingleLine.Text" static="true">a221a95e-6abc-4434-aecc-e48338a1b2f2</tenantId>
+              <controlHeight type="Whole.None" static="true">1100</controlHeight>
+            </parameters>
+          </customControl>
+          <customControl formFactor="1" name="sprk_Spaarke.SpeFileViewer">
+            <parameters>
+              <value type="SingleLine.Text">sprk_documentname</value>
+              <bffApiUrl type="SingleLine.Text" static="true">https://spe-api-dev-67e2xz.azurewebsites.net</bffApiUrl>
+              <clientAppId type="SingleLine.Text" static="true">b36e9b91-ee7d-46e6-9f6a-376871cc9d54</clientAppId>
+              <bffAppId type="SingleLine.Text" static="true">1e40baad-e065-4aea-a8d4-4b7ab273458c</bffAppId>
+              <tenantId type="SingleLine.Text" static="true">a221a95e-6abc-4434-aecc-e48338a1b2f2</tenantId>
+              <controlHeight type="Whole.None" static="true">1100</controlHeight>
+            </parameters>
+          </customControl>
+        </controlDescription>
+      </controlDescriptions>
+    </form>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <LocalizedNames>
+      <LocalizedName description="Document main form" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="Main for this entity" languagecode="1033" />
+    </Descriptions>
+  </systemform>
+</forms>

@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<entities>
+  <entity name="sprk_analysisaction" displayname="Analysis Action" etc="0" primaryidfield="sprk_analysisactionid" primarynamefield="sprk_name" disableplugins="false">
+    <fields>
+      <field displayname="Analysis Action ID" name="sprk_analysisactionid" type="guid" primaryKey="true"/>
+      <field displayname="Name" name="sprk_name" type="string"/>
+      <field displayname="Description" name="sprk_description" type="string"/>
+      <field displayname="System Prompt" name="sprk_systemprompt" type="string"/>
+      <field displayname="Sort Order" name="sprk_sortorder" type="number"/>
+      <field displayname="Status" name="statecode" type="state"/>
+      <field displayname="Status Reason" name="statuscode" type="status"/>
+    </fields>
+  </entity>
+  <entity name="sprk_analysisskill" displayname="Analysis Skill" etc="0" primaryidfield="sprk_analysisskillid" primarynamefield="sprk_name" disableplugins="false">
+    <fields>
+      <field displayname="Analysis Skill ID" name="sprk_analysisskillid" type="guid" primaryKey="true"/>
+      <field displayname="Name" name="sprk_name" type="string"/>
+      <field displayname="Description" name="sprk_description" type="string"/>
+      <field displayname="Prompt Fragment" name="sprk_promptfragment" type="string"/>
+      <field displayname="Category" name="sprk_category" type="optionsetvalue"/>
+      <field displayname="Status" name="statecode" type="state"/>
+      <field displayname="Status Reason" name="statuscode" type="status"/>
+    </fields>
+  </entity>
+  <entity name="sprk_analysisknowledge" displayname="Analysis Knowledge" etc="0" primaryidfield="sprk_analysisknowledgeid" primarynamefield="sprk_name" disableplugins="false">
+    <fields>
+      <field displayname="Analysis Knowledge ID" name="sprk_analysisknowledgeid" type="guid" primaryKey="true"/>
+      <field displayname="Name" name="sprk_name" type="string"/>
+      <field displayname="Description" name="sprk_description" type="string"/>
+      <field displayname="Knowledge Deployment" name="sprk_knowledgedeploymentid" type="entityreference" lookupType="sprk_knowledgedeployment"/>
+      <field displayname="Container" name="sprk_containerid" type="string"/>
+      <field displayname="Filter Path" name="sprk_filterpath" type="string"/>
+      <field displayname="Knowledge Type" name="sprk_knowledgetype" type="optionsetvalue"/>
+      <field displayname="Status" name="statecode" type="state"/>
+      <field displayname="Status Reason" name="statuscode" type="status"/>
+    </fields>
+  </entity>
+  <entity name="sprk_knowledgedeployment" displayname="Knowledge Deployment" etc="0" primaryidfield="sprk_knowledgedeploymentid" primarynamefield="sprk_name" disableplugins="false">
+    <fields>
+      <field displayname="Knowledge Deployment ID" name="sprk_knowledgedeploymentid" type="guid" primaryKey="true"/>
+      <field displayname="Name" name="sprk_name" type="string"/>
+      <field displayname="Description" name="sprk_description" type="string"/>
+      <field displayname="Index Name" name="sprk_indexname" type="string"/>
+      <field displayname="Deployment Model" name="sprk_deploymentmodel" type="optionsetvalue"/>
+      <field displayname="Status" name="statecode" type="state"/>
+      <field displayname="Status Reason" name="statuscode" type="status"/>
+    </fields>
+  </entity>
+</entities>

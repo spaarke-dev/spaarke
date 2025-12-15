@@ -1,0 +1,185 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<forms xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <systemform>
+    <formid>{7d547ccd-e0a6-f011-bbd3-7c1e5217cd7c}</formid>
+    <IntroducedVersion>1.0.0.0</IntroducedVersion>
+    <FormPresentation>1</FormPresentation>
+    <FormActivationState>1</FormActivationState>
+    <form headerdensity="HighReadOnlyValues" showImage="false" maxWidth="600" shownavigationbar="false">
+      <tabs>
+        <tab verticallayout="true" id="{77087ee8-82cd-4ce2-9d8f-f079fe668f81}" IsUserDefined="1" labelid="{22ea6c97-84eb-4da6-93b8-54123b3f7781}" name="General" expanded="false">
+          <labels>
+            <label description="General" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section showlabel="false" showbar="false" IsUserDefined="0" id="{d4235994-f6b8-41cf-aec8-72f8cdf49755}" labelid="{e392e60a-7c4f-4dde-be1f-b10b6272e213}" visible="false" name="Hidden Parameters">
+                  <labels>
+                    <label description="Hidden Parameters" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{c06c25ca-bb89-4715-9ae0-012d28d3b59b}" locklevel="0" colspan="1" rowspan="1" showlabel="false">
+                        <labels>
+                          <label description="Parent Entity Name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_parententityname" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_parententityname" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{092b5ac4-c09e-49ea-8479-696a8eac0078}" locklevel="0" colspan="1" rowspan="1" showlabel="false">
+                        <labels>
+                          <label description="Parent Record ID" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_parentrecordid" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_parentrecordid" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{c0b13f47-bbd4-4eca-bbc0-718170a5a83b}" locklevel="0" colspan="1" rowspan="1" showlabel="false">
+                        <labels>
+                          <label description="Container ID" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_containerid" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_containerid" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{d002539d-b315-4eb8-b079-2af9c6633ec8}" locklevel="0" colspan="1" rowspan="1" showlabel="false">
+                        <labels>
+                          <label description="Parent Display Name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_parentdisplayname" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_parentdisplayname" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{a5fc2ef9-78d0-45e5-a60f-1e810d282fa4}" labelid="{225a7a60-0d72-41aa-a457-7220dd74d5f8}" showlabel="false" visible="false">
+                        <labels>
+                          <label description="Owner" languagecode="1033" />
+                        </labels>
+                        <control id="ownerid" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="ownerid" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+                <section name="General_section_documentupload" id="70461d37-2ee2-4096-849c-34aeb53aad50" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="115">
+                  <labels>
+                    <label description="Document Upload" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell id="{20418bf4-d796-419c-940d-399d3e493ee9}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Parent Entity Name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_parententityname" classid="{F9A8A302-114E-466A-B582-6771B2AE0D92}" datafieldname="sprk_parententityname" disabled="false" uniqueid="{3e048bf8-5f3d-4e80-ac49-1795c8613a03}" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+      </tabs>
+      <header id="{2bd5a07c-7fc1-41e1-81c0-08c60d646a12}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
+        <rows>
+          <row>
+            <cell id="{bbe21eb3-8277-481e-a5b0-63a8e42d2e45}" showlabel="false" labelid="{7383ce1e-46f6-4d0e-85ed-9539633a4bcf}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{f9b03ea8-bcb6-4db8-8c84-a598702bee0b}" showlabel="false" labelid="{a973f77f-411a-4673-a41f-7419d0851b53}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{cbbbd0a3-cc71-477a-a3f8-17e31c612d81}" showlabel="false" labelid="{f37ba736-0bca-4505-ad3d-4d5359581ae4}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+          </row>
+        </rows>
+      </header>
+      <footer id="{0d78aa6f-8682-4519-a8f5-80600595271e}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
+        <rows>
+          <row>
+            <cell id="{ba7abc6e-2e6a-43da-a1dc-4c67e4300643}" showlabel="false" labelid="{51b6232f-9d6f-4fbc-a234-f9c5fae6eeb7}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{95d2254f-503a-40ea-b996-a042cca06393}" showlabel="false" labelid="{0995ca47-8a15-4467-8c4d-59bdf0b6c028}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{64746e63-5bda-448f-a145-403d4bf6f912}" showlabel="false" labelid="{05f55e04-0dbc-453d-ab89-a1bb95ef0e5e}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+          </row>
+        </rows>
+      </footer>
+      <DisplayConditions Order="1" FallbackForm="true">
+        <Everyone />
+      </DisplayConditions>
+      <Navigation>
+        <NavBar>
+          <NavBarByRelationshipItem Area="Info" Show="false" RelationshipName="hardcoded_{B7196B13-6B9D-42CD-BD58-B19A3953126F}navAudit" Id="navAudit" Sequence="9600">
+            <Titles>
+              <Title Text="Audits" LCID="1033" />
+            </Titles>
+          </NavBarByRelationshipItem>
+        </NavBar>
+      </Navigation>
+      <controlDescriptions>
+        <controlDescription forControl="{3e048bf8-5f3d-4e80-ac49-1795c8613a03}">
+          <customControl id="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}">
+            <parameters>
+              <datafieldname>sprk_parententityname</datafieldname>
+            </parameters>
+          </customControl>
+          <customControl formFactor="0" name="sprk_Spaarke.Controls.UniversalDocumentUpload">
+            <parameters>
+              <parentEntityName type="SingleLine.Text">sprk_parententityname</parentEntityName>
+              <parentRecordId type="SingleLine.Text">sprk_parentrecordid</parentRecordId>
+              <containerId type="SingleLine.Text">sprk_containerid</containerId>
+              <parentDisplayName type="SingleLine.Text">sprk_parentdisplayname</parentDisplayName>
+              <sdapApiBaseUrl type="SingleLine.Text" static="true">spe-api-dev-67e2xz.azurewebsites.net/api</sdapApiBaseUrl>
+            </parameters>
+          </customControl>
+          <customControl formFactor="2" name="sprk_Spaarke.Controls.UniversalDocumentUpload">
+            <parameters>
+              <parentEntityName type="SingleLine.Text">sprk_parententityname</parentEntityName>
+              <parentRecordId type="SingleLine.Text">sprk_parentrecordid</parentRecordId>
+              <containerId type="SingleLine.Text">sprk_containerid</containerId>
+              <parentDisplayName type="SingleLine.Text">sprk_parentdisplayname</parentDisplayName>
+              <sdapApiBaseUrl type="SingleLine.Text" static="true">spe-api-dev-67e2xz.azurewebsites.net/api</sdapApiBaseUrl>
+            </parameters>
+          </customControl>
+          <customControl formFactor="1" name="sprk_Spaarke.Controls.UniversalDocumentUpload">
+            <parameters>
+              <parentEntityName type="SingleLine.Text">sprk_parententityname</parentEntityName>
+              <parentRecordId type="SingleLine.Text">sprk_parentrecordid</parentRecordId>
+              <containerId type="SingleLine.Text">sprk_containerid</containerId>
+              <parentDisplayName type="SingleLine.Text">sprk_parentdisplayname</parentDisplayName>
+              <sdapApiBaseUrl type="SingleLine.Text" static="true">spe-api-dev-67e2xz.azurewebsites.net/api</sdapApiBaseUrl>
+            </parameters>
+          </customControl>
+        </controlDescription>
+      </controlDescriptions>
+    </form>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <LocalizedNames>
+      <LocalizedName description="Upload Documents" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="A form for this entity." languagecode="1033" />
+    </Descriptions>
+  </systemform>
+</forms>

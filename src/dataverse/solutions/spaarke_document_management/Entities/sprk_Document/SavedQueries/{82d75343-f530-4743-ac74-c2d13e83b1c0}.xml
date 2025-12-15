@@ -1,0 +1,51 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>0</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>1</isdefault>
+    <savedqueryid>{82d75343-f530-4743-ac74-c2d13e83b1c0}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="sprk_documentname" select="1" icon="1" preview="1">
+        <row name="result" id="sprk_documentid">
+          <cell name="sprk_filepath" width="100" />
+          <cell name="sprk_documentname" width="300" />
+          <cell name="sprk_etag" width="108" />
+          <cell name="sprk_driveitemid" width="117" />
+          <cell name="sprk_graphitemid" width="120" />
+          <cell name="sprk_graphdriveid" width="126" />
+          <cell name="sprk_containerid" width="156" />
+          <cell name="sprk_mimetype" width="105" />
+          <cell name="createdon" width="125" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>0</querytype>
+    <fetchxml>
+      <fetch version="1.0" mapping="logical">
+        <entity name="sprk_document">
+          <attribute name="sprk_documentid" />
+          <attribute name="sprk_documentname" />
+          <attribute name="createdon" />
+          <order attribute="sprk_documentname" descending="false" />
+          <filter type="and">
+            <condition attribute="statecode" operator="eq" value="0" />
+          </filter>
+          <attribute name="sprk_driveitemid" />
+          <attribute name="sprk_filepath" />
+          <attribute name="sprk_graphdriveid" />
+          <attribute name="sprk_graphitemid" />
+          <attribute name="sprk_containerid" />
+          <attribute name="sprk_etag" />
+          <attribute name="sprk_mimetype" />
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="Active Documents" languagecode="1033" />
+    </LocalizedNames>
+  </savedquery>
+</savedqueries>
