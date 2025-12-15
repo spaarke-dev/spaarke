@@ -11,3 +11,6 @@ export * from "./DatasetGrid/VirtualizedListView";
 
 // Toolbar components
 export * from "./Toolbar";
+
+// Rich Text Editor
+export * from "./RichTextEditor";

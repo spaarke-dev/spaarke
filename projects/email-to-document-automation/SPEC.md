@@ -201,7 +201,21 @@ Power Platform standard entity for email activities:
 | `regardingobjectid` | Lookup | Related record (Matter/Account/Contact) |
 | `trackingtoken` | Text(50) | Email tracking token |
 | `directioncode` | Boolean | Incoming (true) / Outgoing (false) |
-| `statecode` | Choice | Open, Completed, Cancelled |
+| `statecode` | State | OOB Email state (used for lifecycle readiness; typically Open/Completed/Canceled) |
+| `statuscode` | Status Reason | OOB Email status reason (used for finer-grained lifecycle state; values vary by org/customizations) |
+
+#### **Email Thread / Conversation Metadata (OOB / Common)**
+
+Dataverse Email records often carry enough metadata to **reconstruct conversation/thread history**, depending on what Server-Side Sync populated.
+
+Recommended fields/signals to use when present:
+- `trackingtoken`: best when you control outbound templates (high-confidence matter correlation)
+- `messageid` (Internet Message-ID): stable identifier for the email message
+- `inreplyto`: message-id of the parent message (thread linkage)
+- `references`: chain of message-ids (thread history)
+- `conversationindex` / `conversationtopic`: Exchange threading hints (availability varies)
+
+**Spec requirement:** when generating the `.eml`, preserve these as RFC 5322 headers if available; persist them on the created `sprk_document` (either as dedicated columns or as a single JSON blob field) so thread reconstruction does not require re-querying Exchange.
 
 #### **ActivityMimeAttachment (Standard Entity)**
 
@@ -264,17 +278,21 @@ Defines rules for filtering and processing emails:
 3. **Skip large emails**: Email size > 25MB → Skip (log warning)
 4. **Process legal emails**: Sender domain matches `@lawfirm.com` → Process + Associate to Matter
 
-### 2.3.1 New Operational State (Recommended)
+### 2.3.1 Email-to-Document Processing Tracking (Recommended)
 
-Because polling windows are not durable across restarts, store processing state explicitly.
+We will use OOB Email `statecode`/`statuscode` strictly for **email lifecycle status**.
+
+Because polling windows are not durable across restarts, store **Email-to-Document processing** tracking explicitly on the Email record (separate from `statecode`/`statuscode`).
 
 #### **Email Activity extensions** (Recommended)
 
-- `sprk_documentprocessingstatus` (Choice): Pending, InProgress, Succeeded, Skipped, Failed
-- `sprk_documentprocessingattempts` (Whole Number)
-- `sprk_documentprocessingcorrelationid` (Text(50) or GUID)
-- `sprk_documentprocessinglasterror` (Memo)
-- `sprk_documentprocessedon` (DateTime)
+- `sprk_emailtodocumentprocessed` (Two Options)
+- `sprk_emailtodocumentdocumentid` (Lookup(sprk_document))
+- `sprk_emailtodocumentattempts` (Whole Number)
+- `sprk_emailtodocumentlastcorrelationid` (Text(50) or GUID)
+- `sprk_emailtodocumentlasterrorcode` (Text(100))
+- `sprk_emailtodocumentlasterrordetails` (Memo)
+- `sprk_emailtodocumentprocessedon` (DateTime)
 
 #### **sprk_emailprocessingcheckpoint** (Optional)
 
@@ -695,7 +713,7 @@ public class EmailToDocumentBackgroundService : BackgroundService
         // - directioncode = incoming (true)
         // - createdon > checkpoint
         // - NOT EXISTS (sprk_document where sprk_emailactivityid = email.activityid)
-        // - sprk_documentprocessingstatus != Succeeded
+        // - sprk_emailtodocumentprocessed != true
         
         // Return array of email activity IDs
         return await dataverse.QueryAsync<Guid>(/* FetchXML */, ct);
@@ -707,9 +725,9 @@ public class EmailToDocumentBackgroundService : BackgroundService
         CancellationToken ct)
     {
         // Update email processing fields:
-        // - sprk_documentprocessingstatus = Skipped/Succeeded
-        // - sprk_documentprocessedon = utcNow
-        // - sprk_documentprocessingattempts++
+        // - sprk_emailtodocumentprocessed = true/false (skipped)
+        // - sprk_emailtodocumentprocessedon = utcNow
+        // - sprk_emailtodocumentattempts++
     }
 }
 ```
@@ -818,7 +836,7 @@ All Service Bus messages MUST conform to the shared ADR-004 `JobContract` schema
 Recommended layered approach:
 
 1. **Storage-level uniqueness**: enforce alternate keys (unique constraints) as described in §2.2.
-2. **Record-level processing state**: use `sprk_documentprocessingstatus` and correlation fields (§2.3.1) to prevent duplicate work and aid support.
+2. **Record-level processing state**: use `sprk_emailtodocumentprocessed` and correlation/error fields (§2.3.1) to prevent duplicate work and aid support.
 3. **Optimistic concurrency**: updates to the Email activity processing state should use conditional updates (ETag/version) to prevent two workers claiming the same email.
 
 **Idempotency keys:**
@@ -834,7 +852,7 @@ Recommended layered approach:
 **Policy (Recommended defaults):**
 - Max attempts: `3` (configurable)
 - Backoff: exponential + jitter; respect `Retry-After` when provided
-- Poison: after max attempts, send to DLQ and set `sprk_documentprocessingstatus = Failed` with a safe error code (no PII)
+- Poison: after max attempts, send to DLQ and set `sprk_emailtodocumentlasterrorcode`/`sprk_emailtodocumentlasterrordetails` with a safe error code (no PII)
 
 **DLQ operations (Recommended):**
 - Admin-only endpoint/tooling to re-drive DLQ messages after remediation

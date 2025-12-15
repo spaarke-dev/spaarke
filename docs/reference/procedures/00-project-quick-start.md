@@ -4,6 +4,43 @@
 
 ---
 
+## Parallel Work (While Active Coding Is Ongoing)
+
+If you want to start a new project (SPEC/PLAN/tasks/etc.) **while other work is actively coding in the repo**, do **not** share the same working directory.
+
+**Recommended:** use a **git worktree** so each parallel effort has its own folder + branch.
+
+```pwsh
+Set-Location c:\code_files\spaarke
+git switch master
+git pull
+
+# Create a separate workspace folder + branch for the new project
+git worktree add ..\spaarke-wt-{project-name} -b work/{project-name}
+
+# Open in a new VS Code window
+code -n ..\spaarke-wt-{project-name}
+```
+
+**Concrete example (copy/paste):**
+
+```pwsh
+Set-Location c:\code_files\spaarke
+git switch master
+git pull
+
+git worktree add ..\spaarke-wt-email-to-document-automation -b work\email-to-document-automation
+code -n c:\code_files\spaarke-wt-email-to-document-automation
+```
+
+**Isolation rules (keep it boring):**
+- One worktree = one “active agent” (Claude Code/Copilot) at a time
+- Avoid editing shared root files concurrently (`*.sln`, `Directory.*`, `package.json`, shared `docs/`)
+- Prefer per-worktree local config copies (avoid changing `config/*.local.json` in two places)
+- If running apps locally in parallel, use different ports per worktree
+
+---
+
 ## Before You Start (Manual Steps)
 
 | # | You Do | Output |
