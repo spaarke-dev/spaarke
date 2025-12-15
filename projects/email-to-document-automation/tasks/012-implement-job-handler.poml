@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="E2D-012" project="Email-to-Document Automation">
+  <metadata>
+    <title>Implement EmailToDocumentJobHandler</title>
+    <status>not-started</status>
+    <phase>2</phase>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>backend, jobs, service-bus</tags>
+  </metadata>
+
+  <prompt>
+    Implement the EmailToDocumentJobHandler that processes email-to-document conversion jobs
+    from Service Bus. This handler is shared by both webhook and polling triggers and must
+    be idempotent per ADR-004.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with Service Bus job processing, ADR-004 patterns, and SDAP architecture.
+  </role>
+
+  <goal>
+    Working EmailToDocumentJobHandler that processes jobs idempotently, converts emails to documents,
+    uploads to SPE, creates Dataverse records, and enqueues downstream jobs (attachments, AI processing).
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/email-to-document-automation/SPEC.md</file>
+    <file purpose="project-plan">projects/email-to-document-automation/PLAN.md</file>
+    <file purpose="project-context">projects/email-to-document-automation/CLAUDE.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-004">Must use JobContract schema and implement idempotency</constraint>
+    <constraint source="ADR-007">Use SpeFileStore for SPE operations</constraint>
+    <constraint source="project">MUST reuse existing services - no new AI or file services</constraint>
+    <constraint source="project">Enqueue existing ai-document-processing job type for AI</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>jobs/service-bus, adr-004</topic>
+    <files>
+      <file>projects/email-to-document-automation/SPEC.md (Section 3.2.3, 3.3)</file>
+      <file>projects/email-to-document-automation/CLAUDE.md</file>
+      <file>docs/reference/adr/ADR-004-async-job-contract.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/DocumentProcessingJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs</file>
+    </files>
+    <patterns>
+      <pattern name="Job Handler Pattern" location="src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/">
+        Follow DocumentProcessingJobHandler pattern for structure and idempotency
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      This is the core processing logic shared by webhook and polling triggers. The handler
+      must be idempotent because jobs may be delivered more than once (at-least-once semantics).
+    </background>
+    <dependencies>
+      <dependency task="E2D-004" status="required">IEmailToEmlConverter service</dependency>
+      <dependency task="E2D-005" status="required">Document creation logic</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Review Existing Patterns">
+      Read DocumentProcessingJobHandler.cs to understand the IJobHandler pattern.
+    </step>
+    <step order="2" name="Create Job Handler">
+      Create EmailToDocumentJobHandler.cs implementing IJobHandler:
+      - JobType = "email-to-document"
+      - ProcessAsync with idempotency check
+    </step>
+    <step order="3" name="Implement Processing Logic">
+      Implement the full processing flow:
+      1. Parse payload to get emailId
+      2. Idempotency check (document already exists for this email?)
+      3. Check filter rules (IEmailFilterService)
+      4. Convert to .eml (IEmailToEmlConverter)
+      5. Upload to SPE (SpeFileStore)
+      6. Create sprk_document (IDataverseService)
+      7. Enqueue email-attachments job if configured
+      8. Enqueue ai-document-processing job (existing job type!)
+      9. Update email processing status
+    </step>
+    <step order="4" name="Add Error Handling">
+      Implement proper error handling:
+      - DataverseThrottlingException -> RetryableFailure
+      - SpeThrottlingException -> RetryableFailure
+      - EmailNotFoundException -> PermanentFailure
+    </step>
+    <step order="5" name="Register Handler">
+      Register handler in DI container.
+    </step>
+    <step order="6" name="Document Changes">
+      Update TASK-INDEX.md with completion status.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET project</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/EmailToDocumentJobHandler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Jobs/EmailToDocumentPayload.cs</output>
+    <output type="docs">projects/email-to-document-automation/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Handler implements IJobHandler interface</criterion>
+    <criterion testable="true">JobType is "email-to-document"</criterion>
+    <criterion testable="true">Idempotency check prevents duplicate documents</criterion>
+    <criterion testable="true">Uses SpeFileStore for SPE operations (not GraphServiceClient)</criterion>
+    <criterion testable="true">Enqueues "ai-document-processing" job (existing type)</criterion>
+    <criterion testable="true">Handles throttling with RetryableFailure</criterion>
+    <criterion testable="true">Project builds without errors</criterion>
+  </acceptance-criteria>
+</task>

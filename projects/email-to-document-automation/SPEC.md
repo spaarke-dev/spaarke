@@ -97,31 +97,43 @@ Power Platform Server-Side Sync creates Email activity records from Exchange:
 
 ### 1.3 Target Architecture
 
+**Hybrid Trigger Model**: Near real-time processing via Dataverse webhook with polling backup for reliability.
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Dataverse Email Activity                     │
 │  Created by Server-Side Sync                                    │
 └────────────────────────┬────────────────────────────────────────┘
                          │
-                         │ 1. Email created event
+        ┌────────────────┴────────────────┐
+        │                                 │
+        ▼                                 ▼
+┌───────────────────┐          ┌─────────────────────────────────┐
+│ Dataverse Webhook │          │ Polling Backup Service          │
+│ (Near Real-Time)  │          │ (Every 5 minutes)               │
+│                   │          │                                 │
+│ On Email Create:  │          │ Catches:                        │
+│ POST /api/emails/ │          │ • Missed webhooks               │
+│   webhook-trigger │          │ • Failed retries                │
+└─────────┬─────────┘          │ • Service restarts              │
+          │                    └─────────────┬───────────────────┘
+          │                                  │
+          └──────────────┬───────────────────┘
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│              EmailToDocumentBackgroundService                   │
-│  (ADR-001 BackgroundService + Service Bus)                      │
+│              ProcessEmailToDocumentJob (Service Bus)            │
+│  (ADR-004 Job Contract - Idempotent Handler)                    │
 │                                                                 │
 │  ┌──────────────────────────────────────────────────────────┐  │
-│  │ 1. Discover: Query new emails via IDataverseService      │  │
+│  │ 1. Idempotency: Check if already processed               │  │
 │  │ 2. Filter: Apply exclusion rules (spam, logos, etc.)     │  │
-│  │ 3. Enqueue: Create ADR-004 job(s) on Service Bus         │  │
-│  │    - ProcessEmailToDocumentJob(emailId, options, ...)    │  │
-│  │    - ProcessEmailAttachmentsJob(emailId, parentDocId)    │  │
-│  │ 4. Process: Worker handles jobs with retries/poisoning   │  │
-│  │ 5. Convert: Generate RFC 5322 .eml file                  │  │
-│  │ 6. Upload: Store .eml to SPE via SpeFileStore            │  │
-│  │ 7. Associate: Match to Matter/Account/Contact            │  │
-│  │ 8. Create: Document record with email metadata           │  │
-│  │ 9. Enqueue: Trigger AI processing                        │  │
+│  │ 3. Convert: Generate RFC 5322 .eml file                  │  │
+│  │ 4. Upload: Store .eml to SPE via SpeFileStore            │  │
+│  │ 5. Associate: Match to Matter/Account/Contact            │  │
+│  │ 6. Create: Document record with email metadata           │  │
+│  │ 7. Attachments: Enqueue ProcessEmailAttachmentsJob       │  │
+│  │ 8. AI: Enqueue AI processing job                         │  │
 │  └──────────────────────────────────────────────────────────┘  │
 └────────────────────────┬────────────────────────────────────────┘
                          │
@@ -129,6 +141,9 @@ Power Platform Server-Side Sync creates Email activity records from Exchange:
 ┌─────────────────────────────────────────────────────────────────┐
 │                     Sprk.Bff.Api                                │
 │  ┌──────────────────────────────────────────────────────────┐  │
+│  │ /api/emails/webhook-trigger (NEW)                        │  │
+│  │ • POST - Dataverse webhook receiver (near real-time)     │  │
+│  │                                                           │  │
 │  │ /api/emails/convert-to-document (NEW)                    │  │
 │  │ • POST - Manual conversion via ribbon button             │  │
 │  │                                                           │  │
@@ -551,165 +566,283 @@ public interface IEmailAttachmentProcessor
 - Skip if filename is generic: `image001.png`, `spacer.gif`, etc.
 - Process all documents, PDFs, Office files, and meaningful images
 
-### 3.2 Background Service Worker
+### 3.2 Hybrid Trigger Architecture
 
-#### **EmailToDocumentBackgroundService**
+The system uses a **hybrid trigger model** combining near real-time webhook processing with polling backup for reliability.
 
-Monitors new emails and processes them automatically.
+#### **3.2.1 Dataverse Webhook Trigger (Primary - Near Real-Time)**
+
+A Dataverse webhook registered on the Email entity fires on record creation, calling the BFF API to enqueue processing immediately.
+
+**Webhook Registration (via Dataverse Service Endpoint + Step):**
+- **Entity**: `email`
+- **Message**: `Create`
+- **Execution Mode**: Asynchronous
+- **Endpoint**: `POST /api/emails/webhook-trigger`
+
+**Webhook Endpoint:**
 
 ```csharp
 /// <summary>
-/// Background service that monitors incoming emails and converts them to Documents.
+/// Receives Dataverse webhook notifications for new Email activities.
+/// Validates the request and enqueues processing job immediately.
+/// </summary>
+app.MapPost("/api/emails/webhook-trigger", async (
+    HttpContext context,
+    IServiceBusPublisher serviceBus,
+    IEmailFilterService filterService,
+    ILogger<Program> logger,
+    CancellationToken ct) =>
+{
+    // 1. Validate Dataverse webhook signature (shared secret or Azure AD)
+    if (!await ValidateWebhookSignatureAsync(context))
+    {
+        return Results.Unauthorized();
+    }
+
+    // 2. Parse webhook payload
+    var payload = await context.Request.ReadFromJsonAsync<DataverseWebhookPayload>(ct);
+    var emailId = payload?.PrimaryEntityId;
+
+    if (emailId == null || emailId == Guid.Empty)
+    {
+        return Results.BadRequest("Invalid webhook payload");
+    }
+
+    var correlationId = Guid.NewGuid();
+    logger.LogInformation(
+        "Webhook received for Email {EmailId}, Correlation {CorrelationId}",
+        emailId, correlationId);
+
+    // 3. Quick filter check (optional - can defer to job handler)
+    var quickFilter = await filterService.QuickFilterCheckAsync(emailId.Value, ct);
+    if (quickFilter.DefinitelySkip)
+    {
+        logger.LogInformation("Email {EmailId} skipped by quick filter: {Reason}",
+            emailId, quickFilter.Reason);
+        return Results.Ok(new { status = "skipped", reason = quickFilter.Reason });
+    }
+
+    // 4. Enqueue ADR-004 job for processing
+    await serviceBus.PublishAsync(new JobContract
+    {
+        JobId = Guid.NewGuid(),
+        JobType = "email-to-document",
+        SubjectId = emailId.Value.ToString(),
+        CorrelationId = correlationId.ToString(),
+        IdempotencyKey = $"Email:{emailId}:Archive",
+        Attempt = 1,
+        MaxAttempts = 3,
+        Payload = new
+        {
+            trigger = "Webhook",
+            emailId = emailId.Value,
+            includeAttachmentsInEml = true,
+            createSeparateAttachmentDocuments = true
+        },
+        CreatedAt = DateTimeOffset.UtcNow
+    }, ct);
+
+    return Results.Accepted(value: new {
+        status = "queued",
+        emailId,
+        correlationId
+    });
+})
+.AllowAnonymous() // Webhook uses shared secret validation, not user auth
+.WithName("EmailWebhookTrigger");
+```
+
+**Webhook Security:**
+- Option A: Shared secret in header (configured in Dataverse Service Endpoint)
+- Option B: Azure AD app authentication (Service Endpoint authenticates as app)
+- Validate signature/token before processing
+
+#### **3.2.2 Polling Backup Service (Secondary - Reliability)**
+
+A background service polls for unprocessed emails to catch any missed webhooks, handle retries, and ensure reliability.
+
+```csharp
+/// <summary>
+/// Backup polling service that catches emails missed by webhook.
+/// Runs less frequently (every 5 minutes) since webhook handles most cases.
 /// Implements ADR-001 BackgroundService pattern.
 /// </summary>
-public class EmailToDocumentBackgroundService : BackgroundService
+public class EmailPollingBackupService : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly ILogger<EmailToDocumentBackgroundService> _logger;
+    private readonly ILogger<EmailPollingBackupService> _logger;
     private readonly EmailProcessingOptions _options;
-
-    // Recommended: use PeriodicTimer rather than Timer + Task.Delay
-    // and avoid keeping timers as fields unless they are actually used.
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("EmailToDocumentBackgroundService started");
+        _logger.LogInformation("EmailPollingBackupService started");
 
-        var timer = new PeriodicTimer(TimeSpan.FromSeconds(_options.PollIntervalSeconds));
+        // Longer interval since webhook handles real-time; this is backup only
+        var timer = new PeriodicTimer(TimeSpan.FromMinutes(_options.PollingBackupIntervalMinutes));
+
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
             try
             {
-                await ProcessPendingEmailsAsync(stoppingToken);
+                await EnqueueMissedEmailsAsync(stoppingToken);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error processing emails");
+                _logger.LogError(ex, "Error in polling backup service");
             }
         }
     }
 
-    private async Task ProcessPendingEmailsAsync(CancellationToken ct)
+    private async Task EnqueueMissedEmailsAsync(CancellationToken ct)
     {
         using var scope = _scopeFactory.CreateScope();
         var dataverse = scope.ServiceProvider.GetRequiredService<IDataverseService>();
-        var converter = scope.ServiceProvider.GetRequiredService<IEmailToEmlConverter>();
-        var filter = scope.ServiceProvider.GetRequiredService<IEmailFilterService>();
-        var association = scope.ServiceProvider.GetRequiredService<IEmailAssociationService>();
-        var attachments = scope.ServiceProvider.GetRequiredService<IEmailAttachmentProcessor>();
-        var speStore = scope.ServiceProvider.GetRequiredService<SpeFileStore>();
+        var serviceBus = scope.ServiceProvider.GetRequiredService<IServiceBusPublisher>();
 
-        // Recommended:
-        // 1) Discover candidates using a durable checkpoint or Dataverse change tracking.
-        // 2) Enqueue ADR-004 jobs to Service Bus.
-        // 3) Process jobs with bounded parallelism and backpressure.
-        var newEmails = await GetUnprocessedEmailsAsync(dataverse, ct);
-        foreach (var emailId in newEmails.Take(_options.BatchSize))
-        {
-            await EnqueueEmailProcessingJobAsync(emailId, ct);
-        }
-    }
+        // Query emails that should have been processed but weren't
+        // This catches: missed webhooks, failed processing, service restarts
+        var missedEmails = await GetUnprocessedEmailsAsync(dataverse, ct);
 
-    private async Task ProcessSingleEmailAsync(
-        Guid emailId,
-        IDataverseService dataverse,
-        IEmailToEmlConverter converter,
-        IEmailFilterService filter,
-        IEmailAssociationService association,
-        IEmailAttachmentProcessor attachments,
-        SpeFileStore speStore,
-        CancellationToken ct)
-    {
-        var correlationId = Guid.NewGuid();
         _logger.LogInformation(
-            "Processing email {EmailId} with correlation {CorrelationId}",
-            emailId, correlationId);
+            "Polling backup found {Count} unprocessed emails",
+            missedEmails.Length);
 
-        try
+        foreach (var emailId in missedEmails.Take(_options.BatchSize))
         {
-            // 1. Check filter rules
-            var filterResult = await filter.ShouldProcessEmailAsync(emailId, ct);
-            if (!filterResult.ShouldProcess)
+            await serviceBus.PublishAsync(new JobContract
             {
-                _logger.LogInformation(
-                    "Email {EmailId} skipped: {Reason}",
-                    emailId, filterResult.Reason);
-                await MarkEmailAsProcessedAsync(emailId, skipped: true, ct);
-                return;
-            }
-
-            // 2. Convert to .eml
-            var emlStream = await converter.ConvertToEmlAsync(emailId, includeAttachments: true, ct);
-            var emlFileName = await converter.GenerateEmlFileNameAsync(emailId, ct);
-
-            // 3. Upload to SPE
-            var containerId = await GetOrCreateEmailContainerAsync(dataverse, ct);
-            var emlPath = $"emails/{DateTime.UtcNow:yyyy/MM}/{emlFileName}";
-            var driveItem = await speStore.UploadSmallAsync(containerId, emlPath, emlStream, ct);
-
-            // 4. Determine association
-            var associationResult = await association.DetermineAssociationAsync(emailId, ct);
-
-            // 5. Create Document record
-            var documentId = await CreateEmailDocumentAsync(
-                emailId, driveItem, associationResult, dataverse, ct);
-
-            // 6. Process attachments (separate documents)
-            var attachmentDocIds = await attachments.ProcessAttachmentsAsync(
-                emailId, documentId, ct);
-
-            // 7. Enqueue AI processing
-            await EnqueueAiProcessingAsync(documentId, ct);
-
-            // 8. Mark email as processed
-            await MarkEmailAsProcessedAsync(emailId, skipped: false, ct);
-
-            _logger.LogInformation(
-                "Email {EmailId} processed successfully. Document: {DocumentId}, Attachments: {Count}",
-                emailId, documentId, attachmentDocIds.Length);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, 
-                "Failed to process email {EmailId} with correlation {CorrelationId}",
-                emailId, correlationId);
-            
-            // Mark for retry or manual intervention
-            await MarkEmailAsFailedAsync(emailId, ex.Message, ct);
+                JobId = Guid.NewGuid(),
+                JobType = "email-to-document",
+                SubjectId = emailId.ToString(),
+                CorrelationId = Guid.NewGuid().ToString(),
+                IdempotencyKey = $"Email:{emailId}:Archive",
+                Attempt = 1,
+                MaxAttempts = 3,
+                Payload = new
+                {
+                    trigger = "PollingBackup",
+                    emailId = emailId,
+                    includeAttachmentsInEml = true,
+                    createSeparateAttachmentDocuments = true
+                },
+                CreatedAt = DateTimeOffset.UtcNow
+            }, ct);
         }
     }
 
     private async Task<Guid[]> GetUnprocessedEmailsAsync(
-        IDataverseService dataverse, 
+        IDataverseService dataverse,
         CancellationToken ct)
     {
-        // Query emails that are eligible for processing and not already succeeded.
-        // Avoid relying solely on "now - poll interval" windows; prefer:
-        // - Dataverse change tracking tokens; OR
-        // - a durable high-watermark persisted in Dataverse/config storage.
-        //
-        // Also filter out emails that are not fully available yet:
+        // Query emails eligible for processing that haven't been processed yet
+        // FetchXML criteria:
         // - statecode = Completed (email fully received)
-        // - (optional) attachments fully hydrated
-        // FetchXML:
-        // - directioncode = incoming (true)
-        // - createdon > checkpoint
-        // - NOT EXISTS (sprk_document where sprk_emailactivityid = email.activityid)
-        // - sprk_documentprocessingstatus != Succeeded
-        
-        // Return array of email activity IDs
+        // - createdon > (now - lookback window, e.g., 24 hours)
+        // - sprk_documentprocessingstatus IS NULL OR = Pending OR = Failed (retryable)
+        // - NOT EXISTS (sprk_document where sprk_emailactivityid = email.activityid
+        //               AND sprk_isemailarchive = true)
+
         return await dataverse.QueryAsync<Guid>(/* FetchXML */, ct);
     }
+}
+```
 
-    private async Task MarkEmailAsProcessedAsync(
-        Guid emailId, 
-        bool skipped, 
-        CancellationToken ct)
+#### **3.2.3 Job Handler (Shared Processing Logic)**
+
+Both webhook and polling triggers enqueue the same job type, processed by a shared handler:
+
+```csharp
+/// <summary>
+/// Handles ProcessEmailToDocumentJob from either webhook or polling trigger.
+/// Implements idempotency per ADR-004.
+/// </summary>
+public class EmailToDocumentJobHandler : IJobHandler
+{
+    public string JobType => "email-to-document";
+
+    public async Task<JobOutcome> HandleAsync(JobContract job, CancellationToken ct)
     {
-        // Update email processing fields:
-        // - sprk_documentprocessingstatus = Skipped/Succeeded
-        // - sprk_documentprocessedon = utcNow
-        // - sprk_documentprocessingattempts++
+        var emailId = Guid.Parse(job.SubjectId);
+        var payload = job.Payload.Deserialize<EmailToDocumentPayload>();
+
+        _logger.LogInformation(
+            "Processing email {EmailId}, Trigger: {Trigger}, Correlation: {CorrelationId}",
+            emailId, payload.Trigger, job.CorrelationId);
+
+        try
+        {
+            // 1. Idempotency check - already processed?
+            if (await IsAlreadyProcessedAsync(emailId, ct))
+            {
+                _logger.LogInformation("Email {EmailId} already processed, skipping", emailId);
+                return JobOutcome.Completed("Already processed");
+            }
+
+            // 2. Check filter rules
+            var filterResult = await _filterService.ShouldProcessEmailAsync(emailId, ct);
+            if (!filterResult.ShouldProcess)
+            {
+                await MarkEmailStatusAsync(emailId, ProcessingStatus.Skipped, filterResult.Reason, ct);
+                return JobOutcome.Completed($"Skipped: {filterResult.Reason}");
+            }
+
+            // 3. Convert to .eml
+            var emlStream = await _converter.ConvertToEmlAsync(emailId, payload.IncludeAttachmentsInEml, ct);
+            var emlFileName = await _converter.GenerateEmlFileNameAsync(emailId, ct);
+
+            // 4. Upload to SPE
+            var containerId = await GetEmailContainerAsync(ct);
+            var emlPath = $"emails/{DateTime.UtcNow:yyyy/MM}/{emlFileName}";
+            var driveItem = await _speStore.UploadSmallAsync(containerId, emlPath, emlStream, ct);
+
+            // 5. Determine association (or use override from payload)
+            var association = payload.AssociationOverride ??
+                await _associationService.DetermineAssociationAsync(emailId, ct);
+
+            // 6. Create Document record (with alternate key for idempotency)
+            var documentId = await CreateEmailDocumentAsync(emailId, driveItem, association, ct);
+
+            // 7. Enqueue attachment processing (separate job)
+            if (payload.CreateSeparateAttachmentDocuments)
+            {
+                await _serviceBus.PublishAsync(new JobContract
+                {
+                    JobType = "email-attachments",
+                    SubjectId = emailId.ToString(),
+                    IdempotencyKey = $"Email:{emailId}:Attachments",
+                    Payload = new { emailId, parentDocumentId = documentId }
+                }, ct);
+            }
+
+            // 8. Enqueue AI processing
+            await _serviceBus.PublishAsync(new JobContract
+            {
+                JobType = "ai-document-processing",
+                SubjectId = documentId.ToString(),
+                IdempotencyKey = $"Doc:{documentId}:AI"
+            }, ct);
+
+            // 9. Mark email as processed
+            await MarkEmailStatusAsync(emailId, ProcessingStatus.Succeeded, null, ct);
+
+            return JobOutcome.Completed($"Document created: {documentId}");
+        }
+        catch (DataverseThrottlingException ex)
+        {
+            // Transient - retry with backoff
+            return JobOutcome.RetryableFailure(ex.Message, ex.RetryAfter);
+        }
+        catch (SpeThrottlingException ex)
+        {
+            // Transient - retry with backoff
+            return JobOutcome.RetryableFailure(ex.Message, ex.RetryAfter);
+        }
+        catch (EmailNotFoundException)
+        {
+            // Permanent - email deleted, don't retry
+            return JobOutcome.PermanentFailure("Email not found");
+        }
     }
 }
 ```
@@ -720,7 +853,10 @@ public class EmailToDocumentBackgroundService : BackgroundService
 {
   "EmailProcessing": {
     "Enabled": true,
-    "PollIntervalSeconds": 60,
+    "WebhookEnabled": true,
+    "PollingBackupEnabled": true,
+    "PollingBackupIntervalMinutes": 5,
+    "PollingLookbackHours": 24,
     "BatchSize": 10,
     "ProcessAttachments": true,
     "AutoEnqueueAi": true,

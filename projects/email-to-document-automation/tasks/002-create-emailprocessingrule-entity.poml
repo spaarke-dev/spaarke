@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="E2D-002" project="Email-to-Document Automation">
+  <metadata>
+    <title>Create sprk_emailprocessingrule Entity</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>dataverse, entity, schema</tags>
+  </metadata>
+
+  <prompt>
+    Create a new Dataverse entity to store email processing rules for filtering and routing.
+    Rules determine which emails should be processed, skipped, or require special handling.
+  </prompt>
+
+  <role>
+    Dataverse solution developer with expertise in entity design and Power Platform.
+  </role>
+
+  <goal>
+    New sprk_emailprocessingrule entity created with all required fields, deployed to
+    development environment, ready for rule seeding in task 014.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/email-to-document-automation/SPEC.md</file>
+    <file purpose="project-plan">projects/email-to-document-automation/PLAN.md</file>
+    <file purpose="project-context">projects/email-to-document-automation/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">Use sprk_ prefix for entity and all fields</constraint>
+    <constraint source="dataverse">Entity must be organization-owned</constraint>
+    <constraint source="project">Support regex patterns in criteria field</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/entity-customization</topic>
+    <files>
+      <file>projects/email-to-document-automation/SPEC.md (Section 2.3)</file>
+      <file>docs/ai-knowledge/guides/HOW-TO-ADD-SDAP-TO-NEW-ENTITY.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Email filtering rules allow administrators to configure which emails are automatically
+      processed, which are skipped (spam, signatures), and how emails are routed.
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Review SPEC.md">
+      Read SPEC.md Section 2.3 (sprk_emailprocessingrule Entity) for field definitions.
+    </step>
+    <step order="2" name="Create Entity">
+      Create new entity sprk_emailprocessingrule with:
+      - Display Name: Email Processing Rule
+      - Plural Name: Email Processing Rules
+      - Primary Field: sprk_name (Rule Name)
+      - Ownership: Organization
+    </step>
+    <step order="3" name="Add Fields">
+      Add the following fields:
+      - sprk_ruletype (Option Set: Exclude=0, Include=1, Route=2)
+      - sprk_criteriajson (Multiple Lines of Text - JSON format)
+      - sprk_priority (Whole Number, default 100)
+      - sprk_isactive (Two Options, default Yes)
+      - sprk_description (Multiple Lines of Text)
+      - sprk_targetfield (Single Line of Text - e.g., "subject", "from", "attachmentname")
+      - sprk_pattern (Single Line of Text - regex pattern)
+    </step>
+    <step order="4" name="Create Views">
+      Create "Active Rules" view sorted by priority ascending.
+      Create "All Rules" view.
+    </step>
+    <step order="5" name="Publish">
+      Publish the solution changes.
+    </step>
+    <step order="6" name="Document Changes">
+      Update TASK-INDEX.md with completion status.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI for solution operations</tool>
+    <tool name="dataverse-ui">Dataverse Maker Portal</tool>
+  </tools>
+
+  <outputs>
+    <output type="solution">src/solutions/SpaarkeCore/ (updated)</output>
+    <output type="docs">projects/email-to-document-automation/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">sprk_emailprocessingrule entity exists in solution</criterion>
+    <criterion testable="true">All 7 fields exist with correct types</criterion>
+    <criterion testable="true">sprk_ruletype option set has Exclude, Include, Route values</criterion>
+    <criterion testable="true">Active Rules view displays and sorts by priority</criterion>
+    <criterion testable="true">Entity can be queried via Web API</criterion>
+  </acceptance-criteria>
+</task>
