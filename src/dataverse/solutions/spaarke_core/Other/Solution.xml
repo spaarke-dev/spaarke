@@ -71,7 +71,6 @@
       <RootComponent type="1" schemaName="sprk_recordtype_ref" behavior="1" />
       <RootComponent type="1" schemaName="sprk_uploadcontext" behavior="0" />
       <RootComponent type="300" schemaName="sprk_documentuploaddialog_e52db" behavior="0" />
-      <RootComponent type="61" schemaName="sprk_DocumentOperations" behavior="0" />
       <RootComponent type="61" schemaName="sprk_subgrid_commands" behavior="0" />
     </RootComponents>
     <MissingDependencies>
