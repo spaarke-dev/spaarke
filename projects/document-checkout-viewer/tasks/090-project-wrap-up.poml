@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="document-checkout-viewer">
+  <metadata>
+    <title>Project Wrap-up</title>
+    <phase>Wrap-up</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>053</dependencies>
+    <blocks>none</blocks>
+    <tags>cleanup, wrap-up</tags>
+  </metadata>
+
+  <prompt>
+    Complete project wrap-up: validate all graduation criteria, run repo-cleanup
+    skill, archive ephemeral files, and prepare final summary.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in project completion procedures.
+    Follow project lifecycle strictly.
+  </role>
+
+  <goal>
+    Project is complete with all graduation criteria met, repository cleaned,
+    and project ready for production use.
+  </goal>
+
+  <context>
+    <background>
+      Project wrap-up ensures all work is complete, documented, and the
+      repository is in a clean state. This follows the SPAARKE development
+      lifecycle for project completion.
+    </background>
+    <relevant-files>
+      <file>projects/document-checkout-viewer/README.md (graduation criteria)</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">All graduation criteria must be verified</constraint>
+    <constraint source="project">Run repo-cleanup skill before closing</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>projects/document-checkout-viewer/README.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review graduation criteria in README.md</step>
+    <step order="2">Verify each criterion is met:
+      - SpeDocumentViewer deployed and functional
+      - Version history working
+      - Delete functionality working
+      - Old components migrated
+      - AI integration working
+      - Documentation updated</step>
+    <step order="3">Run /repo-cleanup command</step>
+    <step order="4">Remove ephemeral files from notes/debug, notes/spikes, notes/drafts</step>
+    <step order="5">Archive handoff notes if any</step>
+    <step order="6">Update project README with completion status</step>
+    <step order="7">Update TASK-INDEX.md: mark all tasks completed</step>
+    <step order="8">Create final commit with wrap-up changes</step>
+    <step order="9">Prepare summary for stakeholders</step>
+    <step order="10">Mark project as COMPLETE in README</step>
+  </steps>
+
+  <tools>
+    <tool name="git">Version control for final commits</tool>
+  </tools>
+
+  <outputs>
+    <output type="documentation">projects/document-checkout-viewer/README.md (status: Complete)</output>
+    <output type="cleanup">Ephemeral files removed</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All graduation criteria verified and met</criterion>
+    <criterion testable="true">repo-cleanup passes without errors</criterion>
+    <criterion testable="true">Ephemeral files removed from notes/</criterion>
+    <criterion testable="true">README shows project status as Complete</criterion>
+    <criterion testable="true">All tasks in TASK-INDEX.md marked completed</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is the final task. Only run after all other tasks are complete.
+    The project folder can remain for historical reference.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/repo-cleanup/SKILL.md</skill>
+    <protocol>
+      Verify all prior tasks are completed before starting wrap-up.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="document-checkout-viewer">
+  <metadata>
+    <title>Create PCF Control Scaffolding</title>
+    <phase>3: SpeDocumentViewer PCF</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>015</dependencies>
+    <blocks>021</blocks>
+    <tags>pcf, react, typescript, frontend, fluent-ui</tags>
+  </metadata>
+
+  <prompt>
+    Create the SpeDocumentViewer PCF control scaffolding with ControlManifest, types,
+    styles, and basic component structure. Set up MSAL authentication and BffClient
+    following existing SpeFileViewer patterns.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in PCF control development with React and Fluent UI v9.
+    Follow ADRs strictly. Follow PCF-V9-PACKAGING.md for version management.
+  </role>
+
+  <goal>
+    A scaffolded SpeDocumentViewer PCF control with manifest, types, auth service,
+    and basic React component structure that compiles and can be tested locally.
+  </goal>
+
+  <context>
+    <background>
+      SpeDocumentViewer will be a unified component replacing both SpeFileViewer and
+      SourceDocumentViewer. It needs feature flags for enableEdit, enableDelete to
+      support different use cases.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/SpeFileViewer/ (reference pattern)</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>projects/document-checkout-viewer/spec.md (PCF Control Specification)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">Use PCF over legacy webresources</constraint>
+    <constraint source="ADR-012">Design for future extraction to shared library</constraint>
+    <constraint source="project">Must support feature flags: enableEdit, enableDelete, enableDownload</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/ai-knowledge/guides/PCF-V9-PACKAGING.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/reference/adr/ADR-006-pcf-over-webresources.md</file>
+    </files>
+    <patterns>
+      <pattern name="PCF structure" location="src/client/pcf/SpeFileViewer/">
+        Follow existing PCF control structure: index.ts, types.ts, BffClient.ts
+      </pattern>
+      <pattern name="MSAL auth" location="src/client/pcf/SpeFileViewer/control/MsalAuthService.ts">
+        Reuse or copy MSAL authentication pattern
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create src/client/pcf/SpeDocumentViewer/ directory structure</step>
+    <step order="2">Create ControlManifest.Input.xml with all properties from spec</step>
+    <step order="3">Set initial version to 1.0.0 in manifest</step>
+    <step order="4">Create types.ts with ISpeDocumentViewerProps, ISpeDocumentViewerState, CheckoutStatus</step>
+    <step order="5">Create BffClient.ts copying from SpeFileViewer, add checkout/checkin methods</step>
+    <step order="6">Copy MsalAuthService.ts from SpeFileViewer</step>
+    <step order="7">Create SpeDocumentViewer.tsx skeleton component</step>
+    <step order="8">Create index.ts PCF entry point</step>
+    <step order="9">Create package.json with dependencies</step>
+    <step order="10">Run npm install and npm run build to verify compilation</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/PCF projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/SpeDocumentViewer/control/ControlManifest.Input.xml</output>
+    <output type="code">src/client/pcf/SpeDocumentViewer/control/types.ts</output>
+    <output type="code">src/client/pcf/SpeDocumentViewer/control/BffClient.ts</output>
+    <output type="code">src/client/pcf/SpeDocumentViewer/control/SpeDocumentViewer.tsx</output>
+    <output type="code">src/client/pcf/SpeDocumentViewer/control/index.ts</output>
+    <output type="code">src/client/pcf/SpeDocumentViewer/package.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build completes without errors</criterion>
+    <criterion testable="true">ControlManifest.Input.xml validates</criterion>
+    <criterion testable="true">All property definitions from spec are present in manifest</criterion>
+    <criterion testable="true">BffClient has checkout, checkin, discard methods defined</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use PCF-V9-PACKAGING.md for version numbering guidance.
+    The manifest must include value property for field control discoverability.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, read PCF-V9-PACKAGING.md for mandatory guidelines.
+    </protocol>
+  </execution>
+</task>

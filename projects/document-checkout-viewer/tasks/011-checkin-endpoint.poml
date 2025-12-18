@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="document-checkout-viewer">
+  <metadata>
+    <title>Implement Check-In Endpoint</title>
+    <phase>2: BFF API Endpoints</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>052</blocks>
+    <tags>bff-api, api, minimal-api, endpoints</tags>
+  </metadata>
+
+  <prompt>
+    Implement the POST /api/documents/{id}/checkin endpoint that releases the document lock,
+    completes the version record, triggers AI analysis, and returns the preview URL.
+    The check-in user may differ from the checkout user.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs and Dataverse integration.
+    Follow ADRs strictly.
+  </role>
+
+  <goal>
+    A working checkin endpoint that releases locks, updates version records with check-in
+    metadata, triggers AI analysis, and returns preview URLs. Includes unit tests.
+  </goal>
+
+  <context>
+    <background>
+      Check-in completes the edit cycle. It must update both the version record and
+      document status, then trigger AI analysis so the AI processes the stable
+      committed version.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/DocumentCheckoutService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API patterns</constraint>
+    <constraint source="project">Check-in user may differ from checkout user</constraint>
+    <constraint source="project">AI analysis should be fire-and-forget (don't block response)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/CLAUDE.md</file>
+      <file>docs/reference/adr/ADR-001-minimal-api-endpoints.md</file>
+      <file>docs/reference/adr/ADR-013-ai-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="AI trigger" location="src/server/api/Sprk.Bff.Api/Services/Ai/">
+        Follow existing AI analysis trigger patterns
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add CheckInAsync method to DocumentCheckoutService</step>
+    <step order="2">Implement: update version record with checkin user, time, comment</step>
+    <step order="3">Update sprk_fileversion.sprk_status to CheckedIn</step>
+    <step order="4">Update sprk_document: clear checkout fields, set currentversionid</step>
+    <step order="5">Trigger AI analysis (fire-and-forget using background task)</step>
+    <step order="6">Add POST /api/documents/{id}/checkin endpoint</step>
+    <step order="7">Create CheckInRequest model with optional comment</step>
+    <step order="8">Create CheckInResponse with preview URL, version info</step>
+    <step order="9">Write unit tests for checkin service</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/DocumentCheckoutService.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/CheckoutModels.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs (modified)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/DocumentCheckoutServiceTests.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">POST /api/documents/{id}/checkin returns 200 with preview URL</criterion>
+    <criterion testable="true">sprk_fileversion.sprk_status is updated to CheckedIn</criterion>
+    <criterion testable="true">sprk_document.sprk_ischeckedout is set to false</criterion>
+    <criterion testable="true">Check-in by different user than checkout works correctly</criterion>
+    <criterion testable="true">AI analysis is triggered (can verify via logs)</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use IBackgroundTaskQueue or similar for fire-and-forget AI trigger.
+    The comment field is optional but should be stored if provided.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

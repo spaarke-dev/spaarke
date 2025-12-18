@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="document-checkout-viewer">
+  <metadata>
+    <title>Implement Checkout Endpoint</title>
+    <phase>2: BFF API Endpoints</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>003</dependencies>
+    <blocks>011, 012</blocks>
+    <tags>bff-api, api, minimal-api, endpoints</tags>
+  </metadata>
+
+  <prompt>
+    Implement the POST /api/documents/{id}/checkout endpoint that locks a document for
+    editing, creates a new sprk_fileversion record, and returns the Office Online edit URL.
+    Handle conflict when document is already checked out by another user.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs and Dataverse integration.
+    Follow ADRs strictly. Use endpoint filters for authorization.
+  </role>
+
+  <goal>
+    A working checkout endpoint that creates version records, locks documents, handles
+    conflicts, and returns edit URLs. Includes unit tests with 80% coverage.
+  </goal>
+
+  <context>
+    <background>
+      The checkout endpoint is the entry point for the edit flow. It must atomically
+      create a version record and update the document's checkout status to prevent
+      race conditions.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/</file>
+      <file>projects/document-checkout-viewer/spec.md (BFF API Specification section)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API patterns, not controllers</constraint>
+    <constraint source="ADR-008">Use endpoint filters for authorization, not middleware</constraint>
+    <constraint source="ADR-010">Follow DI minimalism - avoid unnecessary abstractions</constraint>
+    <constraint source="project">Return 409 Conflict if document already checked out</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/CLAUDE.md</file>
+      <file>docs/reference/adr/ADR-001-minimal-api-endpoints.md</file>
+      <file>docs/reference/adr/ADR-008-endpoint-filters.md</file>
+    </files>
+    <patterns>
+      <pattern name="Minimal API endpoint" location="src/server/api/Sprk.Bff.Api/Api/">
+        Follow existing endpoint patterns in FileAccessEndpoints.cs
+      </pattern>
+      <pattern name="Dataverse operations" location="src/server/api/Sprk.Bff.Api/Services/">
+        Use DataverseService for CRUD operations
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing FileAccessEndpoints.cs for patterns</step>
+    <step order="2">Create DocumentCheckoutService with CheckoutAsync method</step>
+    <step order="3">Implement checkout logic: verify not locked, create version, update document</step>
+    <step order="4">Add POST /api/documents/{id}/checkout endpoint in FileAccessEndpoints.cs</step>
+    <step order="5">Create CheckoutResponse model with edit URL, desktop URL, checkout info</step>
+    <step order="6">Implement conflict handling (409 if already checked out)</step>
+    <step order="7">Add authorization filter for document access</step>
+    <step order="8">Write unit tests for checkout service</step>
+    <step order="9">Test endpoint manually via Postman/curl</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/DocumentCheckoutService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/CheckoutModels.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs (modified)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/DocumentCheckoutServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">POST /api/documents/{id}/checkout returns 200 with edit URL when successful</criterion>
+    <criterion testable="true">Endpoint returns 409 Conflict when document already checked out</criterion>
+    <criterion testable="true">sprk_fileversion record is created with status=CheckedOut</criterion>
+    <criterion testable="true">sprk_document.sprk_ischeckedout is set to true</criterion>
+    <criterion testable="true">Unit tests achieve 80% coverage</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The edit URL should use the Office Online embedview format.
+    Consider using optimistic concurrency for the checkout operation.
+    See spec.md for exact response format.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

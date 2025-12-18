@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="document-checkout-viewer">
+  <metadata>
+    <title>Implement Discard Endpoint</title>
+    <phase>2: BFF API Endpoints</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, api, minimal-api, endpoints</tags>
+  </metadata>
+
+  <prompt>
+    Implement the POST /api/documents/{id}/discard endpoint that cancels a checkout
+    without saving changes. Mark the version record as Discarded and release the
+    document lock.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs.
+    Follow ADRs strictly.
+  </role>
+
+  <goal>
+    A working discard endpoint that cancels checkouts, marks versions as discarded,
+    and returns the preview URL for the last committed version.
+  </goal>
+
+  <context>
+    <background>
+      Discard allows users to cancel their edits and release the lock without
+      committing a new version. The version record is kept for audit trail but
+      marked as Discarded.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/DocumentCheckoutService.cs</file>
+      <file>projects/document-checkout-viewer/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API patterns</constraint>
+    <constraint source="project">Version record should be kept but marked Discarded</constraint>
+    <constraint source="project">Only the user who checked out can discard (or admin)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/CLAUDE.md</file>
+      <file>docs/reference/adr/ADR-001-minimal-api-endpoints.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add DiscardAsync method to DocumentCheckoutService</step>
+    <step order="2">Verify current user is checkout user (or has admin privilege)</step>
+    <step order="3">Update sprk_fileversion.sprk_status to Discarded</step>
+    <step order="4">Clear document checkout fields (sprk_ischeckedout = false, etc.)</step>
+    <step order="5">Add POST /api/documents/{id}/discard endpoint</step>
+    <step order="6">Return preview URL for last committed version</step>
+    <step order="7">Write unit tests</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/DocumentCheckoutService.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs (modified)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/DocumentCheckoutServiceTests.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">POST /api/documents/{id}/discard returns 200 with preview URL</criterion>
+    <criterion testable="true">sprk_fileversion.sprk_status is updated to Discarded</criterion>
+    <criterion testable="true">Document checkout fields are cleared</criterion>
+    <criterion testable="true">Returns 403 if user is not the checkout user</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Consider whether SPE file should be reverted. For now, SPE auto-save means
+    changes are already in the file. Future: could implement version restore.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+    </protocol>
+  </execution>
+</task>

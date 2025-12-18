@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="document-checkout-viewer">
+  <metadata>
+    <title>Migrate SpeFileViewer Usage</title>
+    <phase>5: Migration &amp; Integration</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>025, 032</dependencies>
+    <blocks>053</blocks>
+    <tags>migration, pcf, dataverse</tags>
+  </metadata>
+
+  <prompt>
+    Replace SpeFileViewer PCF control usage with SpeDocumentViewer on the
+    Document entity form. Configure the control with enableEdit=true and
+    enableDelete=true for full functionality.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse form customization.
+    Follow ADRs strictly.
+  </role>
+
+  <goal>
+    Document entity form uses SpeDocumentViewer instead of SpeFileViewer,
+    with full edit/delete capabilities enabled.
+  </goal>
+
+  <context>
+    <background>
+      SpeFileViewer is the existing document preview control. SpeDocumentViewer
+      is the new unified control with check-out/check-in. The migration replaces
+      the old control while preserving functionality.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/SpeFileViewer/</file>
+      <file>src/client/pcf/SpeDocumentViewer/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Enable all features: enableEdit, enableDelete, enableDownload</constraint>
+    <constraint source="project">Preserve existing form layout</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/ai-knowledge/guides/PCF-V9-PACKAGING.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Export Document entity form from Dataverse</step>
+    <step order="2">Identify SpeFileViewer control placement in form XML</step>
+    <step order="3">Replace with SpeDocumentViewer control reference</step>
+    <step order="4">Configure enableEdit=true property</step>
+    <step order="5">Configure enableDelete=true property</step>
+    <step order="6">Configure enableDownload=true property</step>
+    <step order="7">Configure onFullscreen callback if applicable</step>
+    <step order="8">Import modified form</step>
+    <step order="9">Test document preview functionality</step>
+    <step order="10">Test checkout/checkin flow</step>
+    <step order="11">Test delete button integration with ribbon</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI for solution management</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse">Document form using SpeDocumentViewer</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SpeDocumentViewer displays on Document form</criterion>
+    <criterion testable="true">Preview mode works correctly</criterion>
+    <criterion testable="true">Edit button initiates checkout</criterion>
+    <criterion testable="true">Check-in creates version history</criterion>
+    <criterion testable="true">Delete button on ribbon still functions</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Keep SpeFileViewer code in repository temporarily for rollback capability.
+    Mark as deprecated but don't delete until Phase 5 is complete.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, verify SpeDocumentViewer is deployed and working.
+    </protocol>
+  </execution>
+</task>

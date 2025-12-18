@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="document-checkout-viewer">
+  <metadata>
+    <title>Create sprk_fileversion Entity</title>
+    <phase>1: Dataverse Schema</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>002, 010</blocks>
+    <tags>dataverse, solution, fields</tags>
+  </metadata>
+
+  <prompt>
+    Create a new Dataverse entity called sprk_fileversion to track document version history.
+    This entity will store metadata for each check-out/check-in cycle including who checked out,
+    who checked in (may differ), timestamps, and version comments.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse entity creation and solution management.
+    Follow ADRs strictly.
+  </role>
+
+  <goal>
+    A fully configured sprk_fileversion entity exists in Dataverse with all required fields,
+    proper relationships to sprk_document, and appropriate security configuration.
+  </goal>
+
+  <context>
+    <background>
+      The File Version entity enables version tracking with full audit trail. Each check-out
+      creates a new version record, and check-in completes it. This supports scenarios where
+      one user checks out and another checks in (handoff).
+    </background>
+    <relevant-files>
+      <file>projects/document-checkout-viewer/spec.md (Dataverse Schema section)</file>
+      <file>infrastructure/dataverse/ (existing solution structure)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Entity schema name must be sprk_fileversion</constraint>
+    <constraint source="project">Must have 1:N relationship from sprk_document</constraint>
+    <constraint source="project">Status field must have choices: CheckedOut, CheckedIn, Discarded</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>infrastructure/dataverse/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Entity creation" location="infrastructure/dataverse/">
+        Follow existing entity patterns in the Dataverse solution
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec.md Dataverse Schema section for full field definitions</step>
+    <step order="2">Create sprk_fileversion entity with primary field sprk_name</step>
+    <step order="3">Add all fields per spec: sprk_versionnumber, sprk_checkedoutby, sprk_checkedoutat, sprk_checkedinby, sprk_checkedindat, sprk_comment, sprk_filesize, sprk_status</step>
+    <step order="4">Create sprk_documentid lookup field to sprk_document (N:1 relationship)</step>
+    <step order="5">Configure status choice field with values: CheckedOut (1), CheckedIn (2), Discarded (3)</step>
+    <step order="6">Set appropriate field requirements (sprk_documentid required, sprk_versionnumber required)</step>
+    <step order="7">Configure cascade behavior for relationship (delete versions when document deleted)</step>
+    <step order="8">Add entity to appropriate Dataverse solution</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status to completed</step>
+    <step order="10">Document any deviations in projects/document-checkout-viewer/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI for solution operations</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse">sprk_fileversion entity in Dataverse</output>
+    <output type="solution">Updated Dataverse solution with new entity</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">sprk_fileversion entity is queryable via Dataverse Web API</criterion>
+    <criterion testable="true">All specified fields exist with correct data types</criterion>
+    <criterion testable="true">Relationship to sprk_document is properly configured</criterion>
+    <criterion testable="true">Status choice field has all three values</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    See spec.md for complete field definitions including data types and descriptions.
+    The version number should be auto-incremented by the BFF, not Dataverse.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

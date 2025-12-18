@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="document-checkout-viewer">
+  <metadata>
+    <title>Create Delete JavaScript Webresource</title>
+    <phase>4: Delete &amp; Ribbon</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>013</dependencies>
+    <blocks>031</blocks>
+    <tags>webresource, javascript, dataverse, msal</tags>
+  </metadata>
+
+  <prompt>
+    Create the sprk_DocumentDelete.js webresource that handles document deletion.
+    Implement MSAL token acquisition, BFF API call, confirmation dialog, and
+    navigation after successful deletion.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse webresources and MSAL.
+    Follow ADRs strictly. This is an approved ADR-006 exception.
+  </role>
+
+  <goal>
+    A fully functional JavaScript webresource that deletes documents via the BFF
+    API, with proper authentication, user confirmation, and error handling.
+  </goal>
+
+  <context>
+    <background>
+      Delete is triggered from the Document entity ribbon. This is a targeted
+      exception to ADR-006 (PCF over webresources) because delete needs to
+      work without PCF and provide native Dataverse UX.
+    </background>
+    <relevant-files>
+      <file>projects/document-checkout-viewer/spec.md (Delete Flow section)</file>
+      <file>src/client/pcf/SpeFileViewer/control/services/MsalAuthProvider.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">Approved exception for ribbon delete button</constraint>
+    <constraint source="project">Must acquire token using MSAL before API call</constraint>
+    <constraint source="project">Show confirmation dialog with document name</constraint>
+    <constraint source="project">Navigate to grid view after successful deletion</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/reference/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>src/client/pcf/SpeFileViewer/control/services/MsalAuthProvider.ts</file>
+    </files>
+    <patterns>
+      <pattern name="MSAL in webresource" location="existing examples">
+        Use window.msal or dynamically load MSAL library
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create sprk_DocumentDelete.js file structure</step>
+    <step order="2">Implement MSAL configuration for BFF API scope</step>
+    <step order="3">Create token acquisition function using acquireTokenSilent with popup fallback</step>
+    <step order="4">Implement confirmation dialog using Xrm.Navigation.openConfirmDialog</step>
+    <step order="5">Implement DELETE API call with bearer token</step>
+    <step order="6">Handle checkout-locked error (document is checked out)</step>
+    <step order="7">Handle success: close form and navigate to grid</step>
+    <step order="8">Handle error: show user-friendly error message</step>
+    <step order="9">Add progress indicator during deletion</step>
+    <step order="10">Export deleteDocument function for ribbon command</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI for webresource deployment</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/webresources/sprk_DocumentDelete.js</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Confirmation dialog shows document name</criterion>
+    <criterion testable="true">MSAL token acquired successfully for BFF scope</criterion>
+    <criterion testable="true">DELETE API called with bearer token</criterion>
+    <criterion testable="true">Success navigates to document grid</criterion>
+    <criterion testable="true">Checkout-locked error shows friendly message</criterion>
+    <criterion testable="true">API errors show user-friendly message</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use Xrm.Navigation.openConfirmDialog for native Dataverse confirmation.
+    Use Xrm.Utility.showProgressIndicator during API call.
+    Navigate using Xrm.Navigation.navigateTo for grid view.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load the MSAL patterns from SpeFileViewer.
+    </protocol>
+  </execution>
+</task>

@@ -1,9 +1,21 @@
 # Document Check-Out/Check-In Viewer - AI Context
 
 ## Project Status
-- **Phase**: Ready for Task Creation
+- **Phase**: Ready for Implementation
 - **Last Updated**: 2025-12-18
-- **Next Action**: Run `/task-create` to decompose plan into executable tasks
+- **Next Action**: Begin Phase 1 - Task 001 (Create sprk_fileversion Entity)
+
+## Task Summary
+| Phase | Tasks | Description |
+|-------|-------|-------------|
+| 1: Dataverse Schema | 001-003 | Entity creation, fields, solution deploy |
+| 2: BFF API Endpoints | 010-015 | checkout, checkin, discard, delete, preview-url |
+| 3: SpeDocumentViewer PCF | 020-025 | Scaffolding, preview, toolbar, checkout flow, edit, deploy |
+| 4: Delete & Ribbon | 030-032 | Webresource, ribbon button, deploy |
+| 5: Migration & Integration | 050-053 | Migrate components, AI integration, docs |
+| Wrap-up | 090 | Final cleanup and validation |
+
+**Total**: 23 tasks | **Recommended order**: Start with 001 and follow dependency chain
 
 ## Key Files
 - `spec.md` - Original design specification (permanent reference)

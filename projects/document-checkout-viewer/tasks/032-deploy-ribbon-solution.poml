@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="document-checkout-viewer">
+  <metadata>
+    <title>Deploy Ribbon Solution to Dev</title>
+    <phase>4: Delete &amp; Ribbon</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>031</dependencies>
+    <blocks>050</blocks>
+    <tags>deploy, dataverse, ribbon</tags>
+  </metadata>
+
+  <prompt>
+    Deploy the ribbon customization solution to the development Dataverse
+    environment. Verify the Delete button appears and functions correctly on
+    the Document form.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse solution deployment.
+    Follow ADRs strictly.
+  </role>
+
+  <goal>
+    Ribbon solution deployed to dev environment with working Delete button
+    that integrates with the BFF DELETE endpoint.
+  </goal>
+
+  <context>
+    <background>
+      The solution contains the webresource and ribbon customization from
+      tasks 030 and 031. Deployment follows standard pac solution import.
+    </background>
+    <relevant-files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use dataverse-deploy skill</constraint>
+    <constraint source="project">Verify Delete button functionality after deploy</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load dataverse-deploy skill</step>
+    <step order="2">Verify pac auth is connected to dev environment</step>
+    <step order="3">Pack solution as managed</step>
+    <step order="4">Import solution using pac solution import</step>
+    <step order="5">Publish all customizations</step>
+    <step order="6">Open a Document form in the browser</step>
+    <step order="7">Verify Delete button is visible in ribbon</step>
+    <step order="8">Test Delete button with a test document</step>
+    <step order="9">Verify document deleted in both Dataverse and SPE</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI for solution deployment</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment">Ribbon solution deployed to dev Dataverse</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Solution imports without errors</criterion>
+    <criterion testable="true">Delete button visible on Document form</criterion>
+    <criterion testable="true">Delete button calls BFF API successfully</criterion>
+    <criterion testable="true">Document removed from Dataverse after delete</criterion>
+    <criterion testable="true">File removed from SPE after delete</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use a test document that can be safely deleted. Verify both Dataverse record
+    and SPE file are removed.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/dataverse-deploy/SKILL.md</skill>
+    <protocol>
+      Load dataverse-deploy skill BEFORE starting this task.
+    </protocol>
+  </execution>
+</task>

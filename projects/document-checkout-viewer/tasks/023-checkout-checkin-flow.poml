@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="document-checkout-viewer">
+  <metadata>
+    <title>Implement Check-Out/Check-In Flow</title>
+    <phase>3: SpeDocumentViewer PCF</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>022</dependencies>
+    <blocks>024</blocks>
+    <tags>pcf, react, typescript, frontend, fluent-ui</tags>
+  </metadata>
+
+  <prompt>
+    Implement the checkout and checkin flow in the PCF control. When user clicks Edit,
+    call checkout API and transition to edit mode. When user clicks Check In, show
+    comment dialog, call checkin API, and return to preview mode.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in React state management and API integration.
+    Follow ADRs strictly.
+  </role>
+
+  <goal>
+    Working checkout/checkin flow with proper state transitions, error handling,
+    and user feedback including confirmation dialogs.
+  </goal>
+
+  <context>
+    <background>
+      The state machine transitions: preview -> checkout -> edit -> checkin -> preview.
+      Discard is an alternative path: edit -> discard -> preview.
+    </background>
+    <relevant-files>
+      <file>projects/document-checkout-viewer/spec.md (State Machine section)</file>
+      <file>src/client/pcf/SpeDocumentViewer/control/BffClient.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Checkin must show comment dialog</constraint>
+    <constraint source="project">Discard must show confirmation dialog</constraint>
+    <constraint source="project">Handle 409 Conflict for already-checked-out documents</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/ai-knowledge/guides/PCF-V9-PACKAGING.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Dialog pattern" location="@fluentui/react-components">
+        Use Dialog, DialogSurface, DialogTitle, DialogContent, DialogActions
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create useCheckoutFlow hook for state management</step>
+    <step order="2">Implement handleCheckout: call API, update state, get edit URL</step>
+    <step order="3">Create CheckInDialog component with comment input</step>
+    <step order="4">Implement handleCheckIn: show dialog, call API on confirm</step>
+    <step order="5">Create DiscardConfirmDialog component</step>
+    <step order="6">Implement handleDiscard: show confirm, call API on confirm</step>
+    <step order="7">Handle checkout conflict (show error message)</step>
+    <step order="8">Add processing state with spinner during API calls</step>
+    <step order="9">Update toolbar to show Edit vs Check In/Discard based on mode</step>
+    <step order="10">Write tests for state transitions</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/PCF projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/SpeDocumentViewer/control/hooks/useCheckoutFlow.ts</output>
+    <output type="code">src/client/pcf/SpeDocumentViewer/control/components/CheckInDialog.tsx</output>
+    <output type="code">src/client/pcf/SpeDocumentViewer/control/components/DiscardConfirmDialog.tsx</output>
+    <output type="code">src/client/pcf/SpeDocumentViewer/control/SpeDocumentViewer.tsx (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Clicking Edit calls checkout API and transitions to edit mode</criterion>
+    <criterion testable="true">Check In shows dialog with comment field</criterion>
+    <criterion testable="true">Discard shows confirmation dialog before proceeding</criterion>
+    <criterion testable="true">409 Conflict displays user-friendly error message</criterion>
+    <criterion testable="true">Processing spinner shows during API calls</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The comment field in CheckInDialog is optional but should be encouraged.
+    Consider auto-focusing the comment field when dialog opens.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+    </protocol>
+  </execution>
+</task>
