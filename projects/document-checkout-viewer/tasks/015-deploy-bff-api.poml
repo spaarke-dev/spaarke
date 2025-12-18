@@ -3,7 +3,7 @@
   <metadata>
     <title>Deploy BFF API to Dev</title>
     <phase>2: BFF API Endpoints</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>014</dependencies>
     <blocks>020</blocks>

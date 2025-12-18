@@ -8,9 +8,9 @@
 
 | Status | Count |
 |--------|-------|
-| Not Started | 15 |
+| Not Started | 14 |
 | In Progress | 0 |
-| Completed | 8 |
+| Completed | 9 |
 | Blocked | 0 |
 
 ## Task List
@@ -32,7 +32,7 @@
 | [012](012-discard-endpoint.poml) | Implement Discard Endpoint | ✅ completed | 010 | 2 |
 | [013](013-delete-endpoint.poml) | Implement Delete Document Endpoint | ✅ completed | 003 | 3 |
 | [014](014-extend-preview-url.poml) | Extend Preview URL with Checkout Status | ✅ completed | 003 | 2 |
-| [015](015-deploy-bff-api.poml) | Deploy BFF API to Dev | not-started | 014 | 2 |
+| [015](015-deploy-bff-api.poml) | Deploy BFF API to Dev | ✅ completed | 014 | 2 |
 
 ### Phase 3: SpeDocumentViewer PCF
 
