@@ -49,6 +49,16 @@ public static class DocumentOperationsEndpoints
             .ProducesProblem(404)
             .ProducesProblem(401);
 
+        // DELETE /api/documents/{documentId}
+        group.MapDelete("", DeleteDocument)
+            .AddDocumentAuthorizationFilter("delete")
+            .WithName("DeleteDocument")
+            .WithDescription("Deletes a document from both Dataverse and SharePoint Embedded")
+            .Produces<DeleteDocumentResponse>(200)
+            .Produces<DocumentLockedError>(409)
+            .ProducesProblem(404)
+            .ProducesProblem(401);
+
         return app;
     }
 
@@ -226,6 +236,65 @@ public static class DocumentOperationsEndpoints
                 statusCode: 500,
                 title: "Discard Failed",
                 detail: "An error occurred while discarding the checkout",
+                extensions: new Dictionary<string, object?> { ["correlationId"] = correlationId }
+            );
+        }
+    }
+
+    /// <summary>
+    /// DELETE /api/documents/{documentId}
+    /// Deletes a document from both Dataverse and SharePoint Embedded.
+    /// </summary>
+    private static async Task<IResult> DeleteDocument(
+        Guid documentId,
+        HttpContext httpContext,
+        [FromServices] DocumentCheckoutService checkoutService,
+        [FromServices] ILogger<Program> logger,
+        CancellationToken ct)
+    {
+        var correlationId = httpContext.TraceIdentifier;
+
+        logger.LogInformation(
+            "Delete endpoint called for document {DocumentId} [{CorrelationId}]",
+            documentId, correlationId);
+
+        try
+        {
+            var result = await checkoutService.DeleteAsync(documentId, correlationId, ct);
+
+            return result switch
+            {
+                SuccessDeleteResult success => TypedResults.Ok(success.Response),
+                NotFoundDeleteResult => TypedResults.Problem(
+                    statusCode: 404,
+                    title: "Document Not Found",
+                    detail: $"Document {documentId} was not found",
+                    extensions: new Dictionary<string, object?> { ["correlationId"] = correlationId }
+                ),
+                CheckedOutDeleteResult checkedOut => TypedResults.Json(
+                    checkedOut.CheckedOutError,
+                    statusCode: 409
+                ),
+                FailedDeleteResult failed => TypedResults.Problem(
+                    statusCode: 500,
+                    title: "Delete Failed",
+                    detail: "An error occurred while deleting the document",
+                    extensions: new Dictionary<string, object?> { ["correlationId"] = correlationId }
+                ),
+                _ => TypedResults.Problem(
+                    statusCode: 500,
+                    title: "Unexpected Error",
+                    detail: "An unexpected error occurred during delete"
+                )
+            };
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Delete failed for document {DocumentId}", documentId);
+            return TypedResults.Problem(
+                statusCode: 500,
+                title: "Delete Failed",
+                detail: "An error occurred while deleting the document",
                 extensions: new Dictionary<string, object?> { ["correlationId"] = correlationId }
             );
         }

@@ -10,6 +10,7 @@ using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
+using Sprk.Bff.Api.Services;
 
 namespace Sprk.Bff.Api.Api;
 
@@ -83,11 +84,13 @@ public static class FileAccessEndpoints
         /// <summary>
         /// GET /api/documents/{documentId}/preview-url
         /// Returns ephemeral preview URL using user's delegated permissions (OBO)
+        /// Includes checkout status for PCF control to show lock indicators
         /// </summary>
         static async Task<IResult> GetPreviewUrl(
             string documentId,
             IDataverseService dataverseService,
             IGraphClientFactory graphFactory,
+            DocumentCheckoutService checkoutService,
             ILogger<Program> logger,
             HttpContext context,
             CancellationToken ct)
@@ -183,7 +186,19 @@ public static class FileAccessEndpoints
                 }
             }
 
-            // 8. Return PCF-compatible response (flat structure for SpeFileViewer)
+            // 8. Get checkout status for the document
+            CheckoutStatusInfo? checkoutStatus = null;
+            try
+            {
+                checkoutStatus = await checkoutService.GetCheckoutStatusAsync(docGuid, context.User, ct);
+            }
+            catch (Exception ex)
+            {
+                // Log but don't fail - checkout status is non-critical
+                logger.LogWarning(ex, "Failed to get checkout status for document {DocumentId}", documentId);
+            }
+
+            // 9. Return PCF-compatible response (flat structure for SpeFileViewer/SpeDocumentViewer)
             return TypedResults.Ok(new
             {
                 previewUrl = previewUrl,  // Modified URL with chromeless parameters
@@ -194,6 +209,18 @@ public static class FileAccessEndpoints
                     size = document.FileSize,
                     lastModified = document.ModifiedOn.ToString("o") // ISO 8601 format
                 },
+                checkoutStatus = checkoutStatus != null ? new
+                {
+                    isCheckedOut = checkoutStatus.IsCheckedOut,
+                    checkedOutBy = checkoutStatus.CheckedOutBy != null ? new
+                    {
+                        id = checkoutStatus.CheckedOutBy.Id,
+                        name = checkoutStatus.CheckedOutBy.Name,
+                        email = checkoutStatus.CheckedOutBy.Email
+                    } : null,
+                    checkedOutAt = checkoutStatus.CheckedOutAt?.ToString("o"),
+                    isCurrentUser = checkoutStatus.IsCurrentUser
+                } : null,
                 correlationId = context.TraceIdentifier
             });
         }

@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement Delete Document Endpoint</title>
     <phase>2: BFF API Endpoints</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>003</dependencies>
     <blocks>030</blocks>

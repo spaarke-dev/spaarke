@@ -358,6 +358,108 @@ public class DocumentCheckoutService
         );
     }
 
+    /// <summary>
+    /// Delete a document (both SPE file and Dataverse record).
+    /// </summary>
+    public async Task<DeleteResult> DeleteAsync(
+        Guid documentId,
+        string correlationId,
+        CancellationToken ct = default)
+    {
+        await EnsureAuthenticatedAsync(ct);
+
+        _logger.LogInformation(
+            "Delete requested for document {DocumentId} [{CorrelationId}]",
+            documentId, correlationId);
+
+        // 1. Get document and verify not checked out
+        var document = await GetDocumentAsync(documentId, ct);
+        if (document == null)
+        {
+            return DeleteResult.NotFound(correlationId);
+        }
+
+        if (document.IsCheckedOut)
+        {
+            _logger.LogWarning(
+                "Cannot delete document {DocumentId} - checked out by {CheckedOutBy}",
+                documentId, document.CheckedOutByName);
+
+            return DeleteResult.CheckedOut(
+                new DocumentLockedError(
+                    Error: "document_locked",
+                    Detail: $"Cannot delete document. It is checked out by {document.CheckedOutByName}.",
+                    CheckedOutBy: new CheckoutUserInfo(
+                        document.CheckedOutById ?? Guid.Empty,
+                        document.CheckedOutByName ?? "Unknown",
+                        null),
+                    CheckedOutAt: document.CheckedOutAt
+                ),
+                correlationId
+            );
+        }
+
+        // 2. Delete file from SPE first
+        try
+        {
+            if (!string.IsNullOrEmpty(document.DriveId) && !string.IsNullOrEmpty(document.ItemId))
+            {
+                var deleted = await _speFileStore.DeleteFileAsync(document.DriveId, document.ItemId, ct);
+                if (!deleted)
+                {
+                    _logger.LogWarning(
+                        "SPE file not found for document {DocumentId} (may already be deleted)",
+                        documentId);
+                }
+                else
+                {
+                    _logger.LogInformation(
+                        "SPE file deleted for document {DocumentId}",
+                        documentId);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // Log but continue - file might already be deleted
+            _logger.LogWarning(ex,
+                "Failed to delete SPE file for document {DocumentId} - continuing with Dataverse deletion",
+                documentId);
+        }
+
+        // 3. Delete Dataverse record (cascade should handle FileVersions)
+        try
+        {
+            var deleteUrl = $"{DocumentEntitySet}({documentId})";
+            var response = await _httpClient.DeleteAsync(deleteUrl, ct);
+
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                return DeleteResult.NotFound(correlationId);
+            }
+
+            response.EnsureSuccessStatusCode();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to delete Dataverse record for document {DocumentId}", documentId);
+            return DeleteResult.Failed(ex.Message, correlationId);
+        }
+
+        _logger.LogInformation(
+            "Document {DocumentId} deleted successfully [{CorrelationId}]",
+            documentId, correlationId);
+
+        return DeleteResult.Success(
+            new DeleteDocumentResponse(
+                Success: true,
+                Message: "Document deleted successfully.",
+                CorrelationId: correlationId
+            ),
+            correlationId
+        );
+    }
+
     #region Private Methods
 
     private async Task<DocumentRecord?> GetDocumentAsync(Guid documentId, CancellationToken ct)
@@ -744,6 +846,51 @@ public record NotAuthorizedDiscardResult(string CorrelationId)
     : DiscardResult(false, CorrelationId)
 {
     public new int StatusCode => 403;
+}
+
+public abstract record DeleteResult(bool IsSuccess, string CorrelationId)
+{
+    public DeleteDocumentResponse? Response { get; init; }
+    public DocumentLockedError? CheckedOutError { get; init; }
+    public int StatusCode { get; init; }
+
+    public static DeleteResult Success(DeleteDocumentResponse response, string correlationId)
+        => new SuccessDeleteResult(response, correlationId);
+
+    public static DeleteResult NotFound(string correlationId)
+        => new NotFoundDeleteResult(correlationId);
+
+    public static DeleteResult CheckedOut(DocumentLockedError error, string correlationId)
+        => new CheckedOutDeleteResult(error, correlationId);
+
+    public static DeleteResult Failed(string message, string correlationId)
+        => new FailedDeleteResult(message, correlationId);
+}
+
+public record SuccessDeleteResult(DeleteDocumentResponse Response, string CorrelationId)
+    : DeleteResult(true, CorrelationId)
+{
+    public new DeleteDocumentResponse Response { get; } = Response;
+    public new int StatusCode => 200;
+}
+
+public record NotFoundDeleteResult(string CorrelationId)
+    : DeleteResult(false, CorrelationId)
+{
+    public new int StatusCode => 404;
+}
+
+public record CheckedOutDeleteResult(DocumentLockedError Error, string CorrelationId)
+    : DeleteResult(false, CorrelationId)
+{
+    public new DocumentLockedError CheckedOutError => Error;
+    public new int StatusCode => 409;
+}
+
+public record FailedDeleteResult(string Message, string CorrelationId)
+    : DeleteResult(false, CorrelationId)
+{
+    public new int StatusCode => 500;
 }
 
 #endregion
