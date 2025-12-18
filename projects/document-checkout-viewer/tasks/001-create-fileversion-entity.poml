@@ -3,7 +3,7 @@
   <metadata>
     <title>Create sprk_fileversion Entity</title>
     <phase>1: Dataverse Schema</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>002, 010</blocks>
@@ -90,6 +90,24 @@
     See spec.md for complete field definitions including data types and descriptions.
     The version number should be auto-incremented by the BFF, not Dataverse.
   </notes>
+
+  <implementation-notes>
+    <completed-date>2025-12-18</completed-date>
+    <completed-by>Manual creation via Dataverse maker portal</completed-by>
+    <actual-fields>
+      <field name="sprk_VersionNumber" type="text">Primary field</field>
+      <field name="sprk_CheckInDate" type="datetime"/>
+      <field name="sprk_CheckOutDate" type="datetime"/>
+      <field name="sprk_CheckInBy" type="lookup" target="systemuser"/>
+      <field name="sprk_CheckOutBy" type="lookup" target="systemuser"/>
+      <field name="sprk_Document" type="lookup" target="sprk_document">N:1 relationship</field>
+      <field name="statuscode" type="status">Standard status field - CheckedOut:1, CheckedIn:659490001, Discarded:2</field>
+    </actual-fields>
+    <deviations>
+      Using standard statuscode field instead of custom sprk_status field.
+      Status values: CheckedOut=1 (default), CheckedIn=659490001 (custom), Discarded=2.
+    </deviations>
+  </implementation-notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

@@ -3,7 +3,7 @@
   <metadata>
     <title>Add Checkout Fields to Document</title>
     <phase>1: Dataverse Schema</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>001</dependencies>
     <blocks>003</blocks>
@@ -87,6 +87,30 @@
     The subgrid should be sorted by version number descending (newest first).
     Consider adding the checkout status to the form header for visibility.
   </notes>
+
+  <implementation-notes>
+    <completed-date>2025-12-18</completed-date>
+    <completed-by>Manual creation via Dataverse maker portal</completed-by>
+    <actual-implementation>
+      <form-changes>
+        <change>Added History tab to Document form</change>
+        <change>Added File Version subgrid on History tab</change>
+      </form-changes>
+      <fields-added>
+        <field name="sprk_CurrentVersionId" type="lookup" target="sprk_fileversion"/>
+        <field name="sprk_VersionNumber" type="text">Primary field mirrored from FileVersion</field>
+        <field name="sprk_CheckInDate" type="datetime"/>
+        <field name="sprk_CheckOutDate" type="datetime"/>
+        <field name="sprk_CheckInBy" type="lookup" target="systemuser"/>
+        <field name="sprk_CheckOutBy" type="lookup" target="systemuser"/>
+        <field name="VersionNumber" type="integer">Numeric version counter</field>
+      </fields-added>
+    </actual-implementation>
+    <deviations>
+      Field naming slightly different from spec - sprk_VersionNumber is text, VersionNumber is integer.
+      Added VersionNumber (integer) for auto-increment tracking by BFF.
+    </deviations>
+  </implementation-notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

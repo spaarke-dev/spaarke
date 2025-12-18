@@ -8,9 +8,9 @@
 
 | Status | Count |
 |--------|-------|
-| Not Started | 23 |
+| Not Started | 20 |
 | In Progress | 0 |
-| Completed | 0 |
+| Completed | 3 |
 | Blocked | 0 |
 
 ## Task List
@@ -19,9 +19,9 @@
 
 | ID | Title | Status | Dependencies | Est. Hours |
 |----|-------|--------|--------------|------------|
-| [001](001-create-fileversion-entity.poml) | Create sprk_fileversion Entity | not-started | none | 3 |
-| [002](002-add-document-checkout-fields.poml) | Add Checkout Fields to Document | not-started | 001 | 2 |
-| [003](003-deploy-schema-solution.poml) | Deploy Schema Solution to Dev | not-started | 002 | 2 |
+| [001](001-create-fileversion-entity.poml) | Create sprk_fileversion Entity | ✅ completed | none | 3 |
+| [002](002-add-document-checkout-fields.poml) | Add Checkout Fields to Document | ✅ completed | 001 | 2 |
+| [003](003-deploy-schema-solution.poml) | Deploy Schema Solution to Dev | ✅ completed | 002 | 2 |
 
 ### Phase 2: BFF API Endpoints
 
