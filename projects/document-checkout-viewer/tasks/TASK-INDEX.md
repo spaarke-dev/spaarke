@@ -8,9 +8,9 @@
 
 | Status | Count |
 |--------|-------|
-| Not Started | 20 |
+| Not Started | 17 |
 | In Progress | 0 |
-| Completed | 3 |
+| Completed | 6 |
 | Blocked | 0 |
 
 ## Task List
@@ -27,9 +27,9 @@
 
 | ID | Title | Status | Dependencies | Est. Hours |
 |----|-------|--------|--------------|------------|
-| [010](010-checkout-endpoint.poml) | Implement Checkout Endpoint | not-started | 003 | 4 |
-| [011](011-checkin-endpoint.poml) | Implement Check-In Endpoint | not-started | 010 | 4 |
-| [012](012-discard-endpoint.poml) | Implement Discard Endpoint | not-started | 010 | 2 |
+| [010](010-checkout-endpoint.poml) | Implement Checkout Endpoint | ✅ completed | 003 | 4 |
+| [011](011-checkin-endpoint.poml) | Implement Check-In Endpoint | ✅ completed | 010 | 4 |
+| [012](012-discard-endpoint.poml) | Implement Discard Endpoint | ✅ completed | 010 | 2 |
 | [013](013-delete-endpoint.poml) | Implement Delete Document Endpoint | not-started | 003 | 3 |
 | [014](014-extend-preview-url.poml) | Extend Preview URL with Checkout Status | not-started | 003 | 2 |
 | [015](015-deploy-bff-api.poml) | Deploy BFF API to Dev | not-started | 014 | 2 |

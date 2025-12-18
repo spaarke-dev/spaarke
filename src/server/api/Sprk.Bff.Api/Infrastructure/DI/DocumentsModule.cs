@@ -36,6 +36,12 @@ public static class DocumentsModule
         services.AddScoped<ISpeFileOperations>(sp => sp.GetRequiredService<SpeFileStore>());
 
         // ============================================================================
+        // Document Checkout/Check-in Service (document-checkout-viewer project)
+        // ============================================================================
+        // Handles document locking, version tracking, and Office Online integration
+        services.AddHttpClient<DocumentCheckoutService>();
+
+        // ============================================================================
         // Authorization Filters
         // ============================================================================
         // Document authorization filters

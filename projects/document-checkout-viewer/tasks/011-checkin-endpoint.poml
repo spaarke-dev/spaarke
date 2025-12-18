@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement Check-In Endpoint</title>
     <phase>2: BFF API Endpoints</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>010</dependencies>
     <blocks>052</blocks>
