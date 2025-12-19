@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement Preview Mode</title>
     <phase>3: SpeDocumentViewer PCF</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>020</dependencies>
     <blocks>022</blocks>

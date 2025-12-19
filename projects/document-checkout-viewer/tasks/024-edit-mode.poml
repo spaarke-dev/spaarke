@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement Edit Mode with embedview</title>
     <phase>3: SpeDocumentViewer PCF</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>023</dependencies>
     <blocks>025</blocks>

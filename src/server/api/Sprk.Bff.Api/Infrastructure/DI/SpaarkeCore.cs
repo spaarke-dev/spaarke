@@ -23,7 +23,7 @@ public static class SpaarkeCore
         services.AddScoped<Spaarke.Core.Auth.AuthorizationService>();
         services.AddScoped<Spaarke.Core.Auth.IAuthorizationService>(sp => sp.GetRequiredService<Spaarke.Core.Auth.AuthorizationService>());
 
-        // Register HttpClient for DataverseAccessDataSource (shares Dataverse base URL configuration)
+        // Register HttpClient for DataverseAccessDataSource (handles its own authentication)
         services.AddHttpClient<IAccessDataSource, DataverseAccessDataSource>((sp, client) =>
         {
             var configuration = sp.GetRequiredService<IConfiguration>();
@@ -31,7 +31,7 @@ public static class SpaarkeCore
 
             if (!string.IsNullOrEmpty(dataverseUrl))
             {
-                var apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2";
+                var apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2/";
                 client.BaseAddress = new Uri(apiUrl);
                 client.DefaultRequestHeaders.Add("OData-MaxVersion", "4.0");
                 client.DefaultRequestHeaders.Add("OData-Version", "4.0");

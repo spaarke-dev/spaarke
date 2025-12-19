@@ -3,7 +3,7 @@
   <metadata>
     <title>Deploy Ribbon Solution to Dev</title>
     <phase>4: Delete &amp; Ribbon</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>031</dependencies>
     <blocks>050</blocks>

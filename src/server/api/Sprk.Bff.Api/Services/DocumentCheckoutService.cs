@@ -28,10 +28,14 @@ public class DocumentCheckoutService
     private const string DocumentEntitySet = "sprk_documents";
     private const string FileVersionEntitySet = "sprk_fileversions";
 
+    // State codes matching Dataverse schema
+    private const int StateActive = 0;
+    private const int StateInactive = 1;
+
     // Status codes matching Dataverse schema
-    private const int StatusCheckedOut = 1;
-    private const int StatusCheckedIn = 659490001;
-    private const int StatusDiscarded = 2;
+    private const int StatusCheckedOut = 1;       // State: Active
+    private const int StatusCheckedIn = 659490001; // State: Active
+    private const int StatusDiscarded = 2;        // State: Inactive
 
     public DocumentCheckoutService(
         HttpClient httpClient,
@@ -44,7 +48,8 @@ public class DocumentCheckoutService
         _logger = logger;
 
         var dataverseUrl = configuration["Dataverse:ServiceUrl"]
-            ?? throw new InvalidOperationException("Dataverse:ServiceUrl configuration is required");
+            ?? configuration["Dataverse:EnvironmentUrl"]
+            ?? throw new InvalidOperationException("Dataverse:ServiceUrl or Dataverse:EnvironmentUrl configuration is required");
         var tenantId = configuration["TENANT_ID"]
             ?? throw new InvalidOperationException("TENANT_ID configuration is required");
         var clientId = configuration["API_APP_ID"]
@@ -88,13 +93,23 @@ public class DocumentCheckoutService
     {
         await EnsureAuthenticatedAsync(ct);
 
-        var userId = GetUserId(user);
+        var azureAdOid = GetUserId(user);
         var userName = GetUserName(user);
         var userEmail = GetUserEmail(user);
 
         _logger.LogInformation(
-            "Checkout requested for document {DocumentId} by user {UserId} [{CorrelationId}]",
-            documentId, userId, correlationId);
+            "Checkout requested for document {DocumentId} by user {AzureAdOid} [{CorrelationId}]",
+            documentId, azureAdOid, correlationId);
+
+        // Map Azure AD OID to Dataverse systemuserid
+        var dataverseUserId = await LookupDataverseUserIdAsync(azureAdOid, ct);
+        if (!dataverseUserId.HasValue)
+        {
+            _logger.LogError("Cannot checkout: User {AzureAdOid} not found in Dataverse", azureAdOid);
+            throw new InvalidOperationException($"User not found in Dataverse. Azure AD OID: {azureAdOid}");
+        }
+
+        var userId = dataverseUserId.Value;
 
         // 1. Get document and check current status
         var document = await GetDocumentAsync(documentId, ct);
@@ -102,6 +117,10 @@ public class DocumentCheckoutService
         {
             return CheckoutResult.NotFound(correlationId);
         }
+
+        _logger.LogInformation(
+            "Document {DocumentId} retrieved. Name='{DocumentName}', DriveId='{DriveId}', ItemId='{ItemId}'",
+            documentId, document.DocumentName, document.DriveId, document.ItemId);
 
         // 2. Check if already checked out
         if (document.IsCheckedOut)
@@ -113,12 +132,22 @@ public class DocumentCheckoutService
                     "Document {DocumentId} already checked out by same user, returning existing checkout",
                     documentId);
 
+                string existingEditUrl = "";
+                try
+                {
+                    existingEditUrl = await GetEditUrlAsync(document.DriveId, document.ItemId, ct);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to get edit URL for already-checked-out document {DocumentId}", documentId);
+                }
+
                 return CheckoutResult.Success(
                     new CheckoutResponse(
                         Success: true,
                         CheckedOutBy: new CheckoutUserInfo(userId, userName, userEmail),
                         CheckedOutAt: document.CheckedOutAt ?? DateTime.UtcNow,
-                        EditUrl: await GetEditUrlAsync(document.DriveId, document.ItemId, ct),
+                        EditUrl: existingEditUrl,
                         DesktopUrl: GetDesktopUrl(document.DriveId, document.ItemId, document.FileName),
                         FileVersionId: document.CurrentVersionId ?? Guid.Empty,
                         VersionNumber: document.VersionNumber,
@@ -170,13 +199,23 @@ public class DocumentCheckoutService
             ct
         );
 
-        // 5. Get edit URL from SharePoint
-        var editUrl = await GetEditUrlAsync(document.DriveId, document.ItemId, ct);
+        // 5. Get edit URL from SharePoint (non-critical - checkout succeeds without it)
+        string editUrl = "";
+        try
+        {
+            editUrl = await GetEditUrlAsync(document.DriveId, document.ItemId, ct);
+        }
+        catch (Exception ex)
+        {
+            // Log but don't fail checkout - the Dataverse state update is what matters
+            _logger.LogWarning(ex, "Failed to get edit URL for document {DocumentId}, checkout will succeed without it", documentId);
+        }
+
         var desktopUrl = GetDesktopUrl(document.DriveId, document.ItemId, document.FileName);
 
         _logger.LogInformation(
-            "Document {DocumentId} checked out successfully. FileVersion: {FileVersionId}, Version: {VersionNumber}",
-            documentId, fileVersionId, newVersionNumber);
+            "Document {DocumentId} checked out successfully. FileVersion: {FileVersionId}, Version: {VersionNumber}, HasEditUrl: {HasEditUrl}",
+            documentId, fileVersionId, newVersionNumber, !string.IsNullOrEmpty(editUrl));
 
         return CheckoutResult.Success(
             new CheckoutResponse(
@@ -205,11 +244,21 @@ public class DocumentCheckoutService
     {
         await EnsureAuthenticatedAsync(ct);
 
-        var userId = GetUserId(user);
+        var azureAdOid = GetUserId(user);
 
         _logger.LogInformation(
-            "Check-in requested for document {DocumentId} by user {UserId} [{CorrelationId}]",
-            documentId, userId, correlationId);
+            "Check-in requested for document {DocumentId} by user {AzureAdOid} [{CorrelationId}]",
+            documentId, azureAdOid, correlationId);
+
+        // Map Azure AD OID to Dataverse systemuserid
+        var dataverseUserId = await LookupDataverseUserIdAsync(azureAdOid, ct);
+        if (!dataverseUserId.HasValue)
+        {
+            _logger.LogError("Cannot check-in: User {AzureAdOid} not found in Dataverse", azureAdOid);
+            throw new InvalidOperationException($"User not found in Dataverse. Azure AD OID: {azureAdOid}");
+        }
+
+        var userId = dataverseUserId.Value;
 
         // 1. Get document and verify checkout
         var document = await GetDocumentAsync(documentId, ct);
@@ -235,11 +284,19 @@ public class DocumentCheckoutService
             );
         }
 
-        // 3. Clear checkout status on Document
-        await ClearDocumentCheckoutStatusAsync(documentId, ct);
+        // 3. Clear checkout status on Document and set CheckedInBy
+        await ClearDocumentCheckoutStatusAsync(documentId, userId, ct);
 
-        // 4. Get preview URL
-        var previewUrl = await GetPreviewUrlAsync(document.DriveId, document.ItemId, ct);
+        // 4. Get preview URL (non-critical - don't fail check-in if this fails)
+        string previewUrl = "";
+        try
+        {
+            previewUrl = await GetPreviewUrlAsync(document.DriveId, document.ItemId, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to get preview URL after check-in for document {DocumentId}", documentId);
+        }
 
         // 5. TODO: Trigger AI analysis (fire-and-forget)
         var aiTriggered = false; // Will be implemented in task 052
@@ -272,11 +329,21 @@ public class DocumentCheckoutService
     {
         await EnsureAuthenticatedAsync(ct);
 
-        var userId = GetUserId(user);
+        var azureAdOid = GetUserId(user);
 
         _logger.LogInformation(
-            "Discard requested for document {DocumentId} by user {UserId} [{CorrelationId}]",
-            documentId, userId, correlationId);
+            "Discard requested for document {DocumentId} by user {AzureAdOid} [{CorrelationId}]",
+            documentId, azureAdOid, correlationId);
+
+        // Map Azure AD OID to Dataverse systemuserid
+        var dataverseUserId = await LookupDataverseUserIdAsync(azureAdOid, ct);
+        if (!dataverseUserId.HasValue)
+        {
+            _logger.LogError("Cannot discard: User {AzureAdOid} not found in Dataverse", azureAdOid);
+            throw new InvalidOperationException($"User not found in Dataverse. Azure AD OID: {azureAdOid}");
+        }
+
+        var userId = dataverseUserId.Value;
 
         // 1. Get document and verify checkout
         var document = await GetDocumentAsync(documentId, ct);
@@ -296,21 +363,40 @@ public class DocumentCheckoutService
             return DiscardResult.NotAuthorized(correlationId);
         }
 
-        // 2. Update FileVersion record to Discarded status
+        // 2. Update FileVersion record to Discarded status (Inactive state)
         if (document.CurrentVersionId.HasValue)
         {
-            await UpdateFileVersionStatusAsync(
-                document.CurrentVersionId.Value,
-                StatusDiscarded,
-                ct
-            );
+            try
+            {
+                await UpdateFileVersionStatusAsync(
+                    document.CurrentVersionId.Value,
+                    StatusDiscarded,
+                    StateInactive,  // Discarded is in Inactive state
+                    ct
+                );
+            }
+            catch (Exception ex)
+            {
+                // Log but don't fail - the Document status clear is what matters
+                _logger.LogWarning(ex, "Failed to update FileVersion status to Discarded for {FileVersionId}. " +
+                    "This may indicate StatusDiscarded ({StatusCode}) is not a valid status option.",
+                    document.CurrentVersionId.Value, StatusDiscarded);
+            }
         }
 
-        // 3. Clear checkout status on Document
-        await ClearDocumentCheckoutStatusAsync(documentId, ct);
+        // 3. Clear checkout status on Document (no checkin info for discard)
+        await ClearDocumentCheckoutStatusAsync(documentId, null, ct);
 
-        // 4. Get preview URL
-        var previewUrl = await GetPreviewUrlAsync(document.DriveId, document.ItemId, ct);
+        // 4. Get preview URL (non-critical - don't fail discard if this fails)
+        string previewUrl = "";
+        try
+        {
+            previewUrl = await GetPreviewUrlAsync(document.DriveId, document.ItemId, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to get preview URL after discard for document {DocumentId}", documentId);
+        }
 
         _logger.LogInformation(
             "Document {DocumentId} checkout discarded",
@@ -343,7 +429,9 @@ public class DocumentCheckoutService
             return null;
         }
 
-        var currentUserId = GetUserId(user);
+        // Map Azure AD OID to Dataverse systemuserid for comparison
+        var azureAdOid = GetUserId(user);
+        var currentUserId = await LookupDataverseUserIdAsync(azureAdOid, ct);
 
         return new CheckoutStatusInfo(
             IsCheckedOut: document.IsCheckedOut,
@@ -354,7 +442,7 @@ public class DocumentCheckoutService
                     null)
                 : null,
             CheckedOutAt: document.CheckedOutAt,
-            IsCurrentUser: document.CheckedOutById == currentUserId
+            IsCurrentUser: currentUserId.HasValue && document.CheckedOutById == currentUserId.Value
         );
     }
 
@@ -462,18 +550,59 @@ public class DocumentCheckoutService
 
     #region Private Methods
 
+    /// <summary>
+    /// Looks up the Dataverse systemuserid for a given Azure AD Object ID.
+    /// Dataverse systemuserid != Azure AD oid; they're linked via azureactivedirectoryobjectid.
+    /// </summary>
+    private async Task<Guid?> LookupDataverseUserIdAsync(Guid azureAdObjectId, CancellationToken ct)
+    {
+        try
+        {
+            var url = $"systemusers?$filter=azureactivedirectoryobjectid eq '{azureAdObjectId}'&$select=systemuserid";
+            var response = await _httpClient.GetAsync(url, ct);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Failed to lookup Dataverse user for Azure AD OID {AzureAdOid}: {StatusCode}",
+                    azureAdObjectId, response.StatusCode);
+                return null;
+            }
+
+            var result = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: ct);
+            var values = result.GetProperty("value");
+
+            if (values.GetArrayLength() == 0)
+            {
+                _logger.LogWarning("No Dataverse user found for Azure AD OID {AzureAdOid}", azureAdObjectId);
+                return null;
+            }
+
+            var systemUserId = values[0].GetProperty("systemuserid").GetString();
+            _logger.LogDebug("Mapped Azure AD OID {AzureAdOid} to Dataverse systemuserid {SystemUserId}",
+                azureAdObjectId, systemUserId);
+
+            return Guid.Parse(systemUserId!);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error looking up Dataverse user for Azure AD OID {AzureAdOid}", azureAdObjectId);
+            return null;
+        }
+    }
+
     private async Task<DocumentRecord?> GetDocumentAsync(Guid documentId, CancellationToken ct)
     {
         var selectFields = "sprk_documentid,sprk_documentname,sprk_filename,sprk_filesize," +
                           "sprk_graphdriveid,sprk_graphitemid," +
-                          "_sprk_checkedoutby_value,sprk_checkoutdate,sprk_checkindate," +
-                          "_sprk_currentversionid_value,sprk_versionnumber";
+                          "_sprk_checkedoutby_value,sprk_checkedoutdate,sprk_checkedindate," +
+                          "_sprk_currentversionid_value,versionnumber";
         var expandFields = "sprk_CheckedOutBy($select=fullname)";
 
         var url = $"{DocumentEntitySet}({documentId})?$select={selectFields}&$expand={expandFields}";
 
         try
         {
+            _logger.LogDebug("GetDocumentAsync: Requesting {Url}", url);
             var response = await _httpClient.GetAsync(url, ct);
 
             if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
@@ -481,10 +610,20 @@ public class DocumentCheckoutService
                 return null;
             }
 
-            response.EnsureSuccessStatusCode();
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync(ct);
+                _logger.LogError("Dataverse returned {StatusCode} for document {DocumentId}. Response: {ErrorBody}",
+                    response.StatusCode, documentId, errorBody);
+                throw new HttpRequestException($"Dataverse error ({response.StatusCode}): {errorBody}");
+            }
 
             var data = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: ct);
             return MapToDocumentRecord(data);
+        }
+        catch (HttpRequestException)
+        {
+            throw; // Re-throw with the detailed error
         }
         catch (Exception ex)
         {
@@ -500,17 +639,28 @@ public class DocumentCheckoutService
         DateTime checkoutDate,
         CancellationToken ct)
     {
+        // FileVersion stores version metadata including who checked out
         var payload = new Dictionary<string, object>
         {
             ["sprk_versionnumber"] = $"v{versionNumber}",
-            ["sprk_checkoutdate"] = checkoutDate.ToString("o"),
-            ["sprk_CheckedOutBy@odata.bind"] = $"/systemusers({userId})",
             ["sprk_Document@odata.bind"] = $"/{DocumentEntitySet}({documentId})",
+            ["sprk_checkedoutdate"] = checkoutDate.ToString("o"),
+            ["sprk_CheckedOutBy@odata.bind"] = $"/systemusers({userId})",
             ["statuscode"] = StatusCheckedOut
         };
 
+        _logger.LogDebug("CreateFileVersionAsync: POST to {EntitySet} with payload: {Payload}",
+            FileVersionEntitySet, System.Text.Json.JsonSerializer.Serialize(payload));
+
         var response = await _httpClient.PostAsJsonAsync(FileVersionEntitySet, payload, ct);
-        response.EnsureSuccessStatusCode();
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync(ct);
+            _logger.LogError("CreateFileVersion failed with {StatusCode}. Response: {ErrorBody}",
+                response.StatusCode, errorBody);
+            throw new HttpRequestException($"CreateFileVersion error ({response.StatusCode}): {errorBody}");
+        }
 
         // Extract ID from OData-EntityId header
         var entityIdHeader = response.Headers.GetValues("OData-EntityId").FirstOrDefault();
@@ -531,20 +681,35 @@ public class DocumentCheckoutService
         Guid fileVersionId,
         CancellationToken ct)
     {
-        var payload = new Dictionary<string, object>
+        var payload = new Dictionary<string, object?>
         {
-            ["sprk_checkoutdate"] = checkoutDate.ToString("o"),
+            ["sprk_checkedoutdate"] = checkoutDate.ToString("o"),
             ["sprk_CheckedOutBy@odata.bind"] = $"/systemusers({userId})",
-            ["sprk_versionnumber"] = versionNumber,
-            ["sprk_CurrentVersionId@odata.bind"] = $"/{FileVersionEntitySet}({fileVersionId})"
+            ["versionnumber"] = versionNumber,
+            ["sprk_CurrentVersionId@odata.bind"] = $"/{FileVersionEntitySet}({fileVersionId})",
+            // Clear checkin fields when checking out
+            ["sprk_checkedindate"] = null
         };
+
+        _logger.LogDebug("UpdateDocumentCheckoutStatusAsync: PATCH {EntitySet}({DocumentId}) with payload: {Payload}",
+            DocumentEntitySet, documentId, System.Text.Json.JsonSerializer.Serialize(payload));
 
         var response = await _httpClient.PatchAsJsonAsync(
             $"{DocumentEntitySet}({documentId})",
             payload,
             ct
         );
-        response.EnsureSuccessStatusCode();
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync(ct);
+            _logger.LogError("UpdateDocumentCheckoutStatus failed with {StatusCode}. Response: {ErrorBody}",
+                response.StatusCode, errorBody);
+            throw new HttpRequestException($"UpdateDocumentCheckoutStatus error ({response.StatusCode}): {errorBody}");
+        }
+
+        // Disassociate CheckedInBy lookup (separate call for lookup null)
+        await DisassociateLookupAsync(documentId, "sprk_CheckedInBy", ct);
     }
 
     private async Task UpdateFileVersionCheckInAsync(
@@ -554,34 +719,35 @@ public class DocumentCheckoutService
         long? fileSize,
         CancellationToken ct)
     {
-        var payload = new Dictionary<string, object?>
+        // FileVersion stores statuscode only - user info stored on Document entity
+        var payload = new Dictionary<string, object>
         {
-            ["sprk_checkindate"] = DateTime.UtcNow.ToString("o"),
-            ["sprk_CheckedInBy@odata.bind"] = $"/systemusers({userId})",
+            ["sprk_checkedindate"] = DateTime.UtcNow.ToString("o"),
             ["statuscode"] = StatusCheckedIn
         };
 
-        if (!string.IsNullOrEmpty(comment))
-        {
-            payload["sprk_comment"] = comment;
-        }
-
-        if (fileSize.HasValue)
-        {
-            payload["sprk_filesize"] = fileSize.Value;
-        }
+        _logger.LogDebug("UpdateFileVersionCheckInAsync: PATCH {EntitySet}({FileVersionId}) with payload: {Payload}",
+            FileVersionEntitySet, fileVersionId, System.Text.Json.JsonSerializer.Serialize(payload));
 
         var response = await _httpClient.PatchAsJsonAsync(
             $"{FileVersionEntitySet}({fileVersionId})",
             payload,
             ct
         );
-        response.EnsureSuccessStatusCode();
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync(ct);
+            _logger.LogError("UpdateFileVersionCheckIn failed with {StatusCode}. Response: {ErrorBody}",
+                response.StatusCode, errorBody);
+            throw new HttpRequestException($"UpdateFileVersionCheckIn error ({response.StatusCode}): {errorBody}");
+        }
     }
 
     private async Task UpdateFileVersionStatusAsync(
         Guid fileVersionId,
         int status,
+        int? stateCode,
         CancellationToken ct)
     {
         var payload = new Dictionary<string, object>
@@ -589,22 +755,44 @@ public class DocumentCheckoutService
             ["statuscode"] = status
         };
 
+        // If stateCode provided, set it (required when changing to a status in a different state)
+        if (stateCode.HasValue)
+        {
+            payload["statecode"] = stateCode.Value;
+        }
+
+        _logger.LogDebug("UpdateFileVersionStatusAsync: PATCH {EntitySet}({FileVersionId}) with payload: {Payload}",
+            FileVersionEntitySet, fileVersionId, System.Text.Json.JsonSerializer.Serialize(payload));
+
         var response = await _httpClient.PatchAsJsonAsync(
             $"{FileVersionEntitySet}({fileVersionId})",
             payload,
             ct
         );
-        response.EnsureSuccessStatusCode();
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync(ct);
+            _logger.LogError("UpdateFileVersionStatus failed with {StatusCode}. Response: {ErrorBody}",
+                response.StatusCode, errorBody);
+            throw new HttpRequestException($"UpdateFileVersionStatus error ({response.StatusCode}): {errorBody}");
+        }
     }
 
-    private async Task ClearDocumentCheckoutStatusAsync(Guid documentId, CancellationToken ct)
+    private async Task ClearDocumentCheckoutStatusAsync(Guid documentId, Guid? checkInUserId, CancellationToken ct)
     {
-        // Clear checkout fields by setting to null
+        // Clear checkout fields
         var payload = new Dictionary<string, object?>
         {
-            ["sprk_checkoutdate"] = null,
-            ["sprk_checkindate"] = DateTime.UtcNow.ToString("o")
+            ["sprk_checkedoutdate"] = null
         };
+
+        // If checking in (not discarding), set checkin info
+        if (checkInUserId.HasValue)
+        {
+            payload["sprk_checkedindate"] = DateTime.UtcNow.ToString("o");
+            payload["sprk_CheckedInBy@odata.bind"] = $"/systemusers({checkInUserId.Value})";
+        }
 
         var response = await _httpClient.PatchAsJsonAsync(
             $"{DocumentEntitySet}({documentId})",
@@ -631,14 +819,33 @@ public class DocumentCheckoutService
 
     private async Task<string> GetEditUrlAsync(string driveId, string itemId, CancellationToken ct)
     {
-        // Get the embedview URL for editing
-        var preview = await _speFileStore.GetPreviewUrlAsync(driveId, itemId, null, ct);
+        // Validate DriveId and ItemId before calling Graph API
+        if (string.IsNullOrEmpty(driveId) || string.IsNullOrEmpty(itemId))
+        {
+            _logger.LogWarning("Cannot get edit URL: DriveId='{DriveId}', ItemId='{ItemId}' - one or both are empty",
+                driveId, itemId);
+            return "";
+        }
 
-        // Convert embed.aspx to embedview for editing
-        // embed.aspx is read-only, embedview provides full editing
-        var editUrl = preview.PreviewUrl?.Replace("/embed.aspx?", "/embedview?") ?? "";
+        _logger.LogDebug("Getting edit URL for DriveId='{DriveId}', ItemId='{ItemId}'", driveId, itemId);
 
-        return editUrl;
+        try
+        {
+            // Get the embedview URL for editing
+            var preview = await _speFileStore.GetPreviewUrlAsync(driveId, itemId, null, ct);
+
+            // Convert embed.aspx to embedview for editing
+            // embed.aspx is read-only, embedview provides full editing
+            var editUrl = preview.PreviewUrl?.Replace("/embed.aspx?", "/embedview?") ?? "";
+
+            return editUrl;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get edit URL from SPE. DriveId='{DriveId}', ItemId='{ItemId}'",
+                driveId, itemId);
+            throw;
+        }
     }
 
     private async Task<string> GetPreviewUrlAsync(string driveId, string itemId, CancellationToken ct)
@@ -693,16 +900,16 @@ public class DocumentCheckoutService
             ItemId = data.TryGetProperty("sprk_graphitemid", out var iid) ? iid.GetString()! : "",
             CheckedOutById = checkedOutByValue,
             CheckedOutByName = checkedOutByName,
-            CheckedOutAt = data.TryGetProperty("sprk_checkoutdate", out var codate) && codate.ValueKind != JsonValueKind.Null
+            CheckedOutAt = data.TryGetProperty("sprk_checkedoutdate", out var codate) && codate.ValueKind != JsonValueKind.Null
                 ? DateTime.Parse(codate.GetString()!)
                 : null,
-            CheckedInAt = data.TryGetProperty("sprk_checkindate", out var cidate) && cidate.ValueKind != JsonValueKind.Null
+            CheckedInAt = data.TryGetProperty("sprk_checkedindate", out var cidate) && cidate.ValueKind != JsonValueKind.Null
                 ? DateTime.Parse(cidate.GetString()!)
                 : null,
             CurrentVersionId = data.TryGetProperty("_sprk_currentversionid_value", out var cvid) && cvid.ValueKind != JsonValueKind.Null
                 ? Guid.Parse(cvid.GetString()!)
                 : null,
-            VersionNumber = data.TryGetProperty("sprk_versionnumber", out var vn) && vn.ValueKind == JsonValueKind.Number
+            VersionNumber = data.TryGetProperty("versionnumber", out var vn) && vn.ValueKind == JsonValueKind.Number
                 ? vn.GetInt32()
                 : 0
         };
@@ -710,11 +917,24 @@ public class DocumentCheckoutService
 
     private static Guid GetUserId(ClaimsPrincipal user)
     {
+        // Try multiple claim types for Azure AD object ID
         var oid = user.FindFirst("oid")?.Value
-            ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value
-            ?? throw new InvalidOperationException("User ID not found in claims");
+            ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+            ?? user.FindFirst("objectidentifier")?.Value;
 
-        return Guid.Parse(oid);
+        if (string.IsNullOrEmpty(oid))
+        {
+            // Log all claims for debugging
+            var claimsList = string.Join("; ", user.Claims.Select(c => $"{c.Type}={c.Value}"));
+            throw new InvalidOperationException($"Azure AD Object ID (oid) not found in token claims. Available claims: {claimsList}");
+        }
+
+        if (!Guid.TryParse(oid, out var userId))
+        {
+            throw new InvalidOperationException($"User ID claim value '{oid}' is not a valid GUID");
+        }
+
+        return userId;
     }
 
     private static string GetUserName(ClaimsPrincipal user)

@@ -19,8 +19,9 @@ public static class DocumentOperationsEndpoints
             .WithTags("Document Operations");
 
         // POST /api/documents/{documentId}/checkout
+        // Authorization: PCF controls button visibility based on Dataverse security profile
+        // Actual permissions enforced by Graph API via OBO (same as preview endpoint)
         group.MapPost("/checkout", CheckoutDocument)
-            .AddDocumentAuthorizationFilter("write")
             .WithName("CheckoutDocument")
             .WithDescription("Locks a document for editing and returns the edit URL")
             .Produces<CheckoutResponse>(200)
@@ -30,7 +31,6 @@ public static class DocumentOperationsEndpoints
 
         // POST /api/documents/{documentId}/checkin
         group.MapPost("/checkin", CheckInDocument)
-            .AddDocumentAuthorizationFilter("write")
             .WithName("CheckInDocument")
             .WithDescription("Releases the document lock and creates a new version")
             .Produces<CheckInResponse>(200)
@@ -40,18 +40,15 @@ public static class DocumentOperationsEndpoints
 
         // POST /api/documents/{documentId}/discard
         group.MapPost("/discard", DiscardCheckout)
-            .AddDocumentAuthorizationFilter("write")
             .WithName("DiscardCheckout")
             .WithDescription("Cancels the checkout without saving changes")
             .Produces<DiscardResponse>(200)
             .ProducesProblem(400)
-            .ProducesProblem(403)
             .ProducesProblem(404)
             .ProducesProblem(401);
 
         // DELETE /api/documents/{documentId}
         group.MapDelete("", DeleteDocument)
-            .AddDocumentAuthorizationFilter("delete")
             .WithName("DeleteDocument")
             .WithDescription("Deletes a document from both Dataverse and SharePoint Embedded")
             .Produces<DeleteDocumentResponse>(200)
@@ -107,11 +104,23 @@ public static class DocumentOperationsEndpoints
         catch (Exception ex)
         {
             logger.LogError(ex, "Checkout failed for document {DocumentId}", documentId);
+
+            // Include detailed error info for debugging (in dev/staging)
+            var errorDetail = ex.Message;
+            if (ex.InnerException != null)
+            {
+                errorDetail += $" | Inner: {ex.InnerException.Message}";
+            }
+
             return TypedResults.Problem(
                 statusCode: 500,
                 title: "Checkout Failed",
-                detail: "An error occurred while checking out the document",
-                extensions: new Dictionary<string, object?> { ["correlationId"] = correlationId }
+                detail: errorDetail,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["correlationId"] = correlationId,
+                    ["exceptionType"] = ex.GetType().Name
+                }
             );
         }
     }
@@ -170,11 +179,23 @@ public static class DocumentOperationsEndpoints
         catch (Exception ex)
         {
             logger.LogError(ex, "Check-in failed for document {DocumentId}", documentId);
+
+            // Include detailed error info for debugging
+            var errorDetail = ex.Message;
+            if (ex.InnerException != null)
+            {
+                errorDetail += $" | Inner: {ex.InnerException.Message}";
+            }
+
             return TypedResults.Problem(
                 statusCode: 500,
                 title: "Check-in Failed",
-                detail: "An error occurred while checking in the document",
-                extensions: new Dictionary<string, object?> { ["correlationId"] = correlationId }
+                detail: errorDetail,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["correlationId"] = correlationId,
+                    ["exceptionType"] = ex.GetType().Name
+                }
             );
         }
     }
@@ -232,11 +253,23 @@ public static class DocumentOperationsEndpoints
         catch (Exception ex)
         {
             logger.LogError(ex, "Discard failed for document {DocumentId}", documentId);
+
+            // Include detailed error info for debugging
+            var errorDetail = ex.Message;
+            if (ex.InnerException != null)
+            {
+                errorDetail += $" | Inner: {ex.InnerException.Message}";
+            }
+
             return TypedResults.Problem(
                 statusCode: 500,
                 title: "Discard Failed",
-                detail: "An error occurred while discarding the checkout",
-                extensions: new Dictionary<string, object?> { ["correlationId"] = correlationId }
+                detail: errorDetail,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["correlationId"] = correlationId,
+                    ["exceptionType"] = ex.GetType().Name
+                }
             );
         }
     }

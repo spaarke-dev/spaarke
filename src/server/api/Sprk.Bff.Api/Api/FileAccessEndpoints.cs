@@ -77,6 +77,15 @@ public static class FileAccessEndpoints
             .Produces(StatusCodes.Status409Conflict)
             .Produces(StatusCodes.Status500InternalServerError);
 
+        docs.MapGet("/{documentId}/view-url", GetViewUrl)
+            .WithName("GetDocumentViewUrl")
+            .WithTags("File Access")
+            .Produces<object>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status500InternalServerError);
+
         return app;
 
         // Static local functions (method groups)
@@ -567,6 +576,163 @@ public static class FileAccessEndpoints
                 MimeType: mimeType,
                 FileName: fileName
             ));
+        }
+
+        /// <summary>
+        /// GET /api/documents/{documentId}/view-url
+        /// Returns embeddable view URL using driveItem webUrl (not cached Preview action).
+        /// Use this for real-time file viewing without the 30-60s Preview cache delay.
+        /// Includes checkout status for PCF control to show lock indicators.
+        /// </summary>
+        static async Task<IResult> GetViewUrl(
+            string documentId,
+            IDataverseService dataverseService,
+            IGraphClientFactory graphFactory,
+            DocumentCheckoutService checkoutService,
+            ILogger<Program> logger,
+            HttpContext context,
+            CancellationToken ct)
+        {
+            logger.LogInformation("GetViewUrl called | DocumentId: {DocumentId} | TraceId: {TraceId}",
+                documentId, context.TraceIdentifier);
+
+            // 1. Validate document ID format
+            if (!Guid.TryParse(documentId, out var docGuid))
+            {
+                throw new SdapProblemException(
+                    "invalid_id",
+                    "Invalid Document ID",
+                    $"Document ID '{documentId}' is not a valid GUID format",
+                    400
+                );
+            }
+
+            // 2. Get document entity from Dataverse (includes SPE pointers)
+            var document = await dataverseService.GetDocumentAsync(documentId, ct);
+
+            if (document == null)
+            {
+                throw new SdapProblemException(
+                    "document_not_found",
+                    "Document Not Found",
+                    $"Document with ID '{documentId}' does not exist",
+                    404
+                );
+            }
+
+            // 3. Validate SPE pointers (driveId, itemId)
+            ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId);
+
+            logger.LogInformation("SPE pointers validated | DriveId: {DriveId} | ItemId: {ItemId}",
+                document.GraphDriveId, document.GraphItemId);
+
+            // 4. Create Graph client using OBO (user context)
+            var graphClient = await graphFactory.ForUserAsync(context, ct);
+
+            // 5. Get driveItem metadata for file info
+            var driveItem = await graphClient.Drives[document.GraphDriveId!]
+                .Items[document.GraphItemId!]
+                .GetAsync(requestConfiguration =>
+                {
+                    requestConfiguration.QueryParameters.Select = new[] { "id", "name", "webUrl", "size", "lastModifiedDateTime" };
+                }, cancellationToken: ct);
+
+            if (driveItem == null)
+            {
+                throw new SdapProblemException(
+                    "view_url_not_available",
+                    "View URL Not Available",
+                    $"Graph API did not return drive item for document {documentId}",
+                    500
+                );
+            }
+
+            // 6. Use Preview action to get embeddable URL (works for SPE files)
+            // The Preview action returns a properly authenticated URL that works in iframes
+            // Note: Preview URLs are cached for 30-60 seconds by SharePoint, but this is
+            // the only reliable way to get an embeddable URL for SPE containers
+            var previewRequest = new PreviewPostRequestBody
+            {
+                AdditionalData = new Dictionary<string, object>
+                {
+                    { "chromeless", true },
+                    { "viewer", "onedrive" }
+                }
+            };
+
+            var previewResponse = await graphClient.Drives[document.GraphDriveId!]
+                .Items[document.GraphItemId!]
+                .Preview
+                .PostAsync(previewRequest, cancellationToken: ct);
+
+            string viewUrl;
+            if (previewResponse != null && !string.IsNullOrEmpty(previewResponse.GetUrl))
+            {
+                // Use the preview URL with nb=true (no banner)
+                viewUrl = previewResponse.GetUrl;
+                var separator = viewUrl.Contains('?') ? '&' : '?';
+                viewUrl = $"{viewUrl}{separator}nb=true";
+                logger.LogInformation("Using Preview action URL for embedding");
+            }
+            else
+            {
+                // Fall back to webUrl if Preview fails
+                viewUrl = driveItem.WebUrl ?? "";
+                logger.LogWarning("Preview action failed, falling back to webUrl");
+            }
+
+            logger.LogInformation("View URL constructed | FileName: {FileName} | ViewUrl: {ViewUrl}",
+                driveItem.Name, viewUrl);
+
+            // 6. Extract file extension from filename
+            string? fileExtension = null;
+            var fileName = driveItem.Name ?? document.FileName ?? "Unknown";
+            if (!string.IsNullOrEmpty(fileName))
+            {
+                var lastDot = fileName.LastIndexOf('.');
+                if (lastDot >= 0 && lastDot < fileName.Length - 1)
+                {
+                    fileExtension = fileName.Substring(lastDot + 1);
+                }
+            }
+
+            // 7. Get checkout status for the document
+            CheckoutStatusInfo? checkoutStatus = null;
+            try
+            {
+                checkoutStatus = await checkoutService.GetCheckoutStatusAsync(docGuid, context.User, ct);
+            }
+            catch (Exception ex)
+            {
+                // Log but don't fail - checkout status is non-critical
+                logger.LogWarning(ex, "Failed to get checkout status for document {DocumentId}", documentId);
+            }
+
+            // 8. Return PCF-compatible response (matches preview-url format for easy switching)
+            return TypedResults.Ok(new
+            {
+                previewUrl = viewUrl,  // Named previewUrl for PCF compatibility
+                documentInfo = new
+                {
+                    name = fileName,
+                    fileExtension = fileExtension,
+                    size = driveItem.Size ?? document.FileSize,
+                    lastModified = (driveItem.LastModifiedDateTime ?? document.ModifiedOn).ToString("o")
+                },
+                checkoutStatus = checkoutStatus != null ? new
+                {
+                    isCheckedOut = checkoutStatus.IsCheckedOut,
+                    checkedOutBy = checkoutStatus.CheckedOutBy != null ? new
+                    {
+                        id = checkoutStatus.CheckedOutBy.Id,
+                        name = checkoutStatus.CheckedOutBy.Name,
+                        email = checkoutStatus.CheckedOutBy.Email
+                    } : null,
+                    checkedOutAt = checkoutStatus.CheckedOutAt?.ToString("o"),
+                    isCurrentUser = checkoutStatus.IsCurrentUser
+                } : null,
+                correlationId = context.TraceIdentifier
+            });
         }
     }
 

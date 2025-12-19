@@ -300,9 +300,9 @@ A dedicated entity to track version history with full metadata for each check-ou
 | Document | `sprk_documentid` | Lookup (sprk_document) | Parent document (required) |
 | Version Number | `sprk_versionnumber` | Whole Number | Sequential version (1, 2, 3...) |
 | Checked Out By | `sprk_checkedoutby` | Lookup (systemuser) | User who checked out |
-| Checked Out At | `sprk_checkedoutat` | DateTime | When checked out |
+| Checked Out Date | `sprk_checkedoutdate` | DateTime | When checked out |
 | Checked In By | `sprk_checkedinby` | Lookup (systemuser) | User who checked in (may differ) |
-| Checked In At | `sprk_checkedindat` | DateTime | When checked in |
+| Checked In Date | `sprk_checkedindate` | DateTime | When checked in |
 | Comment | `sprk_comment` | Text (500) | Check-in comment |
 | File Size | `sprk_filesize` | Whole Number | File size at check-in (bytes) |
 | Status | `sprk_status` | Choice | CheckedOut, CheckedIn, Discarded |
@@ -327,7 +327,7 @@ Add fields for quick access to current checkout status (denormalized for perform
 | Current Version Number | `sprk_currentversionnumber` | Whole Number | Latest version number (denormalized) |
 | Is Checked Out | `sprk_ischeckedout` | Yes/No | Quick check for lock status |
 | Checked Out By | `sprk_checkedoutby` | Lookup (systemuser) | Current lock holder |
-| Checked Out At | `sprk_checkedoutat` | DateTime | When current checkout started |
+| Checked Out Date | `sprk_checkedoutdate` | DateTime | When current checkout started |
 
 ### Version Flow Diagram
 
@@ -339,12 +339,12 @@ Add fields for quick access to current checkout status (denormalized for perform
 │  2. BFF creates sprk_fileversion record:                                     │
 │     - sprk_versionnumber = current + 1                                       │
 │     - sprk_checkedoutby = current user                                       │
-│     - sprk_checkedoutat = now                                                │
+│     - sprk_checkedoutdate = now                                              │
 │     - sprk_status = "CheckedOut"                                             │
 │  3. BFF updates sprk_document:                                               │
 │     - sprk_ischeckedout = true                                               │
 │     - sprk_checkedoutby = current user                                       │
-│     - sprk_checkedoutat = now                                                │
+│     - sprk_checkedoutdate = now                                              │
 │  4. Return edit URL to PCF                                                   │
 │                                                                              │
 ├─────────────────────────────────────────────────────────────────────────────┤
@@ -353,7 +353,7 @@ Add fields for quick access to current checkout status (denormalized for perform
 │  1. User clicks "Check In"                                                   │
 │  2. BFF updates sprk_fileversion record:                                     │
 │     - sprk_checkedinby = current user (may differ from checkout user)        │
-│     - sprk_checkedindat = now                                                │
+│     - sprk_checkedindate = now                                               │
 │     - sprk_comment = user comment                                            │
 │     - sprk_filesize = current file size                                      │
 │     - sprk_status = "CheckedIn"                                              │
@@ -362,7 +362,7 @@ Add fields for quick access to current checkout status (denormalized for perform
 │     - sprk_currentversionnumber = this version number                        │
 │     - sprk_ischeckedout = false                                              │
 │     - sprk_checkedoutby = null                                               │
-│     - sprk_checkedoutat = null                                               │
+│     - sprk_checkedoutdate = null                                             │
 │  4. Trigger AI analysis                                                      │
 │  5. Return preview URL to PCF                                                │
 │                                                                              │
@@ -376,7 +376,7 @@ Add fields for quick access to current checkout status (denormalized for perform
 │  4. BFF updates sprk_document:                                               │
 │     - sprk_ischeckedout = false                                              │
 │     - sprk_checkedoutby = null                                               │
-│     - sprk_checkedoutat = null                                               │
+│     - sprk_checkedoutdate = null                                             │
 │  5. Return preview URL to PCF                                                │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -967,7 +967,7 @@ public async Task<CheckInResult> CheckInAsync(Guid documentId, string? comment, 
     // 1. Release lock
     await dataverseService.UpdateAsync("sprk_documents", documentId, new {
         sprk_checkedoutby = null,
-        sprk_checkedoutat = null,
+        sprk_checkedoutdate = null,
         sprk_versionnumber = currentVersion + 1,
         sprk_versioncomment = comment
     }, ct);

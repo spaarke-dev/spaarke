@@ -3,7 +3,7 @@
   <metadata>
     <title>Deploy PCF Control to Dev</title>
     <phase>3: SpeDocumentViewer PCF</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>024</dependencies>
     <blocks>050</blocks>

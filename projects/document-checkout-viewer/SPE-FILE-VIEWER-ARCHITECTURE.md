@@ -90,9 +90,9 @@ sprk_document (1) ──────── (N) sprk_fileversion
 | `sprk_documentid` | Lookup | Parent document |
 | `sprk_versionnumber` | Whole Number | Version 1, 2, 3... |
 | `sprk_checkedoutby` | Lookup (User) | Who checked out |
-| `sprk_checkedoutat` | DateTime | When checked out |
+| `sprk_checkedoutdate` | DateTime | When checked out |
 | `sprk_checkedinby` | Lookup (User) | Who checked in (may differ) |
-| `sprk_checkedindat` | DateTime | When checked in |
+| `sprk_checkedindate` | DateTime | When checked in |
 | `sprk_comment` | Text | Check-in comment |
 | `sprk_status` | Choice | CheckedOut, CheckedIn, Discarded |
 

@@ -59,7 +59,7 @@
   <steps>
     <step order="1">Read spec.md Dataverse Schema section for full field definitions</step>
     <step order="2">Create sprk_fileversion entity with primary field sprk_name</step>
-    <step order="3">Add all fields per spec: sprk_versionnumber, sprk_checkedoutby, sprk_checkedoutat, sprk_checkedinby, sprk_checkedindat, sprk_comment, sprk_filesize, sprk_status</step>
+    <step order="3">Add all fields per spec: sprk_versionnumber, sprk_checkedoutby, sprk_checkedoutdate, sprk_checkedinby, sprk_checkedindate, sprk_comment, sprk_filesize, sprk_status</step>
     <step order="4">Create sprk_documentid lookup field to sprk_document (N:1 relationship)</step>
     <step order="5">Configure status choice field with values: CheckedOut (1), CheckedIn (2), Discarded (3)</step>
     <step order="6">Set appropriate field requirements (sprk_documentid required, sprk_versionnumber required)</step>

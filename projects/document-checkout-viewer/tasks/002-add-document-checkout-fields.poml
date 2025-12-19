@@ -60,7 +60,7 @@
     <step order="2">Add sprk_currentversionnumber (Whole Number) field</step>
     <step order="3">Add sprk_ischeckedout (Yes/No) field with default false</step>
     <step order="4">Add sprk_checkedoutby lookup to systemuser</step>
-    <step order="5">Add sprk_checkedoutat (DateTime) field</step>
+    <step order="5">Add sprk_checkedoutdate (DateTime) field</step>
     <step order="6">Open Document main form in form designer</step>
     <step order="7">Add Version History section with subgrid showing sprk_fileversion records</step>
     <step order="8">Configure subgrid columns: Version #, Checked Out By, Checked Out At, Checked In By, Checked In At, Comment, Status</step>

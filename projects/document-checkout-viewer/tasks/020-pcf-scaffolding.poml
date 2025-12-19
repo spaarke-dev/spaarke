@@ -3,7 +3,7 @@
   <metadata>
     <title>Create PCF Control Scaffolding</title>
     <phase>3: SpeDocumentViewer PCF</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>015</dependencies>
     <blocks>021</blocks>

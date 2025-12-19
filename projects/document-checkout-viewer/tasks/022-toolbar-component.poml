@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement Fluent v9 Toolbar</title>
     <phase>3: SpeDocumentViewer PCF</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>021</dependencies>
     <blocks>023</blocks>
