@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="document-checkout-viewer">
+  <metadata>
+    <title>Add Delete Ribbon Button</title>
+    <phase>4: Delete &amp; Ribbon</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>032</blocks>
+    <tags>ribbon, dataverse, customization</tags>
+  </metadata>
+
+  <prompt>
+    Add a Delete Document button to the Document entity form ribbon using the
+    ribbon-edit skill. Configure CommandDefinition, EnableRule, and DisplayRule
+    to show the button only when appropriate.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse ribbon customizations.
+    Follow ADRs strictly. Use ribbon-edit skill for procedure.
+  </role>
+
+  <goal>
+    A Delete Document button on the Document form ribbon that calls the
+    sprk_DocumentDelete.js webresource with proper visibility rules.
+  </goal>
+
+  <context>
+    <background>
+      The ribbon button integrates with the JavaScript webresource created in
+      task 030. It should only be visible when the user has delete permission
+      and hidden when the document is checked out.
+    </background>
+    <relevant-files>
+      <file>projects/document-checkout-viewer/spec.md (Delete Flow section)</file>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use ribbon-edit skill procedure</constraint>
+    <constraint source="project">Button visible only with delete permission</constraint>
+    <constraint source="project">Button disabled when document is checked out</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+      <file>docs/ai-knowledge/guides/RIBBON-CUSTOMIZATION.md</file>
+    </files>
+    <patterns>
+      <pattern name="EnableRule" location="Dataverse ribbon">
+        Use ValueRule to check sprk_ischeckedout field
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load ribbon-edit skill and follow procedure</step>
+    <step order="2">Export solution containing Document entity</step>
+    <step order="3">Extract and edit RibbonDiffXml</step>
+    <step order="4">Add CommandDefinition for sprk.document.delete</step>
+    <step order="5">Configure JavaScriptFunction to call sprk_DocumentDelete.deleteDocument</step>
+    <step order="6">Add EnableRule: ValueRule checking sprk_ischeckedout = false</step>
+    <step order="7">Add DisplayRule: based on delete privilege</step>
+    <step order="8">Add Button element with Delete icon</step>
+    <step order="9">Import modified solution</step>
+    <step order="10">Test button visibility and enabled state</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI for solution export/import</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse">Document entity ribbon with Delete button</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Delete button visible on Document form</criterion>
+    <criterion testable="true">Button disabled when sprk_ischeckedout is true</criterion>
+    <criterion testable="true">Clicking button triggers sprk_DocumentDelete.deleteDocument</criterion>
+    <criterion testable="true">Button uses appropriate delete icon</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The ribbon-edit skill exports the solution, modifies RibbonDiffXml, and reimports.
+    Follow the skill procedure exactly for proper ribbon customization.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/ribbon-edit/SKILL.md</skill>
+    <protocol>
+      Load ribbon-edit skill BEFORE starting this task.
+    </protocol>
+  </execution>
+</task>

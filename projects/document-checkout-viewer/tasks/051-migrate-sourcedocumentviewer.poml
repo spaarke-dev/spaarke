@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="document-checkout-viewer">
+  <metadata>
+    <title>Migrate SourceDocumentViewer in Analysis Workspace</title>
+    <phase>5: Migration &amp; Integration</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>025</dependencies>
+    <blocks>053</blocks>
+    <tags>migration, pcf, react</tags>
+  </metadata>
+
+  <prompt>
+    Replace SourceDocumentViewer component in Analysis Workspace with
+    SpeDocumentViewer configured in read-only mode (enableEdit=false).
+    Preserve existing preview and expand functionality.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in React and PCF integration.
+    Follow ADRs strictly.
+  </role>
+
+  <goal>
+    Analysis Workspace uses SpeDocumentViewer in read-only mode for document
+    preview, replacing the custom SourceDocumentViewer component.
+  </goal>
+
+  <context>
+    <background>
+      SourceDocumentViewer is a custom component within Analysis Workspace.
+      For AI analysis, documents should be read-only (users should check in
+      before running analysis). SpeDocumentViewer with enableEdit=false
+      provides the same preview without edit capabilities.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/AnalysisWorkspace/control/components/SourceDocumentViewer.tsx</file>
+      <file>src/client/pcf/SpeDocumentViewer/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Configure enableEdit=false for read-only</constraint>
+    <constraint source="project">Preserve expand/fullscreen functionality</constraint>
+    <constraint source="project">Must work within AnalysisWorkspace context</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>src/client/pcf/AnalysisWorkspace/control/components/SourceDocumentViewer.tsx</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Analyze SourceDocumentViewer props and usage</step>
+    <step order="2">Identify SpeDocumentViewer equivalent props</step>
+    <step order="3">Create adapter or wrapper if needed for prop mapping</step>
+    <step order="4">Replace SourceDocumentViewer import with SpeDocumentViewer</step>
+    <step order="5">Configure enableEdit=false, enableDelete=false</step>
+    <step order="6">Configure enableDownload based on existing behavior</step>
+    <step order="7">Map onFullscreen callback for expand functionality</step>
+    <step order="8">Update AnalysisWorkspaceApp to use new component</step>
+    <step order="9">Build and test Analysis Workspace</step>
+    <step order="10">Verify document preview works in analysis context</step>
+    <step order="11">Verify expand/fullscreen still works</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/PCF projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/AnalysisWorkspace/control/components/ (modified)</output>
+    <output type="code">src/client/pcf/AnalysisWorkspace/control/AnalysisWorkspaceApp.tsx (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SpeDocumentViewer renders in Analysis Workspace</criterion>
+    <criterion testable="true">Edit button is not visible (enableEdit=false)</criterion>
+    <criterion testable="true">Document preview loads correctly</criterion>
+    <criterion testable="true">Expand/fullscreen functionality preserved</criterion>
+    <criterion testable="true">No regression in Analysis Workspace functionality</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    SourceDocumentViewer may have Analysis-specific logic. Preserve any
+    necessary functionality during migration.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load SourceDocumentViewer to understand current implementation.
+    </protocol>
+  </execution>
+</task>
