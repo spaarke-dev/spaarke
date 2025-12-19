@@ -1,6 +1,6 @@
 # CLAUDE.md - Spaarke Repository Instructions
 
-> **Last Updated**: December 4, 2025
+> **Last Updated**: December 19, 2025
 >
 > **Purpose**: This file provides repository-wide context and instructions for Claude Code when working in this codebase.
 
@@ -56,8 +56,9 @@ When these phrases are detected, **STOP** and load the corresponding skill:
 
 | Trigger Phrase | Skill | Action |
 |----------------|-------|--------|
-| "initialize project", "create project", "start project", "project init" | `project-init` | Load `.claude/skills/project-init/SKILL.md` and follow procedure |
-| "implement spec", "design to project", "transform spec", "process spec" | `design-to-project` | Load `.claude/skills/design-to-project/SKILL.md` and follow 5-phase pipeline |
+| "design to spec", "transform spec", "create AI spec" | `design-to-spec` | Load `.claude/skills/design-to-spec/SKILL.md` - Transform human design docs to AI-ready spec.md |
+| "start project", "initialize project from spec", "run project pipeline" | `project-pipeline` ⭐ | Load `.claude/skills/project-pipeline/SKILL.md` and run full pipeline (RECOMMENDED) |
+| "create project artifacts", "generate artifacts", "project setup" | `project-setup` | Load `.claude/skills/project-setup/SKILL.md` (advanced users only) |
 | "create tasks", "decompose plan", "generate tasks" | `task-create` | Load `.claude/skills/task-create/SKILL.md` and follow procedure |
 | "review code", "code review" | `code-review` | Load `.claude/skills/code-review/SKILL.md` and follow checklist |
 | "check ADRs", "validate architecture" | `adr-check` | Load `.claude/skills/adr-check/SKILL.md` and validate |
@@ -70,7 +71,8 @@ When these phrases are detected, **STOP** and load the corresponding skill:
 
 | Condition | Required Skill |
 |-----------|---------------|
-| `projects/{name}/spec.md` exists but `README.md` doesn't | Run `project-init` |
+| `projects/{name}/design.md` (or .docx, .pdf) exists but `spec.md` doesn't | Run `design-to-spec` to transform |
+| `projects/{name}/spec.md` exists but `README.md` doesn't | Run `project-pipeline` (or `project-setup` if user requests minimal) |
 | `projects/{name}/plan.md` exists but `tasks/` is empty | Run `task-create` |
 | Creating API endpoint, PCF control, or plugin | Apply `adr-aware` (always-apply) |
 | Writing any code | Apply `spaarke-conventions` (always-apply) |
@@ -92,9 +94,10 @@ Use these commands to explicitly invoke skills:
 
 | Command | Purpose |
 |---------|----------|
+| `/design-to-spec {path}` | Transform human design doc to AI-optimized spec.md |
 | `/project-status [name]` | Check project status and get next action |
-| `/project-init {path}` | Initialize project from spec |
-| `/design-to-project {path}` | Full spec-to-implementation pipeline |
+| `/project-pipeline {path}` | **⭐ RECOMMENDED**: Full pipeline - spec → ready tasks + branch |
+| `/project-setup {path}` | Generate artifacts only (advanced users) |
 | `/task-create {path}` | Decompose plan into task files |
 | `/new-project` | Interactive wizard for new projects |
 | `/code-review` | Review recent changes |

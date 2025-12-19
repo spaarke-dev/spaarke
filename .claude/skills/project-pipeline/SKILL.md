@@ -10,7 +10,14 @@ alwaysApply: false
 
 ## Purpose
 
-**Streamlined project initialization pipeline** that automatically chains: SPEC.md validation → PLAN.md generation → Task decomposition → Ready to execute Task 001.
+**Tier 2 Orchestrator Skill (RECOMMENDED)** - Streamlined end-to-end project initialization pipeline that chains: SPEC.md validation → Resource discovery → Artifact generation → Task decomposition → Feature branch → Ready to execute Task 001.
+
+**Key Features**:
+- Human-in-loop confirmations after each major step
+- Automatic resource discovery (ADRs, skills, knowledge docs)
+- Calls component skills (project-setup, task-create)
+- Creates feature branch for isolation
+- Optional auto-start of task 001
 
 **Human-in-Loop**: After each step, present results and ask for confirmation before proceeding. Default to "proceed" (user just says 'y').
 
@@ -58,59 +65,74 @@ IF validation fails:
 
 ---
 
-### Step 2: Generate PLAN.md
+### Step 2: Discover Resources & Generate Artifacts
 
-**Action:**
+**Action Part 1: Resource Discovery**
 ```
-LOAD templates:
-  - docs/ai-knowledge/templates/project-plan.template.md
-
 LOAD context:
   - projects/{project-name}/spec.md
-  - Applicable ADRs (via adr-aware skill)
-  - Existing patterns from src/
 
-DISCOVER RESOURCES (Step 2.5 from project-init):
-  1. Extract keywords from spec.md
+DISCOVER RESOURCES:
+  1. Extract keywords from spec.md (technologies, operations, feature types)
   2. Search .claude/skills/INDEX.md for applicable skills
+     - Match tags, techStack in skill frontmatter
+     - Example: "deploy to Dataverse" → dataverse-deploy skill
   3. Search docs/ai-knowledge/ for relevant guides
-  4. Load referenced ADRs
-  5. Output: "Discovered Resources" section in PLAN.md
+     - Match technology names, patterns
+     - Example: "Azure OpenAI" → search for openai, embeddings tags
+  4. Load applicable ADRs via adr-aware
+     - Based on resource types in spec (API, PCF, Plugin, etc.)
+     - Example: PCF control → ADR-006, ADR-011, ADR-012
 
-GENERATE: projects/{project-name}/PLAN.md
-  Using template structure:
-  1. Executive Summary (purpose, scope, timeline)
-  2. Architecture Context (constraints, decisions, discovered resources)
-  3. Implementation Approach (phase structure, critical path)
-  4. Phase Breakdown (objectives, deliverables, inputs, outputs)
-  5. Dependencies (external, internal)
-  6. Testing Strategy
-  7. Acceptance Criteria
-  8. Risk Register
-  9. Next Steps
+OUTPUT: Resource discovery summary
+  - X ADRs identified
+  - Y skills applicable
+  - Z knowledge docs found
+```
 
-CREATE: projects/{project-name}/README.md
-  - Project overview
-  - Quick start guide
-  - Status tracking
-  - Success criteria
+**Action Part 2: Generate Artifacts**
+```
+INVOKE: project-setup projects/{project-name}
+
+This component skill will:
+  ✅ Create README.md (project overview, graduation criteria)
+  ✅ Create PLAN.md (implementation plan with WBS)
+  ✅ Create CLAUDE.md (AI context file)
+  ✅ Create folder structure (tasks/, notes/)
+
+AFTER project-setup completes:
+  ENHANCE PLAN.md with discovered resources:
+    - Add "Discovered Resources" section in Architecture Context:
+      - List applicable ADRs
+      - List relevant skills
+      - List knowledge docs
+    - Update Architecture Context with ADR constraints
+    - Add discovered resources to References section
 ```
 
 **Output to User:**
 ```
-✅ PLAN.md generated (487 lines):
-   - 5 phases identified
-   - 178 estimated tasks
-   - 625 hours estimated effort
-   - 10 week timeline
+✅ Resources discovered:
+   - 4 ADRs identified (ADR-001, ADR-007, ADR-008, ADR-010)
+   - 2 skills applicable (dataverse-deploy, adr-aware)
+   - 3 knowledge docs found (SPAARKE-ARCHITECTURE.md, ...)
+
+✅ Artifacts generated:
+   - README.md (project overview, graduation criteria)
+   - PLAN.md (5 phases, WBS structure)
+   - CLAUDE.md (AI context file)
+   - Folder structure created
 
 📄 Files created:
-   - projects/ai-document-intelligence-r1/PLAN.md
-   - projects/ai-document-intelligence-r1/README.md
+   - projects/{project-name}/README.md
+   - projects/{project-name}/plan.md
+   - projects/{project-name}/CLAUDE.md
+   - projects/{project-name}/tasks/ (empty, ready for task files)
+   - projects/{project-name}/notes/ (with subdirectories)
 
 📋 Next Step: Decompose PLAN.md into executable task files
 
-[Y to proceed / review to view plan / refine {section} to edit / stop to exit]
+[Y to proceed / review to view artifacts / refine {file} to edit / stop to exit]
 ```
 
 **Wait for User**: `y` (proceed) | `review` (open PLAN.md) | `refine {instructions}` | `stop`
@@ -202,11 +224,87 @@ Task-execute skill will automatically:
 [Y to start task 001 / review {task-number} to view task / stop to exit]
 ```
 
-**Wait for User**: `y` (start task 001) | `review {task-number}` | `stop`
+**Wait for User**: `y` (proceed to branch creation) | `review {task-number}` | `stop`
 
 ---
 
-### Step 4: Execute Task 001 (Optional Auto-Start)
+### Step 4: Create Feature Branch
+
+**Action:**
+```
+CREATE feature branch for this project:
+
+BRANCH NAMING:
+  feature/{project-name}  ← matches project folder name
+  Example: feature/ai-document-intelligence-r1
+
+GIT OPERATIONS:
+  1. Create and checkout branch:
+     git checkout -b feature/{project-name}
+
+  2. Stage project files:
+     git add projects/{project-name}/
+
+  3. Commit with conventional commit format:
+     git commit -m "feat({scope}): initialize {project-name} project
+
+     - Created project artifacts (README, PLAN, CLAUDE.md)
+     - Generated {X} task files
+     - Project ready for implementation
+
+     🤖 Generated with Claude Code"
+
+  4. Push to remote with tracking:
+     git push -u origin feature/{project-name}
+
+  5. OPTIONAL - Create draft PR for visibility:
+     gh pr create --draft \
+       --title "feat({scope}): {project-name}" \
+       --body "## Summary
+Implementation of {project-name}
+
+## Status
+- [x] Project initialized
+- [x] Tasks created ({X} tasks)
+- [ ] Implementation in progress
+- [ ] Code review
+- [ ] Ready for merge
+
+## Quick Links
+- [Project README](projects/{project-name}/README.md)
+- [Implementation Plan](projects/{project-name}/plan.md)
+- [Task Index](projects/{project-name}/tasks/TASK-INDEX.md)
+
+🤖 Generated with Claude Code"
+
+WHY create branch at this point:
+  - All artifacts and tasks are created (meaningful commit)
+  - Isolates project work from master
+  - Enables incremental commits during implementation
+  - Draft PR provides team visibility
+  - Clean merge when project completes
+```
+
+**Output to User:**
+```
+✅ Feature branch created:
+   - Branch: feature/{project-name}
+   - Initial commit: "feat({scope}): initialize {project-name} project"
+   - Pushed to remote: origin/feature/{project-name}
+   - Draft PR created: #{PR-number}
+
+🔗 View PR: https://github.com/{org}/{repo}/pull/{PR-number}
+
+📋 Next Step: Execute Task 001 (optional auto-start)
+
+[Y to start task 001 / stop to exit]
+```
+
+**Wait for User**: `y` (start task 001) | `stop`
+
+---
+
+### Step 5: Execute Task 001 (Optional Auto-Start)
 
 **Action:**
 ```
@@ -237,14 +335,18 @@ IF user said 'stop':
 ```
 ❌ SPEC.md not found at: projects/{project-name}/spec.md
 
-To use project-pipeline:
-1. Create project folder: projects/{descriptive-name}/
-2. Write spec.md with:
+Options:
+1. If you have a human design document (design.md, .docx, .pdf):
+   → Run: /design-to-spec projects/{project-name}
+   → This transforms your design doc into an AI-optimized spec.md
+
+2. Write spec.md manually with:
    - Executive Summary / Purpose
    - Scope definition
    - Technical approach
    - Success criteria
-3. Run: /project-pipeline projects/{descriptive-name}
+
+Then run: /project-pipeline projects/{project-name}
 
 Need help writing spec.md? I can help with that first.
 ```
@@ -366,32 +468,56 @@ Agent: ✅ Project initialized up to PLAN.md
 
 ## Integration with Existing Skills
 
-This skill **orchestrates** but **doesn't replace** existing skills:
+This skill **orchestrates** by calling component skills:
 
-- **adr-aware**: Auto-invoked during PLAN.md generation for ADR loading
-- **project-init**: Concepts integrated but not called (inline for better UX)
-- **task-create**: Concepts integrated but not called (inline for better UX)
-- **task-execute**: **INVOKED** at Step 4 if user confirms
+- **design-to-spec**: **OPTIONAL PREDECESSOR** - Transforms human design docs into AI-optimized spec.md before this skill runs
+- **adr-aware**: Auto-invoked during resource discovery (Step 2) for ADR loading
+- **project-setup**: **CALLED** at Step 2 for artifact generation (README, PLAN, CLAUDE.md, folders)
+- **task-create**: Concepts integrated and called at Step 3 for task decomposition
+- **task-execute**: **CALLED** at Step 5 if user confirms auto-start
+- **push-to-github**: Concepts used at Step 4 for feature branch and commit
 
-**Why inline instead of calling skills?**
-- Better error handling and recovery
-- Clearer progress feedback to user
-- Single confirmation point per step (not nested confirmations)
-- Easier to refine individual steps
+**Orchestration Pattern**:
+```
+design-to-spec (Tier 1 - Optional Predecessor)
+  └─→ Transforms design.md → spec.md (if human design doc exists)
+        │
+        ▼
+project-pipeline (Tier 2 - Orchestrator)
+  ├─→ Step 2: CALLS project-setup (Tier 1 - Component)
+  │     └─→ Generates artifacts
+  ├─→ Step 3: CALLS task-create (Tier 1 - Component)
+  │     └─→ Generates task files
+  └─→ Step 5: CALLS task-execute (Tier 2 - Orchestrator)
+        └─→ Executes first task
+
+Result: Full project initialization with human confirmation at each major step
+```
+
+**Why call component skills?**
+- Single responsibility: Each skill does one thing well
+- Reusability: project-setup can be used standalone or by other orchestrators
+- Maintainability: Changes to artifact generation happen in one place (project-setup)
+- Testability: Component skills can be tested independently
 
 ---
 
 ## Success Criteria
 
 Pipeline successful when:
-- [ ] SPEC.md validated
-- [ ] PLAN.md created with all template sections
-- [ ] README.md created
-- [ ] All task .poml files created
-- [ ] TASK-INDEX.md created
-- [ ] Deployment tasks added
-- [ ] Wrap-up task added
-- [ ] User confirmedready to execute Task 001
+- [ ] SPEC.md validated (Step 1)
+- [ ] Resources discovered (ADRs, skills, knowledge docs) (Step 2)
+- [ ] README.md created with graduation criteria (Step 2)
+- [ ] PLAN.md created with all template sections and discovered resources (Step 2)
+- [ ] CLAUDE.md created with project context (Step 2)
+- [ ] Folder structure created (tasks/, notes/ with subdirs) (Step 2)
+- [ ] All task .poml files created (Step 3)
+- [ ] TASK-INDEX.md created (Step 3)
+- [ ] Deployment tasks added (if applicable) (Step 3)
+- [ ] Wrap-up task added (090-project-wrap-up.poml) (Step 3)
+- [ ] Feature branch created and pushed to remote (Step 4)
+- [ ] Initial commit made with project artifacts (Step 4)
+- [ ] User confirmed ready to execute Task 001 (or declined) (Step 5)
 
 ---
 
