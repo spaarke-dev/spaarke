@@ -10,11 +10,12 @@
 | [adr-check](adr-check/SKILL.md) | Validate code against Architecture Decision Records | No | `/adr-check`, "check ADRs" |
 | [code-review](code-review/SKILL.md) | Comprehensive code review (security, performance, style) | No | `/code-review`, "review code" |
 | [dataverse-deploy](dataverse-deploy/SKILL.md) | Deploy solutions, PCF controls, web resources to Dataverse | No | "deploy to dataverse", "pac pcf push" |
-| [design-to-project](design-to-project/SKILL.md) | Full design spec to implementation pipeline | No | `/design-to-project`, "implement spec" |
+| [design-to-spec](design-to-spec/SKILL.md) | Transform human design documents into AI-optimized spec.md | No | "design to spec", "transform spec", "create AI spec" |
+| [~~design-to-project~~](design-to-project/SKILL.md) | ~~Full design spec to implementation pipeline~~ **ARCHIVED** - Use project-pipeline | No | ~~Use `/project-pipeline` instead~~ |
 | [pull-from-github](pull-from-github/SKILL.md) | Pull latest changes from GitHub | No | `/pull-from-github`, "pull from github" |
 | [push-to-github](push-to-github/SKILL.md) | Commit changes and push to GitHub | No | `/push-to-github`, "push to github" |
-| [project-init](project-init/SKILL.md) | Initialize project folder with README, plan, tasks | No | `/project-init`, "create project" |
-| [project-pipeline](project-pipeline/SKILL.md) | **🚀 RECOMMENDED**: Automated pipeline from SPEC.md → ready tasks | No | `/project-pipeline`, "start project" |
+| [project-pipeline](project-pipeline/SKILL.md) | **🚀 RECOMMENDED**: Full automated pipeline SPEC.md → ready tasks + branch | No | `/project-pipeline`, "start project" |
+| [project-setup](project-setup/SKILL.md) | Generate project artifacts (README, PLAN, CLAUDE.md) only | No | `/project-setup`, "create artifacts" |
 | [repo-cleanup](repo-cleanup/SKILL.md) | Repository hygiene audit and ephemeral file cleanup | No | `/repo-cleanup`, "clean up repo" |
 | [spaarke-conventions](spaarke-conventions/SKILL.md) | Coding standards and naming conventions | **Yes** | Auto-applied |
 | [task-create](task-create/SKILL.md) | Decompose plan.md into POML task files | No | `/task-create`, "create tasks" |
@@ -28,12 +29,13 @@
 - **spaarke-conventions** - Naming, patterns, file organization
 
 ### 🚀 Project Lifecycle
-- **project-pipeline** - **⭐ RECOMMENDED**: Automated pipeline from SPEC.md → ready tasks with human-in-loop
-- **design-to-project** - Alternative: Full design spec to implementation pipeline
-- **project-init** - Manual: Create project folder structure
-- **task-create** - Manual: Break plan into executable tasks
-- **task-execute** - Execute individual tasks with mandatory knowledge loading
-- **repo-cleanup** - Clean up after project completion
+- **design-to-spec** - Component: Transform human design docs into AI-optimized spec.md (Tier 1)
+- **project-pipeline** - **⭐ RECOMMENDED**: Full orchestrator - spec.md → ready tasks + branch (Tier 2)
+- **project-setup** - Component: Generate artifacts only (README, PLAN, CLAUDE.md) (Tier 1)
+- **task-create** - Component: Decompose plan into task files (Tier 1)
+- **task-execute** - Orchestrator: Execute individual task with context loading (Tier 2)
+- **repo-cleanup** - Operational: Validate structure and clean up after completion (Tier 3)
+- ~~**design-to-project**~~ - **ARCHIVED** - Use project-pipeline instead
 
 ### ✅ Quality Assurance
 - **code-review** - General code quality review
@@ -51,36 +53,76 @@
 ## Skill Flow
 
 ```
-Design Spec
+Human Design Document (design.md, .docx, .pdf, or notes)
     │
     ▼
 ┌─────────────────────┐
-│  design-to-project  │  ← Full pipeline orchestrator
+│  design-to-spec     │  ← Tier 1 Component (Optional)
+│  Transform verbose  │     Extracts requirements, adds ADR refs,
+│  docs → AI-ready    │     flags ambiguities
 └─────────────────────┘
-    │ calls ▼
+    │
+    ▼
+AI-Optimized Spec (spec.md)
+    │
+    ▼
 ┌─────────────────────┐
-│    project-init     │  ← Creates folder structure
+│  project-pipeline   │  ← Tier 2 Orchestrator (RECOMMENDED)
+│  Human-in-loop      │     Confirmations at each step
 └─────────────────────┘
-    │ then ▼
-┌─────────────────────┐
-│    task-create      │  ← Decomposes into tasks
-└─────────────────────┘
-    │ for each task ▼
-┌─────────────────────┐
-│    task-execute     │  ← EXECUTE: Load knowledge, apply constraints
-└─────────────────────┘
-    │ during execution ▼
-┌─────────────────────┐
-│     adr-aware       │  ← BEFORE: Load relevant ADRs (always-apply)
-│ spaarke-conventions │  ← DURING: Apply coding standards (always-apply)
-│     adr-check       │  ← AFTER: Validate architecture
-│    code-review      │  ← AFTER: Quality review
-└─────────────────────┘
-    │ on completion ▼
-┌─────────────────────┐
-│    repo-cleanup     │  ← WRAP-UP: Validate structure, remove ephemeral files
-└─────────────────────┘
+    │
+    ├─→ Step 1: Validate spec.md
+    │
+    ├─→ Step 2: Resource discovery + artifact generation
+    │      │
+    │      └─→ CALLS ▼
+    │   ┌──────────────────┐
+    │   │  project-setup   │  ← Tier 1 Component
+    │   │  README, PLAN,   │     Artifact generation only
+    │   │  CLAUDE.md       │
+    │   └──────────────────┘
+    │
+    ├─→ Step 3: Task decomposition
+    │      │
+    │      └─→ CALLS ▼
+    │   ┌──────────────────┐
+    │   │  task-create     │  ← Tier 1 Component
+    │   │  tasks/*.poml    │     Task file generation only
+    │   └──────────────────┘
+    │
+    ├─→ Step 4: Feature branch + commit
+    │
+    └─→ Step 5: Optional auto-start task 001
+           │
+           └─→ CALLS ▼
+        ┌──────────────────┐
+        │  task-execute    │  ← Tier 2 Orchestrator (per task)
+        │  Load + execute  │     With full context
+        └──────────────────┘
+            │
+            ├─→ adr-aware (Tier 0 - implicit)
+            ├─→ spaarke-conventions (Tier 0 - implicit)
+            ├─→ Execute task steps
+            ├─→ code-review (Tier 3 - quality gate)
+            ├─→ adr-check (Tier 3 - validation)
+            └─→ dataverse-deploy/ribbon-edit (Tier 3 - conditional)
+               │
+               ▼
+        User executes remaining tasks (repeat task-execute)
+               │
+               ▼
+        ┌──────────────────┐
+        │  repo-cleanup    │  ← Tier 3 Operational (final step)
+        │  Validate +      │     Cleanup ephemeral files
+        │  cleanup         │
+        └──────────────────┘
 ```
+
+**Skill Tiers**:
+- **Tier 0**: Always-Apply (adr-aware, spaarke-conventions)
+- **Tier 1**: Components (design-to-spec, project-setup, task-create)
+- **Tier 2**: Orchestrators (project-pipeline, task-execute)
+- **Tier 3**: Operational (code-review, adr-check, dataverse-deploy, etc.)
 
 ## ADR Awareness Flow
 
@@ -92,15 +134,15 @@ Design Spec
 │  PLANNING              IMPLEMENTATION           VALIDATION   │
 │  ───────              ──────────────           ──────────   │
 │                                                              │
-│  design-to-project    adr-aware (proactive)   adr-check     │
+│  project-pipeline     adr-aware (proactive)   adr-check     │
 │  ↓                    ↓                       ↓             │
 │  Identifies ADRs      Loads ADRs before       Validates all │
-│  in Phase 2          writing code            ADRs in index  │
+│  in Step 2           writing code            ADRs in index  │
 │                                                              │
 │  task-create          Prevents violations     Reports        │
 │  ↓                    before they happen     violations     │
 │  Includes ADR refs                                          │
-│  in constraints                                              │
+│  in task metadata                                           │
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -168,7 +210,9 @@ alwaysApply: false  # Only true for universal skills like conventions
 │       └── review-checklist.md
 ├── dataverse-deploy/             ← Dataverse deployment operations
 │   └── SKILL.md
-├── design-to-project/
+├── design-to-spec/               ← Transform design docs to AI-ready spec.md
+│   └── SKILL.md
+├── design-to-project/            ← ARCHIVED (use project-pipeline)
 │   ├── SKILL.md
 │   └── references/
 ├── project-init/
@@ -188,4 +232,4 @@ alwaysApply: false  # Only true for universal skills like conventions
 
 ---
 
-*Last updated: December 8, 2025*
+*Last updated: December 19, 2025*
