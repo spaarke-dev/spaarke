@@ -8,6 +8,44 @@ appliesTo: ["projects/*/", "start project", "initialize project"]
 alwaysApply: false
 ---
 
+## Prerequisites
+
+### Claude Code Extended Context Configuration
+
+**CRITICAL**: This orchestrator skill REQUIRES extended context settings:
+
+```bash
+MAX_THINKING_TOKENS=50000
+CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000
+```
+
+**Why Extended Context is Critical**:
+- **Resource Discovery (Step 2)**: Loads ADRs, skills, knowledge docs, and existing code patterns
+- **Artifact Generation (Step 2)**: Calls `project-setup` which generates README, PLAN, CLAUDE.md
+- **Task Decomposition (Step 3)**: Creates 50-200+ task files with tag-to-knowledge mapping
+- **Context Enrichment**: Each task file includes applicable ADRs and knowledge docs
+- **Pipeline Orchestration**: Chains multiple component skills sequentially
+
+**Example Context Load**:
+For AI Document Intelligence R1 project:
+- spec.md: 2,306 words
+- 4 ADRs loaded (ADR-013, ADR-014, ADR-015, ADR-016)
+- 8 knowledge docs discovered
+- 178 tasks generated with full context
+
+**Verify settings before proceeding**:
+```bash
+# Windows PowerShell
+echo $env:MAX_THINKING_TOKENS
+echo $env:CLAUDE_CODE_MAX_OUTPUT_TOKENS
+
+# Should output: 50000 and 64000
+```
+
+**If not set**, the pipeline may fail or produce incomplete results. See root [CLAUDE.md](../../../CLAUDE.md#development-environment) for setup instructions.
+
+---
+
 ## Purpose
 
 **Tier 2 Orchestrator Skill (RECOMMENDED)** - Streamlined end-to-end project initialization pipeline that chains: SPEC.md validation → Resource discovery → Artifact generation → Task decomposition → Feature branch → Ready to execute Task 001.
@@ -65,49 +103,77 @@ IF validation fails:
 
 ---
 
-### Step 2: Discover Resources & Generate Artifacts
+### Step 2: Comprehensive Resource Discovery & Artifact Generation
 
-**Action Part 1: Resource Discovery**
+**Purpose:** Load ALL implementation context (ADRs, skills, patterns, knowledge docs, code examples) for task creation.
+
+**Action Part 1: Comprehensive Resource Discovery**
 ```
 LOAD context:
   - projects/{project-name}/spec.md
 
-DISCOVER RESOURCES:
-  1. Extract keywords from spec.md (technologies, operations, feature types)
-  2. Search .claude/skills/INDEX.md for applicable skills
-     - Match tags, techStack in skill frontmatter
-     - Example: "deploy to Dataverse" → dataverse-deploy skill
-  3. Search docs/ai-knowledge/ for relevant guides
-     - Match technology names, patterns
-     - Example: "Azure OpenAI" → search for openai, embeddings tags
-  4. Load applicable ADRs via adr-aware
+DISCOVER RESOURCES (Comprehensive):
+  1. IDENTIFY resource types from spec.md
+     - Extract keywords (technologies, operations, feature types)
+     - Identify components (API, PCF, plugins, storage, AI, jobs)
+
+  2. LOAD applicable ADRs via adr-aware
      - Based on resource types in spec (API, PCF, Plugin, etc.)
      - Example: PCF control → ADR-006, ADR-011, ADR-012
+     - Load FULL ADR content (not just constraints)
 
-OUTPUT: Resource discovery summary
-  - X ADRs identified
-  - Y skills applicable
-  - Z knowledge docs found
+  3. SEARCH for applicable skills
+     - Search .claude/skills/INDEX.md
+     - Match tags, techStack in skill frontmatter
+     - Example: "deploy to Dataverse" → dataverse-deploy skill
+
+  4. SEARCH for knowledge docs and patterns
+     - Search docs/ai-knowledge/guides/ for relevant procedures
+     - Search docs/ai-knowledge/patterns/ for code patterns
+     - Match technology names, patterns
+     - Example: "Azure OpenAI" → openai, embeddings, streaming patterns
+
+  5. FIND existing code examples
+     - Search codebase for similar implementations
+     - Identify canonical implementations to follow
+     - Example: Existing PCF controls for reference
+
+OUTPUT: Comprehensive resource discovery summary
+  - X ADRs loaded (with full content)
+  - Y skills applicable (with file paths)
+  - Z knowledge docs found (guides + patterns)
+  - N code examples identified
+
+⚠️ **DIFFERENCE from design-to-spec Step 3**:
+- design-to-spec: Preliminary (ADR constraints only for spec enrichment)
+- project-pipeline: Comprehensive (full ADRs, patterns, code examples for implementation)
 ```
 
-**Action Part 2: Generate Artifacts**
+**Action Part 2: Generate Artifacts with Discovered Resources**
 ```
+PREPARE context for project-setup:
+  - spec.md content
+  - Discovered resources summary (ADRs, skills, knowledge docs)
+
 INVOKE: project-setup projects/{project-name}
 
-This component skill will:
-  ✅ Create README.md (project overview, graduation criteria)
-  ✅ Create PLAN.md (implementation plan with WBS)
-  ✅ Create CLAUDE.md (AI context file)
-  ✅ Create folder structure (tasks/, notes/)
+This component skill generates:
+  ✅ README.md (project overview, graduation criteria from spec)
+  ✅ PLAN.md (implementation plan with WBS from spec)
+  ✅ CLAUDE.md (AI context file from spec)
+  ✅ Folder structure (tasks/, notes/ with subdirectories)
 
 AFTER project-setup completes:
   ENHANCE PLAN.md with discovered resources:
-    - Add "Discovered Resources" section in Architecture Context:
-      - List applicable ADRs
-      - List relevant skills
-      - List knowledge docs
-    - Update Architecture Context with ADR constraints
-    - Add discovered resources to References section
+    - Insert "Discovered Resources" section in Architecture Context
+    - List applicable ADRs with summaries
+    - List relevant skills with purpose
+    - List knowledge docs with topics
+    - Update References section with all resource links
+
+ENHANCE CLAUDE.md with discovered resources:
+    - Populate "Applicable ADRs" section
+    - Add resource file paths for quick reference
 ```
 
 **Output to User:**

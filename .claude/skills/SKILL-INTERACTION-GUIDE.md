@@ -4,19 +4,20 @@
 >
 > **Audience**: Claude Code (AI agent) and human operators
 >
-> **Last Updated**: December 18, 2024
+> **Last Updated**: December 20, 2025
 
 ---
 
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [Skill Categories](#skill-categories)
-3. [Primary Workflows](#primary-workflows)
-4. [Skill Interaction Patterns](#skill-interaction-patterns)
-5. [Decision Trees](#decision-trees)
-6. [Invocation Rules](#invocation-rules)
-7. [Common Patterns](#common-patterns)
+2. [Extended Context Configuration](#extended-context-configuration)
+3. [Skill Categories](#skill-categories)
+4. [Primary Workflows](#primary-workflows)
+5. [Skill Interaction Patterns](#skill-interaction-patterns)
+6. [Decision Trees](#decision-trees)
+7. [Invocation Rules](#invocation-rules)
+8. [Common Patterns](#common-patterns)
 
 ---
 
@@ -68,24 +69,84 @@ Skills are organized in three tiers by complexity and scope:
 
 ---
 
+## Extended Context Configuration
+
+### Prerequisites for Project Pipeline Skills
+
+**CRITICAL**: Skills involved in project initialization require extended context settings:
+
+```bash
+MAX_THINKING_TOKENS=50000
+CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000
+```
+
+**Why Extended Context is Required**:
+- **Multi-phase projects**: Projects like AI Document Intelligence R1 have 100+ tasks across 8 phases
+- **Deep resource discovery**: Pipeline loads ADRs, knowledge docs, patterns, and existing code
+- **Context-rich task execution**: Each task includes full project history and applicable constraints
+- **Pipeline orchestration**: `project-pipeline` chains multiple component skills sequentially
+- **Large spec documents**: Design specs are typically 1500-5000 words
+
+**Real-World Example**:
+For the AI Document Intelligence R1 project:
+- spec.md: 2,306 words
+- 4 ADRs loaded (ADR-013, ADR-014, ADR-015, ADR-016)
+- 8 knowledge docs discovered
+- 178 tasks generated with full context
+
+**Setting in Windows**:
+```cmd
+setx MAX_THINKING_TOKENS "50000"
+setx CLAUDE_CODE_MAX_OUTPUT_TOKENS "64000"
+```
+
+**Verification**:
+```powershell
+echo $env:MAX_THINKING_TOKENS
+echo $env:CLAUDE_CODE_MAX_OUTPUT_TOKENS
+# Should output: 50000 and 64000
+```
+
+### Skills Requiring Extended Context
+
+| Skill | Context Need | Reason |
+|-------|--------------|--------|
+| **design-to-spec** | High | Ingests 2000-5000 word design docs, preliminary resource discovery |
+| **project-pipeline** | Critical | Orchestrates multiple skills, comprehensive resource discovery |
+| **project-setup** | Medium | Processes 1500-3000 word specs, generates comprehensive artifacts |
+| **task-create** | Medium | Creates 50-200+ task files with tag-to-knowledge mapping |
+
+**If not set**, pipeline skills may fail or produce incomplete results.
+
+---
+
 ## Skill Categories
 
 ### 1. Project Lifecycle Skills
 
 **Purpose**: Manage project creation, task decomposition, and execution
 
-| Skill | Tier | Purpose | User-Facing |
-|-------|------|---------|-------------|
-| **project-pipeline** | 2 (Orchestrator) | Spec → Ready Tasks (full automation) | ✅ **RECOMMENDED** |
-| **project-setup** | 1 (Component) | Generate artifacts (README, PLAN, CLAUDE.md) | ⚠️ Advanced users only |
-| **task-create** | 1 (Component) | Decompose PLAN.md → task files | ⚠️ Manual workflow |
-| **task-execute** | 2 (Orchestrator) | Execute a single task with full context | ✅ Primary |
-| **repo-cleanup** | 3 (Operational) | Validate structure, remove ephemeral files | ✅ After completion |
+| Skill | Tier | Purpose | Developer-Facing | AI Internal |
+|-------|------|---------|------------------|-------------|
+| **design-to-spec** | 1 (Component) | Transform human design → AI-optimized spec.md | ✅ Yes | ❌ No |
+| **project-pipeline** | 2 (Orchestrator) | Spec → Ready Tasks (full automation) | ✅ **RECOMMENDED** | ❌ No |
+| **project-setup** | 1 (Component) | Generate artifacts (README, PLAN, CLAUDE.md) | ❌ No | ✅ Yes (called by pipeline) |
+| **task-create** | 1 (Component) | Decompose PLAN.md → task files | ❌ No | ✅ Yes (called by pipeline) |
+| **task-execute** | 2 (Orchestrator) | Execute a single task with full context | ✅ Yes (natural language) | ❌ No |
+| **repo-cleanup** | 3 (Operational) | Validate structure, remove ephemeral files | ✅ Yes (after completion) | ❌ No |
 
-**Primary Workflow**:
+**Developer Workflow** (2 Steps):
 ```
-User → project-pipeline → project-setup → task-create → task-execute (per task) → repo-cleanup
+Step 1: design-to-spec (if starting from human design doc)
+         ↓
+Step 2: project-pipeline (full automation: artifacts + tasks + branch)
+         ↓
+Step 3: task-execute (natural language: "work on task 001")
 ```
+
+**AI Internal Skills** (called by orchestrators, NOT by developers):
+- `project-setup` - Called by `project-pipeline` Step 2
+- `task-create` - Called by `project-pipeline` Step 3
 
 ---
 
@@ -152,57 +213,99 @@ task-execute starts
 
 ## Primary Workflows
 
-### Workflow 1: New Project from Spec (RECOMMENDED)
+### Workflow 1: New Project from Design Document (RECOMMENDED)
 
-**Scenario**: You have a design specification and want to initialize a complete project.
+**Scenario**: You have a human-written design document and want to initialize a complete project.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│              WORKFLOW 1: NEW PROJECT FROM SPEC              │
+│       WORKFLOW 1: NEW PROJECT FROM DESIGN DOCUMENT          │
 └─────────────────────────────────────────────────────────────┘
 
-Step 1: Create Project Folder & Spec
-  📁 projects/{project-name}/
-  📄 projects/{project-name}/spec.md (design specification)
+PHASE A: DESIGN TRANSFORMATION (Optional - if starting from human design doc)
 
-Step 2: Invoke Orchestrator
+Step A1: Create Project Folder & Design Document
+  📁 projects/{project-name}/
+  📄 projects/{project-name}/design.md (or .docx, .pdf)
+
+Step A2: Transform to AI-Optimized Spec
+  💬 User: "/design-to-spec projects/{project-name}"
+  🤖 Claude: Loads design-to-spec skill
+
+Step A3: Extract Core Elements
+  🔍 Extract: Purpose, scope, requirements, success criteria
+  📋 Flag missing/unclear elements for user clarification
+  ⏸️  Wait for user: clarify gaps or proceed
+
+Step A4: Preliminary Technical Context Discovery
+  🔍 Identify resource types from design content
+  📜 Load applicable ADRs for CONSTRAINTS ONLY
+     - API endpoints → ADR-001, ADR-008, ADR-010 constraints
+     - PCF controls → ADR-006, ADR-011, ADR-012 constraints
+     - Plugins → ADR-002 constraints
+  ⚠️  SCOPE: Preliminary only (for spec enrichment)
+       ❌ DO NOT: Load full code patterns, detailed guides
+       ✅ FULL discovery happens in project-pipeline Step 2
+
+Step A5: Generate spec.md
+  ✅ Creates: projects/{project-name}/spec.md (AI-optimized)
+  📋 Includes: Structured requirements, ADR constraints, file paths
+  ⏸️  Wait for user: Review spec.md before proceeding
+
+Step A6: Handoff to Pipeline
+  ⏸️  User choice: 'y' to proceed to project-pipeline | 'done' to stop
+  IF 'y': → Continue to PHASE B
+
+---
+
+PHASE B: PROJECT INITIALIZATION (Full Automation)
+
+Step B1: Invoke Orchestrator
   💬 User: "/project-pipeline projects/{project-name}"
   🤖 Claude: Loads project-pipeline skill
 
-Step 3: Validation (project-pipeline Step 1)
+Step B2: Validation (project-pipeline Step 1)
   🔍 Validate spec.md exists and has required sections
   ✅ Output: "SPEC.md validated - ready for planning"
   ⏸️  Wait for user: 'y' to proceed
 
-Step 4: Resource Discovery (project-pipeline Step 2)
+Step B3: Comprehensive Resource Discovery (project-pipeline Step 2)
   🔍 Extract keywords from spec.md
+  📜 Load FULL ADRs (not just constraints)
+     - Complete ADR content with decision rationale
   📚 Search .claude/skills/ for applicable skills
-  📖 Search docs/ai-knowledge/ for guides
-  📜 Load applicable ADRs via adr-aware
-  ✅ Output: "Discovered X ADRs, Y skills, Z guides"
+  📖 Search docs/ai-knowledge/ for guides and patterns
+  💻 Find existing code examples
+  ⚠️  SCOPE: Comprehensive (for task creation and implementation)
+       ✅ Full ADR content, patterns, code examples
+  ✅ Output: "Discovered X ADRs, Y skills, Z guides, N code examples"
 
-Step 5: Generate Artifacts (project-pipeline Step 2)
-  🔧 CALLS: project-setup
+Step B4: Generate Artifacts (project-pipeline Step 2 continued)
+  🔧 CALLS: project-setup (AI Internal)
     → Creates README.md (project overview)
     → Creates PLAN.md (implementation plan)
     → Creates CLAUDE.md (AI context file)
     → Creates tasks/ folder
     → Creates notes/ folder structure
-  ✅ Output: "Artifacts generated"
+  🔧 ENHANCE artifacts with discovered resources
+    → Insert "Discovered Resources" section in PLAN.md
+    → Populate "Applicable ADRs" section in CLAUDE.md
+  ✅ Output: "Artifacts generated and enriched"
   ⏸️  Wait for user: 'y' to proceed
 
-Step 6: Create Task Files (project-pipeline Step 3)
-  🔧 CALLS: task-create (or inline)
+Step B5: Create Task Files (project-pipeline Step 3)
+  🔧 CALLS: task-create (AI Internal)
     → Decomposes PLAN.md phases into tasks
-    → Creates tasks/NNN-{slug}.poml files
+    → Creates tasks/NNN-{slug}.poml files (50-200+ tasks)
     → Creates tasks/TASK-INDEX.md
     → Applies tag-to-knowledge mapping
+    → Embeds discovered resources in each task
     → Adds deployment tasks (if applicable)
     → Adds wrap-up task (090-project-wrap-up.poml)
-  ✅ Output: "X tasks created"
+  ✅ Output: "X tasks created with full context"
   ⏸️  Wait for user: 'y' to proceed
 
-Step 7: Create Feature Branch (project-pipeline Step 3.5)
+Step B6: Create Feature Branch (project-pipeline Step 4)
   🔧 Git operations:
     → git checkout -b feature/{project-name}
     → git add projects/{project-name}/
@@ -210,25 +313,32 @@ Step 7: Create Feature Branch (project-pipeline Step 3.5)
     → git push -u origin feature/{project-name}
   ✅ Output: "Feature branch created and pushed"
 
-Step 8: Optional Auto-Start (project-pipeline Step 4)
-  ⏸️  Wait for user: 'y' to start task 001
+Step B7: Optional Auto-Start (project-pipeline Step 5)
+  ⏸️  Wait for user: 'y' to start task 001 | 'done' to exit
   IF 'y':
     🔧 CALLS: task-execute projects/{project-name}/tasks/001-*.poml
     → Loads task file
     → Loads knowledge files (from <knowledge> section)
     → Loads ADRs (via adr-aware)
     → Executes task steps
+    → (Session continues with task 001 execution)
   ELSE:
-    ✅ Output: "Project ready! Run 'execute task 001' when ready."
+    ✅ Output: "Project ready! Say 'work on task 001' when ready."
 
-Step 9: Execute Remaining Tasks (Manual Loop)
-  FOR each task in TASK-INDEX.md:
-    💬 User: "execute task {NNN}"
-    🔧 CALLS: task-execute
+---
+
+PHASE C: TASK EXECUTION (Ongoing)
+
+Step C1: Execute Tasks (Natural Language)
+  💬 User says: "work on task 002" OR "continue with next task"
+  🤖 Claude: Automatically invokes task-execute skill
       → (See Workflow 2 for task execution details)
 
-Step 10: Project Wrap-up (Final Task)
-  💬 User: "execute task 090" (or final task number)
+  Alternative: Explicit invocation
+  💬 User: "/task-execute projects/{project-name}/tasks/002-*.poml"
+
+Step C2: Project Wrap-up (Final Task)
+  💬 User: "work on task 090" (or final task number)
   🔧 CALLS: task-execute → repo-cleanup
     → Validate repository structure
     → Remove ephemeral files from notes/
@@ -237,10 +347,15 @@ Step 10: Project Wrap-up (Final Task)
 ```
 
 **Key Decision Points**:
-- After Step 3: User can stop to refine spec.md
-- After Step 5: User can review/edit artifacts
-- After Step 6: User can review/modify tasks
-- Step 8: User decides whether to start immediately or later
+- After Step A5: User can refine spec.md before proceeding
+- After Step B2: User can stop to refine spec.md further
+- After Step B4: User can review/edit artifacts
+- After Step B5: User can review/modify tasks
+- Step B7: User decides whether to start task 001 immediately or later
+
+**Resource Discovery Distinction**:
+- **Preliminary (design-to-spec)**: ADR constraints only for spec enrichment
+- **Comprehensive (project-pipeline)**: Full ADRs, patterns, code examples for implementation
 
 ---
 
@@ -253,8 +368,12 @@ Step 10: Project Wrap-up (Final Task)
 │                WORKFLOW 2: EXECUTE SINGLE TASK              │
 └─────────────────────────────────────────────────────────────┘
 
-Step 1: Invoke Task Execution
-  💬 User: "execute task 001" OR "work on task 001"
+Step 1: Invoke Task Execution (Natural Language)
+  💬 User says: "work on task 001" OR "continue with next task"
+  🤖 Claude: Automatically invokes task-execute skill
+
+  Alternative (Explicit):
+  💬 User: "/task-execute projects/{project}/tasks/001-*.poml"
   🤖 Claude: Loads task-execute skill
 
 Step 2: Locate Task File
@@ -328,18 +447,21 @@ Step 10: Special Task Types
 
 ---
 
-### Workflow 3: Manual Project Setup (Advanced)
+### Workflow 3: Manual Project Setup (Advanced - NOT RECOMMENDED)
 
-**Scenario**: Need more control, create artifacts manually without full pipeline.
+**Scenario**: Advanced users who need direct control over artifact generation without full pipeline orchestration.
+
+⚠️ **WARNING**: This workflow uses AI-internal component skills directly. Most developers should use Workflow 1 (project-pipeline) instead.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│            WORKFLOW 3: MANUAL PROJECT SETUP                 │
+│   WORKFLOW 3: MANUAL PROJECT SETUP (Advanced Users Only)   │
 └─────────────────────────────────────────────────────────────┘
 
-Step 1: Create Artifacts Only
+Step 1: Create Artifacts Only (AI Internal Skill)
   💬 User: "/project-setup projects/{project-name}"
   🤖 Claude: Loads project-setup skill (Tier 1 - Component)
+  ⚠️  NOTE: This is an AI-internal skill normally called by project-pipeline
 
   Generates:
     ✅ README.md
@@ -349,18 +471,24 @@ Step 1: Create Artifacts Only
     ✅ notes/ folder structure
 
   Does NOT:
-    ❌ Discover resources (ADRs, skills)
+    ❌ Discover resources (ADRs, skills, patterns)
     ❌ Create task files
     ❌ Create feature branch
+    ❌ Enrich artifacts with discovered context
 
-Step 2: Manual Task Creation
+Step 2: Manual Task Creation (AI Internal Skill)
   💬 User: "/task-create projects/{project-name}"
   🤖 Claude: Loads task-create skill (Tier 1 - Component)
+  ⚠️  NOTE: This is an AI-internal skill normally called by project-pipeline
 
   Generates:
     ✅ tasks/NNN-{slug}.poml files
     ✅ tasks/TASK-INDEX.md
     ✅ Tag-to-knowledge mapping applied
+
+  Missing:
+    ❌ Resource discovery context (no comprehensive ADR loading)
+    ❌ Code examples and patterns
 
 Step 3: Manual Branch & Commit
   💬 User: (Manually via bash or push-to-github skill)
@@ -375,11 +503,15 @@ Step 4: Execute Tasks
   (Same as Workflow 2 - Execute Single Task)
 ```
 
-**When to Use Manual Workflow**:
-- Need to review/modify artifacts before creating tasks
-- Want to customize PLAN.md extensively
-- Project structure already partially exists
-- Learning how the pipeline works
+**When to Use Manual Workflow (RARE)**:
+- ✅ Debugging artifact generation logic
+- ✅ Regenerating artifacts without full pipeline
+- ✅ Learning how component skills work internally
+
+**Do NOT Use If**:
+- ❌ Starting a new project → Use project-pipeline (Workflow 1)
+- ❌ Need comprehensive resource discovery → Use project-pipeline
+- ❌ Want automated branching and task creation → Use project-pipeline
 
 ---
 
@@ -389,23 +521,40 @@ Step 4: Execute Tasks
 
 **Definition**: Tier 2 (Orchestrator) skills call Tier 1 (Component) skills to compose functionality.
 
-**Example**:
+**Example: project-pipeline orchestrates project initialization**:
 ```
-project-pipeline (Tier 2 - Orchestrator)
-  ├─→ CALLS project-setup (Tier 1 - Component)
-  │     └─→ Returns: Artifacts created
-  ├─→ CALLS task-create (Tier 1 - Component)
-  │     └─→ Returns: Task files created
-  └─→ CALLS task-execute (Tier 2 - Orchestrator)
-        └─→ Returns: Task completed
+project-pipeline (Tier 2 - Orchestrator, Developer-Facing)
+  │
+  ├─→ Step 2: CALLS project-setup (Tier 1 - Component, AI Internal)
+  │     └─→ Returns: README.md, PLAN.md, CLAUDE.md, folder structure
+  │
+  ├─→ Step 3: CALLS task-create (Tier 1 - Component, AI Internal)
+  │     └─→ Returns: 50-200+ task files with full context
+  │
+  └─→ Step 5: CALLS task-execute (Tier 2 - Orchestrator, Developer-Facing)
+        └─→ Returns: Task 001 completed (optional auto-start)
 
-Result: Full project initialization with human-in-loop
+Result: Full project initialization with human checkpoints
+```
+
+**Example: design-to-spec feeds into project-pipeline**:
+```
+design-to-spec (Tier 1 - Component, Developer-Facing)
+  │
+  ├─→ Step 3: Preliminary resource discovery (constraints only)
+  │     └─→ Returns: spec.md enriched with ADR constraints
+  │
+  └─→ Handoff to project-pipeline (User confirms 'y')
+        │
+        └─→ project-pipeline Step 2: Comprehensive resource discovery
+              └─→ Returns: Full ADRs, patterns, code examples
 ```
 
 **Rules**:
 - Orchestrators coordinate multiple components
-- Components do NOT call other components
+- Components do NOT call other components (except design-to-spec optionally invoking project-pipeline)
 - Orchestrators handle human interaction and decision points
+- AI-internal components (project-setup, task-create) should NOT be directly invoked by developers
 
 ---
 
@@ -547,41 +696,65 @@ NOTE: This is NEVER automatically called by task-execute or other skills
 ```
 START: I have a project to work on
   │
-  ├─ Do I have a design spec (spec.md)?
+  ├─ Do I have a design spec or design document?
   │   │
-  │   ├─ YES
+  │   ├─ I have a HUMAN DESIGN DOC (design.md, .docx, .pdf)
+  │   │   │
+  │   │   └─ Step 1: Transform to AI-optimized spec
+  │   │       /design-to-spec projects/{name}
+  │   │       │
+  │   │       └─ This creates spec.md with:
+  │   │           - Structured requirements
+  │   │           - ADR constraints (preliminary)
+  │   │           - File paths and context
+  │   │           │
+  │   │           └─ Step 2: Proceed to project-pipeline
+  │   │               /project-pipeline projects/{name} ⭐ RECOMMENDED
+  │   │
+  │   ├─ I have an AI-OPTIMIZED SPEC (spec.md already exists)
   │   │   │
   │   │   ├─ Do I want fully automated setup?
   │   │   │   │
   │   │   │   ├─ YES → Use project-pipeline ⭐ RECOMMENDED
   │   │   │   │        /project-pipeline projects/{name}
+  │   │   │   │        - Comprehensive resource discovery
+  │   │   │   │        - Artifact generation
+  │   │   │   │        - 50-200+ task files
+  │   │   │   │        - Feature branch creation
+  │   │   │   │        - Optional auto-start task 001
   │   │   │   │
-  │   │   │   └─ NO (want manual control)
-  │   │   │        ├─ Generate artifacts only
+  │   │   │   └─ NO (want manual control) ⚠️ ADVANCED ONLY
+  │   │   │        ├─ Generate artifacts only (AI Internal Skill)
   │   │   │        │   /project-setup projects/{name}
+  │   │   │        │   ⚠️ Missing: Resource discovery
   │   │   │        │
   │   │   │        ├─ Review/edit artifacts
   │   │   │        │
-  │   │   │        └─ Create tasks manually
+  │   │   │        └─ Create tasks manually (AI Internal Skill)
   │   │   │            /task-create projects/{name}
+  │   │   │            ⚠️ Missing: Comprehensive context
   │   │   │
   │   │   └─ Do artifacts already exist (README, PLAN)?
   │   │       │
-  │   │       ├─ YES → Just create tasks
+  │   │       ├─ YES but NO tasks → Use task-create
   │   │       │        /task-create projects/{name}
+  │   │       │        ⚠️ AI Internal - normally called by pipeline
   │   │       │
-  │   │       └─ NO → Start with project-pipeline
+  │   │       └─ NO artifacts → Start with project-pipeline
   │   │
-  │   └─ NO (no spec.md)
+  │   └─ NO (no spec.md or design doc)
   │       │
-  │       └─ Create spec.md first
-  │           ├─ Create folder: projects/{name}/
-  │           ├─ Write spec.md with:
-  │           │   - Problem statement
-  │           │   - Solution approach
-  │           │   - Scope
-  │           │   - Acceptance criteria
-  │           └─ Then use project-pipeline
+  │       └─ Create design document or spec.md first
+  │           │
+  │           ├─ Option A: Write human design doc
+  │           │   - Create: projects/{name}/design.md
+  │           │   - Include: problem, solution, scope, criteria
+  │           │   - Then: /design-to-spec projects/{name}
+  │           │
+  │           └─ Option B: Write AI spec directly
+  │               - Create: projects/{name}/spec.md
+  │               - Use template: docs/ai-knowledge/templates/spec.template.md
+  │               - Then: /project-pipeline projects/{name}
   │
   └─ Is this just a small task (no full project)?
       │
@@ -598,14 +771,18 @@ START: I need to work on something
   │
   ├─ Is there a task file (.poml)?
   │   │
-  │   ├─ YES → Use task-execute
-  │   │        "execute task {NNN}"
+  │   ├─ YES → Use task-execute (Natural Language)
+  │   │        💬 User says: "work on task 002" OR "continue with next task"
+  │   │        🤖 Claude: Automatically invokes task-execute skill
+  │   │
+  │   │        Alternative (Explicit):
+  │   │        "/task-execute projects/{name}/tasks/002-*.poml"
   │   │
   │   │        task-execute will automatically:
-  │   │        ├─ Load knowledge files
-  │   │        ├─ Load ADRs (adr-aware)
-  │   │        ├─ Apply conventions
-  │   │        └─ Run quality gates
+  │   │        ├─ Load knowledge files (from task <knowledge> section)
+  │   │        ├─ Load ADRs (adr-aware based on tags)
+  │   │        ├─ Apply conventions (spaarke-conventions)
+  │   │        └─ Run quality gates (code-review, adr-check)
   │   │
   │   └─ NO → Is this a known operation?
   │       │
@@ -812,49 +989,82 @@ task-execute loads task file
 ### When Starting a New Project
 
 ```
-Have spec.md? → YES → /project-pipeline projects/{name} ⭐
-              → NO  → Create spec.md first, then /project-pipeline
+Have human design doc? → YES → /design-to-spec projects/{name}
+                              → Then: /project-pipeline projects/{name} ⭐
+
+Have spec.md already?  → YES → /project-pipeline projects/{name} ⭐
+
+Have nothing yet?      → Create design.md or spec.md first
+                         → Option A: /design-to-spec (if design.md)
+                         → Option B: /project-pipeline (if spec.md)
 ```
 
 ### When Executing Tasks
 
 ```
-Have task file? → YES → execute task {NNN}
-                → NO  → Work directly (always-apply active)
+Have task file? → YES → Natural language: "work on task 002"
+                      → OR explicit: /task-execute projects/{name}/tasks/002-*.poml
+                → NO  → Work directly (always-apply skills active)
 ```
 
 ### When You Need
 
-| Need | Command |
-|------|---------|
-| Full project setup | `/project-pipeline projects/{name}` |
-| Just artifacts | `/project-setup projects/{name}` |
-| Just tasks | `/task-create projects/{name}` |
-| Execute a task | `execute task {NNN}` |
-| Review code | `/code-review` |
-| Check ADRs | `/adr-check` |
-| Deploy PCF/solution | `/dataverse-deploy` |
-| Edit ribbon | `/ribbon-edit` |
-| Pull changes | `/pull-from-github` |
-| Push changes | `/push-to-github` |
-| Cleanup repo | `/repo-cleanup` |
+| Need | Command | Developer-Facing | AI Internal |
+|------|---------|------------------|-------------|
+| Transform design doc to spec | `/design-to-spec projects/{name}` | ✅ Yes | ❌ No |
+| Full project setup | `/project-pipeline projects/{name}` ⭐ | ✅ Yes | ❌ No |
+| Just artifacts (advanced) | `/project-setup projects/{name}` | ⚠️ Advanced | ✅ Yes (called by pipeline) |
+| Just tasks (advanced) | `/task-create projects/{name}` | ⚠️ Advanced | ✅ Yes (called by pipeline) |
+| Execute a task | `work on task {NNN}` | ✅ Yes | ❌ No |
+| Review code | `/code-review` | ✅ Yes | ❌ No |
+| Check ADRs | `/adr-check` | ✅ Yes | ❌ No |
+| Deploy PCF/solution | `/dataverse-deploy` | ✅ Yes | ❌ No |
+| Edit ribbon | `/ribbon-edit` | ✅ Yes | ❌ No |
+| Pull changes | `/pull-from-github` | ✅ Yes | ❌ No |
+| Push changes | `/push-to-github` | ✅ Yes | ❌ No |
+| Cleanup repo | `/repo-cleanup` | ✅ Yes | ❌ No |
 
 ### Skill Dependency Chain
 
 ```
-project-pipeline
-  └─→ project-setup
-        └─→ (no dependencies)
-  └─→ task-create
-        └─→ adr-aware (implicit)
-  └─→ task-execute
+design-to-spec (Developer-Facing)
+  └─→ Preliminary resource discovery (constraints only)
+        └─→ Generates: spec.md
+              │
+              └─→ Handoff to project-pipeline
+
+project-pipeline (Developer-Facing)
+  ├─→ Comprehensive resource discovery (full ADRs, patterns, code)
+  │
+  ├─→ CALLS: project-setup (AI Internal)
+  │     └─→ No dependencies
+  │
+  ├─→ CALLS: task-create (AI Internal)
+  │     └─→ adr-aware (implicit)
+  │
+  └─→ CALLS: task-execute (Developer-Facing, optional auto-start)
         └─→ adr-aware (implicit)
         └─→ spaarke-conventions (implicit)
         └─→ code-review (after code)
         └─→ adr-check (after code)
         └─→ dataverse-deploy (if tagged)
         └─→ ribbon-edit (if ribbon task)
+
+task-execute (Developer-Facing - Natural Language)
+  💬 Invoked by: "work on task 002" OR "continue with next task"
+  └─→ (Same dependencies as above)
 ```
+
+### Resource Discovery Levels
+
+| Skill | Discovery Type | Scope | Purpose |
+|-------|---------------|-------|---------|
+| **design-to-spec** | Preliminary | ADR constraints only | Enrich spec.md with architecture boundaries |
+| **project-pipeline** | Comprehensive | Full ADRs, patterns, code examples | Support task creation and implementation |
+
+**Key Distinction**:
+- Preliminary = "What are the rules?" (constraints for spec)
+- Comprehensive = "How do I implement this?" (full context for tasks)
 
 ---
 

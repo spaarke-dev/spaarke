@@ -8,6 +8,36 @@ appliesTo: ["projects/*/design.md", "projects/*/design.docx", "transform spec", 
 alwaysApply: false
 ---
 
+## Prerequisites
+
+### Claude Code Extended Context Configuration
+
+**IMPORTANT**: Before running this skill, ensure Claude Code is configured with extended context settings:
+
+```bash
+MAX_THINKING_TOKENS=50000
+CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000
+```
+
+**Why Extended Context is Required**:
+- This skill ingests verbose design documents (often 2000-5000 words)
+- Performs **preliminary** resource discovery (ADR constraints for spec enrichment)
+- Generates structured spec.md with technical context
+- Chains into `project-pipeline` which performs comprehensive resource discovery
+
+**Verify settings before proceeding**:
+```bash
+# Windows PowerShell
+echo $env:MAX_THINKING_TOKENS
+echo $env:CLAUDE_CODE_MAX_OUTPUT_TOKENS
+
+# Should output: 50000 and 64000
+```
+
+If not set, see root [CLAUDE.md](../../../CLAUDE.md#development-environment) for setup instructions.
+
+---
+
 ## Purpose
 
 **Tier 1 Component Skill** - Transforms verbose human design documents into structured, AI-optimized `spec.md` files that the `project-pipeline` skill can consume.
@@ -148,34 +178,38 @@ Would you like to clarify these now? [Y to clarify / skip to proceed with assump
 
 ---
 
-### Step 3: Discover Technical Context
+### Step 3: Preliminary Technical Context Discovery
+
+**Purpose:** Enrich spec.md with **architectural constraints only** (not detailed implementation patterns).
 
 **Action:**
 ```
-ANALYZE extracted content for:
+IDENTIFY resource types from extracted content:
 
-1. RESOURCE TYPES
-   - API endpoints → Load ADR-001, ADR-008, ADR-010, ADR-019
-   - PCF controls → Load ADR-006, ADR-011, ADR-012
-   - Plugins → Load ADR-002
-   - Storage → Load ADR-005, ADR-007, ADR-009
-   - AI features → Load ADR-013, ADR-014, ADR-015, ADR-016
-   - Background jobs → Load ADR-004, ADR-017
+1. RESOURCE TYPES → ADR CONSTRAINTS
+   - API endpoints → Reference ADR-001, ADR-008, ADR-010, ADR-019 (constraints only)
+   - PCF controls → Reference ADR-006, ADR-011, ADR-012 (constraints only)
+   - Plugins → Reference ADR-002 (constraints only)
+   - Storage → Reference ADR-005, ADR-007, ADR-009 (constraints only)
+   - AI features → Reference ADR-013, ADR-014, ADR-015, ADR-016 (constraints only)
+   - Background jobs → Reference ADR-004, ADR-017 (constraints only)
 
-2. EXISTING CODE AREAS
-   - Search codebase for related files
-   - Identify patterns to follow
-   - Find canonical implementations
+2. EXTRACT KEY CONSTRAINTS
+   - Read applicable ADRs for MUST/MUST NOT rules
+   - Identify architectural boundaries
+   - Note technology choices
 
-3. CONSTRAINTS
-   - Extract MUST/MUST NOT from applicable ADRs
-   - Load relevant constraint files from .claude/constraints/
+OUTPUT: List of applicable ADRs and key constraints for spec.md
 
-4. KNOWLEDGE DOCS
-   - Search docs/guides/ for relevant procedures
-   - Search docs/adr/ for architectural context
+⚠️ **SCOPE LIMITATION**:
+This is PRELIMINARY discovery for spec.md enrichment only.
+- ✅ DO: Identify which ADRs apply
+- ✅ DO: Extract key constraints (MUST/MUST NOT)
+- ❌ DON'T: Search codebase for implementation patterns
+- ❌ DON'T: Load detailed knowledge docs or guides
+- ❌ DON'T: Find existing code examples
 
-OUTPUT: Technical context summary
+Comprehensive resource discovery happens in project-pipeline Step 2.
 ```
 
 ---
@@ -301,6 +335,38 @@ ASK for review:
 ```
 
 **Wait for User**: `y` (proceed to pipeline) | `edit` (make changes) | `done` (stop here)
+
+---
+
+## Next Steps After This Skill
+
+### ✅ CORRECT: Proceed to Full Pipeline
+
+After spec.md is reviewed and approved:
+
+```bash
+/project-pipeline projects/{project-name}
+```
+
+This performs:
+- ✅ **Comprehensive resource discovery** (ADRs, skills, knowledge docs, code patterns)
+- ✅ Artifact generation (README, PLAN, CLAUDE.md)
+- ✅ Task decomposition (50-200+ task files)
+- ✅ Feature branch creation
+- ✅ Ready to execute task 001
+
+### ❌ INCORRECT: Call Component Skills Directly
+
+**DO NOT** run these after design-to-spec:
+```bash
+# ❌ WRONG - Missing resource discovery and tasks
+/project-setup projects/{project-name}
+
+# ❌ WRONG - Can't create tasks without plan.md
+/task-create projects/{project-name}
+```
+
+**Why?** Component skills are called BY project-pipeline, not by developers.
 
 ---
 
