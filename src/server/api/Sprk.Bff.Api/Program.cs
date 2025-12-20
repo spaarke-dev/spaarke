@@ -921,6 +921,9 @@ app.MapUploadEndpoints();
 // OBO endpoints (user-enforced CRUD)
 app.MapOBOEndpoints();
 
+// Document checkout/checkin/discard operations (document-checkout-viewer project)
+app.MapDocumentOperationsEndpoints();
+
 // Document Intelligence endpoints (only if enabled)
 if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled"))
 {

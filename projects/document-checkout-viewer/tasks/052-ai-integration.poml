@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="document-checkout-viewer">
+  <metadata>
+    <title>Integrate Check-In with AI Analysis</title>
+    <phase>5: Migration &amp; Integration</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>011, 025</dependencies>
+    <blocks>053</blocks>
+    <tags>ai, bff-api, integration</tags>
+  </metadata>
+
+  <prompt>
+    Connect the check-in endpoint to trigger AI document analysis. When a
+    document is checked in, fire-and-forget trigger the AI analysis pipeline
+    to process the stable document version.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in AI integration and async patterns.
+    Follow ADRs strictly.
+  </role>
+
+  <goal>
+    Check-in successfully triggers AI analysis pipeline to process the newly
+    committed document version without blocking the check-in operation.
+  </goal>
+
+  <context>
+    <background>
+      AI analysis should run on stable document versions (after check-in, not
+      during editing). The check-in endpoint triggers analysis as fire-and-forget
+      to avoid blocking the user. The AI pipeline is already implemented.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/</file>
+      <file>projects/document-checkout-viewer/spec.md (AI Integration section)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Use existing AI Tool Framework</constraint>
+    <constraint source="project">Fire-and-forget: don't block check-in</constraint>
+    <constraint source="project">Pass fileVersionId for version tracking</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/CLAUDE.md</file>
+      <file>docs/ai-knowledge/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fire-and-forget" location="src/server/api">
+        Use Task.Run or BackgroundService for async operations
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review AI analysis pipeline entry point</step>
+    <step order="2">Identify appropriate trigger method in checkin endpoint</step>
+    <step order="3">Add fire-and-forget call to AI analysis service</step>
+    <step order="4">Pass documentId and fileVersionId to analysis</step>
+    <step order="5">Ensure check-in returns immediately (doesn't wait for AI)</step>
+    <step order="6">Add logging for AI trigger (success/failure)</step>
+    <step order="7">Handle AI trigger failures gracefully (don't fail check-in)</step>
+    <step order="8">Test check-in with AI trigger</step>
+    <step order="9">Verify AI analysis receives document correctly</step>
+    <step order="10">Verify check-in performance is not impacted</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/DocumentEndpoints.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Check-in triggers AI analysis</criterion>
+    <criterion testable="true">Check-in returns immediately (fire-and-forget)</criterion>
+    <criterion testable="true">AI receives correct documentId and fileVersionId</criterion>
+    <criterion testable="true">AI trigger failure doesn't fail check-in</criterion>
+    <criterion testable="true">Logging records AI trigger attempt</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Fire-and-forget pattern: use _ = Task.Run(...) or queue to background service.
+    Don't await the AI operation in the check-in request path.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load AI architecture guide for patterns.
+    </protocol>
+  </execution>
+</task>

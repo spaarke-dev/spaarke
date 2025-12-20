@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="document-checkout-viewer">
+  <metadata>
+    <title>Deploy Schema Solution to Dev</title>
+    <phase>1: Dataverse Schema</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>010, 013, 014</blocks>
+    <tags>deploy, dataverse, solution</tags>
+  </metadata>
+
+  <prompt>
+    Export the Dataverse solution containing the new sprk_fileversion entity and
+    Document entity changes, then deploy to the development environment. Verify
+    all schema changes are correctly applied.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse solution deployment using PAC CLI.
+    Follow ADRs strictly.
+  </role>
+
+  <goal>
+    The Dataverse solution with schema changes is exported, source-controlled, and
+    successfully deployed to the dev environment with all entities and fields working.
+  </goal>
+
+  <context>
+    <background>
+      Schema changes must be deployed before BFF API development can begin, as the
+      API needs to read/write to the new entity and fields.
+    </background>
+    <relevant-files>
+      <file>infrastructure/dataverse/ (solution files)</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Must use pac solution export/import commands</constraint>
+    <constraint source="project">Solution must be source-controlled</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/ai-knowledge/guides/PCF-V9-PACKAGING.md</file>
+    </files>
+    <patterns>
+      <pattern name="Solution deployment" location=".claude/skills/dataverse-deploy/">
+        Follow the dataverse-deploy skill for pac commands
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load dataverse-deploy skill for deployment commands</step>
+    <step order="2">Verify pac auth is connected to correct environment</step>
+    <step order="3">Export solution as unmanaged: pac solution export</step>
+    <step order="4">Unpack solution to source control format: pac solution unpack</step>
+    <step order="5">Commit solution changes to git</step>
+    <step order="6">Import solution to dev environment: pac solution import</step>
+    <step order="7">Publish all customizations: pac solution publish</step>
+    <step order="8">Verify sprk_fileversion entity exists via Web API query</step>
+    <step order="9">Verify Document entity has new checkout fields</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI for solution operations</tool>
+    <tool name="git">Version control for solution files</tool>
+  </tools>
+
+  <outputs>
+    <output type="solution">Exported and unpacked solution files in infrastructure/dataverse/</output>
+    <output type="dataverse">Deployed solution in dev environment</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">pac solution export completes without errors</criterion>
+    <criterion testable="true">Solution files are committed to git</criterion>
+    <criterion testable="true">pac solution import completes successfully</criterion>
+    <criterion testable="true">sprk_fileversion entity is accessible via Dataverse Web API</criterion>
+    <criterion testable="true">Document checkout fields are visible in form</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use the dataverse-deploy skill for the correct pac command sequence.
+    If deployment fails, check for schema conflicts with existing data.
+  </notes>
+
+  <implementation-notes>
+    <completed-date>2025-12-18</completed-date>
+    <completed-by>Manual deployment via Dataverse maker portal</completed-by>
+    <deployment-method>Direct creation in maker portal - schema changes saved automatically</deployment-method>
+    <deviations>
+      Solution export/import not used - entities created directly in dev environment.
+      Solution export should be done for source control before production deployment.
+    </deviations>
+  </implementation-notes>
+
+  <execution>
+    <skill>.claude/skills/dataverse-deploy/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load the dataverse-deploy skill.
+      Follow the skill procedure for solution deployment.
+    </protocol>
+  </execution>
+</task>

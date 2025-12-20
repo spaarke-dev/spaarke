@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="document-checkout-viewer">
+  <metadata>
+    <title>Extend Preview URL with Checkout Status</title>
+    <phase>2: BFF API Endpoints</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>003</dependencies>
+    <blocks>015</blocks>
+    <tags>bff-api, api, minimal-api, endpoints</tags>
+  </metadata>
+
+  <prompt>
+    Modify the existing GET /api/documents/{id}/preview-url endpoint to include
+    checkout status in the response. The PCF control needs this to show lock status
+    and enable/disable the Edit button.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs.
+    Follow ADRs strictly.
+  </role>
+
+  <goal>
+    The preview-url endpoint returns checkout status including whether the document
+    is locked, who has it locked, and whether the current user is the lock holder.
+  </goal>
+
+  <context>
+    <background>
+      The PCF control calls preview-url on load. It needs checkout status to show
+      the correct toolbar buttons and lock indicators without making a separate API call.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/FileOperationModels.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API patterns</constraint>
+    <constraint source="project">Must not break existing preview-url consumers</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/CLAUDE.md</file>
+      <file>docs/reference/adr/ADR-001-minimal-api-endpoints.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing FilePreviewResponse model</step>
+    <step order="2">Create CheckoutStatusResponse model with isCheckedOut, checkedOutBy, isCurrentUser</step>
+    <step order="3">Add checkoutStatus property to FilePreviewResponse</step>
+    <step order="4">Modify preview-url handler to query Document checkout fields</step>
+    <step order="5">Determine isCurrentUser by comparing checkout user ID with request user</step>
+    <step order="6">Add versionInfo to response (current version number, last modified)</step>
+    <step order="7">Update unit tests for preview-url endpoint</step>
+    <step order="8">Verify backward compatibility (existing consumers still work)</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/FileOperationModels.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs (modified)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/FileAccessEndpointsTests.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">preview-url response includes checkoutStatus object</criterion>
+    <criterion testable="true">isCurrentUser is true when request user matches checkout user</criterion>
+    <criterion testable="true">Existing preview-url functionality unchanged</criterion>
+    <criterion testable="true">Response includes versionInfo with current version number</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    See spec.md for exact response format. The PCF will use isCurrentUser to determine
+    if the current user can check in or only view.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+    </protocol>
+  </execution>
+</task>

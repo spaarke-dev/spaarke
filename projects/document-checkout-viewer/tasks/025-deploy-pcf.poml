@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="document-checkout-viewer">
+  <metadata>
+    <title>Deploy PCF Control to Dev</title>
+    <phase>3: SpeDocumentViewer PCF</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>024</dependencies>
+    <blocks>050</blocks>
+    <tags>deploy, dataverse, pcf</tags>
+  </metadata>
+
+  <prompt>
+    Build and deploy the SpeDocumentViewer PCF control to the development Dataverse
+    environment using pac pcf push. Verify the control loads on a Document form.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in PCF deployment.
+    Follow ADRs strictly. Follow PCF-V9-PACKAGING.md for version bumping.
+  </role>
+
+  <goal>
+    SpeDocumentViewer PCF control is deployed and visible on a test Document form
+    with all features working.
+  </goal>
+
+  <context>
+    <background>
+      PCF deployment uses pac pcf push for quick iteration. The control will be
+      added to the Document form for testing before migration.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/SpeDocumentViewer/</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Follow PCF-V9-PACKAGING.md version bumping</constraint>
+    <constraint source="project">Update version in 4 locations before deploy</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/ai-knowledge/guides/PCF-V9-PACKAGING.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read PCF-V9-PACKAGING.md for version bump locations</step>
+    <step order="2">Bump version to 1.0.1 (or appropriate) in all 4 locations</step>
+    <step order="3">Run npm run build to compile control</step>
+    <step order="4">Load dataverse-deploy skill for pac commands</step>
+    <step order="5">Verify pac auth is connected to dev environment</step>
+    <step order="6">Run pac pcf push to deploy control</step>
+    <step order="7">Add control to a test Document form</step>
+    <step order="8">Test preview mode loads correctly</step>
+    <step order="9">Test checkout/checkin flow end-to-end</step>
+    <step order="10">Verify version number shows in control footer</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF control</tool>
+    <tool name="pac">Power Platform CLI for deployment</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment">SpeDocumentViewer PCF deployed to dev Dataverse</output>
+    <output type="dataverse">Test Document form with control added</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build completes without errors</criterion>
+    <criterion testable="true">pac pcf push completes successfully</criterion>
+    <criterion testable="true">Control loads on Document form</criterion>
+    <criterion testable="true">Preview mode displays document</criterion>
+    <criterion testable="true">Checkout/checkin flow works end-to-end</criterion>
+    <criterion testable="true">Version number visible in control</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Version bump is critical - stale deployments happen without it.
+    Use pac pcf push --publisher-prefix sprk for correct publisher.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/dataverse-deploy/SKILL.md</skill>
+    <protocol>
+      Before starting this task, read PCF-V9-PACKAGING.md for version requirements.
+    </protocol>
+  </execution>
+</task>

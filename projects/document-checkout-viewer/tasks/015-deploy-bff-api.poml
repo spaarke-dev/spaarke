@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="document-checkout-viewer">
+  <metadata>
+    <title>Deploy BFF API to Dev</title>
+    <phase>2: BFF API Endpoints</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>014</dependencies>
+    <blocks>020</blocks>
+    <tags>deploy, azure, bff-api</tags>
+  </metadata>
+
+  <prompt>
+    Deploy the BFF API with new checkout/checkin/discard/delete endpoints to the
+    development Azure App Service. Verify all endpoints are accessible and working.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Azure App Service deployments.
+    Follow ADRs strictly.
+  </role>
+
+  <goal>
+    The BFF API is deployed to dev with all new endpoints accessible and functional.
+    Integration tests pass against the deployed API.
+  </goal>
+
+  <context>
+    <background>
+      The PCF control development depends on working BFF endpoints. Deploying to
+      dev allows parallel PCF development and early integration testing.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/</file>
+      <file>infrastructure/azure/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Deploy to dev environment only</constraint>
+    <constraint source="project">Must not break existing endpoints</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/product-documentation/IT-DEPLOYMENT-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run dotnet build to verify project compiles</step>
+    <step order="2">Run dotnet test to verify all tests pass</step>
+    <step order="3">Publish API: dotnet publish -c Release</step>
+    <step order="4">Deploy to Azure App Service using az webapp deploy or GitHub Actions</step>
+    <step order="5">Verify health endpoint: GET /healthz</step>
+    <step order="6">Test checkout endpoint with valid document</step>
+    <step order="7">Test checkin endpoint</step>
+    <step order="8">Test discard endpoint</step>
+    <step order="9">Test delete endpoint (use test document)</step>
+    <step order="10">Verify preview-url returns checkout status</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and publish .NET projects</tool>
+    <tool name="az">Azure CLI for deployment</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment">BFF API deployed to dev Azure App Service</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">dotnet test passes with no failures</criterion>
+    <criterion testable="true">API is accessible at dev URL</criterion>
+    <criterion testable="true">POST /api/documents/{id}/checkout returns 200</criterion>
+    <criterion testable="true">POST /api/documents/{id}/checkin returns 200</criterion>
+    <criterion testable="true">POST /api/documents/{id}/discard returns 200</criterion>
+    <criterion testable="true">DELETE /api/documents/{id} returns 200</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use GitHub Actions if configured, otherwise manual az webapp deploy.
+    Check Application Insights for any deployment errors.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, verify all Phase 2 implementation tasks complete.
+    </protocol>
+  </execution>
+</task>

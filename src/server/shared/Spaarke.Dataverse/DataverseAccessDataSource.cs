@@ -1,5 +1,9 @@
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Azure.Core;
+using Azure.Identity;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace Spaarke.Dataverse;
@@ -13,15 +17,57 @@ public class DataverseAccessDataSource : IAccessDataSource
     private readonly IDataverseService _dataverseService;
     private readonly ILogger<DataverseAccessDataSource> _logger;
     private readonly HttpClient _httpClient;
+    private readonly TokenCredential _credential;
+    private readonly string _apiUrl;
+    private AccessToken? _currentToken;
 
     public DataverseAccessDataSource(
         IDataverseService dataverseService,
         HttpClient httpClient,
+        IConfiguration configuration,
         ILogger<DataverseAccessDataSource> logger)
     {
         _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+        var dataverseUrl = configuration["Dataverse:ServiceUrl"];
+        var tenantId = configuration["TENANT_ID"];
+        var clientId = configuration["API_APP_ID"];
+        var clientSecret = configuration["Dataverse:ClientSecret"];
+
+        if (string.IsNullOrEmpty(dataverseUrl))
+            throw new InvalidOperationException("Dataverse:ServiceUrl configuration is required");
+
+        _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2";
+
+        // Use managed identity if no client secret, otherwise use client credentials
+        if (!string.IsNullOrEmpty(clientSecret) && !string.IsNullOrEmpty(tenantId) && !string.IsNullOrEmpty(clientId))
+        {
+            _credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
+            _logger.LogInformation("DataverseAccessDataSource using ClientSecretCredential");
+        }
+        else
+        {
+            _credential = new DefaultAzureCredential();
+            _logger.LogInformation("DataverseAccessDataSource using DefaultAzureCredential (managed identity)");
+        }
+    }
+
+    private async Task EnsureAuthenticatedAsync(CancellationToken ct = default)
+    {
+        if (_currentToken == null || _currentToken.Value.ExpiresOn <= DateTimeOffset.UtcNow.AddMinutes(5))
+        {
+            var scope = $"{_apiUrl.Replace("/api/data/v9.2", "")}/.default";
+            _currentToken = await _credential.GetTokenAsync(
+                new TokenRequestContext(new[] { scope }),
+                ct);
+
+            _httpClient.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", _currentToken.Value.Token);
+
+            _logger.LogDebug("DataverseAccessDataSource: Refreshed Dataverse access token");
+        }
     }
 
     public async Task<AccessSnapshot> GetUserAccessAsync(string userId, string resourceId, CancellationToken ct = default)
@@ -33,14 +79,35 @@ public class DataverseAccessDataSource : IAccessDataSource
 
         try
         {
-            // Query user permissions from Dataverse
-            var permissions = await QueryUserPermissionsAsync(userId, resourceId, ct);
+            // Ensure we have a valid access token for Dataverse
+            await EnsureAuthenticatedAsync(ct);
 
-            // Query team memberships
-            var teams = await QueryUserTeamMembershipsAsync(userId, ct);
+            // Map Azure AD Object ID to Dataverse systemuserid
+            var dataverseUserId = await LookupDataverseUserIdAsync(userId, ct);
+            if (string.IsNullOrEmpty(dataverseUserId))
+            {
+                _logger.LogWarning("Could not find Dataverse user for Azure AD OID {AzureAdOid}. Returning None access.", userId);
+                return new AccessSnapshot
+                {
+                    UserId = userId,
+                    ResourceId = resourceId,
+                    AccessRights = AccessRights.None,
+                    TeamMemberships = Array.Empty<string>(),
+                    Roles = Array.Empty<string>(),
+                    CachedAt = DateTimeOffset.UtcNow
+                };
+            }
 
-            // Query user roles
-            var roles = await QueryUserRolesAsync(userId, ct);
+            _logger.LogDebug("Mapped Azure AD OID {AzureAdOid} to Dataverse systemuserid {DataverseUserId}", userId, dataverseUserId);
+
+            // Query user permissions from Dataverse using the Dataverse user ID
+            var permissions = await QueryUserPermissionsAsync(dataverseUserId, resourceId, ct);
+
+            // Query team memberships using Dataverse user ID
+            var teams = await QueryUserTeamMembershipsAsync(dataverseUserId, ct);
+
+            // Query user roles using Dataverse user ID
+            var roles = await QueryUserRolesAsync(dataverseUserId, ct);
 
             // Determine granular access rights based on permissions
             var accessRights = DetermineAccessLevel(permissions);
@@ -82,6 +149,50 @@ public class DataverseAccessDataSource : IAccessDataSource
     }
 
     /// <summary>
+    /// Looks up the Dataverse systemuserid for a given Azure AD Object ID.
+    /// </summary>
+    /// <param name="azureAdObjectId">Azure AD Object ID (from token 'oid' claim)</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Dataverse systemuserid, or null if not found</returns>
+    private async Task<string?> LookupDataverseUserIdAsync(string azureAdObjectId, CancellationToken ct)
+    {
+        try
+        {
+            // Query systemusers by azureactivedirectoryobjectid
+            var url = $"systemusers?$filter=azureactivedirectoryobjectid eq '{azureAdObjectId}'&$select=systemuserid,fullname";
+
+            _logger.LogDebug("Looking up Dataverse user for Azure AD OID {AzureAdOid}: {Url}", azureAdObjectId, url);
+
+            var response = await _httpClient.GetAsync(url, ct);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Failed to lookup Dataverse user: {StatusCode}", response.StatusCode);
+                return null;
+            }
+
+            var result = await response.Content.ReadFromJsonAsync<ODataResponse<SystemUserDto>>(ct);
+
+            if (result?.Value == null || !result.Value.Any())
+            {
+                _logger.LogWarning("No Dataverse user found for Azure AD OID {AzureAdOid}", azureAdObjectId);
+                return null;
+            }
+
+            var user = result.Value.First();
+            _logger.LogInformation("Found Dataverse user {FullName} (systemuserid: {SystemUserId}) for Azure AD OID {AzureAdOid}",
+                user.FullName, user.SystemUserId, azureAdObjectId);
+
+            return user.SystemUserId;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(exception: ex, message: "Error looking up Dataverse user for Azure AD OID {AzureAdOid}", azureAdObjectId);
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Checks user's access to a specific resource using Dataverse's built-in security.
     /// Uses RetrievePrincipalAccess to get native Dataverse permissions.
     /// </summary>
@@ -91,21 +202,21 @@ public class DataverseAccessDataSource : IAccessDataSource
         {
             // Use Dataverse's RetrievePrincipalAccess function to check native permissions
             // This respects Business Units, Security Roles, Teams, and Record Sharing
-            var request = new
+            // Format: POST /api/data/v9.2/RetrievePrincipalAccess with @odata.id references
+            var request = new Dictionary<string, object>
             {
-                Target = new
+                ["Target"] = new Dictionary<string, string>
                 {
-                    sprk_documentid = resourceId,
-                    __metadata = new { type = "Microsoft.Dynamics.CRM.sprk_document" }
+                    ["@odata.id"] = $"sprk_documents({resourceId})"
                 },
-                Principal = new
+                ["Principal"] = new Dictionary<string, string>
                 {
-                    systemuserid = userId,
-                    __metadata = new { type = "Microsoft.Dynamics.CRM.systemuser" }
+                    ["@odata.id"] = $"systemusers({userId})"
                 }
             };
 
             _logger.LogDebug("Checking Dataverse access for user {UserId} on resource {ResourceId}", userId, resourceId);
+            _logger.LogDebug("RetrievePrincipalAccess request: Target=sprk_documents({ResourceId}), Principal=systemusers({UserId})", resourceId, userId);
 
             var response = await _httpClient.PostAsJsonAsync("RetrievePrincipalAccess", request, ct);
 
@@ -317,5 +428,14 @@ public class DataverseAccessDataSource : IAccessDataSource
 
         [System.Text.Json.Serialization.JsonPropertyName("name")]
         public string? Name { get; set; }
+    }
+
+    private class SystemUserDto
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("systemuserid")]
+        public string? SystemUserId { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("fullname")]
+        public string? FullName { get; set; }
     }
 }

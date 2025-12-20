@@ -25,11 +25,29 @@ export enum FileViewerState {
 }
 
 /**
- * Response from BFF /api/documents/{id}/preview-url endpoint
+ * Checkout status information
+ */
+export interface CheckoutStatus {
+    /** Whether the document is currently checked out */
+    isCheckedOut: boolean;
+    /** Information about who checked out the document */
+    checkedOutBy?: {
+        id: string;
+        name: string;
+        email?: string;
+    };
+    /** When the document was checked out (ISO 8601) */
+    checkedOutAt?: string;
+    /** Whether the current user is the one who checked out the document */
+    isCurrentUser: boolean;
+}
+
+/**
+ * Response from BFF /api/documents/{id}/preview-url or /api/documents/{id}/view-url endpoint
  */
 export interface FilePreviewResponse {
     /**
-     * SharePoint preview URL with embedded viewer
+     * SharePoint preview/view URL with embedded viewer
      * Valid for ~15 minutes, includes access_token parameter
      */
     previewUrl: string;
@@ -47,6 +65,11 @@ export interface FilePreviewResponse {
         /** Last modified timestamp */
         lastModified?: string;
     };
+
+    /**
+     * Checkout status of the document (optional, included in view-url response)
+     */
+    checkoutStatus?: CheckoutStatus;
 
     /**
      * Correlation ID for distributed tracing
@@ -225,6 +248,9 @@ export interface FilePreviewState {
         fileExtension?: string;
         size?: number;
     } | null;
+
+    /** Checkout status from BFF API */
+    checkoutStatus?: CheckoutStatus;
 }
 
 /**

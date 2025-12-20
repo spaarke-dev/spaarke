@@ -1,11 +1,20 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <RibbonDiffXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <CustomActions>
+    <!-- ========================================== -->
+    <!-- SUBGRID BUTTONS                           -->
+    <!-- ========================================== -->
+    <!-- Subgrid: Add Multiple Documents -->
     <CustomAction Id="sprk.Spaarke.Document.AddMultiple.Button.CustomAction" Location="Mscrm.SubGrid.sprk_document.MainTab.Management.Controls._children" Sequence="5">
       <CommandUIDefinition>
         <Button Alt="$LocLabels:Spaarke.Document.AddMultiple.Button.Alt" Command="Spaarke.Document.AddMultiple.Command" Id="Spaarke.Document.AddMultiple.Button" Image32by32="/_imgs/ribbon/DocumentAdd_32.png" Image16by16="/_imgs/ribbon/DocumentAdd_16.png" LabelText="$LocLabels:Spaarke.Document.AddMultiple.Button.LabelText" Sequence="5" TemplateAlias="o1" ToolTipTitle="$LocLabels:Spaarke.Document.AddMultiple.Button.ToolTipTitle" ToolTipDescription="$LocLabels:Spaarke.Document.AddMultiple.Button.ToolTipDescription" />
       </CommandUIDefinition>
     </CustomAction>
+
+    <!-- ========================================== -->
+    <!-- GRID BUTTONS                              -->
+    <!-- ========================================== -->
+    <!-- Grid: Theme Menu -->
     <CustomAction Id="sprk.ThemeMenu.FlyoutAnchor.CustomAction" Location="Mscrm.HomepageGrid.sprk_document.MainTab.Actions.Controls._children" Sequence="900">
       <CommandUIDefinition>
         <FlyoutAnchor Id="sprk.ThemeMenu.FlyoutAnchor" Command="sprk.ThemeMenu.FlyoutCommand" LabelText="Dark Mode" ToolTipTitle="Dark Mode" ToolTipDescription="Choose your preferred color theme" Image16by16="$webresource:sprk_ThemeMenu16.svg" Image32by32="$webresource:sprk_ThemeMenu32.svg" PopulateDynamically="false" TemplateAlias="o1">
@@ -19,6 +28,37 @@
             </MenuSection>
           </Menu>
         </FlyoutAnchor>
+      </CommandUIDefinition>
+    </CustomAction>
+
+    <!-- ========================================== -->
+    <!-- FORM BUTTONS - Document Operations        -->
+    <!-- Order: New(OOTB), Check In, Check Out,    -->
+    <!--        Discard, Save(OOTB), Save&Close,   -->
+    <!--        Deactivate, Delete, Refresh...     -->
+    <!-- ========================================== -->
+    <!-- Form: Check In Button (Sequence 15 - after New) -->
+    <CustomAction Id="sprk.Document.Checkin.Button.CustomAction" Location="Mscrm.Form.sprk_document.MainTab.Save.Controls._children" Sequence="15">
+      <CommandUIDefinition>
+        <Button Id="sprk.Document.Checkin.Button" Command="sprk.Document.Checkin.Command" Alt="$LocLabels:sprk.Document.Checkin.LabelText" LabelText="$LocLabels:sprk.Document.Checkin.LabelText" ToolTipTitle="$LocLabels:sprk.Document.Checkin.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Document.Checkin.ToolTipDescription" Image16by16="/_imgs/ribbon/DocumentApproval_16.png" Image32by32="/_imgs/ribbon/DocumentApproval_32.png" TemplateAlias="o1" Sequence="15" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <!-- Form: Check Out Button (Sequence 16) -->
+    <CustomAction Id="sprk.Document.Checkout.Button.CustomAction" Location="Mscrm.Form.sprk_document.MainTab.Save.Controls._children" Sequence="16">
+      <CommandUIDefinition>
+        <Button Id="sprk.Document.Checkout.Button" Command="sprk.Document.Checkout.Command" Alt="$LocLabels:sprk.Document.Checkout.LabelText" LabelText="$LocLabels:sprk.Document.Checkout.LabelText" ToolTipTitle="$LocLabels:sprk.Document.Checkout.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Document.Checkout.ToolTipDescription" Image16by16="/_imgs/ribbon/Lock_16.png" Image32by32="/_imgs/ribbon/Lock_32.png" TemplateAlias="o1" Sequence="16" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <!-- Form: Discard Checkout Button (Sequence 17) -->
+    <CustomAction Id="sprk.Document.Discard.Button.CustomAction" Location="Mscrm.Form.sprk_document.MainTab.Save.Controls._children" Sequence="17">
+      <CommandUIDefinition>
+        <Button Id="sprk.Document.Discard.Button" Command="sprk.Document.Discard.Command" Alt="$LocLabels:sprk.Document.Discard.LabelText" LabelText="$LocLabels:sprk.Document.Discard.LabelText" ToolTipTitle="$LocLabels:sprk.Document.Discard.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Document.Discard.ToolTipDescription" Image16by16="/_imgs/ribbon/Cancel_16.png" Image32by32="/_imgs/ribbon/Cancel_32.png" TemplateAlias="o1" Sequence="17" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <!-- Form: Delete Document Button (Sequence 65 - after Deactivate) -->
+    <CustomAction Id="sprk.Document.Delete.Button.CustomAction" Location="Mscrm.Form.sprk_document.MainTab.Save.Controls._children" Sequence="65">
+      <CommandUIDefinition>
+        <Button Id="sprk.Document.Delete.Button" Command="sprk.Document.Delete.Command" Alt="$LocLabels:sprk.Document.Delete.LabelText" LabelText="$LocLabels:sprk.Document.Delete.LabelText" ToolTipTitle="$LocLabels:sprk.Document.Delete.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Document.Delete.ToolTipDescription" Image16by16="/_imgs/ribbon/Delete_16.png" Image32by32="/_imgs/ribbon/Delete_32.png" TemplateAlias="o1" Sequence="65" />
       </CommandUIDefinition>
     </CustomAction>
   </CustomActions>
@@ -71,16 +111,93 @@
         </JavaScriptFunction>
       </Actions>
     </CommandDefinition>
+    <!-- Document Checkout Command (enabled when NOT checked out) -->
+    <CommandDefinition Id="sprk.Document.Checkout.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Document.Checkout.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="sprk.Document.Form.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_DocumentOperations.js" FunctionName="Spaarke.Document.checkoutDocument">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <!-- Document Checkin Command (enabled when checked out BY current user) -->
+    <CommandDefinition Id="sprk.Document.Checkin.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Document.Checkin.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="sprk.Document.Form.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_DocumentOperations.js" FunctionName="Spaarke.Document.checkinDocument">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <!-- Document Discard Command (enabled when checked out BY current user) -->
+    <CommandDefinition Id="sprk.Document.Discard.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Document.Discard.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="sprk.Document.Form.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_DocumentOperations.js" FunctionName="Spaarke.Document.discardCheckout">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <!-- Document Delete Command -->
+    <CommandDefinition Id="sprk.Document.Delete.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Document.Delete.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="sprk.Document.Form.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_DocumentOperations.js" FunctionName="Spaarke.Document.deleteDocument">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
   </CommandDefinitions>
   <RuleDefinitions>
     <TabDisplayRules />
-    <DisplayRules />
+    <DisplayRules>
+      <!-- Show buttons only on form (existing records, not new records) -->
+      <DisplayRule Id="sprk.Document.Form.DisplayRule">
+        <FormStateRule State="Existing" />
+      </DisplayRule>
+    </DisplayRules>
     <EnableRules>
       <EnableRule Id="Spaarke.Document.AddMultiple.EnableRule">
         <CrmClientTypeRule Type="Web" />
       </EnableRule>
       <EnableRule Id="sprk.ThemeMenu.EnableRule">
         <CustomRule FunctionName="Spaarke.Theme.isEnabled" Library="$webresource:sprk_ThemeMenu.js" Default="true" />
+      </EnableRule>
+      <!-- Checkout: enabled when document is NOT checked out -->
+      <EnableRule Id="sprk.Document.Checkout.EnableRule">
+        <CustomRule FunctionName="Spaarke.Document.canCheckout" Library="$webresource:sprk_DocumentOperations.js" Default="true" />
+      </EnableRule>
+      <!-- Checkin: enabled when document is checked out BY current user -->
+      <EnableRule Id="sprk.Document.Checkin.EnableRule">
+        <CustomRule FunctionName="Spaarke.Document.canCheckin" Library="$webresource:sprk_DocumentOperations.js" Default="false" />
+      </EnableRule>
+      <!-- Discard: enabled when document is checked out BY current user -->
+      <EnableRule Id="sprk.Document.Discard.EnableRule">
+        <CustomRule FunctionName="Spaarke.Document.canDiscard" Library="$webresource:sprk_DocumentOperations.js" Default="false" />
+      </EnableRule>
+      <!-- Delete: enabled when document is NOT checked out -->
+      <EnableRule Id="sprk.Document.Delete.EnableRule">
+        <CustomRule FunctionName="Spaarke.Document.canDelete" Library="$webresource:sprk_DocumentOperations.js" Default="true" />
       </EnableRule>
     </EnableRules>
   </RuleDefinitions>
@@ -103,6 +220,70 @@
     <LocLabel Id="Spaarke.Document.AddMultiple.Button.ToolTipTitle">
       <Titles>
         <Title description="Quick Create: Document" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <!-- Checkout Labels -->
+    <LocLabel Id="sprk.Document.Checkout.LabelText">
+      <Titles>
+        <Title description="Check Out" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Checkout.ToolTipTitle">
+      <Titles>
+        <Title description="Check Out Document" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Checkout.ToolTipDescription">
+      <Titles>
+        <Title description="Lock this document for editing. Other users will not be able to edit until you check it in." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <!-- Checkin Labels -->
+    <LocLabel Id="sprk.Document.Checkin.LabelText">
+      <Titles>
+        <Title description="Check In" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Checkin.ToolTipTitle">
+      <Titles>
+        <Title description="Check In Document" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Checkin.ToolTipDescription">
+      <Titles>
+        <Title description="Save your changes and unlock the document for other users to edit." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <!-- Discard Labels -->
+    <LocLabel Id="sprk.Document.Discard.LabelText">
+      <Titles>
+        <Title description="Discard Checkout" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Discard.ToolTipTitle">
+      <Titles>
+        <Title description="Discard Checkout" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Discard.ToolTipDescription">
+      <Titles>
+        <Title description="Discard your changes and unlock the document. The document will be restored to its previous state." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <!-- Delete Labels -->
+    <LocLabel Id="sprk.Document.Delete.LabelText">
+      <Titles>
+        <Title description="Delete" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Delete.ToolTipTitle">
+      <Titles>
+        <Title description="Delete Document" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Delete.ToolTipDescription">
+      <Titles>
+        <Title description="Permanently delete this document and its file from storage. This action cannot be undone." languagecode="1033" />
       </Titles>
     </LocLabel>
   </LocLabels>

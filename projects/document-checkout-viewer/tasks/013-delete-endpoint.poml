@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="document-checkout-viewer">
+  <metadata>
+    <title>Implement Delete Document Endpoint</title>
+    <phase>2: BFF API Endpoints</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>003</dependencies>
+    <blocks>030</blocks>
+    <tags>bff-api, api, minimal-api, endpoints</tags>
+  </metadata>
+
+  <prompt>
+    Implement the DELETE /api/documents/{id} endpoint that deletes both the Dataverse
+    Document record and the associated file from SharePoint Embedded. Block deletion
+    if document is checked out.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs and SharePoint Embedded.
+    Follow ADRs strictly.
+  </role>
+
+  <goal>
+    A working delete endpoint that removes documents from both Dataverse and SPE,
+    handles errors gracefully, and prevents deletion of checked-out documents.
+  </goal>
+
+  <context>
+    <background>
+      Delete is triggered from the Document ribbon button. The BFF must delete
+      the SPE file first, then the Dataverse record. If SPE delete fails but
+      file doesn't exist, continue with Dataverse deletion.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+      <file>src/server/shared/Sprk.SpeFileStore/</file>
+      <file>projects/document-checkout-viewer/spec.md (Delete section)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API patterns</constraint>
+    <constraint source="ADR-007">Use SpeFileStore facade for SPE operations</constraint>
+    <constraint source="project">Return 409 Conflict if document is checked out</constraint>
+    <constraint source="project">Delete SPE file before Dataverse record</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/CLAUDE.md</file>
+      <file>docs/reference/adr/ADR-007-spe-filestore-facade.md</file>
+    </files>
+    <patterns>
+      <pattern name="SPE file operations" location="src/server/shared/Sprk.SpeFileStore/">
+        Use SpeFileStore.DeleteFileAsync for file deletion
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read SpeFileStore to understand delete operations</step>
+    <step order="2">Create DeleteDocumentAsync method in document service</step>
+    <step order="3">Verify document is not checked out (return 409 if locked)</step>
+    <step order="4">Delete file from SPE using SpeFileStore.DeleteFileAsync</step>
+    <step order="5">Handle SPE errors (log warning if file already deleted, continue)</step>
+    <step order="6">Delete Document record from Dataverse (versions cascade)</step>
+    <step order="7">Add DELETE /api/documents/{id} endpoint</step>
+    <step order="8">Write unit tests with mocked SpeFileStore</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/DocumentService.cs (or similar)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs (modified)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/DocumentServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">DELETE /api/documents/{id} returns 200 on success</criterion>
+    <criterion testable="true">Returns 409 if document is checked out</criterion>
+    <criterion testable="true">SPE file is deleted (verified via Graph API or logs)</criterion>
+    <criterion testable="true">Dataverse Document record is deleted</criterion>
+    <criterion testable="true">Deletion continues if SPE file already doesn't exist</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The Dataverse cascade delete should handle sprk_fileversion records automatically.
+    If not configured, explicitly delete versions before document.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+    </protocol>
+  </execution>
+</task>

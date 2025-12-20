@@ -25,7 +25,8 @@ import {
 import {
     EditRegular,
     GlobeRegular,
-    ArrowClockwiseRegular
+    ArrowClockwiseRegular,
+    LockClosedRegular
 } from '@fluentui/react-icons';
 import { FilePreviewProps, FilePreviewState } from './types';
 import { BffClient } from './BffClient';
@@ -58,7 +59,8 @@ export class FilePreview extends React.Component<FilePreviewProps, FilePreviewSt
             isEditLoading: false,
             isWebLoading: false,
             error: null,
-            documentInfo: null
+            documentInfo: null,
+            checkoutStatus: undefined
         };
 
         // Initialize BFF client
@@ -163,20 +165,21 @@ export class FilePreview extends React.Component<FilePreviewProps, FilePreviewSt
             isIframeLoading: false,
             error: null,
             previewUrl: null,
-            documentInfo: null
+            documentInfo: null,
+            checkoutStatus: undefined
         });
 
-        console.log(`[FilePreview] Loading preview for document: ${documentId}`);
+        console.log(`[FilePreview] Loading view URL for document: ${documentId}`);
 
         try {
-            // Call BFF API
-            const response = await this.bffClient.getPreviewUrl(
+            // Call BFF API - use view-url endpoint for real-time viewing (no cache)
+            const response = await this.bffClient.getViewUrl(
                 documentId,
                 accessToken,
                 correlationId
             );
 
-            // Update state with preview URL
+            // Update state with view URL and checkout status
             this.setState({
                 previewUrl: response.previewUrl,
                 documentInfo: {
@@ -184,6 +187,7 @@ export class FilePreview extends React.Component<FilePreviewProps, FilePreviewSt
                     fileExtension: response.documentInfo.fileExtension,
                     size: response.documentInfo.size
                 },
+                checkoutStatus: response.checkoutStatus,
                 isLoading: false,
                 isIframeLoading: true,
                 error: null
@@ -192,7 +196,10 @@ export class FilePreview extends React.Component<FilePreviewProps, FilePreviewSt
             // Start timeout for iframe loading
             this.startIframeLoadTimeout();
 
-            console.log(`[FilePreview] Preview URL received: ${response.documentInfo.name}`);
+            console.log(`[FilePreview] View URL received: ${response.documentInfo.name}`);
+            if (response.checkoutStatus?.isCheckedOut) {
+                console.log(`[FilePreview] Document checked out by: ${response.checkoutStatus.checkedOutBy?.name}`);
+            }
 
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
@@ -345,7 +352,8 @@ export class FilePreview extends React.Component<FilePreviewProps, FilePreviewSt
             isWebLoading,
             error,
             previewUrl,
-            documentInfo
+            documentInfo,
+            checkoutStatus
         } = this.state;
 
         // Use isDarkTheme from props (controlled by global theme menu)
@@ -359,6 +367,11 @@ export class FilePreview extends React.Component<FilePreviewProps, FilePreviewSt
 
         // Any button loading state
         const anyButtonLoading = isEditLoading || isWebLoading;
+
+        // Checkout status display
+        const isCheckedOut = checkoutStatus?.isCheckedOut ?? false;
+        const checkedOutByName = checkoutStatus?.checkedOutBy?.name ?? 'Unknown';
+        const isCheckedOutByCurrentUser = checkoutStatus?.isCurrentUser ?? false;
 
         return (
             <FluentProvider theme={theme} style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -411,6 +424,58 @@ export class FilePreview extends React.Component<FilePreviewProps, FilePreviewSt
                                             Refresh
                                         </Button>
                                     </Tooltip>
+
+                                    {/* Checkout Status Badge */}
+                                    {isCheckedOut ? (
+                                        <Tooltip
+                                            content={isCheckedOutByCurrentUser
+                                                ? 'You have this document checked out'
+                                                : `Checked out by ${checkedOutByName}`}
+                                            relationship="label"
+                                        >
+                                            <div
+                                                style={{
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: tokens.spacingHorizontalXS,
+                                                    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
+                                                    backgroundColor: isCheckedOutByCurrentUser
+                                                        ? tokens.colorPaletteGreenBackground2
+                                                        : tokens.colorPaletteYellowBackground2,
+                                                    borderRadius: tokens.borderRadiusMedium,
+                                                    fontSize: tokens.fontSizeBase200,
+                                                    fontWeight: tokens.fontWeightSemibold
+                                                }}
+                                            >
+                                                <LockClosedRegular />
+                                                <span>
+                                                    {isCheckedOutByCurrentUser
+                                                        ? 'Checked out by you'
+                                                        : `Checked out by ${checkedOutByName}`}
+                                                </span>
+                                            </div>
+                                        </Tooltip>
+                                    ) : (
+                                        <Tooltip
+                                            content="Document is checked in and available for checkout"
+                                            relationship="label"
+                                        >
+                                            <div
+                                                style={{
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: tokens.spacingHorizontalXS,
+                                                    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
+                                                    backgroundColor: tokens.colorNeutralBackground3,
+                                                    borderRadius: tokens.borderRadiusMedium,
+                                                    fontSize: tokens.fontSizeBase200,
+                                                    color: tokens.colorNeutralForeground2
+                                                }}
+                                            >
+                                                <span>Checked In</span>
+                                            </div>
+                                        </Tooltip>
+                                    )}
 
                                     {/* Spacer */}
                                     <div style={{ flex: 1 }} />
@@ -471,6 +536,20 @@ export class FilePreview extends React.Component<FilePreviewProps, FilePreviewSt
                             </MessageBar>
                         </div>
                     )}
+
+                    {/* Version Footer */}
+                    <div
+                        style={{
+                            position: 'absolute',
+                            bottom: tokens.spacingVerticalXS,
+                            right: tokens.spacingHorizontalS,
+                            fontSize: tokens.fontSizeBase100,
+                            color: tokens.colorNeutralForeground4,
+                            opacity: 0.7
+                        }}
+                    >
+                        v2.0.0 - Built 2025-12-19
+                    </div>
                 </div>
             </FluentProvider>
         );
