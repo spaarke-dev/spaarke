@@ -6,6 +6,131 @@
 
 ---
 
+## Development Environment
+
+### Claude Code Extended Context Settings
+
+This monorepo uses extended context settings for multi-phase feature development. These environment variables enable Claude Code to handle complex project pipelines with deep context requirements:
+
+```bash
+MAX_THINKING_TOKENS=50000
+CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000
+```
+
+**Why Extended Context?**
+- **Multi-phase projects**: AI Document Intelligence R1 has 100+ tasks across 8 phases
+- **Deep resource discovery**: Skills load ADRs, knowledge docs, patterns, and existing code
+- **Context-rich task execution**: Each task includes full project history, applicable constraints
+- **Pipeline orchestration**: project-pipeline skill chains multiple component skills
+
+**When to Use**:
+- Running `/project-pipeline` for new projects with extensive specs (>2000 words)
+- Executing complex tasks that touch multiple system areas (API + PCF + Dataverse)
+- Working on AI features that require ADR-013/014/015/016 context loading
+- Phase wrap-up tasks that synthesize learnings across many prior tasks
+
+**Setting in Windows**:
+```cmd
+setx MAX_THINKING_TOKENS "50000"
+setx CLAUDE_CODE_MAX_OUTPUT_TOKENS "64000"
+```
+
+**Verifying settings**:
+```bash
+# In new terminal session
+echo $env:MAX_THINKING_TOKENS
+echo $env:CLAUDE_CODE_MAX_OUTPUT_TOKENS
+```
+
+---
+
+## 🚀 Project Initialization: Developer Workflow
+
+**Standard 2-Step Process for New Projects:**
+
+### Step 1: Create AI-Optimized Specification
+
+**If you have a human design document** (Word doc, design.md, rough notes):
+```bash
+/design-to-spec projects/{project-name}
+```
+- Transforms narrative design → structured spec.md
+- Adds preliminary ADR references (constraints only)
+- Flags ambiguities for clarification
+- **Output**: `projects/{name}/spec.md` (AI-ready specification)
+
+**OR manually write** `projects/{project-name}/spec.md` with:
+- Executive Summary, Scope, Requirements, Success Criteria, Technical Approach
+
+**→ Review spec.md before proceeding to Step 2**
+
+---
+
+### Step 2: Initialize Project (Full Pipeline)
+
+```bash
+/project-pipeline projects/{project-name}
+```
+
+This orchestrates the complete setup:
+1. ✅ Validates spec.md
+2. ✅ **Comprehensive resource discovery** (ADRs, skills, patterns, knowledge docs)
+3. ✅ Generates artifacts (README.md, PLAN.md, CLAUDE.md, folder structure)
+4. ✅ Creates 50-200+ task files with full context
+5. ✅ Creates feature branch and initial commit
+6. ✅ Optionally starts task 001
+
+**→ Human-in-loop confirmations after each major step**
+
+---
+
+### Step 3: Execute Tasks
+
+**If project-pipeline auto-started task 001** (you said 'y' in Step 2):
+- Already executing task 001 in same session
+- Continue until task complete
+
+**If resuming in new session or moving to next task**:
+```bash
+work on task 002
+# OR
+continue with next task
+# OR
+resume task 005
+```
+
+**What happens**: Natural language phrases automatically invoke the `task-execute` skill, which loads:
+- Task file (POML format)
+- Applicable ADRs and constraints
+- Knowledge docs and patterns
+- Project context (README, PLAN, CLAUDE.md)
+
+**Explicit invocation** (alternative):
+```bash
+/task-execute projects/{name}/tasks/002-*.poml
+```
+
+---
+
+### ⚠️ Component Skills (AI Internal Use Only)
+
+These skills are **called BY orchestrators** and should NOT be invoked directly by developers:
+
+| Skill | Purpose | Called By |
+|-------|---------|-----------|
+| `project-setup` | Generate artifacts only (README, PLAN, CLAUDE.md) | `project-pipeline` (Step 2) |
+| `task-create` | Decompose plan.md into task files | `project-pipeline` (Step 3) |
+| `adr-aware` | Load applicable ADRs based on resource types | Multiple skills (auto) |
+
+**Exception**: `task-execute` is also a skill, but it **IS developer-facing** for daily task work:
+- Used in Step 3 above: `work on task 001` invokes `task-execute`
+- Ensures proper context loading (knowledge files, ADRs, patterns)
+- Primary workflow for implementing individual tasks
+
+**When in doubt → Use `/project-pipeline`** (it orchestrates everything)
+
+---
+
 ## 🚨 AI Execution Rules (Critical)
 
 ### Context Management

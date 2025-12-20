@@ -8,9 +8,39 @@ appliesTo: ["projects/*/", "create artifacts", "generate project files"]
 alwaysApply: false
 ---
 
+## Prerequisites
+
+### Claude Code Extended Context Configuration
+
+**IMPORTANT**: Before running this skill, ensure Claude Code is configured with extended context settings:
+
+```bash
+MAX_THINKING_TOKENS=50000
+CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000
+```
+
+**Why Extended Context is Required**:
+- Loads and processes detailed `spec.md` files (typically 1500-3000 words)
+- Generates comprehensive `plan.md` with WBS (Work Breakdown Structure)
+- Creates context-rich `CLAUDE.md` with technical constraints
+- Often called by `project-pipeline` which performs additional resource discovery
+
+**Verify settings before proceeding**:
+```bash
+# Windows PowerShell
+echo $env:MAX_THINKING_TOKENS
+echo $env:CLAUDE_CODE_MAX_OUTPUT_TOKENS
+
+# Should output: 50000 and 64000
+```
+
+If not set, see root [CLAUDE.md](../../../CLAUDE.md#development-environment) for setup instructions.
+
+---
+
 ## Purpose
 
-**Tier 1 Component Skill** - Generates foundational project artifact files (README.md, PLAN.md, CLAUDE.md) and folder structure from a design specification. This is a pure artifact generator that does NOT perform resource discovery, branching, or task creation.
+**Tier 1 Component Skill (AI INTERNAL USE)** - Generates foundational project artifact files (README.md, PLAN.md, CLAUDE.md) and folder structure from a design specification. This is a pure artifact generator that does NOT perform resource discovery, branching, or task creation.
 
 **Design Philosophy**:
 - Single responsibility: artifact generation only
@@ -18,20 +48,40 @@ alwaysApply: false
 - Deterministic: same input → same output
 - Composable: can be called by orchestrator skills
 
-## When to Use
+## ⚠️ Developer Note
 
-**Primary Use**: Called by orchestrator skills (e.g., project-pipeline)
+**This skill is for AI internal use only.** It is called BY `project-pipeline`, not invoked directly by developers.
 
-**Standalone Use** (Advanced):
-- Need project artifacts but will create tasks manually
-- Rebuilding artifacts after deletion
-- Want full control over each step of project initialization
-- Learning how the project structure works
+### When This Skill Is Used
+
+**Called By**: `project-pipeline` (Step 2 - Artifact Generation)
+
+**Direct Developer Use**: ❌ **NOT RECOMMENDED**
+
+### If You're a Developer
+
+**✅ Use this instead**:
+```bash
+/project-pipeline projects/{project-name}
+```
+
+This orchestrates the full setup:
+- Comprehensive resource discovery (ADRs, skills, patterns, knowledge docs)
+- Artifact generation ← **This skill is called here**
+- Task decomposition
+- Feature branch creation
+
+### Advanced Use Cases ONLY
+
+Call this skill directly only if:
+- ✅ You need to regenerate artifacts (README, PLAN, CLAUDE.md) without full pipeline
+- ✅ You're debugging artifact generation logic
+- ✅ You want manual control over each initialization step
 
 **Do NOT use if**:
-- You want full automated setup → Use **project-pipeline** instead
-- You need task files created → Use **project-pipeline** or **task-create**
-- You want resource discovery (ADRs, skills) → Use **project-pipeline** instead
+- ❌ You want full automated setup → Use **project-pipeline** instead
+- ❌ You need task files created → Use **project-pipeline** (it calls task-create)
+- ❌ You want resource discovery → Use **project-pipeline** (it performs comprehensive discovery)
 
 ## Inputs Required
 
