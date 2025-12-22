@@ -26,8 +26,8 @@
 
     <!-- Microsoft Graph SDK v5.x (CRITICAL - must be 5.x or higher) -->
     <PackageReference Include="Microsoft.Graph" Version="5.56.0" />
-    <PackageReference Include="Microsoft.Kiota.Abstractions" Version="1.12.0" />
-    <PackageReference Include="Microsoft.Kiota.Authentication.Azure" Version="1.1.7" />
+    <PackageReference Include="Microsoft.Kiota.Abstractions" Version="1.21.1" />
+    <PackageReference Include="Microsoft.Kiota.Authentication.Azure" Version="1.21.1" />
 
     <!-- Microsoft Identity (CRITICAL - must be 3.x or higher) -->
     <!-- Identity.Web 3.8.2+ fixes CVE-2025-32016; requires Identity.Client >= 4.70.0 -->
