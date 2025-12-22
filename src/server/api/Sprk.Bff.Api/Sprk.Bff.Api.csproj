@@ -26,7 +26,7 @@
 
     <!-- Microsoft Graph SDK v5.x (CRITICAL - must be 5.x or higher) -->
     <PackageReference Include="Microsoft.Graph" Version="5.56.0" />
-    <PackageReference Include="Microsoft.Kiota.Abstractions" Version="1.12.0" />
+    <PackageReference Include="Microsoft.Kiota.Abstractions" Version="1.21.1" />
     <PackageReference Include="Microsoft.Kiota.Authentication.Azure" Version="1.1.7" />
 
     <!-- Microsoft Identity (CRITICAL - must be 3.x or higher) -->
