@@ -275,6 +275,44 @@ REPORT to user:
 
 ---
 
+## How current-task.md Works Across Tasks
+
+**Key concept**: `current-task.md` tracks only the **active task**, not task history.
+
+### Task Lifecycle in current-task.md
+
+```
+Task 001 starts
+  → current-task.md: Task ID = 001, Status = in-progress
+  → Steps completed, files modified tracked
+
+Task 001 completes
+  → current-task.md RESETS (clears steps, files, decisions)
+  → current-task.md: Task ID = 002, Status = not-started
+
+Task 002 starts
+  → current-task.md: Status = in-progress
+  → Fresh tracking for this task
+```
+
+### Where History Is Preserved
+
+| What | Where |
+|------|-------|
+| Which tasks are done | `TASK-INDEX.md` (✅/🔲 status) |
+| Task completion notes | Individual `.poml` files (`<notes>` section) |
+| Code changes per task | Git commits |
+| Important cross-task learnings | `current-task.md` → Session Notes → Key Learnings |
+
+### Why Reset Instead of Accumulate?
+
+- **Faster recovery**: Only load current task context, not entire history
+- **Focused context**: Recovery needs "where am I now", not "where have I been"
+- **Prevents bloat**: 50+ task project would have massive file otherwise
+- **History exists elsewhere**: TASK-INDEX.md and git provide full history
+
+---
+
 ## current-task.md Format
 
 **Location**: `projects/{project-name}/current-task.md`

@@ -209,18 +209,58 @@ UPDATE task file <metadata><status> to "completed"
 ADD <notes> section with completion summary
 
 UPDATE TASK-INDEX.md with ✅ completed status
-
-UPDATE current-task.md:
-  - Status: "completed"
-  - All steps marked [x]
-  - Clear "Next Action" (task done)
-  - Add completion timestamp
-
-DETERMINE next task:
-  - Check TASK-INDEX.md for next pending task
-  - If found: Update current-task.md with next task info (status: "not-started")
-  - If none: Set current-task.md status to "none"
 ```
+
+### Step 11: Transition to Next Task
+
+**Important**: `current-task.md` tracks only the ACTIVE task, not task history. When a task completes, it resets for the next task.
+
+```
+TRANSITION current-task.md:
+
+1. ARCHIVE completed task info (optional - for session notes):
+   - Add to "Session Notes > Key Learnings" if significant discoveries
+   - Add to "Handoff Notes" if important context for future tasks
+
+2. RESET for next task:
+   - Clear "Completed Steps" section
+   - Clear "Files Modified" section
+   - Clear "Decisions Made" section
+   - Clear "Current Step" section
+
+3. DETERMINE next task:
+   - Check TASK-INDEX.md for next pending task (🔲 status)
+   - If dependencies: Find first task with all dependencies satisfied
+
+4. UPDATE current-task.md with next task:
+   IF next task found:
+     - Task ID: {next task number}
+     - Task File: tasks/{NNN}-{slug}.poml
+     - Title: {from next task metadata}
+     - Phase: {from next task metadata}
+     - Status: "not-started"
+     - Started: "—"
+     - Next Action: "Begin Step 1 of task {NNN}"
+
+   IF no more tasks (project complete):
+     - Task ID: "none"
+     - Status: "none"
+     - Next Action: "Project complete. Run /repo-cleanup"
+
+5. REPORT to user:
+   "✅ Task {completed_id} complete.
+
+    Next task: {next_id} - {next_title}
+    Ready to begin? [Y/N]"
+```
+
+**Why reset instead of accumulate?**
+- `current-task.md` is for **context recovery**, not task history
+- Task history is preserved in:
+  - `TASK-INDEX.md` (status of all tasks)
+  - Individual `.poml` files (status + notes sections)
+  - Git commits (what changed when)
+- Keeping it focused prevents file bloat and faster recovery
 
 ---
 
