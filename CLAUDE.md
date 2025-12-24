@@ -224,7 +224,7 @@ Use these commands to explicitly invoke skills:
 | `/project-pipeline {path}` | **⭐ RECOMMENDED**: Full pipeline - spec → ready tasks + branch |
 | `/project-setup {path}` | Generate artifacts only (advanced users) |
 | `/task-create {path}` | Decompose plan into task files |
-| `/new-project` | Interactive wizard for new projects |
+| `/repo-cleanup` | Repository hygiene audit and ephemeral file cleanup |
 | `/code-review` | Review recent changes |
 | `/adr-check` | Validate ADR compliance |
 | `/dataverse-deploy` | Deploy PCF, solutions, or web resources to Dataverse |
@@ -305,6 +305,7 @@ ADRs are in `/docs/reference/adr/`. The key constraints are summarized here—**
 | ADR-010 | DI minimalism | **≤15 non-framework DI registrations** |
 | ADR-012 | Shared component library | **Reuse `@spaarke/ui-components` across modules** |
 | ADR-013 | AI Architecture | **AI Tool Framework; extend BFF, not separate service** |
+| ADR-021 | Fluent UI v9 Design System | **All UI must use Fluent v9; no hard-coded colors; dark mode required** |
 
 ## AI Architecture
 
@@ -463,24 +464,22 @@ All coding projects follow this process:
 
 ### 🤖 AI-Assisted Development
 
-**When given a design spec, use the `design-to-project` skill:**
-- **Location**: `.claude/skills/design-to-project/SKILL.md`
-- **Trigger**: `/design-to-project {project-path}` or say "implement this spec"
+**Standard 2-step workflow for new projects:**
 
-The skill guides you through a **5-phase pipeline**:
-1. **Ingest** - Extract key info from the design spec
-2. **Context** - Gather ADRs, existing code, knowledge base
-3. **Generate** - Create README, plan, tasks using templates (via `project-init` + `task-create`)
-4. **Validate** - Cross-reference checklist before coding
-5. **Implement** - Follow patterns and update tasks
-6. **Wrap-up** - Run `/repo-cleanup` to validate structure and remove ephemeral files
+1. **Transform design to spec**: `/design-to-spec projects/{name}`
+   - Converts human design docs → AI-optimized `spec.md`
+
+2. **Run project pipeline**: `/project-pipeline projects/{name}`
+   - Validates spec → discovers resources → generates artifacts → creates tasks → ready to execute
+
+See [Project Initialization: Developer Workflow](#-project-initialization-developer-workflow) section above for full details.
 
 ### Before Starting Work
 
 1. **Check for skills** - Review `.claude/skills/INDEX.md` for applicable workflows
 2. **Identify the phase** - What lifecycle phase is this work in?
 3. **Check for existing artifacts** - Look for design specs, assessments
-4. **Follow the spec** - If a design spec exists, run `/design-to-project`
+4. **Follow the workflow** - If a design spec exists, run `/design-to-spec` then `/project-pipeline`
 
 ### After Completing Work
 

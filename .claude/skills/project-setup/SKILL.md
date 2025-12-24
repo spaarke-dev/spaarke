@@ -301,7 +301,7 @@ When working on this project, Claude Code should:
 
 {Extract key constraints from spec.md, examples:}
 - Must use .NET 8 Minimal API (no Azure Functions) - per ADR-001
-- PCF controls must use Fluent UI v9 - per ADR-006
+- PCF controls must use Fluent UI v9, no v8, dark mode required - per ADR-006, ADR-021
 - No HTTP calls from Dataverse plugins - per ADR-002
 - Redis-first caching strategy - per ADR-009
 

@@ -32,7 +32,7 @@ Ensures Architecture Decision Records (ADRs) are automatically considered when A
 | **Caching** | `*Cache*.cs`, `IDistributedCache`, `IMemoryCache` | ADR-009 |
 | **Dataverse Plugin** | `*Plugin.cs` in plugins folder | ADR-002 |
 | **Graph/SPE Integration** | `*Spe*.cs`, `*Graph*.cs`, `*Drive*.cs` | ADR-007 |
-| **PCF Control** | `*.tsx` in pcf/, `ControlManifest.Input.xml` | ADR-006, ADR-011, ADR-012 |
+| **PCF Control** | `*.tsx` in pcf/, `ControlManifest.Input.xml` | ADR-006, ADR-011, ADR-012, ADR-021 |
 | **Webresource** | `*.js` in webresources/ | ADR-006 |
 | **DI Registration** | `Program.cs` DI section, `Add*` extension methods | ADR-010 |
 | **Background Worker** | `*Worker.cs`, `*Service.cs` implementing `BackgroundService` | ADR-001, ADR-004 |
@@ -123,6 +123,7 @@ Reference this table for common constraints. The source of truth is the ADR inde
 | ADR-018 | Feature Flags | Kill switches for risky features | No gating for AI/expensive features |
 | ADR-019 | API Errors | ProblemDetails standards | Ad-hoc error payloads/status codes |
 | ADR-020 | Versioning | Version APIs/jobs/contracts | Breaking changes without version bump |
+| ADR-021 | Fluent UI v9 Design | Use Fluent v9; dark mode; tokens | Hard-coded colors, Fluent v8 imports |
 
 ---
 
@@ -178,18 +179,29 @@ app.MapGet("/api/documents/{id}/metadata", GetDocumentMetadataAsync)
 **adr-aware activates**:
 ```
 Detected: PCF Control creation
-Loading ADRs: ADR-006, ADR-011, ADR-012
+Loading ADRs: ADR-006, ADR-011, ADR-012, ADR-021
 
 Key constraints:
 - ADR-006: Use PCF, not webresource (already doing this ✅)
 - ADR-011: Use Dataset PCF for list views
 - ADR-012: Import from @spaarke/ui-components for shared components
+- ADR-021: Use Fluent v9, semantic tokens, dark mode support
 ```
 
 **Generated code includes**:
 ```typescript
 // ADR-012: Use shared component library
 import { DocumentCard, StatusBadge } from "@spaarke/ui-components";
+// ADR-021: Fluent v9 components and tokens
+import { Button, tokens, makeStyles } from "@fluentui/react-components";
+import { DocumentAdd20Regular } from "@fluentui/react-icons";
+
+const useStyles = makeStyles({
+  container: {
+    backgroundColor: tokens.colorNeutralBackground1, // ADR-021: semantic tokens
+    color: tokens.colorNeutralForeground1,
+  },
+});
 ```
 
 ### Example 3: Prevented violation
@@ -218,4 +230,4 @@ Run `/adr-check` after completing tasks to verify no violations were introduced.
 
 ---
 
-*Last updated: December 12, 2025*
+*Last updated: December 24, 2025*

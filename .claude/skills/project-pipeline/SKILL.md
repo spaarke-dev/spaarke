@@ -119,7 +119,7 @@ DISCOVER RESOURCES (Comprehensive):
 
   2. LOAD applicable ADRs via adr-aware
      - Based on resource types in spec (API, PCF, Plugin, etc.)
-     - Example: PCF control → ADR-006, ADR-011, ADR-012
+     - Example: PCF control → ADR-006, ADR-011, ADR-012, ADR-021
      - Load FULL ADR content (not just constraints)
 
   3. SEARCH for applicable skills
