@@ -176,12 +176,16 @@ These skills are **called BY orchestrators** and should NOT be invoked directly 
 
 **Format**: Use 🔔 **Human Input Required** block with situation, options, recommendation.
 
-### Task Completion
+### Task Completion and Transition
 
 After completing any task:
-1. Update `TASK-INDEX.md` status: 🔲 → ✅
-2. Document deviations in `notes/`
-3. Report completion to user
+1. Update task `.poml` file status to "completed"
+2. Update `TASK-INDEX.md` status: 🔲 → ✅
+3. **Reset `current-task.md`** for next task (clears steps, files, decisions)
+4. Set `current-task.md` to next pending task (or "none" if project complete)
+5. Report completion and ask if ready for next task
+
+**Important**: `current-task.md` tracks only the **active task**, not history. Task history is preserved in TASK-INDEX.md and individual .poml files.
 
 **Full protocols**: `docs/reference/protocols/` (AIP-001, AIP-002, AIP-003)
 

@@ -378,22 +378,38 @@ WHY create branch at this point:
 ```
 IF user said 'y':
   → INVOKE task-execute skill with projects/{project-name}/tasks/001-*.poml
-  → This loads:
-    - Task file (POML)
-    - Knowledge files (from <knowledge> section)
-    - ADRs (via adr-aware based on tags)
-    - Context from PLAN.md and README.md
+  → task-execute will:
+    1. UPDATE current-task.md:
+       - Task ID: 001
+       - Status: in-progress
+       - Started: {timestamp}
+    2. LOAD context:
+       - Task file (POML)
+       - Knowledge files (from <knowledge> section)
+       - ADRs (via adr-aware based on tags)
+       - Context from PLAN.md and README.md
+    3. EXECUTE task steps, updating current-task.md after each step
 
 IF user said 'stop':
   → OUTPUT:
     "✅ Project initialized and ready!
-     
+
+     current-task.md is set to:
+       - Task ID: none
+       - Status: none (waiting for first task)
+
      When ready to start:
-     - Execute: `work on task 001`
-     - Or: `execute task 001`
-     
-     Task-execute will load all necessary context automatically."
+     - Say: `work on task 001` or `execute task 001`
+     - task-execute will update current-task.md and load all context
+
+     To check status later: `/project-status {project-name}`"
 ```
+
+**Note on current-task.md lifecycle:**
+- Created by project-setup with status: "none" (no active task yet)
+- When task 001 starts → status: "in-progress", steps/files/decisions tracked
+- When task 001 completes → RESETS, advances to task 002 (status: "not-started")
+- Continues until project complete (status: "none", next action: "run /repo-cleanup")
 
 ---
 
