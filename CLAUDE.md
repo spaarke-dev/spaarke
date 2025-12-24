@@ -143,7 +143,7 @@ These skills are **called BY orchestrators** and should NOT be invoked directly 
 
 **Commands**: `/context` (check) · `/clear` (wipe) · `/compact` (compress)
 
-### Context Persistence (NEW)
+### Context Persistence
 
 **All work state must be recoverable from files alone.**
 
@@ -153,13 +153,17 @@ These skills are **called BY orchestrators** and should NOT be invoked directly 
 | `projects/{name}/CLAUDE.md` | Project context, decisions, constraints | Manual or skills |
 | `projects/{name}/tasks/TASK-INDEX.md` | Task status overview | `task-execute` skill |
 
-**Recovery Protocol**: After compaction or new session, run [Context Recovery](docs/procedures/context-recovery.md):
-1. Read `current-task.md` to find active task
-2. Load task .poml file
-3. Load knowledge files per task
-4. Resume from documented step
+**Resuming Work in a New Session**:
 
-**Quick Recovery**: Say "where was I?" or "continue task" to trigger automatic recovery.
+| What You Want | What to Say |
+|---------------|-------------|
+| Resume where you left off | "Where was I?" or "Continue" |
+| Resume specific task | "Continue task 013" |
+| Resume specific project | "Continue work on {project-name}" |
+| Check all project status | "/project-status" |
+| Save progress before stopping | "Save my progress" |
+
+**Full Protocol**: [Context Recovery Procedure](docs/procedures/context-recovery.md)
 
 ### Human Escalation Triggers
 

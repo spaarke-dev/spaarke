@@ -14,19 +14,150 @@ Claude Code's context window is finite. When context usage exceeds thresholds or
 
 ---
 
-## Context Recovery Triggers
+## How to Use This Protocol (Developer Guide)
 
-| Trigger | Action Required |
-|---------|-----------------|
-| New session start | Full recovery (Step 1-5) |
-| After `/compact` command | Verification recovery (Step 3-5) |
-| Context usage > 70% | Create handoff, then recovery in new session |
-| Context usage > 85% | Emergency handoff, immediate new session |
-| "Where was I?" question | Quick recovery (Step 3-4) |
+### Starting a New Session
+
+When you open Claude Code in a new session and want to continue previous work:
+
+```
+# Option 1: Quick resume (recommended)
+You: "Where was I?"
+
+# Option 2: Resume specific project
+You: "Continue work on ai-doc-summary"
+
+# Option 3: Resume specific task
+You: "Continue task 013"
+
+# Option 4: Check all project status first
+You: "/project-status"
+```
+
+Claude Code will automatically:
+1. Find your `current-task.md` file
+2. Load the active task and all required context
+3. Report what was completed and what's next
+4. Ask if you're ready to continue
+
+### During Work (Proactive Updates)
+
+Claude Code automatically updates `current-task.md` during task execution:
+- After completing each step
+- When modifying files
+- When making implementation decisions
+- Before context gets too high (>70%)
+
+**You don't need to do anything** — the `task-execute` skill handles this.
+
+### Before Ending a Session
+
+If you need to stop mid-task:
+
+```
+You: "I need to stop for today, save my progress"
+```
+
+Claude Code will:
+1. Update `current-task.md` with complete state
+2. Add handoff notes for next session
+3. Confirm the handoff is saved
+
+### After Using /compact
+
+The `/compact` command compresses context but loses conversation history:
+
+```
+# After compacting
+You: "Where was I?"
+```
+
+Claude Code recovers from `current-task.md` and continues.
 
 ---
 
-## Recovery Protocol
+## Common Scenarios
+
+### Scenario 1: Resuming a Project After Days/Weeks
+
+You started a project last week and want to continue:
+
+```
+You: "I want to continue working on the ai-doc-summary project"
+```
+
+Claude Code will:
+1. Read `projects/ai-doc-summary/current-task.md`
+2. Load project context (CLAUDE.md, README.md, plan.md)
+3. Load the active task file and its knowledge requirements
+4. Report: "Task 013 was in progress. Steps 1-5 complete. Next: Step 6 - Add dark mode support. Ready to continue?"
+
+### Scenario 2: Starting Fresh Session After Compaction
+
+You ran `/compact` to free up context:
+
+```
+You: "Where was I?"
+```
+
+Claude Code reads `current-task.md` and resumes exactly where you left off.
+
+### Scenario 3: Task Was Interrupted Mid-Step
+
+You closed Claude Code in the middle of implementing Step 4:
+
+```
+You: "Continue task 013"
+```
+
+Claude Code will:
+1. Load task 013 context
+2. See Step 4 was marked "in-progress" (not completed)
+3. Read the "Current Step" details from `current-task.md`
+4. Resume Step 4 from where you left off
+
+### Scenario 4: Switching Between Projects
+
+You have two projects and want to switch:
+
+```
+You: "Switch to the mda-darkmode-theme project"
+```
+
+Claude Code will:
+1. Save current project state to its `current-task.md`
+2. Load the new project's `current-task.md`
+3. Resume that project's active task
+
+### Scenario 5: Not Sure What's Active
+
+You forgot what you were working on:
+
+```
+You: "/project-status"
+```
+
+Shows all projects with their current state, then:
+
+```
+You: "Continue the in-progress one"
+```
+
+---
+
+## Context Recovery Triggers
+
+| Trigger | What to Say | What Claude Does |
+|---------|-------------|------------------|
+| New session start | "Where was I?" | Full recovery (Step 1-5) |
+| After `/compact` | "Continue task" | Verification recovery (Step 3-5) |
+| Context usage > 70% | (automatic) | Creates handoff, requests new session |
+| Context usage > 85% | (automatic) | Emergency handoff |
+| Switching projects | "Work on {project}" | Full recovery for specified project |
+
+---
+
+## Recovery Protocol (What Claude Does)
 
 ### Step 1: Identify Active Project
 
@@ -235,14 +366,35 @@ When context usage approaches limits, create a handoff summary before compaction
 
 ---
 
-## Quick Recovery Commands
+## Quick Recovery Commands (Cheat Sheet)
 
-| Command | Action |
-|---------|--------|
-| "Where was I?" | Run Step 3-5 of recovery protocol |
-| "Continue task" | Full recovery + resume execution |
-| "Show current state" | Display current-task.md contents |
-| "Recover context for {project}" | Run full recovery for specified project |
+**Most Common:**
+| What You Say | What Happens |
+|--------------|--------------|
+| "Where was I?" | Shows current task, completed steps, next action |
+| "Continue" | Resumes active task from where you left off |
+| "Continue task 013" | Resumes specific task |
+
+**Project-Level:**
+| What You Say | What Happens |
+|--------------|--------------|
+| "Continue work on {project}" | Full project context load + resume |
+| "Switch to {project}" | Save current state, load new project |
+| "/project-status" | Overview of all projects and their state |
+| "/project-status {project}" | Detailed status of specific project |
+
+**State Inspection:**
+| What You Say | What Happens |
+|--------------|--------------|
+| "Show current state" | Displays current-task.md contents |
+| "What files have I modified?" | Lists files touched in current task |
+| "What decisions did I make?" | Shows logged implementation decisions |
+
+**Session Management:**
+| What You Say | What Happens |
+|--------------|--------------|
+| "Save my progress" | Updates current-task.md with full state |
+| "Create handoff" | Detailed handoff notes for session end |
 
 ---
 
