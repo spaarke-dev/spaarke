@@ -40,10 +40,10 @@ FOR each folder in projects/:
 
 | State | Condition | Next Action |
 |-------|-----------|-------------|
-| 📋 **Spec Only** | spec.md exists, no README.md | `/project-init` |
-| 📝 **Initialized** | README.md + plan.md exist, tasks/ empty | `/task-create` |
+| 📋 **Spec Only** | spec.md exists, no README.md | `/project-pipeline` |
+| 📝 **Initialized** | README.md + plan.md exist, tasks/ empty | `/project-pipeline` (will detect and run task-create) |
 | 🚧 **In Progress** | Tasks exist, some not completed | Continue task execution |
-| ✅ **Complete** | All tasks completed | Deploy or close project |
+| ✅ **Complete** | All tasks completed | Deploy or run `/repo-cleanup` |
 | ⚠️ **Incomplete** | Missing required files | Manual review needed |
 
 ### Step 3: Output Report
@@ -55,7 +55,7 @@ FOR each folder in projects/:
 projects/mda-darkmode-theme/
   Status: 📝 Initialized (needs task decomposition)
   Files:  ✅ spec.md  ✅ README.md  ✅ plan.md  ❌ tasks/
-  Action: Run /task-create projects/mda-darkmode-theme
+  Action: Run /project-pipeline projects/mda-darkmode-theme
 
 projects/sdap-fileviewer-enhancements-1/
   Status: ✅ Complete
@@ -65,7 +65,7 @@ projects/sdap-fileviewer-enhancements-1/
 projects/new-feature/
   Status: 📋 Spec Only (needs initialization)
   Files:  ✅ spec.md  ❌ README.md  ❌ plan.md  ❌ tasks/
-  Action: Run /project-init projects/new-feature
+  Action: Run /project-pipeline projects/new-feature
 
 ─────────────────────────────
 Summary: 3 projects (1 complete, 2 need action)
@@ -112,6 +112,7 @@ To start: "Begin task 001" or read tasks/001-create-theme-storage.poml
 
 ## Related Commands
 
-- `/project-init` - Initialize a new project
-- `/task-create` - Create task files from plan
-- `/new-project` - Interactive wizard for new projects
+- `/project-pipeline` - Full pipeline from spec.md to ready tasks (recommended)
+- `/design-to-spec` - Transform design doc to spec.md
+- `/repo-cleanup` - Clean up after project completion
+

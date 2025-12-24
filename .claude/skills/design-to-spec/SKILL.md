@@ -188,7 +188,7 @@ IDENTIFY resource types from extracted content:
 
 1. RESOURCE TYPES → ADR CONSTRAINTS
    - API endpoints → Reference ADR-001, ADR-008, ADR-010, ADR-019 (constraints only)
-   - PCF controls → Reference ADR-006, ADR-011, ADR-012 (constraints only)
+   - PCF controls → Reference ADR-006, ADR-011, ADR-012, ADR-021 (constraints only)
    - Plugins → Reference ADR-002 (constraints only)
    - Storage → Reference ADR-005, ADR-007, ADR-009 (constraints only)
    - AI features → Reference ADR-013, ADR-014, ADR-015, ADR-016 (constraints only)

@@ -1,6 +1,6 @@
 # CLAUDE.md - Spaarke Repository Instructions
 
-> **Last Updated**: December 19, 2025
+> **Last Updated**: December 24, 2025
 >
 > **Purpose**: This file provides repository-wide context and instructions for Claude Code when working in this codebase.
 
@@ -138,10 +138,32 @@ These skills are **called BY orchestrators** and should NOT be invoked directly 
 | Usage | Action |
 |-------|--------|
 | < 70% | ✅ Proceed normally |
-| > 70% | 🛑 STOP - Create handoff at `notes/handoffs/`, request new session |
-| > 85% | 🚨 EMERGENCY - Immediately create handoff |
+| > 70% | 🛑 STOP - Update `current-task.md`, create handoff, request new session |
+| > 85% | 🚨 EMERGENCY - Immediately update `current-task.md` and stop |
 
 **Commands**: `/context` (check) · `/clear` (wipe) · `/compact` (compress)
+
+### Context Persistence
+
+**All work state must be recoverable from files alone.**
+
+| File | Purpose | Updated By |
+|------|---------|------------|
+| `projects/{name}/current-task.md` | Active task state, completed steps, files modified | `task-execute` skill |
+| `projects/{name}/CLAUDE.md` | Project context, decisions, constraints | Manual or skills |
+| `projects/{name}/tasks/TASK-INDEX.md` | Task status overview | `task-execute` skill |
+
+**Resuming Work in a New Session**:
+
+| What You Want | What to Say |
+|---------------|-------------|
+| Resume where you left off | "Where was I?" or "Continue" |
+| Resume specific task | "Continue task 013" |
+| Resume specific project | "Continue work on {project-name}" |
+| Check all project status | "/project-status" |
+| Save progress before stopping | "Save my progress" |
+
+**Full Protocol**: [Context Recovery Procedure](docs/procedures/context-recovery.md)
 
 ### Human Escalation Triggers
 
@@ -154,12 +176,16 @@ These skills are **called BY orchestrators** and should NOT be invoked directly 
 
 **Format**: Use 🔔 **Human Input Required** block with situation, options, recommendation.
 
-### Task Completion
+### Task Completion and Transition
 
 After completing any task:
-1. Update `TASK-INDEX.md` status: 🔲 → ✅
-2. Document deviations in `notes/`
-3. Report completion to user
+1. Update task `.poml` file status to "completed"
+2. Update `TASK-INDEX.md` status: 🔲 → ✅
+3. **Reset `current-task.md`** for next task (clears steps, files, decisions)
+4. Set `current-task.md` to next pending task (or "none" if project complete)
+5. Report completion and ask if ready for next task
+
+**Important**: `current-task.md` tracks only the **active task**, not history. Task history is preserved in TASK-INDEX.md and individual .poml files.
 
 **Full protocols**: `docs/reference/protocols/` (AIP-001, AIP-002, AIP-003)
 
@@ -224,7 +250,7 @@ Use these commands to explicitly invoke skills:
 | `/project-pipeline {path}` | **⭐ RECOMMENDED**: Full pipeline - spec → ready tasks + branch |
 | `/project-setup {path}` | Generate artifacts only (advanced users) |
 | `/task-create {path}` | Decompose plan into task files |
-| `/new-project` | Interactive wizard for new projects |
+| `/repo-cleanup` | Repository hygiene audit and ephemeral file cleanup |
 | `/code-review` | Review recent changes |
 | `/adr-check` | Validate ADR compliance |
 | `/dataverse-deploy` | Deploy PCF, solutions, or web resources to Dataverse |
@@ -305,6 +331,7 @@ ADRs are in `/docs/reference/adr/`. The key constraints are summarized here—**
 | ADR-010 | DI minimalism | **≤15 non-framework DI registrations** |
 | ADR-012 | Shared component library | **Reuse `@spaarke/ui-components` across modules** |
 | ADR-013 | AI Architecture | **AI Tool Framework; extend BFF, not separate service** |
+| ADR-021 | Fluent UI v9 Design System | **All UI must use Fluent v9; no hard-coded colors; dark mode required** |
 
 ## AI Architecture
 
@@ -463,24 +490,22 @@ All coding projects follow this process:
 
 ### 🤖 AI-Assisted Development
 
-**When given a design spec, use the `design-to-project` skill:**
-- **Location**: `.claude/skills/design-to-project/SKILL.md`
-- **Trigger**: `/design-to-project {project-path}` or say "implement this spec"
+**Standard 2-step workflow for new projects:**
 
-The skill guides you through a **5-phase pipeline**:
-1. **Ingest** - Extract key info from the design spec
-2. **Context** - Gather ADRs, existing code, knowledge base
-3. **Generate** - Create README, plan, tasks using templates (via `project-init` + `task-create`)
-4. **Validate** - Cross-reference checklist before coding
-5. **Implement** - Follow patterns and update tasks
-6. **Wrap-up** - Run `/repo-cleanup` to validate structure and remove ephemeral files
+1. **Transform design to spec**: `/design-to-spec projects/{name}`
+   - Converts human design docs → AI-optimized `spec.md`
+
+2. **Run project pipeline**: `/project-pipeline projects/{name}`
+   - Validates spec → discovers resources → generates artifacts → creates tasks → ready to execute
+
+See [Project Initialization: Developer Workflow](#-project-initialization-developer-workflow) section above for full details.
 
 ### Before Starting Work
 
 1. **Check for skills** - Review `.claude/skills/INDEX.md` for applicable workflows
 2. **Identify the phase** - What lifecycle phase is this work in?
 3. **Check for existing artifacts** - Look for design specs, assessments
-4. **Follow the spec** - If a design spec exists, run `/design-to-project`
+4. **Follow the workflow** - If a design spec exists, run `/design-to-spec` then `/project-pipeline`
 
 ### After Completing Work
 

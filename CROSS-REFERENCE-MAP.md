@@ -160,7 +160,14 @@
 | Project Plan | [.claude/templates/project-plan.template.md](.claude/templates/project-plan.template.md) | project-setup skill |
 | Task Execution | [.claude/templates/task-execution.template.md](.claude/templates/task-execution.template.md) | task-create skill |
 | AI Knowledge Article | [.claude/templates/ai-knowledge-article.template.md](.claude/templates/ai-knowledge-article.template.md) | Documentation creation |
-| AI Agent Playbook | [.claude/templates/AI-AGENT-PLAYBOOK.md](.claude/templates/AI-AGENT-PLAYBOOK.md) | General AI guidance |
+
+---
+
+## AI Skill Workflows
+
+| Guide | Location | Purpose |
+|-------|----------|---------|
+| **Skill Interaction Guide** (Authoritative) | [.claude/skills/SKILL-INTERACTION-GUIDE.md](.claude/skills/SKILL-INTERACTION-GUIDE.md) | Complete AI playbook: workflows, skill invocation, decision trees |
 
 ---
 
@@ -176,6 +183,7 @@
 | 2025-12-19 | Added Caching patterns (distributed-cache, request-cache, token-cache) | Phase 3 batch |
 | 2025-12-19 | Added AI patterns (streaming-endpoints, text-extraction, analysis-scopes) | Phase 3 batch |
 | 2025-12-19 | Added Testing patterns (unit-test-structure, mocking-patterns, integration-tests) | Phase 3 batch |
+| 2025-12-24 | Consolidated AI playbooks - SKILL-INTERACTION-GUIDE.md is authoritative | Doc consolidation |
 
 ---
 

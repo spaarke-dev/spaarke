@@ -1,6 +1,6 @@
 # How to Initiate a New Project
 
-> **Last Updated**: December 5, 2025
+> **Last Updated**: December 24, 2025
 >
 > **Purpose**: Step-by-step guide for starting new development projects using AI-assisted workflows.
 
@@ -27,35 +27,31 @@
 │                        PROJECT INITIATION FLOW                               │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
-│  STEP 1                STEP 2                STEP 3                STEP 4   │
-│  ──────                ──────                ──────                ──────   │
+│  STEP 1                              STEP 2                                  │
+│  ──────                              ──────                                  │
 │                                                                              │
-│  Create Folder    →    Add Spec       →    Initialize      →    Create     │
-│  & Design Spec         (if not done)       Project              Tasks       │
+│  Create spec.md                  →   Run Pipeline                            │
+│  (from design doc or manual)         (generates all artifacts + tasks)       │
 │                                                                              │
-│  ┌──────────┐         ┌──────────┐         ┌──────────┐         ┌────────┐ │
-│  │ projects/│         │ spec.md  │         │ README   │         │ tasks/ │ │
-│  │ {name}/  │         │          │         │ plan.md  │         │ *.poml │ │
-│  └──────────┘         └──────────┘         │ CLAUDE   │         └────────┘ │
-│                                            └──────────┘                     │
-│       │                    │                    │                    │      │
-│       │                    │                    │                    │      │
-│       ▼                    ▼                    ▼                    ▼      │
-│                                                                              │
-│    Manual              Manual            /project-init          /task-create │
-│    or                  or                or                     or          │
-│    /new-project        /new-project      /design-to-project     (auto)      │
+│  ┌──────────────────┐               ┌──────────────────────────────────────┐ │
+│  │ Design doc       │               │ README.md, plan.md, CLAUDE.md        │ │
+│  │    ↓             │               │ tasks/*.poml, TASK-INDEX.md          │ │
+│  │ /design-to-spec  │               │ Feature branch created               │ │
+│  │    ↓             │               │                                      │ │
+│  │ spec.md          │               │ /project-pipeline                    │ │
+│  └──────────────────┘               └──────────────────────────────────────┘ │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 1.2 Two Paths to Start
+### 1.2 The 2-Step Workflow
 
-| Path | When to Use | Commands |
-|------|-------------|----------|
-| **Quick Path** | You have a spec ready | `/project-init` then `/task-create` |
-| **Full Pipeline** | You want guided validation | `/design-to-project` (does both + validation) |
-| **Interactive** | You're starting from scratch | `/new-project` (wizard) |
+| Step | Command | When to Use |
+|------|---------|-------------|
+| **Step 1** | `/design-to-spec {path}` | Transform human design doc → AI-optimized spec.md |
+| **Step 2** | `/project-pipeline {path}` | Full pipeline: spec.md → ready tasks + branch |
+
+**Note**: If you already have a spec.md, skip Step 1 and go directly to Step 2.
 
 ---
 
@@ -72,116 +68,90 @@
 
 ### 2.2 Skills Used in Project Initiation
 
-| Skill | File | Purpose |
+| Skill | Type | Purpose |
 |-------|------|---------|
-| `project-init` | `.claude/skills/project-init/SKILL.md` | Create folder structure and initial artifacts |
-| `task-create` | `.claude/skills/task-create/SKILL.md` | Decompose plan into POML task files |
-| `design-to-project` | `.claude/skills/design-to-project/SKILL.md` | Full 5-phase pipeline (orchestrates both above) |
-| `adr-aware` | `.claude/skills/adr-aware/SKILL.md` | Auto-load relevant ADRs (always-apply) |
-| `spaarke-conventions` | `.claude/skills/spaarke-conventions/SKILL.md` | Apply coding standards (always-apply) |
+| `design-to-spec` | Developer-facing | Transform design docs to spec.md |
+| `project-pipeline` | Developer-facing | Full orchestrator (recommended) |
+| `project-setup` | AI-internal | Generate artifacts (called by pipeline) |
+| `task-create` | AI-internal | Create task files (called by pipeline) |
+| `adr-aware` | Always-apply | Auto-load relevant ADRs |
+| `spaarke-conventions` | Always-apply | Apply coding standards |
 
 ### 2.3 Slash Commands
 
-| Command | Purpose | Invokes Skill |
-|---------|---------|---------------|
-| `/project-status [name]` | Check project status, get recommendations | - |
-| `/new-project` | Interactive wizard for new projects | `project-init` + `task-create` |
-| `/project-init {path}` | Initialize project from spec | `project-init` |
-| `/design-to-project {path}` | Full pipeline with validation | `design-to-project` |
-| `/task-create {path}` | Create task files from plan | `task-create` |
+| Command | Purpose |
+|---------|---------|
+| `/project-status [name]` | Check project status, get recommendations |
+| `/design-to-spec {path}` | Transform design doc to spec.md (Step 1) |
+| `/project-pipeline {path}` | Full pipeline from spec.md to ready tasks (Step 2) |
+| `/repo-cleanup [path]` | Clean up after project completion |
 
 ### 2.4 Templates (Referenced by Skills)
 
 | Template | Location | Used By |
 |----------|----------|---------|
-| Project README | `docs/ai-knowledge/templates/project-README.template.md` | `project-init` |
-| Project Plan | `docs/ai-knowledge/templates/project-plan.template.md` | `project-init` |
+| Project README | `docs/ai-knowledge/templates/project-README.template.md` | `project-setup` |
+| Project Plan | `docs/ai-knowledge/templates/project-plan.template.md` | `project-setup` |
 | Task Execution | `docs/ai-knowledge/templates/task-execution.template.md` | `task-create` |
 
 ---
 
 ## 3. Quick Start
 
-### 3.1 Fastest Path (You Have a Spec)
+### 3.1 If You Have a Design Document
 
 ```bash
-# 1. Create project folder
+# 1. Create project folder and place design doc
 mkdir projects/my-feature
+# Copy design.md, design.docx, or notes to projects/my-feature/
 
-# 2. Add your spec file
-# Place your design specification at: projects/my-feature/spec.md
+# 2. Transform to spec.md
+/design-to-spec projects/my-feature
 
-# 3. Tell Claude to initialize
+# 3. Review spec.md, then run full pipeline
+/project-pipeline projects/my-feature
 ```
 
-Then say to Claude:
-```
-Initialize the project at projects/my-feature
+### 3.2 If You Already Have a spec.md
+
+```bash
+# 1. Create project folder with spec
+mkdir projects/my-feature
+# Place spec.md at projects/my-feature/spec.md
+
+# 2. Run full pipeline
+/project-pipeline projects/my-feature
 ```
 
-Or use the command:
-```
-/project-init projects/my-feature
-```
+### 3.3 Starting From Scratch
 
-Then:
-```
-/task-create projects/my-feature
-```
+If you don't have any documentation yet:
 
-### 3.2 Full Pipeline (With Validation)
+1. Create `projects/my-feature/spec.md` manually with:
+   - Problem statement
+   - Proposed solution
+   - Scope (in/out)
+   - Technical approach
+   - Acceptance criteria
 
-```
-/design-to-project projects/my-feature
-```
-
-This runs all 5 phases:
-1. **Ingest** - Extracts key info from spec
-2. **Context** - Gathers ADRs and existing patterns
-3. **Generate** - Creates README, plan, tasks
-4. **Validate** - Checks everything before proceeding
-5. **Implement** - (Waits for your approval)
-
-### 3.3 Interactive (Starting From Scratch)
-
-```
-/new-project
-```
-
-The wizard will ask:
-1. Project name
-2. Whether you have a spec
-3. Help create a spec if needed
-4. Run initialization automatically
+2. Run `/project-pipeline projects/my-feature`
 
 ---
 
 ## 4. Detailed Process
 
-### Step 1: Create Project Folder
-
-**Location**: `projects/{project-name}/`
-
-**Naming Convention**:
-- Use `kebab-case`
-- Be descriptive (e.g., `mda-darkmode-theme`, `sdap-fileviewer-enhancements`)
-- No abbreviations unless well-known
-
-**Manual**:
-```bash
-mkdir projects/my-awesome-feature
-```
-
-**Or via wizard**:
-```
-/new-project
-```
-
----
-
-### Step 2: Create Design Specification
+### Step 1: Create Design Specification
 
 **Location**: `projects/{project-name}/spec.md`
+
+**Option A: Transform from design doc**
+```
+/design-to-spec projects/my-feature
+```
+
+This reads `design.md` (or similar) and creates an AI-optimized `spec.md`.
+
+**Option B: Write spec.md manually**
 
 **Required Sections**:
 - Problem statement / Background
@@ -218,19 +188,19 @@ How will this be implemented?
 
 ---
 
-### Step 3: Initialize Project
+### Step 2: Run Project Pipeline
 
-**Command**: `/project-init projects/{name}`
-
-**Or trigger phrase**: "initialize project at projects/{name}"
+**Command**: `/project-pipeline projects/{name}`
 
 **What happens**:
-1. AI loads `.claude/skills/project-init/SKILL.md`
-2. Validates spec.md exists
-3. Extracts key information from spec
-4. Creates folder structure
-5. Generates README.md, plan.md, CLAUDE.md
-6. Creates tasks/ and notes/ directories
+1. **Validates** spec.md exists and is well-formed
+2. **Discovers** applicable ADRs, skills, patterns, knowledge docs
+3. **Generates** README.md, plan.md, CLAUDE.md, folder structure
+4. **Creates** 50-200+ task files (POML format) with full context
+5. **Creates** feature branch and initial commit
+6. **Optionally** starts task 001 (you'll be asked)
+
+**Human-in-loop confirmations** after each major step.
 
 **Output**:
 ```
@@ -240,66 +210,36 @@ Created files:
   - README.md (project overview)
   - plan.md (implementation plan)
   - CLAUDE.md (AI context)
-  - tasks/.gitkeep
-  - notes/.gitkeep
+  - tasks/TASK-INDEX.md
+  - tasks/*.poml (N task files)
+
+Branch created: work/my-feature
 
 Next steps:
-  1. Review README.md and plan.md for accuracy
-  2. Run /task-create to decompose plan into tasks
+  1. Review README.md for accuracy
+  2. Check tasks/TASK-INDEX.md for execution order
+  3. Start with task 001
+
+To begin: "work on task 001"
 ```
 
 ---
 
-### Step 4: Create Task Files
-
-**Command**: `/task-create projects/{name}`
-
-**Or trigger phrase**: "create tasks for projects/{name}"
-
-**What happens**:
-1. AI loads `.claude/skills/task-create/SKILL.md`
-2. Reads plan.md WBS (Work Breakdown Structure)
-3. Decomposes into individual tasks
-4. Creates POML files (valid XML) for each task
-5. Creates TASK-INDEX.md with status tracking
-
-**Output**:
-```
-✅ Tasks created for: projects/my-feature/
-
-Task breakdown:
-  Phase 1: 3 tasks (001-003)
-  Phase 2: 4 tasks (010-013)
-  Phase 3: 2 tasks (020-021)
-  Total: 9 tasks
-
-Files created:
-  - tasks/TASK-INDEX.md
-  - tasks/001-setup-infrastructure.poml
-  - tasks/002-create-data-model.poml
-  ...
-
-Execution order recommendation:
-  1. Start with task 001 (no dependencies)
-```
-
----
-
-### Step 5: Begin Implementation
-
-**Check status**:
-```
-/project-status my-feature
-```
+### Step 3: Execute Tasks
 
 **Start first task**:
 ```
-Begin task 001
+work on task 001
 ```
 
-Or read the task file directly:
+Or be more explicit:
 ```
-Read tasks/001-setup-infrastructure.poml and execute it
+/task-execute projects/my-feature/tasks/001-*.poml
+```
+
+**Check progress**:
+```
+/project-status my-feature
 ```
 
 ---
@@ -384,10 +324,9 @@ Each `.poml` file is valid XML:
 |---------|-------------|---------|
 | `/project-status` | List all projects with status | `/project-status` |
 | `/project-status {name}` | Detailed status of one project | `/project-status mda-darkmode` |
-| `/new-project` | Interactive project wizard | `/new-project` |
-| `/project-init {path}` | Initialize from spec | `/project-init projects/my-feature` |
-| `/design-to-project {path}` | Full pipeline | `/design-to-project projects/my-feature` |
-| `/task-create {path}` | Create tasks from plan | `/task-create projects/my-feature` |
+| `/design-to-spec {path}` | Transform design doc to spec.md | `/design-to-spec projects/my-feature` |
+| `/project-pipeline {path}` | Full pipeline (recommended) | `/project-pipeline projects/my-feature` |
+| `/repo-cleanup [path]` | Clean up after completion | `/repo-cleanup projects/my-feature` |
 
 ### 6.2 Quality Commands
 
@@ -404,9 +343,9 @@ These phrases automatically invoke skills:
 
 | Phrase | Invokes |
 |--------|---------|
-| "initialize project", "create project", "start project" | `project-init` |
-| "implement spec", "design to project", "transform spec" | `design-to-project` |
-| "create tasks", "decompose plan", "generate tasks" | `task-create` |
+| "transform spec", "design to spec", "create AI spec" | `design-to-spec` |
+| "run pipeline", "initialize project from spec", "start project" | `project-pipeline` |
+| "work on task", "begin task", "execute task" | `task-execute` |
 | "review code", "code review" | `code-review` |
 | "check ADRs", "validate architecture" | `adr-check` |
 
@@ -419,8 +358,8 @@ These phrases automatically invoke skills:
 | Issue | Cause | Solution |
 |-------|-------|----------|
 | "spec.md not found" | Spec file missing or wrong location | Create `projects/{name}/spec.md` |
-| "Project already initialized" | README.md exists | Review existing files or re-initialize |
-| "plan.md missing WBS" | Plan lacks work breakdown | Add phases and deliverables to plan.md |
+| "Project already initialized" | README.md exists | Review existing files or delete to re-initialize |
+| "plan.md missing WBS" | Plan lacks work breakdown | Ensure plan.md has phases and deliverables |
 | Tasks not created | plan.md has no phases | Ensure plan.md Section 5 has WBS |
 
 ### 7.2 Validation Checklist
@@ -439,9 +378,8 @@ Before starting implementation, verify:
 
 | Scenario | Command |
 |----------|---------|
-| Regenerate README/plan | `/project-init {path}` (will warn about existing) |
-| Regenerate tasks only | Delete `tasks/*.poml`, run `/task-create {path}` |
-| Full reset | Delete all except spec.md, run `/design-to-project {path}` |
+| Regenerate everything | Delete all except spec.md, run `/project-pipeline {path}` |
+| Regenerate tasks only | Delete `tasks/*.poml`, pipeline will detect and regenerate |
 
 ---
 
@@ -454,17 +392,16 @@ Before starting implementation, verify:
 │                                                                 │
 │  CHECK STATUS          /project-status                          │
 │                                                                 │
-│  NEW PROJECT           /new-project                             │
-│  (interactive)                                                  │
+│  FROM DESIGN DOC       1. /design-to-spec projects/{name}       │
+│  (2-step)              2. Review spec.md                        │
+│                        3. /project-pipeline projects/{name}     │
 │                                                                 │
-│  FROM SPEC             1. Create projects/{name}/spec.md        │
-│  (manual)              2. /project-init projects/{name}         │
-│                        3. /task-create projects/{name}          │
+│  FROM SPEC             /project-pipeline projects/{name}        │
+│  (1-step)              (if spec.md already exists)              │
 │                                                                 │
-│  FROM SPEC             /design-to-project projects/{name}       │
-│  (full pipeline)       (does steps 2-3 plus validation)         │
+│  START WORK            "work on task 001"                       │
 │                                                                 │
-│  START WORK            "Begin task 001"                         │
+│  AFTER COMPLETE        /repo-cleanup projects/{name}            │
 │                                                                 │
 │  REVIEW                /code-review                             │
 │                        /adr-check                               │
@@ -477,9 +414,10 @@ Before starting implementation, verify:
 ## Related Documents
 
 - [Skills Index](.claude/skills/INDEX.md) - All available skills
-- [ADR Index](docs/reference/adr/) - Architecture decisions
+- [ADR Index](docs/adr/INDEX.md) - Architecture decisions
 - [Root CLAUDE.md](CLAUDE.md) - Repository-wide AI instructions
 
 ---
 
-*Last updated: December 5, 2025*
+*Last updated: December 24, 2025*
+

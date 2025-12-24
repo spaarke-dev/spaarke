@@ -1,6 +1,7 @@
 # Skills Index
 
 > **Purpose**: Central registry of Claude Code skills for Spaarke development.
+> **Authoritative Playbook**: [SKILL-INTERACTION-GUIDE.md](SKILL-INTERACTION-GUIDE.md) - Complete AI workflow guide with decision trees and invocation patterns
 
 ## Available Skills
 
@@ -10,8 +11,7 @@
 | [adr-check](adr-check/SKILL.md) | Validate code against Architecture Decision Records | No | `/adr-check`, "check ADRs" |
 | [code-review](code-review/SKILL.md) | Comprehensive code review (security, performance, style) | No | `/code-review`, "review code" |
 | [dataverse-deploy](dataverse-deploy/SKILL.md) | Deploy solutions, PCF controls, web resources to Dataverse | No | "deploy to dataverse", "pac pcf push" |
-| [design-to-spec](design-to-spec/SKILL.md) | Transform human design documents into AI-optimized spec.md | No | "design to spec", "transform spec", "create AI spec" |
-| [~~design-to-project~~](design-to-project/SKILL.md) | ~~Full design spec to implementation pipeline~~ **ARCHIVED** - Use project-pipeline | No | ~~Use `/project-pipeline` instead~~ |
+| [design-to-spec](design-to-spec/SKILL.md) | Transform human design documents into AI-optimized spec.md | No | `/design-to-spec`, "design to spec" |
 | [pull-from-github](pull-from-github/SKILL.md) | Pull latest changes from GitHub | No | `/pull-from-github`, "pull from github" |
 | [push-to-github](push-to-github/SKILL.md) | Commit changes and push to GitHub | No | `/push-to-github`, "push to github" |
 | [project-pipeline](project-pipeline/SKILL.md) | **🚀 RECOMMENDED**: Full automated pipeline SPEC.md → ready tasks + branch | No | `/project-pipeline`, "start project" |
@@ -31,11 +31,10 @@
 ### 🚀 Project Lifecycle
 - **design-to-spec** - Component: Transform human design docs into AI-optimized spec.md (Tier 1)
 - **project-pipeline** - **⭐ RECOMMENDED**: Full orchestrator - spec.md → ready tasks + branch (Tier 2)
-- **project-setup** - Component: Generate artifacts only (README, PLAN, CLAUDE.md) (Tier 1)
-- **task-create** - Component: Decompose plan into task files (Tier 1)
+- **project-setup** - Component (AI-internal): Generate artifacts only (Tier 1)
+- **task-create** - Component (AI-internal): Decompose plan into task files (Tier 1)
 - **task-execute** - Orchestrator: Execute individual task with context loading (Tier 2)
 - **repo-cleanup** - Operational: Validate structure and clean up after completion (Tier 3)
-- ~~**design-to-project**~~ - **ARCHIVED** - Use project-pipeline instead
 
 ### ✅ Quality Assurance
 - **code-review** - General code quality review
@@ -212,12 +211,10 @@ alwaysApply: false  # Only true for universal skills like conventions
 │   └── SKILL.md
 ├── design-to-spec/               ← Transform design docs to AI-ready spec.md
 │   └── SKILL.md
-├── design-to-project/            ← ARCHIVED (use project-pipeline)
-│   ├── SKILL.md
-│   └── references/
-├── project-init/
-│   ├── SKILL.md
-│   └── assets/
+├── project-pipeline/             ← RECOMMENDED: Full orchestrator
+│   └── SKILL.md
+├── project-setup/                ← AI-internal: Artifact generation
+│   └── SKILL.md
 ├── repo-cleanup/               ← Repository hygiene
 │   └── SKILL.md
 ├── ribbon-edit/                ← Dataverse ribbon customization
@@ -232,4 +229,4 @@ alwaysApply: false  # Only true for universal skills like conventions
 
 ---
 
-*Last updated: December 19, 2025*
+*Last updated: December 24, 2025*

@@ -15,7 +15,7 @@ Validate code against Architecture Decision Records (ADRs).
 
 ## What This Command Does
 
-This command executes the `adr-check` skill to validate that code complies with the current ADR index in `docs/reference/adr/README-ADRs.md` (currently ADR-001–ADR-020).
+This command executes the `adr-check` skill to validate that code complies with the current ADR index in `docs/adr/INDEX.md` (currently ADR-001–ADR-021).
 
 ## Execution Instructions
 
@@ -30,9 +30,15 @@ This command executes the `adr-check` skill to validate that code complies with 
 
 `.claude/skills/adr-check/SKILL.md`
 
-## ADRs Validated
+## Key ADRs by Domain
 
-All ADRs listed in `docs/reference/adr/README-ADRs.md`.
+| Domain | ADRs |
+|--------|------|
+| **UI/UX** | ADR-006, ADR-011, ADR-012, **ADR-021** (Fluent v9) |
+| **Backend** | ADR-001, ADR-004, ADR-010, ADR-017, ADR-019 |
+| **Security** | ADR-003, ADR-008 |
+| **AI** | ADR-013, ADR-014, ADR-015, ADR-016 |
+| **Dataverse** | ADR-002 |
 
 ## Output Format
 
@@ -45,6 +51,9 @@ ADR Compliance Report
 ❌ ADR-010: DI minimalism - FAIL
    - Found 18 DI registrations (limit: 15)
    - Location: Program.cs:45-80
+❌ ADR-021: Fluent v9 design system - FAIL
+   - Found @fluentui/react (v8) import, should use @fluentui/react-components (v9)
+   - Location: MyControl.tsx:3
 ⚠️ ADR-007: SpeFileStore - WARNING
    - GraphServiceClient exposed in controller constructor
    - Location: DocumentController.cs:12
@@ -54,3 +63,4 @@ ADR Compliance Report
 
 - `adr-aware` - Proactively loads ADRs before creating code
 - `code-review` - Includes ADR checks as part of review
+
