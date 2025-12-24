@@ -146,6 +146,7 @@ projects/{project-name}/
 ├── README.md          # Project overview (generated)
 ├── plan.md            # Implementation plan (generated)
 ├── CLAUDE.md          # AI context file for this project (generated)
+├── current-task.md    # Active task state tracker (generated - for context recovery)
 ├── tasks/             # Task files go here
 │   └── .gitkeep
 └── notes/             # Ephemeral working files
@@ -157,6 +158,8 @@ projects/{project-name}/
 ```
 
 **Notes directory purpose**: Store temporary artifacts during development (debug logs, spike code, drafts, handoff summaries). Contents are ephemeral and may be removed after project completion by repo-cleanup skill.
+
+**current-task.md purpose**: Tracks active task state for context recovery across compaction. See [Context Recovery Protocol](../../../docs/procedures/context-recovery.md).
 
 ### Step 4: Generate README.md
 
@@ -277,6 +280,7 @@ Create project-specific AI context file:
 - [`spec.md`](spec.md) - Original design specification (permanent reference)
 - [`README.md`](README.md) - Project overview and graduation criteria
 - [`plan.md`](plan.md) - Implementation plan and WBS
+- [`current-task.md`](current-task.md) - **Active task state** (for context recovery)
 - [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md) - Task tracker (will be created by task-create)
 
 ### Project Metadata
@@ -291,9 +295,12 @@ Create project-specific AI context file:
 When working on this project, Claude Code should:
 
 1. **Always load this file first** when starting work on any task
-2. **Reference spec.md** for design decisions, requirements, and acceptance criteria
-3. **Load the relevant task file** from `tasks/` based on current work
-4. **Apply ADRs** relevant to the technologies used (loaded automatically via adr-aware)
+2. **Check current-task.md** for active work state (especially after compaction/new session)
+3. **Reference spec.md** for design decisions, requirements, and acceptance criteria
+4. **Load the relevant task file** from `tasks/` based on current work
+5. **Apply ADRs** relevant to the technologies used (loaded automatically via adr-aware)
+
+**Context Recovery**: If resuming work, see [Context Recovery Protocol](../../docs/procedures/context-recovery.md)
 
 ---
 
@@ -340,7 +347,27 @@ When working on this project, Claude Code should:
 *This file should be kept updated throughout project lifecycle*
 ```
 
-### Step 7: Output Summary
+### Step 7: Generate current-task.md
+
+Create initial task state tracker from template:
+
+```
+COPY template: .claude/templates/current-task.template.md
+  → projects/{project-name}/current-task.md
+
+UPDATE placeholders:
+  - Project: {project-name}
+  - Task ID: none
+  - Status: none
+  - All other fields: initial/empty state
+
+PURPOSE:
+  - Enables context recovery after compaction or new sessions
+  - Task-execute skill will update this file during task work
+  - See: docs/procedures/context-recovery.md
+```
+
+### Step 8: Output Summary
 
 ```
 ✅ Project artifacts created: projects/{project-name}/
@@ -349,6 +376,7 @@ Files generated:
   ✅ README.md - Project overview and graduation criteria
   ✅ plan.md - Implementation plan with WBS
   ✅ CLAUDE.md - AI context file
+  ✅ current-task.md - Active task state tracker (context recovery)
   ✅ tasks/.gitkeep - Task folder (empty, ready for task-create)
   ✅ notes/.gitkeep - Notes folder with subdirectories
   ✅ notes/debug/.gitkeep

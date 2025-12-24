@@ -161,6 +161,7 @@ This component skill generates:
   ✅ README.md (project overview, graduation criteria from spec)
   ✅ PLAN.md (implementation plan with WBS from spec)
   ✅ CLAUDE.md (AI context file from spec)
+  ✅ current-task.md (active task state tracker - for context recovery)
   ✅ Folder structure (tasks/, notes/ with subdirectories)
 
 AFTER project-setup completes:
@@ -193,6 +194,7 @@ ENHANCE CLAUDE.md with discovered resources:
    - projects/{project-name}/README.md
    - projects/{project-name}/plan.md
    - projects/{project-name}/CLAUDE.md
+   - projects/{project-name}/current-task.md (context recovery)
    - projects/{project-name}/tasks/ (empty, ready for task files)
    - projects/{project-name}/notes/ (with subdirectories)
 

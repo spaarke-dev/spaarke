@@ -1,6 +1,6 @@
 # CLAUDE.md - Spaarke Repository Instructions
 
-> **Last Updated**: December 19, 2025
+> **Last Updated**: December 24, 2025
 >
 > **Purpose**: This file provides repository-wide context and instructions for Claude Code when working in this codebase.
 
@@ -138,10 +138,28 @@ These skills are **called BY orchestrators** and should NOT be invoked directly 
 | Usage | Action |
 |-------|--------|
 | < 70% | ✅ Proceed normally |
-| > 70% | 🛑 STOP - Create handoff at `notes/handoffs/`, request new session |
-| > 85% | 🚨 EMERGENCY - Immediately create handoff |
+| > 70% | 🛑 STOP - Update `current-task.md`, create handoff, request new session |
+| > 85% | 🚨 EMERGENCY - Immediately update `current-task.md` and stop |
 
 **Commands**: `/context` (check) · `/clear` (wipe) · `/compact` (compress)
+
+### Context Persistence (NEW)
+
+**All work state must be recoverable from files alone.**
+
+| File | Purpose | Updated By |
+|------|---------|------------|
+| `projects/{name}/current-task.md` | Active task state, completed steps, files modified | `task-execute` skill |
+| `projects/{name}/CLAUDE.md` | Project context, decisions, constraints | Manual or skills |
+| `projects/{name}/tasks/TASK-INDEX.md` | Task status overview | `task-execute` skill |
+
+**Recovery Protocol**: After compaction or new session, run [Context Recovery](docs/procedures/context-recovery.md):
+1. Read `current-task.md` to find active task
+2. Load task .poml file
+3. Load knowledge files per task
+4. Resume from documented step
+
+**Quick Recovery**: Say "where was I?" or "continue task" to trigger automatic recovery.
 
 ### Human Escalation Triggers
 
