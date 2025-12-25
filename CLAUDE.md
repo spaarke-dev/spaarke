@@ -219,6 +219,7 @@ When these phrases are detected, **STOP** and load the corresponding skill:
 | "pull from github", "update from remote", "sync with github", "git pull", "get latest" | `pull-from-github` | Load `.claude/skills/pull-from-github/SKILL.md` and follow procedure |
 | "push to github", "create PR", "commit and push", "ready to merge", "submit changes" | `push-to-github` | Load `.claude/skills/push-to-github/SKILL.md` and follow procedure |
 | "update AI procedures", "add new ADR", "propagate changes", "maintain procedures" | `ai-procedure-maintenance` | Load `.claude/skills/ai-procedure-maintenance/SKILL.md` and follow checklists |
+| "create worktree", "setup worktree", "new project worktree", "worktree for project" | `worktree-setup` | Load `.claude/skills/worktree-setup/SKILL.md` and follow procedure |
 
 ### Auto-Detection Rules
 
@@ -261,6 +262,7 @@ Use these commands to explicitly invoke skills:
 | `/pull-from-github` | Pull latest changes from GitHub |
 | `/push-to-github` | Commit changes and push to GitHub |
 | `/ai-procedure-maintenance` | Propagate updates when adding ADRs, patterns, constraints, skills |
+| `/worktree-setup` | Create and manage git worktrees for parallel project development |
 
 ---
 
