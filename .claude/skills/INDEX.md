@@ -23,6 +23,7 @@
 | [task-create](task-create/SKILL.md) | Decompose plan.md into POML task files | No | `/task-create`, "create tasks" |
 | [task-execute](task-execute/SKILL.md) | Execute POML task with mandatory knowledge loading | No | "execute task", "run task", "work on task" |
 | [ribbon-edit](ribbon-edit/SKILL.md) | Edit Dataverse ribbon via solution export/import | No | "edit ribbon", "add ribbon button" |
+| [worktree-setup](worktree-setup/SKILL.md) | Create and manage git worktrees for parallel development | No | `/worktree-setup`, "create worktree", "new project worktree" |
 
 ## Skill Categories
 
@@ -54,6 +55,7 @@
 ### 🔄 Operations
 - **pull-from-github** - Pull latest changes from GitHub
 - **push-to-github** - Commit changes and push to GitHub
+- **worktree-setup** - Create and manage git worktrees for parallel project development
 
 ## Skill Flow
 
@@ -233,9 +235,11 @@ alwaysApply: false  # Only true for universal skills like conventions
 ├── spaarke-conventions/
 │   ├── SKILL.md
 │   └── references/
-└── task-create/
-    ├── SKILL.md
-    └── references/
+├── task-create/
+│   ├── SKILL.md
+│   └── references/
+└── worktree-setup/             ← Git worktree management for parallel development
+    └── SKILL.md
 ```
 
 ---
