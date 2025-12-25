@@ -59,39 +59,60 @@ What is the project name? (use kebab-case, e.g., "email-automation")
 
 Store as: `{project-name}`
 
-#### Step 2: Verify Prerequisites
+#### Step 2: Sync Master (Can Run From Any Location)
+
+**This step ensures master is up-to-date before creating the worktree.**
 
 ```powershell
-# Must run from main spaarke repo
+# Navigate to main spaarke repo
 cd C:\code_files\spaarke
 
-# Check we're in main repo (not already a worktree)
-git rev-parse --git-dir
-# Should return ".git" (not a path to another repo)
+# Fetch latest from origin
+git fetch origin master
 
-# Check current branch
-git branch --show-current
+# Check if master needs updating
+git log master..origin/master --oneline
 ```
 
 **Decision tree:**
 ```
-IF not in C:\code_files\spaarke:
-  → ERROR: "Please run from main spaarke directory"
-  → STOP
+IF commits exist (master is behind):
+  → Update master:
+    git checkout master
+    git pull origin master
+  → CONFIRM: "Master updated to {commit}"
 
-IF git-dir is not ".git":
-  → ERROR: "You're in a worktree, not the main repo. Switch to C:\code_files\spaarke"
-  → STOP
+IF no commits (already up to date):
+  → CONFIRM: "Master is already up to date"
 ```
 
-#### Step 3: Update Master
+**If running from a worktree** (e.g., `spaarke-wt-project-planning-and-documentation`):
+```powershell
+# You can update master without switching to it
+cd C:\code_files\spaarke
+git fetch origin master:master
+```
+This fetches and fast-forwards master without needing to checkout.
+
+#### Step 3: Verify Main Repo
 
 ```powershell
-git checkout master
-git pull origin master
+# Confirm we're in main repo
+cd C:\code_files\spaarke
+git rev-parse --git-dir
+# Should return ".git" (not a path to another repo)
 ```
 
-**Confirm**: "Master is up to date with origin"
+**Decision tree:**
+```
+IF git-dir is not ".git":
+  → ERROR: "You're in a worktree, not the main repo"
+  → STOP
+
+IF directory doesn't exist:
+  → ERROR: "Main repo not found at C:\code_files\spaarke"
+  → STOP
+```
 
 #### Step 4: Check for Existing Worktree/Branch
 
