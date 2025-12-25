@@ -3,7 +3,7 @@
 > **Purpose**: MUST/MUST NOT rules organized by domain for efficient AI loading
 > **Target**: 100-200 lines per domain
 > **Source**: Extracted from ADRs and validated against codebase
-> **Last Updated**: 2025-12-19
+> **Last Updated**: 2025-12-25
 
 ---
 
@@ -25,6 +25,7 @@ This directory contains actionable constraints (rules, requirements, limits) org
 | AI Features | [ai.md](ai.md) | ADR-013 | ~100 |
 | Jobs/Workers | [jobs.md](jobs.md) | ADR-001, 004, 017 | ~100 |
 | Configuration | [config.md](config.md) | ADR-018, 020 | ~115 |
+| Testing | [testing.md](testing.md) | ADR-022 | ~115 |
 
 ---
 
@@ -41,6 +42,7 @@ This directory contains actionable constraints (rules, requirements, limits) org
 | Background jobs | `jobs.md` |
 | AI features | `ai.md` |
 | Configuration/flags | `config.md` |
+| Writing tests | `testing.md` |
 
 This provides focused, actionable rules without loading full ADR context.
 

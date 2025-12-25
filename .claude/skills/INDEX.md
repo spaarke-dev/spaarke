@@ -8,6 +8,8 @@
 | Skill | Description | Always Apply | Trigger |
 |-------|-------------|--------------|---------|
 | [adr-aware](adr-aware/SKILL.md) | Proactively load ADRs when creating resources | **Yes** | Auto-applied |
+| [ai-procedure-maintenance](ai-procedure-maintenance/SKILL.md) | Maintain AI procedures when adding ADRs, patterns, skills | No | "update AI procedures", "add new ADR" |
+| [script-aware](script-aware/SKILL.md) | Discover and reuse scripts from library before writing new code | **Yes** | Auto-applied |
 | [adr-check](adr-check/SKILL.md) | Validate code against Architecture Decision Records | No | `/adr-check`, "check ADRs" |
 | [code-review](code-review/SKILL.md) | Comprehensive code review (security, performance, style) | No | `/code-review`, "review code" |
 | [dataverse-deploy](dataverse-deploy/SKILL.md) | Deploy solutions, PCF controls, web resources to Dataverse | No | "deploy to dataverse", "pac pcf push" |
@@ -26,6 +28,7 @@
 
 ### 📐 Standards (Always-Apply)
 - **adr-aware** - Proactive ADR loading based on resource type
+- **script-aware** - Script library discovery and reuse before writing new automation
 - **spaarke-conventions** - Naming, patterns, file organization
 
 ### 🚀 Project Lifecycle
@@ -40,6 +43,9 @@
 - **code-review** - General code quality review
 - **adr-check** - Architecture compliance validation (post-hoc)
 - **repo-cleanup** - Repository structure validation and hygiene
+
+### 🔧 Maintenance
+- **ai-procedure-maintenance** - Propagate updates when adding ADRs, constraints, patterns, skills
 
 ### ⚙️ Dataverse/Platform
 - **dataverse-deploy** - Deploy solutions, PCF controls, web resources via PAC CLI
@@ -100,6 +106,7 @@ AI-Optimized Spec (spec.md)
         └──────────────────┘
             │
             ├─→ adr-aware (Tier 0 - implicit)
+            ├─→ script-aware (Tier 0 - implicit)
             ├─→ spaarke-conventions (Tier 0 - implicit)
             ├─→ Execute task steps
             ├─→ code-review (Tier 3 - quality gate)
@@ -118,7 +125,7 @@ AI-Optimized Spec (spec.md)
 ```
 
 **Skill Tiers**:
-- **Tier 0**: Always-Apply (adr-aware, spaarke-conventions)
+- **Tier 0**: Always-Apply (adr-aware, script-aware, spaarke-conventions)
 - **Tier 1**: Components (design-to-spec, project-setup, task-create)
 - **Tier 2**: Orchestrators (project-pipeline, task-execute)
 - **Tier 3**: Operational (code-review, adr-check, dataverse-deploy, etc.)
@@ -199,6 +206,8 @@ alwaysApply: false  # Only true for universal skills like conventions
 │       └── assets/
 ├── adr-aware/                  ← Proactive ADR loading
 │   └── SKILL.md
+├── ai-procedure-maintenance/   ← Maintain AI procedures when adding new elements
+│   └── SKILL.md
 ├── adr-check/
 │   ├── SKILL.md
 │   └── references/
@@ -219,6 +228,8 @@ alwaysApply: false  # Only true for universal skills like conventions
 │   └── SKILL.md
 ├── ribbon-edit/                ← Dataverse ribbon customization
 │   └── SKILL.md
+├── script-aware/               ← Script library discovery and reuse
+│   └── SKILL.md
 ├── spaarke-conventions/
 │   ├── SKILL.md
 │   └── references/
@@ -229,4 +240,4 @@ alwaysApply: false  # Only true for universal skills like conventions
 
 ---
 
-*Last updated: December 24, 2025*
+*Last updated: December 25, 2025*

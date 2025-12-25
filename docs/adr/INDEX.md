@@ -2,7 +2,7 @@
 
 > **Purpose**: Documents architectural decisions for the Spaarke platform
 > **Audience**: Developers, architects, AI coding agents
-> **Last Updated**: 2025-12-22
+> **Last Updated**: 2025-12-25
 
 ## About ADRs
 

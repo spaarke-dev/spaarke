@@ -116,24 +116,68 @@ FOR each file in <knowledge><files>:
 FOR each pattern in <knowledge><patterns>:
   READ the referenced file
   UNDERSTAND the pattern to follow
+```
 
-COMMON KNOWLEDGE FILES BY TAG:
+#### 4a. Load Constraints by Tag (MANDATORY)
+
+**Based on task tags, load the appropriate constraint files:**
+
+| Task Tags | Load Constraints File |
+|-----------|----------------------|
+| `bff-api`, `api`, `minimal-api`, `endpoints` | `.claude/constraints/api.md` |
+| `pcf`, `react`, `fluent-ui`, `frontend` | `.claude/constraints/pcf.md` |
+| `dataverse`, `plugin`, `solution` | `.claude/constraints/plugins.md` |
+| `auth`, `oauth`, `authorization` | `.claude/constraints/auth.md` |
+| `cache`, `redis`, `data` | `.claude/constraints/data.md` |
+| `ai`, `azure-openai`, `document-intelligence` | `.claude/constraints/ai.md` |
+| `worker`, `job`, `background` | `.claude/constraints/jobs.md` |
+| `testing`, `unit-test`, `integration-test` | `.claude/constraints/testing.md` |
+| `config`, `feature-flag` | `.claude/constraints/config.md` |
+
+#### 4b. Load Patterns by Tag (RECOMMENDED)
+
+**Based on task tags, load relevant pattern files:**
+
+| Task Tags | Load Pattern Files |
+|-----------|-------------------|
+| `bff-api`, `api` | `.claude/patterns/api/endpoint-definition.md`, `.claude/patterns/api/endpoint-filters.md` |
+| `pcf`, `react` | `.claude/patterns/pcf/control-initialization.md`, `.claude/patterns/pcf/theme-management.md` |
+| `auth`, `oauth` | `.claude/patterns/auth/obo-flow.md`, `.claude/patterns/auth/oauth-scopes.md` |
+| `dataverse`, `plugin` | `.claude/patterns/dataverse/plugin-structure.md` |
+| `cache` | `.claude/patterns/caching/distributed-cache.md` |
+| `testing` | `.claude/patterns/testing/unit-test-structure.md`, `.claude/patterns/testing/mocking-patterns.md` |
+
+#### 4c. Common Knowledge Files by Tag
+
+```
+ADDITIONAL MODULE-SPECIFIC FILES:
   - pcf tags → READ src/client/pcf/CLAUDE.md
-  - pcf tags → READ docs/ai-knowledge/guides/PCF-V9-PACKAGING.md
+  - pcf tags → READ docs/guides/PCF-V9-PACKAGING.md
   - bff-api tags → READ src/server/api/CLAUDE.md (if exists)
   - dataverse tags → READ .claude/skills/dataverse-deploy/SKILL.md
   - deploy tags → READ .claude/skills/dataverse-deploy/SKILL.md
 
 UPDATE current-task.md:
   - Add "Knowledge Files Loaded" section with paths
+  - Add "Constraints Loaded" section with constraint file names
+  - Add "Patterns Loaded" section with pattern file names
 ```
 
-### Step 5: Load ADR Constraints
+### Step 5: Load ADR Constraints (Two-Tier)
 
 ```
 FOR each <constraint source="ADR-XXX">:
-  READ docs/adr/ADR-XXX-*.md
-  NOTE specific requirements that apply
+
+  TIER 1 (Default - Concise):
+    READ .claude/adr/ADR-XXX-*.md
+    - These are 100-150 line AI-optimized versions
+    - Contain MUST/MUST NOT rules
+    - Sufficient for most implementation tasks
+
+  TIER 2 (If Needed - Full Context):
+    IF constraint is unclear or need historical rationale:
+      READ docs/adr/ADR-XXX-*.md
+      - Full version with history, alternatives considered, consequences
 
 UPDATE current-task.md:
   - Add "Applicable ADRs" section with ADR numbers and relevance
@@ -144,6 +188,29 @@ UPDATE current-task.md:
 ```
 LOAD .claude/skills/adr-aware/SKILL.md
 LOAD .claude/skills/spaarke-conventions/SKILL.md
+LOAD .claude/skills/script-aware/SKILL.md
+```
+
+### Step 6.5: Load Script Context (for deployment/testing tasks)
+
+```
+IF task tags include: deploy, test, validate, automation, setup
+  OR task steps mention: deployment, testing, validation, health check
+
+THEN:
+  READ scripts/README.md
+  IDENTIFY relevant scripts for this task
+  NOTE scripts to use instead of writing new automation
+
+COMMON SCRIPT MATCHES:
+  - PCF deployment → Deploy-PCFWebResources.ps1
+  - API testing → Test-SdapBffApi.ps1
+  - Health checks → test-sdap-api-health.js
+  - Custom page deploy → Deploy-CustomPage.ps1
+  - Ribbon export → Export-EntityRibbon.ps1
+
+UPDATE current-task.md:
+  - Add "Available Scripts" section with matched scripts
 ```
 
 ### Step 7: Review Relevant CLAUDE.md Files
@@ -209,6 +276,33 @@ UPDATE task file <metadata><status> to "completed"
 ADD <notes> section with completion summary
 
 UPDATE TASK-INDEX.md with ✅ completed status
+```
+
+### Step 10.5: Script Library Maintenance
+
+```
+AFTER task completion, EVALUATE script library updates:
+
+IF task USED existing scripts:
+  VERIFY scripts still work as expected
+  IF script needed modifications:
+    UPDATE script file
+    UPDATE scripts/README.md (Last Used, any behavior changes)
+
+IF task CREATED reusable automation (commands used 3+ times):
+  EVALUATE: Should this become a script?
+
+  IF yes (repeatable, complex, multi-step):
+    1. CREATE new script following naming convention
+    2. ADD inline documentation (synopsis, parameters, examples)
+    3. ADD entry to scripts/README.md with:
+       - Purpose, Usage frequency, Lifecycle status
+       - Dependencies, When to use, Command example
+    4. Place in: scripts/ (general) or projects/{name}/scripts/ (project-specific)
+
+IF task DEPRECATED script functionality:
+  UPDATE scripts/README.md to mark as ⚠️ Deprecated
+  NOTE replacement approach
 ```
 
 ### Step 11: Transition to Next Task
@@ -438,6 +532,7 @@ When task has `deploy` tag:
 
 - **task-create**: Creates the task files this skill executes
 - **adr-aware**: Proactive ADR loading (always-apply)
+- **script-aware**: Script library discovery and maintenance (always-apply)
 - **dataverse-deploy**: Deployment operations
 - **code-review**: Post-implementation review
 - **project-pipeline**: Initializes current-task.md for projects
