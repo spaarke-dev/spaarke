@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="ai-document-intelligence-r1">
+  <metadata>
+    <title>Create Security Roles</title>
+    <phase>Phase 1B: Entity Creation (Conditional)</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>010-019</dependencies>
+    <blocks>021</blocks>
+    <tags>dataverse, security</tags>
+    <condition>Execute only if any entities were created in Tasks 010-019</condition>
+  </metadata>
+
+  <prompt>
+    Create security roles for the Analysis feature: Analysis User and Analysis Admin.
+
+    - Analysis User: Read/Write on analysis entities for own records
+    - Analysis Admin: Full access to all analysis entities including configuration
+
+    CONDITIONAL: Only execute if any Phase 1B entity tasks (010-019) executed.
+  </prompt>
+
+  <role>
+    Power Platform administrator with Dataverse security expertise.
+  </role>
+
+  <goal>
+    Two security roles configured with appropriate privileges for the Analysis feature entities.
+  </goal>
+
+  <context>
+    <background>
+      Security roles control who can access and modify analysis data. Users need access to create and manage their own analyses. Admins need access to manage configuration entities (actions, skills, knowledge, tools).
+    </background>
+    <dependencies>
+      <dependency task="010-019" status="conditional">Entity creation tasks</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use business unit scope for user role</constraint>
+    <constraint source="project">Use organization scope for admin role</constraint>
+    <constraint source="ADR-003">Follow lean authorization principles</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r1/spec.md</file>
+      <file>docs/adr/ADR-003-lean-authorization.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify at least one entity was created in Phase 1B</step>
+    <step order="2">Create "Analysis User" security role</step>
+    <step order="3">Configure User role: Create/Read/Write/Delete own records on analysis entities</step>
+    <step order="4">Create "Analysis Admin" security role</step>
+    <step order="5">Configure Admin role: Full privileges on all analysis entities</step>
+    <step order="6">Add roles to solution</step>
+    <step order="7">Document role permissions in notes/security-roles.md</step>
+    <step order="8">Update TASK-INDEX.md</step>
+  </steps>
+
+  <tools>
+    <tool name="power-platform-maker">Create and configure security roles</tool>
+  </tools>
+
+  <outputs>
+    <output type="security-role">Analysis User</output>
+    <output type="security-role">Analysis Admin</output>
+    <output type="docs">projects/ai-document-intelligence-r1/notes/security-roles.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Analysis User role created with correct privileges</criterion>
+    <criterion testable="true">Analysis Admin role created with correct privileges</criterion>
+    <criterion testable="true">Roles added to solution</criterion>
+    <criterion testable="true">Permission documentation created</criterion>
+  </acceptance-criteria>
+</task>

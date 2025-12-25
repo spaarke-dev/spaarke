@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="ai-document-intelligence-r1">
+  <metadata>
+    <title>Export Solution Package</title>
+    <phase>Phase 1B: Entity Creation (Conditional)</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>031</blocks>
+    <tags>dataverse, solution, deployment</tags>
+    <condition>Execute only if any entities or roles were created in Phase 1B</condition>
+  </metadata>
+
+  <prompt>
+    Export the Dataverse solution package containing all Analysis feature entities, environment variables, and security roles.
+
+    Export both managed and unmanaged solution packages.
+
+    CONDITIONAL: Only execute if any Phase 1B tasks (010-020) executed.
+  </prompt>
+
+  <role>
+    Power Platform developer with solution management expertise.
+  </role>
+
+  <goal>
+    Exported solution packages (managed and unmanaged) committed to repository.
+  </goal>
+
+  <context>
+    <background>
+      The solution package enables deployment to other environments (test, production, customer tenants). Both managed and unmanaged exports are needed.
+    </background>
+    <dependencies>
+      <dependency task="020" status="conditional">Security roles created</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Solution name: Spaarke_DocumentIntelligence</constraint>
+    <constraint source="project">Export to infrastructure/dataverse/solutions/</constraint>
+    <constraint source="project">Version format: 1.0.0.{build}</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r1/spec.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify Phase 1B work was done (entities/roles created)</step>
+    <step order="2">Verify all components are in solution</step>
+    <step order="3">Increment solution version</step>
+    <step order="4">Export as unmanaged: pac solution export --name Spaarke_DocumentIntelligence --path ./unmanaged.zip</step>
+    <step order="5">Export as managed: pac solution export --name Spaarke_DocumentIntelligence --managed --path ./managed.zip</step>
+    <step order="6">Move exports to infrastructure/dataverse/solutions/</step>
+    <step order="7">Commit solution packages to repository</step>
+    <step order="8">Update TASK-INDEX.md</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI for solution export</tool>
+    <tool name="git">Commit solution to repository</tool>
+  </tools>
+
+  <outputs>
+    <output type="solution">infrastructure/dataverse/solutions/Spaarke_DocumentIntelligence_unmanaged.zip</output>
+    <output type="solution">infrastructure/dataverse/solutions/Spaarke_DocumentIntelligence_managed.zip</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Unmanaged solution exported</criterion>
+    <criterion testable="true">Managed solution exported</criterion>
+    <criterion testable="true">Solutions committed to repository</criterion>
+    <criterion testable="true">Solutions can be imported to clean environment</criterion>
+  </acceptance-criteria>
+</task>

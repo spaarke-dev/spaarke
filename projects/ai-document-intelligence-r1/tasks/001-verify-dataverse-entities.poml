@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="ai-document-intelligence-r1">
+  <metadata>
+    <title>Verify Dataverse Entities Exist</title>
+    <phase>Phase 1A: Verification</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>005, 010-021</blocks>
+    <tags>dataverse, verification</tags>
+  </metadata>
+
+  <prompt>
+    Verify whether the 10 Dataverse entities required for the AI Analysis feature already exist in the development environment. This is a VERIFICATION task - do not create anything, only check existence and document findings.
+
+    The entities to verify:
+    1. sprk_analysis
+    2. sprk_analysisaction
+    3. sprk_analysisskill
+    4. sprk_analysisknowledge
+    5. sprk_knowledgedeployment
+    6. sprk_analysistool
+    7. sprk_analysisplaybook
+    8. sprk_analysisworkingversion
+    9. sprk_analysisemailmetadata
+    10. sprk_analysischatmessage
+
+    Document which entities exist and which are missing. This determines whether Phase 1B tasks need to execute.
+  </prompt>
+
+  <role>
+    Power Platform administrator with PAC CLI expertise and Dataverse solution management experience.
+  </role>
+
+  <goal>
+    A verification report documenting the existence status of all 10 entities, with specific details about any that exist (columns, relationships) and a clear list of any that are missing.
+  </goal>
+
+  <context>
+    <background>
+      R1 is a verification-first release. The BFF API code already exists and references these entities. We need to confirm the entities exist in Dataverse before proceeding with integration testing.
+    </background>
+    <dependencies>
+      <dependency task="none" status="n/a">This is the first task</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Do NOT create any entities - this is verification only</constraint>
+    <constraint source="project">Use PAC CLI for verification (pac solution list, pac org who)</constraint>
+    <constraint source="project">Target environment: spaarkedev1.crm.dynamics.com</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r1/spec.md</file>
+      <file>projects/ai-document-intelligence-r1/CODE-INVENTORY.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Connect to Dataverse dev environment using PAC CLI: pac auth create --url https://spaarkedev1.crm.dynamics.com</step>
+    <step order="2">List available solutions: pac solution list</step>
+    <step order="3">Check for each entity using PAC CLI or Web API query</step>
+    <step order="4">For entities that exist, document: columns, relationships, solution membership</step>
+    <step order="5">Create verification report in projects/ai-document-intelligence-r1/notes/verification/entities-verification.md</step>
+    <step order="6">Update TASK-INDEX.md with results and next steps</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI for solution and entity operations</tool>
+    <tool name="bash">Execute PAC commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">projects/ai-document-intelligence-r1/notes/verification/entities-verification.md</output>
+    <output type="docs">tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 10 entities checked for existence</criterion>
+    <criterion testable="true">Verification report created with entity status table</criterion>
+    <criterion testable="true">Missing entities clearly listed for Phase 1B</criterion>
+    <criterion testable="true">TASK-INDEX.md updated with verification results</criterion>
+  </acceptance-criteria>
+</task>

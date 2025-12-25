@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="017" project="ai-document-intelligence-r1">
+  <metadata>
+    <title>Create sprk_analysisworkingversion Entity</title>
+    <phase>Phase 1B: Entity Creation (Conditional)</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>005</dependencies>
+    <blocks>020, 021</blocks>
+    <tags>dataverse, entity-creation</tags>
+    <condition>Execute only if Task 005 indicates entity is missing</condition>
+  </metadata>
+
+  <prompt>
+    Create the sprk_analysisworkingversion entity in Dataverse. Working versions store snapshots of the analysis document during editing.
+
+    CONDITIONAL: Only execute if verification (Task 005) shows this entity is missing.
+  </prompt>
+
+  <role>
+    Power Platform developer with Dataverse entity modeling expertise.
+  </role>
+
+  <goal>
+    A fully configured sprk_analysisworkingversion entity for document versioning.
+  </goal>
+
+  <context>
+    <background>
+      Working versions allow users to iterate on the analysis document. Versions are stored in SharePoint Embedded via the BFF API.
+    </background>
+    <dependencies>
+      <dependency task="005" status="required">Verification must confirm entity is missing</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use "sprk_" prefix for schema name</constraint>
+    <constraint source="ADR-007">Document content stored in SPE, not Dataverse</constraint>
+    <constraint source="project">Include: version number, SPE file reference, timestamp</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r1/spec.md</file>
+      <file>docs/adr/ADR-007-spefilestore-facade.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify Task 005 indicates entity is missing</step>
+    <step order="2">Create entity with version tracking columns</step>
+    <step order="3">Create relationship to sprk_analysis</step>
+    <step order="4">Create main form and version list view</step>
+    <step order="5">Add to solution</step>
+    <step order="6">Update TASK-INDEX.md</step>
+  </steps>
+
+  <tools>
+    <tool name="power-platform-maker">Create Dataverse entities</tool>
+  </tools>
+
+  <outputs>
+    <output type="entity">sprk_analysisworkingversion entity in Dataverse</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Entity created with correct schema name</criterion>
+    <criterion testable="true">Relationship to analysis entity configured</criterion>
+    <criterion testable="true">SPE file reference column present</criterion>
+  </acceptance-criteria>
+</task>

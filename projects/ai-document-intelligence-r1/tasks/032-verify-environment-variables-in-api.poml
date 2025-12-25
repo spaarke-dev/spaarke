@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="ai-document-intelligence-r1">
+  <metadata>
+    <title>Verify Environment Variables Resolve in Deployed API</title>
+    <phase>Phase 1C: Deployment Testing</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>033</blocks>
+    <tags>bff-api, config, deploy, verification</tags>
+  </metadata>
+
+  <prompt>
+    Verify that environment variables configured in Azure App Service are correctly resolved by the deployed BFF API. This ensures the configuration pattern works for customer deployments.
+
+    Check that:
+    - API reads configuration from Azure App Settings
+    - Secrets are properly retrieved from Key Vault
+    - AI service connections work with resolved URLs
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Follow ADRs strictly. Expert in .NET configuration, Azure App Service, and Key Vault integration.
+  </role>
+
+  <goal>
+    Confirmation that all environment variables resolve correctly in the deployed API with documented evidence.
+  </goal>
+
+  <context>
+    <background>
+      The BFF API uses environment variables for all tenant-specific configuration. This task validates the configuration pattern works in a deployed environment.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.json</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">API uses Minimal API pattern</constraint>
+    <constraint source="project">Do not expose secret values in logs or reports</constraint>
+    <constraint source="project">Verify against deployed API, not local</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r1/spec.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review API configuration pattern in appsettings.json</step>
+    <step order="2">Check Azure App Service configuration settings</step>
+    <step order="3">Verify Key Vault references are configured</step>
+    <step order="4">Call API health endpoint to confirm startup</step>
+    <step order="5">Test an endpoint that uses AI services (if auth available)</step>
+    <step order="6">Check Application Insights for any configuration errors</step>
+    <step order="7">Document results in notes/verification/env-vars-api-verification.md</step>
+    <step order="8">Update TASK-INDEX.md status</step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI for App Service inspection</tool>
+    <tool name="curl">HTTP requests to API</tool>
+    <tool name="bash">Execute commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-document-intelligence-r1/notes/verification/env-vars-api-verification.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">API starts successfully with all configuration resolved</criterion>
+    <criterion testable="true">Key Vault secrets accessible to API</criterion>
+    <criterion testable="true">AI service connections work with configured URLs</criterion>
+    <criterion testable="true">No configuration errors in Application Insights</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>

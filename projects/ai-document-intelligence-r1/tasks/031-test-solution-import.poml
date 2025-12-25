@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="ai-document-intelligence-r1">
+  <metadata>
+    <title>Test Dataverse Solution Import to Clean Environment</title>
+    <phase>Phase 1C: Deployment Testing</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>021</dependencies>
+    <blocks>033</blocks>
+    <tags>deploy, dataverse, solution</tags>
+  </metadata>
+
+  <prompt>
+    Test importing the Dataverse solution package to a clean environment. This validates that the solution exports correctly and can be deployed to customer tenants.
+
+    Use a test Dataverse environment that is separate from development.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Follow ADRs strictly. Expert in Power Platform solutions and Dataverse deployments.
+  </role>
+
+  <goal>
+    Successful solution import to test environment with all entities, security roles, and environment variables functional.
+  </goal>
+
+  <context>
+    <background>
+      The solution package created in Task 021 needs validation in a clean environment to ensure it will work for customer deployments.
+    </background>
+    <relevant-files>
+      <file>infrastructure/dataverse/solutions/Spaarke_DocumentIntelligence_managed.zip</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Import managed solution for testing</constraint>
+    <constraint source="project">Do not import to production environment</constraint>
+    <constraint source="project">Document any import warnings or errors</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r1/spec.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify solution export exists from Task 021</step>
+    <step order="2">Connect to test Dataverse environment: pac auth create --url https://[test-env].crm.dynamics.com</step>
+    <step order="3">Import solution: pac solution import --path ./Spaarke_DocumentIntelligence_managed.zip</step>
+    <step order="4">Verify entities exist in test environment</step>
+    <step order="5">Verify security roles imported correctly</step>
+    <step order="6">Verify environment variables imported (may need values configured)</step>
+    <step order="7">Document import results in notes/deployment/solution-import-results.md</step>
+    <step order="8">Update TASK-INDEX.md status</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI for solution import</tool>
+    <tool name="bash">Execute commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="solution">Solution imported to test environment</output>
+    <output type="docs">projects/ai-document-intelligence-r1/notes/deployment/solution-import-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Solution imports without blocking errors</criterion>
+    <criterion testable="true">All entities available in test environment</criterion>
+    <criterion testable="true">Security roles imported and assignable</criterion>
+    <criterion testable="true">Import documented with any warnings noted</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="ai-document-intelligence-r1">
+  <metadata>
+    <title>Run Integration Tests Against Dev Environment</title>
+    <phase>Phase 1C: Deployment Testing</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>004, 030, 031, 032</dependencies>
+    <blocks>034</blocks>
+    <tags>testing, integration-test, bff-api</tags>
+  </metadata>
+
+  <prompt>
+    Run integration tests against the deployed development environment. This validates the complete stack works together:
+    - BFF API endpoints
+    - Dataverse entity operations
+    - AI service integrations
+    - SSE streaming
+
+    Document test results and any failures.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Follow ADRs strictly. Expert in .NET testing, integration testing, and API testing.
+  </role>
+
+  <goal>
+    Complete integration test run with all tests passing or failures documented with root cause analysis.
+  </goal>
+
+  <context>
+    <background>
+      Integration tests validate the complete system works together. They should run against a deployed environment, not mocked services.
+    </background>
+    <relevant-files>
+      <file>tests/integration/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Run against dev environment, not production</constraint>
+    <constraint source="project">Document all test failures with details</constraint>
+    <constraint source="ADR-001">Tests should validate Minimal API patterns</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r1/spec.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>tests/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Integration Test Pattern" location=".claude/patterns/testing/integration-test-structure.md">
+        Follow established integration test patterns
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing integration tests in tests/integration/</step>
+    <step order="2">Configure test settings for dev environment</step>
+    <step order="3">Run integration tests: dotnet test tests/integration/</step>
+    <step order="4">Capture test results and any failures</step>
+    <step order="5">For failures, investigate root cause</step>
+    <step order="6">Document results in notes/testing/integration-test-results.md</step>
+    <step order="7">If tests fail due to missing features, create follow-up tasks</step>
+    <step order="8">Update TASK-INDEX.md status</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Run .NET integration tests</tool>
+    <tool name="bash">Execute commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="test-results">Integration test results</output>
+    <output type="docs">projects/ai-document-intelligence-r1/notes/testing/integration-test-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All integration tests run successfully</criterion>
+    <criterion testable="true">Test results documented with pass/fail counts</criterion>
+    <criterion testable="true">Any failures have root cause analysis</criterion>
+    <criterion testable="true">Follow-up tasks created for blocking issues</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>
