@@ -79,14 +79,17 @@ FOR each WBS phase:
 
 When a task has these tags, ALWAYS include these knowledge files:
 
-| Tag | Required Knowledge Files |
-|-----|-------------------------|
-| `pcf`, `react`, `fluent-ui`, `frontend` | `src/client/pcf/CLAUDE.md`, `docs/ai-knowledge/guides/PCF-V9-PACKAGING.md`, `.claude/skills/dataverse-deploy/SKILL.md` |
-| `bff-api`, `api`, `minimal-api`, `endpoints` | `src/server/api/CLAUDE.md` (if exists), `docs/reference/adr/ADR-001-minimal-api-endpoints.md` |
-| `dataverse`, `solution`, `fields` | `.claude/skills/dataverse-deploy/SKILL.md`, `infrastructure/dataverse/CLAUDE.md` (if exists) |
-| `deploy` | `.claude/skills/dataverse-deploy/SKILL.md`, `docs/ai-knowledge/guides/PCF-V9-PACKAGING.md` |
-| `azure`, `azure-search`, `azure-openai` | `docs/reference/adr/ADR-013-ai-architecture.md` |
-| `testing`, `unit-test`, `integration-test` | `tests/CLAUDE.md` |
+| Tag | Constraints | Patterns | Additional Files |
+|-----|-------------|----------|------------------|
+| `pcf`, `react`, `fluent-ui`, `frontend` | `.claude/constraints/pcf.md` | `.claude/patterns/pcf/control-initialization.md`, `.claude/patterns/pcf/theme-management.md` | `src/client/pcf/CLAUDE.md`, `docs/guides/PCF-V9-PACKAGING.md` |
+| `bff-api`, `api`, `minimal-api`, `endpoints` | `.claude/constraints/api.md` | `.claude/patterns/api/endpoint-definition.md`, `.claude/patterns/api/endpoint-filters.md` | `src/server/api/CLAUDE.md` (if exists) |
+| `dataverse`, `solution`, `fields`, `plugin` | `.claude/constraints/plugins.md` | `.claude/patterns/dataverse/plugin-structure.md` | `.claude/skills/dataverse-deploy/SKILL.md` |
+| `auth`, `oauth`, `authorization` | `.claude/constraints/auth.md` | `.claude/patterns/auth/obo-flow.md`, `.claude/patterns/auth/oauth-scopes.md` | — |
+| `cache`, `redis`, `caching` | `.claude/constraints/data.md` | `.claude/patterns/caching/distributed-cache.md` | — |
+| `ai`, `azure-openai`, `document-intelligence` | `.claude/constraints/ai.md` | `.claude/patterns/ai/streaming-endpoints.md` | — |
+| `deploy` | — | — | `.claude/skills/dataverse-deploy/SKILL.md`, `docs/guides/PCF-V9-PACKAGING.md` |
+| `testing`, `unit-test`, `integration-test` | `.claude/constraints/testing.md` | `.claude/patterns/testing/unit-test-structure.md`, `.claude/patterns/testing/mocking-patterns.md` | — |
+| `worker`, `job`, `background` | `.claude/constraints/jobs.md` | — | — |
 
 **Critical: PCF tasks MUST reference PCF-V9-PACKAGING.md**
 
@@ -100,8 +103,10 @@ FOR each task:
   EXTRACT tags from <metadata><tags>
   FOR each tag:
     LOOKUP in Tag-to-Knowledge Mapping
-    ADD all matching files to <knowledge><files>
-  
+    ADD matching constraint file to <knowledge><files>
+    ADD matching pattern files to <knowledge><files>
+    ADD matching additional files to <knowledge><files>
+
   ENSURE <knowledge> section is NOT empty
   IF no matches found:
     ADD at minimum: relevant CLAUDE.md for the module being modified
@@ -117,13 +122,17 @@ FOR each task identified:
     - Caching → ADR-009
     - Dataverse Plugin → ADR-002
     - Graph/SPE Integration → ADR-007
-    - PCF Control → ADR-006, ADR-011, ADR-012
+    - PCF Control → ADR-006, ADR-011, ADR-012, ADR-021
     - Background Worker → ADR-001, ADR-004
     - DI Registration → ADR-010
-  
+    - AI Features → ADR-013, ADR-014, ADR-015, ADR-016
+    - Testing → ADR-022
+
   ADD to task:
     - <constraints> with source="ADR-XXX" for each applicable ADR
-    - <knowledge><files> including relevant ADR paths
+    - <knowledge><files> include CONCISE ADR paths:
+      - Use .claude/adr/ADR-XXX-*.md (100-150 lines, AI-optimized)
+      - NOT docs/adr/ADR-XXX-*.md (full version, load only if needed)
 
 REFERENCE: See adr-aware skill for full mapping table
 ```

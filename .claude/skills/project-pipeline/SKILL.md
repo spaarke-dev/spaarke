@@ -138,11 +138,21 @@ DISCOVER RESOURCES (Comprehensive):
      - Identify canonical implementations to follow
      - Example: Existing PCF controls for reference
 
+  6. DISCOVER applicable scripts (via script-aware)
+     - READ scripts/README.md for script registry
+     - Match spec keywords to script purposes:
+       - PCF deployment → Deploy-PCFWebResources.ps1
+       - API testing → Test-SdapBffApi.ps1
+       - Custom pages → Deploy-CustomPage.ps1
+       - Ribbon work → Export-EntityRibbon.ps1
+     - Note scripts for inclusion in task files
+
 OUTPUT: Comprehensive resource discovery summary
   - X ADRs loaded (with full content)
   - Y skills applicable (with file paths)
   - Z knowledge docs found (guides + patterns)
   - N code examples identified
+  - M scripts available (for deployment/testing steps)
 
 ⚠️ **DIFFERENCE from design-to-spec Step 3**:
 - design-to-spec: Preliminary (ADR constraints only for spec enrichment)
@@ -183,6 +193,7 @@ ENHANCE CLAUDE.md with discovered resources:
    - 4 ADRs identified (ADR-001, ADR-007, ADR-008, ADR-010)
    - 2 skills applicable (dataverse-deploy, adr-aware)
    - 3 knowledge docs found (SPAARKE-ARCHITECTURE.md, ...)
+   - 2 scripts available (Deploy-PCFWebResources.ps1, Test-SdapBffApi.ps1)
 
 ✅ Artifacts generated:
    - README.md (project overview, graduation criteria)

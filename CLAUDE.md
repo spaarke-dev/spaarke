@@ -1,6 +1,6 @@
 # CLAUDE.md - Spaarke Repository Instructions
 
-> **Last Updated**: December 24, 2025
+> **Last Updated**: December 25, 2025
 >
 > **Purpose**: This file provides repository-wide context and instructions for Claude Code when working in this codebase.
 
@@ -121,6 +121,7 @@ These skills are **called BY orchestrators** and should NOT be invoked directly 
 | `project-setup` | Generate artifacts only (README, PLAN, CLAUDE.md) | `project-pipeline` (Step 2) |
 | `task-create` | Decompose plan.md into task files | `project-pipeline` (Step 3) |
 | `adr-aware` | Load applicable ADRs based on resource types | Multiple skills (auto) |
+| `script-aware` | Discover and reuse scripts from library | Multiple skills (auto) |
 
 **Exception**: `task-execute` is also a skill, but it **IS developer-facing** for daily task work:
 - Used in Step 3 above: `work on task 001` invokes `task-execute`
@@ -187,7 +188,7 @@ After completing any task:
 
 **Important**: `current-task.md` tracks only the **active task**, not history. Task history is preserved in TASK-INDEX.md and individual .poml files.
 
-**Full protocols**: `docs/reference/protocols/` (AIP-001, AIP-002, AIP-003)
+**Full protocols**: `.claude/protocols/` (AIP-001, AIP-002, AIP-003)
 
 ---
 
@@ -217,6 +218,7 @@ When these phrases are detected, **STOP** and load the corresponding skill:
 | "edit ribbon", "add ribbon button", "ribbon customization", "command bar button" | `ribbon-edit` | Load `.claude/skills/ribbon-edit/SKILL.md` and follow procedure |
 | "pull from github", "update from remote", "sync with github", "git pull", "get latest" | `pull-from-github` | Load `.claude/skills/pull-from-github/SKILL.md` and follow procedure |
 | "push to github", "create PR", "commit and push", "ready to merge", "submit changes" | `push-to-github` | Load `.claude/skills/push-to-github/SKILL.md` and follow procedure |
+| "update AI procedures", "add new ADR", "propagate changes", "maintain procedures" | `ai-procedure-maintenance` | Load `.claude/skills/ai-procedure-maintenance/SKILL.md` and follow checklists |
 
 ### Auto-Detection Rules
 
@@ -237,6 +239,7 @@ These skills are **automatically active** during all coding work:
 | Skill | Purpose |
 |-------|---------|
 | `adr-aware` | Proactively load relevant ADRs before creating resources |
+| `script-aware` | Discover and reuse scripts from library before writing new automation |
 | `spaarke-conventions` | Apply naming conventions and code patterns |
 
 ### Slash Commands
@@ -257,28 +260,48 @@ Use these commands to explicitly invoke skills:
 | `/ribbon-edit` | Edit Dataverse ribbon via solution export/import |
 | `/pull-from-github` | Pull latest changes from GitHub |
 | `/push-to-github` | Commit changes and push to GitHub |
+| `/ai-procedure-maintenance` | Propagate updates when adding ADRs, patterns, constraints, skills |
 
 ---
 
 ## Documentation
 
-Coding-relevant documentation is in `/docs/ai-knowledge/`. Reference these documents for architecture, standards, and workflow guidance.
+### AI-Optimized Context (Load First)
 
-**Do not reference `/docs/reference/` unless explicitly directed**—it contains background material not relevant to most coding tasks.
+`.claude/` contains **concise, AI-optimized** content for efficient context loading:
+
+```
+.claude/
+├── adr/                      # Concise ADRs (~100-150 lines each)
+├── constraints/              # MUST/MUST NOT rules by topic
+├── patterns/                 # Code patterns and examples
+├── protocols/                # AI behavior protocols
+├── skills/                   # Skill definitions and workflows
+└── templates/                # Project/task templates
+```
+
+### Full Reference Documentation (Load When Needed)
+
+`docs/` contains **complete documentation** for deep dives:
 
 ```
 docs/
-├── ai-knowledge/             # ✅ REFERENCE for coding tasks
-│   ├── architecture/         # System patterns (SDAP, auth boundaries)
-│   ├── standards/            # OAuth/OBO, Dataverse auth patterns
-│   ├── guides/               # How-to procedures
-│   └── templates/            # Project/task scaffolding
-└── reference/                # ⚠️ DO NOT LOAD unless asked
-    ├── adr/                  # Architecture Decision Records (system principles)
-    ├── protocols/            # AI Protocols (AI behavior principles)
-    ├── procedures/           # Full process documentation
-    └── research/             # Verbose KM-* articles
+├── adr/                      # Full ADRs with history and rationale
+├── architecture/             # System architecture docs
+├── guides/                   # How-to guides and procedures
+├── procedures/               # Process documentation
+├── standards/                # Coding and auth standards
+└── product-documentation/    # User-facing docs
 ```
+
+### Loading Strategy
+
+| Need | Location | Action |
+|------|----------|--------|
+| Constraints, patterns | `.claude/` | ✅ Load by default |
+| Full rationale, history | `docs/` | ⚠️ Load when deep dive needed |
+| ADR constraints | `.claude/adr/ADR-XXX.md` | ✅ Use for implementation |
+| ADR full context | `docs/adr/ADR-XXX-*.md` | ⚠️ Use for architectural decisions |
 
 ---
 
@@ -540,4 +563,4 @@ See `CLAUDE.md` files in subdirectories for module-specific guidance:
 
 ---
 
-*Last updated: December 2025*
+*Last updated: December 25, 2025*

@@ -42,18 +42,53 @@ Ensures Architecture Decision Records (ADRs) are automatically considered when A
 | **Versioning** | `v1/`, `ApiVersion`, contracts/DTO versioning | ADR-020 |
 | **Storage/Documents** | `*Store*.cs`, `*Document*.cs`, `*File*.cs` | ADR-005, ADR-007 |
 
-### Rule 2: Automatic ADR Loading
+### Rule 2: Automatic Context Loading (Two-Tier Strategy)
 
 When a task or prompt involves creating/modifying files matching the patterns above:
 
 ```
 BEFORE writing any code:
   1. IDENTIFY resource types from task/file patterns
-  2. LOOKUP applicable ADRs from mapping table
-  3. LOAD ADR summaries from root CLAUDE.md (already in context)
-  4. IF constraint needs clarification → READ full ADR from docs/reference/adr/
+  2. LOOKUP applicable ADRs from mapping table (Rule 1)
+
+  3. LOAD Tier 1 context (concise, AI-optimized):
+     a. LOAD .claude/constraints/{domain}.md for MUST/MUST NOT rules
+        - API work → .claude/constraints/api.md
+        - PCF work → .claude/constraints/pcf.md
+        - Plugin work → .claude/constraints/plugins.md
+        - Auth work → .claude/constraints/auth.md
+        - Caching work → .claude/constraints/data.md
+        - AI work → .claude/constraints/ai.md
+        - Testing → .claude/constraints/testing.md
+
+     b. LOAD .claude/adr/ADR-XXX.md for each applicable ADR
+        - These are 100-150 line concise versions
+        - Focus on constraints, not full rationale
+
+     c. LOAD .claude/patterns/{domain}/*.md for code examples
+        - API patterns → .claude/patterns/api/
+        - Auth patterns → .claude/patterns/auth/
+        - PCF patterns → .claude/patterns/pcf/
+        - Dataverse patterns → .claude/patterns/dataverse/
+
+  4. IF more context needed (rare):
+     → READ docs/adr/ADR-XXX-*.md for full rationale and history
+
   5. APPLY constraints during implementation
 ```
+
+### Resource Type to Context Files Mapping
+
+| Resource Type | Constraints File | Pattern Directory | ADRs |
+|---------------|------------------|-------------------|------|
+| API Endpoint | `.claude/constraints/api.md` | `.claude/patterns/api/` | ADR-001, 008, 010 |
+| PCF Control | `.claude/constraints/pcf.md` | `.claude/patterns/pcf/` | ADR-006, 011, 012, 021 |
+| Plugin | `.claude/constraints/plugins.md` | `.claude/patterns/dataverse/` | ADR-002 |
+| Auth/OAuth | `.claude/constraints/auth.md` | `.claude/patterns/auth/` | ADR-003, 008 |
+| Caching | `.claude/constraints/data.md` | `.claude/patterns/caching/` | ADR-009 |
+| AI Features | `.claude/constraints/ai.md` | `.claude/patterns/ai/` | ADR-013, 014, 015, 016 |
+| Background Jobs | `.claude/constraints/jobs.md` | — | ADR-001, 004, 017 |
+| Testing | `.claude/constraints/testing.md` | `.claude/patterns/testing/` | ADR-022 |
 
 ### Rule 3: ADR Constraint Comments
 
@@ -99,7 +134,9 @@ IF detected violation pattern:
 
 ## ADR Quick Reference
 
-Reference this table for common constraints. The source of truth is the ADR index: `docs/reference/adr/README-ADRs.md`.
+Reference this table for common constraints. The source of truth is:
+- **Concise ADRs**: `.claude/adr/` (AI-optimized, 100-150 lines each)
+- **Full ADRs**: `docs/adr/INDEX.md` (complete with history and rationale)
 
 | ADR | Title | Key Constraint | Violation Pattern |
 |-----|-------|----------------|-------------------|
@@ -230,4 +267,4 @@ Run `/adr-check` after completing tasks to verify no violations were introduced.
 
 ---
 
-*Last updated: December 24, 2025*
+*Last updated: December 25, 2025*

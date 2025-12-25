@@ -23,27 +23,26 @@
 | ADR # | AI Context File | Full Documentation | Constraints | Patterns |
 |-------|----------------|-------------------|-------------|----------|
 | 001 | `.claude/adr/ADR-001-minimal-api.md` | [docs/adr/ADR-001-minimal-api-and-workers.md](docs/adr/ADR-001-minimal-api-and-workers.md) | [api.md](.claude/constraints/api.md) | [api/endpoint-definition.md](.claude/patterns/api/endpoint-definition.md) |
-| 002 | `.claude/adr/ADR-002-thin-plugins.md` | [docs/adr/ADR-002-thin-plugins.md](docs/adr/ADR-002-thin-plugins.md) | [plugins.md](.claude/constraints/plugins.md) | [dataverse/plugin-structure.md](.claude/patterns/dataverse/plugin-structure.md) |
-| 003 | `.claude/adr/ADR-003-entity-data-contract.md` | [docs/adr/ADR-003-entity-data-contract-spe-link.md](docs/adr/ADR-003-entity-data-contract-spe-link.md) | [data.md](.claude/constraints/data.md) | - |
-| 004 | `.claude/adr/ADR-004-bff-authorization.md` | [docs/adr/ADR-004-bff-api-authorization.md](docs/adr/ADR-004-bff-api-authorization.md) | [auth.md](.claude/constraints/auth.md), [api.md](.claude/constraints/api.md) | [auth/oauth-scopes.md](.claude/patterns/auth/oauth-scopes.md), [api/endpoint-filters.md](.claude/patterns/api/endpoint-filters.md) |
-| 005 | `.claude/adr/ADR-005-graph-api-usage.md` | [docs/adr/ADR-005-graph-api-usage-in-bff.md](docs/adr/ADR-005-graph-api-usage-in-bff.md) | [data.md](.claude/constraints/data.md) | - |
-| 006 | `.claude/adr/ADR-006-pcf-over-webresources.md` | [docs/adr/ADR-006-pcf-over-webresources.md](docs/adr/ADR-006-pcf-over-webresources.md) | [pcf.md](.claude/constraints/pcf.md) | [pcf/control-initialization.md](.claude/patterns/pcf/control-initialization.md) |
-| 007 | `.claude/adr/ADR-007-spefilestore-facade.md` | [docs/adr/ADR-007-spefilestore-facade.md](docs/adr/ADR-007-spefilestore-facade.md) | [data.md](.claude/constraints/data.md) | - |
-| 008 | `.claude/adr/ADR-008-endpoint-filters.md` | [docs/adr/ADR-008-endpoint-filters.md](docs/adr/ADR-008-endpoint-filters.md) | [api.md](.claude/constraints/api.md), [auth.md](.claude/constraints/auth.md) | [api/endpoint-filters.md](.claude/patterns/api/endpoint-filters.md) |
-| 009 | `.claude/adr/ADR-009-redis-caching.md` | [docs/adr/ADR-009-redis-first-caching.md](docs/adr/ADR-009-redis-first-caching.md) | [data.md](.claude/constraints/data.md) | - |
+| 002 | `.claude/adr/ADR-002-thin-plugins.md` | [docs/adr/ADR-002-no-heavy-plugins.md](docs/adr/ADR-002-no-heavy-plugins.md) | [plugins.md](.claude/constraints/plugins.md) | [dataverse/plugin-structure.md](.claude/patterns/dataverse/plugin-structure.md) |
+| 003 | `.claude/adr/ADR-003-authorization-seams.md` | [docs/adr/ADR-003-lean-authorization-seams.md](docs/adr/ADR-003-lean-authorization-seams.md) | [auth.md](.claude/constraints/auth.md) | - |
+| 004 | `.claude/adr/ADR-004-job-contract.md` | [docs/adr/ADR-004-async-job-contract.md](docs/adr/ADR-004-async-job-contract.md) | [jobs.md](.claude/constraints/jobs.md) | - |
+| 005 | `.claude/adr/ADR-005-flat-storage.md` | [docs/adr/ADR-005-flat-storage-spe.md](docs/adr/ADR-005-flat-storage-spe.md) | [data.md](.claude/constraints/data.md) | - |
+| 006 | `.claude/adr/ADR-006-pcf-over-webresources.md` | [docs/adr/ADR-006-prefer-pcf-over-webresources.md](docs/adr/ADR-006-prefer-pcf-over-webresources.md) | [pcf.md](.claude/constraints/pcf.md) | [pcf/control-initialization.md](.claude/patterns/pcf/control-initialization.md) |
+| 007 | `.claude/adr/ADR-007-spefilestore.md` | [docs/adr/ADR-007-spe-storage-seam-minimalism.md](docs/adr/ADR-007-spe-storage-seam-minimalism.md) | [data.md](.claude/constraints/data.md) | - |
+| 008 | `.claude/adr/ADR-008-endpoint-filters.md` | [docs/adr/ADR-008-authorization-endpoint-filters.md](docs/adr/ADR-008-authorization-endpoint-filters.md) | [api.md](.claude/constraints/api.md), [auth.md](.claude/constraints/auth.md) | [api/endpoint-filters.md](.claude/patterns/api/endpoint-filters.md) |
+| 009 | `.claude/adr/ADR-009-redis-caching.md` | [docs/adr/ADR-009-caching-redis-first.md](docs/adr/ADR-009-caching-redis-first.md) | [data.md](.claude/constraints/data.md) | [caching/distributed-cache.md](.claude/patterns/caching/distributed-cache.md) |
 | 010 | `.claude/adr/ADR-010-di-minimalism.md` | [docs/adr/ADR-010-di-minimalism.md](docs/adr/ADR-010-di-minimalism.md) | [api.md](.claude/constraints/api.md) | [api/service-registration.md](.claude/patterns/api/service-registration.md) |
-| 011 | `.claude/adr/ADR-011-serverless-rejection.md` | [docs/adr/ADR-011-serverless-function-rejection.md](docs/adr/ADR-011-serverless-function-rejection.md) | [api.md](.claude/constraints/api.md) | - |
+| 011 | `.claude/adr/ADR-011-dataset-pcf.md` | [docs/adr/ADR-011-dataset-pcf-over-subgrids.md](docs/adr/ADR-011-dataset-pcf-over-subgrids.md) | [pcf.md](.claude/constraints/pcf.md) | - |
 | 012 | `.claude/adr/ADR-012-shared-components.md` | [docs/adr/ADR-012-shared-component-library.md](docs/adr/ADR-012-shared-component-library.md) | [pcf.md](.claude/constraints/pcf.md) | [pcf/theme-management.md](.claude/patterns/pcf/theme-management.md) |
-| 013 | `.claude/adr/ADR-013-ai-architecture.md` | [docs/adr/ADR-013-ai-architecture.md](docs/adr/ADR-013-ai-architecture.md) | [ai.md](.claude/constraints/ai.md) | - |
-| 014 | `.claude/adr/ADR-014-pcf-metadata-caching.md` | [docs/adr/ADR-014-pcf-metadata-caching.md](docs/adr/ADR-014-pcf-metadata-caching.md) | [pcf.md](.claude/constraints/pcf.md) | [pcf/dataverse-queries.md](.claude/patterns/pcf/dataverse-queries.md) |
-| 015 | `.claude/adr/ADR-015-pcf-module-structure.md` | [docs/adr/ADR-015-pcf-module-structure.md](docs/adr/ADR-015-pcf-module-structure.md) | [pcf.md](.claude/constraints/pcf.md) | [pcf/control-initialization.md](.claude/patterns/pcf/control-initialization.md) |
-| 016 | `.claude/adr/ADR-016-dataverse-auth.md` | [docs/adr/ADR-016-dataverse-auth-patterns.md](docs/adr/ADR-016-dataverse-auth-patterns.md) | [auth.md](.claude/constraints/auth.md) | [auth/service-principal.md](.claude/patterns/auth/service-principal.md) |
-| 017 | `.claude/adr/ADR-017-bff-resiliency.md` | [docs/adr/ADR-017-bff-resiliency.md](docs/adr/ADR-017-bff-resiliency.md) | [api.md](.claude/constraints/api.md) | [api/resilience.md](.claude/patterns/api/resilience.md) |
-| 018 | `.claude/adr/ADR-018-pcf-error-handling.md` | [docs/adr/ADR-018-pcf-error-handling.md](docs/adr/ADR-018-pcf-error-handling.md) | [pcf.md](.claude/constraints/pcf.md) | [pcf/error-handling.md](.claude/patterns/pcf/error-handling.md) |
-| 019 | `.claude/adr/ADR-019-spe-container-lifecycle.md` | [docs/adr/ADR-019-spe-container-lifecycle.md](docs/adr/ADR-019-spe-container-lifecycle.md) | [data.md](.claude/constraints/data.md) | - |
-| 020 | `.claude/adr/ADR-020-telemetry.md` | [docs/adr/ADR-020-telemetry-strategy.md](docs/adr/ADR-020-telemetry-strategy.md) | [config.md](.claude/constraints/config.md) | - |
-| 021 | `.claude/adr/ADR-021-configuration.md` | [docs/adr/ADR-021-configuration-management.md](docs/adr/ADR-021-configuration-management.md) | [config.md](.claude/constraints/config.md) | - |
-| 022 | `.claude/adr/ADR-022-testing.md` | [docs/adr/ADR-022-testing-strategy.md](docs/adr/ADR-022-testing-strategy.md) | [testing.md](.claude/constraints/testing.md) | [testing/unit-test-structure.md](.claude/patterns/testing/unit-test-structure.md) |
+| 013 | `.claude/adr/ADR-013-ai-architecture.md` | [docs/adr/ADR-013-ai-architecture.md](docs/adr/ADR-013-ai-architecture.md) | [ai.md](.claude/constraints/ai.md) | [ai/streaming-endpoints.md](.claude/patterns/ai/streaming-endpoints.md) |
+| 014 | `.claude/adr/ADR-014-ai-caching.md` | [docs/adr/ADR-014-ai-caching-and-reuse-policy.md](docs/adr/ADR-014-ai-caching-and-reuse-policy.md) | [ai.md](.claude/constraints/ai.md) | - |
+| 015 | `.claude/adr/ADR-015-ai-data-governance.md` | [docs/adr/ADR-015-ai-data-governance.md](docs/adr/ADR-015-ai-data-governance.md) | [ai.md](.claude/constraints/ai.md) | - |
+| 016 | `.claude/adr/ADR-016-ai-rate-limits.md` | [docs/adr/ADR-016-ai-cost-rate-limit-and-backpressure.md](docs/adr/ADR-016-ai-cost-rate-limit-and-backpressure.md) | [ai.md](.claude/constraints/ai.md) | - |
+| 017 | `.claude/adr/ADR-017-job-status.md` | [docs/adr/ADR-017-async-job-status-and-persistence.md](docs/adr/ADR-017-async-job-status-and-persistence.md) | [jobs.md](.claude/constraints/jobs.md) | - |
+| 018 | `.claude/adr/ADR-018-feature-flags.md` | [docs/adr/ADR-018-feature-flags-and-kill-switches.md](docs/adr/ADR-018-feature-flags-and-kill-switches.md) | [config.md](.claude/constraints/config.md) | - |
+| 019 | `.claude/adr/ADR-019-problemdetails.md` | [docs/adr/ADR-019-api-errors-and-problemdetails.md](docs/adr/ADR-019-api-errors-and-problemdetails.md) | [api.md](.claude/constraints/api.md) | [api/error-handling.md](.claude/patterns/api/error-handling.md) |
+| 020 | `.claude/adr/ADR-020-versioning.md` | [docs/adr/ADR-020-versioning-strategy-apis-jobs-client-packages.md](docs/adr/ADR-020-versioning-strategy-apis-jobs-client-packages.md) | [api.md](.claude/constraints/api.md) | - |
+| 021 | `.claude/adr/ADR-021-fluent-design-system.md` | [docs/adr/ADR-021-fluent-ui-design-system.md](docs/adr/ADR-021-fluent-ui-design-system.md) | [pcf.md](.claude/constraints/pcf.md) | [pcf/theme-management.md](.claude/patterns/pcf/theme-management.md) |
 
 ---
 
@@ -92,6 +91,7 @@
 | OBO Flow | [.claude/patterns/auth/obo-flow.md](.claude/patterns/auth/obo-flow.md) | ADR-004, ADR-009 | `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs` |
 | Token Caching | [.claude/patterns/auth/token-caching.md](.claude/patterns/auth/token-caching.md) | ADR-009 | `src/server/api/Sprk.Bff.Api/Services/GraphTokenCache.cs` |
 | MSAL Client | [.claude/patterns/auth/msal-client.md](.claude/patterns/auth/msal-client.md) | ADR-006 | `src/client/pcf/UniversalQuickCreate/control/services/auth/MsalAuthProvider.ts` |
+| Service Principal | [.claude/patterns/auth/service-principal.md](.claude/patterns/auth/service-principal.md) | ADR-004, ADR-016 | `src/server/api/Sprk.Bff.Api/Infrastructure/Auth/ServiceCredentialFactory.cs` |
 
 ### Dataverse Patterns
 
@@ -184,15 +184,31 @@
 | 2025-12-19 | Added AI patterns (streaming-endpoints, text-extraction, analysis-scopes) | Phase 3 batch |
 | 2025-12-19 | Added Testing patterns (unit-test-structure, mocking-patterns, integration-tests) | Phase 3 batch |
 | 2025-12-24 | Consolidated AI playbooks - SKILL-INTERACTION-GUIDE.md is authoritative | Doc consolidation |
+| 2025-12-25 | Fixed ADR table entries to match actual file names; added service-principal.md to Auth patterns | Phase 3 completion |
 
 ---
 
 ## Maintenance Instructions
 
+**For complete maintenance procedures, use the `ai-procedure-maintenance` skill:**
+- Location: [.claude/skills/ai-procedure-maintenance/SKILL.md](.claude/skills/ai-procedure-maintenance/SKILL.md)
+- Trigger: "update AI procedures", "add new ADR", "propagate changes"
+
+The skill provides checklists for:
+- **Checklist A**: New ADR (11 steps)
+- **Checklist B**: New constraint file (6 steps)
+- **Checklist C**: New pattern file (5 steps)
+- **Checklist D**: New protocol/AIP (4 steps)
+- **Checklist E**: New skill (7 steps)
+- **Checklist F**: Root CLAUDE.md updates (4 steps)
+
+**Quick Reference (simplified)**:
+
 **When creating new AI context**:
 1. Add entry to appropriate section in this map
 2. Include source documentation links
 3. Add reverse reference in source doc
+4. **Run skill mappings update** (adr-aware, task-execute, task-create)
 
 **When updating full documentation**:
 1. Check this map for related AI context files
