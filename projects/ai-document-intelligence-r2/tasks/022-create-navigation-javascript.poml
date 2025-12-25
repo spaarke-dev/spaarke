@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="ai-document-intelligence-r2">
+  <metadata>
+    <title>Create Navigation JavaScript Web Resource</title>
+    <phase>Phase 3: Document Form Integration</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>021</dependencies>
+    <blocks>023</blocks>
+    <tags>javascript, webresource, navigation</tags>
+  </metadata>
+
+  <prompt>
+    Create a JavaScript web resource that handles navigation to the Analysis Builder and Workspace custom pages. This script will be called by the ribbon button to open the correct page with parameters.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse JavaScript and Xrm SDK.
+  </role>
+
+  <goal>
+    JavaScript web resource that navigates to custom pages with correct parameters.
+  </goal>
+
+  <context>
+    <background>
+      While ADR-006 prefers PCF over webresources, a small navigation script is acceptable. This script uses Xrm.Navigation to open custom pages with the current document's context.
+    </background>
+    <relevant-files>
+      <file>projects/ai-document-intelligence-r2/notes/custom-pages/navigation-patterns.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">Keep script minimal - navigation only, not UI</constraint>
+    <constraint source="project">Must work with ribbon button command</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create JavaScript file: sprk_analysis_navigation.js</step>
+    <step order="2">Implement openAnalysisBuilder(documentId) function</step>
+    <step order="3">Implement openAnalysisWorkspace(analysisId) function</step>
+    <step order="4">Use Xrm.Navigation.navigateTo for custom page navigation</step>
+    <step order="5">Add parameter passing logic</step>
+    <step order="6">Create web resource in Dataverse solution</step>
+    <step order="7">Upload JavaScript to web resource</step>
+    <step order="8">Publish web resource</step>
+    <step order="9">Test functions from browser console</step>
+    <step order="10">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="write">Create JavaScript file</tool>
+    <tool name="power-apps">Upload web resource</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">sprk_analysis_navigation.js web resource</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Web resource created in solution</criterion>
+    <criterion testable="true">openAnalysisBuilder navigates correctly</criterion>
+    <criterion testable="true">openAnalysisWorkspace navigates correctly</criterion>
+    <criterion testable="true">Parameters passed to custom pages</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="ai-document-intelligence-r2">
+  <metadata>
+    <title>Create UI User Guide</title>
+    <phase>Phase 5: Documentation</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>032</dependencies>
+    <blocks>090</blocks>
+    <tags>documentation</tags>
+  </metadata>
+
+  <prompt>
+    Create a user guide documenting how to use the Analysis Workspace UI. Include screenshots, step-by-step workflows, and tips for effective AI analysis.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in technical writing and user documentation.
+  </role>
+
+  <goal>
+    Comprehensive user guide that enables users to effectively use the AI Analysis features.
+  </goal>
+
+  <context>
+    <background>
+      Users need documentation to understand how to create, configure, and work with AI analyses. The guide should be accessible to non-technical users.
+    </background>
+    <relevant-files>
+      <file>docs/guides/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Include screenshots</constraint>
+    <constraint source="project">Cover all workflows from spec</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r2/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Outline guide structure based on user workflows</step>
+    <step order="2">Write Introduction section</step>
+    <step order="3">Write "Creating a New Analysis" section</step>
+    <step order="4">Write "Working in Analysis Workspace" section</step>
+    <step order="5">Write "Using the Chat Panel" section</step>
+    <step order="6">Write "Editing the Working Document" section</step>
+    <step order="7">Write "Tips and Best Practices" section</step>
+    <step order="8">Add screenshots for key workflows</step>
+    <step order="9">Create docs/guides/AI-ANALYSIS-USER-GUIDE.md</step>
+    <step order="10">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="write">Create documentation</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/guides/AI-ANALYSIS-USER-GUIDE.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Guide covers all user workflows</criterion>
+    <criterion testable="true">Screenshots included</criterion>
+    <criterion testable="true">Language accessible to non-technical users</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>

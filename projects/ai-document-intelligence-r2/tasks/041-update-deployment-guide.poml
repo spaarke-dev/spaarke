@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="ai-document-intelligence-r2">
+  <metadata>
+    <title>Update Deployment Guide with UI Steps</title>
+    <phase>Phase 5: Documentation</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>032</dependencies>
+    <blocks>090</blocks>
+    <tags>documentation, deploy</tags>
+  </metadata>
+
+  <prompt>
+    Update the Phase 1 Deployment Guide (from R1) with additional steps for deploying the UI solution. Include custom page republishing requirements and cache clearing.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in deployment documentation.
+  </role>
+
+  <goal>
+    Deployment guide updated with complete UI deployment steps.
+  </goal>
+
+  <context>
+    <background>
+      The R1 deployment guide covers infrastructure. This update adds UI-specific steps including PCF deployment, custom page configuration, and post-deployment verification.
+    </background>
+    <relevant-files>
+      <file>docs/guides/AI-PHASE1-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/guides/PCF-V9-PACKAGING.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Integrate with existing guide structure</constraint>
+    <constraint source="project">Include custom page republish steps</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/PCF-V9-PACKAGING.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing deployment guide</step>
+    <step order="2">Add "UI Solution Deployment" section</step>
+    <step order="3">Document PCF control deployment steps</step>
+    <step order="4">Document custom page configuration</step>
+    <step order="5">Document post-deployment cache clearing</step>
+    <step order="6">Add verification steps for UI components</step>
+    <step order="7">Update table of contents</step>
+    <step order="8">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="edit">Update documentation</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/guides/AI-PHASE1-DEPLOYMENT-GUIDE.md (updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">UI deployment steps documented</criterion>
+    <criterion testable="true">Custom page steps included</criterion>
+    <criterion testable="true">Cache clearing documented</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>

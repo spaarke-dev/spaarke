@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="ai-document-intelligence-r2">
+  <metadata>
+    <title>Add Analysis Tab to Document Form</title>
+    <phase>Phase 3: Document Form Integration</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>014</dependencies>
+    <blocks>021</blocks>
+    <tags>dataverse, form, customization</tags>
+  </metadata>
+
+  <prompt>
+    Add a new "Analysis" tab to the sprk_document entity main form. This tab will contain the Analysis subgrid and serve as the entry point for AI analysis features.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse form customization.
+  </role>
+
+  <goal>
+    Analysis tab visible on Document form, ready for subgrid and ribbon button.
+  </goal>
+
+  <context>
+    <background>
+      The sprk_document entity needs an Analysis tab where users can see related analyses and launch new ones. This is a form customization in the Dataverse solution.
+    </background>
+    <relevant-files>
+      <file>src/solutions/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Tab should be after General tab</constraint>
+    <constraint source="project">Tab should only be visible when document is saved</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Open Power Apps Maker</step>
+    <step order="2">Navigate to sprk_document entity</step>
+    <step order="3">Open main form for editing</step>
+    <step order="4">Add new tab named "Analysis"</step>
+    <step order="5">Position after General tab</step>
+    <step order="6">Add a section for the subgrid</step>
+    <step order="7">Save and publish form</step>
+    <step order="8">Test form loads with new tab</step>
+    <step order="9">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="power-apps">Form designer</tool>
+  </tools>
+
+  <outputs>
+    <output type="form">Updated sprk_document main form</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Analysis tab visible on form</criterion>
+    <criterion testable="true">Tab positioned correctly</criterion>
+    <criterion testable="true">Form loads without errors</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="ai-document-intelligence-r2">
+  <metadata>
+    <title>Test Environment Variable Resolution in PCF</title>
+    <phase>Phase 2: Custom Page Creation</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>013</dependencies>
+    <blocks>024</blocks>
+    <tags>testing, config, pcf, dataverse</tags>
+  </metadata>
+
+  <prompt>
+    Verify that the PCF controls correctly read configuration from Dataverse environment variables, specifically the BFF API URL. The controls must NOT have hard-coded URLs.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse environment variables and PCF configuration.
+  </role>
+
+  <goal>
+    Confirmed that PCF controls read API URL from environment variables, not hard-coded.
+  </goal>
+
+  <context>
+    <background>
+      Environment variables in Dataverse store tenant-specific configuration. The PCF controls use environmentVariables.ts to read these values at runtime.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/AnalysisBuilder/utils/environmentVariables.ts</file>
+      <file>src/client/pcf/AnalysisWorkspace/utils/environmentVariables.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Must NOT have hard-coded API URLs</constraint>
+    <constraint source="project">Must log resolved URL for verification</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review environmentVariables.ts in both controls</step>
+    <step order="2">Verify environment variable names match Dataverse configuration</step>
+    <step order="3">Open Custom Page in browser</step>
+    <step order="4">Open DevTools Console</step>
+    <step order="5">Look for log message showing resolved API URL</step>
+    <step order="6">Verify URL matches expected BFF API endpoint</step>
+    <step order="7">Test with modified environment variable value</step>
+    <step order="8">Document results in notes/testing/env-var-test.md</step>
+    <step order="9">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="browser">DevTools for console inspection</tool>
+    <tool name="power-apps">View environment variable configuration</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-document-intelligence-r2/notes/testing/env-var-test.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">No hard-coded URLs in PCF source</criterion>
+    <criterion testable="true">Console shows resolved environment variable</criterion>
+    <criterion testable="true">API calls use resolved URL</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>

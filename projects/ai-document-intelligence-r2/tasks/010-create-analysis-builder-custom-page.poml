@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="ai-document-intelligence-r2">
+  <metadata>
+    <title>Create Analysis Builder Custom Page</title>
+    <phase>Phase 2: Custom Page Creation</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>004</dependencies>
+    <blocks>012, 013</blocks>
+    <tags>dataverse, pcf, custom-page</tags>
+  </metadata>
+
+  <prompt>
+    Create a Power Apps Custom Page named "Analysis Builder" that hosts the AnalysisBuilder PCF control. Configure the page to accept parameters (documentId, analysisId) and pass them to the control.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Power Apps Custom Pages and PCF integration.
+  </role>
+
+  <goal>
+    Custom Page created in Power Apps that hosts AnalysisBuilder PCF and accepts navigation parameters.
+  </goal>
+
+  <context>
+    <background>
+      Custom Pages are canvas apps embedded in model-driven apps. The Analysis Builder page will be launched from the Document form to configure a new analysis.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/AnalysisBuilder/ControlManifest.Input.xml</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">Host PCF control, not webresource</constraint>
+    <constraint source="project">Accept documentId parameter from navigation</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/PCF-V9-PACKAGING.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Open Power Apps Maker (make.powerapps.com)</step>
+    <step order="2">Navigate to Solutions, open Spaarke solution</step>
+    <step order="3">Create new Custom Page: "AnalysisBuilderPage"</step>
+    <step order="4">Add AnalysisBuilder PCF control to the page</step>
+    <step order="5">Configure control to fill entire page</step>
+    <step order="6">Add OnStart to capture Param("documentId") and Param("analysisId")</step>
+    <step order="7">Pass parameters to PCF control properties</step>
+    <step order="8">Save and publish the Custom Page</step>
+    <step order="9">Test page loads with test parameters</step>
+    <step order="10">Document page configuration in notes/custom-pages/</step>
+    <step order="11">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="power-apps">Create custom page in maker portal</tool>
+    <tool name="browser">Access make.powerapps.com</tool>
+  </tools>
+
+  <outputs>
+    <output type="custom-page">AnalysisBuilderPage in Dataverse</output>
+    <output type="docs">projects/ai-document-intelligence-r2/notes/custom-pages/builder-page.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Custom Page exists in solution</criterion>
+    <criterion testable="true">PCF control fills the page</criterion>
+    <criterion testable="true">Parameters accessible in control</criterion>
+    <criterion testable="true">Page loads without errors</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>

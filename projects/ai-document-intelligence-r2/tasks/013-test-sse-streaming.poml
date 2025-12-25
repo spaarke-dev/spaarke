@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="ai-document-intelligence-r2">
+  <metadata>
+    <title>Test SSE Streaming in Custom Page Context</title>
+    <phase>Phase 2: Custom Page Creation</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>012</dependencies>
+    <blocks>014, 024</blocks>
+    <tags>testing, sse, api, pcf</tags>
+  </metadata>
+
+  <prompt>
+    Verify that Server-Sent Events (SSE) streaming works correctly when the AnalysisWorkspace PCF is hosted in a Custom Page. The chat messages should stream in real-time without blocking.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in SSE streaming and API integration.
+  </role>
+
+  <goal>
+    SSE streaming confirmed working in Custom Page context with real-time message delivery.
+  </goal>
+
+  <context>
+    <background>
+      SSE streaming is used for the AI chat interface. The useSseStream hook connects to the BFF API and streams responses. This must work correctly within the Custom Page sandbox.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/AnalysisWorkspace/hooks/useSseStream.ts</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Must test in actual Custom Page, not just harness</constraint>
+    <constraint source="project">Stream connection must establish within 2 seconds</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Open Analysis Workspace Custom Page</step>
+    <step order="2">Open browser DevTools Network tab</step>
+    <step order="3">Filter for EventStream connections</step>
+    <step order="4">Trigger a chat message that invokes SSE</step>
+    <step order="5">Verify SSE connection is established</step>
+    <step order="6">Verify messages stream in real-time</step>
+    <step order="7">Check for any CORS or auth errors</step>
+    <step order="8">Test connection recovery on disconnect</step>
+    <step order="9">Document results in notes/testing/sse-test.md</step>
+    <step order="10">If issues found, document workarounds needed</step>
+    <step order="11">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="browser">DevTools for network inspection</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-document-intelligence-r2/notes/testing/sse-test.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SSE connection establishes within 2 seconds</criterion>
+    <criterion testable="true">Messages stream without buffering</criterion>
+    <criterion testable="true">No CORS errors in console</criterion>
+    <criterion testable="true">Connection recovers on disconnect</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>

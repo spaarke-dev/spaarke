@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="ai-document-intelligence-r2">
+  <metadata>
+    <title>Test Form Integration End-to-End</title>
+    <phase>Phase 3: Document Form Integration</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>023</dependencies>
+    <blocks>030</blocks>
+    <tags>testing, integration-test, e2e</tags>
+  </metadata>
+
+  <prompt>
+    Perform end-to-end testing of the complete form integration: open document, view Analysis tab, click New Analysis button, configure in Builder, and work in Workspace.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in integration testing.
+  </role>
+
+  <goal>
+    Complete user flow tested and documented with all steps working.
+  </goal>
+
+  <context>
+    <background>
+      This task validates the complete user journey from Document form to Analysis Builder to Analysis Workspace. All navigation and data passing must work correctly.
+    </background>
+    <relevant-files>
+      <file>projects/ai-document-intelligence-r2/notes/testing/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Test with real document record</constraint>
+    <constraint source="project">Document any issues found</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r2/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Open an existing sprk_document record</step>
+    <step order="2">Navigate to Analysis tab</step>
+    <step order="3">Verify subgrid displays (may be empty)</step>
+    <step order="4">Click "+ New Analysis" ribbon button</step>
+    <step order="5">Verify Analysis Builder opens with document context</step>
+    <step order="6">Configure analysis parameters (select scopes)</step>
+    <step order="7">Start analysis</step>
+    <step order="8">Verify Analysis Workspace opens</step>
+    <step order="9">Test chat streaming</step>
+    <step order="10">Test Monaco editor</step>
+    <step order="11">Navigate back to Document form</step>
+    <step order="12">Verify new analysis appears in subgrid</step>
+    <step order="13">Document test results in notes/testing/e2e-results.md</step>
+    <step order="14">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="browser">Manual testing</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-document-intelligence-r2/notes/testing/e2e-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Can navigate from Document to Builder</criterion>
+    <criterion testable="true">Can configure and start analysis</criterion>
+    <criterion testable="true">Workspace shows streaming chat</criterion>
+    <criterion testable="true">Can navigate back to Document</criterion>
+    <criterion testable="true">Analysis appears in subgrid</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>

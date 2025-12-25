@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="ai-document-intelligence-r2">
+  <metadata>
+    <title>Project Wrap-up</title>
+    <phase>Project Completion</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>040, 041</dependencies>
+    <blocks>none</blocks>
+    <tags>documentation, project-completion</tags>
+  </metadata>
+
+  <prompt>
+    Complete the R2 project by updating all status indicators, documenting lessons learned, and preparing the project for archival. This is the MANDATORY final task.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in project completion and documentation.
+  </role>
+
+  <goal>
+    Project marked complete with all artifacts finalized and lessons documented.
+  </goal>
+
+  <context>
+    <background>
+      This task finalizes the R2 project, updates status across all documents, and documents any lessons learned for future reference.
+    </background>
+    <relevant-files>
+      <file>projects/ai-document-intelligence-r2/README.md</file>
+      <file>projects/ai-document-intelligence-r2/plan.md</file>
+      <file>projects/ai-document-intelligence-r2/tasks/TASK-INDEX.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">All tasks must be completed first</constraint>
+    <constraint source="project">Must update README status to Complete</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/task-create/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify all previous tasks are marked completed in TASK-INDEX.md</step>
+    <step order="2">Update README.md Status to "Complete"</step>
+    <step order="3">Update README.md Progress to "100%"</step>
+    <step order="4">Check all Graduation Criteria checkboxes</step>
+    <step order="5">Update plan.md Status to "Complete"</step>
+    <step order="6">Update all milestones to completed</step>
+    <step order="7">Create notes/lessons-learned.md with any insights</step>
+    <step order="8">Update TASK-INDEX.md status for this task to completed</step>
+    <step order="9">Run /repo-cleanup if needed</step>
+  </steps>
+
+  <tools>
+    <tool name="edit">Update documentation</tool>
+    <tool name="write">Create lessons learned</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-document-intelligence-r2/notes/lessons-learned.md</output>
+    <output type="docs">Updated README.md and plan.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">README shows Status: Complete</criterion>
+    <criterion testable="true">All graduation criteria checked</criterion>
+    <criterion testable="true">plan.md milestones all completed</criterion>
+    <criterion testable="true">Lessons learned documented</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>
