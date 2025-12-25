@@ -1,0 +1,75 @@
+<task id="022" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Implement Load Playbook API</title>
+    <phase>3</phase>
+    <tags>api, playbook, load, dotnet</tags>
+    <estimate>3h</estimate>
+    <dependencies>021</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>Senior .NET Developer</role>
+    <goal>Implement API endpoint for loading playbook configurations</goal>
+    <context>
+      Load Playbook API allows:
+      - Getting a single playbook by ID
+      - Listing playbooks for current user
+      - Listing shared/public playbooks
+      - Filtering by document type
+
+      Must respect security/sharing settings.
+    </context>
+    <constraints>
+      - MUST use Minimal API patterns (ADR-001)
+      - MUST respect playbook sharing settings
+      - MUST support filtering and pagination
+      - MUST cache frequently accessed playbooks (ADR-009)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/reference/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>docs/reference/adr/ADR-009-redis-first-caching.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create GET /api/playbooks endpoint (list)</step>
+    <step order="2">Create GET /api/playbooks/{id} endpoint (single)</step>
+    <step order="3">Implement security filtering (owned + shared)</step>
+    <step order="4">Add document type filtering</step>
+    <step order="5">Add pagination support</step>
+    <step order="6">Implement Redis caching for popular playbooks</step>
+    <step order="7">Write unit and integration tests</step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review existing API patterns</tool>
+    <tool>Write - Create endpoint implementation</tool>
+    <tool>Bash - Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output>GET endpoints added to PlaybookEndpoints.cs</output>
+    <output>PlaybookQueryDto.cs - Query parameters</output>
+    <output>PlaybookListDto.cs - List response</output>
+    <output>Unit and integration tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>GET by ID returns single playbook</criterion>
+    <criterion>GET list returns user's playbooks</criterion>
+    <criterion>Security filtering works correctly</criterion>
+    <criterion>Pagination works</criterion>
+    <criterion>Caching implemented</criterion>
+    <criterion>Tests pass</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
+    <next-task>023-add-playbook-sharing-logic.poml</next-task>
+  </execution>
+</task>

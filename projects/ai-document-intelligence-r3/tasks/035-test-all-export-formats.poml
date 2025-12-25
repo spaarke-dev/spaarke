@@ -1,0 +1,73 @@
+<task id="035" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Test All Export Formats</title>
+    <phase>4</phase>
+    <tags>testing, export, integration</tags>
+    <estimate>4h</estimate>
+    <dependencies>034</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>QA Engineer / .NET Developer</role>
+    <goal>Test all export formats end-to-end</goal>
+    <context>
+      Export services are complete:
+      - DOCX export
+      - PDF export
+      - Email export
+      - Teams export
+      - Power Automate flows
+
+      Need to verify all work correctly with real analyses.
+    </context>
+    <constraints>
+      - MUST test each export format
+      - MUST test with various analysis sizes
+      - MUST verify formatting/branding
+      - MUST test error handling
+      - MUST document test results
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r3/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create test analysis with various content</step>
+    <step order="2">Test DOCX export and verify output</step>
+    <step order="3">Test PDF export and verify output</step>
+    <step order="4">Test email export and verify delivery</step>
+    <step order="5">Test Teams export and verify posting</step>
+    <step order="6">Test Power Automate flows</step>
+    <step order="7">Test error scenarios</step>
+    <step order="8">Document test results</step>
+  </steps>
+
+  <tools>
+    <tool>Bash - Run integration tests</tool>
+    <tool>Write - Document test results</tool>
+  </tools>
+
+  <outputs>
+    <output>Integration test suite for exports</output>
+    <output>Test results document</output>
+    <output>List of issues found (if any)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All export formats work</criterion>
+    <criterion>Formatting correct in all outputs</criterion>
+    <criterion>Large analyses handled</criterion>
+    <criterion>Errors handled gracefully</criterion>
+    <criterion>Test results documented</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
+    <next-task>036-document-export-features.poml</next-task>
+  </execution>
+</task>

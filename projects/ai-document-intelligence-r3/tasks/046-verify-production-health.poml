@@ -1,0 +1,73 @@
+<task id="046" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Verify Production Health</title>
+    <phase>5</phase>
+    <tags>verification, production, health-check</tags>
+    <estimate>3h</estimate>
+    <dependencies>045</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>DevOps Engineer / Developer</role>
+    <goal>Verify production environment health after deployment</goal>
+    <context>
+      Post-deployment verification:
+      - All health endpoints responding
+      - RAG queries working
+      - Export functions working
+      - Monitoring data flowing
+      - No errors in logs
+
+      Monitor for 24-48 hours.
+    </context>
+    <constraints>
+      - MUST verify all health endpoints
+      - MUST run end-to-end test scenarios
+      - MUST monitor error rates
+      - MUST verify dashboards receiving data
+      - MUST document any issues found
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r3/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Check all health endpoints</step>
+    <step order="2">Run end-to-end test scenarios</step>
+    <step order="3">Verify RAG queries return results</step>
+    <step order="4">Verify export functions work</step>
+    <step order="5">Check monitoring dashboards</step>
+    <step order="6">Review error logs</step>
+    <step order="7">Monitor for 24 hours</step>
+    <step order="8">Document health verification results</step>
+  </steps>
+
+  <tools>
+    <tool>Bash - Run health checks</tool>
+    <tool>Write - Document results</tool>
+  </tools>
+
+  <outputs>
+    <output>Health verification report</output>
+    <output>Error log analysis</output>
+    <output>24-hour monitoring summary</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All health endpoints passing</criterion>
+    <criterion>E2E tests successful</criterion>
+    <criterion>No critical errors in logs</criterion>
+    <criterion>Dashboards receiving data</criterion>
+    <criterion>24-hour monitoring clean</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
+    <next-task>047-create-customer-deployment-guide.poml</next-task>
+  </execution>
+</task>

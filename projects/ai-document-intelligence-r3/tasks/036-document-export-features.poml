@@ -1,0 +1,67 @@
+<task id="036" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Document Export Features</title>
+    <phase>4</phase>
+    <tags>documentation, export</tags>
+    <estimate>3h</estimate>
+    <dependencies>035</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>Technical Writer / Developer</role>
+    <goal>Create comprehensive documentation for export features</goal>
+    <context>
+      Export features are complete. Need to document:
+      - Available export formats
+      - Configuration options
+      - Template customization
+      - Power Automate integration
+      - Troubleshooting
+    </context>
+    <constraints>
+      - MUST document all export formats
+      - MUST include configuration examples
+      - MUST explain template customization
+      - MUST include troubleshooting section
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r3/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Document DOCX export options</step>
+    <step order="2">Document PDF export options</step>
+    <step order="3">Document email export configuration</step>
+    <step order="4">Document Teams export configuration</step>
+    <step order="5">Document Power Automate flows</step>
+    <step order="6">Create template customization guide</step>
+    <step order="7">Create troubleshooting section</step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review implementation</tool>
+    <tool>Write - Create documentation</tool>
+  </tools>
+
+  <outputs>
+    <output>EXPORT-GUIDE.md - Export documentation</output>
+    <output>TEMPLATE-CUSTOMIZATION.md - Template guide</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All export formats documented</criterion>
+    <criterion>Configuration examples provided</criterion>
+    <criterion>Template customization explained</criterion>
+    <criterion>Troubleshooting section complete</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
+    <next-task>040-add-application-insights-telemetry.poml</next-task>
+  </execution>
+</task>

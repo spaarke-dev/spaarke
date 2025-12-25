@@ -1,0 +1,74 @@
+<task id="010" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Create IAnalysisToolHandler Interface</title>
+    <phase>2</phase>
+    <tags>interface, tool-framework, ai, dotnet</tags>
+    <estimate>3h</estimate>
+    <dependencies>004</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>Senior .NET Developer</role>
+    <goal>Define the IAnalysisToolHandler interface for the extensible AI tool framework</goal>
+    <context>
+      The tool framework allows dynamic loading and execution of AI analysis tools.
+      Each tool handler must implement a common interface for:
+      - Tool metadata (name, description, parameters)
+      - Execution logic
+      - Result formatting
+
+      Must follow ADR-013 AI Architecture patterns.
+    </context>
+    <constraints>
+      - MUST define clear interface contract
+      - MUST support async execution
+      - MUST include tool metadata for discovery
+      - MUST support parameter validation
+      - MUST follow ADR-013 tool framework pattern
+      - MUST integrate with existing AiToolService
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/ai-knowledge/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+      <file>docs/reference/adr/ADR-013-ai-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing AI service patterns in codebase</step>
+    <step order="2">Define IAnalysisToolHandler interface</step>
+    <step order="3">Define ToolMetadata class for tool discovery</step>
+    <step order="4">Define ToolExecutionContext for execution parameters</step>
+    <step order="5">Define ToolResult for standardized output</step>
+    <step order="6">Document interface contracts</step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review existing AI services</tool>
+    <tool>Write - Create interface files</tool>
+  </tools>
+
+  <outputs>
+    <output>IAnalysisToolHandler.cs - Core interface</output>
+    <output>ToolMetadata.cs - Tool description model</output>
+    <output>ToolExecutionContext.cs - Execution context</output>
+    <output>ToolResult.cs - Standardized result model</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Interface clearly defines tool contract</criterion>
+    <criterion>Async execution supported</criterion>
+    <criterion>Tool metadata includes name, description, parameters</criterion>
+    <criterion>Result model supports various output types</criterion>
+    <criterion>Interface documented with XML comments</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
+    <next-task>011-implement-dynamic-tool-loading.poml</next-task>
+  </execution>
+</task>

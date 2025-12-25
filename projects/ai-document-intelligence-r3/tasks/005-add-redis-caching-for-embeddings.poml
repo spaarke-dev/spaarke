@@ -1,0 +1,71 @@
+<task id="005" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Add Redis Caching for Embeddings</title>
+    <phase>1</phase>
+    <tags>redis, caching, embeddings, performance</tags>
+    <estimate>4h</estimate>
+    <dependencies>004</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>Senior .NET Developer</role>
+    <goal>Implement Redis caching for embeddings to reduce Azure OpenAI costs and latency</goal>
+    <context>
+      Embedding generation is expensive (API cost) and slow (network latency).
+      Cache embeddings by content hash to avoid regenerating for same content.
+      Must follow ADR-009 Redis-first caching patterns.
+    </context>
+    <constraints>
+      - MUST cache embeddings by content hash
+      - MUST use Redis as primary cache (ADR-009)
+      - MUST set appropriate TTL (balance freshness vs cost)
+      - MUST handle cache misses gracefully
+      - MUST NOT use hybrid L1 cache unless profiling proves need
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/reference/adr/ADR-009-redis-first-caching.md</file>
+      <file>docs/ai-knowledge/patterns/distributed-cache.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create content hashing utility for cache keys</step>
+    <step order="2">Implement IEmbeddingCache interface</step>
+    <step order="3">Create RedisEmbeddingCache implementation</step>
+    <step order="4">Integrate cache into RagService embedding generation</step>
+    <step order="5">Configure TTL based on embedding stability</step>
+    <step order="6">Add cache hit/miss telemetry</step>
+    <step order="7">Write unit tests with mock cache</step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review existing Redis usage patterns</tool>
+    <tool>Write - Create cache implementation</tool>
+    <tool>Bash - Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output>IEmbeddingCache.cs - Cache interface</output>
+    <output>RedisEmbeddingCache.cs - Redis implementation</output>
+    <output>ContentHasher.cs - Hashing utility</output>
+    <output>Cache integration in RagService</output>
+    <output>Unit tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Embeddings cached by content hash</criterion>
+    <criterion>Redis used as cache store</criterion>
+    <criterion>Cache hit/miss metrics logged</criterion>
+    <criterion>TTL configured appropriately</criterion>
+    <criterion>Tests pass</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
+    <next-task>006-test-shared-deployment-model.poml</next-task>
+  </execution>
+</task>

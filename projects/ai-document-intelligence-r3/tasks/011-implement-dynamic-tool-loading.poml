@@ -1,0 +1,72 @@
+<task id="011" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Implement Dynamic Tool Loading</title>
+    <phase>2</phase>
+    <tags>tool-framework, dynamic-loading, di, dotnet</tags>
+    <estimate>4h</estimate>
+    <dependencies>010</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>Senior .NET Developer</role>
+    <goal>Implement dynamic tool loading and registration for the AI tool framework</goal>
+    <context>
+      Tools should be discoverable and loadable at runtime without code changes.
+      Use DI container for tool registration and resolution.
+      Support configuration-based tool enabling/disabling.
+    </context>
+    <constraints>
+      - MUST use reflection/DI for tool discovery
+      - MUST support configuration-based tool registration
+      - MUST follow ADR-010 DI minimalism
+      - MUST handle missing/disabled tools gracefully
+      - MUST log tool registration for diagnostics
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/ai-knowledge/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+      <file>docs/reference/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/reference/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create IToolRegistry interface</step>
+    <step order="2">Implement ToolRegistry with reflection-based discovery</step>
+    <step order="3">Add DI extension method for tool registration</step>
+    <step order="4">Implement configuration-based tool filtering</step>
+    <step order="5">Add tool resolution by name</step>
+    <step order="6">Add logging for tool registration</step>
+    <step order="7">Write unit tests</step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review DI patterns in codebase</tool>
+    <tool>Write - Create registry implementation</tool>
+    <tool>Bash - Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output>IToolRegistry.cs - Registry interface</output>
+    <output>ToolRegistry.cs - Implementation</output>
+    <output>ToolRegistrationExtensions.cs - DI helpers</output>
+    <output>Unit tests for tool loading</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Tools discovered via reflection</criterion>
+    <criterion>DI registration works correctly</criterion>
+    <criterion>Configuration can enable/disable tools</criterion>
+    <criterion>Tool resolution by name works</criterion>
+    <criterion>Registration logging present</criterion>
+    <criterion>Tests pass</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
+    <next-task>012-create-entity-extractor-tool.poml</next-task>
+  </execution>
+</task>

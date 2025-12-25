@@ -1,0 +1,79 @@
+<task id="012" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Create EntityExtractor Tool</title>
+    <phase>2</phase>
+    <tags>tool-handler, entity-extraction, ai, dotnet</tags>
+    <estimate>6h</estimate>
+    <dependencies>011</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>Senior .NET Developer with NLP expertise</role>
+    <goal>Implement EntityExtractor tool handler for extracting named entities from documents</goal>
+    <context>
+      EntityExtractor identifies and extracts:
+      - People names
+      - Organization names
+      - Dates and time references
+      - Monetary values
+      - Legal references
+      - Custom entity types based on configuration
+
+      Uses Azure OpenAI for extraction with structured output.
+    </context>
+    <constraints>
+      - MUST implement IAnalysisToolHandler interface
+      - MUST use Azure OpenAI for extraction
+      - MUST support configurable entity types
+      - MUST return structured JSON output
+      - MUST handle large documents (chunking)
+      - MUST follow ADR-013 tool patterns
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/ai-knowledge/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+      <file>docs/reference/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create EntityExtractorHandler class implementing IAnalysisToolHandler</step>
+    <step order="2">Define supported entity types</step>
+    <step order="3">Create prompt template for entity extraction</step>
+    <step order="4">Implement document chunking for large docs</step>
+    <step order="5">Implement entity aggregation from chunks</step>
+    <step order="6">Add structured output parsing</step>
+    <step order="7">Register handler with tool registry</step>
+    <step order="8">Write unit tests</step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review Azure OpenAI patterns</tool>
+    <tool>Write - Create handler implementation</tool>
+    <tool>Bash - Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output>EntityExtractorHandler.cs - Tool implementation</output>
+    <output>EntityType.cs - Entity type definitions</output>
+    <output>ExtractedEntity.cs - Result model</output>
+    <output>Unit tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Implements IAnalysisToolHandler correctly</criterion>
+    <criterion>Extracts standard entity types (people, orgs, dates)</criterion>
+    <criterion>Handles large documents via chunking</criterion>
+    <criterion>Returns structured JSON output</criterion>
+    <criterion>Registered with tool registry</criterion>
+    <criterion>Tests pass</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
+    <next-task>013-create-clause-analyzer-tool.poml</next-task>
+  </execution>
+</task>

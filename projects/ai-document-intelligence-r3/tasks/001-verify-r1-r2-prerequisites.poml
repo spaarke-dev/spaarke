@@ -1,0 +1,67 @@
+<task id="001" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Verify R1/R2 Prerequisites</title>
+    <phase>1</phase>
+    <tags>verification, prerequisites, infrastructure</tags>
+    <estimate>2h</estimate>
+    <dependencies>none</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>Senior .NET Developer</role>
+    <goal>Verify that all R1 and R2 prerequisites are complete before starting R3 implementation</goal>
+    <context>
+      R3 builds on infrastructure from R1 (API, services, Azure resources) and R2 (PCF controls, custom pages).
+      Before implementing advanced AI features, we must verify the foundation is solid.
+    </context>
+    <constraints>
+      - MUST verify all R1 API endpoints are deployed and functional
+      - MUST verify all R2 PCF controls are deployed to Dataverse
+      - MUST verify Azure AI Search is provisioned
+      - MUST verify Azure OpenAI is accessible
+      - MUST document any gaps found
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r1/README.md</file>
+      <file>projects/ai-document-intelligence-r2/README.md</file>
+      <file>docs/ai-knowledge/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review R1 graduation criteria and verify all are marked complete</step>
+    <step order="2">Review R2 graduation criteria and verify all are marked complete</step>
+    <step order="3">Test API endpoints: GET /healthz, analysis endpoints</step>
+    <step order="4">Verify Azure AI Search resource exists and is accessible</step>
+    <step order="5">Verify Azure OpenAI embedding model is deployed</step>
+    <step order="6">Document verification results</step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review project READMEs</tool>
+    <tool>Bash - Run API health checks</tool>
+    <tool>Bash - Verify Azure resources via az CLI</tool>
+  </tools>
+
+  <outputs>
+    <output>Verification report documenting R1/R2 completion status</output>
+    <output>List of any gaps or issues to address</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All R1 graduation criteria verified complete</criterion>
+    <criterion>All R2 graduation criteria verified complete</criterion>
+    <criterion>Azure AI Search confirmed accessible</criterion>
+    <criterion>Azure OpenAI confirmed accessible</criterion>
+    <criterion>Verification report created</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
+    <next-task>002-create-rag-index-schema.poml</next-task>
+  </execution>
+</task>

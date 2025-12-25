@@ -1,0 +1,75 @@
+<task id="033" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Implement Teams Export</title>
+    <phase>4</phase>
+    <tags>export, teams, graph, dotnet</tags>
+    <estimate>5h</estimate>
+    <dependencies>032</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>Senior .NET Developer with Teams expertise</role>
+    <goal>Implement Teams export for sharing analysis results in Teams channels</goal>
+    <context>
+      Teams export allows:
+      - Posting analysis summary to Teams channel
+      - Using Adaptive Cards for rich formatting
+      - Including action buttons for follow-up
+      - Supporting direct messages
+
+      Must use Graph API for Teams integration.
+    </context>
+    <constraints>
+      - MUST use Microsoft Graph for Teams
+      - MUST use Adaptive Cards for formatting
+      - MUST support channel and chat posting
+      - MUST respect Teams permissions
+      - MUST include deep links back to analysis
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/ai-knowledge/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create TeamsExportService implementing IExportService</step>
+    <step order="2">Design Adaptive Card template</step>
+    <step order="3">Implement channel message posting</step>
+    <step order="4">Implement chat message posting</step>
+    <step order="5">Add deep link generation</step>
+    <step order="6">Create post-to-teams endpoint</step>
+    <step order="7">Write unit and integration tests</step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review Graph API Teams patterns</tool>
+    <tool>Write - Create service implementation</tool>
+    <tool>Bash - Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output>TeamsExportService.cs - Teams implementation</output>
+    <output>Adaptive Card template JSON</output>
+    <output>Post-to-teams endpoint</output>
+    <output>Unit and integration tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Messages post to Teams channels</criterion>
+    <criterion>Adaptive Cards render correctly</criterion>
+    <criterion>Chat posting works</criterion>
+    <criterion>Deep links functional</criterion>
+    <criterion>Permissions respected</criterion>
+    <criterion>Tests pass</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
+    <next-task>034-create-power-automate-flows.poml</next-task>
+  </execution>
+</task>

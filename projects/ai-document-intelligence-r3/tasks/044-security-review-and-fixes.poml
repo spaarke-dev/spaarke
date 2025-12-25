@@ -1,0 +1,76 @@
+<task id="044" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Security Review and Fixes</title>
+    <phase>5</phase>
+    <tags>security, review, compliance</tags>
+    <estimate>6h</estimate>
+    <dependencies>043</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>Security Engineer / Senior Developer</role>
+    <goal>Conduct security review and fix any issues before production</goal>
+    <context>
+      Security review covers:
+      - Authentication/authorization
+      - Data protection (encryption, PII handling)
+      - API security (input validation, rate limiting)
+      - AI-specific security (prompt injection, data leakage)
+
+      Must follow ADR-016 AI Security.
+    </context>
+    <constraints>
+      - MUST review all new endpoints
+      - MUST verify input validation
+      - MUST check for prompt injection vulnerabilities
+      - MUST verify data isolation
+      - MUST follow ADR-016 requirements
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/reference/adr/ADR-016-ai-security.md</file>
+      <file>docs/reference/adr/ADR-008-endpoint-auth-filters.md</file>
+      <file>projects/ai-document-intelligence-r3/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review all new API endpoints for auth</step>
+    <step order="2">Verify input validation on all endpoints</step>
+    <step order="3">Check for prompt injection vulnerabilities</step>
+    <step order="4">Verify tenant data isolation</step>
+    <step order="5">Review secret management</step>
+    <step order="6">Check for PII leakage in logs/telemetry</step>
+    <step order="7">Fix any security issues found</step>
+    <step order="8">Document security review findings</step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review code for security issues</tool>
+    <tool>Write - Create security report</tool>
+    <tool>Edit - Fix security issues</tool>
+  </tools>
+
+  <outputs>
+    <output>Security review report</output>
+    <output>Fixed security issues</output>
+    <output>ADR-016 compliance verification</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All endpoints have proper auth</criterion>
+    <criterion>Input validation complete</criterion>
+    <criterion>No prompt injection vulnerabilities</criterion>
+    <criterion>Data isolation verified</criterion>
+    <criterion>No PII in logs</criterion>
+    <criterion>ADR-016 compliance confirmed</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
+    <next-task>045-deploy-to-production.poml</next-task>
+  </execution>
+</task>

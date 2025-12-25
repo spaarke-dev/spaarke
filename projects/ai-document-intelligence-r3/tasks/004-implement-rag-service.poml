@@ -1,0 +1,79 @@
+<task id="004" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Implement IRagService with Hybrid Search</title>
+    <phase>1</phase>
+    <tags>service, rag, hybrid-search, azure-ai-search, dotnet</tags>
+    <estimate>8h</estimate>
+    <dependencies>003</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>Senior .NET Developer with RAG expertise</role>
+    <goal>Implement IRagService with hybrid search combining keyword and vector retrieval</goal>
+    <context>
+      RAG service performs hybrid retrieval:
+      1. Generate embedding for query using Azure OpenAI
+      2. Execute hybrid search (keyword + vector) in Azure AI Search
+      3. Apply semantic ranking for relevance
+      4. Return ranked results with context
+
+      Must integrate with KnowledgeDeploymentService for multi-tenant routing.
+    </context>
+    <constraints>
+      - MUST use Azure AI Search hybrid search (keyword + vector)
+      - MUST apply semantic ranking
+      - MUST integrate with IKnowledgeDeploymentService for tenant routing
+      - MUST cache embeddings in Redis (ADR-009)
+      - MUST achieve &lt;500ms P95 latency for retrieval
+      - MUST follow ADR-013 AI Architecture patterns
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/ai-knowledge/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+      <file>docs/reference/adr/ADR-009-redis-first-caching.md</file>
+      <file>docs/reference/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/ai-knowledge/patterns/distributed-cache.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define IRagService interface with Search and Index methods</step>
+    <step order="2">Implement embedding generation using Azure OpenAI</step>
+    <step order="3">Implement hybrid search query builder</step>
+    <step order="4">Add semantic ranking configuration</step>
+    <step order="5">Integrate with IKnowledgeDeploymentService for index routing</step>
+    <step order="6">Add Redis caching for query embeddings</step>
+    <step order="7">Add telemetry for latency monitoring</step>
+    <step order="8">Write unit and integration tests</step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review Azure AI Search SDK documentation</tool>
+    <tool>Write - Create service files</tool>
+    <tool>Bash - Run dotnet build and tests</tool>
+  </tools>
+
+  <outputs>
+    <output>IRagService.cs - Interface definition</output>
+    <output>RagService.cs - Implementation with hybrid search</output>
+    <output>RagSearchResult.cs - Result model</output>
+    <output>Unit and integration tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Hybrid search combines keyword and vector retrieval</criterion>
+    <criterion>Semantic ranking applied to results</criterion>
+    <criterion>Multi-tenant routing via IKnowledgeDeploymentService</criterion>
+    <criterion>Embedding caching in Redis</criterion>
+    <criterion>Latency telemetry added</criterion>
+    <criterion>Tests pass</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
+    <next-task>005-add-redis-caching-for-embeddings.poml</next-task>
+  </execution>
+</task>
