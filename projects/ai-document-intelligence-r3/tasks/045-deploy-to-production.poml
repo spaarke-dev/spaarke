@@ -1,0 +1,76 @@
+<task id="045" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Deploy to Production</title>
+    <phase>5</phase>
+    <tags>deployment, production, azure</tags>
+    <estimate>4h</estimate>
+    <dependencies>044</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>DevOps Engineer / Developer</role>
+    <goal>Deploy R3 features to production environment</goal>
+    <context>
+      Production deployment includes:
+      - API updates with new endpoints
+      - Azure AI Search RAG indexes
+      - Azure Function for PDF
+      - Dataverse solution updates
+      - Configuration updates
+
+      Must follow deployment checklist.
+    </context>
+    <constraints>
+      - MUST follow deployment checklist
+      - MUST have rollback plan
+      - MUST deploy during maintenance window
+      - MUST verify health after deployment
+      - MUST update configuration in Key Vault
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r3/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create deployment checklist</step>
+    <step order="2">Create rollback plan</step>
+    <step order="3">Update production configuration in Key Vault</step>
+    <step order="4">Deploy API updates</step>
+    <step order="5">Deploy Azure Function</step>
+    <step order="6">Deploy Dataverse solution</step>
+    <step order="7">Create/update RAG indexes</step>
+    <step order="8">Verify all services healthy</step>
+    <step order="9">Run smoke tests</step>
+  </steps>
+
+  <tools>
+    <tool>Bash - Deploy via CI/CD</tool>
+    <tool>Skill - dataverse-deploy for solution</tool>
+    <tool>Write - Document deployment</tool>
+  </tools>
+
+  <outputs>
+    <output>Deployment checklist</output>
+    <output>Rollback plan</output>
+    <output>Production deployment completed</output>
+    <output>Smoke test results</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All components deployed</criterion>
+    <criterion>Health checks passing</criterion>
+    <criterion>Smoke tests passing</criterion>
+    <criterion>Rollback plan documented</criterion>
+    <criterion>No production incidents</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
+    <next-task>046-verify-production-health.poml</next-task>
+  </execution>
+</task>

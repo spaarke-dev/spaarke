@@ -1,0 +1,76 @@
+<task id="021" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Implement Save Playbook API</title>
+    <phase>3</phase>
+    <tags>api, playbook, save, dotnet</tags>
+    <estimate>4h</estimate>
+    <dependencies>020</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>Senior .NET Developer</role>
+    <goal>Implement API endpoint for saving playbook configurations</goal>
+    <context>
+      Save Playbook API allows:
+      - Creating new playbooks
+      - Updating existing playbooks
+      - Validating playbook configuration
+      - Storing in Dataverse
+
+      Must integrate with Dataverse for storage.
+    </context>
+    <constraints>
+      - MUST use Minimal API patterns (ADR-001)
+      - MUST validate playbook configuration
+      - MUST store playbook in Dataverse
+      - MUST handle concurrent updates
+      - MUST return created/updated playbook ID
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/reference/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>docs/ai-knowledge/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define PlaybookDto request/response models</step>
+    <step order="2">Create POST /api/playbooks endpoint</step>
+    <step order="3">Create PUT /api/playbooks/{id} endpoint</step>
+    <step order="4">Implement playbook validation logic</step>
+    <step order="5">Integrate with Dataverse for storage</step>
+    <step order="6">Add authorization filter</step>
+    <step order="7">Write unit and integration tests</step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review existing API patterns</tool>
+    <tool>Write - Create endpoint implementation</tool>
+    <tool>Bash - Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output>PlaybookEndpoints.cs - API endpoints</output>
+    <output>PlaybookDto.cs - Request/response models</output>
+    <output>PlaybookValidator.cs - Validation logic</output>
+    <output>Unit and integration tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>POST endpoint creates playbooks</criterion>
+    <criterion>PUT endpoint updates playbooks</criterion>
+    <criterion>Validation rejects invalid configurations</criterion>
+    <criterion>Playbooks stored in Dataverse</criterion>
+    <criterion>Authorization enforced</criterion>
+    <criterion>Tests pass</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
+    <next-task>022-implement-load-playbook-api.poml</next-task>
+  </execution>
+</task>

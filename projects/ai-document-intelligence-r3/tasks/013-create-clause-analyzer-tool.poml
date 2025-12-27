@@ -1,0 +1,78 @@
+<task id="013" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Create ClauseAnalyzer Tool</title>
+    <phase>2</phase>
+    <tags>tool-handler, clause-analysis, ai, legal, dotnet</tags>
+    <estimate>6h</estimate>
+    <dependencies>011</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>Senior .NET Developer with legal tech expertise</role>
+    <goal>Implement ClauseAnalyzer tool handler for analyzing contract clauses</goal>
+    <context>
+      ClauseAnalyzer examines contract documents to:
+      - Identify clause types (indemnification, limitation of liability, etc.)
+      - Assess clause risk levels
+      - Compare against standard language
+      - Flag unusual or missing clauses
+
+      Uses Azure OpenAI with legal analysis prompts.
+    </context>
+    <constraints>
+      - MUST implement IAnalysisToolHandler interface
+      - MUST identify common contract clause types
+      - MUST provide risk assessment per clause
+      - MUST support customizable clause templates
+      - MUST return structured analysis results
+      - MUST follow ADR-013 tool patterns
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/ai-knowledge/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+      <file>docs/reference/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create ClauseAnalyzerHandler class implementing IAnalysisToolHandler</step>
+    <step order="2">Define clause type taxonomy</step>
+    <step order="3">Create clause identification prompts</step>
+    <step order="4">Implement risk scoring logic</step>
+    <step order="5">Add comparison against standard templates</step>
+    <step order="6">Implement missing clause detection</step>
+    <step order="7">Register handler with tool registry</step>
+    <step order="8">Write unit tests</step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review legal analysis patterns</tool>
+    <tool>Write - Create handler implementation</tool>
+    <tool>Bash - Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output>ClauseAnalyzerHandler.cs - Tool implementation</output>
+    <output>ClauseType.cs - Clause type definitions</output>
+    <output>ClauseAnalysisResult.cs - Result model</output>
+    <output>RiskLevel.cs - Risk enumeration</output>
+    <output>Unit tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Implements IAnalysisToolHandler correctly</criterion>
+    <criterion>Identifies common contract clause types</criterion>
+    <criterion>Provides risk assessment per clause</criterion>
+    <criterion>Compares against standard templates</criterion>
+    <criterion>Detects missing expected clauses</criterion>
+    <criterion>Tests pass</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
+    <next-task>014-create-document-classifier-tool.poml</next-task>
+  </execution>
+</task>

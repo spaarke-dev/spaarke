@@ -1,0 +1,73 @@
+<task id="047" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Create Customer Deployment Guide</title>
+    <phase>5</phase>
+    <tags>documentation, deployment, customer</tags>
+    <estimate>6h</estimate>
+    <dependencies>046</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>Technical Writer / Developer</role>
+    <goal>Create comprehensive customer deployment guide</goal>
+    <context>
+      Customers need to deploy AI Document Intelligence to their environment.
+      Guide should cover:
+      - Prerequisites (Azure resources, permissions)
+      - Step-by-step deployment instructions
+      - Configuration options
+      - Troubleshooting common issues
+      - Post-deployment verification
+
+      Must be usable by customer IT teams.
+    </context>
+    <constraints>
+      - MUST be understandable by non-developers
+      - MUST include all prerequisites
+      - MUST have step-by-step instructions with screenshots
+      - MUST include verification steps
+      - MUST include troubleshooting section
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r3/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">List all prerequisites</step>
+    <step order="2">Document Azure resource requirements</step>
+    <step order="3">Write step-by-step deployment instructions</step>
+    <step order="4">Add screenshots for key steps</step>
+    <step order="5">Document configuration options</step>
+    <step order="6">Create troubleshooting section</step>
+    <step order="7">Add post-deployment verification steps</step>
+    <step order="8">Review with internal team</step>
+  </steps>
+
+  <tools>
+    <tool>Write - Create documentation</tool>
+  </tools>
+
+  <outputs>
+    <output>CUSTOMER-DEPLOYMENT-GUIDE.md</output>
+    <output>Screenshots for key steps</output>
+    <output>Quick start checklist</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All prerequisites listed</criterion>
+    <criterion>Step-by-step instructions complete</criterion>
+    <criterion>Screenshots included</criterion>
+    <criterion>Troubleshooting section helpful</criterion>
+    <criterion>Verification steps work</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
+    <next-task>048-validate-guide-with-external-user.poml</next-task>
+  </execution>
+</task>

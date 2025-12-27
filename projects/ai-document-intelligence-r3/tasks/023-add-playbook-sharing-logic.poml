@@ -1,0 +1,74 @@
+<task id="023" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Add Playbook Sharing Logic</title>
+    <phase>3</phase>
+    <tags>security, playbook, sharing, dataverse</tags>
+    <estimate>4h</estimate>
+    <dependencies>022</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>Senior .NET Developer with Dataverse expertise</role>
+    <goal>Implement playbook sharing and security logic</goal>
+    <context>
+      Playbooks can be shared at different levels:
+      - Private: Only owner can see/use
+      - Team: Shared with specific teams
+      - Organization: Available to all org users
+      - Public: Template playbooks visible to all
+
+      Must integrate with Dataverse security model.
+    </context>
+    <constraints>
+      - MUST use Dataverse sharing model
+      - MUST support team-based sharing
+      - MUST support org-wide visibility
+      - MUST prevent unauthorized access
+      - MUST audit sharing changes
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/ai-knowledge/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+      <file>projects/ai-document-intelligence-r3/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define sharing levels enum</step>
+    <step order="2">Implement sharing service</step>
+    <step order="3">Integrate with Dataverse sharing API</step>
+    <step order="4">Create share/unshare endpoints</step>
+    <step order="5">Update load API to respect sharing</step>
+    <step order="6">Add audit logging for sharing changes</step>
+    <step order="7">Write security tests</step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review Dataverse security patterns</tool>
+    <tool>Write - Create sharing implementation</tool>
+    <tool>Bash - Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output>SharingLevel.cs - Sharing level enum</output>
+    <output>PlaybookSharingService.cs - Sharing logic</output>
+    <output>Share/unshare API endpoints</output>
+    <output>Security tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All sharing levels implemented</criterion>
+    <criterion>Dataverse security integration works</criterion>
+    <criterion>Unauthorized access prevented</criterion>
+    <criterion>Sharing changes audited</criterion>
+    <criterion>Security tests pass</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
+    <next-task>024-test-playbook-functionality.poml</next-task>
+  </execution>
+</task>

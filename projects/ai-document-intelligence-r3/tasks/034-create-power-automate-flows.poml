@@ -1,0 +1,73 @@
+<task id="034" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Create Power Automate Flows</title>
+    <phase>4</phase>
+    <tags>power-automate, flows, integration</tags>
+    <estimate>4h</estimate>
+    <dependencies>033</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>Power Platform Developer</role>
+    <goal>Create sample Power Automate flows for common export scenarios</goal>
+    <context>
+      Power Automate flows extend export capabilities:
+      - Scheduled analysis exports
+      - Triggered exports on record changes
+      - Multi-destination exports (email + Teams + SharePoint)
+      - Approval workflows before sharing
+
+      Provide as templates for customers to customize.
+    </context>
+    <constraints>
+      - MUST create reusable flow templates
+      - MUST use standard connectors where possible
+      - MUST document flow parameters
+      - MUST include error handling
+      - MUST provide deployment instructions
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r3/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create scheduled export flow template</step>
+    <step order="2">Create trigger-on-complete flow template</step>
+    <step order="3">Create multi-destination export flow</step>
+    <step order="4">Create approval workflow flow</step>
+    <step order="5">Export flows as solution components</step>
+    <step order="6">Document flow usage and customization</step>
+    <step order="7">Test flows in dev environment</step>
+  </steps>
+
+  <tools>
+    <tool>Write - Create flow definitions</tool>
+    <tool>Skill - dataverse-deploy for solution packaging</tool>
+  </tools>
+
+  <outputs>
+    <output>Scheduled export flow</output>
+    <output>Trigger-on-complete flow</output>
+    <output>Multi-destination flow</output>
+    <output>Approval workflow flow</output>
+    <output>Flow documentation</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All flow templates created</criterion>
+    <criterion>Flows work in test environment</criterion>
+    <criterion>Error handling implemented</criterion>
+    <criterion>Documentation complete</criterion>
+    <criterion>Flows exportable as solution</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
+    <next-task>035-test-all-export-formats.poml</next-task>
+  </execution>
+</task>

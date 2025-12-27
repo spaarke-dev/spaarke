@@ -1,0 +1,72 @@
+<task id="020" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Create Playbook Admin Forms</title>
+    <phase>3</phase>
+    <tags>dataverse, forms, playbook, admin</tags>
+    <estimate>4h</estimate>
+    <dependencies>008</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>Dataverse Developer</role>
+    <goal>Create Dataverse forms for playbook administration</goal>
+    <context>
+      Playbooks are reusable analysis configurations containing:
+      - Selected tools and parameters
+      - Document type filters
+      - Output preferences
+      - Sharing settings
+
+      Admin forms allow creating, editing, and managing playbooks.
+    </context>
+    <constraints>
+      - MUST create main playbook entity form
+      - MUST include tool selection section
+      - MUST include parameter configuration
+      - MUST include sharing/security settings
+      - MUST follow Fluent UI v9 design patterns (ADR-021)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/reference/adr/ADR-021-fluent-ui-v9.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>projects/ai-document-intelligence-r3/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Design playbook entity schema if not exists</step>
+    <step order="2">Create main playbook form layout</step>
+    <step order="3">Add tool selection section with checkboxes</step>
+    <step order="4">Add parameter configuration section</step>
+    <step order="5">Add sharing/security section</step>
+    <step order="6">Configure form navigation and tabs</step>
+    <step order="7">Test form in model-driven app</step>
+  </steps>
+
+  <tools>
+    <tool>Skill - dataverse-deploy for form deployment</tool>
+    <tool>Write - Create form customizations</tool>
+  </tools>
+
+  <outputs>
+    <output>Playbook entity form customizations</output>
+    <output>Form deployed to Dataverse</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Playbook form created and functional</criterion>
+    <criterion>Tool selection works correctly</criterion>
+    <criterion>Parameter configuration saves properly</criterion>
+    <criterion>Sharing settings functional</criterion>
+    <criterion>Form follows Fluent v9 patterns</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
+    <next-task>021-implement-save-playbook-api.poml</next-task>
+  </execution>
+</task>

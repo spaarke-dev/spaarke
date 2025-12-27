@@ -1,0 +1,72 @@
+<task id="048" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Validate Guide with External User</title>
+    <phase>5</phase>
+    <tags>validation, documentation, customer</tags>
+    <estimate>4h</estimate>
+    <dependencies>047</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>Technical Writer / Developer</role>
+    <goal>Validate deployment guide by having external user follow it</goal>
+    <context>
+      Best way to validate documentation is to have someone unfamiliar follow it.
+      - Find internal user outside dev team OR pilot customer
+      - Have them follow guide without assistance
+      - Document questions and issues
+      - Update guide based on feedback
+
+      Goal is guide that works without hand-holding.
+    </context>
+    <constraints>
+      - MUST use external validator (not dev team member)
+      - MUST document all questions asked
+      - MUST track time taken for each section
+      - MUST update guide based on feedback
+      - MUST re-validate critical fixes
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r3/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Identify validation participant</step>
+    <step order="2">Set up clean test environment</step>
+    <step order="3">Observe participant following guide</step>
+    <step order="4">Document all questions and issues</step>
+    <step order="5">Track time for each section</step>
+    <step order="6">Collect feedback</step>
+    <step order="7">Update guide based on findings</step>
+    <step order="8">Re-validate critical updates</step>
+    <step order="9">Finalize guide</step>
+  </steps>
+
+  <tools>
+    <tool>Write - Update documentation</tool>
+  </tools>
+
+  <outputs>
+    <output>Validation feedback document</output>
+    <output>Updated CUSTOMER-DEPLOYMENT-GUIDE.md</output>
+    <output>Validation sign-off</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>External user successfully deployed</criterion>
+    <criterion>All questions documented</criterion>
+    <criterion>Guide updated with improvements</criterion>
+    <criterion>Critical issues re-validated</criterion>
+    <criterion>Guide signed off as complete</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
+    <next-task>090-project-wrap-up.poml</next-task>
+  </execution>
+</task>

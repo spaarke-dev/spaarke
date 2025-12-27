@@ -1,0 +1,71 @@
+<task id="042" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Create Monitoring Dashboards</title>
+    <phase>5</phase>
+    <tags>monitoring, dashboards, azure, observability</tags>
+    <estimate>4h</estimate>
+    <dependencies>040, 041</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>DevOps Engineer / Developer</role>
+    <goal>Create Azure dashboards for monitoring AI feature health</goal>
+    <context>
+      Dashboards should show:
+      - RAG performance (latency, throughput)
+      - Tool execution metrics
+      - Export success rates
+      - Error rates and types
+      - Circuit breaker states
+      - Resource utilization
+    </context>
+    <constraints>
+      - MUST use Azure Dashboard
+      - MUST include all key metrics
+      - MUST set up alerts for critical thresholds
+      - MUST be accessible to ops team
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/reference/adr/ADR-015-ai-observability.md</file>
+      <file>projects/ai-document-intelligence-r3/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Design dashboard layout</step>
+    <step order="2">Create RAG performance panel</step>
+    <step order="3">Create tool execution panel</step>
+    <step order="4">Create export metrics panel</step>
+    <step order="5">Create error tracking panel</step>
+    <step order="6">Create circuit breaker status panel</step>
+    <step order="7">Configure alerts for critical thresholds</step>
+    <step order="8">Share dashboard with ops team</step>
+  </steps>
+
+  <tools>
+    <tool>Bash - Deploy dashboard via ARM/Bicep</tool>
+    <tool>Write - Create dashboard definition</tool>
+  </tools>
+
+  <outputs>
+    <output>Azure Dashboard definition (JSON/Bicep)</output>
+    <output>Deployed dashboard</output>
+    <output>Alert rules configured</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Dashboard shows all key metrics</criterion>
+    <criterion>Alerts configured for critical thresholds</criterion>
+    <criterion>Dashboard accessible to ops team</criterion>
+    <criterion>Real-time data updating</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
+    <next-task>043-run-load-tests.poml</next-task>
+  </execution>
+</task>

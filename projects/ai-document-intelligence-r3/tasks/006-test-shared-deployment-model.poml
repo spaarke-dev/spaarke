@@ -1,0 +1,71 @@
+<task id="006" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Test Shared Deployment Model</title>
+    <phase>1</phase>
+    <tags>testing, rag, shared-model, integration</tags>
+    <estimate>4h</estimate>
+    <dependencies>005</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>QA Engineer / .NET Developer</role>
+    <goal>Test the Shared deployment model end-to-end for RAG functionality</goal>
+    <context>
+      Shared deployment model uses a multi-tenant index where all customers share embeddings.
+      Need to verify:
+      - Documents can be indexed
+      - Hybrid search returns relevant results
+      - Tenant isolation is maintained (can't see other tenants' data)
+      - Performance meets P95 &lt;500ms target
+    </context>
+    <constraints>
+      - MUST test document indexing
+      - MUST test hybrid search retrieval
+      - MUST verify tenant isolation
+      - MUST measure P95 latency
+      - MUST document test results
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/ai-knowledge/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+      <file>projects/ai-document-intelligence-r3/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create test documents for indexing</step>
+    <step order="2">Index documents using RagService</step>
+    <step order="3">Execute hybrid search queries</step>
+    <step order="4">Verify search results are relevant</step>
+    <step order="5">Test tenant isolation (query as different tenant)</step>
+    <step order="6">Measure and record P95 latency</step>
+    <step order="7">Document test results</step>
+  </steps>
+
+  <tools>
+    <tool>Bash - Run integration tests</tool>
+    <tool>Write - Document test results</tool>
+  </tools>
+
+  <outputs>
+    <output>Integration test suite for Shared model</output>
+    <output>Test results document with latency measurements</output>
+    <output>List of issues found (if any)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Documents successfully indexed</criterion>
+    <criterion>Hybrid search returns relevant results</criterion>
+    <criterion>Tenant isolation verified</criterion>
+    <criterion>P95 latency &lt;500ms</criterion>
+    <criterion>Test results documented</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
+    <next-task>007-test-dedicated-deployment-model.poml</next-task>
+  </execution>
+</task>
