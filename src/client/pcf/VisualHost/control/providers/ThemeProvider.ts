@@ -1,6 +1,7 @@
 /**
  * Theme Provider for Visual Host PCF
  * Detects and applies Fluent UI v9 themes based on Power Apps theme
+ * Supports light, dark, and high-contrast modes per ADR-021
  */
 
 import {
@@ -8,10 +9,60 @@ import {
   webDarkTheme,
   teamsLightTheme,
   teamsDarkTheme,
+  teamsHighContrastTheme,
   Theme,
 } from "@fluentui/react-components";
 import { IInputs } from "../generated/ManifestTypes";
 import { logger } from "../utils/logger";
+
+/**
+ * Theme mode enumeration
+ */
+export type ThemeMode = "light" | "dark" | "high-contrast";
+
+/**
+ * Detect if high-contrast mode is active
+ */
+export function isHighContrast(): boolean {
+  // Method 1: Check for forced-colors media query (modern browsers)
+  if (window.matchMedia) {
+    const forcedColors = window.matchMedia("(forced-colors: active)");
+    if (forcedColors.matches) {
+      return true;
+    }
+
+    // Method 2: Check for -ms-high-contrast (legacy Edge/IE)
+    const msHighContrast = window.matchMedia("(-ms-high-contrast: active)");
+    if (msHighContrast.matches) {
+      return true;
+    }
+  }
+
+  // Method 3: Check for specific high-contrast classes on body
+  if (
+    document.body.classList.contains("high-contrast") ||
+    document.body.classList.contains("ms-highContrast")
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Get current theme mode
+ */
+export function getThemeMode(
+  context?: ComponentFramework.Context<IInputs>
+): ThemeMode {
+  if (isHighContrast()) {
+    return "high-contrast";
+  }
+  if (isDarkMode(context)) {
+    return "dark";
+  }
+  return "light";
+}
 
 /**
  * Detect if dark mode is active in the host environment
@@ -62,11 +113,20 @@ export function isDarkMode(
 
 /**
  * Resolve the appropriate Fluent theme based on environment
+ * Supports light, dark, and high-contrast modes per ADR-021
  */
 export function resolveTheme(
   context?: ComponentFramework.Context<IInputs>
 ): Theme {
-  const dark = isDarkMode(context);
+  const themeMode = getThemeMode(context);
+
+  // High-contrast mode takes precedence (accessibility requirement)
+  if (themeMode === "high-contrast") {
+    logger.debug("ThemeProvider", "Resolved high-contrast theme");
+    return teamsHighContrastTheme;
+  }
+
+  const dark = themeMode === "dark";
 
   // Check if we're in Teams context
   const isTeams =
@@ -84,24 +144,31 @@ export function resolveTheme(
 
 /**
  * Set up a listener for theme changes
+ * Listens for both dark mode and high-contrast mode changes
  * Returns a cleanup function
  */
 export function setupThemeListener(
-  onThemeChange: (isDark: boolean) => void,
+  onThemeChange: (themeMode: ThemeMode) => void,
   context?: ComponentFramework.Context<IInputs>
 ): () => void {
-  // Listen for system preference changes
-  const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+  // Listen for system preference changes (dark mode)
+  const darkModeQuery = window.matchMedia("(prefers-color-scheme: dark)");
 
-  const handleChange = (e: MediaQueryListEvent) => {
-    logger.info("ThemeProvider", `System theme changed: ${e.matches ? "dark" : "light"}`);
-    onThemeChange(e.matches);
+  // Listen for high-contrast mode changes
+  const forcedColorsQuery = window.matchMedia("(forced-colors: active)");
+
+  const handleChange = () => {
+    const newMode = getThemeMode(context);
+    logger.info("ThemeProvider", `Theme changed: ${newMode}`);
+    onThemeChange(newMode);
   };
 
-  mediaQuery.addEventListener("change", handleChange);
+  darkModeQuery.addEventListener("change", handleChange);
+  forcedColorsQuery.addEventListener("change", handleChange);
 
   // Return cleanup function
   return () => {
-    mediaQuery.removeEventListener("change", handleChange);
+    darkModeQuery.removeEventListener("change", handleChange);
+    forcedColorsQuery.removeEventListener("change", handleChange);
   };
 }

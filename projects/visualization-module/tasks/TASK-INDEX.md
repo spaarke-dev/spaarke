@@ -12,7 +12,7 @@
 |-------|-------|--------|
 | Phase 1: Foundation | 5 | 4/5 complete |
 | Phase 2: Chart Components | 8 | 8/8 complete |
-| Phase 3: Visual Host PCF | 4 | 1/4 complete |
+| Phase 3: Visual Host PCF | 4 | 2/4 complete |
 | Phase 4: Drill-Through | 5 | 0/5 complete |
 | Phase 5: Testing & Docs | 2 | 0/2 complete |
 | Wrap-up | 1 | 0/1 complete |
@@ -51,7 +51,7 @@
 | 020 | [Build Visual Host PCF core](020-visualhost-pcf-core.poml) | ✅ completed | 017 | 4 |
 | 021 | [Implement configuration loader service](021-configuration-loader.poml) | 🔲 not-started | 005, 020 | 3 |
 | 022 | [Implement data aggregation service](022-data-aggregation-service.poml) | 🔲 not-started | 021 | 4 |
-| 023 | [Integrate theme management](023-theme-integration.poml) | 🔲 not-started | 020 | 3 |
+| 023 | [Integrate theme management](023-theme-integration.poml) | ✅ completed | 020 | 3 |
 
 ### Phase 4: Drill-Through Workspace
 
@@ -102,9 +102,10 @@
 
 ## Execution Notes
 
-- **Next tasks**: Task 021 (requires 005), Task 023 (020 complete)
-- **Critical dependency**: Task 005 (entity deployment) must complete before 021
-- **Parallel work possible**: Tasks 021 and 023 can be worked in parallel once 005 is done
+- **Next tasks**: Task 021 (requires 005), Phase 4 tasks (require 023)
+- **Critical dependency**: Task 005 (entity deployment) must complete before 021 and 022
+- **Phase 3 blocked**: Tasks 021 and 022 require Task 005 (Dataverse entity deployment)
+- **Phase 4 ready when**: Task 023 complete (✅), but best to wait for 021-022
 - **End with**: Task 090 (project wrap-up)
 
 ---
