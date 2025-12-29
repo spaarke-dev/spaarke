@@ -1,7 +1,7 @@
 # SDAP System Overview
 
 > **Source**: SDAP-ARCHITECTURE-GUIDE.md (3000 lines) → Condensed overview
-> **Last Updated**: December 3, 2025
+> **Last Updated**: December 29, 2025
 > **Applies To**: Any work involving the SDAP document management system
 
 ---
@@ -9,6 +9,8 @@
 ## TL;DR
 
 SDAP (SharePoint Document Access Platform) is an enterprise document management solution integrating Dataverse with SharePoint Embedded (SPE). Files stored in SPE containers (up to 250GB), metadata in Dataverse. Uses BFF pattern with Redis caching, PCF controls for UI.
+
+**New in Phase 1**: Email-to-Document conversion converts Dataverse email activities to RFC 5322 compliant `.eml` files stored in SPE with full metadata extraction.
 
 ---
 
@@ -19,6 +21,8 @@ SDAP (SharePoint Document Access Platform) is an enterprise document management 
 - Troubleshooting document-related issues
 - Understanding the authentication flow for document operations
 - Working with any `sprk_document` related code
+- **Converting Dataverse email activities to archived documents**
+- **Working with email-to-document automation rules**
 
 ---
 
@@ -69,7 +73,11 @@ BFF API (https://spe-api-dev-67e2xz.azurewebsites.net):
 ├─ GET  /api/navmap/{entity}/{relationship}/lookup  → Metadata discovery
 ├─ GET  /api/documents/{id}/preview-url  → File preview URL
 ├─ GET  /api/documents/{id}/office       → Office Online editor URL
-└─ GET  /healthz                  → Health check
+├─ GET  /healthz                  → Health check
+│
+│  Email-to-Document Conversion (Phase 1):
+├─ POST /api/v1/emails/{emailId}/save-as-document  → Convert email to .eml document
+└─ GET  /api/v1/emails/{emailId}/document-status   → Check if email already saved
 ```
 
 ---
@@ -80,14 +88,38 @@ BFF API (https://spe-api-dev-67e2xz.azurewebsites.net):
 
 **sprk_document** (child - holds file references)
 ```
-sprk_documentid     GUID        Primary key
-sprk_documentname   Text        Display name
-sprk_filename       Text        Original file name
-sprk_filesize       Int         File size in bytes
-sprk_graphitemid    Text        SPE DriveItem ID ← Links to SharePoint
-sprk_graphdriveid   Text        SPE Container Drive ID
-sprk_matter         Lookup      → sprk_matter (1:N relationship)
-sprk_project        Lookup      → sprk_project (1:N relationship)
+sprk_documentid         GUID        Primary key
+sprk_documentname       Text        Display name
+sprk_filename           Text        Original file name
+sprk_filesize           Int         File size in bytes
+sprk_graphitemid        Text        SPE DriveItem ID ← Links to SharePoint
+sprk_graphdriveid       Text        SPE Container Drive ID
+sprk_matter             Lookup      → sprk_matter (1:N relationship)
+sprk_project            Lookup      → sprk_project (1:N relationship)
+
+# Email Archive Fields (Phase 1)
+sprk_isemailarchive     Boolean     Is this an archived email (.eml)
+sprk_email              Lookup      → email (email activity reference)
+sprk_emailsubject       Text        Email subject line
+sprk_emailfrom          Text        Sender email address
+sprk_emailto            Text        Primary recipients (semicolon-separated)
+sprk_emailcc            Text        CC recipients (semicolon-separated)
+sprk_emaildate          DateTime    Email sent/received date
+sprk_emaildirection     Choice      Received (100000000) / Sent (100000001)
+sprk_emailmessageid     Text        RFC 5322 Message-ID header
+sprk_emailtrackingtoken Text        CRM tracking token
+sprk_documenttype       Choice      Email = 100000006
+sprk_relationshiptype   Choice      Email Attachment = 100000000
+sprk_parentdocument     Lookup      → sprk_document (for attachments)
+```
+
+**sprk_emailsaverule** (email automation rules)
+```
+sprk_emailsaveruleid    GUID        Primary key
+sprk_name               Text        Rule name
+sprk_direction          Choice      Received/Sent/Both
+sprk_isactive           Boolean     Rule enabled
+sprk_priority           Int         Rule priority order
 ```
 
 **sprk_matter / sprk_project** (parents - own the container)
