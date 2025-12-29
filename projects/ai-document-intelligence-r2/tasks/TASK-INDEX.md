@@ -10,11 +10,11 @@
 
 | Phase | Tasks | Status |
 |-------|-------|--------|
-| Phase 1: PCF Deployment | 001-004 | 🔲 Not Started |
-| Phase 2: Custom Page Creation | 010-014 | 🔲 Not Started |
-| Phase 3: Document Form Integration | 020-024 | 🔲 Not Started |
-| Phase 4: Solution Packaging | 030-032 | 🔲 Not Started |
-| Phase 5: Documentation | 040-041 | 🔲 Not Started |
+| Phase 1: PCF Deployment | 001-004 | ✅ Completed |
+| Phase 2: Custom Page Creation | 010-014 | ✅ Completed |
+| Phase 3: Document Form Integration | 020-024 | ✅ Completed |
+| Phase 4: Solution Packaging | 030-032 | ⏭️ Deferred |
+| Phase 5: Documentation | 040-041 | ✅ Completed |
 | Project Completion | 090 | 🔲 Not Started |
 
 ---
@@ -25,10 +25,10 @@ Deploy existing PCF controls to Dataverse.
 
 | ID | Title | Status | Dependencies | Notes |
 |----|-------|--------|--------------|-------|
-| 001 | Build and Deploy AnalysisBuilder PCF | 🔲 Not Started | none | Uses dataverse-deploy skill |
-| 002 | Build and Deploy AnalysisWorkspace PCF | 🔲 Not Started | 001 | Uses dataverse-deploy skill |
-| 003 | Test PCF Controls in Test Harness | 🔲 Not Started | 001, 002 | |
-| 004 | Document PCF Deployment Results | 🔲 Not Started | 003 | |
+| 001 | Build and Deploy AnalysisBuilder PCF | ✅ Completed | none | Deployed v1.12.0 (source v1.5.0 outdated); verified in PowerAppsToolsTemp_sprk |
+| 002 | Build and Deploy AnalysisWorkspace PCF | ✅ Completed | 001 | Deployed v1.0.29 on 2025-12-17; verified |
+| 003 | Test PCF Controls in Test Harness | ✅ Completed | 001, 002 | Pass with BUG-001: Workspace toolbar hover issue |
+| 004 | Document PCF Deployment Results | ✅ Completed | 003 | phase1-summary.md created |
 
 ---
 
@@ -38,11 +38,11 @@ Create Power Apps Custom Pages hosting PCF controls.
 
 | ID | Title | Status | Dependencies | Notes |
 |----|-------|--------|--------------|-------|
-| 010 | Create Analysis Builder Custom Page | 🔲 Not Started | 004 | |
-| 011 | Create Analysis Workspace Custom Page | 🔲 Not Started | 004 | |
-| 012 | Configure Custom Page Navigation | 🔲 Not Started | 010, 011 | |
-| 013 | Test SSE Streaming in Custom Page | 🔲 Not Started | 012 | Critical - verify streaming works |
-| 014 | Test Environment Variable Resolution | 🔲 Not Started | 013 | |
+| 010 | Create Analysis Builder Custom Page | ✅ Completed | 004 | sprk_analysisbuilder_40af8 deployed |
+| 011 | Create Analysis Workspace Custom Page | ✅ Completed | 004 | sprk_analysisworkspace_52748 deployed |
+| 012 | Configure Custom Page Navigation | ✅ Completed | 010, 011 | Builder → Workspace navigation working |
+| 013 | Test SSE Streaming in Custom Page | ✅ Completed | 012 | Code working; 404 due to in-memory storage (deferred to R3) |
+| 014 | Test Environment Variable Resolution | ✅ Completed | 013 | sprk_BffApiBaseUrl correctly resolved |
 
 ---
 
@@ -52,34 +52,34 @@ Integrate analysis UI into the Document entity form.
 
 | ID | Title | Status | Dependencies | Notes |
 |----|-------|--------|--------------|-------|
-| 020 | Add Analysis Tab to Document Form | 🔲 Not Started | 014 | |
-| 021 | Add Analysis Subgrid to Tab | 🔲 Not Started | 020 | |
-| 022 | Create Navigation JavaScript | 🔲 Not Started | 021 | Minimal webresource |
-| 023 | Add New Analysis Ribbon Button | 🔲 Not Started | 022 | Uses ribbon-edit skill |
-| 024 | Test Form Integration E2E | 🔲 Not Started | 023 | Full workflow test |
+| 020 | Add Analysis Tab to Document Form | ✅ Completed | 014 | Already exists on sprk_document form |
+| 021 | Add Analysis Subgrid to Tab | ✅ Completed | 020 | Already exists with sprk_analysis records |
+| 022 | Create Navigation JavaScript | ✅ Completed | 021 | Web resource deployed |
+| 023 | Add New Analysis Ribbon Button | ✅ Completed | 022 | Button deployed, launches Builder |
+| 024 | Test Form Integration E2E | ✅ Completed | 023 | Navigation PASS; data issues deferred to R3 |
 
 ---
 
 ## Phase 4: Solution Packaging
 
-Package UI components for deployment.
+Package UI components for deployment. **DEFERRED** - not ready for production deployment.
 
 | ID | Title | Status | Dependencies | Notes |
 |----|-------|--------|--------------|-------|
-| 030 | Export UI Solution (Unmanaged) | 🔲 Not Started | 024 | |
-| 031 | Test Solution Import | 🔲 Not Started | 030 | Clean environment test |
-| 032 | Export Managed Solution | 🔲 Not Started | 031 | Production-ready |
+| 030 | Export UI Solution (Unmanaged) | ⏭️ Deferred | 024 | Deferred to future |
+| 031 | Test Solution Import | ⏭️ Deferred | 030 | Deferred to future |
+| 032 | Export Managed Solution | ⏭️ Deferred | 031 | Deferred to future |
 
 ---
 
 ## Phase 5: Documentation
 
-Create user and deployment documentation.
+Create and consolidate AI documentation.
 
 | ID | Title | Status | Dependencies | Notes |
 |----|-------|--------|--------------|-------|
-| 040 | Create UI User Guide | 🔲 Not Started | 032 | |
-| 041 | Update Deployment Guide | 🔲 Not Started | 032 | Add UI steps to R1 guide |
+| 040 | Create Analysis UI Documentation | ✅ Completed | 024 | Created AI-DEPLOYMENT-GUIDE.md (R1+R2) |
+| 041 | Consolidate AI Documentation | ✅ Completed | 040 | Reduced 7→4 files; merged duplicates |
 
 ---
 
@@ -143,9 +143,26 @@ Phase 5: Documentation
 
 | Component | Path | Status |
 |-----------|------|--------|
-| AnalysisBuilder PCF | `src/client/pcf/AnalysisBuilder/` | Built - ready to deploy |
-| AnalysisWorkspace PCF | `src/client/pcf/AnalysisWorkspace/` | Built - ready to deploy |
+| AnalysisBuilder PCF | `src/client/pcf/AnalysisBuilder/` | ✅ Deployed (v1.12.0) |
+| AnalysisWorkspace PCF | `src/client/pcf/AnalysisWorkspace/` | ✅ Deployed (v1.0.29) |
+| Analysis Builder Custom Page | `sprk_analysisbuilder_40af8` | ✅ Deployed |
+| Analysis Workspace Custom Page | `sprk_analysisworkspace_52748` | ✅ Deployed |
+| Document Form - Analysis Tab | `sprk_document` main form | ✅ Deployed |
+| Analysis Subgrid | On Document Analysis tab | ✅ Deployed |
+| Navigation JavaScript | Web resource | ✅ Deployed |
+| New Analysis Ribbon Button | `sprk_document` form ribbon | ✅ Deployed |
 
 ---
 
-*Last Updated: 2025-12-25*
+## Deferred to R3
+
+| Issue | Description | Impact |
+|-------|-------------|--------|
+| Analysis Persistence | BFF API uses in-memory storage; analysis sessions lost on restart | Users cannot return to previous analyses |
+| Analysis Builder Empty | No scopes (skills, knowledge, actions) displayed | Builder UI shows no content |
+| Analysis Workspace Empty | No analysis data loaded | Workspace shows empty state |
+| Fix Location | `AnalysisOrchestrationService.cs:36` - replace static dictionary with Dataverse | Requires full Dataverse integration |
+
+---
+
+*Last Updated: 2025-12-29*

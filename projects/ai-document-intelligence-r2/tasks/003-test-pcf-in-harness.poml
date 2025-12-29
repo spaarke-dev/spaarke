@@ -3,7 +3,7 @@
   <metadata>
     <title>Test PCF Controls in Test Harness</title>
     <phase>Phase 1: PCF Deployment</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>001, 002</dependencies>
     <blocks>004</blocks>
@@ -77,4 +77,19 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load all files in knowledge section.</protocol>
   </execution>
+
+  <notes>
+    <completion-date>2025-12-29</completion-date>
+    <summary>
+      Both PCF controls tested in Dataverse environment.
+      Light mode and dark mode rendering verified.
+      One bug found in AnalysisWorkspace toolbar interactions.
+    </summary>
+    <findings>
+      <finding type="pass">AnalysisBuilder: All tests pass - scope tabs, theming, interactions</finding>
+      <finding type="pass">AnalysisWorkspace: Rendering and theming pass</finding>
+      <finding type="bug">BUG-001: AnalysisWorkspace toolbar buttons cause screen blink/hide on hover or click</finding>
+    </findings>
+    <documentation>projects/ai-document-intelligence-r2/notes/testing/pcf-harness-test.md</documentation>
+  </notes>
 </task>

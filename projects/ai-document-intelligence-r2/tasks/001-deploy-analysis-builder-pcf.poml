@@ -3,7 +3,7 @@
   <metadata>
     <title>Build and Deploy AnalysisBuilder PCF Control</title>
     <phase>Phase 1: PCF Deployment</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>003, 010</blocks>
@@ -90,4 +90,25 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load all files in knowledge section.</protocol>
   </execution>
+
+  <notes>
+    <completion-date>2025-12-28</completion-date>
+    <summary>
+      AnalysisBuilder PCF control verified as already deployed to Dataverse development environment.
+      No redeployment needed.
+    </summary>
+    <findings>
+      <finding type="version-mismatch">
+        Deployed version: v1.12.0 (verified via screenshot 2025-12-29)
+        Source code version: v1.5.0 (ControlManifest.Input.xml, AnalysisBuilderApp.tsx)
+        Action required: Synchronize source code version before making any updates.
+      </finding>
+      <finding type="bundle-size">
+        Current bundle: 11MB (exceeds 5MB limit)
+        Root cause: react-dom dev bundle, unoptimized icon imports
+        Deferred to: R3 project
+      </finding>
+    </findings>
+    <documentation>projects/ai-document-intelligence-r2/notes/deployment/pcf-deployment.md</documentation>
+  </notes>
 </task>

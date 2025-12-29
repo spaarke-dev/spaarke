@@ -3,7 +3,7 @@
   <metadata>
     <title>Test Environment Variable Resolution in PCF</title>
     <phase>Phase 2: Custom Page Creation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>013</dependencies>
     <blocks>024</blocks>
@@ -74,4 +74,33 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load all files in knowledge section.</protocol>
   </execution>
+
+  <notes>
+    <completion-date>2025-12-29</completion-date>
+    <summary>
+      Environment variable resolution correctly implemented in both PCF controls.
+      Uses sprk_BffApiBaseUrl from Dataverse with fallback for development.
+    </summary>
+    <findings>
+      <finding type="verified">
+        Environment variable name: sprk_BffApiBaseUrl
+        Dataverse value: https://spe-api-dev-67e2xz.azurewebsites.net (verified in R1)
+        PCF implementation: getApiBaseUrl() in control/utils/environmentVariables.ts
+      </finding>
+      <finding type="verified">
+        Console logging: Both controls log resolved URL with prefixes
+        - [Spaarke.AnalysisBuilder.EnvVar]
+        - [Spaarke.AnalysisWorkspace.EnvVar]
+      </finding>
+      <finding type="verified">
+        Fallback hierarchy:
+        1. PCF input parameter (apiBaseUrl) - for override
+        2. Dataverse environment variable (sprk_BffApiBaseUrl) - primary
+        3. Hardcoded default - only for dev/error scenarios
+      </finding>
+      <finding type="verified">
+        Caching: 5-minute cache to reduce Dataverse API calls
+      </finding>
+    </findings>
+  </notes>
 </task>

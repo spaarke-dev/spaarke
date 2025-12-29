@@ -1,6 +1,59 @@
-# AI Document Summary - Troubleshooting Guide
+# AI Document Intelligence - Troubleshooting Guide
 
-> Common issues and solutions for the AI Document Summary feature.
+> **Last Updated**: 2025-12-29
+> **Covers**: Document Analysis, Record Matching, Analysis Workspace
+
+---
+
+## Quick Reference
+
+### Current Deployment Status (Dev)
+
+| Feature | Status | Endpoint |
+|---------|--------|----------|
+| Document Analysis (SSE) | Deployed | POST /api/ai/document-intelligence/analyze |
+| Background Analysis | Deployed | POST /api/ai/document-intelligence/enqueue |
+| Record Matching | Deployed | POST /api/ai/document-intelligence/match-records |
+| AnalysisBuilder PCF | v1.12.0 | Custom Page hosted |
+| AnalysisWorkspace PCF | v1.0.29 | Custom Page hosted |
+
+### Quick Diagnostic Flow
+
+```
+1. Can you reach the API?
+   curl https://spe-api-dev-67e2xz.azurewebsites.net/ping
+   NO → Check App Service is running
+   YES → Go to 2
+
+2. Is AI enabled?
+   Check: DocumentIntelligence__Enabled=true
+   NO → Enable in app settings
+   YES → Go to 3
+
+3. Does OpenAI deployment exist?
+   az cognitiveservices account deployment list ...
+   NO → Create deployment or fix SummarizeModel
+   YES → Go to 4
+
+4. Check Application Insights for specific error
+   Portal → Application Insights → Failures → Filter by "AI"
+```
+
+### Field Mapping Reference
+
+| Model Property | Dataverse Field | Type |
+|---------------|-----------------|------|
+| Summary | sprk_filesummary | Multiline Text |
+| TlDr | sprk_filetldr | Multiline Text |
+| Keywords | sprk_filekeywords | Text |
+| SummaryStatus | sprk_filesummarystatus | Choice (0-4) |
+| ExtractOrganization | sprk_extractorganization | Multiline Text |
+| ExtractPeople | sprk_extractpeople | Multiline Text |
+| ExtractFees | sprk_extractfees | Multiline Text |
+| ExtractDates | sprk_extractdates | Multiline Text |
+| ExtractReference | sprk_extractreference | Multiline Text |
+
+---
 
 ## Quick Diagnostics
 

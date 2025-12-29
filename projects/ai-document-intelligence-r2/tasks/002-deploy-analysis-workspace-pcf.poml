@@ -3,7 +3,7 @@
   <metadata>
     <title>Build and Deploy AnalysisWorkspace PCF Control</title>
     <phase>Phase 1: PCF Deployment</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>001</dependencies>
     <blocks>003, 011</blocks>
@@ -82,4 +82,24 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load all files in knowledge section.</protocol>
   </execution>
+
+  <notes>
+    <completion-date>2025-12-29</completion-date>
+    <summary>
+      AnalysisWorkspace PCF control verified as already deployed to Dataverse.
+      No redeployment needed.
+    </summary>
+    <findings>
+      <finding type="deployment-verified">
+        Dataverse version: v1.0.29
+        Deployed date: 2025-12-17
+        Solution package version: 1.0.18 (managed)
+        Control manifest version: 1.0.32
+      </finding>
+      <finding type="bundle-size">
+        Package bundle.js: 645 KB (within limits)
+      </finding>
+    </findings>
+    <documentation>projects/ai-document-intelligence-r2/notes/deployment/pcf-deployment.md</documentation>
+  </notes>
 </task>
