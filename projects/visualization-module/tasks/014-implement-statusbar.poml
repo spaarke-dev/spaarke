@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="visualization-module">
+  <metadata>
+    <title>Implement StatusDistributionBar component</title>
+    <phase>2: Core Chart Components</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>004</dependencies>
+    <blocks>017, 020</blocks>
+    <tags>pcf, react, fluent-ui, frontend</tags>
+  </metadata>
+
+  <prompt>
+    Build the StatusDistributionBar component - a horizontal stacked bar showing
+    status distribution (e.g., Active/Pending/Closed). Uses Fluent v9 charting.
+  </prompt>
+
+  <role>
+    React developer with @fluentui/react-charting expertise.
+  </role>
+
+  <goal>
+    A reusable StatusDistributionBar component that shows status distribution
+    as a single horizontal stacked bar with segment click for drill-through.
+  </goal>
+
+  <context>
+    <background>
+      Status bars show quick distribution like "25 Active | 10 Pending | 5 Closed".
+      Compact visualization for status overviews on dashboards.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST use @fluentui/react-charting (StackedBarChart or custom)</constraint>
+    <constraint source="ADR-021">MUST use Fluent design tokens for status colors</constraint>
+    <constraint source="project">MUST emit DrillInteraction on segment click</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create StatusDistributionBar.tsx component file</step>
+    <step order="2">Define props interface (segments with label/value/color, onSegmentClick)</step>
+    <step order="3">Implement using StackedBarChart or custom horizontal bar</step>
+    <step order="4">Map status types to semantic Fluent colors</step>
+    <step order="5">Add labels showing counts or percentages</step>
+    <step order="6">Implement onSegmentClick that emits DrillInteraction</step>
+    <step order="7">Create Storybook stories</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/pcf/VisualHost/control/components/StatusDistributionBar.tsx</output>
+    <output type="code">src/client/pcf/VisualHost/stories/StatusDistributionBar.stories.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Component renders horizontal stacked bar</criterion>
+    <criterion testable="true">Segment click emits DrillInteraction with status value</criterion>
+    <criterion testable="true">Component looks correct in dark mode</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

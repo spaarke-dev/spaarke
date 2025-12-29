@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="visualization-module">
+  <metadata>
+    <title>Deploy entity to Dataverse</title>
+    <phase>1: Foundation and Infrastructure</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>021</blocks>
+    <tags>deploy, dataverse, solution</tags>
+  </metadata>
+
+  <prompt>
+    Deploy the sprk_chartdefinition entity to the Dataverse development environment.
+    This makes the configuration table available for the Visual Host PCF to query.
+  </prompt>
+
+  <role>
+    Dataverse solution developer. Expert in Power Platform deployment.
+  </role>
+
+  <goal>
+    The sprk_chartdefinition entity deployed to Dataverse dev environment,
+    with option sets configured and accessible via WebAPI.
+  </goal>
+
+  <context>
+    <background>
+      The entity must be deployed before the PCF can query chart configurations.
+      This enables development and testing of the configuration loader.
+    </background>
+    <relevant-files>
+      <file>projects/visualization-module/notes/entity-schema.md</file>
+      <file>src/solutions/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Deploy to dev environment only (spaarkedev1.crm.dynamics.com)</constraint>
+    <constraint source="project">Entity must be organization-owned</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Authenticate to Dataverse: pac auth create</step>
+    <step order="2">Create or update solution with entity definition</step>
+    <step order="3">Import solution to dev environment</step>
+    <step order="4">Verify entity exists via Power Apps maker portal</step>
+    <step order="5">Test WebAPI query: GET /api/data/v9.2/sprk_chartdefinitions</step>
+    <step order="6">Create a sample chart definition record for testing</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI for solution operations</tool>
+  </tools>
+
+  <outputs>
+    <output type="solution">sprk_chartdefinition entity in Dataverse</output>
+    <output type="docs">Sample chart definition record ID for testing</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Entity appears in Power Apps maker portal</criterion>
+    <criterion testable="true">WebAPI query returns empty array (no errors)</criterion>
+    <criterion testable="true">Sample record can be created and retrieved</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <skill>.claude/skills/dataverse-deploy/SKILL.md</skill>
+  </execution>
+</task>

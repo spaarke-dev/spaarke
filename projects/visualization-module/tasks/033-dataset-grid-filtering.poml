@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="visualization-module">
+  <metadata>
+    <title>Integrate dataset grid with filtering</title>
+    <phase>4: Drill-Through Workspace</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>032</dependencies>
+    <blocks>034</blocks>
+    <tags>pcf, dataverse, frontend</tags>
+  </metadata>
+
+  <prompt>
+    Integrate the dataset grid to consume filter state from context and re-query
+    Dataverse with the applied filter. Records update in real-time on chart interaction.
+  </prompt>
+
+  <role>
+    PCF developer with Dataverse WebAPI expertise.
+  </role>
+
+  <goal>
+    A dataset grid that re-queries Dataverse when filter state changes,
+    showing only records matching the chart selection.
+  </goal>
+
+  <context>
+    <background>
+      The grid shows records from the same view as the chart.
+      When user clicks a chart element, the grid filters to show matching records.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-011">MUST use Dataset PCF pattern for grid</constraint>
+    <constraint source="project">MUST apply DrillInteraction filter to query</constraint>
+    <constraint source="project">MUST respect Dataverse security</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-011-dataset-pcf.md</file>
+      <file>.claude/patterns/pcf/dataverse-queries.md</file>
+      <file>src/client/pcf/UniversalDatasetGrid/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create FilteredDatasetGrid component</step>
+    <step order="2">Subscribe to FilterStateContext</step>
+    <step order="3">Build filter query from DrillInteraction</step>
+    <step order="4">Query Dataverse with filter applied</step>
+    <step order="5">Render grid with Fluent DataGrid</step>
+    <step order="6">Add loading indicator during query</step>
+    <step order="7">Handle empty results state</step>
+    <step order="8">Test filter application with various operators</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/pcf/DrillThroughWorkspace/control/components/FilteredDatasetGrid.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Grid shows all records when no filter active</criterion>
+    <criterion testable="true">Grid filters when chart element clicked</criterion>
+    <criterion testable="true">Grid resets when clear button clicked</criterion>
+    <criterion testable="true">Loading indicator shows during query</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

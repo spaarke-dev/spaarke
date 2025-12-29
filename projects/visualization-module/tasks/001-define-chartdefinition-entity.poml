@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="visualization-module">
+  <metadata>
+    <title>Define sprk_chartdefinition entity schema</title>
+    <phase>1: Foundation and Infrastructure</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>002, 005</blocks>
+    <tags>dataverse, solution, fields</tags>
+  </metadata>
+
+  <prompt>
+    Create the Dataverse entity schema for sprk_chartdefinition that will store chart configuration.
+    This entity is the foundation for the configuration-driven visualization framework.
+  </prompt>
+
+  <role>
+    Dataverse solution developer. Expert in Power Platform entity design and option sets.
+  </role>
+
+  <goal>
+    A complete entity definition for sprk_chartdefinition with all required fields, option sets,
+    and relationships ready for deployment to Dataverse.
+  </goal>
+
+  <context>
+    <background>
+      The visualization framework is configuration-driven. Each chart/visual is defined by a
+      sprk_chartdefinition record that specifies visual type, data source (entity + view),
+      aggregation settings, and display options.
+    </background>
+    <relevant-files>
+      <file>projects/visualization-module/spec.md</file>
+      <file>src/solutions/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Entity must be organization-owned (admin-only CRUD in Phase 1)</constraint>
+    <constraint source="project">Option set values must match TypeScript enum values exactly</constraint>
+    <constraint source="spec">sprk_optionsjson field for flexible per-visual-type options</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>projects/visualization-module/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review spec.md Data Model section for field requirements</step>
+    <step order="2">Create entity definition document with all fields:
+      - sprk_chartdefinitionid (GUID, Primary Key)
+      - sprk_name (String, Display Name)
+      - sprk_visualtype (OptionSet: metriccard, bar, line, area, donut, statusbar, calendar, minitable)
+      - sprk_entitylogicalname (String)
+      - sprk_baseviewid (String, SavedQuery/UserQuery GUID)
+      - sprk_aggregationfield (String)
+      - sprk_aggregationtype (OptionSet: count, sum, avg, min, max)
+      - sprk_groupbyfield (String)
+      - sprk_optionsjson (Multiline Text)</step>
+    <step order="3">Define option set values with explicit integer mappings</step>
+    <step order="4">Create solution XML or use Power Platform tools to define entity</step>
+    <step order="5">Document the entity schema in a markdown file for reference</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI for solution operations</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/visualization-module/notes/entity-schema.md</output>
+    <output type="solution">Entity definition ready for deployment</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Entity schema document exists with all 9 fields defined</criterion>
+    <criterion testable="true">VisualType option set has 8 values matching spec</criterion>
+    <criterion testable="true">AggregationType option set has 5 values (count, sum, avg, min, max)</criterion>
+    <criterion testable="true">sprk_optionsjson field is multiline text type</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The sprk_optionsjson schema will be defined per-visual-type during implementation.
+    This task focuses on the entity structure, not the JSON schema details.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

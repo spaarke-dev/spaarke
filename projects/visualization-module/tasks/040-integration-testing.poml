@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="visualization-module">
+  <metadata>
+    <title>Integration testing with Dataverse</title>
+    <phase>5: Testing &amp; Documentation</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>034</dependencies>
+    <blocks>041</blocks>
+    <tags>testing, dataverse, integration</tags>
+  </metadata>
+
+  <prompt>
+    Create integration tests that verify the visualization framework works end-to-end
+    with real Dataverse data. Test all visual types with various data shapes.
+  </prompt>
+
+  <role>
+    QA engineer with Dataverse and PCF testing expertise.
+  </role>
+
+  <goal>
+    Comprehensive integration test suite that validates the visualization framework
+    with real Dataverse data across all visual types and interaction patterns.
+  </goal>
+
+  <context>
+    <background>
+      Integration tests verify the full stack: PCF control → Dataverse query →
+      data aggregation → chart rendering → drill-through interaction.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="project">MUST test with real Dataverse environment</constraint>
+    <constraint source="project">MUST cover all 7 visual types</constraint>
+    <constraint source="project">MUST verify drill-through filtering</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/ai-knowledge/guides/PCF-V9-PACKAGING.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create test chart definitions in Dataverse</step>
+    <step order="2">Test MetricCard with single value aggregation</step>
+    <step order="3">Test BarChart with category grouping</step>
+    <step order="4">Test LineChart with time series data</step>
+    <step order="5">Test AreaChart with cumulative data</step>
+    <step order="6">Test DonutChart with percentage distribution</step>
+    <step order="7">Test StatusDistributionBar with status field</step>
+    <step order="8">Test MiniTable with record list</step>
+    <step order="9">Test drill-through navigation from Visual Host</step>
+    <step order="10">Test filter application in DrillThroughWorkspace</step>
+    <step order="11">Test theme switching (light/dark mode)</step>
+    <step order="12">Document test results and any issues found</step>
+    <step order="13">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <outputs>
+    <output type="document">Test results documentation</output>
+    <output type="data">Test chart definition records</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 7 visual types render correctly</criterion>
+    <criterion testable="true">Drill-through opens and filters correctly</criterion>
+    <criterion testable="true">Theme switching works across all visuals</criterion>
+    <criterion testable="true">No console errors during normal operation</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
