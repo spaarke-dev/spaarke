@@ -126,6 +126,9 @@ public enum ToolType
     /// <summary>Clause analysis tool.</summary>
     ClauseAnalyzer = 1,
 
+    /// <summary>Document classification tool.</summary>
+    DocumentClassifier = 2,
+
     /// <summary>Custom tool with handler class.</summary>
-    Custom = 2
+    Custom = 99
 }

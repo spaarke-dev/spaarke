@@ -361,4 +361,100 @@ public class OpenAiClient : IOpenAiClient
             throw;
         }
     }
+
+    /// <summary>
+    /// Generate vector embeddings for text content.
+    /// Uses text-embedding-3-small (1536 dimensions) by default.
+    /// Protected by circuit breaker - throws OpenAiCircuitBrokenException when open.
+    /// </summary>
+    /// <param name="text">The text to generate embeddings for.</param>
+    /// <param name="model">Optional model override. Defaults to text-embedding-3-small.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Vector embedding as float array.</returns>
+    /// <exception cref="OpenAiCircuitBrokenException">Thrown when circuit breaker is open.</exception>
+    public async Task<ReadOnlyMemory<float>> GenerateEmbeddingAsync(
+        string text,
+        string? model = null,
+        CancellationToken cancellationToken = default)
+    {
+        var deploymentName = model ?? _options.EmbeddingModel ?? "text-embedding-3-small";
+        var embeddingClient = _client.GetEmbeddingClient(deploymentName);
+
+        _logger.LogDebug("Generating embedding with model {Model}, TextLength={Length}",
+            deploymentName, text.Length);
+
+        try
+        {
+            var response = await _circuitBreaker.ExecuteAsync(async ct =>
+            {
+                return await embeddingClient.GenerateEmbeddingAsync(text, cancellationToken: ct);
+            }, cancellationToken);
+
+            _logger.LogDebug("Embedding generated with model {Model}, Dimensions={Dims}",
+                deploymentName, response.Value.ToFloats().Length);
+
+            return response.Value.ToFloats();
+        }
+        catch (BrokenCircuitException)
+        {
+            _logger.LogWarning("OpenAI circuit breaker is open. Rejecting embedding request.");
+            throw new OpenAiCircuitBrokenException(BreakDuration);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to generate embedding with model {Model}", deploymentName);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Generate vector embeddings for multiple texts in a batch.
+    /// More efficient than individual calls for bulk operations.
+    /// Protected by circuit breaker - throws OpenAiCircuitBrokenException when open.
+    /// </summary>
+    /// <param name="texts">The texts to generate embeddings for.</param>
+    /// <param name="model">Optional model override. Defaults to text-embedding-3-small.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>List of vector embeddings in same order as input texts.</returns>
+    /// <exception cref="OpenAiCircuitBrokenException">Thrown when circuit breaker is open.</exception>
+    public async Task<IReadOnlyList<ReadOnlyMemory<float>>> GenerateEmbeddingsAsync(
+        IEnumerable<string> texts,
+        string? model = null,
+        CancellationToken cancellationToken = default)
+    {
+        var textList = texts.ToList();
+        var deploymentName = model ?? _options.EmbeddingModel ?? "text-embedding-3-small";
+        var embeddingClient = _client.GetEmbeddingClient(deploymentName);
+
+        _logger.LogDebug("Generating batch embeddings with model {Model}, Count={Count}",
+            deploymentName, textList.Count);
+
+        try
+        {
+            var response = await _circuitBreaker.ExecuteAsync(async ct =>
+            {
+                return await embeddingClient.GenerateEmbeddingsAsync(textList, cancellationToken: ct);
+            }, cancellationToken);
+
+            var embeddings = response.Value
+                .OrderBy(e => e.Index)
+                .Select(e => e.ToFloats())
+                .ToList();
+
+            _logger.LogDebug("Batch embeddings generated with model {Model}, Count={Count}, Dimensions={Dims}",
+                deploymentName, embeddings.Count, embeddings.FirstOrDefault().Length);
+
+            return embeddings;
+        }
+        catch (BrokenCircuitException)
+        {
+            _logger.LogWarning("OpenAI circuit breaker is open. Rejecting batch embedding request.");
+            throw new OpenAiCircuitBrokenException(BreakDuration);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to generate batch embeddings with model {Model}", deploymentName);
+            throw;
+        }
+    }
 }

@@ -5,7 +5,7 @@
     <tags>tool-handler, classification, ai, dotnet</tags>
     <estimate>5h</estimate>
     <dependencies>011</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -73,4 +73,36 @@
     <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
     <next-task>015-test-tool-framework.poml</next-task>
   </execution>
+
+  <notes>
+    <completed>2025-12-29</completed>
+    <summary>
+      Created DocumentClassifierHandler with full IAnalysisToolHandler implementation.
+      Handler classifies documents into predefined categories (NDA, MSA, SOW, etc.) or
+      custom taxonomies. Supports optional RAG integration for example-based classification
+      using few-shot learning from similar documents.
+    </summary>
+    <implementation>
+      - HandlerId = "DocumentClassifierHandler"
+      - SupportedToolTypes = ToolType.DocumentClassifier (added enum value = 2)
+      - 5 configurable parameters: categories, useRagExamples, ragExampleCount, minConfidence, includeSecondaryClassifications
+      - Document truncation strategy: first 3000 + last 1000 chars for classification focus
+      - RAG integration via IRagService.SearchAsync for example retrieval
+      - Primary + secondary classification with confidence scores
+      - JSON metadata parsing for RAG result categories
+    </implementation>
+    <files-created>
+      - src/server/api/Sprk.Bff.Api/Services/Ai/Tools/DocumentClassifierHandler.cs
+      - tests/unit/Sprk.Bff.Api.Tests/Services/Ai/DocumentClassifierHandlerTests.cs
+    </files-created>
+    <files-modified>
+      - src/server/api/Sprk.Bff.Api/Services/Ai/IScopeResolverService.cs (added DocumentClassifier = 2 to ToolType enum)
+    </files-modified>
+    <test-results>All 103 tool framework tests pass (23 EntityExtractor + 27 ClauseAnalyzer + 33 DocumentClassifier + 20 ToolHandlerRegistry)</test-results>
+    <issues-resolved>
+      - CS0117: RagSearchOptions uses MinScore (not MinRelevanceScore)
+      - CS1061: RagSearchResult.Metadata is JSON string, not Dictionary - created ExtractCategoryFromMetadata helper
+      - CS1061: RagSearchResult uses Score property (not RelevanceScore)
+    </issues-resolved>
+  </notes>
 </task>

@@ -1,0 +1,506 @@
+using System.Diagnostics;
+using Azure;
+using Azure.Search.Documents;
+using Azure.Search.Documents.Models;
+using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Models.Ai;
+
+namespace Sprk.Bff.Api.Services.Ai;
+
+/// <summary>
+/// Implements hybrid RAG search combining keyword search, vector search, and semantic ranking.
+/// Integrates with IKnowledgeDeploymentService for multi-tenant index routing.
+/// </summary>
+/// <remarks>
+/// Hybrid search pipeline:
+/// 1. Generate embedding for query (with optional caching)
+/// 2. Build hybrid query combining:
+///    - Full-text keyword search on content field
+///    - Vector search on contentVector field (cosine similarity)
+/// 3. Apply semantic ranking for result re-ordering
+/// 4. Filter by tenant and other criteria
+/// 5. Return ranked results with telemetry
+///
+/// Performance targets:
+/// - P95 latency: <500ms
+/// - Embedding generation: ~50ms (cached), ~150ms (uncached)
+/// - Search execution: ~100-300ms depending on index size
+/// </remarks>
+public class RagService : IRagService
+{
+    private readonly IKnowledgeDeploymentService _deploymentService;
+    private readonly IOpenAiClient _openAiClient;
+    private readonly IEmbeddingCache _embeddingCache;
+    private readonly AnalysisOptions _analysisOptions;
+    private readonly ILogger<RagService> _logger;
+
+    // Semantic configuration name from the index definition
+    private const string SemanticConfigurationName = "knowledge-semantic-config";
+
+    // Vector field name and dimensions
+    private const string VectorFieldName = "contentVector";
+    private const int VectorDimensions = 1536;
+
+    // Search field for keyword queries
+    private static readonly string[] SearchFields = ["content", "documentName", "knowledgeSourceName"];
+
+    public RagService(
+        IKnowledgeDeploymentService deploymentService,
+        IOpenAiClient openAiClient,
+        IEmbeddingCache embeddingCache,
+        IOptions<AnalysisOptions> analysisOptions,
+        ILogger<RagService> logger)
+    {
+        _deploymentService = deploymentService;
+        _openAiClient = openAiClient;
+        _embeddingCache = embeddingCache;
+        _analysisOptions = analysisOptions.Value;
+        _logger = logger;
+    }
+
+    /// <inheritdoc />
+    public async Task<RagSearchResponse> SearchAsync(
+        string query,
+        RagSearchOptions options,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(query);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentException.ThrowIfNullOrEmpty(options.TenantId);
+
+        var totalStopwatch = Stopwatch.StartNew();
+        var embeddingStopwatch = new Stopwatch();
+        var searchStopwatch = new Stopwatch();
+        var embeddingCacheHit = false;
+
+        _logger.LogDebug(
+            "Starting RAG search for tenant {TenantId}, query length={QueryLength}, TopK={TopK}",
+            options.TenantId, query.Length, options.TopK);
+
+        try
+        {
+            // Step 1: Get embedding for query (with caching)
+            ReadOnlyMemory<float> queryEmbedding = default;
+            if (options.UseVectorSearch)
+            {
+                embeddingStopwatch.Start();
+
+                // Try cache first
+                var cachedEmbedding = await _embeddingCache.GetEmbeddingForContentAsync(query, cancellationToken);
+                if (cachedEmbedding.HasValue)
+                {
+                    queryEmbedding = cachedEmbedding.Value;
+                    embeddingCacheHit = true;
+                }
+                else
+                {
+                    // Cache miss - generate and cache
+                    queryEmbedding = await _openAiClient.GenerateEmbeddingAsync(query, cancellationToken: cancellationToken);
+                    await _embeddingCache.SetEmbeddingForContentAsync(query, queryEmbedding, cancellationToken);
+                }
+
+                embeddingStopwatch.Stop();
+
+                _logger.LogDebug("Query embedding in {ElapsedMs}ms, cacheHit={CacheHit}",
+                    embeddingStopwatch.ElapsedMilliseconds, embeddingCacheHit);
+            }
+
+            // Step 2: Get SearchClient for tenant's deployment
+            searchStopwatch.Start();
+            var searchClient = options.DeploymentId.HasValue
+                ? await _deploymentService.GetSearchClientByDeploymentAsync(options.DeploymentId.Value, cancellationToken)
+                : await _deploymentService.GetSearchClientAsync(options.TenantId, cancellationToken);
+
+            // Step 3: Build hybrid search options
+            var searchOptions = BuildSearchOptions(options, queryEmbedding);
+
+            // Step 4: Execute search
+            var searchText = options.UseKeywordSearch ? query : "*";
+            var response = await searchClient.SearchAsync<KnowledgeDocument>(searchText, searchOptions, cancellationToken);
+            searchStopwatch.Stop();
+
+            // Step 5: Process results
+            var results = new List<RagSearchResult>();
+            long totalCount = 0;
+
+            await foreach (var result in response.Value.GetResultsAsync().WithCancellation(cancellationToken))
+            {
+                if (result.Document == null) continue;
+
+                // Apply minimum score filter
+                var score = result.Score ?? 0;
+                var semanticScore = result.SemanticSearch?.RerankerScore;
+
+                // Use semantic score if available, otherwise use search score
+                var effectiveScore = semanticScore ?? score;
+                if (effectiveScore < options.MinScore) continue;
+
+                results.Add(new RagSearchResult
+                {
+                    Id = result.Document.Id,
+                    DocumentId = result.Document.DocumentId,
+                    DocumentName = result.Document.DocumentName,
+                    Content = result.Document.Content,
+                    KnowledgeSourceName = result.Document.KnowledgeSourceName,
+                    Score = effectiveScore,
+                    SemanticScore = semanticScore,
+                    ChunkIndex = result.Document.ChunkIndex,
+                    ChunkCount = result.Document.ChunkCount,
+                    Highlights = GetHighlights(result),
+                    Metadata = result.Document.Metadata,
+                    Tags = result.Document.Tags
+                });
+            }
+
+            // Get total count from response
+            totalCount = response.Value.TotalCount ?? results.Count;
+
+            totalStopwatch.Stop();
+
+            _logger.LogInformation(
+                "RAG search completed for tenant {TenantId}: {ResultCount} results in {TotalMs}ms " +
+                "(embedding={EmbeddingMs}ms, search={SearchMs}ms)",
+                options.TenantId, results.Count, totalStopwatch.ElapsedMilliseconds,
+                embeddingStopwatch.ElapsedMilliseconds, searchStopwatch.ElapsedMilliseconds);
+
+            return new RagSearchResponse
+            {
+                Query = query,
+                Results = results,
+                TotalCount = totalCount,
+                SearchDurationMs = searchStopwatch.ElapsedMilliseconds,
+                EmbeddingDurationMs = embeddingStopwatch.ElapsedMilliseconds,
+                EmbeddingCacheHit = embeddingCacheHit
+            };
+        }
+        catch (RequestFailedException ex)
+        {
+            _logger.LogError(ex, "Azure AI Search error during RAG search for tenant {TenantId}", options.TenantId);
+            throw;
+        }
+        catch (OpenAiCircuitBrokenException)
+        {
+            _logger.LogWarning("OpenAI circuit breaker open during RAG search for tenant {TenantId}", options.TenantId);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error during RAG search for tenant {TenantId}", options.TenantId);
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<KnowledgeDocument> IndexDocumentAsync(
+        KnowledgeDocument document,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentException.ThrowIfNullOrEmpty(document.TenantId);
+
+        _logger.LogDebug("Indexing document {DocumentId} chunk {ChunkIndex} for tenant {TenantId}",
+            document.DocumentId, document.ChunkIndex, document.TenantId);
+
+        // Generate embedding if not provided
+        if (document.ContentVector.Length == 0 && !string.IsNullOrEmpty(document.Content))
+        {
+            var embedding = await _openAiClient.GenerateEmbeddingAsync(document.Content, cancellationToken: cancellationToken);
+            document.ContentVector = embedding;
+        }
+
+        // Ensure timestamps are set
+        var now = DateTimeOffset.UtcNow;
+        if (document.CreatedAt == default)
+        {
+            document.CreatedAt = now;
+        }
+        document.UpdatedAt = now;
+
+        // Get SearchClient and index document
+        var searchClient = await _deploymentService.GetSearchClientAsync(document.TenantId, cancellationToken);
+        var response = await searchClient.MergeOrUploadDocumentsAsync(
+            new[] { document },
+            cancellationToken: cancellationToken);
+
+        var result = response.Value.Results.FirstOrDefault();
+        if (result?.Succeeded != true)
+        {
+            throw new InvalidOperationException($"Failed to index document: {result?.ErrorMessage}");
+        }
+
+        _logger.LogInformation("Indexed document {DocumentId} chunk {ChunkIndex} for tenant {TenantId}",
+            document.DocumentId, document.ChunkIndex, document.TenantId);
+
+        return document;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<IndexResult>> IndexDocumentsBatchAsync(
+        IEnumerable<KnowledgeDocument> documents,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(documents);
+
+        var documentList = documents.ToList();
+        if (documentList.Count == 0) return [];
+
+        var tenantId = documentList[0].TenantId;
+        ArgumentException.ThrowIfNullOrEmpty(tenantId);
+
+        _logger.LogDebug("Batch indexing {Count} documents for tenant {TenantId}", documentList.Count, tenantId);
+
+        // Generate embeddings for documents without vectors
+        var documentsNeedingEmbeddings = documentList
+            .Where(d => d.ContentVector.Length == 0 && !string.IsNullOrEmpty(d.Content))
+            .ToList();
+
+        if (documentsNeedingEmbeddings.Count > 0)
+        {
+            var texts = documentsNeedingEmbeddings.Select(d => d.Content).ToList();
+            var embeddings = await _openAiClient.GenerateEmbeddingsAsync(texts, cancellationToken: cancellationToken);
+
+            for (int i = 0; i < documentsNeedingEmbeddings.Count; i++)
+            {
+                documentsNeedingEmbeddings[i].ContentVector = embeddings[i];
+            }
+        }
+
+        // Set timestamps
+        var now = DateTimeOffset.UtcNow;
+        foreach (var doc in documentList)
+        {
+            if (doc.CreatedAt == default)
+            {
+                doc.CreatedAt = now;
+            }
+            doc.UpdatedAt = now;
+        }
+
+        // Index in batches (Azure AI Search limit is 1000 per batch)
+        var searchClient = await _deploymentService.GetSearchClientAsync(tenantId, cancellationToken);
+        var results = new List<IndexResult>();
+
+        const int batchSize = 1000;
+        for (int i = 0; i < documentList.Count; i += batchSize)
+        {
+            var batch = documentList.Skip(i).Take(batchSize).ToList();
+            var response = await searchClient.MergeOrUploadDocumentsAsync(batch, cancellationToken: cancellationToken);
+
+            foreach (var result in response.Value.Results)
+            {
+                results.Add(result.Succeeded
+                    ? IndexResult.Success(result.Key)
+                    : IndexResult.Failure(result.Key, result.ErrorMessage ?? "Unknown error"));
+            }
+        }
+
+        var successCount = results.Count(r => r.Succeeded);
+        _logger.LogInformation("Batch indexed {SuccessCount}/{TotalCount} documents for tenant {TenantId}",
+            successCount, documentList.Count, tenantId);
+
+        return results;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> DeleteDocumentAsync(
+        string documentId,
+        string tenantId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(documentId);
+        ArgumentException.ThrowIfNullOrEmpty(tenantId);
+
+        _logger.LogDebug("Deleting document {DocumentId} for tenant {TenantId}", documentId, tenantId);
+
+        var searchClient = await _deploymentService.GetSearchClientAsync(tenantId, cancellationToken);
+        var response = await searchClient.DeleteDocumentsAsync(
+            "id",
+            new[] { documentId },
+            cancellationToken: cancellationToken);
+
+        var result = response.Value.Results.FirstOrDefault();
+        var succeeded = result?.Succeeded ?? false;
+
+        if (succeeded)
+        {
+            _logger.LogInformation("Deleted document {DocumentId} for tenant {TenantId}", documentId, tenantId);
+        }
+        else
+        {
+            _logger.LogWarning("Failed to delete document {DocumentId} for tenant {TenantId}: {Error}",
+                documentId, tenantId, result?.ErrorMessage);
+        }
+
+        return succeeded;
+    }
+
+    /// <inheritdoc />
+    public async Task<int> DeleteBySourceDocumentAsync(
+        string sourceDocumentId,
+        string tenantId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(sourceDocumentId);
+        ArgumentException.ThrowIfNullOrEmpty(tenantId);
+
+        _logger.LogDebug("Deleting all chunks for source document {SourceDocumentId} for tenant {TenantId}",
+            sourceDocumentId, tenantId);
+
+        var searchClient = await _deploymentService.GetSearchClientAsync(tenantId, cancellationToken);
+
+        // First, find all chunk IDs for this source document
+        var searchOptions = new SearchOptions
+        {
+            Filter = $"documentId eq '{EscapeFilterValue(sourceDocumentId)}' and tenantId eq '{EscapeFilterValue(tenantId)}'",
+            Size = 1000,
+            Select = { "id" }
+        };
+
+        var response = await searchClient.SearchAsync<KnowledgeDocument>("*", searchOptions, cancellationToken);
+
+        var idsToDelete = new List<string>();
+        await foreach (var result in response.Value.GetResultsAsync().WithCancellation(cancellationToken))
+        {
+            if (result.Document?.Id != null)
+            {
+                idsToDelete.Add(result.Document.Id);
+            }
+        }
+
+        if (idsToDelete.Count == 0)
+        {
+            _logger.LogDebug("No chunks found for source document {SourceDocumentId}", sourceDocumentId);
+            return 0;
+        }
+
+        // Delete all found chunks
+        var deleteResponse = await searchClient.DeleteDocumentsAsync("id", idsToDelete, cancellationToken: cancellationToken);
+        var deletedCount = deleteResponse.Value.Results.Count(r => r.Succeeded);
+
+        _logger.LogInformation("Deleted {DeletedCount}/{TotalCount} chunks for source document {SourceDocumentId}",
+            deletedCount, idsToDelete.Count, sourceDocumentId);
+
+        return deletedCount;
+    }
+
+    /// <inheritdoc />
+    public async Task<ReadOnlyMemory<float>> GetEmbeddingAsync(
+        string text,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(text);
+
+        // Try cache first
+        var cachedEmbedding = await _embeddingCache.GetEmbeddingForContentAsync(text, cancellationToken);
+        if (cachedEmbedding.HasValue)
+        {
+            return cachedEmbedding.Value;
+        }
+
+        // Cache miss - generate and cache
+        var embedding = await _openAiClient.GenerateEmbeddingAsync(text, cancellationToken: cancellationToken);
+        await _embeddingCache.SetEmbeddingForContentAsync(text, embedding, cancellationToken);
+
+        return embedding;
+    }
+
+    #region Private Methods
+
+    private SearchOptions BuildSearchOptions(RagSearchOptions options, ReadOnlyMemory<float> queryEmbedding)
+    {
+        var searchOptions = new SearchOptions
+        {
+            Size = options.TopK,
+            IncludeTotalCount = true,
+            QueryType = SearchQueryType.Semantic,
+            SemanticSearch = new SemanticSearchOptions
+            {
+                SemanticConfigurationName = SemanticConfigurationName,
+                QueryCaption = new QueryCaption(QueryCaptionType.Extractive),
+                QueryAnswer = new QueryAnswer(QueryAnswerType.None)
+            }
+        };
+
+        // Add vector search if enabled
+        if (options.UseVectorSearch && queryEmbedding.Length > 0)
+        {
+            searchOptions.VectorSearch = new VectorSearchOptions
+            {
+                Queries =
+                {
+                    new VectorizedQuery(queryEmbedding)
+                    {
+                        KNearestNeighborsCount = options.TopK * 2, // Retrieve more for hybrid fusion
+                        Fields = { VectorFieldName }
+                    }
+                }
+            };
+        }
+
+        // Build filter expression
+        var filters = new List<string>();
+
+        // Always filter by tenant for security
+        filters.Add($"tenantId eq '{EscapeFilterValue(options.TenantId)}'");
+
+        // Optional filters
+        if (!string.IsNullOrEmpty(options.KnowledgeSourceId))
+        {
+            filters.Add($"knowledgeSourceId eq '{EscapeFilterValue(options.KnowledgeSourceId)}'");
+        }
+
+        if (!string.IsNullOrEmpty(options.DocumentType))
+        {
+            filters.Add($"documentType eq '{EscapeFilterValue(options.DocumentType)}'");
+        }
+
+        if (options.Tags?.Count > 0)
+        {
+            var tagFilters = options.Tags.Select(t => $"tags/any(tag: tag eq '{EscapeFilterValue(t)}')");
+            filters.Add($"({string.Join(" or ", tagFilters)})");
+        }
+
+        searchOptions.Filter = string.Join(" and ", filters);
+
+        // Set search fields for keyword search
+        if (options.UseKeywordSearch)
+        {
+            foreach (var field in SearchFields)
+            {
+                searchOptions.SearchFields.Add(field);
+            }
+        }
+
+        // Enable highlighting
+        searchOptions.HighlightFields.Add("content");
+
+        return searchOptions;
+    }
+
+    private static IReadOnlyList<string>? GetHighlights(SearchResult<KnowledgeDocument> result)
+    {
+        if (result.Highlights == null || !result.Highlights.TryGetValue("content", out var highlights))
+        {
+            // Try semantic captions if available
+            if (result.SemanticSearch?.Captions?.Count > 0)
+            {
+                return result.SemanticSearch.Captions
+                    .Select(c => c.Highlights ?? c.Text)
+                    .Where(h => !string.IsNullOrEmpty(h))
+                    .ToList()!;
+            }
+            return null;
+        }
+
+        return highlights.ToList();
+    }
+
+    private static string EscapeFilterValue(string value)
+    {
+        // Escape single quotes for OData filter expressions
+        return value.Replace("'", "''");
+    }
+
+    #endregion
+}

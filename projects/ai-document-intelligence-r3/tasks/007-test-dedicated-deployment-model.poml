@@ -5,7 +5,7 @@
     <tags>testing, rag, dedicated-model, integration</tags>
     <estimate>4h</estimate>
     <dependencies>005</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -70,4 +70,19 @@
     <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
     <next-task>008-document-rag-implementation.poml</next-task>
   </execution>
+
+  <notes>
+    <completion-date>2025-12-29</completion-date>
+    <summary>Created comprehensive test suite for Dedicated and CustomerOwned RAG deployment models.</summary>
+    <findings>
+      <finding type="created">tests/integration/Spe.Integration.Tests/RagDedicatedDeploymentTests.cs - 14 integration tests</finding>
+      <finding type="created">scripts/Test-RagDedicatedModel.ps1 - PowerShell E2E test script</finding>
+      <finding type="created">projects/ai-document-intelligence-r3/notes/task-007-test-results.md - Test documentation</finding>
+      <finding type="note">Dedicated model uses sanitized tenant ID for index naming (lowercase, alphanumeric, hyphens)</finding>
+      <finding type="note">CustomerOwned model requires SearchEndpoint and ApiKeySecretName for validation</finding>
+      <finding type="note">SearchClient instances are cached per tenant for performance</finding>
+      <finding type="note">Cross-model isolation tests verify Dedicated cannot see Shared data</finding>
+      <finding type="note">Index name format: {sanitizedTenantId}-knowledge</finding>
+    </findings>
+  </notes>
 </task>

@@ -5,7 +5,7 @@
     <tags>azure-ai-search, rag, schema, infrastructure</tags>
     <estimate>4h</estimate>
     <dependencies>001</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -65,4 +65,17 @@
     <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
     <next-task>003-implement-knowledge-deployment-service.poml</next-task>
   </execution>
+
+  <notes>
+    <completion-date>2025-12-29</completion-date>
+    <summary>Created and deployed spaarke-knowledge-index to Azure AI Search.</summary>
+    <findings>
+      <finding type="created">infrastructure/ai-search/spaarke-knowledge-index.json - Index definition</finding>
+      <finding type="created">src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs - C# model</finding>
+      <finding type="deployed">spaarke-knowledge-index in spaarke-search-dev (verified accessible)</finding>
+      <finding type="note">Vector: 1536 dimensions (text-embedding-3-small), HNSW algorithm, cosine metric</finding>
+      <finding type="note">Semantic config: knowledge-semantic-config (title=documentName, content=content)</finding>
+      <finding type="note">Multi-tenant: tenantId, deploymentId, deploymentModel fields for Shared/Dedicated/CustomerOwned</finding>
+    </findings>
+  </notes>
 </task>

@@ -1,10 +1,11 @@
 # Spaarke AI Architecture
 
-> **Version**: 1.3
-> **Date**: December 10, 2025  
-> **Status**: Draft  
-> **Author**: Spaarke Engineering  
+> **Version**: 1.4
+> **Date**: December 29, 2025
+> **Status**: Draft
+> **Author**: Spaarke Engineering
 > **Related**: [SPAARKE-AI-STRATEGY.md](../../reference/architecture/SPAARKE-AI-STRATEGY.md)
+> **R3 Updates**: RAG Deployment Models, KnowledgeDeploymentService, Knowledge Index
 
 ---
 
@@ -26,6 +27,7 @@ For strategic context, use cases, and Microsoft Foundry platform details, see th
 | **File Access** | `SpeFileStore` facade (existing) |
 | **AI Client** | `OpenAiClient` (new, shared across tools) |
 | **Text Extraction** | `TextExtractorService` (native + Document Intelligence) |
+| **RAG Deployment** | `IKnowledgeDeploymentService` - Multi-tenant SearchClient routing (R3) |
 | **Background Jobs** | Service Bus + `IJobHandler` pattern (existing) |
 | **Caching** | Redis with TTL-based invalidation (existing) |
 
@@ -206,6 +208,9 @@ src/server/api/Sprk.Bff.Api/
 │   │   ├── AiSearchService.cs            # Vector/hybrid search
 │   │   ├── AiChatService.cs              # RAG chat completion
 │   │   ├── EmbeddingService.cs           # Embedding generation
+│   │   │
+│   │   ├── IKnowledgeDeploymentService.cs  # (R3) RAG deployment interface
+│   │   ├── KnowledgeDeploymentService.cs   # (R3) SearchClient routing
 │   │   │
 │   │   └── Tools/                        # Tool handlers
 │   │       ├── IAiToolHandler.cs         # Interface
@@ -1418,9 +1423,155 @@ public class AiAuthorizationFilter : IEndpointFilter
 
 ---
 
-## 8. Index Schema
+## 8. RAG Deployment Models (R3)
 
-### 8.1 Azure AI Search Index Definition
+The RAG (Retrieval-Augmented Generation) system supports 3 deployment models for multi-tenant knowledge retrieval. This enables flexible data isolation strategies based on customer requirements.
+
+### 8.1 Deployment Model Overview
+
+| Model | Description | Index Location | Use Case |
+|-------|-------------|----------------|----------|
+| **Shared** | Multi-tenant index with tenant filtering | `spaarke-knowledge-index` | Default, cost-effective |
+| **Dedicated** | Per-customer index in Spaarke subscription | `{tenantId}-knowledge` | Per-customer isolation |
+| **CustomerOwned** | Customer's own Azure AI Search | Customer-provided | Full data sovereignty (BYOK) |
+
+### 8.2 IKnowledgeDeploymentService
+
+The `IKnowledgeDeploymentService` routes SearchClient requests to the appropriate deployment model:
+
+```csharp
+public interface IKnowledgeDeploymentService
+{
+    /// <summary>Get deployment config for a tenant (creates default if not exists).</summary>
+    Task<KnowledgeDeploymentConfig> GetDeploymentConfigAsync(string tenantId, CancellationToken ct);
+
+    /// <summary>Get SearchClient configured for tenant's deployment model.</summary>
+    Task<SearchClient> GetSearchClientAsync(string tenantId, CancellationToken ct);
+
+    /// <summary>Get SearchClient for explicit deployment ID.</summary>
+    Task<SearchClient> GetSearchClientByDeploymentAsync(Guid deploymentId, CancellationToken ct);
+
+    /// <summary>Save/update deployment configuration.</summary>
+    Task<KnowledgeDeploymentConfig> SaveDeploymentConfigAsync(KnowledgeDeploymentConfig config, CancellationToken ct);
+
+    /// <summary>Validate CustomerOwned deployment (test connectivity).</summary>
+    Task<DeploymentValidationResult> ValidateCustomerOwnedDeploymentAsync(KnowledgeDeploymentConfig config, CancellationToken ct);
+}
+```
+
+### 8.3 Deployment Configuration
+
+```csharp
+public record KnowledgeDeploymentConfig
+{
+    public Guid? Id { get; init; }                    // sprk_aiknowledgedeploymentid
+    public string TenantId { get; init; }             // Dataverse org ID
+    public RagDeploymentModel Model { get; init; }    // Shared, Dedicated, CustomerOwned
+    public string? SearchEndpoint { get; init; }      // For CustomerOwned
+    public string IndexName { get; init; }            // Index name
+    public string? ApiKeySecretName { get; init; }    // Key Vault secret (CustomerOwned)
+    public bool IsActive { get; init; }               // Active/inactive
+}
+```
+
+### 8.4 Index Naming Convention
+
+| Model | Index Name Pattern | Example |
+|-------|-------------------|---------|
+| Shared | `spaarke-knowledge-index` | `spaarke-knowledge-index` |
+| Dedicated | `{sanitized-tenantId}-knowledge` | `contoso123-knowledge` |
+| CustomerOwned | Customer-specified | `customer-knowledge-prod` |
+
+**Sanitization**: Tenant IDs are sanitized to lowercase alphanumeric + hyphens for Azure AI Search compatibility.
+
+### 8.5 CustomerOwned Model - Key Vault Integration
+
+For CustomerOwned deployments, API keys are stored in Azure Key Vault:
+
+```csharp
+// Secret name format
+config.ApiKeySecretName = "kv://spaarke-spekvcert/customer-contoso-searchkey";
+
+// Retrieved via SecretClient injection
+var apiKey = await _secretClient.GetSecretAsync(secretName, cancellationToken);
+```
+
+### 8.6 DI Registration
+
+```csharp
+// Program.cs - Analysis services section
+if (!string.IsNullOrEmpty(docIntelOptions?.AiSearchEndpoint))
+{
+    // SearchIndexClient for index management
+    builder.Services.AddSingleton(sp => new SearchIndexClient(
+        new Uri(docIntelOptions.AiSearchEndpoint),
+        new AzureKeyCredential(docIntelOptions.AiSearchKey)));
+
+    // KnowledgeDeploymentService - Singleton for caching
+    builder.Services.AddSingleton<IKnowledgeDeploymentService, KnowledgeDeploymentService>();
+
+    // EmbeddingCache - Redis-based embedding caching (ADR-009)
+    builder.Services.AddSingleton<IEmbeddingCache, EmbeddingCache>();
+
+    // RagService - Hybrid search with embedding cache integration
+    builder.Services.AddSingleton<IRagService, RagService>();
+}
+```
+
+### 8.7 Embedding Cache (R3)
+
+The embedding cache reduces Azure OpenAI API costs and latency by caching embeddings by content hash.
+
+**Interface: `IEmbeddingCache`**
+```csharp
+public interface IEmbeddingCache
+{
+    Task<ReadOnlyMemory<float>?> GetEmbeddingAsync(string contentHash, CancellationToken ct);
+    Task SetEmbeddingAsync(string contentHash, ReadOnlyMemory<float> embedding, CancellationToken ct);
+    string ComputeContentHash(string content);
+
+    // Convenience methods (compute hash internally)
+    Task<ReadOnlyMemory<float>?> GetEmbeddingForContentAsync(string content, CancellationToken ct);
+    Task SetEmbeddingForContentAsync(string content, ReadOnlyMemory<float> embedding, CancellationToken ct);
+}
+```
+
+**Implementation: `EmbeddingCache`**
+
+| Feature | Implementation |
+|---------|----------------|
+| **Cache Key** | `sdap:embedding:{SHA256-base64-hash}` |
+| **TTL** | 7 days (embeddings are deterministic for same model) |
+| **Serialization** | Binary via `Buffer.BlockCopy` (float[] → byte[]) |
+| **Error Handling** | Graceful - cache failures don't break embedding generation |
+| **Metrics** | `CacheMetrics` with `cacheType="embedding"` for OpenTelemetry |
+
+**Integration with RagService:**
+```csharp
+// RagService.SearchAsync - Query embedding with cache
+var cachedEmbedding = await _embeddingCache.GetEmbeddingForContentAsync(query, ct);
+if (cachedEmbedding.HasValue)
+{
+    queryEmbedding = cachedEmbedding.Value;
+    embeddingCacheHit = true;
+}
+else
+{
+    queryEmbedding = await _openAiClient.GenerateEmbeddingAsync(query, ct);
+    await _embeddingCache.SetEmbeddingForContentAsync(query, queryEmbedding, ct);
+}
+```
+
+**Performance Targets:**
+- Cache hit: ~5-10ms (Redis lookup)
+- Cache miss: ~150-200ms (Azure OpenAI API call)
+- Expected hit rate: >80% for document-heavy workloads
+
+---
+
+## 9. Index Schema
+
+### 9.1 Azure AI Search Index Definition
 
 ```json
 {
@@ -1471,11 +1622,72 @@ public class AiAuthorizationFilter : IEndpointFilter
 }
 ```
 
+### 9.2 RAG Knowledge Index Definition (R3)
+
+The `spaarke-knowledge-index` is used for hybrid RAG search with vector, keyword, and semantic ranking:
+
+```json
+{
+  "name": "spaarke-knowledge-index",
+  "fields": [
+    { "name": "id", "type": "Edm.String", "key": true },
+    { "name": "tenantId", "type": "Edm.String", "filterable": true, "facetable": true },
+    { "name": "deploymentId", "type": "Edm.String", "filterable": true },
+    { "name": "deploymentModel", "type": "Edm.String", "filterable": true },
+    { "name": "knowledgeSourceId", "type": "Edm.String", "filterable": true },
+    { "name": "knowledgeSourceName", "type": "Edm.String", "searchable": true },
+    { "name": "documentId", "type": "Edm.String", "filterable": true },
+    { "name": "documentName", "type": "Edm.String", "searchable": true },
+    { "name": "documentType", "type": "Edm.String", "filterable": true },
+    { "name": "chunkIndex", "type": "Edm.Int32", "sortable": true },
+    { "name": "chunkCount", "type": "Edm.Int32" },
+    { "name": "content", "type": "Edm.String", "searchable": true },
+    { "name": "contentVector", "type": "Collection(Edm.Single)", "dimensions": 1536, "vectorSearchProfile": "knowledge-vector-profile" },
+    { "name": "metadata", "type": "Edm.String" },
+    { "name": "tags", "type": "Collection(Edm.String)", "searchable": true, "filterable": true },
+    { "name": "createdAt", "type": "Edm.DateTimeOffset", "filterable": true, "sortable": true },
+    { "name": "updatedAt", "type": "Edm.DateTimeOffset", "filterable": true, "sortable": true }
+  ],
+  "vectorSearch": {
+    "algorithms": [
+      {
+        "name": "hnsw-knowledge",
+        "kind": "hnsw",
+        "hnswParameters": { "m": 4, "efConstruction": 400, "efSearch": 500, "metric": "cosine" }
+      }
+    ],
+    "profiles": [
+      { "name": "knowledge-vector-profile", "algorithm": "hnsw-knowledge" }
+    ]
+  },
+  "semantic": {
+    "configurations": [
+      {
+        "name": "knowledge-semantic-config",
+        "prioritizedFields": {
+          "titleField": { "fieldName": "documentName" },
+          "prioritizedContentFields": [{ "fieldName": "content" }],
+          "prioritizedKeywordsFields": [{ "fieldName": "knowledgeSourceName" }, { "fieldName": "tags" }]
+        }
+      }
+    ]
+  }
+}
+```
+
+**Key differences from per-customer index:**
+- 1536 dimensions (text-embedding-3-small vs 3072 for text-embedding-3-large)
+- Multi-tenant fields: `tenantId`, `deploymentId`, `deploymentModel`
+- Knowledge source metadata: `knowledgeSourceId`, `knowledgeSourceName`
+- Tags field for categorization
+
+**C# Model**: See `src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs`
+
 ---
 
-## 9. Testing
+## 10. Testing
 
-### 9.1 Unit Test Example
+### 10.1 Unit Test Example
 
 ```csharp
 // Tests/Unit/Sprk.Bff.Api.Tests/Services/Ai/AiSearchServiceTests.cs
@@ -1583,5 +1795,6 @@ public class AiSearchServiceTests
 
 ---
 
-*Document Owner: Spaarke Engineering*  
-*Last Updated: December 5, 2025*
+*Document Owner: Spaarke Engineering*
+*Last Updated: December 29, 2025*
+*R3 Updates: RAG Deployment Models (Section 8), Knowledge Index Schema (Section 9.2)*

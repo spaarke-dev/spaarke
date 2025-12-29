@@ -11,12 +11,15 @@
 
 | Category | Files | Status |
 |----------|-------|--------|
-| BFF API Endpoints | 2 | Complete |
-| BFF Services | 12 | Complete |
-| BFF Models | 6 | Complete |
+| BFF API Endpoints | 3 | Complete (R3: +1) |
+| BFF Services | 25 | Complete (R3: +12) |
+| BFF Models | 7 | Complete |
 | BFF Filters | 1 | Complete |
-| BFF Configuration | 2 | Complete |
-| Unit Tests | 5 | Complete |
+| BFF Configuration | 3 | Complete (R3: +1) |
+| Unit Tests | 9 | Complete (R3: +4) |
+| Integration Tests | 2 | Complete (R3: +2) |
+| E2E Test Scripts | 2 | Complete (R3: +2) |
+| Documentation | 3 | Complete (R3: +3) |
 | PCF Controls | 2 projects | Built, not deployed |
 | Infrastructure | 1+ | Partial |
 
@@ -29,13 +32,22 @@
 | File | Lines | Endpoints | Status |
 |------|-------|-----------|--------|
 | [AnalysisEndpoints.cs](../../src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs) | ~424 | 5 endpoints | Complete |
+| [RagEndpoints.cs](../../src/server/api/Sprk.Bff.Api/Api/Ai/RagEndpoints.cs) | ~300 | 6 endpoints | Complete (R3) |
 
-**Endpoints:**
+**Analysis Endpoints:**
 - `POST /api/ai/analysis/execute` - Execute analysis with SSE streaming
 - `POST /api/ai/analysis/{id}/continue` - Continue analysis via chat
 - `POST /api/ai/analysis/{id}/save` - Save working document
 - `POST /api/ai/analysis/{id}/export` - Export analysis
 - `GET /api/ai/analysis/{id}` - Get analysis with history
+
+**RAG Endpoints (R3):**
+- `POST /api/ai/rag/search` - Hybrid search (keyword + vector + semantic)
+- `POST /api/ai/rag/index` - Index a document chunk
+- `POST /api/ai/rag/index/batch` - Batch index multiple chunks
+- `DELETE /api/ai/rag/{documentId}` - Delete a document chunk
+- `DELETE /api/ai/rag/source/{sourceDocumentId}` - Delete all chunks for a source document
+- `POST /api/ai/rag/embedding` - Generate embedding for text
 
 **Also exists (Document Intelligence - separate feature):**
 | File | Endpoints | Status |
@@ -61,8 +73,21 @@
 | [IWorkingDocumentService.cs](../../src/server/api/Sprk.Bff.Api/Services/Ai/IWorkingDocumentService.cs) | 3KB | Interface | Complete |
 | [DocumentIntelligenceService.cs](../../src/server/api/Sprk.Bff.Api/Services/Ai/DocumentIntelligenceService.cs) | 28KB | Document analysis (prod feature) | Complete |
 | [TextExtractorService.cs](../../src/server/api/Sprk.Bff.Api/Services/Ai/TextExtractorService.cs) | 26KB | Text extraction | Complete |
-| [OpenAiClient.cs](../../src/server/api/Sprk.Bff.Api/Services/Ai/OpenAiClient.cs) | 15KB | OpenAI API wrapper | Complete |
+| [IOpenAiClient.cs](../../src/server/api/Sprk.Bff.Api/Services/Ai/IOpenAiClient.cs) | 2KB | OpenAI client interface (completions, vision, embeddings) | Complete |
+| [OpenAiClient.cs](../../src/server/api/Sprk.Bff.Api/Services/Ai/OpenAiClient.cs) | 15KB | OpenAI API wrapper with circuit breaker | Complete |
 | [DocumentTypeMapper.cs](../../src/server/api/Sprk.Bff.Api/Services/Ai/DocumentTypeMapper.cs) | 2KB | Document type mapping | Complete |
+| [IKnowledgeDeploymentService.cs](../../src/server/api/Sprk.Bff.Api/Services/Ai/IKnowledgeDeploymentService.cs) | 6KB | RAG deployment routing interface | Complete (R3) |
+| [KnowledgeDeploymentService.cs](../../src/server/api/Sprk.Bff.Api/Services/Ai/KnowledgeDeploymentService.cs) | 12KB | RAG deployment model implementation | Complete (R3) |
+| [IRagService.cs](../../src/server/api/Sprk.Bff.Api/Services/Ai/IRagService.cs) | 8KB | Hybrid RAG search interface + records | Complete (R3) |
+| [RagService.cs](../../src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs) | 14KB | Hybrid search implementation (keyword + vector + semantic) | Complete (R3) |
+| [IEmbeddingCache.cs](../../src/server/api/Sprk.Bff.Api/Services/Ai/IEmbeddingCache.cs) | 2KB | Embedding cache interface with content hashing | Complete (R3) |
+| [EmbeddingCache.cs](../../src/server/api/Sprk.Bff.Api/Services/Ai/EmbeddingCache.cs) | 5KB | Redis-based embedding cache (SHA256 keys, 7-day TTL) | Complete (R3) |
+| [IAnalysisToolHandler.cs](../../src/server/api/Sprk.Bff.Api/Services/Ai/IAnalysisToolHandler.cs) | 4KB | Tool handler interface + metadata/validation records | Complete (R3) |
+| [ToolExecutionContext.cs](../../src/server/api/Sprk.Bff.Api/Services/Ai/ToolExecutionContext.cs) | 3KB | Tool execution context with document and analysis state | Complete (R3) |
+| [ToolResult.cs](../../src/server/api/Sprk.Bff.Api/Services/Ai/ToolResult.cs) | 5KB | Standardized tool result with JSON data and metadata | Complete (R3) |
+| [IToolHandlerRegistry.cs](../../src/server/api/Sprk.Bff.Api/Services/Ai/IToolHandlerRegistry.cs) | 2KB | Registry interface for handler discovery/resolution | Complete (R3) |
+| [ToolHandlerRegistry.cs](../../src/server/api/Sprk.Bff.Api/Services/Ai/ToolHandlerRegistry.cs) | 5KB | Registry implementation with reflection-based discovery | Complete (R3) |
+| [ToolFrameworkExtensions.cs](../../src/server/api/Sprk.Bff.Api/Services/Ai/ToolFrameworkExtensions.cs) | 3KB | DI extension methods for tool framework registration | Complete (R3) |
 
 ---
 
@@ -78,6 +103,7 @@
 | [AnalysisExportRequest.cs](../../src/server/api/Sprk.Bff.Api/Models/Ai/AnalysisExportRequest.cs) | Export request model | Complete |
 | [AnalysisResult.cs](../../src/server/api/Sprk.Bff.Api/Models/Ai/AnalysisResult.cs) | Analysis result model | Complete |
 | [AnalysisChunk.cs](../../src/server/api/Sprk.Bff.Api/Models/Ai/AnalysisChunk.cs) | SSE chunk model | Complete |
+| [KnowledgeDocument.cs](../../src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs) | RAG knowledge index model | Complete (R3) |
 
 ---
 
@@ -112,7 +138,24 @@
 | [Filters/AnalysisAuthorizationFilterTests.cs](../../tests/unit/Sprk.Bff.Api.Tests/Filters/AnalysisAuthorizationFilterTests.cs) | Filter tests | Complete |
 | [Services/Ai/AnalysisOrchestrationServiceTests.cs](../../tests/unit/Sprk.Bff.Api.Tests/Services/Ai/AnalysisOrchestrationServiceTests.cs) | Service tests | Complete |
 | [Services/Ai/AnalysisContextBuilderTests.cs](../../tests/unit/Sprk.Bff.Api.Tests/Services/Ai/AnalysisContextBuilderTests.cs) | Context builder tests | Complete |
+| [Services/Ai/KnowledgeDeploymentServiceTests.cs](../../tests/unit/Sprk.Bff.Api.Tests/Services/Ai/KnowledgeDeploymentServiceTests.cs) | 17 tests for RAG deployment | Complete (R3) |
+| [Services/Ai/RagServiceTests.cs](../../tests/unit/Sprk.Bff.Api.Tests/Services/Ai/RagServiceTests.cs) | 35 tests for hybrid RAG search + caching | Complete (R3) |
+| [Services/Ai/EmbeddingCacheTests.cs](../../tests/unit/Sprk.Bff.Api.Tests/Services/Ai/EmbeddingCacheTests.cs) | 21 tests for embedding cache | Complete (R3) |
 | Services/Jobs/DocumentAnalysisJobHandlerTests.cs | Job handler tests | Complete |
+
+### tests/integration/Spe.Integration.Tests/
+
+| File | Tests | Status |
+|------|-------|--------|
+| [RagSharedDeploymentTests.cs](../../tests/integration/Spe.Integration.Tests/RagSharedDeploymentTests.cs) | 12 integration tests for Shared model | Complete (R3 Task 006) |
+| [RagDedicatedDeploymentTests.cs](../../tests/integration/Spe.Integration.Tests/RagDedicatedDeploymentTests.cs) | 14 integration tests for Dedicated/CustomerOwned models | Complete (R3 Task 007) |
+
+### scripts/ (Test Scripts)
+
+| File | Purpose | Status |
+|------|---------|--------|
+| [Test-RagSharedModel.ps1](../../scripts/Test-RagSharedModel.ps1) | PowerShell E2E tests for Shared model | Complete (R3 Task 006) |
+| [Test-RagDedicatedModel.ps1](../../scripts/Test-RagDedicatedModel.ps1) | PowerShell E2E tests for Dedicated/CustomerOwned models | Complete (R3 Task 007) |
 
 ---
 
@@ -171,6 +214,13 @@
 |------|---------|--------|
 | [ai-foundry.bicepparam](../../infrastructure/bicep/ai-foundry.bicepparam) | AI Foundry parameters | Exists |
 
+### infrastructure/ai-search/
+
+| File | Purpose | Status |
+|------|---------|--------|
+| [spaarke-records-index.json](../../infrastructure/ai-search/spaarke-records-index.json) | Record matching index | Deployed |
+| [spaarke-knowledge-index.json](../../infrastructure/ai-search/spaarke-knowledge-index.json) | RAG knowledge index (1536 dims) | Deployed (R3) |
+
 ### infrastructure/ai-foundry/ (if exists)
 
 | Directory | Purpose | Status |
@@ -190,6 +240,7 @@
 | AI Foundry Project | sprkspaarkedev-aif-proj | Deployed |
 | Azure OpenAI | spaarke-openai-dev | Deployed |
 | AI Search | spaarke-search-dev | Deployed |
+| AI Search Index | spaarke-knowledge-index | Deployed (R3) |
 | Document Intelligence | spaarke-docintel-dev | Deployed |
 
 ---
@@ -230,5 +281,25 @@ These entities were verified during R1 Phase 1A:
 
 ---
 
+## 11. Documentation (R3)
+
+### docs/guides/
+
+| File | Purpose | Status |
+|------|---------|--------|
+| [RAG-ARCHITECTURE.md](../../docs/guides/RAG-ARCHITECTURE.md) | Full RAG architecture documentation | Complete (R3 Task 008) |
+| [RAG-CONFIGURATION.md](../../docs/guides/RAG-CONFIGURATION.md) | RAG configuration reference | Complete (R3 Task 008) |
+| [RAG-TROUBLESHOOTING.md](../../docs/guides/RAG-TROUBLESHOOTING.md) | RAG troubleshooting guide | Complete (R3 Task 008) |
+| AI-DEPLOYMENT-GUIDE.md | Deployment guide (updated for R3) | Complete |
+
+### projects/ai-document-intelligence-r3/notes/
+
+| File | Purpose | Status |
+|------|---------|--------|
+| task-006-test-results.md | Shared model test results | Complete |
+| task-007-test-results.md | Dedicated model test results | Complete |
+
+---
+
 *This inventory should be updated as work progresses.*
-*History: Created in R1, moved to R2 (Dec 28), moved to R3 (Dec 29)*
+*History: Created in R1, moved to R2 (Dec 28), moved to R3 (Dec 29), Task 005 embedding cache added (Dec 29), Task 006-008 test files and docs added (Dec 29)*

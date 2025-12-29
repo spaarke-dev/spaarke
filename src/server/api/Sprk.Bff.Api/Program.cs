@@ -21,6 +21,7 @@ using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Infrastructure.Startup;
 using Sprk.Bff.Api.Infrastructure.Validation;
 using Sprk.Bff.Api.Models;
+using Sprk.Bff.Api.Services.Ai;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -333,6 +334,52 @@ if (analysisEnabled && documentIntelligenceEnabled)
     builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IAnalysisContextBuilder, Sprk.Bff.Api.Services.Ai.AnalysisContextBuilder>();
     builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IWorkingDocumentService, Sprk.Bff.Api.Services.Ai.WorkingDocumentService>();
     builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IAnalysisOrchestrationService, Sprk.Bff.Api.Services.Ai.AnalysisOrchestrationService>();
+
+    // Playbook Service - CRUD operations for analysis playbooks (R3 Phase 3)
+    builder.Services.AddHttpClient<Sprk.Bff.Api.Services.Ai.IPlaybookService, Sprk.Bff.Api.Services.Ai.PlaybookService>();
+
+    // Playbook Sharing Service - team/organization sharing for playbooks (R3 Phase 3 Task 023)
+    builder.Services.AddHttpClient<Sprk.Bff.Api.Services.Ai.IPlaybookSharingService, Sprk.Bff.Api.Services.Ai.PlaybookSharingService>();
+
+    // RAG Knowledge Deployment Service - manages SearchClient routing for deployment models (R3)
+    // Uses same AI Search config as Record Matching (DocumentIntelligence:AiSearchEndpoint/Key)
+    var docIntelOptions = builder.Configuration.GetSection(DocumentIntelligenceOptions.SectionName).Get<DocumentIntelligenceOptions>();
+    if (!string.IsNullOrEmpty(docIntelOptions?.AiSearchEndpoint) && !string.IsNullOrEmpty(docIntelOptions?.AiSearchKey))
+    {
+        // SearchIndexClient for index management and creating SearchClients
+        builder.Services.AddSingleton(sp =>
+        {
+            return new Azure.Search.Documents.Indexes.SearchIndexClient(
+                new Uri(docIntelOptions.AiSearchEndpoint),
+                new Azure.AzureKeyCredential(docIntelOptions.AiSearchKey));
+        });
+
+        // KnowledgeDeploymentService - Singleton for caching deployment configs
+        builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.IKnowledgeDeploymentService, Sprk.Bff.Api.Services.Ai.KnowledgeDeploymentService>();
+
+        // EmbeddingCache - Redis-based caching for embeddings (ADR-009)
+        builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.IEmbeddingCache, Sprk.Bff.Api.Services.Ai.EmbeddingCache>();
+
+        // RagService - Hybrid search service for RAG retrieval (keyword + vector + semantic ranking)
+        builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.IRagService, Sprk.Bff.Api.Services.Ai.RagService>();
+        Console.WriteLine("✓ RAG services enabled (hybrid search + embedding cache)");
+    }
+    else
+    {
+        Console.WriteLine("⚠ RAG services disabled (requires DocumentIntelligence:AiSearchEndpoint/Key)");
+    }
+
+    // Tool Framework - Dynamic tool loading for AI analysis tools
+    var toolFrameworkOptions = builder.Configuration.GetSection(Sprk.Bff.Api.Configuration.ToolFrameworkOptions.SectionName);
+    if (toolFrameworkOptions.GetValue<bool>("Enabled", true))
+    {
+        builder.Services.AddToolFramework(builder.Configuration);
+        Console.WriteLine("✓ Tool framework enabled");
+    }
+    else
+    {
+        Console.WriteLine("⚠ Tool framework disabled (ToolFramework:Enabled = false)");
+    }
 
     Console.WriteLine("✓ Analysis services enabled");
 }
@@ -933,7 +980,11 @@ if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled"))
     if (app.Configuration.GetValue<bool>("Analysis:Enabled", true))
     {
         app.MapAnalysisEndpoints();
+        app.MapPlaybookEndpoints();
     }
+
+    // RAG endpoints for knowledge base operations (R3)
+    app.MapRagEndpoints();
 }
 
 // Record Matching endpoints (Phase 2 - only if enabled)
