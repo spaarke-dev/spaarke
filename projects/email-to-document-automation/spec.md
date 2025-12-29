@@ -316,7 +316,21 @@ Email Activity (activityid: AAA)
 - [x] Q5: sprk_Email lookup exists ✅
 - [x] Q6: sprk_ParentDocument lookup exists ✅
 - [x] Q7: sprk_RelationshipType has "Email Attachment" (100000000) ✅
-- [ ] Q8: Confirm sprk_DocumentType has "Email" value (pending verification)
+- [x] Q8: sprk_DocumentType has "Email" (100000006) ✅
+
+**sprk_DocumentType Choice Values**:
+| Value | Label |
+|-------|-------|
+| 100000000 | Contract |
+| 100000001 | Invoice |
+| 100000002 | Proposal |
+| 100000003 | Report |
+| 100000004 | Letter |
+| 100000005 | Memo |
+| 100000006 | Email |
+| 100000007 | Agreement |
+| 100000008 | Statement |
+| 100000009 | Other |
 
 ---
 

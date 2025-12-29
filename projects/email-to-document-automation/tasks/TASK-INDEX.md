@@ -25,7 +25,7 @@
 | 001 | Extend sprk_document entity with email fields | ✅ | 3h | None |
 | 002 | Create sprk_emailprocessingrule entity | 🔲 | 2h | None |
 | 003 | Add alternate key for idempotency | 🔲 | 1h | 001 |
-| 004 | Implement IEmailToEmlConverter service | 🔲 | 4h | None |
+| 004 | Implement IEmailToEmlConverter service | ✅ | 4h | None |
 | 005 | Create POST /api/emails/convert-to-document endpoint | 🔲 | 3h | 001, 004 |
 | 006 | Unit tests for EmailToEmlConverter | 🔲 | 3h | 004 |
 | **009** | **Phase 1 Deploy** | 🔲 | 2h | 001-006 |
