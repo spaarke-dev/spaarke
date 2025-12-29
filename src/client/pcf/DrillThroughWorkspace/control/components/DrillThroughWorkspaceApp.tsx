@@ -1,6 +1,6 @@
 /**
  * Drill-Through Workspace App Component
- * Two-panel layout: Chart (1/3) | Dataset Grid (2/3)
+ * Uses TwoPanelLayout: Chart (1/3) | Dataset Grid (2/3)
  */
 
 import * as React from "react";
@@ -15,7 +15,8 @@ import {
   Text,
   Tooltip,
 } from "@fluentui/react-components";
-import { DismissRegular, ArrowMaximizeRegular } from "@fluentui/react-icons";
+import { DismissRegular, ArrowMaximizeRegular, FilterRegular } from "@fluentui/react-icons";
+import { TwoPanelLayout } from "./TwoPanelLayout";
 import { logger } from "../utils/logger";
 
 const useStyles = makeStyles({
@@ -44,45 +45,23 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalS,
   },
   content: {
-    display: "flex",
     flex: 1,
     overflow: "hidden",
   },
-  chartPanel: {
-    width: "33.33%",
-    minWidth: "300px",
-    borderRight: `1px solid ${tokens.colorNeutralStroke1}`,
-    padding: tokens.spacingVerticalM,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    overflow: "auto",
-    backgroundColor: tokens.colorNeutralBackground1,
-  },
-  gridPanel: {
-    flex: 1,
-    padding: tokens.spacingVerticalM,
-    paddingLeft: tokens.spacingHorizontalL,
-    paddingRight: tokens.spacingHorizontalL,
-    overflow: "auto",
-    backgroundColor: tokens.colorNeutralBackground1,
-  },
-  panelHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: tokens.spacingVerticalM,
-  },
-  panelTitle: {
-    fontWeight: tokens.fontWeightSemibold,
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground1,
-  },
   filterBadge: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalXS,
     padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
     backgroundColor: tokens.colorBrandBackground,
     color: tokens.colorNeutralForegroundOnBrand,
     borderRadius: tokens.borderRadiusMedium,
     fontSize: tokens.fontSizeBase200,
+  },
+  filterActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalS,
   },
   placeholder: {
     display: "flex",
@@ -92,6 +71,7 @@ const useStyles = makeStyles({
     height: "100%",
     gap: tokens.spacingVerticalM,
     color: tokens.colorNeutralForeground3,
+    textAlign: "center",
   },
   footer: {
     display: "flex",
@@ -135,7 +115,7 @@ export const DrillThroughWorkspaceApp: React.FC<IDrillThroughWorkspaceAppProps> 
   const [chartTitle, setChartTitle] = useState<string>("Chart");
   const [activeFilter, setActiveFilter] = useState<IActiveFilter | null>(null);
 
-  // Simulate loading chart definition
+  // Load chart definition
   React.useEffect(() => {
     if (!chartDefinitionId) {
       setIsLoading(false);
@@ -143,7 +123,6 @@ export const DrillThroughWorkspaceApp: React.FC<IDrillThroughWorkspaceAppProps> 
       return;
     }
 
-    // TODO: Task 021 - Implement actual configuration loader
     const loadChartDefinition = async () => {
       try {
         setIsLoading(true);
@@ -170,14 +149,11 @@ export const DrillThroughWorkspaceApp: React.FC<IDrillThroughWorkspaceAppProps> 
   /**
    * Handle drill interaction from chart
    */
-  const handleDrillInteraction = useCallback(
-    (filter: IActiveFilter) => {
-      logger.info("DrillThroughWorkspaceApp", "Drill interaction", filter);
-      setActiveFilter(filter);
-      // TODO: Task 032 - Apply filter to dataset grid
-    },
-    []
-  );
+  const handleDrillInteraction = useCallback((filter: IActiveFilter) => {
+    logger.info("DrillThroughWorkspaceApp", "Drill interaction", filter);
+    setActiveFilter(filter);
+    // TODO: Task 032 - Apply filter to dataset grid
+  }, []);
 
   /**
    * Clear active filter
@@ -201,6 +177,78 @@ export const DrillThroughWorkspaceApp: React.FC<IDrillThroughWorkspaceAppProps> 
     return `${filter.field}: ${filter.value}`;
   };
 
+  /**
+   * Render chart panel content
+   */
+  const renderChartContent = () => {
+    if (isLoading) {
+      return (
+        <div className={styles.placeholder}>
+          <Spinner label="Loading chart..." />
+        </div>
+      );
+    }
+
+    if (error) {
+      return (
+        <MessageBar intent="error">
+          <MessageBarBody>{error}</MessageBarBody>
+        </MessageBar>
+      );
+    }
+
+    return (
+      <div className={styles.placeholder}>
+        <ArrowMaximizeRegular style={{ fontSize: 48 }} />
+        <Text>Chart visualization will render here</Text>
+        <Text size={200}>Click chart elements to filter the dataset</Text>
+      </div>
+    );
+  };
+
+  /**
+   * Render dataset grid content
+   */
+  const renderGridContent = () => {
+    return (
+      <div className={styles.placeholder}>
+        <FilterRegular style={{ fontSize: 48 }} />
+        <Text>Dataset grid will render here</Text>
+        <Text size={200}>
+          {activeFilter
+            ? "Showing filtered records"
+            : "Select a chart element to filter records"}
+        </Text>
+        <Text size={100} style={{ color: tokens.colorNeutralForeground4 }}>
+          Task 033: Implement dataset grid with filtering
+        </Text>
+      </div>
+    );
+  };
+
+  /**
+   * Render filter badge for right panel header
+   */
+  const renderRightActions = () => {
+    if (!activeFilter) return null;
+
+    return (
+      <div className={styles.filterActions}>
+        <span className={styles.filterBadge}>
+          <FilterRegular fontSize={12} />
+          {getFilterLabel(activeFilter)}
+        </span>
+        <Button
+          appearance="subtle"
+          size="small"
+          icon={<DismissRegular />}
+          onClick={handleClearFilter}
+          aria-label="Clear filter"
+        />
+      </div>
+    );
+  };
+
   return (
     <div className={styles.container}>
       {/* Header with title and close button */}
@@ -209,7 +257,7 @@ export const DrillThroughWorkspaceApp: React.FC<IDrillThroughWorkspaceAppProps> 
           {chartTitle} - Drill-Through View
         </Text>
         <div className={styles.headerActions}>
-          <Tooltip content="Close" relationship="label">
+          <Tooltip content="Close (Esc)" relationship="label">
             <Button
               appearance="subtle"
               icon={<DismissRegular />}
@@ -220,66 +268,17 @@ export const DrillThroughWorkspaceApp: React.FC<IDrillThroughWorkspaceAppProps> 
         </div>
       </div>
 
-      {/* Main content area */}
+      {/* Main content - Two Panel Layout */}
       <div className={styles.content}>
-        {/* Chart panel (1/3) */}
-        <div className={styles.chartPanel}>
-          <div className={styles.panelHeader}>
-            <Text className={styles.panelTitle}>Chart</Text>
-          </div>
-
-          {isLoading ? (
-            <div className={styles.placeholder}>
-              <Spinner label="Loading chart..." />
-            </div>
-          ) : error ? (
-            <MessageBar intent="error">
-              <MessageBarBody>{error}</MessageBarBody>
-            </MessageBar>
-          ) : (
-            <div className={styles.placeholder}>
-              <ArrowMaximizeRegular style={{ fontSize: 48 }} />
-              <Text>Chart visualization will render here</Text>
-              <Text size={200}>Click chart elements to filter the dataset</Text>
-            </div>
-          )}
-        </div>
-
-        {/* Grid panel (2/3) */}
-        <div className={styles.gridPanel}>
-          <div className={styles.panelHeader}>
-            <Text className={styles.panelTitle}>
-              Dataset
-              {entityName && ` - ${entityName}`}
-            </Text>
-            {activeFilter && (
-              <div style={{ display: "flex", alignItems: "center", gap: tokens.spacingHorizontalS }}>
-                <span className={styles.filterBadge}>
-                  {getFilterLabel(activeFilter)}
-                </span>
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  icon={<DismissRegular />}
-                  onClick={handleClearFilter}
-                  aria-label="Clear filter"
-                />
-              </div>
-            )}
-          </div>
-
-          <div className={styles.placeholder}>
-            <Text>Dataset grid will render here</Text>
-            <Text size={200}>
-              {activeFilter
-                ? "Showing filtered records"
-                : "Select a chart element to filter records"}
-            </Text>
-            <Text size={100} style={{ color: tokens.colorNeutralForeground4 }}>
-              Task 033: Implement dataset grid with filtering
-            </Text>
-          </div>
-        </div>
+        <TwoPanelLayout
+          leftContent={renderChartContent()}
+          rightContent={renderGridContent()}
+          leftTitle="Chart"
+          rightTitle={entityName ? `Dataset - ${entityName}` : "Dataset"}
+          rightActions={renderRightActions()}
+          showHeaders={true}
+          enableResize={true}
+        />
       </div>
 
       {/* Footer with version */}
