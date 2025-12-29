@@ -10,7 +10,7 @@
 
 | Phase | Tasks | Status |
 |-------|-------|--------|
-| Phase 1: Foundation | 5 | 4/5 complete |
+| Phase 1: Foundation | 5 | 5/5 complete |
 | Phase 2: Chart Components | 8 | 8/8 complete |
 | Phase 3: Visual Host PCF | 4 | 2/4 complete |
 | Phase 4: Drill-Through | 5 | 2/5 complete |
@@ -29,7 +29,7 @@
 | 002 | [Create shared TypeScript types](002-create-shared-types.poml) | ✅ completed | 001 | 2 |
 | 003 | [Scaffold Visual Host PCF project](003-scaffold-visualhost-pcf.poml) | ✅ completed | 002 | 3 |
 | 004 | [Configure Storybook for chart components](004-configure-storybook.poml) | ✅ completed | 003 | 2 |
-| 005 | [Deploy entity to Dataverse](005-deploy-entity-dataverse.poml) | 🔲 not-started | 001 | 2 |
+| 005 | [Deploy entity to Dataverse](005-deploy-entity-dataverse.poml) | ✅ completed | 001 | 2 |
 
 ### Phase 2: Core Chart Components
 
@@ -102,10 +102,11 @@
 
 ## Execution Notes
 
-- **Next tasks**: Task 031 (two-panel layout), Task 021 (requires 005)
-- **Critical dependency**: Task 005 (entity deployment) must complete before 021 and 022
-- **Phase 3 blocked**: Tasks 021 and 022 require Task 005 (Dataverse entity deployment)
-- **Phase 4 progress**: Task 030 complete (DrillThroughWorkspace PCF created)
+- **Next tasks**: Task 021 (configuration loader), Task 032 (filter state context)
+- **Phase 1 complete**: All foundation tasks done, entity deployed to Dataverse
+- **Phase 3 unblocked**: Tasks 021 and 022 can now proceed (005 complete)
+- **Phase 4 progress**: Tasks 030, 031 complete (DrillThroughWorkspace PCF with TwoPanelLayout)
+- **Sample record**: sprk_chartdefinition ID: 03f9ce2a-f7e4-f011-8406-7c1e520aa4df
 - **End with**: Task 090 (project wrap-up)
 
 ---
