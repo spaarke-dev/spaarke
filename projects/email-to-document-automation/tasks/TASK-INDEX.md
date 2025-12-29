@@ -28,7 +28,7 @@
 | 004 | Implement IEmailToEmlConverter service | ✅ | 4h | None |
 | 005 | Create POST /api/emails/convert-to-document endpoint | ✅ | 3h | 001, 004 |
 | 006 | Unit tests for EmailToEmlConverter | ✅ | 3h | 004 |
-| **009** | **Phase 1 Deploy** | 🔲 | 2h | 001-006 |
+| **009** | **Phase 1 Deploy** | ✅ | 2h | 001-006 |
 
 ---
 
