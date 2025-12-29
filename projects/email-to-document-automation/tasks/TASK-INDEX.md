@@ -22,7 +22,7 @@
 
 | ID | Task | Status | Est. | Dependencies |
 |----|------|--------|------|--------------|
-| 001 | Extend sprk_document entity with email fields | 🔲 | 3h | None |
+| 001 | Extend sprk_document entity with email fields | ✅ | 3h | None |
 | 002 | Create sprk_emailprocessingrule entity | 🔲 | 2h | None |
 | 003 | Add alternate key for idempotency | 🔲 | 1h | 001 |
 | 004 | Implement IEmailToEmlConverter service | 🔲 | 4h | None |

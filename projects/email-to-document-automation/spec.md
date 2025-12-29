@@ -161,17 +161,44 @@ This project implements automatic and manual conversion of Power Platform email 
 | sprk_regardingentitytype | Text | e.g., "sprk_matter" |
 | sprk_createattachmentdocuments | Boolean | Create separate docs |
 
-### Extended: sprk_document (verify existing fields)
+### Extended: sprk_document (VERIFIED 2025-12-29)
 
-| Field | Purpose | Status |
-|-------|---------|--------|
-| sprk_email | Lookup to email activity | **Verify exists** |
-| sprk_emailmessageid | RFC 5322 Message-ID | **Verify exists** |
-| sprk_emailsubject | Email subject | **Verify exists** |
-| sprk_emailsender | Sender address | **Verify exists** |
-| sprk_emaildirection | Inbound/Outbound | **Verify exists** |
-| sprk_parentdocument | Parent document lookup | **Verify exists** |
-| sprk_relationshiptype | Relationship type (Email Attachment) | **Verify exists** |
+| Field (Logical Name) | Display Name | Data Type | Status |
+|---------------------|--------------|-----------|--------|
+| sprk_Email | Email | Lookup → email | ✅ Exists |
+| sprk_EmailBody | Email Body | Multiple lines of text | ✅ Exists |
+| sprk_EmailConversationIndex | Email Conversation Index | Single line of text | ✅ Exists |
+| sprk_EmailDate | Email Date | Date and time | ✅ Exists |
+| sprk_EmailDirection | Email Direction | Choice | ✅ Exists |
+| sprk_EmailFrom | Email From | Single line of text | ✅ Exists |
+| sprk_EmailMessageId | Email Message Id | Single line of text | ✅ Exists |
+| sprk_EmailSubject | Email Subject | Single line of text | ✅ Exists |
+| sprk_EmailTo | Email To | Single line of text | ✅ Exists |
+| sprk_EmailTrackingToken | Email Tracking Token | Single line of text | ✅ Exists |
+| sprk_IsEmailArchive | Is Email Archive | Yes/No | ✅ Exists |
+| sprk_ParentDocument | Parent Document | Lookup → sprk_document | ✅ Exists |
+| sprk_RelationshipType | Relationship Type | Choice | ✅ Exists |
+
+### Choice Field Values
+
+**sprk_EmailDirection**:
+| Value | Label |
+|-------|-------|
+| 100000000 | Received |
+| 100000001 | Sent |
+
+**sprk_RelationshipType**:
+| Value | Label |
+|-------|-------|
+| 100000000 | Email Attachment |
+
+### Field Mapping Notes
+
+| Spec Reference | Actual Field | Notes |
+|----------------|--------------|-------|
+| sprk_emailsender | sprk_EmailFrom | Sender address stored here |
+| sprk_emailrecipients | sprk_EmailTo | Recipients stored here |
+| sprk_emaildirection | sprk_EmailDirection | Received=100000000, Sent=100000001 |
 
 ### Document Relationship Pattern
 
@@ -284,12 +311,12 @@ Email Activity (activityid: AAA)
 | Sync vs Async for manual | Synchronous (consistent with existing document create) |
 | Filter bypass for manual | Manual saves bypass filters |
 
-### Schema Verification Required (Implementation Phase)
+### Schema Verification (COMPLETED 2025-12-29)
 
-- [ ] Q5: Confirm sprk_document.sprk_email lookup exists
-- [ ] Q6: Confirm sprk_document.sprk_parentdocument lookup exists
-- [ ] Q7: Confirm sprk_relationshiptype has "Email Attachment" value
-- [ ] Q8: Confirm sprk_documenttype has "Email" value
+- [x] Q5: sprk_Email lookup exists ✅
+- [x] Q6: sprk_ParentDocument lookup exists ✅
+- [x] Q7: sprk_RelationshipType has "Email Attachment" (100000000) ✅
+- [ ] Q8: Confirm sprk_DocumentType has "Email" value (pending verification)
 
 ---
 
