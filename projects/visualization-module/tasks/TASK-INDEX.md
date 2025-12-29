@@ -10,7 +10,7 @@
 
 | Phase | Tasks | Status |
 |-------|-------|--------|
-| Phase 1: Foundation | 5 | 3/5 complete |
+| Phase 1: Foundation | 5 | 4/5 complete |
 | Phase 2: Chart Components | 8 | 0/8 complete |
 | Phase 3: Visual Host PCF | 4 | 0/4 complete |
 | Phase 4: Drill-Through | 5 | 0/5 complete |
@@ -28,7 +28,7 @@
 | 001 | [Define sprk_chartdefinition entity schema](001-define-chartdefinition-entity.poml) | ✅ completed | none | 3 |
 | 002 | [Create shared TypeScript types](002-create-shared-types.poml) | ✅ completed | 001 | 2 |
 | 003 | [Scaffold Visual Host PCF project](003-scaffold-visualhost-pcf.poml) | ✅ completed | 002 | 3 |
-| 004 | [Configure Storybook for chart components](004-configure-storybook.poml) | 🔲 not-started | 003 | 2 |
+| 004 | [Configure Storybook for chart components](004-configure-storybook.poml) | ✅ completed | 003 | 2 |
 | 005 | [Deploy entity to Dataverse](005-deploy-entity-dataverse.poml) | 🔲 not-started | 001 | 2 |
 
 ### Phase 2: Core Chart Components
@@ -102,8 +102,8 @@
 
 ## Execution Notes
 
-- **Start with**: Task 004 or 005 (001, 002, 003 completed)
-- **Parallel work possible**: Tasks 010-016 can be worked in parallel after 004
+- **Start with**: Task 005 or 010 (001, 002, 003, 004 completed)
+- **Parallel work possible**: Tasks 010-016 can be worked in parallel (004 complete)
 - **Critical dependency**: Task 005 (entity deployment) must complete before 021
 - **End with**: Task 090 (project wrap-up)
 

@@ -35,13 +35,16 @@ export enum AggregationType {
 export interface IChartDefinition {
   sprk_chartdefinitionid: string;
   sprk_name: string;
+  sprk_description?: string;
   sprk_visualtype: VisualType;
-  sprk_entitylogicalname: string;
-  sprk_baseviewid: string;
+  sprk_sourceentity?: string;
+  sprk_entitylogicalname?: string;
+  sprk_baseviewid?: string;
   sprk_aggregationfield?: string;
   sprk_aggregationtype?: AggregationType;
   sprk_groupbyfield?: string;
   sprk_optionsjson?: string;
+  sprk_configurationjson?: string;
 }
 
 /**
@@ -55,6 +58,9 @@ export interface DrillInteraction {
   value: unknown;
   label?: string;
 }
+
+/** Alias for backwards compatibility */
+export type IDrillInteraction = DrillInteraction;
 
 /**
  * Aggregated data point for chart rendering
