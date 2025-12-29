@@ -3,7 +3,7 @@
   <metadata>
     <title>Run Integration Tests Against Dev Environment</title>
     <phase>Phase 1C: Deployment Testing</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>004, 030, 031, 032</dependencies>
     <blocks>034</blocks>

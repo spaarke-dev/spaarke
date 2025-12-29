@@ -3,7 +3,7 @@
   <metadata>
     <title>Verify Environment Variables in Solution</title>
     <phase>Phase 1A: Verification</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>005, 032</blocks>

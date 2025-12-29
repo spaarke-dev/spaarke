@@ -3,7 +3,7 @@
   <metadata>
     <title>Export Solution Package</title>
     <phase>Phase 1B: Entity Creation (Conditional)</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>020</dependencies>
     <blocks>031</blocks>

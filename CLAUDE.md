@@ -1,6 +1,6 @@
 # CLAUDE.md - Spaarke Repository Instructions
 
-> **Last Updated**: December 25, 2025
+> **Last Updated**: December 28, 2025
 >
 > **Purpose**: This file provides repository-wide context and instructions for Claude Code when working in this codebase.
 
@@ -304,6 +304,49 @@ docs/
 | Full rationale, history | `docs/` | ⚠️ Load when deep dive needed |
 | ADR constraints | `.claude/adr/ADR-XXX.md` | ✅ Use for implementation |
 | ADR full context | `docs/adr/ADR-XXX-*.md` | ⚠️ Use for architectural decisions |
+
+---
+
+## Azure Infrastructure Resources
+
+**DO NOT query Azure CLI for resource info** - use these pre-documented references instead.
+
+### Quick Endpoints (Dev Environment)
+
+| Service | Endpoint |
+|---------|----------|
+| BFF API | `https://spe-api-dev-67e2xz.azurewebsites.net` |
+| Azure OpenAI | `https://spaarke-openai-dev.openai.azure.com/` |
+| Document Intelligence | `https://westus2.api.cognitive.microsoft.com/` |
+| Azure AI Search | `https://spaarke-search-dev.search.windows.net/` |
+
+### Resource Documentation
+
+| Need | Location | Content |
+|------|----------|---------|
+| AI resources (OpenAI, Doc Intel, AI Search, AI Foundry) | [`docs/architecture/auth-AI-azure-resources.md`](docs/architecture/auth-AI-azure-resources.md) | Endpoints, models, CLI commands |
+| All Azure resources | [`docs/architecture/auth-azure-resources.md`](docs/architecture/auth-azure-resources.md) | Full Azure inventory |
+| AI Foundry infrastructure | [`infrastructure/ai-foundry/README.md`](infrastructure/ai-foundry/README.md) | Hub, Project, Prompt Flows |
+| Resource naming conventions | [`docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md`](docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md) | Naming patterns |
+
+### Key Resource Names
+
+| Resource Type | Dev Environment |
+|--------------|-----------------|
+| Resource Group | `spe-infrastructure-westus2` |
+| App Service | `spe-api-dev-67e2xz` |
+| Azure OpenAI | `spaarke-openai-dev` |
+| Document Intelligence | `spaarke-docintel-dev` |
+| AI Search | `spaarke-search-dev` |
+| AI Foundry Hub | `sprkspaarkedev-aif-hub` |
+| AI Foundry Project | `sprkspaarkedev-aif-proj` |
+| Key Vault | `spaarke-spekvcert` |
+
+### Dataverse Environments
+
+| Environment | URL | Purpose |
+|-------------|-----|---------|
+| Dev | `https://spaarkedev1.crm.dynamics.com` | Development/testing |
 
 ---
 

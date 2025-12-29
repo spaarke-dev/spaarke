@@ -1,8 +1,20 @@
 # AI Azure Resources
 
-> **Last Updated**: December 10, 2025
+> **Last Updated**: December 28, 2025
 > **Purpose**: Quick reference for AI-related Azure resource IDs and configuration.
 > **Secrets**: Actual secrets stored in `config/ai-config.local.json` (gitignored)
+> **Verified**: Task 003 - AI Document Intelligence R1 (2025-12-28)
+
+---
+
+## Quick Reference - All Endpoints
+
+| Service | Endpoint |
+|---------|----------|
+| Azure OpenAI | `https://spaarke-openai-dev.openai.azure.com/` |
+| Document Intelligence | `https://westus2.api.cognitive.microsoft.com/` |
+| Azure AI Search | `https://spaarke-search-dev.search.windows.net/` |
+| AI Foundry Studio | [Portal Link](https://ai.azure.com) |
 
 ---
 
@@ -12,7 +24,7 @@
 |----------|-------|
 | **Resource Name** | `spaarke-openai-dev` |
 | **Resource Group** | `spe-infrastructure-westus2` |
-| **Region** | East US |
+| **Region** | West US 2 |
 | **SKU** | S0 (Standard) |
 | **Endpoint** | `https://spaarke-openai-dev.openai.azure.com/` |
 | **Resource ID** | `/subscriptions/484bc857-3802-427f-9ea5-ca47b43db0f0/resourceGroups/spe-infrastructure-westus2/providers/Microsoft.CognitiveServices/accounts/spaarke-openai-dev` |
@@ -21,14 +33,15 @@
 
 | Deployment Name | Model | Version | Capacity | Purpose |
 |-----------------|-------|---------|----------|---------|
-| `gpt-4o-mini` | gpt-4o-mini | 2024-07-18 | 10K TPM | Document summarization |
+| `gpt-4o-mini` | gpt-4o-mini | 2024-07-18 | 10 TPM | Document analysis, chat |
+| `text-embedding-3-small` | text-embedding-3-small | 1 | 120 TPM | Vector embeddings for RAG |
 
 ### Rate Limits
 
 | Limit Type | Value |
 |------------|-------|
 | Requests per minute | 100 |
-| Tokens per minute | 10,000 |
+| Tokens per minute | 10,000 (gpt-4o-mini) |
 
 ---
 
@@ -151,6 +164,80 @@ az cognitiveservices account keys regenerate \
   --name spaarke-docintel-dev \
   --resource-group spe-infrastructure-westus2 \
   --key-name key1
+```
+
+---
+
+## Azure AI Search
+
+| Property | Value |
+|----------|-------|
+| **Resource Name** | `spaarke-search-dev` |
+| **Resource Group** | `spe-infrastructure-westus2` |
+| **Region** | West US 2 |
+| **Endpoint** | `https://spaarke-search-dev.search.windows.net/` |
+
+### Indexes
+
+| Index Name | Purpose | Status |
+|------------|---------|--------|
+| `spaarke-records-index` | Document search | Active |
+
+---
+
+## AI Foundry Infrastructure
+
+### AI Foundry Hub
+
+| Property | Value |
+|----------|-------|
+| **Name** | `sprkspaarkedev-aif-hub` |
+| **Resource Group** | `spe-infrastructure-westus2` |
+| **Region** | West US 2 |
+| **Type** | Microsoft.MachineLearningServices/workspaces |
+
+### AI Foundry Project
+
+| Property | Value |
+|----------|-------|
+| **Name** | `sprkspaarkedev-aif-proj` |
+| **Resource Group** | `spe-infrastructure-westus2` |
+| **Region** | West US 2 |
+| **Parent Hub** | `sprkspaarkedev-aif-hub` |
+
+### Configured Connections
+
+| Connection Name | Target Service | Endpoint |
+|-----------------|---------------|----------|
+| azure-openai-connection | Azure OpenAI | `https://spaarke-openai-dev.openai.azure.com/` |
+| ai-search-connection | Azure AI Search | `https://spaarke-search-dev.search.windows.net/` |
+
+### Supporting Resources
+
+| Resource | Name | Purpose |
+|----------|------|---------|
+| Key Vault | `sprkspaarkedev-aif-kv` | Connection secrets |
+| Storage Account | `sprkspaarkedevaifsa` | Flow artifacts, models |
+| Application Insights | `sprkspaarkedev-aif-insights` | Runtime monitoring |
+| Log Analytics | `sprkspaarkedev-aif-logs` | Diagnostic logs |
+
+### Azure CLI Commands
+
+```bash
+# View AI Foundry Hub
+az ml workspace show \
+  --name sprkspaarkedev-aif-hub \
+  --resource-group spe-infrastructure-westus2
+
+# View AI Foundry Project
+az ml workspace show \
+  --name sprkspaarkedev-aif-proj \
+  --resource-group spe-infrastructure-westus2
+
+# List Connections
+az ml connection list \
+  --workspace-name sprkspaarkedev-aif-proj \
+  --resource-group spe-infrastructure-westus2
 ```
 
 ---
