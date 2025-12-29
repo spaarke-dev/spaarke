@@ -1,0 +1,73 @@
+<task id="043" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Run Load Tests (100+ Concurrent)</title>
+    <phase>5</phase>
+    <tags>testing, load-test, performance</tags>
+    <estimate>6h</estimate>
+    <dependencies>042</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>Performance Engineer / Developer</role>
+    <goal>Run load tests to verify system handles 100+ concurrent analyses</goal>
+    <context>
+      Production must handle:
+      - 100+ concurrent analysis requests
+      - Sustained throughput over time
+      - Graceful degradation under overload
+
+      Use realistic test scenarios.
+    </context>
+    <constraints>
+      - MUST test 100+ concurrent analyses
+      - MUST measure P95 latency
+      - MUST verify no data corruption
+      - MUST test circuit breaker behavior
+      - MUST document results and bottlenecks
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r3/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Design load test scenarios</step>
+    <step order="2">Create load test scripts (k6, JMeter, etc.)</step>
+    <step order="3">Run baseline test (10 concurrent)</step>
+    <step order="4">Run target test (100 concurrent)</step>
+    <step order="5">Run stress test (200+ concurrent)</step>
+    <step order="6">Analyze results and identify bottlenecks</step>
+    <step order="7">Implement optimizations if needed</step>
+    <step order="8">Re-run tests to verify improvements</step>
+    <step order="9">Document final results</step>
+  </steps>
+
+  <tools>
+    <tool>Bash - Run load test tools</tool>
+    <tool>Write - Document results</tool>
+  </tools>
+
+  <outputs>
+    <output>Load test scripts</output>
+    <output>Load test results (baseline, target, stress)</output>
+    <output>Bottleneck analysis</output>
+    <output>Performance optimization recommendations</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>100+ concurrent analyses handled</criterion>
+    <criterion>P95 latency within targets</criterion>
+    <criterion>No data corruption under load</criterion>
+    <criterion>Circuit breakers function correctly</criterion>
+    <criterion>Results documented</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
+    <next-task>044-security-review-and-fixes.poml</next-task>
+  </execution>
+</task>

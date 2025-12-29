@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="ai-document-intelligence-r1">
+  <metadata>
+    <title>Create sprk_knowledgedeployment Entity</title>
+    <phase>Phase 1B: Entity Creation (Conditional)</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>005</dependencies>
+    <blocks>020, 021</blocks>
+    <tags>dataverse, entity-creation</tags>
+    <condition>Execute only if Task 005 indicates entity is missing</condition>
+  </metadata>
+
+  <prompt>
+    Create the sprk_knowledgedeployment entity in Dataverse. This entity tracks RAG index deployments (Shared, Dedicated, CustomerOwned models).
+
+    CONDITIONAL: Only execute if verification (Task 005) shows this entity is missing.
+  </prompt>
+
+  <role>
+    Power Platform developer with Dataverse entity modeling expertise.
+  </role>
+
+  <goal>
+    A fully configured sprk_knowledgedeployment entity with columns for deployment model configuration.
+  </goal>
+
+  <context>
+    <background>
+      Knowledge deployments define how RAG indexes are provisioned. R3 will implement 3 models: Shared (multi-tenant), Dedicated (per-customer), CustomerOwned (customer's subscription).
+    </background>
+    <dependencies>
+      <dependency task="005" status="required">Verification must confirm entity is missing</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use "sprk_" prefix for schema name</constraint>
+    <constraint source="project">Include: deployment model choice set, index URL, connection details</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r1/spec.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify Task 005 indicates entity is missing</step>
+    <step order="2">Create entity with deployment model columns</step>
+    <step order="3">Create choice set for deployment models</step>
+    <step order="4">Create main form and active view</step>
+    <step order="5">Add to solution</step>
+    <step order="6">Update TASK-INDEX.md</step>
+  </steps>
+
+  <tools>
+    <tool name="power-platform-maker">Create Dataverse entities</tool>
+  </tools>
+
+  <outputs>
+    <output type="entity">sprk_knowledgedeployment entity in Dataverse</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Entity created with correct schema name</criterion>
+    <criterion testable="true">Deployment model choice set created</criterion>
+    <criterion testable="true">Form and views created</criterion>
+  </acceptance-criteria>
+</task>

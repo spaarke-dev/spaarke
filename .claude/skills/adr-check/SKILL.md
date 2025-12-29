@@ -5,8 +5,8 @@ alwaysApply: false
 
 # ADR Check
 
-> **Category**: Quality  
-> **Last Updated**: December 4, 2025
+> **Category**: Quality
+> **Last Updated**: December 24, 2025
 
 ---
 
@@ -56,6 +56,7 @@ Quick reference of key constraints:
 | ADR-008 | Endpoint filters | Global `UseAuthorization` middleware |
 | ADR-009 | Redis-first | `IMemoryCache` for cross-request caching |
 | ADR-010 | DI minimalism | Interfaces with single implementation |
+| ADR-021 | Fluent v9 design system | `@fluentui/react` (v8), hard-coded colors, missing FluentProvider |
 
 Note: This table is not exhaustive. Validate against the full ADR index in `docs/reference/adr/README-ADRs.md`.
 

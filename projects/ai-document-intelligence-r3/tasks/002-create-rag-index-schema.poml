@@ -1,0 +1,68 @@
+<task id="002" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Create RAG Index Schema in Azure AI Search</title>
+    <phase>1</phase>
+    <tags>azure-ai-search, rag, schema, infrastructure</tags>
+    <estimate>4h</estimate>
+    <dependencies>001</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>Senior .NET Developer with Azure AI Search expertise</role>
+    <goal>Design and create the RAG index schema in Azure AI Search for hybrid retrieval</goal>
+    <context>
+      The RAG system needs an index that supports both keyword and vector search.
+      Index must store document chunks, embeddings, and metadata for retrieval.
+      Must support filtering by tenant/deployment model.
+    </context>
+    <constraints>
+      - MUST use Azure AI Search hybrid search capabilities
+      - MUST include vector field for embeddings (1536 dimensions for ada-002)
+      - MUST include fields for tenant isolation
+      - MUST support semantic ranking
+      - MUST follow ADR-009 for caching strategy
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/ai-knowledge/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+      <file>docs/reference/adr/ADR-009-redis-first-caching.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Design index schema with required fields (content, embedding, metadata)</step>
+    <step order="2">Add vector search configuration (HNSW algorithm, 1536 dimensions)</step>
+    <step order="3">Add semantic configuration for ranking</step>
+    <step order="4">Add tenant/deployment model filtering fields</step>
+    <step order="5">Create index using Azure AI Search SDK or REST API</step>
+    <step order="6">Verify index is created and accessible</step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review existing search configurations</tool>
+    <tool>Write - Create index definition JSON</tool>
+    <tool>Bash - Deploy index via az CLI or SDK</tool>
+  </tools>
+
+  <outputs>
+    <output>Azure AI Search index definition (JSON or C# code)</output>
+    <output>Index created in Azure AI Search</output>
+    <output>Documentation of index schema</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Index created in Azure AI Search</criterion>
+    <criterion>Vector field configured for 1536-dimension embeddings</criterion>
+    <criterion>Semantic ranking configured</criterion>
+    <criterion>Tenant filtering fields present</criterion>
+    <criterion>Index accessible from API</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
+    <next-task>003-implement-knowledge-deployment-service.poml</next-task>
+  </execution>
+</task>

@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="ai-document-intelligence-r1">
+  <metadata>
+    <title>Verify AI Foundry Hub Connections</title>
+    <phase>Phase 1A: Verification</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>005</blocks>
+    <tags>azure, ai-foundry, verification</tags>
+  </metadata>
+
+  <prompt>
+    Verify the Azure AI Foundry Hub and Project are deployed and accessible. Check connections to Azure OpenAI and other AI services.
+
+    Resources to verify:
+    - AI Foundry Hub: sprkspaarkedev-aif-hub
+    - AI Foundry Project: sprkspaarkedev-aif-proj
+    - Azure OpenAI: spaarke-openai-dev
+    - Prompt Flow deployments (if any)
+
+    This is VERIFICATION only - check that infrastructure exists and is accessible.
+  </prompt>
+
+  <role>
+    Azure cloud engineer with expertise in AI Foundry, Azure OpenAI, and infrastructure verification.
+  </role>
+
+  <goal>
+    A verification report documenting the status of all AI infrastructure components, their connectivity, and any issues found.
+  </goal>
+
+  <context>
+    <background>
+      The AI Foundry infrastructure was deployed via Bicep templates. We need to verify these resources exist and are correctly configured before testing the BFF API's AI integration.
+    </background>
+    <dependencies>
+      <dependency task="none" status="n/a">Can run in parallel with Tasks 001-002</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">AI features extend BFF API - verify BFF can reach AI services</constraint>
+    <constraint source="project">Do NOT modify Azure resources - verification only</constraint>
+    <constraint source="project">Use Azure CLI for verification</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r1/spec.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>infrastructure/bicep/ai-foundry.bicepparam</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Login to Azure CLI: az login</step>
+    <step order="2">Set subscription: az account set --subscription [dev-subscription]</step>
+    <step order="3">Verify AI Foundry Hub exists: az ml workspace show --name sprkspaarkedev-aif-hub</step>
+    <step order="4">Verify AI Foundry Project exists: az ml workspace show --name sprkspaarkedev-aif-proj</step>
+    <step order="5">Verify Azure OpenAI resource: az cognitiveservices account show --name spaarke-openai-dev</step>
+    <step order="6">Check deployed models in Azure OpenAI</step>
+    <step order="7">Verify connectivity from BFF API (if deployed)</step>
+    <step order="8">Create verification report in projects/ai-document-intelligence-r1/notes/verification/ai-foundry-verification.md</step>
+    <step order="9">Update TASK-INDEX.md with results</step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI for resource verification</tool>
+    <tool name="bash">Execute Azure CLI commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">projects/ai-document-intelligence-r1/notes/verification/ai-foundry-verification.md</output>
+    <output type="docs">tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AI Foundry Hub exists and accessible</criterion>
+    <criterion testable="true">AI Foundry Project exists and accessible</criterion>
+    <criterion testable="true">Azure OpenAI resource exists with deployed models</criterion>
+    <criterion testable="true">Verification report documents all findings</criterion>
+  </acceptance-criteria>
+</task>

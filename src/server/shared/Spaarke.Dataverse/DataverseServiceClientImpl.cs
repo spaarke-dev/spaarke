@@ -524,12 +524,27 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
     private DocumentEntity MapToDocumentEntity(Entity entity)
     {
+        // Handle ContainerId which could be either a lookup (EntityReference) or text field (string)
+        string? containerId = null;
+        if (entity.Contains("sprk_containerid"))
+        {
+            var containerValue = entity["sprk_containerid"];
+            if (containerValue is EntityReference entityRef)
+            {
+                containerId = entityRef.Id.ToString();
+            }
+            else if (containerValue is string strValue)
+            {
+                containerId = strValue;
+            }
+        }
+
         return new DocumentEntity
         {
             Id = entity.Id.ToString(),
             Name = entity.GetAttributeValue<string>("sprk_documentname") ?? "Untitled",
             Description = entity.GetAttributeValue<string>("sprk_documentdescription"),
-            ContainerId = entity.GetAttributeValue<EntityReference>("sprk_containerid")?.Id.ToString(),
+            ContainerId = containerId,
             HasFile = entity.GetAttributeValue<bool>("sprk_hasfile"),
             FileName = entity.GetAttributeValue<string>("sprk_filename"),
             FileSize = entity.Contains("sprk_filesize") ? (long?)entity.GetAttributeValue<int>("sprk_filesize") : null,

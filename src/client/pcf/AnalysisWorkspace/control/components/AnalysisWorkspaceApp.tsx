@@ -5,7 +5,7 @@
  * Design Reference: UI Screenshots/02-DOCUMENT-ANALYSIS-OUTPUT-FORM.jpg
  *
  * THREE-COLUMN LAYOUT:
- * 1. Left: Analysis Output (Working Document with Monaco Editor)
+ * 1. Left: Analysis Output (Working Document with Rich Text Editor)
  * 2. Center: Original Document Preview (Source file viewer)
  * 3. Right: Conversation Panel (AI Chat with SSE streaming)
  */
@@ -24,10 +24,8 @@ import {
     Textarea
 } from "@fluentui/react-components";
 import {
-    DocumentTextRegular,
     ChatRegular,
     SaveRegular,
-    DocumentRegular,
     Send24Regular,
     Copy24Regular,
     ArrowDownload24Regular,
@@ -38,12 +36,12 @@ import {
 } from "@fluentui/react-icons";
 import { IAnalysisWorkspaceAppProps, IChatMessage, IAnalysis } from "../types";
 import { logInfo, logError } from "../utils/logger";
-import { MonacoEditor } from "./MonacoEditor";
+import { RichTextEditor } from "./RichTextEditor";
 import { SourceDocumentViewer } from "./SourceDocumentViewer";
 import { useSseStream } from "../hooks/useSseStream";
 
 // Build info for version footer
-const VERSION = "1.0.14";
+const VERSION = "1.0.18";
 const BUILD_DATE = "2025-12-14";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -731,8 +729,7 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
                 <div ref={leftPanelRef} className={styles.leftPanel} style={leftPanelWidth ? { flex: `0 0 ${leftPanelWidth}px` } : undefined}>
                     <div className={styles.panelHeader}>
                         <div className={styles.panelHeaderLeft}>
-                            <DocumentTextRegular />
-                            <Text weight="semibold">Analysis Output</Text>
+                            <Text weight="semibold">ANALYSIS OUTPUT</Text>
                             <span className={`${styles.statusIndicator} ${isDirty ? styles.unsavedIndicator : styles.savedIndicator}`}>
                                 {isDirty ? "• Unsaved" : formatLastSaved()}
                             </span>
@@ -773,10 +770,9 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
                         </div>
                     </div>
                     <div className={styles.editorContainer}>
-                        <MonacoEditor
+                        <RichTextEditor
                             value={workingDocument}
                             onChange={handleDocumentChange}
-                            language="markdown"
                             readOnly={false}
                             isDarkMode={false}
                             placeholder="Analysis output will appear here..."
@@ -800,9 +796,8 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
                 >
                     <div className={styles.panelHeader}>
                         <div className={styles.panelHeaderLeft}>
-                            <DocumentRegular />
                             <Text weight="semibold">
-                                {resolvedDocumentName || "Original Document"}
+                                {resolvedDocumentName ? resolvedDocumentName.toUpperCase() : "ORIGINAL DOCUMENT"}
                             </Text>
                         </div>
                         <div className={styles.panelHeaderActions}>
@@ -838,8 +833,7 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
                 <div className={`${styles.rightPanel} ${!isConversationPanelVisible ? styles.rightPanelCollapsed : ''}`}>
                     <div className={styles.panelHeader}>
                         <div className={styles.panelHeaderLeft}>
-                            <ChatRegular />
-                            <Text weight="semibold">Conversation</Text>
+                            <Text weight="semibold">CONVERSATION</Text>
                             {chatMessages.length > 0 && (
                                 <Badge appearance="filled" color="brand" size="small">
                                     {chatMessages.length}

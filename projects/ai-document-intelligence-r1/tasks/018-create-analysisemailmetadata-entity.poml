@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="018" project="ai-document-intelligence-r1">
+  <metadata>
+    <title>Create sprk_analysisemailmetadata Entity</title>
+    <phase>Phase 1B: Entity Creation (Conditional)</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>005</dependencies>
+    <blocks>020, 021</blocks>
+    <tags>dataverse, entity-creation</tags>
+    <condition>Execute only if Task 005 indicates entity is missing</condition>
+  </metadata>
+
+  <prompt>
+    Create the sprk_analysisemailmetadata entity in Dataverse. This entity stores metadata when analysis results are exported to email.
+
+    CONDITIONAL: Only execute if verification (Task 005) shows this entity is missing.
+  </prompt>
+
+  <role>
+    Power Platform developer with Dataverse entity modeling expertise.
+  </role>
+
+  <goal>
+    A fully configured sprk_analysisemailmetadata entity for email export tracking.
+  </goal>
+
+  <context>
+    <background>
+      When users export analysis results to email, metadata is captured for audit and tracking. R3 will implement email export via Power Apps email entity.
+    </background>
+    <dependencies>
+      <dependency task="005" status="required">Verification must confirm entity is missing</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use "sprk_" prefix for schema name</constraint>
+    <constraint source="project">Include: recipients, subject, sent date, email activity reference</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r1/spec.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify Task 005 indicates entity is missing</step>
+    <step order="2">Create entity with email metadata columns</step>
+    <step order="3">Create relationship to sprk_analysis</step>
+    <step order="4">Create main form and view</step>
+    <step order="5">Add to solution</step>
+    <step order="6">Update TASK-INDEX.md</step>
+  </steps>
+
+  <tools>
+    <tool name="power-platform-maker">Create Dataverse entities</tool>
+  </tools>
+
+  <outputs>
+    <output type="entity">sprk_analysisemailmetadata entity in Dataverse</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Entity created with correct schema name</criterion>
+    <criterion testable="true">Email metadata columns present</criterion>
+    <criterion testable="true">Relationship to analysis entity configured</criterion>
+  </acceptance-criteria>
+</task>

@@ -202,9 +202,13 @@ See: .claude/skills/adr-check/ for detailed ADR validation rules
   - Proper interface definitions
   - Null/undefined handling
 
-✓ Fluent UI usage (per ADR)
-  - Using v9 components (not v8)
-  - Consistent styling approach
+✓ Fluent UI v9 Design System (ADR-021)
+  - Using @fluentui/react-components (v9), NOT @fluentui/react (v8)
+  - Icons from @fluentui/react-icons with currentColor
+  - Semantic tokens (tokens.colorNeutralBackground1), no hard-coded colors
+  - FluentProvider wrapper with theme
+  - Dark mode compatibility (no hard-coded hex colors)
+  - Accessibility: aria-labels on icon-only buttons
 ```
 
 #### For Plugin Code

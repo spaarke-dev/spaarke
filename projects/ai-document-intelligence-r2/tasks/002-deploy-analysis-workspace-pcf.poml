@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="ai-document-intelligence-r2">
+  <metadata>
+    <title>Build and Deploy AnalysisWorkspace PCF Control</title>
+    <phase>Phase 1: PCF Deployment</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>003, 011</blocks>
+    <tags>pcf, deploy, dataverse, fluent-ui</tags>
+  </metadata>
+
+  <prompt>
+    Build and deploy the existing AnalysisWorkspace PCF control to the Dataverse development environment. This control provides the 3-column analysis workspace layout (Analysis, Source, Chat). It's already built - do NOT recreate the code.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Follow ADRs strictly. Expert in PCF control deployment, Monaco editor integration, and SSE streaming.
+  </role>
+
+  <goal>
+    AnalysisWorkspace PCF control deployed to Dataverse with 3-column layout working and SSE streaming functional.
+  </goal>
+
+  <context>
+    <background>
+      The AnalysisWorkspace PCF control is the main analysis interface with Monaco editor, source viewer, and streaming chat. Located at src/client/pcf/AnalysisWorkspace/.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/AnalysisWorkspace/</file>
+      <file>src/client/pcf/AnalysisWorkspace/ControlManifest.Input.xml</file>
+      <file>src/client/pcf/AnalysisWorkspace/components/AnalysisWorkspaceApp.tsx</file>
+      <file>src/client/pcf/AnalysisWorkspace/hooks/useSseStream.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">All UI must be PCF controls</constraint>
+    <constraint source="ADR-021">Must use Fluent UI v9, support dark mode</constraint>
+    <constraint source="project">Must update version in 4 locations</constraint>
+    <constraint source="project">SSE streaming must work in PCF context</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/PCF-V9-PACKAGING.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Navigate to src/client/pcf/AnalysisWorkspace/</step>
+    <step order="2">Run npm install</step>
+    <step order="3">Run npm run build</step>
+    <step order="4">Verify bundle size under 5MB</step>
+    <step order="5">Update version in ControlManifest.Input.xml</step>
+    <step order="6">Update version in footer component</step>
+    <step order="7">Deploy: pac pcf push --publisher-prefix sprk</step>
+    <step order="8">Verify deployment in Dataverse</step>
+    <step order="9">Update deployment notes</step>
+    <step order="10">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF control</tool>
+    <tool name="pac">Power Platform CLI</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment">AnalysisWorkspace PCF in Dataverse</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Build completes without errors</criterion>
+    <criterion testable="true">Bundle under 5MB</criterion>
+    <criterion testable="true">Control deployed to Dataverse</criterion>
+    <criterion testable="true">3-column layout visible in test harness</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+
+  <notes>
+    <completion-date>2025-12-29</completion-date>
+    <summary>
+      AnalysisWorkspace PCF control verified as already deployed to Dataverse.
+      No redeployment needed.
+    </summary>
+    <findings>
+      <finding type="deployment-verified">
+        Dataverse version: v1.0.29
+        Deployed date: 2025-12-17
+        Solution package version: 1.0.18 (managed)
+        Control manifest version: 1.0.32
+      </finding>
+      <finding type="bundle-size">
+        Package bundle.js: 645 KB (within limits)
+      </finding>
+    </findings>
+    <documentation>projects/ai-document-intelligence-r2/notes/deployment/pcf-deployment.md</documentation>
+  </notes>
+</task>

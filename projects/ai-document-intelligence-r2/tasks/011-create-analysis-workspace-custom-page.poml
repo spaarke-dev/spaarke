@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="ai-document-intelligence-r2">
+  <metadata>
+    <title>Create Analysis Workspace Custom Page</title>
+    <phase>Phase 2: Custom Page Creation</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>004</dependencies>
+    <blocks>012, 013</blocks>
+    <tags>dataverse, pcf, custom-page</tags>
+  </metadata>
+
+  <prompt>
+    Create a Power Apps Custom Page named "Analysis Workspace" that hosts the AnalysisWorkspace PCF control. This page displays the 3-column analysis interface with Monaco editor and streaming chat.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Power Apps Custom Pages and PCF integration.
+  </role>
+
+  <goal>
+    Custom Page created that hosts AnalysisWorkspace PCF with full 3-column layout.
+  </goal>
+
+  <context>
+    <background>
+      The Analysis Workspace is the main working area where users interact with AI analysis. It needs to display the full 3-column layout and support SSE streaming for chat.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/AnalysisWorkspace/ControlManifest.Input.xml</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">Host PCF control, not webresource</constraint>
+    <constraint source="project">Must support SSE streaming</constraint>
+    <constraint source="project">Accept analysisId parameter</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/PCF-V9-PACKAGING.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Open Power Apps Maker</step>
+    <step order="2">Create new Custom Page: "AnalysisWorkspacePage"</step>
+    <step order="3">Add AnalysisWorkspace PCF control</step>
+    <step order="4">Configure to fill entire page (100% width/height)</step>
+    <step order="5">Add OnStart to capture Param("analysisId")</step>
+    <step order="6">Pass analysisId to PCF control</step>
+    <step order="7">Save and publish</step>
+    <step order="8">Test page loads with mock analysisId</step>
+    <step order="9">Verify 3-column layout displays correctly</step>
+    <step order="10">Document configuration</step>
+    <step order="11">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="power-apps">Create custom page</tool>
+  </tools>
+
+  <outputs>
+    <output type="custom-page">AnalysisWorkspacePage in Dataverse</output>
+    <output type="docs">projects/ai-document-intelligence-r2/notes/custom-pages/workspace-page.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Custom Page exists in solution</criterion>
+    <criterion testable="true">3-column layout visible</criterion>
+    <criterion testable="true">Monaco editor loads</criterion>
+    <criterion testable="true">Chat panel visible</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+
+  <notes>
+    <completion-date>2025-12-29</completion-date>
+    <summary>
+      Custom Page already exists and is deployed.
+    </summary>
+    <findings>
+      <finding type="existing">
+        Custom Page Name: sprk_analysisworkspace_52748
+        Status: Deployed
+      </finding>
+    </findings>
+  </notes>
+</task>

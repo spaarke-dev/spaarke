@@ -1,0 +1,78 @@
+<task id="030" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Implement DOCX Export (OpenXML)</title>
+    <phase>4</phase>
+    <tags>export, docx, openxml, dotnet</tags>
+    <estimate>6h</estimate>
+    <dependencies>024</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>Senior .NET Developer</role>
+    <goal>Implement DOCX export using OpenXML SDK for analysis results</goal>
+    <context>
+      Export analysis results to Word documents:
+      - Summary section with key findings
+      - Detailed analysis sections
+      - Entity/clause tables
+      - Charts and visualizations
+      - Branded templates
+
+      Must use OpenXML SDK for performance.
+    </context>
+    <constraints>
+      - MUST use OpenXML SDK (no Word COM/Interop)
+      - MUST support template-based generation
+      - MUST include all analysis sections
+      - MUST handle large analyses (100+ pages)
+      - MUST follow ADR-001 (no Azure Functions for core)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/reference/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>docs/ai-knowledge/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add OpenXML SDK NuGet package</step>
+    <step order="2">Create IExportService interface</step>
+    <step order="3">Create DocxExportService implementation</step>
+    <step order="4">Create Word template file</step>
+    <step order="5">Implement section generation (summary, details, tables)</step>
+    <step order="6">Add chart generation for visualizations</step>
+    <step order="7">Create export endpoint</step>
+    <step order="8">Write unit tests</step>
+  </steps>
+
+  <tools>
+    <tool>Bash - Add NuGet package</tool>
+    <tool>Write - Create service implementation</tool>
+    <tool>Bash - Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output>IExportService.cs - Export interface</output>
+    <output>DocxExportService.cs - DOCX implementation</output>
+    <output>Word template file (.dotx)</output>
+    <output>Export endpoint</output>
+    <output>Unit tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>DOCX files generated correctly</criterion>
+    <criterion>All analysis sections included</criterion>
+    <criterion>Tables render properly</criterion>
+    <criterion>Large documents handled</criterion>
+    <criterion>Template branding applied</criterion>
+    <criterion>Tests pass</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
+    <next-task>031-create-pdf-azure-function.poml</next-task>
+  </execution>
+</task>

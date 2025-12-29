@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="ai-document-intelligence-r2">
+  <metadata>
+    <title>Build and Deploy AnalysisBuilder PCF Control</title>
+    <phase>Phase 1: PCF Deployment</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>003, 010</blocks>
+    <tags>pcf, deploy, dataverse, fluent-ui</tags>
+  </metadata>
+
+  <prompt>
+    Build and deploy the existing AnalysisBuilder PCF control to the Dataverse development environment. This control is already built and ready - do NOT recreate the code. Follow the PCF-V9-PACKAGING.md guide for proper version management and deployment.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Follow ADRs strictly. Expert in PCF control deployment, Power Platform CLI (pac), and Dataverse solution management.
+  </role>
+
+  <goal>
+    AnalysisBuilder PCF control deployed to Dataverse and visible in the controls list, with proper version number in footer.
+  </goal>
+
+  <context>
+    <background>
+      The AnalysisBuilder PCF control provides the UI for configuring AI analysis parameters (actions, skills, knowledge, tools). It's already built at src/client/pcf/AnalysisBuilder/ and needs to be deployed to Dataverse.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/AnalysisBuilder/</file>
+      <file>src/client/pcf/AnalysisBuilder/ControlManifest.Input.xml</file>
+      <file>src/client/pcf/AnalysisBuilder/components/FooterActions.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">All UI must be PCF controls, not legacy webresources</constraint>
+    <constraint source="ADR-021">Must use Fluent UI v9, support dark mode</constraint>
+    <constraint source="project">Must update version in 4 locations per PCF-V9-PACKAGING.md</constraint>
+    <constraint source="project">Must include version footer in UI</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/PCF-V9-PACKAGING.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="PCF Deployment" location="docs/guides/PCF-V9-PACKAGING.md">
+        Follow Part B for deployment workflow and version management
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Navigate to src/client/pcf/AnalysisBuilder/</step>
+    <step order="2">Run npm install to ensure dependencies are current</step>
+    <step order="3">Run npm run build to create production bundle</step>
+    <step order="4">Verify bundle size is under 5MB (check out/controls/control/bundle.js)</step>
+    <step order="5">Update version in ControlManifest.Input.xml</step>
+    <step order="6">Update version in footer component (FooterActions.tsx or similar)</step>
+    <step order="7">Verify pac auth is connected to dev environment</step>
+    <step order="8">Deploy using: pac pcf push --publisher-prefix sprk</step>
+    <step order="9">Verify deployment: pac solution list | grep -i Analysis</step>
+    <step order="10">Document deployment results in notes/deployment/pcf-deployment.md</step>
+    <step order="11">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF control</tool>
+    <tool name="pac">Power Platform CLI for deployment</tool>
+    <tool name="bash">Execute commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment">AnalysisBuilder PCF in Dataverse</output>
+    <output type="docs">projects/ai-document-intelligence-r2/notes/deployment/pcf-deployment.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build completes without errors</criterion>
+    <criterion testable="true">Bundle size is under 5MB</criterion>
+    <criterion testable="true">pac pcf push succeeds</criterion>
+    <criterion testable="true">Control visible in Dataverse controls list</criterion>
+    <criterion testable="true">Version footer displays correct version</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+
+  <notes>
+    <completion-date>2025-12-28</completion-date>
+    <summary>
+      AnalysisBuilder PCF control verified as already deployed to Dataverse development environment.
+      No redeployment needed.
+    </summary>
+    <findings>
+      <finding type="version-mismatch">
+        Deployed version: v1.12.0 (verified via screenshot 2025-12-29)
+        Source code version: v1.5.0 (ControlManifest.Input.xml, AnalysisBuilderApp.tsx)
+        Action required: Synchronize source code version before making any updates.
+      </finding>
+      <finding type="bundle-size">
+        Current bundle: 11MB (exceeds 5MB limit)
+        Root cause: react-dom dev bundle, unoptimized icon imports
+        Deferred to: R3 project
+      </finding>
+    </findings>
+    <documentation>projects/ai-document-intelligence-r2/notes/deployment/pcf-deployment.md</documentation>
+  </notes>
+</task>

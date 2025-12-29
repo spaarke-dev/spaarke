@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="ai-document-intelligence-r1">
+  <metadata>
+    <title>Create sprk_analysisknowledge Entity</title>
+    <phase>Phase 1B: Entity Creation (Conditional)</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>005</dependencies>
+    <blocks>020, 021</blocks>
+    <tags>dataverse, entity-creation</tags>
+    <condition>Execute only if Task 005 indicates entity is missing</condition>
+  </metadata>
+
+  <prompt>
+    Create the sprk_analysisknowledge entity in Dataverse. Knowledge sources provide context for RAG-enhanced analysis.
+
+    CONDITIONAL: Only execute if verification (Task 005) shows this entity is missing.
+  </prompt>
+
+  <role>
+    Power Platform developer with Dataverse entity modeling expertise.
+  </role>
+
+  <goal>
+    A fully configured sprk_analysisknowledge entity with all columns and forms.
+  </goal>
+
+  <context>
+    <background>
+      Knowledge sources are indexed documents or data that provide context for AI analysis via RAG (Retrieval Augmented Generation).
+    </background>
+    <dependencies>
+      <dependency task="005" status="required">Verification must confirm entity is missing</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use "sprk_" prefix for schema name</constraint>
+    <constraint source="project">Include: name, description, source type, index reference</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r1/spec.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify Task 005 indicates entity is missing</step>
+    <step order="2">Create entity with appropriate columns</step>
+    <step order="3">Create relationship to sprk_knowledgedeployment</step>
+    <step order="4">Create main form and active view</step>
+    <step order="5">Add to solution</step>
+    <step order="6">Update TASK-INDEX.md</step>
+  </steps>
+
+  <tools>
+    <tool name="power-platform-maker">Create Dataverse entities</tool>
+  </tools>
+
+  <outputs>
+    <output type="entity">sprk_analysisknowledge entity in Dataverse</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Entity created with correct schema name</criterion>
+    <criterion testable="true">Required columns present</criterion>
+    <criterion testable="true">Relationship to knowledgedeployment configured</criterion>
+  </acceptance-criteria>
+</task>

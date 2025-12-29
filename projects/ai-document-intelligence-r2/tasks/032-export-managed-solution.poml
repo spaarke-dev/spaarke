@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="ai-document-intelligence-r2">
+  <metadata>
+    <title>Export Managed Solution for Production</title>
+    <phase>Phase 4: Solution Packaging</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>031</dependencies>
+    <blocks>040</blocks>
+    <tags>deploy, solution</tags>
+  </metadata>
+
+  <prompt>
+    Export the final managed solution for production deployments. Managed solutions prevent customization in target environments and are recommended for customer deployments.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse solution management.
+  </role>
+
+  <goal>
+    Managed solution ZIP ready for production deployment.
+  </goal>
+
+  <context>
+    <background>
+      Managed solutions lock down components to prevent accidental changes. This is the production-ready artifact for customer deployments.
+    </background>
+    <relevant-files>
+      <file>infrastructure/dataverse/solutions/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Verify all tests pass before managed export</constraint>
+    <constraint source="project">Use semantic versioning</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify all Task 031 tests passed</step>
+    <step order="2">Update solution version for production</step>
+    <step order="3">Export as managed solution</step>
+    <step order="4">Save to infrastructure/dataverse/solutions/Spaarke_UI_Managed.zip</step>
+    <step order="5">Document version in release notes</step>
+    <step order="6">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">pac solution export --managed</tool>
+  </tools>
+
+  <outputs>
+    <output type="solution">Spaarke_UI_Managed.zip</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Managed solution ZIP created</criterion>
+    <criterion testable="true">Version number matches plan</criterion>
+    <criterion testable="true">File saved to correct location</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>

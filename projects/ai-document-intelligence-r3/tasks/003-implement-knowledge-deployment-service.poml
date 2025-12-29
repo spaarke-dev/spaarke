@@ -1,0 +1,76 @@
+<task id="003" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Implement IKnowledgeDeploymentService</title>
+    <phase>1</phase>
+    <tags>service, rag, deployment-models, dotnet</tags>
+    <estimate>6h</estimate>
+    <dependencies>002</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>Senior .NET Developer</role>
+    <goal>Implement IKnowledgeDeploymentService to manage the 3 RAG deployment models</goal>
+    <context>
+      RAG supports 3 deployment models:
+      - Shared: Multi-tenant index, all customers share embeddings
+      - Dedicated: Per-customer index, isolated embeddings
+      - CustomerOwned: Customer provides their own Azure AI Search
+
+      Service must route requests to correct deployment based on configuration.
+    </context>
+    <constraints>
+      - MUST support all 3 deployment models (Shared, Dedicated, CustomerOwned)
+      - MUST use configuration to determine deployment model per tenant
+      - MUST handle connection strings securely via Key Vault
+      - MUST follow ADR-001 Minimal API patterns
+      - MUST follow ADR-010 DI minimalism (≤15 registrations)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/ai-knowledge/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+      <file>docs/reference/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>docs/reference/adr/ADR-010-di-minimalism.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define IKnowledgeDeploymentService interface</step>
+    <step order="2">Create deployment model enum (Shared, Dedicated, CustomerOwned)</step>
+    <step order="3">Implement service with deployment model routing logic</step>
+    <step order="4">Add configuration binding for per-tenant deployment settings</step>
+    <step order="5">Integrate with Key Vault for CustomerOwned connection strings</step>
+    <step order="6">Register service in DI container</step>
+    <step order="7">Write unit tests for deployment model selection</step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review existing services for patterns</tool>
+    <tool>Write - Create service files</tool>
+    <tool>Bash - Run dotnet build and tests</tool>
+  </tools>
+
+  <outputs>
+    <output>IKnowledgeDeploymentService.cs - Interface definition</output>
+    <output>KnowledgeDeploymentService.cs - Implementation</output>
+    <output>DeploymentModel.cs - Enum for deployment types</output>
+    <output>Unit tests for service</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Interface defined with clear contracts</criterion>
+    <criterion>All 3 deployment models supported</criterion>
+    <criterion>Configuration-based tenant routing works</criterion>
+    <criterion>Key Vault integration for secrets</criterion>
+    <criterion>Unit tests pass</criterion>
+    <criterion>Service registered in DI</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
+    <next-task>004-implement-rag-service.poml</next-task>
+  </execution>
+</task>

@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="ai-document-intelligence-r2">
+  <metadata>
+    <title>Test PCF Controls in Test Harness</title>
+    <phase>Phase 1: PCF Deployment</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001, 002</dependencies>
+    <blocks>004</blocks>
+    <tags>pcf, testing, fluent-ui</tags>
+  </metadata>
+
+  <prompt>
+    Run both PCF controls in the PCF test harness to verify they render correctly before adding to custom pages. Test dark mode, responsive layout, and basic interactions.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in PCF testing and Fluent UI v9 theming.
+  </role>
+
+  <goal>
+    Both PCF controls render correctly in test harness with dark mode support verified.
+  </goal>
+
+  <context>
+    <background>
+      The PCF test harness allows testing controls locally before deployment. Both controls should be tested for proper rendering, theming, and basic functionality.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/AnalysisBuilder/</file>
+      <file>src/client/pcf/AnalysisWorkspace/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Dark mode must work correctly</constraint>
+    <constraint source="project">Test in multiple viewport sizes</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Navigate to src/client/pcf/AnalysisBuilder/</step>
+    <step order="2">Run npm start to launch test harness</step>
+    <step order="3">Verify AnalysisBuilder renders with scope tabs</step>
+    <step order="4">Test dark mode toggle</step>
+    <step order="5">Test responsive layout at different widths</step>
+    <step order="6">Navigate to src/client/pcf/AnalysisWorkspace/</step>
+    <step order="7">Run npm start</step>
+    <step order="8">Verify 3-column layout renders</step>
+    <step order="9">Test Monaco editor loads</step>
+    <step order="10">Document test results in notes/testing/pcf-harness-test.md</step>
+    <step order="11">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Start test harness</tool>
+    <tool name="browser">Visual verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-document-intelligence-r2/notes/testing/pcf-harness-test.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AnalysisBuilder renders with 4 scope tabs</criterion>
+    <criterion testable="true">AnalysisWorkspace shows 3 columns</criterion>
+    <criterion testable="true">Dark mode works for both controls</criterion>
+    <criterion testable="true">Version footer visible in both</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+
+  <notes>
+    <completion-date>2025-12-29</completion-date>
+    <summary>
+      Both PCF controls tested in Dataverse environment.
+      Light mode and dark mode rendering verified.
+      One bug found in AnalysisWorkspace toolbar interactions.
+    </summary>
+    <findings>
+      <finding type="pass">AnalysisBuilder: All tests pass - scope tabs, theming, interactions</finding>
+      <finding type="pass">AnalysisWorkspace: Rendering and theming pass</finding>
+      <finding type="bug">BUG-001: AnalysisWorkspace toolbar buttons cause screen blink/hide on hover or click</finding>
+    </findings>
+    <documentation>projects/ai-document-intelligence-r2/notes/testing/pcf-harness-test.md</documentation>
+  </notes>
+</task>

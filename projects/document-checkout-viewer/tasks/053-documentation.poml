@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="053" project="document-checkout-viewer">
+  <metadata>
+    <title>Update Documentation</title>
+    <phase>5: Migration &amp; Integration</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>050, 051, 052</dependencies>
+    <blocks>090</blocks>
+    <tags>documentation, cleanup</tags>
+  </metadata>
+
+  <prompt>
+    Update architecture documentation to reflect the new SpeDocumentViewer
+    component. Deprecate SpeFileViewer and SourceDocumentViewer in docs.
+    Update IT deployment guide with new component.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in technical documentation.
+    Follow ADRs strictly.
+  </role>
+
+  <goal>
+    All documentation reflects the new SpeDocumentViewer component and
+    deprecation of old components.
+  </goal>
+
+  <context>
+    <background>
+      Documentation updates ensure future developers understand the current
+      architecture. Old components should be marked deprecated with migration
+      notes pointing to SpeDocumentViewer.
+    </background>
+    <relevant-files>
+      <file>docs/ai-knowledge/architecture/</file>
+      <file>docs/guides/IT-DEPLOYMENT-GUIDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Mark old components as deprecated, not deleted</constraint>
+    <constraint source="project">Include migration notes for developers</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/ai-knowledge/architecture/sdap-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Update SDAP architecture doc with SpeDocumentViewer</step>
+    <step order="2">Add deprecation notice to SpeFileViewer CLAUDE.md</step>
+    <step order="3">Add deprecation notice to SourceDocumentViewer section</step>
+    <step order="4">Update IT deployment guide with SpeDocumentViewer</step>
+    <step order="5">Add version history/check-out documentation</step>
+    <step order="6">Document the Delete button ribbon integration</step>
+    <step order="7">Update PCF CLAUDE.md with new component</step>
+    <step order="8">Add migration guide section for future reference</step>
+    <step order="9">Review all doc updates for accuracy</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="none">Documentation is markdown editing only</tool>
+  </tools>
+
+  <outputs>
+    <output type="documentation">docs/ai-knowledge/architecture/sdap-architecture.md (modified)</output>
+    <output type="documentation">docs/guides/IT-DEPLOYMENT-GUIDE.md (modified)</output>
+    <output type="documentation">src/client/pcf/CLAUDE.md (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Architecture doc describes SpeDocumentViewer</criterion>
+    <criterion testable="true">Old components marked as deprecated</criterion>
+    <criterion testable="true">IT deployment guide includes new component</criterion>
+    <criterion testable="true">Migration notes exist for developers</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Focus on documentation that helps future developers understand the system.
+    Don't delete old component docs - mark as deprecated with migration path.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, review existing documentation structure.
+    </protocol>
+  </execution>
+</task>

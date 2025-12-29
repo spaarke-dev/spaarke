@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="ai-document-intelligence-r1">
+  <metadata>
+    <title>Create sprk_analysisplaybook Entity</title>
+    <phase>Phase 1B: Entity Creation (Conditional)</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>005</dependencies>
+    <blocks>020, 021</blocks>
+    <tags>dataverse, entity-creation</tags>
+    <condition>Execute only if Task 005 indicates entity is missing</condition>
+  </metadata>
+
+  <prompt>
+    Create the sprk_analysisplaybook entity in Dataverse. Playbooks are saved analysis configurations that can be reused.
+
+    This entity requires N:N relationships to skills, knowledge, and tools.
+
+    CONDITIONAL: Only execute if verification (Task 005) shows this entity is missing.
+  </prompt>
+
+  <role>
+    Power Platform developer with Dataverse entity modeling and relationship expertise.
+  </role>
+
+  <goal>
+    A fully configured sprk_analysisplaybook entity with N:N relationships to scope entities.
+  </goal>
+
+  <context>
+    <background>
+      Playbooks save a complete analysis configuration (action + skills + knowledge + tools) for reuse. R3 will implement save/load playbook functionality.
+    </background>
+    <dependencies>
+      <dependency task="005" status="required">Verification must confirm entity is missing</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use "sprk_" prefix for schema name</constraint>
+    <constraint source="project">N:N relationships require intersect entities</constraint>
+    <constraint source="project">Include: public/private visibility flag</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r1/spec.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify Task 005 indicates entity is missing</step>
+    <step order="2">Create entity with playbook columns</step>
+    <step order="3">Create N:N relationships to skills, knowledge, tools</step>
+    <step order="4">Create main form with subgrids for related entities</step>
+    <step order="5">Add to solution</step>
+    <step order="6">Update TASK-INDEX.md</step>
+  </steps>
+
+  <tools>
+    <tool name="power-platform-maker">Create Dataverse entities</tool>
+  </tools>
+
+  <outputs>
+    <output type="entity">sprk_analysisplaybook entity in Dataverse</output>
+    <output type="entity">N:N intersect entities</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Entity created with correct schema name</criterion>
+    <criterion testable="true">N:N relationships configured</criterion>
+    <criterion testable="true">Public/private flag present</criterion>
+    <criterion testable="true">Form with subgrids created</criterion>
+  </acceptance-criteria>
+</task>

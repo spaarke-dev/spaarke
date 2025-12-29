@@ -1,0 +1,76 @@
+<task id="014" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Create DocumentClassifier Tool</title>
+    <phase>2</phase>
+    <tags>tool-handler, classification, ai, dotnet</tags>
+    <estimate>5h</estimate>
+    <dependencies>011</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>Senior .NET Developer</role>
+    <goal>Implement DocumentClassifier tool handler for classifying document types</goal>
+    <context>
+      DocumentClassifier categorizes documents into types:
+      - Contract types (NDA, MSA, SOW, Amendment, etc.)
+      - Business document types (Invoice, Proposal, Report, etc.)
+      - Custom categories per customer
+
+      Uses Azure OpenAI with classification prompts and optional RAG for examples.
+    </context>
+    <constraints>
+      - MUST implement IAnalysisToolHandler interface
+      - MUST classify into predefined categories
+      - MUST support custom categories via configuration
+      - MUST provide confidence scores
+      - MUST optionally use RAG for example-based classification
+      - MUST follow ADR-013 tool patterns
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/ai-knowledge/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+      <file>docs/reference/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create DocumentClassifierHandler class implementing IAnalysisToolHandler</step>
+    <step order="2">Define default document type taxonomy</step>
+    <step order="3">Create classification prompts</step>
+    <step order="4">Implement confidence scoring</step>
+    <step order="5">Add optional RAG integration for examples</step>
+    <step order="6">Support custom category configuration</step>
+    <step order="7">Register handler with tool registry</step>
+    <step order="8">Write unit tests</step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review classification patterns</tool>
+    <tool>Write - Create handler implementation</tool>
+    <tool>Bash - Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output>DocumentClassifierHandler.cs - Tool implementation</output>
+    <output>DocumentType.cs - Document type definitions</output>
+    <output>ClassificationResult.cs - Result model with confidence</output>
+    <output>Unit tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Implements IAnalysisToolHandler correctly</criterion>
+    <criterion>Classifies into predefined categories</criterion>
+    <criterion>Provides confidence scores</criterion>
+    <criterion>Supports custom categories</criterion>
+    <criterion>Optional RAG integration works</criterion>
+    <criterion>Tests pass</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
+    <next-task>015-test-tool-framework.poml</next-task>
+  </execution>
+</task>

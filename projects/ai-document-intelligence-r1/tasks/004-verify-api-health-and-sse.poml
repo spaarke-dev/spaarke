@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="ai-document-intelligence-r1">
+  <metadata>
+    <title>Run API Health Check and SSE Test</title>
+    <phase>Phase 1A: Verification</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>005, 033</blocks>
+    <tags>api, testing, sse, verification</tags>
+  </metadata>
+
+  <prompt>
+    Verify the BFF API is deployed and functioning correctly. Test health endpoints and SSE streaming.
+
+    Endpoints to verify:
+    - GET /ping - Basic health check
+    - GET /healthz - Detailed health check
+    - POST /api/analysis/execute - SSE streaming endpoint (if accessible)
+
+    Use the existing Test-SdapBffApi.ps1 script if available, or manual curl/Invoke-WebRequest.
+  </prompt>
+
+  <role>
+    API developer with expertise in .NET Minimal APIs, SSE streaming, and API testing.
+  </role>
+
+  <goal>
+    A verification report confirming the BFF API is deployed, health endpoints return 200, and SSE streaming works correctly.
+  </goal>
+
+  <context>
+    <background>
+      The BFF API code is COMPLETE and deployed. We need to verify it functions correctly before proceeding with integration testing. The API uses SSE for streaming AI responses.
+    </background>
+    <dependencies>
+      <dependency task="none" status="n/a">Can run in parallel with Tasks 001-003</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Minimal API pattern - verify endpoints follow pattern</constraint>
+    <constraint source="project">Target API: spe-api-dev-67e2xz.azurewebsites.net</constraint>
+    <constraint source="project">May need authentication token for /api/* endpoints</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r1/spec.md</file>
+      <file>docs/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>scripts/Test-SdapBffApi.ps1</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Check if Test-SdapBffApi.ps1 script exists and is usable</step>
+    <step order="2">Test GET /ping endpoint - expect 200 with "pong"</step>
+    <step order="3">Test GET /healthz endpoint - expect 200 with health details</step>
+    <step order="4">If auth available, test POST /api/analysis/execute with SSE</step>
+    <step order="5">Verify SSE headers: Content-Type: text/event-stream</step>
+    <step order="6">Document response times and any errors</step>
+    <step order="7">Create verification report in projects/ai-document-intelligence-r1/notes/verification/api-verification.md</step>
+    <step order="8">Update TASK-INDEX.md with results</step>
+  </steps>
+
+  <tools>
+    <tool name="powershell">Run Test-SdapBffApi.ps1 or Invoke-WebRequest</tool>
+    <tool name="curl">Alternative HTTP testing</tool>
+    <tool name="bash">Execute commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">projects/ai-document-intelligence-r1/notes/verification/api-verification.md</output>
+    <output type="docs">tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">/ping returns 200</criterion>
+    <criterion testable="true">/healthz returns 200 with health details</criterion>
+    <criterion testable="true">SSE streaming verified (if auth available)</criterion>
+    <criterion testable="true">Verification report documents all findings</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="ai-document-intelligence-r2">
+  <metadata>
+    <title>Export UI Solution Package (Unmanaged)</title>
+    <phase>Phase 4: Solution Packaging</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>024</dependencies>
+    <blocks>031</blocks>
+    <tags>deploy, dataverse, solution</tags>
+  </metadata>
+
+  <prompt>
+    Export the complete UI solution containing PCF controls, custom pages, form customizations, and ribbon changes as an unmanaged solution package.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse solution management.
+  </role>
+
+  <goal>
+    Unmanaged solution ZIP exported with all UI components.
+  </goal>
+
+  <context>
+    <background>
+      The solution package contains all R2 deliverables for deployment to other environments. Unmanaged export allows for further customization in target environments.
+    </background>
+    <relevant-files>
+      <file>infrastructure/dataverse/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Include all custom pages and PCF controls</constraint>
+    <constraint source="project">Version solution appropriately</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/guides/PCF-V9-PACKAGING.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Open Power Apps Maker</step>
+    <step order="2">Navigate to solution containing UI components</step>
+    <step order="3">Verify all components are included</step>
+    <step order="4">Update solution version number</step>
+    <step order="5">Export as unmanaged solution</step>
+    <step order="6">Download ZIP file</step>
+    <step order="7">Save to infrastructure/dataverse/solutions/</step>
+    <step order="8">Document export in notes/deployment/solution-export.md</step>
+    <step order="9">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="power-apps">Export solution</tool>
+    <tool name="pac">pac solution export</tool>
+  </tools>
+
+  <outputs>
+    <output type="solution">Spaarke_UI_Unmanaged.zip</output>
+    <output type="docs">projects/ai-document-intelligence-r2/notes/deployment/solution-export.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Solution ZIP created</criterion>
+    <criterion testable="true">Contains all PCF controls</criterion>
+    <criterion testable="true">Contains custom pages</criterion>
+    <criterion testable="true">Contains form and ribbon changes</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>

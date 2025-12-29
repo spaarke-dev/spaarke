@@ -1,0 +1,71 @@
+<task id="024" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Test Playbook Functionality</title>
+    <phase>3</phase>
+    <tags>testing, playbook, integration</tags>
+    <estimate>4h</estimate>
+    <dependencies>023</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>QA Engineer / .NET Developer</role>
+    <goal>Test complete playbook functionality end-to-end</goal>
+    <context>
+      Playbook system is complete with:
+      - Admin forms
+      - Save/Load APIs
+      - Sharing logic
+
+      Need to verify full round-trip functionality.
+    </context>
+    <constraints>
+      - MUST test create/read/update/delete lifecycle
+      - MUST test sharing at all levels
+      - MUST test playbook application to analysis
+      - MUST verify security enforcement
+      - MUST document test results
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r3/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Test playbook creation via form</step>
+    <step order="2">Test playbook creation via API</step>
+    <step order="3">Test playbook retrieval</step>
+    <step order="4">Test playbook update</step>
+    <step order="5">Test sharing at each level</step>
+    <step order="6">Test applying playbook to analysis</step>
+    <step order="7">Test security (unauthorized access attempts)</step>
+    <step order="8">Document test results</step>
+  </steps>
+
+  <tools>
+    <tool>Bash - Run integration tests</tool>
+    <tool>Write - Document test results</tool>
+  </tools>
+
+  <outputs>
+    <output>Integration test suite for playbooks</output>
+    <output>Test results document</output>
+    <output>List of issues found (if any)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>CRUD operations work correctly</criterion>
+    <criterion>Sharing works at all levels</criterion>
+    <criterion>Playbooks apply to analyses</criterion>
+    <criterion>Security enforced properly</criterion>
+    <criterion>Test results documented</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
+    <next-task>030-implement-docx-export.poml</next-task>
+  </execution>
+</task>

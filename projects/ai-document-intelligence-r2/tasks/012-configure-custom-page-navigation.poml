@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="ai-document-intelligence-r2">
+  <metadata>
+    <title>Configure Custom Page Navigation</title>
+    <phase>Phase 2: Custom Page Creation</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>010, 011</dependencies>
+    <blocks>013, 014, 022</blocks>
+    <tags>dataverse, custom-page, navigation</tags>
+  </metadata>
+
+  <prompt>
+    Configure navigation between the model-driven app, custom pages, and back. Define URL patterns for navigating to Analysis Builder and Workspace pages with proper parameters.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Power Platform navigation and URL handling.
+  </role>
+
+  <goal>
+    Navigation patterns defined and tested for all page transitions.
+  </goal>
+
+  <context>
+    <background>
+      Users need to navigate from Document form to Analysis Builder, then to Analysis Workspace, and back. URL parameters must persist through navigation.
+    </background>
+    <relevant-files>
+      <file>projects/ai-document-intelligence-r2/notes/custom-pages/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Must work within model-driven app context</constraint>
+    <constraint source="project">Parameters must be properly encoded</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Document URL pattern for Analysis Builder page</step>
+    <step order="2">Document URL pattern for Analysis Workspace page</step>
+    <step order="3">Test navigation from form to Builder page</step>
+    <step order="4">Test navigation from Builder to Workspace</step>
+    <step order="5">Test back navigation to form</step>
+    <step order="6">Document navigation patterns</step>
+    <step order="7">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="browser">Test navigation</tool>
+    <tool name="power-apps">Configure page settings</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-document-intelligence-r2/notes/custom-pages/navigation-patterns.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Can navigate to Builder with documentId</criterion>
+    <criterion testable="true">Can navigate to Workspace with analysisId</criterion>
+    <criterion testable="true">Back navigation works</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+
+  <notes>
+    <completion-date>2025-12-29</completion-date>
+    <summary>
+      Navigation between Analysis Builder and Analysis Workspace is already configured and working.
+    </summary>
+    <findings>
+      <finding type="verified">
+        Builder → Workspace navigation: Working
+        Parameter passing: Functional
+      </finding>
+    </findings>
+  </notes>
+</task>

@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="document-checkout-viewer">
+  <metadata>
+    <title>Implement Fluent v9 Toolbar</title>
+    <phase>3: SpeDocumentViewer PCF</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>021</dependencies>
+    <blocks>023</blocks>
+    <tags>pcf, react, typescript, frontend, fluent-ui</tags>
+  </metadata>
+
+  <prompt>
+    Implement the Fluent v9 toolbar with contextual buttons. Show different buttons
+    based on view mode (preview vs edit) and checkout status. Include Refresh,
+    Edit, Download, Delete buttons for preview mode.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Fluent UI v9 and React.
+    Follow ADRs strictly.
+  </role>
+
+  <goal>
+    A fully functional toolbar component with buttons that change based on state,
+    tooltips, and proper loading/disabled states.
+  </goal>
+
+  <context>
+    <background>
+      The toolbar follows Power Platform command bar styling. Buttons show/hide
+      based on mode (preview/edit) and permissions (enableEdit, enableDelete).
+    </background>
+    <relevant-files>
+      <file>projects/document-checkout-viewer/spec.md (Toolbar Design section)</file>
+      <file>src/client/pcf/SpeFileViewer/control/FilePreview.tsx (action buttons)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Use Fluent UI v9 components</constraint>
+    <constraint source="project">Button appearance: subtle, size: small</constraint>
+    <constraint source="project">All buttons must have tooltips</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/ai-knowledge/guides/PCF-V9-PACKAGING.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Toolbar buttons" location="src/client/pcf/SpeFileViewer/control/FilePreview.tsx">
+        Follow button styling with Tooltip, subtle appearance, small size
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create Toolbar component with makeStyles</step>
+    <step order="2">Implement document info section (name, size)</step>
+    <step order="3">Add Refresh button (always visible)</step>
+    <step order="4">Add Edit button (visible when enableEdit=true and not checked out by others)</step>
+    <step order="5">Add Download button (visible when enableDownload=true)</step>
+    <step order="6">Add Delete button (visible when enableDelete=true, disabled if checked out)</step>
+    <step order="7">Add Expand button (visible when onFullscreen prop provided)</step>
+    <step order="8">Implement button disabled states based on loading</step>
+    <step order="9">Add checkout status badge (shows who has it locked)</step>
+    <step order="10">Write component tests for different states</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/PCF projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/SpeDocumentViewer/control/components/Toolbar.tsx</output>
+    <output type="code">src/client/pcf/SpeDocumentViewer/control/components/CheckoutStatusBadge.tsx</output>
+    <output type="code">src/client/pcf/SpeDocumentViewer/control/SpeDocumentViewer.tsx (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Toolbar renders with correct buttons based on mode</criterion>
+    <criterion testable="true">Edit button disabled when document checked out by another user</criterion>
+    <criterion testable="true">All buttons have tooltips via Tooltip component</criterion>
+    <criterion testable="true">Checkout status badge shows lock holder name</criterion>
+    <criterion testable="true">Buttons use appearance="subtle" size="small"</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    See spec.md Appendix A for exact Fluent v9 button patterns.
+    Icons: ArrowClockwiseRegular, EditRegular, ArrowDownloadRegular, DeleteRegular, FullScreenMaximize24Regular
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+    </protocol>
+  </execution>
+</task>

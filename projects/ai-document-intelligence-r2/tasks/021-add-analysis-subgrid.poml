@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="ai-document-intelligence-r2">
+  <metadata>
+    <title>Add Analysis Subgrid to Analysis Tab</title>
+    <phase>Phase 3: Document Form Integration</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>022</blocks>
+    <tags>dataverse, form, subgrid</tags>
+  </metadata>
+
+  <prompt>
+    Add a subgrid to the Analysis tab that displays sprk_analysis records related to the current document. Configure columns to show analysis name, status, and created date.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse subgrids and views.
+  </role>
+
+  <goal>
+    Subgrid displays related analyses with appropriate columns.
+  </goal>
+
+  <context>
+    <background>
+      The subgrid shows analyses linked to the current document via a lookup relationship. Users can click an analysis to open the Analysis Workspace.
+    </background>
+    <relevant-files>
+      <file>src/solutions/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Show name, status, created date columns</constraint>
+    <constraint source="project">Enable add new and delete actions</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Open sprk_document form in designer</step>
+    <step order="2">Navigate to Analysis tab</step>
+    <step order="3">Add subgrid component</step>
+    <step order="4">Configure to show sprk_analysis entity</step>
+    <step order="5">Set relationship filter to current document</step>
+    <step order="6">Configure columns: Name, Status, Created On</step>
+    <step order="7">Enable add new and delete</step>
+    <step order="8">Save and publish</step>
+    <step order="9">Test subgrid displays correctly</step>
+    <step order="10">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="power-apps">Form designer</tool>
+  </tools>
+
+  <outputs>
+    <output type="form">Subgrid on Analysis tab</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Subgrid visible on Analysis tab</criterion>
+    <criterion testable="true">Shows related analyses only</criterion>
+    <criterion testable="true">Columns display correctly</criterion>
+    <criterion testable="true">Add new button works</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+
+  <notes>
+    <completion-date>2025-12-29</completion-date>
+    <summary>Analysis subgrid already exists on Document form Analysis tab.</summary>
+    <findings>
+      <finding type="existing">Subgrid displays related sprk_analysis records</finding>
+    </findings>
+  </notes>
+</task>

@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="document-checkout-viewer">
+  <metadata>
+    <title>Implement Preview Mode</title>
+    <phase>3: SpeDocumentViewer PCF</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>022</blocks>
+    <tags>pcf, react, typescript, frontend, fluent-ui</tags>
+  </metadata>
+
+  <prompt>
+    Implement the preview mode for SpeDocumentViewer using embed.aspx iframe.
+    Handle loading states, errors, and iframe load timeout. Display document info
+    in the toolbar area.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in React and Fluent UI v9.
+    Follow ADRs strictly.
+  </role>
+
+  <goal>
+    Preview mode displays documents in an embed.aspx iframe with proper loading
+    states, error handling, and document info display.
+  </goal>
+
+  <context>
+    <background>
+      Preview mode uses embed.aspx which hides the Share button for security.
+      This is the default view when opening a document.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/SpeFileViewer/control/FilePreview.tsx</file>
+      <file>src/client/pcf/AnalysisWorkspace/control/components/SourceDocumentViewer.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">Use PCF controls</constraint>
+    <constraint source="project">Must use embed.aspx URL (not embedview)</constraint>
+    <constraint source="project">Iframe load timeout should be 15 seconds</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/ai-knowledge/guides/PCF-V9-PACKAGING.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Iframe preview" location="src/client/pcf/SpeFileViewer/control/FilePreview.tsx">
+        Follow iframe loading pattern with timeout
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Implement useDocumentPreview hook for fetching preview URL</step>
+    <step order="2">Add loading state UI with Fluent Spinner</step>
+    <step order="3">Add error state UI with Fluent MessageBar</step>
+    <step order="4">Implement iframe with onLoad/onError handlers</step>
+    <step order="5">Add iframe load timeout (15 seconds)</step>
+    <step order="6">Display document name and size in toolbar area</step>
+    <step order="7">Handle checkout status from preview-url response</step>
+    <step order="8">Store checkout status in component state for toolbar</step>
+    <step order="9">Write component tests</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/PCF projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/SpeDocumentViewer/control/hooks/useDocumentPreview.ts</output>
+    <output type="code">src/client/pcf/SpeDocumentViewer/control/SpeDocumentViewer.tsx (modified)</output>
+    <output type="code">src/client/pcf/SpeDocumentViewer/control/SpeDocumentViewer.styles.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Document preview loads in iframe using embed.aspx URL</criterion>
+    <criterion testable="true">Loading spinner displays while fetching preview URL</criterion>
+    <criterion testable="true">Error message displays if preview fails</criterion>
+    <criterion testable="true">Timeout error after 15 seconds if iframe doesn't load</criterion>
+    <criterion testable="true">Document name and size display correctly</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The iframe sandbox attribute should allow same-origin and scripts for Office embed.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+    </protocol>
+  </execution>
+</task>

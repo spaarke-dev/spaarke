@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="ai-document-intelligence-r2">
+  <metadata>
+    <title>Test Solution Import to Clean Environment</title>
+    <phase>Phase 4: Solution Packaging</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>032</blocks>
+    <tags>deploy, testing, solution</tags>
+  </metadata>
+
+  <prompt>
+    Import the unmanaged solution to a clean test environment to verify all components deploy correctly. Document any import warnings or errors.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse solution deployment.
+  </role>
+
+  <goal>
+    Solution imports successfully to test environment with all features working.
+  </goal>
+
+  <context>
+    <background>
+      Testing import to a clean environment validates the solution is self-contained and can be deployed to customer environments.
+    </background>
+    <relevant-files>
+      <file>infrastructure/dataverse/solutions/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use test environment, not production</constraint>
+    <constraint source="project">Document all warnings</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Connect to test environment: pac auth create --url https://test.crm.dynamics.com</step>
+    <step order="2">Import solution: pac solution import --path Spaarke_UI_Unmanaged.zip</step>
+    <step order="3">Note any warnings or errors</step>
+    <step order="4">Publish all customizations</step>
+    <step order="5">Verify PCF controls are available</step>
+    <step order="6">Verify custom pages exist</step>
+    <step order="7">Verify form changes applied</step>
+    <step order="8">Test end-to-end flow in test environment</step>
+    <step order="9">Document results in notes/deployment/import-test-results.md</step>
+    <step order="10">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Solution import</tool>
+    <tool name="browser">Verify in test environment</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-document-intelligence-r2/notes/deployment/import-test-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Solution imports without blocking errors</criterion>
+    <criterion testable="true">PCF controls available in test env</criterion>
+    <criterion testable="true">Custom pages work</criterion>
+    <criterion testable="true">Form changes visible</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,74 @@
+<task id="032" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Implement Email Export</title>
+    <phase>4</phase>
+    <tags>export, email, graph, dotnet</tags>
+    <estimate>4h</estimate>
+    <dependencies>030</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>Senior .NET Developer</role>
+    <goal>Implement email export for sharing analysis results via email</goal>
+    <context>
+      Email export allows:
+      - Sending analysis summary via email
+      - Attaching DOCX/PDF exports
+      - Including links back to full analysis
+      - Using Microsoft Graph for sending
+
+      Must use Graph API for email delivery.
+    </context>
+    <constraints>
+      - MUST use Microsoft Graph for email
+      - MUST support HTML email body
+      - MUST support attachments (DOCX, PDF)
+      - MUST respect user's mailbox permissions
+      - MUST track email delivery status
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/ai-knowledge/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create EmailExportService implementing IExportService</step>
+    <step order="2">Create HTML email template</step>
+    <step order="3">Implement Graph API email sending</step>
+    <step order="4">Add attachment support</step>
+    <step order="5">Create send-via-email endpoint</step>
+    <step order="6">Add delivery tracking</step>
+    <step order="7">Write unit and integration tests</step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review Graph API email patterns</tool>
+    <tool>Write - Create service implementation</tool>
+    <tool>Bash - Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output>EmailExportService.cs - Email implementation</output>
+    <output>Email HTML template</output>
+    <output>Send-via-email endpoint</output>
+    <output>Unit and integration tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Emails sent via Graph API</criterion>
+    <criterion>HTML body renders correctly</criterion>
+    <criterion>Attachments work</criterion>
+    <criterion>Permissions respected</criterion>
+    <criterion>Tests pass</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
+    <next-task>033-implement-teams-export.poml</next-task>
+  </execution>
+</task>

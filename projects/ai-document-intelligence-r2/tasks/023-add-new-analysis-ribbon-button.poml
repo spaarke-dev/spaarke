@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="ai-document-intelligence-r2">
+  <metadata>
+    <title>Add New Analysis Ribbon Button</title>
+    <phase>Phase 3: Document Form Integration</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>022</dependencies>
+    <blocks>024</blocks>
+    <tags>dataverse, ribbon, customization</tags>
+  </metadata>
+
+  <prompt>
+    Add a "+ New Analysis" button to the sprk_document form ribbon that launches the Analysis Builder custom page. Use the ribbon-edit skill for proper ribbon customization.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse ribbon customization.
+  </role>
+
+  <goal>
+    Ribbon button visible that launches Analysis Builder with current document context.
+  </goal>
+
+  <context>
+    <background>
+      The ribbon button provides quick access to create a new analysis for the current document. It calls the navigation JavaScript to open the Analysis Builder page.
+    </background>
+    <relevant-files>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Button should be in Analysis group</constraint>
+    <constraint source="project">Only visible when document is saved</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load ribbon-edit skill</step>
+    <step order="2">Export current sprk_document ribbon XML</step>
+    <step order="3">Add new button definition for "+ New Analysis"</step>
+    <step order="4">Configure command to call openAnalysisBuilder</step>
+    <step order="5">Add enable rule for saved records only</step>
+    <step order="6">Set icon and label</step>
+    <step order="7">Import updated ribbon</step>
+    <step order="8">Publish customizations</step>
+    <step order="9">Test button appears and works</step>
+    <step order="10">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Export/import ribbon</tool>
+    <tool name="power-apps">Ribbon customization</tool>
+  </tools>
+
+  <outputs>
+    <output type="ribbon">+ New Analysis button on sprk_document</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Button visible on form ribbon</criterion>
+    <criterion testable="true">Click opens Analysis Builder page</criterion>
+    <criterion testable="true">Document ID passed to page</criterion>
+    <criterion testable="true">Button disabled for unsaved records</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/ribbon-edit/SKILL.md</skill>
+    <protocol>Follow ribbon-edit skill procedure.</protocol>
+  </execution>
+
+  <notes>
+    <completion-date>2025-12-29</completion-date>
+    <summary>New Analysis ribbon button already created and deployed on Document form.</summary>
+    <findings>
+      <finding type="existing">Button visible on form ribbon, launches Analysis Builder</finding>
+    </findings>
+  </notes>
+</task>

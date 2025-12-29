@@ -1,0 +1,403 @@
+---
+description: Create and manage git worktrees for parallel project development
+tags: [git, worktree, project-setup, operations]
+techStack: [git, powershell]
+appliesTo: ["new project", "parallel development", "multi-computer workflow"]
+alwaysApply: false
+---
+
+# Worktree Setup
+
+> **Category**: Operations
+> **Last Updated**: December 2025
+
+---
+
+## Purpose
+
+Manage git worktrees for parallel project development. Worktrees allow multiple working directories from the same repository, each on a different branch, without cloning multiple times.
+
+**Benefits:**
+- Work on multiple projects simultaneously
+- Each VS Code window has isolated branch state
+- No stash juggling when switching projects
+- Shared git history across all worktrees
+
+---
+
+## Applies When
+
+- Starting a new project that needs isolation
+- Setting up existing project on a new computer
+- Cleaning up completed project worktrees
+- **Trigger phrases**: "create worktree", "setup worktree", "new project worktree", "worktree for project"
+
+---
+
+## Naming Conventions
+
+| Item | Convention | Example |
+|------|------------|---------|
+| Worktree folder | `spaarke-wt-{project-name}` | `spaarke-wt-email-automation` |
+| Branch name | `work/{project-name}` | `work/email-automation` |
+| Location | `C:\code_files\` (sibling to main repo) | `C:\code_files\spaarke-wt-email-automation` |
+
+---
+
+## Workflows
+
+### Workflow A: Create New Project Worktree
+
+**When**: Starting a brand new project
+
+#### Step 1: Gather Information
+
+**ASK user:**
+```
+What is the project name? (use kebab-case, e.g., "email-automation")
+```
+
+Store as: `{project-name}`
+
+#### Step 2: Sync Master (Can Run From Any Location)
+
+**This step ensures master is up-to-date before creating the worktree.**
+
+```powershell
+# Navigate to main spaarke repo
+cd C:\code_files\spaarke
+
+# Fetch latest from origin
+git fetch origin master
+
+# Check if master needs updating
+git log master..origin/master --oneline
+```
+
+**Decision tree:**
+```
+IF commits exist (master is behind):
+  → Update master:
+    git checkout master
+    git pull origin master
+  → CONFIRM: "Master updated to {commit}"
+
+IF no commits (already up to date):
+  → CONFIRM: "Master is already up to date"
+```
+
+**If running from a worktree** (e.g., `spaarke-wt-project-planning-and-documentation`):
+```powershell
+# You can update master without switching to it
+cd C:\code_files\spaarke
+git fetch origin master:master
+```
+This fetches and fast-forwards master without needing to checkout.
+
+#### Step 3: Verify Main Repo
+
+```powershell
+# Confirm we're in main repo
+cd C:\code_files\spaarke
+git rev-parse --git-dir
+# Should return ".git" (not a path to another repo)
+```
+
+**Decision tree:**
+```
+IF git-dir is not ".git":
+  → ERROR: "You're in a worktree, not the main repo"
+  → STOP
+
+IF directory doesn't exist:
+  → ERROR: "Main repo not found at C:\code_files\spaarke"
+  → STOP
+```
+
+#### Step 4: Check for Existing Worktree/Branch
+
+```powershell
+# List existing worktrees
+git worktree list
+
+# Check if branch already exists
+git branch --list "work/{project-name}"
+git branch -r --list "origin/work/{project-name}"
+```
+
+**Decision tree:**
+```
+IF worktree already exists for this project:
+  → WARN: "Worktree already exists at {path}"
+  → ASK: "Open existing worktree? (y/n)"
+  → If yes: Skip to Step 6
+
+IF branch exists locally or remotely:
+  → WARN: "Branch work/{project-name} already exists"
+  → ASK: "Use existing branch? (y/n)"
+  → If yes: Use `git worktree add` without `-b` flag
+  → If no: ASK for different project name
+```
+
+#### Step 5: Create Worktree
+
+```powershell
+# Create worktree with new branch
+git worktree add ..\spaarke-wt-{project-name} -b work/{project-name}
+```
+
+**Expected output:**
+```
+Preparing worktree (new branch 'work/{project-name}')
+HEAD is now at {commit} {message}
+```
+
+#### Step 6: Provide Next Steps
+
+**Output to user:**
+```
+✅ Worktree created successfully!
+
+📁 Location: C:\code_files\spaarke-wt-{project-name}
+🌿 Branch: work/{project-name}
+
+Next steps:
+1. Open in VS Code:
+   code -n C:\code_files\spaarke-wt-{project-name}
+
+2. After making changes, push branch to GitHub:
+   cd C:\code_files\spaarke-wt-{project-name}
+   git add .
+   git commit -m "Initial project setup"
+   git push -u origin work/{project-name}
+
+3. To start project pipeline:
+   /project-pipeline projects/{project-name}
+```
+
+---
+
+### Workflow B: Resume Project on Another Computer
+
+**When**: You have a worktree on Computer A and want to work on Computer B
+
+#### Step 1: Gather Information
+
+**ASK user:**
+```
+What is the project name? (the branch is work/{project-name})
+```
+
+#### Step 2: Verify Main Repo Exists
+
+```powershell
+cd C:\code_files\spaarke
+git status
+```
+
+**Decision tree:**
+```
+IF directory doesn't exist:
+  → "Main repo not found. Clone it first:"
+  → git clone https://github.com/spaarke-dev/spaarke.git C:\code_files\spaarke
+  → THEN continue
+
+IF not a git repo:
+  → ERROR: "C:\code_files\spaarke exists but is not a git repo"
+  → STOP
+```
+
+#### Step 3: Fetch All Branches
+
+```powershell
+git fetch --all
+```
+
+#### Step 4: Check Branch Exists on Remote
+
+```powershell
+git branch -r --list "origin/work/{project-name}"
+```
+
+**Decision tree:**
+```
+IF branch not found:
+  → ERROR: "Branch work/{project-name} not found on remote"
+  → "Did you push from Computer A? Run: git push -u origin work/{project-name}"
+  → STOP
+```
+
+#### Step 5: Create Worktree from Existing Branch
+
+```powershell
+# Note: NO -b flag - uses existing remote branch
+git worktree add ..\spaarke-wt-{project-name} work/{project-name}
+```
+
+#### Step 6: Verify Setup
+
+```powershell
+cd C:\code_files\spaarke-wt-{project-name}
+git status
+git log -1 --oneline
+```
+
+**Output to user:**
+```
+✅ Worktree created from existing branch!
+
+📁 Location: C:\code_files\spaarke-wt-{project-name}
+🌿 Branch: work/{project-name}
+📝 Latest commit: {commit hash} {message}
+
+Open in VS Code:
+   code -n C:\code_files\spaarke-wt-{project-name}
+```
+
+---
+
+### Workflow C: List Worktrees
+
+**When**: User wants to see all active worktrees
+
+```powershell
+cd C:\code_files\spaarke
+git worktree list
+```
+
+**Format output:**
+```
+Active Worktrees:
+─────────────────
+📁 C:/code_files/spaarke                           [master]
+📁 C:/code_files/spaarke-wt-project-planning       [work/project-planning-and-documentation]
+📁 C:/code_files/spaarke-wt-email-automation       [work/email-automation]
+```
+
+---
+
+### Workflow D: Remove Completed Project Worktree
+
+**When**: Project is merged and worktree no longer needed
+
+#### Step 1: Verify Project is Merged
+
+```powershell
+cd C:\code_files\spaarke
+git fetch origin
+
+# Check if branch is merged to master
+git branch --merged master | grep "work/{project-name}"
+```
+
+**Decision tree:**
+```
+IF branch NOT merged:
+  → WARN: "Branch work/{project-name} is NOT merged to master"
+  → ASK: "Force remove anyway? (y/n)"
+  → If no: STOP
+
+IF branch merged:
+  → CONFIRM: "Branch is merged. Safe to remove."
+```
+
+#### Step 2: Remove Worktree
+
+```powershell
+# Remove the worktree
+git worktree remove ..\spaarke-wt-{project-name}
+```
+
+**If worktree has uncommitted changes:**
+```powershell
+# Force remove (use with caution)
+git worktree remove --force ..\spaarke-wt-{project-name}
+```
+
+#### Step 3: Delete Local Branch (Optional)
+
+```powershell
+# Delete local branch (safe - only works if merged)
+git branch -d work/{project-name}
+
+# Force delete (use if branch wasn't merged)
+git branch -D work/{project-name}
+```
+
+#### Step 4: Confirm Cleanup
+
+```powershell
+# Verify worktree is gone
+git worktree list
+
+# Prune any stale worktree references
+git worktree prune
+```
+
+**Output to user:**
+```
+✅ Worktree removed successfully!
+
+Cleaned up:
+  ❌ Folder: C:\code_files\spaarke-wt-{project-name}
+  ❌ Local branch: work/{project-name}
+
+Remote branch still exists (delete via GitHub PR or manually):
+  git push origin --delete work/{project-name}
+```
+
+---
+
+## Multi-Computer Workflow Summary
+
+```
+Computer A (create)              GitHub                Computer B (resume)
+─────────────────               ──────                ─────────────────
+git worktree add ... -b         ←──────────────────── git fetch --all
+  ↓                                                     ↓
+Work on files                                        git worktree add ...
+  ↓                                                   (no -b flag)
+git push -u origin work/...     ──────────────────→    ↓
+                                                     git pull
+                                                       ↓
+                                                     Work on files
+                                                       ↓
+git pull                        ←────────────────── git push
+```
+
+---
+
+## Isolation Rules
+
+| Rule | Why |
+|------|-----|
+| **One worktree per branch** | Git enforces - can't checkout same branch twice |
+| **One Claude Code session per worktree** | Avoids conflicting edits |
+| **Merge via PR, not local checkout** | Master is "locked" to main worktree |
+| **Don't edit shared root files in parallel** | `*.sln`, `Directory.*`, root `package.json` |
+| **Use different ports if running locally** | Avoid port conflicts between worktrees |
+
+---
+
+## Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| "fatal: '{branch}' is already checked out" | Branch is in another worktree; use that worktree or remove it first |
+| "fatal: '{path}' already exists" | Folder exists; remove it or use different name |
+| Worktree folder deleted manually | Run `git worktree prune` to clean up references |
+| Can't checkout master | Master is in main worktree; work from there or use PR to merge |
+| Stale worktree reference | `git worktree prune` cleans up |
+
+---
+
+## Related Skills
+
+- `project-pipeline` - Run after creating worktree to initialize project
+- `push-to-github` - For pushing worktree changes
+- `pull-from-github` - For syncing worktree across computers
+- `repo-cleanup` - Run before removing worktree to validate state
+
+---
+
+*Last updated: December 25, 2025*

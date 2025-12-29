@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="ai-document-intelligence-r1">
+  <metadata>
+    <title>Test Bicep Deployment to External Subscription</title>
+    <phase>Phase 1C: Deployment Testing</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>005</dependencies>
+    <blocks>032, 033</blocks>
+    <tags>deploy, azure, bicep, infrastructure</tags>
+  </metadata>
+
+  <prompt>
+    Test the Bicep infrastructure deployment to an external Azure subscription. This validates that the infrastructure-as-code templates work correctly for customer deployments.
+
+    Deploy to a clean subscription/resource group to simulate customer deployment experience.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Follow ADRs strictly. Expert in Azure Bicep, infrastructure as code, and Azure resource deployment.
+  </role>
+
+  <goal>
+    Successful Bicep deployment to external subscription with all AI infrastructure resources provisioned.
+  </goal>
+
+  <context>
+    <background>
+      The infrastructure Bicep templates exist but may not have been tested end-to-end in a clean environment. This task validates the deployment process.
+    </background>
+    <relevant-files>
+      <file>infrastructure/bicep/main.bicep</file>
+      <file>infrastructure/bicep/ai-foundry.bicepparam</file>
+      <file>infrastructure/bicep/modules/ai-search.bicep</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Deploy to test subscription, not production</constraint>
+    <constraint source="project">Use parameterized deployment (no hard-coded values)</constraint>
+    <constraint source="project">Document any deployment errors</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r1/spec.md</file>
+      <file>infrastructure/bicep/README.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing Bicep templates in infrastructure/bicep/</step>
+    <step order="2">Prepare parameter file for test deployment</step>
+    <step order="3">Login to Azure: az login</step>
+    <step order="4">Set test subscription: az account set --subscription [test-subscription]</step>
+    <step order="5">Create resource group: az group create --name rg-spaarke-test --location eastus</step>
+    <step order="6">Deploy Bicep: az deployment group create --resource-group rg-spaarke-test --template-file main.bicep --parameters @test.bicepparam</step>
+    <step order="7">Verify all resources provisioned correctly</step>
+    <step order="8">Document deployment results in notes/deployment/bicep-test-results.md</step>
+    <step order="9">Update TASK-INDEX.md status</step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI for deployments</tool>
+    <tool name="bash">Execute commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="infrastructure">Deployed Azure resources in test subscription</output>
+    <output type="docs">projects/ai-document-intelligence-r1/notes/deployment/bicep-test-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Bicep deployment completes without errors</criterion>
+    <criterion testable="true">All required resources provisioned</criterion>
+    <criterion testable="true">Resources accessible and functional</criterion>
+    <criterion testable="true">Deployment documented with any issues found</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>

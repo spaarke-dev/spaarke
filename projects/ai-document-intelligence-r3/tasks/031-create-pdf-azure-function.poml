@@ -1,0 +1,78 @@
+<task id="031" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Create PDF Azure Function</title>
+    <phase>4</phase>
+    <tags>export, pdf, azure-function</tags>
+    <estimate>6h</estimate>
+    <dependencies>030</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>Senior .NET Developer</role>
+    <goal>Create Azure Function for PDF generation from analysis results</goal>
+    <context>
+      PDF generation requires headless browser/puppeteer which is heavy.
+      Use Azure Function for:
+      - Isolation from main API
+      - Scale independently
+      - Container-based deployment for dependencies
+
+      Falls back to server-side if function unavailable.
+    </context>
+    <constraints>
+      - MUST use Azure Functions for PDF (exception to ADR-001)
+      - MUST generate PDF from HTML/CSS template
+      - MUST support custom branding
+      - MUST handle timeout gracefully
+      - MUST implement fallback strategy
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/reference/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>docs/ai-knowledge/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create Azure Function project</step>
+    <step order="2">Add Puppeteer Sharp or similar PDF library</step>
+    <step order="3">Create HTML template for PDF rendering</step>
+    <step order="4">Implement PDF generation function</step>
+    <step order="5">Add branding/styling support</step>
+    <step order="6">Implement timeout handling</step>
+    <step order="7">Create fallback service in main API</step>
+    <step order="8">Deploy function to Azure</step>
+    <step order="9">Write integration tests</step>
+  </steps>
+
+  <tools>
+    <tool>Bash - Create function project</tool>
+    <tool>Write - Implement function code</tool>
+    <tool>Bash - Deploy to Azure</tool>
+  </tools>
+
+  <outputs>
+    <output>Azure Function project for PDF</output>
+    <output>HTML/CSS templates</output>
+    <output>Fallback service in BFF API</output>
+    <output>Deployed function</output>
+    <output>Integration tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>PDF function generates documents</criterion>
+    <criterion>HTML template renders correctly</criterion>
+    <criterion>Branding applied</criterion>
+    <criterion>Timeout handled gracefully</criterion>
+    <criterion>Fallback works when function unavailable</criterion>
+    <criterion>Tests pass</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
+    <next-task>032-implement-email-export.poml</next-task>
+  </execution>
+</task>

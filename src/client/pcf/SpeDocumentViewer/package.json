@@ -1,0 +1,39 @@
+{
+  "name": "spe-document-viewer",
+  "version": "1.0.2",
+  "description": "SPE Document Viewer PCF Control with check-out/check-in workflow",
+  "scripts": {
+    "build": "pcf-scripts build",
+    "build:prod": "pcf-scripts build --production",
+    "clean": "pcf-scripts clean",
+    "lint": "pcf-scripts lint",
+    "lint:fix": "pcf-scripts lint fix",
+    "rebuild": "pcf-scripts rebuild",
+    "start": "pcf-scripts start",
+    "start:watch": "pcf-scripts start watch",
+    "refreshTypes": "pcf-scripts refreshTypes"
+  },
+  "dependencies": {
+    "@azure/msal-browser": "^4.26.2",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.25.1",
+    "@fluentui/react-components": "^9.56.0",
+    "@fluentui/react-icons": "^2.0.266",
+    "@microsoft/eslint-plugin-power-apps": "^0.2.51",
+    "@types/node": "^18.19.86",
+    "@types/powerapps-component-framework": "^1.3.16",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.7",
+    "@types/uuid": "^10.0.0",
+    "eslint-plugin-promise": "^7.1.0",
+    "globals": "^15.15.0",
+    "pcf-scripts": "^1",
+    "pcf-start": "^1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.31.0"
+  }
+}

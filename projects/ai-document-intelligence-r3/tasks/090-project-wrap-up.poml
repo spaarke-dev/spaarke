@@ -1,0 +1,77 @@
+<task id="090" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Project Wrap-up</title>
+    <phase>wrap-up</phase>
+    <tags>wrap-up, documentation, lessons-learned</tags>
+    <estimate>3h</estimate>
+    <dependencies>048</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>Project Lead / Developer</role>
+    <goal>Complete project wrap-up activities</goal>
+    <context>
+      Project completion activities:
+      - Update README status to Complete
+      - Create lessons learned document
+      - Archive project artifacts
+      - Update knowledge base with new patterns
+      - Clean up ephemeral files
+    </context>
+    <constraints>
+      - MUST update README status
+      - MUST create lessons learned
+      - MUST archive completed tasks
+      - MUST clean up ephemeral files
+      - MUST update knowledge base
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r3/README.md</file>
+      <file>projects/ai-document-intelligence-r3/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Update README.md status to Complete</step>
+    <step order="2">Verify all graduation criteria met</step>
+    <step order="3">Create lessons-learned.md</step>
+    <step order="4">Document what went well</step>
+    <step order="5">Document challenges and solutions</step>
+    <step order="6">Update knowledge base with new patterns</step>
+    <step order="7">Clean up notes/debug, notes/spikes, notes/drafts</step>
+    <step order="8">Run /repo-cleanup</step>
+    <step order="9">Create final commit</step>
+  </steps>
+
+  <tools>
+    <tool>Edit - Update README status</tool>
+    <tool>Write - Create lessons learned</tool>
+    <tool>Skill - repo-cleanup</tool>
+    <tool>Skill - push-to-github</tool>
+  </tools>
+
+  <outputs>
+    <output>Updated README.md with Complete status</output>
+    <output>lessons-learned.md</output>
+    <output>Clean repository</output>
+    <output>Final commit and PR merge</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>README shows Complete status</criterion>
+    <criterion>All graduation criteria checked</criterion>
+    <criterion>Lessons learned documented</criterion>
+    <criterion>Ephemeral files cleaned up</criterion>
+    <criterion>Knowledge base updated</criterion>
+    <criterion>Final commit created</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Project Complete - Merge PR and celebrate!</on-complete>
+    <next-task>none</next-task>
+  </execution>
+</task>

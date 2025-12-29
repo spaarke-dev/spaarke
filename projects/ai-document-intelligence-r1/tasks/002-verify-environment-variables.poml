@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="ai-document-intelligence-r1">
+  <metadata>
+    <title>Verify Environment Variables in Solution</title>
+    <phase>Phase 1A: Verification</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>005, 032</blocks>
+    <tags>dataverse, environment-variables, verification</tags>
+  </metadata>
+
+  <prompt>
+    Verify whether Environment Variables required for the AI Analysis feature exist in the Dataverse solution. Check both existence and current values.
+
+    Required Environment Variables (from spec.md):
+    - sprk_BffApiBaseUrl
+    - sprk_AzureOpenAiEndpoint
+    - sprk_AzureOpenAiKey
+    - sprk_DocumentIntelligenceEndpoint
+    - sprk_AzureAiSearchEndpoint
+    - sprk_PromptFlowEndpoint
+    - sprk_EnableAiFeatures
+    - sprk_RedisConnectionString
+    - sprk_ApplicationInsightsKey
+    - sprk_KeyVaultUrl
+    - sprk_CustomerTenantId
+    - sprk_DeploymentEnvironment
+
+    This is VERIFICATION only - document what exists and what's missing.
+  </prompt>
+
+  <role>
+    Power Platform administrator with expertise in Environment Variables and solution configuration.
+  </role>
+
+  <goal>
+    A verification report documenting which Environment Variables exist, their current values (non-secret), and which are missing.
+  </goal>
+
+  <context>
+    <background>
+      Environment Variables are critical for multi-tenant deployment. The BFF API and PCF controls read these values to determine endpoints and configuration. We need to verify they exist before testing API integration.
+    </background>
+    <dependencies>
+      <dependency task="none" status="n/a">Can run in parallel with Task 001</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Do NOT create Environment Variables - verification only</constraint>
+    <constraint source="project">Do NOT expose secret values in reports</constraint>
+    <constraint source="project">Target environment: spaarkedev1.crm.dynamics.com</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r1/spec.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Connect to Dataverse dev environment using PAC CLI</step>
+    <step order="2">Query environmentvariabledefinition table for sprk_* variables</step>
+    <step order="3">For each found variable, check current value (mask secrets)</step>
+    <step order="4">Document which variables exist and which are missing</step>
+    <step order="5">Create verification report in projects/ai-document-intelligence-r1/notes/verification/env-vars-verification.md</step>
+    <step order="6">Update TASK-INDEX.md with results</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI for Dataverse queries</tool>
+    <tool name="bash">Execute PAC commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">projects/ai-document-intelligence-r1/notes/verification/env-vars-verification.md</output>
+    <output type="docs">tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All expected Environment Variables checked</criterion>
+    <criterion testable="true">Report shows which exist and which are missing</criterion>
+    <criterion testable="true">Non-secret values documented for existing variables</criterion>
+    <criterion testable="true">Secret values masked in report</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="ai-document-intelligence-r1">
+  <metadata>
+    <title>Project Wrap-up</title>
+    <phase>Project Completion</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>034</dependencies>
+    <blocks>none</blocks>
+    <tags>documentation, project-management</tags>
+  </metadata>
+
+  <prompt>
+    Complete the AI Document Intelligence R1 project by updating all documentation to reflect completion status, documenting lessons learned, and preparing for handoff to R2.
+
+    This is the MANDATORY final task for the project.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Follow ADRs strictly. Expert in project documentation and knowledge management.
+  </role>
+
+  <goal>
+    Project fully documented as complete with all artifacts updated and lessons learned captured.
+  </goal>
+
+  <context>
+    <background>
+      R1 focused on core infrastructure verification and setup. Lessons learned here will inform R2 (UI) and R3 (Advanced Features) planning.
+    </background>
+    <relevant-files>
+      <file>projects/ai-document-intelligence-r1/README.md</file>
+      <file>projects/ai-document-intelligence-r1/plan.md</file>
+      <file>projects/ai-document-intelligence-r1/tasks/TASK-INDEX.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">All tasks must be marked complete before this task</constraint>
+    <constraint source="project">README and plan must show Complete status</constraint>
+    <constraint source="project">Lessons learned should inform R2/R3 planning</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r1/spec.md</file>
+      <file>.claude/skills/task-create/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify all prior tasks (001-034) are marked complete in TASK-INDEX.md</step>
+    <step order="2">Update README.md:
+      - Set Status to "Complete"
+      - Update Last Updated date
+      - Set Progress to "100%"
+      - Add Completed Date
+      - Check all Graduation Criteria checkboxes
+    </step>
+    <step order="3">Update plan.md:
+      - Set Status to "Complete"
+      - Update all phase milestones to ✅
+    </step>
+    <step order="4">Create notes/lessons-learned.md with:
+      - What went well
+      - What could be improved
+      - Recommendations for R2/R3
+      - Technical debt or follow-up items
+    </step>
+    <step order="5">Review and clean up notes/ directory</step>
+    <step order="6">Update this task (090) to complete in TASK-INDEX.md</step>
+    <step order="7">Create summary for project handoff</step>
+  </steps>
+
+  <tools>
+    <tool name="edit">Update documentation files</tool>
+    <tool name="write">Create lessons learned</tool>
+    <tool name="read">Review project artifacts</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-document-intelligence-r1/README.md (updated)</output>
+    <output type="docs">projects/ai-document-intelligence-r1/plan.md (updated)</output>
+    <output type="docs">projects/ai-document-intelligence-r1/notes/lessons-learned.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All tasks marked complete in TASK-INDEX.md</criterion>
+    <criterion testable="true">README.md shows Complete status with 100% progress</criterion>
+    <criterion testable="true">plan.md shows Complete status</criterion>
+    <criterion testable="true">Lessons learned document created</criterion>
+    <criterion testable="true">Project ready for R2 handoff</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>

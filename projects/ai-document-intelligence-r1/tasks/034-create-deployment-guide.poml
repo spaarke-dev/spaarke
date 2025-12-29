@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="ai-document-intelligence-r1">
+  <metadata>
+    <title>Create Phase 1 Deployment Guide</title>
+    <phase>Phase 1C: Deployment Testing</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>030, 031, 032, 033</dependencies>
+    <blocks>090</blocks>
+    <tags>documentation, deploy</tags>
+  </metadata>
+
+  <prompt>
+    Create a comprehensive Phase 1 Deployment Guide documenting how to deploy the AI Analysis infrastructure to a new environment. This guide will be used for customer deployments and internal team reference.
+
+    Include:
+    - Prerequisites and requirements
+    - Azure infrastructure deployment steps
+    - Dataverse solution import steps
+    - Environment variable configuration
+    - Verification procedures
+    - Troubleshooting common issues
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Follow ADRs strictly. Expert in technical documentation and deployment procedures.
+  </role>
+
+  <goal>
+    A complete, validated deployment guide that enables successful deployment to any target environment.
+  </goal>
+
+  <context>
+    <background>
+      This guide synthesizes learnings from Tasks 030-033 into actionable deployment instructions. It should be usable by someone unfamiliar with the project.
+    </background>
+    <relevant-files>
+      <file>projects/ai-document-intelligence-r1/notes/deployment/</file>
+      <file>projects/ai-document-intelligence-r1/notes/verification/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Guide must be standalone (no assumed knowledge)</constraint>
+    <constraint source="project">Include screenshots or command examples where helpful</constraint>
+    <constraint source="project">Include troubleshooting section</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r1/spec.md</file>
+      <file>projects/ai-document-intelligence-r1/notes/deployment/bicep-test-results.md</file>
+      <file>projects/ai-document-intelligence-r1/notes/deployment/solution-import-results.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review all deployment and verification notes from Tasks 030-033</step>
+    <step order="2">Outline deployment guide structure</step>
+    <step order="3">Write Prerequisites section (Azure subscription, Power Platform, tools)</step>
+    <step order="4">Write Azure Infrastructure Deployment section</step>
+    <step order="5">Write Dataverse Solution Deployment section</step>
+    <step order="6">Write Environment Configuration section</step>
+    <step order="7">Write Verification Procedures section</step>
+    <step order="8">Write Troubleshooting section based on issues found</step>
+    <step order="9">Create guide at docs/guides/AI-PHASE1-DEPLOYMENT-GUIDE.md</step>
+    <step order="10">Update TASK-INDEX.md status</step>
+  </steps>
+
+  <tools>
+    <tool name="write">Create documentation files</tool>
+    <tool name="read">Review source materials</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/guides/AI-PHASE1-DEPLOYMENT-GUIDE.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Guide covers all deployment steps</criterion>
+    <criterion testable="true">Prerequisites clearly listed</criterion>
+    <criterion testable="true">Command examples provided for each step</criterion>
+    <criterion testable="true">Troubleshooting section addresses known issues</criterion>
+    <criterion testable="true">Guide validated against actual deployment process</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge section.</protocol>
+  </execution>
+</task>

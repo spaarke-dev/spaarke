@@ -291,6 +291,64 @@ export class BffClient {
     }
 
     /**
+     * Get view URL for a document (real-time, no cache)
+     *
+     * Calls: GET /api/documents/{documentId}/view-url
+     *
+     * This endpoint uses driveItem webUrl instead of the Preview action,
+     * providing near real-time file viewing without the 30-60 second cache delay.
+     * Includes checkout status for showing lock indicators.
+     *
+     * @param documentId Document GUID
+     * @param accessToken Bearer token from MSAL
+     * @param correlationId Correlation ID for distributed tracing
+     * @returns FilePreviewResponse with view URL, metadata, and checkout status
+     * @throws Error if API call fails
+     */
+    public async getViewUrl(
+        documentId: string,
+        accessToken: string,
+        correlationId: string
+    ): Promise<FilePreviewResponse> {
+        const url = `${this.baseUrl}/api/documents/${documentId}/view-url`;
+
+        console.log(`[BffClient] GET ${url} (View URL - real-time)`);
+        console.log(`[BffClient] Correlation ID: ${correlationId}`);
+
+        try {
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'X-Correlation-Id': correlationId,
+                    'Accept': 'application/json'
+                },
+                mode: 'cors',
+                credentials: 'omit'
+            });
+
+            // Handle non-2xx responses
+            if (!response.ok) {
+                await this.handleErrorResponse(response, correlationId);
+            }
+
+            // Parse successful response
+            const data = await response.json() as FilePreviewResponse;
+
+            console.log(`[BffClient] View URL acquired for document: ${data.documentInfo.name}`);
+            if (data.checkoutStatus?.isCheckedOut) {
+                console.log(`[BffClient] Document is checked out by: ${data.checkoutStatus.checkedOutBy?.name}`);
+            }
+
+            return data;
+
+        } catch (error) {
+            console.error('[BffClient] Request failed:', error);
+            throw new Error(`Failed to get view URL: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
+    /**
      * Download a document
      *
      * Calls: GET /api/documents/{documentId}/content

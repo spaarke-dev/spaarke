@@ -1,0 +1,69 @@
+<task id="008" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Document RAG Implementation</title>
+    <phase>1</phase>
+    <tags>documentation, rag, architecture</tags>
+    <estimate>3h</estimate>
+    <dependencies>006, 007</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>Technical Writer / Developer</role>
+    <goal>Create comprehensive documentation for the RAG implementation</goal>
+    <context>
+      RAG infrastructure is complete. Need to document:
+      - Architecture and design decisions
+      - Configuration options
+      - Deployment model differences
+      - Troubleshooting guide
+      - Performance tuning recommendations
+    </context>
+    <constraints>
+      - MUST document all 3 deployment models
+      - MUST include configuration examples
+      - MUST include troubleshooting section
+      - MUST be clear for ops team to maintain
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/ai-knowledge/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+      <file>projects/ai-document-intelligence-r3/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Document RAG architecture overview</step>
+    <step order="2">Document each deployment model with pros/cons</step>
+    <step order="3">Create configuration reference</step>
+    <step order="4">Document index schema and fields</step>
+    <step order="5">Create troubleshooting guide</step>
+    <step order="6">Add performance tuning recommendations</step>
+    <step order="7">Review and finalize documentation</step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review implementation code</tool>
+    <tool>Write - Create documentation</tool>
+  </tools>
+
+  <outputs>
+    <output>RAG-ARCHITECTURE.md - Architecture documentation</output>
+    <output>RAG-CONFIGURATION.md - Configuration reference</output>
+    <output>RAG-TROUBLESHOOTING.md - Troubleshooting guide</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All deployment models documented</criterion>
+    <criterion>Configuration examples provided</criterion>
+    <criterion>Troubleshooting guide complete</criterion>
+    <criterion>Documentation reviewed for clarity</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
+    <next-task>010-create-analysis-tool-handler-interface.poml</next-task>
+  </execution>
+</task>

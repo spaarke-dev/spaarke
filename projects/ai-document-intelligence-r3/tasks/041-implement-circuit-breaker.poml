@@ -1,0 +1,74 @@
+<task id="041" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Implement Circuit Breaker</title>
+    <phase>5</phase>
+    <tags>resilience, circuit-breaker, polly, dotnet</tags>
+    <estimate>4h</estimate>
+    <dependencies>040</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>Senior .NET Developer</role>
+    <goal>Implement circuit breaker pattern for external service calls</goal>
+    <context>
+      Circuit breakers protect against cascading failures:
+      - Azure OpenAI calls
+      - Azure AI Search calls
+      - External API calls (Graph, Teams)
+
+      Use Polly library for resilience patterns.
+    </context>
+    <constraints>
+      - MUST use Polly for circuit breaker
+      - MUST configure per-service thresholds
+      - MUST implement graceful degradation
+      - MUST log circuit state changes
+      - MUST expose circuit state for monitoring
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/ai-knowledge/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+      <file>docs/ai-knowledge/patterns/distributed-cache.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add Polly NuGet packages</step>
+    <step order="2">Configure circuit breaker for Azure OpenAI</step>
+    <step order="3">Configure circuit breaker for Azure AI Search</step>
+    <step order="4">Configure circuit breaker for Graph API</step>
+    <step order="5">Implement fallback strategies</step>
+    <step order="6">Add circuit state monitoring</step>
+    <step order="7">Log circuit state changes</step>
+    <step order="8">Write tests for circuit behavior</step>
+  </steps>
+
+  <tools>
+    <tool>Bash - Add NuGet packages</tool>
+    <tool>Write - Implement circuit breakers</tool>
+    <tool>Bash - Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output>Circuit breaker configuration</output>
+    <output>Fallback implementations</output>
+    <output>Circuit state monitoring endpoint</output>
+    <output>Tests for circuit behavior</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Circuit breakers configured for all external services</criterion>
+    <criterion>Fallbacks work when circuits open</criterion>
+    <criterion>State changes logged</criterion>
+    <criterion>Monitoring endpoint works</criterion>
+    <criterion>Tests pass</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
+    <next-task>042-create-monitoring-dashboards.poml</next-task>
+  </execution>
+</task>

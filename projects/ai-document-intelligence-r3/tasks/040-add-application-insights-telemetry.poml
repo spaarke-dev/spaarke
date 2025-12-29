@@ -1,0 +1,75 @@
+<task id="040" project="ai-document-intelligence-r3">
+  <metadata>
+    <title>Add Application Insights Telemetry</title>
+    <phase>5</phase>
+    <tags>telemetry, monitoring, application-insights, dotnet</tags>
+    <estimate>4h</estimate>
+    <dependencies>036</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <role>Senior .NET Developer</role>
+    <goal>Implement comprehensive Application Insights telemetry for AI features</goal>
+    <context>
+      Need to monitor:
+      - RAG query latency
+      - Tool execution times
+      - Export operation metrics
+      - Error rates and types
+      - User behavior patterns
+
+      Must follow ADR-015 AI Observability.
+    </context>
+    <constraints>
+      - MUST use Application Insights
+      - MUST track custom metrics for AI operations
+      - MUST include correlation IDs
+      - MUST follow ADR-015 observability patterns
+      - MUST NOT log PII
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/reference/adr/ADR-015-ai-observability.md</file>
+      <file>docs/ai-knowledge/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Configure Application Insights SDK</step>
+    <step order="2">Add custom metrics for RAG operations</step>
+    <step order="3">Add custom metrics for tool execution</step>
+    <step order="4">Add custom metrics for export operations</step>
+    <step order="5">Implement correlation ID propagation</step>
+    <step order="6">Add exception tracking with context</step>
+    <step order="7">Verify PII scrubbing</step>
+    <step order="8">Test telemetry in Azure portal</step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review ADR-015 requirements</tool>
+    <tool>Write - Add telemetry code</tool>
+    <tool>Bash - Run and verify</tool>
+  </tools>
+
+  <outputs>
+    <output>Telemetry configuration</output>
+    <output>Custom metrics definitions</output>
+    <output>Telemetry verification in Azure</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Application Insights receiving data</criterion>
+    <criterion>Custom metrics for AI operations</criterion>
+    <criterion>Correlation IDs working</criterion>
+    <criterion>No PII in telemetry</criterion>
+    <criterion>ADR-015 compliance verified</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
+    <next-task>041-implement-circuit-breaker.poml</next-task>
+  </execution>
+</task>

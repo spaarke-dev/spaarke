@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="ai-document-intelligence-r1">
+  <metadata>
+    <title>Document Verification Results</title>
+    <phase>Phase 1A: Verification</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>001, 002, 003, 004</dependencies>
+    <blocks>010-021, 030-034</blocks>
+    <tags>documentation, verification</tags>
+  </metadata>
+
+  <prompt>
+    Consolidate all Phase 1A verification results into a single summary report. Determine which Phase 1B tasks need to execute based on what's missing.
+
+    This task synthesizes the individual verification reports and produces:
+    1. A comprehensive verification summary
+    2. A decision on which Phase 1B tasks to execute
+    3. Updated TASK-INDEX.md with Phase 1B task status (skip vs. required)
+  </prompt>
+
+  <role>
+    Project coordinator with technical understanding of Dataverse, Azure, and API infrastructure.
+  </role>
+
+  <goal>
+    A consolidated verification report that clearly states what exists, what's missing, and which Phase 1B tasks must execute.
+  </goal>
+
+  <context>
+    <background>
+      Phase 1A was verification-only. Based on results, we now need to determine the scope of Phase 1B (entity creation). If all entities exist, Phase 1B can be skipped entirely.
+    </background>
+    <dependencies>
+      <dependency task="001" status="required">Entity verification</dependency>
+      <dependency task="002" status="required">Environment variable verification</dependency>
+      <dependency task="003" status="required">AI Foundry verification</dependency>
+      <dependency task="004" status="required">API health verification</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Base decisions on actual verification results</constraint>
+    <constraint source="project">Mark Phase 1B tasks as "skipped" if not needed</constraint>
+    <constraint source="project">Be specific about what needs to be created</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r1/notes/verification/entities-verification.md</file>
+      <file>projects/ai-document-intelligence-r1/notes/verification/env-vars-verification.md</file>
+      <file>projects/ai-document-intelligence-r1/notes/verification/ai-foundry-verification.md</file>
+      <file>projects/ai-document-intelligence-r1/notes/verification/api-verification.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read all 4 verification reports from Phase 1A</step>
+    <step order="2">Create summary table: Component | Status | Action Required</step>
+    <step order="3">Determine Phase 1B scope:
+      - List entities that need creation
+      - List environment variables that need creation
+      - List any infrastructure gaps
+    </step>
+    <step order="4">Update TASK-INDEX.md:
+      - Mark Phase 1B tasks as "skipped" or "required"
+      - Add notes on why each decision was made
+    </step>
+    <step order="5">Create consolidated report at projects/ai-document-intelligence-r1/VERIFICATION-SUMMARY.md</step>
+    <step order="6">Update README.md status section</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Read verification reports</tool>
+    <tool name="write">Create consolidated report</tool>
+    <tool name="edit">Update TASK-INDEX.md and README.md</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">projects/ai-document-intelligence-r1/VERIFICATION-SUMMARY.md</output>
+    <output type="docs">tasks/TASK-INDEX.md (Phase 1B decisions)</output>
+    <output type="docs">README.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Consolidated report created with all verification results</criterion>
+    <criterion testable="true">Clear decision on each Phase 1B task (skip vs. required)</criterion>
+    <criterion testable="true">TASK-INDEX.md updated with Phase 1B task status</criterion>
+    <criterion testable="true">README.md reflects current project status</criterion>
+  </acceptance-criteria>
+</task>
