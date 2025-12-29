@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest>
+  <control namespace="Spaarke.Controls" constructor="DrillThroughWorkspace" version="1.0.0" display-name-key="Drill-Through Workspace" description-key="Visualization drill-through workspace - displays chart and filtered dataset side-by-side (v1.0.0)" control-type="standard">
+    <external-service-usage enabled="false">
+    </external-service-usage>
+
+    <!--
+      DRILL-THROUGH WORKSPACE PCF CONTROL
+
+      Purpose: Expanded workspace for drill-through visualizations
+      - Two-panel layout: Chart (1/3) | Dataset Grid (2/3)
+      - Click chart elements to filter dataset grid
+      - Supports all 7 visual types from Visual Host
+      - Opens as dialog from Visual Host expand button
+
+      Used In: Drill-Through Custom Page (sprk_drillthroughworkspace)
+      Design Reference: projects/visualization-module/spec.md
+    -->
+
+    <!-- Chart Definition ID (INPUT - required) -->
+    <property name="chartDefinitionId"
+              display-name-key="Chart Definition ID"
+              description-key="GUID of the sprk_chartdefinition record"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="true" />
+
+    <!-- Entity Name (INPUT - for dataset grid) -->
+    <property name="entityName"
+              display-name-key="Entity Name"
+              description-key="Logical name of entity to display in grid"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false" />
+
+    <!-- Initial Filter (INPUT - optional FetchXML filter) -->
+    <property name="initialFilter"
+              display-name-key="Initial Filter"
+              description-key="Optional initial FetchXML filter condition"
+              of-type="Multiple"
+              usage="input"
+              required="false" />
+
+    <!-- Should Close (OUTPUT - signals dialog should close) -->
+    <property name="shouldClose"
+              display-name-key="Should Close"
+              description-key="Set to true when workspace should close"
+              of-type="TwoOptions"
+              usage="output"
+              required="false" />
+
+    <!-- Selected Record IDs (OUTPUT - for external actions) -->
+    <property name="selectedRecordIds"
+              display-name-key="Selected Record IDs"
+              description-key="Comma-separated GUIDs of selected records in grid"
+              of-type="SingleLine.Text"
+              usage="output"
+              required="false" />
+
+    <resources>
+      <code path="index.ts" order="1" />
+      <!-- Host-provided libraries -->
+      <platform-library name="React" version="16.14.0" />
+      <platform-library name="Fluent" version="9.46.2" />
+    </resources>
+
+    <feature-usage>
+      <uses-feature name="WebAPI" required="true" />
+      <uses-feature name="Utility" required="true" />
+    </feature-usage>
+  </control>
+</manifest>

@@ -141,14 +141,49 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
   );
 
   /**
-   * Handle expand button click - opens drill-through workspace
+   * Handle expand button click - opens drill-through workspace Custom Page
    */
-  const handleExpandClick = useCallback(() => {
+  const handleExpandClick = useCallback(async () => {
     logger.info("VisualHostRoot", "Expand clicked", { chartDefinitionId });
 
-    // TODO: In task 030, navigate to drill-through Custom Page
-    // For now, log for debugging
-    console.log("Expand clicked for chart:", chartDefinitionId);
+    if (!chartDefinitionId) {
+      logger.warn("VisualHostRoot", "No chart definition ID to expand");
+      return;
+    }
+
+    try {
+      // Access Xrm from global scope
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const xrm = (window as any).Xrm;
+
+      if (!xrm?.Navigation?.navigateTo) {
+        logger.warn("VisualHostRoot", "Xrm.Navigation not available");
+        console.log("Expand clicked for chart:", chartDefinitionId);
+        return;
+      }
+
+      // Open the drill-through workspace as a dialog
+      // Custom Page name: sprk_drillthroughworkspace
+      await xrm.Navigation.navigateTo(
+        {
+          pageType: "custom",
+          name: "sprk_drillthroughworkspace",
+          recordId: chartDefinitionId,
+        },
+        {
+          target: 2, // Dialog
+          position: 1, // Center
+          width: { value: 90, unit: "%" },
+          height: { value: 85, unit: "%" },
+        }
+      );
+
+      logger.info("VisualHostRoot", "Drill-through workspace opened");
+    } catch (err) {
+      logger.error("VisualHostRoot", "Failed to open drill-through workspace", err);
+      // Fallback: log for debugging
+      console.log("Expand clicked for chart:", chartDefinitionId);
+    }
   }, [chartDefinitionId]);
 
   /**
