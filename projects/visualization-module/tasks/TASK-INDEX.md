@@ -11,7 +11,7 @@
 | Phase | Tasks | Status |
 |-------|-------|--------|
 | Phase 1: Foundation | 5 | 4/5 complete |
-| Phase 2: Chart Components | 8 | 7/8 complete |
+| Phase 2: Chart Components | 8 | 8/8 complete |
 | Phase 3: Visual Host PCF | 4 | 0/4 complete |
 | Phase 4: Drill-Through | 5 | 0/5 complete |
 | Phase 5: Testing & Docs | 2 | 0/2 complete |
@@ -42,7 +42,7 @@
 | 014 | [Implement StatusDistributionBar component](014-implement-statusbar.poml) | ✅ completed | 004 | 3 |
 | 015 | [Implement CalendarVisual component](015-implement-calendar.poml) | ✅ completed | 004 | 4 |
 | 016 | [Implement MiniTable component](016-implement-minitable.poml) | ✅ completed | 004 | 2 |
-| 017 | [Create chart component unit tests](017-chart-component-tests.poml) | 🔲 not-started | 010-016 | 4 |
+| 017 | [Create chart component unit tests](017-chart-component-tests.poml) | ✅ completed | 010-016 | 4 |
 
 ### Phase 3: Visual Host PCF Control
 
