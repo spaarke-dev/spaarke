@@ -10,12 +10,12 @@
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | none |
-| **Task File** | — |
-| **Title** | — |
-| **Phase** | — |
-| **Status** | none |
-| **Started** | — |
+| **Task ID** | 001 |
+| **Task File** | `tasks/001-define-chartdefinition-entity.poml` |
+| **Title** | Define sprk_chartdefinition entity schema |
+| **Phase** | 1: Foundation and Infrastructure |
+| **Status** | in-progress |
+| **Started** | 2025-12-29 |
 
 ---
 
@@ -26,28 +26,33 @@
 <!-- Updated by task-execute after each step completion -->
 <!-- Format: - [x] Step N: {description} ({YYYY-MM-DD HH:MM}) -->
 
-*No steps completed yet*
+- [x] Step 1: Review spec.md Data Model section (2025-12-29)
+- [x] Step 2: Create entity definition document with all 9 fields (2025-12-29)
+- [x] Step 3: Define option set values with explicit integer mappings (2025-12-29)
+- [x] Step 4: Document entity schema in markdown (2025-12-29)
+- [x] Step 5: Update TASK-INDEX.md status (2025-12-29)
 
 ### Current Step
 
-**Step**: Not started
+**Step**: Complete
 
 **What this step involves**:
-- Awaiting task assignment
+- Task 001 completed successfully
 
 ### Files Modified
 
 <!-- Track all files created or modified during this task -->
 <!-- Format: - `path/to/file` - {Created|Modified} - {brief purpose} -->
 
-*No files modified yet*
+- `projects/visualization-module/notes/entity-schema.md` - Created - Complete entity schema documentation
 
 ### Decisions Made
 
 <!-- Log implementation decisions for context recovery -->
 <!-- Format: - {YYYY-MM-DD}: {Decision} — Reason: {why} -->
 
-*No decisions recorded yet*
+- 2025-12-29: Option set values start at 100000000 — Standard Dataverse convention for custom option sets
+- 2025-12-29: sprk_baseviewid as String not Lookup — Allows referencing both SavedQuery and UserQuery without polymorphic lookup complexity
 
 ---
 

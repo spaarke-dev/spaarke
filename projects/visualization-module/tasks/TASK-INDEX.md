@@ -10,7 +10,7 @@
 
 | Phase | Tasks | Status |
 |-------|-------|--------|
-| Phase 1: Foundation | 5 | 0/5 complete |
+| Phase 1: Foundation | 5 | 1/5 complete |
 | Phase 2: Chart Components | 8 | 0/8 complete |
 | Phase 3: Visual Host PCF | 4 | 0/4 complete |
 | Phase 4: Drill-Through | 5 | 0/5 complete |
@@ -25,7 +25,7 @@
 
 | ID | Title | Status | Dependencies | Est. Hours |
 |----|-------|--------|--------------|------------|
-| 001 | [Define sprk_chartdefinition entity schema](001-define-chartdefinition-entity.poml) | 🔲 not-started | none | 3 |
+| 001 | [Define sprk_chartdefinition entity schema](001-define-chartdefinition-entity.poml) | ✅ completed | none | 3 |
 | 002 | [Create shared TypeScript types](002-create-shared-types.poml) | 🔲 not-started | 001 | 2 |
 | 003 | [Scaffold Visual Host PCF project](003-scaffold-visualhost-pcf.poml) | 🔲 not-started | 002 | 3 |
 | 004 | [Configure Storybook for chart components](004-configure-storybook.poml) | 🔲 not-started | 003 | 2 |
@@ -102,7 +102,7 @@
 
 ## Execution Notes
 
-- **Start with**: Task 001 (no dependencies)
+- **Start with**: Task 002 (001 completed)
 - **Parallel work possible**: Tasks 010-016 can be worked in parallel after 004
 - **Critical dependency**: Task 005 (entity deployment) must complete before 021
 - **End with**: Task 090 (project wrap-up)
