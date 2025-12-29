@@ -2,12 +2,12 @@
   "extends": "./node_modules/pcf-scripts/tsconfig_base.json",
   "compilerOptions": {
     "typeRoots": ["node_modules/@types"],
-    "types": ["node", "jest", "@testing-library/jest-dom"],
     "module": "es2015",
     "moduleResolution": "node",
     "jsx": "react",
     "esModuleInterop": true,
     "skipLibCheck": true
   },
-  "include": ["control/**/*", "jest.setup.ts"]
+  "include": ["control/**/*"],
+  "exclude": ["control/**/__tests__/**/*"]
 }

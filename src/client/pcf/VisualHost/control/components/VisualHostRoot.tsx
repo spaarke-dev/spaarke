@@ -4,17 +4,21 @@
  */
 
 import * as React from "react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Spinner,
   MessageBar,
   MessageBarBody,
+  Button,
+  Tooltip,
   makeStyles,
   tokens,
   Text,
 } from "@fluentui/react-components";
+import { OpenRegular } from "@fluentui/react-icons";
 import { IInputs } from "../generated/ManifestTypes";
-import { IChartDefinition, VisualType } from "../types";
+import { IChartDefinition, IChartData, DrillInteraction } from "../types";
+import { ChartRenderer } from "./ChartRenderer";
 import { logger } from "../utils/logger";
 
 const useStyles = makeStyles({
@@ -66,15 +70,18 @@ interface IVisualHostRootProps {
  */
 export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
   context,
+  notifyOutputChanged,
 }) => {
   const styles = useStyles();
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [chartDefinition, setChartDefinition] = useState<IChartDefinition | null>(null);
+  const [chartData, setChartData] = useState<IChartData | null>(null);
 
   // Get chart definition ID from PCF input
   const chartDefinitionId = context.parameters.chartDefinitionId?.raw;
   const showToolbar = context.parameters.showToolbar?.raw !== false;
+  const enableDrillThrough = context.parameters.enableDrillThrough?.raw !== false;
   const height = context.parameters.height?.raw;
 
   useEffect(() => {
@@ -115,6 +122,36 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
   };
 
   /**
+   * Handle drill interaction from chart components
+   */
+  const handleDrillInteraction = useCallback(
+    (interaction: DrillInteraction) => {
+      if (!enableDrillThrough) return;
+
+      logger.info("VisualHostRoot", "Drill interaction", interaction);
+
+      // TODO: In task 030, navigate to drill-through Custom Page
+      // For now, log the interaction for debugging
+      console.log("Drill interaction:", interaction);
+
+      // Notify PCF that output has changed (if we add drill output parameter)
+      notifyOutputChanged();
+    },
+    [enableDrillThrough, notifyOutputChanged]
+  );
+
+  /**
+   * Handle expand button click - opens drill-through workspace
+   */
+  const handleExpandClick = useCallback(() => {
+    logger.info("VisualHostRoot", "Expand clicked", { chartDefinitionId });
+
+    // TODO: In task 030, navigate to drill-through Custom Page
+    // For now, log for debugging
+    console.log("Expand clicked for chart:", chartDefinitionId);
+  }, [chartDefinitionId]);
+
+  /**
    * Render the appropriate visual based on chart definition
    */
   const renderVisual = () => {
@@ -129,25 +166,14 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
       );
     }
 
-    // TODO: Implement visual rendering in tasks 010-016
-    switch (chartDefinition.sprk_visualtype) {
-      case VisualType.MetricCard:
-        return <div>MetricCard - Coming in Task 010</div>;
-      case VisualType.BarChart:
-        return <div>BarChart - Coming in Task 011</div>;
-      case VisualType.LineChart:
-        return <div>LineChart - Coming in Task 012</div>;
-      case VisualType.DonutChart:
-        return <div>DonutChart - Coming in Task 013</div>;
-      case VisualType.StatusBar:
-        return <div>StatusBar - Coming in Task 014</div>;
-      case VisualType.Calendar:
-        return <div>Calendar - Coming in Task 015</div>;
-      case VisualType.MiniTable:
-        return <div>MiniTable - Coming in Task 016</div>;
-      default:
-        return <div>Unknown visual type</div>;
-    }
+    return (
+      <ChartRenderer
+        chartDefinition={chartDefinition}
+        chartData={chartData || undefined}
+        onDrillInteraction={enableDrillThrough ? handleDrillInteraction : undefined}
+        height={height || 300}
+      />
+    );
   };
 
   // Container style with optional height
@@ -157,10 +183,19 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
 
   return (
     <div className={styles.container} style={containerStyle}>
-      {/* Toolbar area - expand button will go here */}
+      {/* Toolbar area with expand button */}
       {showToolbar && (
         <div className={styles.toolbar}>
-          {/* TODO: Add expand button in task 030 */}
+          {enableDrillThrough && chartDefinition && (
+            <Tooltip content="View details" relationship="label">
+              <Button
+                appearance="subtle"
+                icon={<OpenRegular />}
+                onClick={handleExpandClick}
+                aria-label="View details in expanded workspace"
+              />
+            </Tooltip>
+          )}
         </div>
       )}
 

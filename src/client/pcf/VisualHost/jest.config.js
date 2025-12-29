@@ -11,7 +11,7 @@ module.exports = {
   },
   transform: {
     '^.+\\.tsx?$': ['ts-jest', {
-      tsconfig: 'tsconfig.json',
+      tsconfig: 'tsconfig.test.json',
     }],
     // Transform ES modules from @fluentui/react-charting and its dependencies
     '^.+\\.(js|jsx)$': 'babel-jest',
