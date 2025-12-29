@@ -1,8 +1,9 @@
 # AI Document Intelligence - Code Inventory
 
 > **Purpose**: Track all existing code files to prevent recreation
-> **Last Updated**: December 28, 2025
-> **Moved from**: R1 project (verified during R1 Phase 1A)
+> **Last Updated**: December 29, 2025
+> **Project**: AI Document Intelligence R3
+> **Lineage**: R1 (created) → R2 (moved) → R3 (current)
 
 ---
 
@@ -230,4 +231,4 @@ These entities were verified during R1 Phase 1A:
 ---
 
 *This inventory should be updated as work progresses.*
-*Moved from R1 to R2: December 28, 2025*
+*History: Created in R1, moved to R2 (Dec 28), moved to R3 (Dec 29)*
