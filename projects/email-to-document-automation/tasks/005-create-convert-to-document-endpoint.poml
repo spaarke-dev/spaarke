@@ -2,7 +2,7 @@
 <task id="E2D-005" project="Email-to-Document Automation">
   <metadata>
     <title>Create POST /api/emails/convert-to-document Endpoint</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>1</phase>
     <estimated-effort>3 hours</estimated-effort>
     <tags>backend, api, endpoint</tags>

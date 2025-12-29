@@ -28,11 +28,27 @@ public class EmailToEmlConverter : IEmailToEmlConverter
     private const int DirectionReceived = 100000000;
     private const int DirectionSent = 100000001;
 
+    /// <summary>
+    /// Creates a new EmailToEmlConverter with default credential from configuration.
+    /// </summary>
     public EmailToEmlConverter(
         HttpClient httpClient,
         IOptions<EmailProcessingOptions> options,
         IConfiguration configuration,
         ILogger<EmailToEmlConverter> logger)
+        : this(httpClient, options, configuration, logger, credential: null)
+    {
+    }
+
+    /// <summary>
+    /// Creates a new EmailToEmlConverter with an optional custom TokenCredential (for testing).
+    /// </summary>
+    internal EmailToEmlConverter(
+        HttpClient httpClient,
+        IOptions<EmailProcessingOptions> options,
+        IConfiguration configuration,
+        ILogger<EmailToEmlConverter> logger,
+        TokenCredential? credential)
     {
         _httpClient = httpClient;
         _options = options.Value;
@@ -41,15 +57,25 @@ public class EmailToEmlConverter : IEmailToEmlConverter
 
         var dataverseUrl = configuration["Dataverse:ServiceUrl"]
             ?? throw new InvalidOperationException("Dataverse:ServiceUrl configuration is required");
-        var tenantId = configuration["TENANT_ID"]
-            ?? throw new InvalidOperationException("TENANT_ID configuration is required");
-        var clientId = configuration["API_APP_ID"]
-            ?? throw new InvalidOperationException("API_APP_ID configuration is required");
-        var clientSecret = configuration["Dataverse:ClientSecret"]
-            ?? throw new InvalidOperationException("Dataverse:ClientSecret configuration is required");
 
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2";
-        _credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
+
+        // Use provided credential or create from configuration
+        if (credential != null)
+        {
+            _credential = credential;
+        }
+        else
+        {
+            var tenantId = configuration["TENANT_ID"]
+                ?? throw new InvalidOperationException("TENANT_ID configuration is required");
+            var clientId = configuration["API_APP_ID"]
+                ?? throw new InvalidOperationException("API_APP_ID configuration is required");
+            var clientSecret = configuration["Dataverse:ClientSecret"]
+                ?? throw new InvalidOperationException("Dataverse:ClientSecret configuration is required");
+
+            _credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
+        }
 
         _httpClient.BaseAddress = new Uri(_apiUrl);
         _httpClient.DefaultRequestHeaders.Add("OData-MaxVersion", "4.0");

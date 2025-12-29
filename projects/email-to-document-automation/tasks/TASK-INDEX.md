@@ -1,7 +1,7 @@
 # Task Index - Email-to-Document Automation
 
 > **Project**: Email-to-Document Automation
-> **Last Updated**: 2025-12-14
+> **Last Updated**: 2025-12-29
 > **Total Tasks**: 25
 
 ---
@@ -23,11 +23,11 @@
 | ID | Task | Status | Est. | Dependencies |
 |----|------|--------|------|--------------|
 | 001 | Extend sprk_document entity with email fields | ✅ | 3h | None |
-| 002 | Create sprk_emailprocessingrule entity | 🔲 | 2h | None |
-| 003 | Add alternate key for idempotency | 🔲 | 1h | 001 |
+| 002 | Create sprk_emailsaverule entity | ✅ | 2h | None |
+| 003 | Add alternate key for idempotency | ✅ | 1h | 001 |
 | 004 | Implement IEmailToEmlConverter service | ✅ | 4h | None |
-| 005 | Create POST /api/emails/convert-to-document endpoint | 🔲 | 3h | 001, 004 |
-| 006 | Unit tests for EmailToEmlConverter | 🔲 | 3h | 004 |
+| 005 | Create POST /api/emails/convert-to-document endpoint | ✅ | 3h | 001, 004 |
+| 006 | Unit tests for EmailToEmlConverter | ✅ | 3h | 004 |
 | **009** | **Phase 1 Deploy** | 🔲 | 2h | 001-006 |
 
 ---

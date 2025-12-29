@@ -2,7 +2,7 @@
 <task id="E2D-002" project="Email-to-Document Automation">
   <metadata>
     <title>Create sprk_emailprocessingrule Entity</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>1</phase>
     <estimated-effort>2 hours</estimated-effort>
     <tags>dataverse, entity, schema</tags>

@@ -363,6 +363,20 @@ else
     Console.WriteLine("⚠ Record Matching services disabled (DocumentIntelligence:RecordMatchingEnabled = false)");
 }
 
+// ============================================================================
+// EMAIL-TO-DOCUMENT CONVERSION SERVICES (Email-to-Document Automation project)
+// ============================================================================
+// Register Email Processing configuration
+builder.Services.Configure<Sprk.Bff.Api.Configuration.EmailProcessingOptions>(
+    builder.Configuration.GetSection(Sprk.Bff.Api.Configuration.EmailProcessingOptions.SectionName));
+
+// Email-to-EML converter - uses HttpClient for Dataverse Web API calls
+builder.Services.AddHttpClient<Sprk.Bff.Api.Services.Email.EmailToEmlConverter>();
+builder.Services.AddScoped<Sprk.Bff.Api.Services.Email.IEmailToEmlConverter>(sp =>
+    sp.GetRequiredService<Sprk.Bff.Api.Services.Email.EmailToEmlConverter>());
+
+Console.WriteLine("✓ Email-to-Document conversion services registered");
+
 // Background Job Processing (ADR-004) - Service Bus Strategy
 // Always register JobSubmissionService (unified entry point)
 builder.Services.AddSingleton<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>();
@@ -923,6 +937,9 @@ app.MapOBOEndpoints();
 
 // Document checkout/checkin/discard operations (document-checkout-viewer project)
 app.MapDocumentOperationsEndpoints();
+
+// Email-to-document conversion endpoints (Email-to-Document Automation project)
+app.MapEmailEndpoints();
 
 // Document Intelligence endpoints (only if enabled)
 if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled"))
