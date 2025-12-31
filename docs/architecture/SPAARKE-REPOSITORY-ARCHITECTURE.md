@@ -118,6 +118,7 @@ Sprk.Bff.Api/
 │   ├── EmailEndpoints.cs        # Email-to-document automation
 │   └── ...
 ├── Configuration/          # Strongly-typed configuration classes
+│   └── EmailProcessingOptions.cs  # Email attachment rules
 ├── Infrastructure/         # Cross-cutting concerns
 │   ├── Auth/               # Authentication middleware
 │   ├── Authorization/      # Policy-based authorization
@@ -128,15 +129,25 @@ Sprk.Bff.Api/
 │   ├── Resilience/         # Polly retry policies
 │   └── Validation/         # Request validation
 ├── Models/                 # DTOs and request/response models
+│   └── Email/              # Email conversion DTOs
 ├── Services/               # Business logic services
 │   ├── Email/              # Email-to-document services
 │   │   ├── IEmailToEmlConverter.cs
+│   │   ├── EmailToEmlConverter.cs  # RFC 5322 .eml generation
 │   │   ├── IEmailFilterService.cs
 │   │   └── EmailRuleSeedService.cs
-│   └── Jobs/               # Async job processing
-│       ├── Handlers/       # Job type handlers
-│       │   └── EmailToDocumentJobHandler.cs
-│       └── EmailPollingBackupService.cs
+│   ├── Jobs/               # Async job processing
+│   │   ├── Handlers/       # Job type handlers
+│   │   │   └── EmailToDocumentJobHandler.cs
+│   │   └── EmailPollingBackupService.cs
+│   └── Ai/                 # AI analysis services
+│       ├── Export/         # Analysis export services
+│       │   ├── IExportService.cs       # Export service interface
+│       │   ├── ExportServiceRegistry.cs # Service resolution by format
+│       │   ├── DocxExportService.cs    # Word document export
+│       │   ├── PdfExportService.cs     # PDF export (QuestPDF)
+│       │   └── EmailExportService.cs   # Email via Microsoft Graph
+│       └── Tools/          # AI tool handlers
 ├── Telemetry/              # OpenTelemetry metrics
 │   ├── AiTelemetry.cs
 │   └── EmailTelemetry.cs   # Email processing metrics
@@ -368,8 +379,13 @@ Before submitting code:
 | PCF control source | `src/client/pcf/{ControlName}/` |
 | BFF API endpoints | `src/server/api/Sprk.Bff.Api/Api/` |
 | BFF infrastructure | `src/server/api/Sprk.Bff.Api/Infrastructure/` |
+| **BFF Email services** | `src/server/api/Sprk.Bff.Api/Services/Email/` |
+| **BFF AI services** | `src/server/api/Sprk.Bff.Api/Services/Ai/` |
+| **BFF Export services** | `src/server/api/Sprk.Bff.Api/Services/Ai/Export/` |
 | Dataverse plugins | `src/dataverse/plugins/` |
 | Unit tests | `tests/unit/{ProjectName}.Tests/` |
+| **Email conversion tests** | `tests/unit/Sprk.Bff.Api.Tests/Services/Email/` |
+| **AI export tests** | `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/` |
 | ADRs | `docs/reference/adr/` |
 | AI coding guides | `docs/ai-knowledge/` |
 | Bicep modules | `infrastructure/bicep/modules/` |

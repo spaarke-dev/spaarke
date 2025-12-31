@@ -39,4 +39,30 @@ public interface IOpenAiClient
         byte[] imageBytes,
         string mediaType,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Generate vector embeddings for text content.
+    /// Uses text-embedding-3-small (1536 dimensions) by default.
+    /// </summary>
+    /// <param name="text">The text to generate embeddings for.</param>
+    /// <param name="model">Optional model override. Defaults to text-embedding-3-small.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Vector embedding as float array.</returns>
+    Task<ReadOnlyMemory<float>> GenerateEmbeddingAsync(
+        string text,
+        string? model = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Generate vector embeddings for multiple texts in a batch.
+    /// More efficient than individual calls for bulk operations.
+    /// </summary>
+    /// <param name="texts">The texts to generate embeddings for.</param>
+    /// <param name="model">Optional model override. Defaults to text-embedding-3-small.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>List of vector embeddings in same order as input texts.</returns>
+    Task<IReadOnlyList<ReadOnlyMemory<float>>> GenerateEmbeddingsAsync(
+        IEnumerable<string> texts,
+        string? model = null,
+        CancellationToken cancellationToken = default);
 }

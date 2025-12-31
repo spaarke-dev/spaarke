@@ -266,6 +266,12 @@ param enableAiFoundry bool = false
 @allowed(['Basic', 'Standard'])
 param aiFoundrySku string = 'Basic'
 
+@description('Enable AI Monitoring Dashboard deployment')
+param enableMonitoringDashboard bool = true
+
+@description('Alert notification email address')
+param alertNotificationEmail string = ''
+
 module aiFoundry '../modules/ai-foundry-hub.bicep' = if (enableAiFoundry) {
   scope: rg
   name: 'aiFoundry-${baseName}'
@@ -280,6 +286,34 @@ module aiFoundry '../modules/ai-foundry-hub.bicep' = if (enableAiFoundry) {
     aiSearchResourceId: aiSearch.outputs.searchServiceId
     sku: aiFoundrySku
     publicNetworkAccess: 'Enabled'
+    tags: tags
+  }
+}
+
+// ============================================================================
+// MONITORING DASHBOARD & ALERTS
+// ============================================================================
+
+module aiDashboard '../modules/dashboard.bicep' = if (enableMonitoringDashboard) {
+  scope: rg
+  name: 'dashboard-${baseName}'
+  params: {
+    dashboardName: '${baseName}-ai-dashboard'
+    location: location
+    appInsightsId: monitoring.outputs.appInsightsId
+    logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsId
+    tags: tags
+  }
+}
+
+module aiAlerts '../modules/alerts.bicep' = if (enableMonitoringDashboard && !empty(alertNotificationEmail)) {
+  scope: rg
+  name: 'alerts-${baseName}'
+  params: {
+    alertNamePrefix: baseName
+    location: location
+    appInsightsId: monitoring.outputs.appInsightsId
+    actionGroupId: '' // Will create default action group
     tags: tags
   }
 }
@@ -326,3 +360,7 @@ output aiFoundryHubId string = enableAiFoundry ? aiFoundry.outputs.hubId : ''
 output aiFoundryProjectId string = enableAiFoundry ? aiFoundry.outputs.projectId : ''
 output promptFlowEndpoint string = enableAiFoundry ? aiFoundry.outputs.promptFlowEndpoint : ''
 output aiFoundryPortalUrl string = enableAiFoundry ? aiFoundry.outputs.aiFoundryPortalUrl : ''
+
+// Dashboard
+output dashboardId string = enableMonitoringDashboard ? aiDashboard.outputs.dashboardId : ''
+output dashboardName string = enableMonitoringDashboard ? aiDashboard.outputs.dashboardName : ''

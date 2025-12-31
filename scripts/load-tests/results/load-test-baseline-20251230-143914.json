@@ -1,0 +1,20 @@
+﻿{
+    "StartTime":  "2025-12-30T14:36:58.3179713-05:00",
+    "TotalRequests":  111,
+    "RequestsPerSecond":  0.81,
+    "SuccessRate":  0,
+    "ThresholdsPassed":  false,
+    "Latency":  {
+                    "P50":  0,
+                    "P99":  0,
+                    "P95":  0,
+                    "Average":  0
+                },
+    "DurationSeconds":  136.4,
+    "Concurrency":  10,
+    "EndTime":  "2025-12-30T14:39:14.6682122-05:00",
+    "CircuitBreakerOpens":  0,
+    "SuccessfulRequests":  0,
+    "TestType":  "baseline",
+    "FailedRequests":  111
+}

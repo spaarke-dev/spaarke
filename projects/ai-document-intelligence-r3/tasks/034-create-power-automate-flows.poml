@@ -5,8 +5,18 @@
     <tags>power-automate, flows, integration</tags>
     <estimate>4h</estimate>
     <dependencies>033</dependencies>
-    <status>pending</status>
+    <status>skipped</status>
   </metadata>
+
+  <notes>
+    <skipped-date>2025-12-30</skipped-date>
+    <skipped-reason>
+      ADR Conflict: Spaarke has a strict ADR prohibiting Power Automate usage in the product.
+      Power Automate flows would violate this architectural constraint.
+      Export functionality is delivered via API endpoints instead - users can integrate
+      with their own automation tools if needed.
+    </skipped-reason>
+  </notes>
 
   <prompt>
     <role>Power Platform Developer</role>

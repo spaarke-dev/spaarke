@@ -22,6 +22,8 @@ SDAP (SharePoint Document Access Platform) is an enterprise document management 
 - Understanding the authentication flow for document operations
 - Working with any `sprk_document` related code
 - Working with email-to-document automation (webhook, polling, job processing)
+- Converting Dataverse email activities to archived documents
+- Working with email-to-document automation rules
 
 ---
 
@@ -92,26 +94,29 @@ BFF API (https://spe-api-dev-67e2xz.azurewebsites.net):
 
 **sprk_document** (child - holds file references)
 ```
-sprk_documentid     GUID        Primary key
-sprk_documentname   Text        Display name
-sprk_filename       Text        Original file name
-sprk_filesize       Int         File size in bytes
-sprk_graphitemid    Text        SPE DriveItem ID ← Links to SharePoint
-sprk_graphdriveid   Text        SPE Container Drive ID
-sprk_matter         Lookup      → sprk_matter (1:N relationship)
-sprk_project        Lookup      → sprk_project (1:N relationship)
+sprk_documentid         GUID        Primary key
+sprk_documentname       Text        Display name
+sprk_filename           Text        Original file name
+sprk_filesize           Int         File size in bytes
+sprk_graphitemid        Text        SPE DriveItem ID ← Links to SharePoint
+sprk_graphdriveid       Text        SPE Container Drive ID
+sprk_matter             Lookup      → sprk_matter (1:N relationship)
+sprk_project            Lookup      → sprk_project (1:N relationship)
 
-# Email-to-Document fields (Phase 2):
-sprk_isemailarchive Boolean     True if document is archived email
-sprk_documenttype   Choice      100000006 = Email
-sprk_email          Lookup      → email activity
-sprk_emailsubject   Text        Email subject line
-sprk_emailfrom      Text        Sender address
-sprk_emailto        Text        Recipients (comma-separated)
-sprk_emailcc        Text        CC recipients
-sprk_emaildate      DateTime    Email sent/received date
-sprk_emailmessageid Text        RFC 2822 Message-ID
-sprk_emaildirection Choice      Received=100000000, Sent=100000001
+# Email Archive Fields (Phase 1 & 2)
+sprk_isemailarchive     Boolean     Is this an archived email (.eml)
+sprk_email              Lookup      → email (email activity reference)
+sprk_emailsubject       Text        Email subject line
+sprk_emailfrom          Text        Sender email address
+sprk_emailto            Text        Primary recipients (semicolon-separated)
+sprk_emailcc            Text        CC recipients (semicolon-separated)
+sprk_emaildate          DateTime    Email sent/received date
+sprk_emaildirection     Choice      Received (100000000) / Sent (100000001)
+sprk_emailmessageid     Text        RFC 5322 Message-ID header
+sprk_emailtrackingtoken Text        CRM tracking token
+sprk_documenttype       Choice      Email = 100000006
+sprk_relationshiptype   Choice      Email Attachment = 100000000
+sprk_parentdocument     Lookup      → sprk_document (for attachments)
 ```
 
 **sprk_emailprocessingrule** (filter rules for automation)

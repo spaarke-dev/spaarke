@@ -57,6 +57,8 @@ When modifying a component, check this table for potential downstream effects:
 │  │  • GET  /api/containers/{id}/children    ← File listing                 ││
 │  │  • GET  /api/documents/{id}/preview-url  ← Preview URLs                 ││
 │  │  • GET  /api/navmap/{entity}/lookup      ← Metadata discovery           ││
+│  │  • POST /api/v1/emails/{id}/save-as-document  ← Email-to-document       ││
+│  │  • GET  /api/v1/emails/{id}/document-status   ← Email status check      ││
 │  └─────────────────────────────────────────────────────────────────────────┘│
 │  ┌─────────────────────────────────────────────────────────────────────────┐│
 │  │  Infrastructure Layer                                                   ││
@@ -64,6 +66,14 @@ When modifying a component, check this table for potential downstream effects:
 │  │  • Graph/ — ContainerOperations, DriveItemOperations, UploadManager    ││
 │  │  • Dataverse/ — Web API client for metadata queries                    ││
 │  │  • Resilience/ — Polly retry policies                                  ││
+│  └─────────────────────────────────────────────────────────────────────────┘│
+│  ┌─────────────────────────────────────────────────────────────────────────┐│
+│  │  Services Layer                                                         ││
+│  │  • Email/EmailToEmlConverter — RFC 5322 .eml generation with MimeKit   ││
+│  │  • Email/IEmailToEmlConverter — Email conversion interface             ││
+│  │  • Email/IEmailFilterService — Rule-based email filtering              ││
+│  │  • Jobs/EmailToDocumentJobHandler — Async email processing             ││
+│  │  • Jobs/EmailPollingBackupService — Backup polling for missed webhooks ││
 │  └─────────────────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────────────────┘
            │                                              │
@@ -175,6 +185,14 @@ Dataverse Email → Webhook → BFF API → Filter Rules → Job Queue → SPE +
 | Change job payload schema | Update both webhook handler and job handler |
 | Modify filter rule schema | Update EmailFilterService, seed service, Dataverse entity |
 | Change default container | Update EmailProcessingOptions configuration |
+| Modify EmailEndpoints signature | Update any UI callers (ribbon button, PCF) |
+| Add email fields to sprk_document | Update DataverseWebApiService mappings |
+| Change attachment filtering rules | Update EmailProcessingOptions config |
+
+**Key Files:**
+- `EmailToEmlConverter.cs` — Uses MimeKit for RFC 5322 compliant .eml generation
+- `EmailEndpoints.cs` — POST /api/v1/emails/{emailId}/save-as-document, webhook receiver
+- `EmailProcessingOptions.cs` — Attachment size limits, blocked extensions, signature patterns
 
 ---
 
@@ -299,6 +317,8 @@ src/ ─────────────✗────→ tests/ (no test c
 | BFF Endpoints | `src/server/api/Sprk.Bff.Api/Api/` | `tests/unit/Sprk.Bff.Api.Tests/` |
 | BFF Graph Operations | `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/` | Same test project |
 | BFF Auth | `src/server/api/Sprk.Bff.Api/Infrastructure/Auth/` | Same test project |
+| **BFF Email Services** | `src/server/api/Sprk.Bff.Api/Services/Email/` | `tests/unit/Sprk.Bff.Api.Tests/Services/Email/` |
+| **Email Models** | `src/server/api/Sprk.Bff.Api/Models/Email/` | — |
 | PCF UniversalQuickCreate | `src/client/pcf/UniversalQuickCreate/` | Manual testing |
 | PCF SpeFileViewer | `src/client/pcf/SpeFileViewer/` | Manual testing |
 | PCF Shared Auth | `src/client/pcf/*/services/auth/` | — |
