@@ -8,6 +8,7 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Export;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai;
@@ -25,6 +26,7 @@ public class AnalysisOrchestrationServiceTests
     private readonly Mock<IScopeResolverService> _scopeResolverMock;
     private readonly Mock<IAnalysisContextBuilder> _contextBuilderMock;
     private readonly Mock<IWorkingDocumentService> _workingDocumentServiceMock;
+    private readonly ExportServiceRegistry _exportRegistry;
     private readonly Mock<ILogger<AnalysisOrchestrationService>> _loggerMock;
     private readonly IOptions<AnalysisOptions> _options;
     private readonly AnalysisOrchestrationService _service;
@@ -46,6 +48,9 @@ public class AnalysisOrchestrationServiceTests
             MaxChatHistoryMessages = 10
         });
 
+        // Create export registry with empty services for basic tests
+        _exportRegistry = new ExportServiceRegistry(Array.Empty<IExportService>());
+
         _service = new AnalysisOrchestrationService(
             _dataverseServiceMock.Object,
             _speFileOperationsMock.Object,
@@ -54,6 +59,7 @@ public class AnalysisOrchestrationServiceTests
             _scopeResolverMock.Object,
             _contextBuilderMock.Object,
             _workingDocumentServiceMock.Object,
+            _exportRegistry,
             _options,
             _loggerMock.Object);
     }

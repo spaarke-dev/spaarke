@@ -5,8 +5,61 @@
     <tags>resilience, circuit-breaker, polly, dotnet</tags>
     <estimate>4h</estimate>
     <dependencies>040</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
+
+  <notes>
+    <completed-date>2025-12-29</completed-date>
+    <implementation-summary>
+      Implemented unified circuit breaker pattern with centralized monitoring.
+
+      1. Circuit Breaker Registry (CircuitBreakerRegistry.cs):
+         - Centralized tracking of all circuit breaker states
+         - OpenTelemetry metrics integration (circuit_breaker.state_transitions, circuit_breaker.open_count)
+         - Thread-safe concurrent dictionary for state management
+         - Well-known service names: AzureOpenAI, AzureAISearch, MicrosoftGraph
+
+      2. Azure AI Search Resilience (ResilientSearchClient.cs):
+         - Added circuit breaker, retry, and timeout using Polly v8.x
+         - Configurable via AiSearchResilienceOptions (50% failure ratio, 10 min throughput, 30s break)
+         - Integrated with CircuitBreakerRegistry for state tracking
+         - AiSearchCircuitBrokenException for handling open circuits
+
+      3. Updated OpenAiClient.cs:
+         - Integrated with CircuitBreakerRegistry
+         - State changes (Open/HalfOpen/Closed) recorded to registry
+         - Existing circuit breaker now reports to centralized monitoring
+
+      4. Updated GraphHttpMessageHandler.cs:
+         - Integrated with CircuitBreakerRegistry
+         - State changes recorded to registry
+         - Existing Polly circuit breaker now reports to centralized monitoring
+
+      5. Monitoring Endpoints (ResilienceEndpoints.cs):
+         - GET /api/resilience/circuits - All circuit breaker states
+         - GET /api/resilience/circuits/{serviceName} - Specific circuit state
+         - GET /api/resilience/health - Returns 503 if any circuit is open
+
+      6. Updated RagService.cs:
+         - Optional injection of IResilientSearchClient
+         - All search, index, and delete operations protected
+         - Added AiSearchCircuitBrokenException handling in error paths
+
+      Files Modified:
+      - Infrastructure/Resilience/CircuitBreakerRegistry.cs (new)
+      - Infrastructure/Resilience/ResilientSearchClient.cs (new)
+      - Configuration/AiSearchResilienceOptions.cs (new)
+      - Api/ResilienceEndpoints.cs (new)
+      - Services/Ai/OpenAiClient.cs (registry integration)
+      - Services/Ai/RagService.cs (resilient client)
+      - Infrastructure/Http/GraphHttpMessageHandler.cs (registry integration)
+      - Program.cs (DI registration, endpoints)
+    </implementation-summary>
+    <test-results>
+      Build: Succeeded
+      Circuit Breaker Tests: 18/18 passed
+    </test-results>
+  </notes>
 
   <prompt>
     <role>Senior .NET Developer</role>

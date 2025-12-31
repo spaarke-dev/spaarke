@@ -133,9 +133,9 @@ public class AnalysisOptions
 
     /// <summary>
     /// Enable export to PDF format.
-    /// Requires additional PDF generation library.
+    /// Uses QuestPDF for in-process PDF generation (ADR-001 compliant).
     /// </summary>
-    public bool EnablePdfExport { get; set; } = false;
+    public bool EnablePdfExport { get; set; } = true;
 
     /// <summary>
     /// Enable email integration via Power Apps email entity.

@@ -26,11 +26,10 @@ public static class DocumentIntelligenceEndpoints
             .WithTags("AI");
 
         // POST /api/ai/document-intelligence/analyze - Stream document analysis via SSE
-        // Note: AiAuthorizationFilter removed for MVP - Dataverse auth for access checks not yet configured.
-        // The user is authenticated (.RequireAuthorization) and typically just uploaded the document.
-        // TODO: Re-enable document-level authorization when DataverseAccessDataSource has proper OBO auth.
+        // AiAuthorizationFilter validates user has read access to the document in Dataverse.
+        // Uses DataverseAccessDataSource to check permissions via RetrievePrincipalAccess.
         group.MapPost("/analyze", StreamAnalyze)
-            // .AddAiAuthorizationFilter() // Disabled: requires Dataverse OBO auth configuration
+            .AddAiAuthorizationFilter()
             .RequireRateLimiting("ai-stream") // 10 requests/minute per user (Task 072)
             .WithName("StreamDocumentAnalysis")
             .WithSummary("Stream document analysis via SSE")
@@ -43,9 +42,9 @@ public static class DocumentIntelligenceEndpoints
             .ProducesProblem(500);
 
         // POST /api/ai/document-intelligence/enqueue - Enqueue single document for background analysis
-        // Note: AiAuthorizationFilter disabled for MVP (same as /analyze endpoint)
+        // AiAuthorizationFilter validates user has read access to the document in Dataverse.
         group.MapPost("/enqueue", EnqueueAnalysis)
-            // .AddAiAuthorizationFilter() // Disabled: requires Dataverse OBO auth configuration
+            .AddAiAuthorizationFilter()
             .RequireRateLimiting("ai-batch") // 20 requests/minute per user (Task 072)
             .WithName("EnqueueDocumentAnalysis")
             .WithSummary("Enqueue document for background analysis")
@@ -58,9 +57,9 @@ public static class DocumentIntelligenceEndpoints
             .ProducesProblem(500);
 
         // POST /api/ai/document-intelligence/enqueue-batch - Enqueue multiple documents for background analysis
-        // Note: AiAuthorizationFilter disabled for MVP (same as /analyze endpoint)
+        // AiAuthorizationFilter validates user has read access to ALL documents in the batch.
         group.MapPost("/enqueue-batch", EnqueueBatchAnalysis)
-            // .AddAiAuthorizationFilter() // Disabled: requires Dataverse OBO auth configuration
+            .AddAiAuthorizationFilter()
             .RequireRateLimiting("ai-batch") // 20 requests/minute per user (Task 072)
             .WithName("EnqueueBatchDocumentAnalysis")
             .WithSummary("Enqueue multiple documents for background analysis")

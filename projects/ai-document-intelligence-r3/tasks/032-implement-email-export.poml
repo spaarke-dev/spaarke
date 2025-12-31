@@ -5,8 +5,71 @@
     <tags>export, email, graph, dotnet</tags>
     <estimate>4h</estimate>
     <dependencies>030</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
+
+  <notes>
+    <completed-date>2025-12-30</completed-date>
+    <implementation-summary>
+      Implemented email export using Microsoft Graph API for sending emails
+      from the user's mailbox (OBO flow). The implementation is integrated
+      directly into the BFF API following ADR-001.
+
+      Implementation Details:
+
+      1. EmailExportService.cs (NEW):
+         - Location: src/server/api/Sprk.Bff.Api/Services/Ai/Export/
+         - Implements IExportService for ExportFormat.Email
+         - Uses IGraphClientFactory.ForUserAsync() for OBO authentication
+         - Sends via /me/sendMail Graph API endpoint
+         - Returns action-based result with Metadata (not FileBytes)
+
+      2. HTML Email Template:
+         - Professional styling with Spaarke branding (#0078D4)
+         - Executive Summary section
+         - Analysis Content with paragraph parsing
+         - Entities table (Organizations, People, Dates, Amounts, References)
+         - Clauses table with risk level color coding
+         - Footer with generation info
+
+      3. Attachment Support:
+         - Optional DOCX or PDF attachments
+         - Uses Lazy resolution to avoid circular dependency
+         - Generates attachment using existing DocxExportService/PdfExportService
+         - Uses FileAttachment with Base64-encoded content
+
+      4. ExportFileResult Extensions:
+         - Added Metadata dictionary for action-based exports
+         - Added OkAction() factory method
+
+      5. Orchestration Integration:
+         - Updated AnalysisOrchestrationService.ExportAnalysisAsync()
+         - Extracts email metadata (Recipients, Subject, SentAt)
+         - Returns formatted status message
+
+      Configuration (AnalysisOptions.cs):
+      - EnableEmailExport - Feature flag (default: false)
+
+      Files Created:
+      - src/server/api/Sprk.Bff.Api/Services/Ai/Export/EmailExportService.cs
+      - tests/unit/Sprk.Bff.Api.Tests/Services/Ai/EmailExportServiceTests.cs
+
+      Files Modified:
+      - src/server/api/Sprk.Bff.Api/Services/Ai/Export/IExportService.cs (added Metadata, OkAction)
+      - src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs (email handling)
+      - src/server/api/Sprk.Bff.Api/Program.cs (IHttpContextAccessor, EmailExportService registration)
+
+      Note: Email is sent directly via Graph API (from user's Outlook mailbox),
+      not via Dataverse email activity. Dataverse integration can be added later
+      if needed for tracking/workflow purposes.
+    </implementation-summary>
+    <test-results>
+      Total: 19 tests
+      Passed: 19
+      Failed: 0
+      Duration: ~47ms
+    </test-results>
+  </notes>
 
   <prompt>
     <role>Senior .NET Developer</role>

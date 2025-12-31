@@ -5,8 +5,46 @@
     <tags>documentation, export</tags>
     <estimate>3h</estimate>
     <dependencies>035</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
+
+  <notes>
+    <completed-date>2025-12-30</completed-date>
+    <implementation-summary>
+      Updated existing architecture documentation with export service details.
+      Teams export and Power Automate flows were skipped per earlier decisions (ADR).
+
+      Documentation Updated:
+
+      1. SPAARKE-REPOSITORY-ARCHITECTURE.md:
+         - Added export services folder to BFF API Structure
+         - Added AI export tests to Quick Reference table
+         - Documented IExportService, ExportServiceRegistry, and format services
+
+      2. ai-document-summary.md:
+         - Added POST /api/ai/analysis/{analysisId}/export endpoint
+         - Documented supported formats (DOCX, PDF, Email)
+         - Added AnalysisOptions (Export) configuration section
+         - Included error response codes
+
+      3. SPAARKE-AI-ARCHITECTURE.md:
+         - Added Section 12: Export Services (R3 Phase 4)
+         - Documented export architecture diagram
+         - IExportService interface and implementations
+         - ExportFileResult and ExportContext models
+         - DocxExportService, PdfExportService, EmailExportService
+         - ExportServiceRegistry pattern
+         - Configuration options
+         - DI registration
+         - Test coverage summary (72 tests)
+
+      Skipped:
+      - Standalone EXPORT-GUIDE.md (content integrated into existing docs)
+      - TEMPLATE-CUSTOMIZATION.md (not needed at this stage)
+      - Teams export documentation (Task 033 skipped)
+      - Power Automate flows documentation (ADR: no Power Automate)
+    </implementation-summary>
+  </notes>
 
   <prompt>
     <role>Technical Writer / Developer</role>

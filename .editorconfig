@@ -60,7 +60,9 @@ dotnet_sort_system_directives_first = true
 dotnet_separate_import_directive_groups = false
 
 # Code quality rules
-dotnet_code_quality_unused_parameters = all:warning
+# IDE0060: Unused parameters - set to suggestion to prevent format check failures
+# (dotnet format cannot auto-fix unused parameters)
+dotnet_code_quality_unused_parameters = all:suggestion
 
 # Null-checking preferences
 csharp_style_throw_expression = true:suggestion

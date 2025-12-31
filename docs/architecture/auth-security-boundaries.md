@@ -179,11 +179,37 @@ Which boundary is failing?
 
 ---
 
+## AI Authorization Extensions
+
+AI endpoints add additional authorization filters on top of the base security boundaries:
+
+### AiAuthorizationFilter (Document Intelligence)
+
+Validates user has read access to documents being analyzed:
+1. Extracts Azure AD `oid` claim from user JWT (Boundary 3)
+2. Uses ClientSecret auth to query Dataverse (Boundary 6)
+3. Calls `RetrievePrincipalAccess` to check user's document permissions
+4. Fail-closed: Denies access if any step fails
+
+**Claim Extraction**: Must use `oid` claim (not `ClaimTypes.NameIdentifier`) because Dataverse queries `azureactivedirectoryobjectid`.
+
+### TenantAuthorizationFilter (RAG Endpoints)
+
+Validates user's Azure AD tenant matches the requested tenant:
+1. Extracts Azure AD `tid` claim from user JWT (Boundary 3)
+2. Compares against `tenantId` in request body
+3. Returns 403 if tenant mismatch
+
+Prevents cross-tenant RAG index access.
+
+---
+
 ## Related Articles
 
 - [sdap-auth-patterns.md](sdap-auth-patterns.md) - Auth flow implementation
 - [oauth-obo-errors.md](oauth-obo-errors.md) - OBO error codes
 - [auth-azure-resources.md](auth-azure-resources.md) - Infrastructure details
+- [SPAARKE-AI-ARCHITECTURE.md](../guides/SPAARKE-AI-ARCHITECTURE.md) - AI authorization filters
 
 ---
 

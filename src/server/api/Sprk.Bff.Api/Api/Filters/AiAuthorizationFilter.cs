@@ -51,8 +51,12 @@ public class AiAuthorizationFilter : IEndpointFilter
     {
         var httpContext = context.HttpContext;
 
-        // Extract user ID from claims
-        var userId = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        // Extract Azure AD Object ID from claims.
+        // DataverseAccessDataSource requires the 'oid' claim to lookup user in Dataverse.
+        // Fallback chain matches other authorization filters in the codebase.
+        var userId = httpContext.User.FindFirst("oid")?.Value
+            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+            ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         if (string.IsNullOrEmpty(userId))
         {
             return Results.Problem(

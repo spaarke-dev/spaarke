@@ -5,7 +5,7 @@
     <tags>service, rag, deployment-models, dotnet</tags>
     <estimate>6h</estimate>
     <dependencies>002</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -73,4 +73,18 @@
     <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
     <next-task>004-implement-rag-service.poml</next-task>
   </execution>
+
+  <notes>
+    <completion-date>2025-12-29</completion-date>
+    <summary>Implemented IKnowledgeDeploymentService for RAG deployment model routing.</summary>
+    <findings>
+      <finding type="created">src/server/api/Sprk.Bff.Api/Services/Ai/IKnowledgeDeploymentService.cs - Interface + records</finding>
+      <finding type="created">src/server/api/Sprk.Bff.Api/Services/Ai/KnowledgeDeploymentService.cs - Implementation</finding>
+      <finding type="created">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/KnowledgeDeploymentServiceTests.cs - 17 unit tests</finding>
+      <finding type="modified">src/server/api/Sprk.Bff.Api/Program.cs - DI registration for SearchIndexClient + service</finding>
+      <finding type="note">RagDeploymentModel enum already exists in AnalysisOptions.cs - reused</finding>
+      <finding type="note">Service uses in-memory config cache (TODO: Dataverse persistence future task)</finding>
+      <finding type="note">Key Vault integration for CustomerOwned deployments (SecretClient injection)</finding>
+    </findings>
+  </notes>
 </task>

@@ -4,27 +4,47 @@ using System.Diagnostics.Metrics;
 namespace Sprk.Bff.Api.Telemetry;
 
 /// <summary>
-/// Metrics for AI summarization operations (OpenTelemetry-compatible).
-/// Tracks: request count, success/failure, duration, token usage.
+/// Metrics for AI operations (OpenTelemetry-compatible).
+/// Tracks: summarization, RAG search, tool execution, and export operations.
 ///
 /// Usage:
 /// - Meter name: "Sprk.Bff.Api.Ai" for OpenTelemetry configuration
-/// - Metrics: ai.summarize.requests, ai.summarize.duration, ai.summarize.tokens
-/// - Dimensions: ai.status (success/failed), ai.method (streaming/batch), ai.extraction (native/docint/vision)
+/// - Metrics prefixes: ai.summarize.*, ai.rag.*, ai.tool.*, ai.export.*
+/// - Common dimensions: ai.status (success/failed), ai.error_code
 ///
 /// Application Insights custom queries:
-/// - Success rate: customMetrics | where name == "ai.summarize.requests" | summarize count() by customDimensions["ai.status"]
-/// - Token usage: customMetrics | where name == "ai.summarize.tokens" | summarize sum(value) by customDimensions["ai.token_type"]
+/// - RAG latency: customMetrics | where name == "ai.rag.duration" | summarize percentile(value, 95)
+/// - Tool success rate: customMetrics | where name == "ai.tool.requests" | summarize count() by customDimensions["ai.status"]
+/// - Export by format: customMetrics | where name == "ai.export.requests" | summarize count() by customDimensions["ai.format"]
 /// </summary>
 public class AiTelemetry : IDisposable
 {
     private readonly Meter _meter;
+
+    // Summarization metrics
     private readonly Counter<long> _summarizeRequests;
     private readonly Counter<long> _summarizeSuccesses;
     private readonly Counter<long> _summarizeFailures;
     private readonly Histogram<double> _summarizeDuration;
     private readonly Counter<long> _tokenUsage;
     private readonly Histogram<long> _fileSize;
+
+    // RAG metrics
+    private readonly Counter<long> _ragRequests;
+    private readonly Histogram<double> _ragDuration;
+    private readonly Histogram<double> _ragEmbeddingDuration;
+    private readonly Histogram<double> _ragSearchDuration;
+    private readonly Histogram<long> _ragResultCount;
+
+    // Tool execution metrics
+    private readonly Counter<long> _toolRequests;
+    private readonly Histogram<double> _toolDuration;
+    private readonly Counter<long> _toolTokens;
+
+    // Export metrics
+    private readonly Counter<long> _exportRequests;
+    private readonly Histogram<double> _exportDuration;
+    private readonly Histogram<long> _exportFileSize;
 
     // Meter name for OpenTelemetry
     private const string MeterName = "Sprk.Bff.Api.Ai";
@@ -37,41 +57,94 @@ public class AiTelemetry : IDisposable
         // Create meter (OpenTelemetry-compatible)
         _meter = new Meter(MeterName, "1.0.0");
 
-        // Counter: Total summarization requests
+        // === Summarization Metrics ===
         _summarizeRequests = _meter.CreateCounter<long>(
             name: "ai.summarize.requests",
             unit: "{request}",
             description: "Total number of summarization requests");
 
-        // Counter: Successful summarizations
         _summarizeSuccesses = _meter.CreateCounter<long>(
             name: "ai.summarize.successes",
             unit: "{request}",
             description: "Number of successful summarizations");
 
-        // Counter: Failed summarizations
         _summarizeFailures = _meter.CreateCounter<long>(
             name: "ai.summarize.failures",
             unit: "{request}",
             description: "Number of failed summarizations");
 
-        // Histogram: Summarization duration
         _summarizeDuration = _meter.CreateHistogram<double>(
             name: "ai.summarize.duration",
             unit: "ms",
             description: "Summarization operation duration in milliseconds");
 
-        // Counter: Token usage (for cost tracking)
         _tokenUsage = _meter.CreateCounter<long>(
             name: "ai.summarize.tokens",
             unit: "{token}",
             description: "Total tokens used for summarization");
 
-        // Histogram: File size processed
         _fileSize = _meter.CreateHistogram<long>(
             name: "ai.summarize.file_size",
             unit: "By",
             description: "Size of files processed for summarization");
+
+        // === RAG Metrics ===
+        _ragRequests = _meter.CreateCounter<long>(
+            name: "ai.rag.requests",
+            unit: "{request}",
+            description: "Total number of RAG search requests");
+
+        _ragDuration = _meter.CreateHistogram<double>(
+            name: "ai.rag.duration",
+            unit: "ms",
+            description: "Total RAG search duration in milliseconds");
+
+        _ragEmbeddingDuration = _meter.CreateHistogram<double>(
+            name: "ai.rag.embedding_duration",
+            unit: "ms",
+            description: "Embedding generation duration in milliseconds");
+
+        _ragSearchDuration = _meter.CreateHistogram<double>(
+            name: "ai.rag.search_duration",
+            unit: "ms",
+            description: "Azure AI Search query duration in milliseconds");
+
+        _ragResultCount = _meter.CreateHistogram<long>(
+            name: "ai.rag.result_count",
+            unit: "{result}",
+            description: "Number of results returned from RAG search");
+
+        // === Tool Execution Metrics ===
+        _toolRequests = _meter.CreateCounter<long>(
+            name: "ai.tool.requests",
+            unit: "{request}",
+            description: "Total number of tool executions");
+
+        _toolDuration = _meter.CreateHistogram<double>(
+            name: "ai.tool.duration",
+            unit: "ms",
+            description: "Tool execution duration in milliseconds");
+
+        _toolTokens = _meter.CreateCounter<long>(
+            name: "ai.tool.tokens",
+            unit: "{token}",
+            description: "Total tokens used by tools");
+
+        // === Export Metrics ===
+        _exportRequests = _meter.CreateCounter<long>(
+            name: "ai.export.requests",
+            unit: "{request}",
+            description: "Total number of export requests");
+
+        _exportDuration = _meter.CreateHistogram<double>(
+            name: "ai.export.duration",
+            unit: "ms",
+            description: "Export operation duration in milliseconds");
+
+        _exportFileSize = _meter.CreateHistogram<long>(
+            name: "ai.export.file_size",
+            unit: "By",
+            description: "Size of exported files in bytes");
     }
 
     /// <summary>
@@ -189,6 +262,129 @@ public class AiTelemetry : IDisposable
         }
         return activity;
     }
+
+    #region RAG Metrics
+
+    /// <summary>
+    /// Record a RAG search operation.
+    /// </summary>
+    /// <param name="totalDurationMs">Total search duration in milliseconds</param>
+    /// <param name="embeddingDurationMs">Embedding generation duration in milliseconds</param>
+    /// <param name="searchDurationMs">Azure AI Search query duration in milliseconds</param>
+    /// <param name="resultCount">Number of results returned</param>
+    /// <param name="success">Whether the operation succeeded</param>
+    /// <param name="embeddingCacheHit">Whether embedding was retrieved from cache</param>
+    /// <param name="errorCode">Error code if failed</param>
+    public void RecordRagSearch(
+        double totalDurationMs,
+        double embeddingDurationMs,
+        double searchDurationMs,
+        int resultCount,
+        bool success,
+        bool embeddingCacheHit = false,
+        string? errorCode = null)
+    {
+        var tags = new TagList
+        {
+            { "ai.status", success ? "success" : "failed" },
+            { "ai.cache_hit", embeddingCacheHit.ToString().ToLowerInvariant() }
+        };
+        if (!success && errorCode != null)
+        {
+            tags.Add("ai.error_code", errorCode);
+        }
+
+        _ragRequests.Add(1, tags);
+        _ragDuration.Record(totalDurationMs, tags);
+        _ragEmbeddingDuration.Record(embeddingDurationMs, tags);
+        _ragSearchDuration.Record(searchDurationMs, tags);
+        _ragResultCount.Record(resultCount, tags);
+    }
+
+    #endregion
+
+    #region Tool Metrics
+
+    /// <summary>
+    /// Record a tool execution.
+    /// </summary>
+    /// <param name="toolId">Tool identifier (e.g., EntityExtractor, ClauseAnalyzer)</param>
+    /// <param name="durationMs">Execution duration in milliseconds</param>
+    /// <param name="success">Whether the operation succeeded</param>
+    /// <param name="inputTokens">Number of input tokens used</param>
+    /// <param name="outputTokens">Number of output tokens generated</param>
+    /// <param name="errorCode">Error code if failed</param>
+    public void RecordToolExecution(
+        string toolId,
+        double durationMs,
+        bool success,
+        int inputTokens = 0,
+        int outputTokens = 0,
+        string? errorCode = null)
+    {
+        var tags = new TagList
+        {
+            { "ai.tool_id", toolId },
+            { "ai.status", success ? "success" : "failed" }
+        };
+        if (!success && errorCode != null)
+        {
+            tags.Add("ai.error_code", errorCode);
+        }
+
+        _toolRequests.Add(1, tags);
+        _toolDuration.Record(durationMs, tags);
+
+        if (inputTokens > 0 || outputTokens > 0)
+        {
+            _toolTokens.Add(inputTokens,
+                new KeyValuePair<string, object?>("ai.tool_id", toolId),
+                new KeyValuePair<string, object?>("ai.token_type", "input"));
+            _toolTokens.Add(outputTokens,
+                new KeyValuePair<string, object?>("ai.tool_id", toolId),
+                new KeyValuePair<string, object?>("ai.token_type", "output"));
+        }
+    }
+
+    #endregion
+
+    #region Export Metrics
+
+    /// <summary>
+    /// Record an export operation.
+    /// </summary>
+    /// <param name="format">Export format (docx, pdf, email)</param>
+    /// <param name="durationMs">Export duration in milliseconds</param>
+    /// <param name="success">Whether the operation succeeded</param>
+    /// <param name="fileSizeBytes">Size of exported file in bytes (null for action-based exports)</param>
+    /// <param name="errorCode">Error code if failed</param>
+    public void RecordExport(
+        string format,
+        double durationMs,
+        bool success,
+        long? fileSizeBytes = null,
+        string? errorCode = null)
+    {
+        var tags = new TagList
+        {
+            { "ai.format", format.ToLowerInvariant() },
+            { "ai.status", success ? "success" : "failed" }
+        };
+        if (!success && errorCode != null)
+        {
+            tags.Add("ai.error_code", errorCode);
+        }
+
+        _exportRequests.Add(1, tags);
+        _exportDuration.Record(durationMs, tags);
+
+        if (fileSizeBytes.HasValue && fileSizeBytes.Value > 0)
+        {
+            _exportFileSize.Record(fileSizeBytes.Value, tags);
+        }
+    }
+
+    #endregion
 
     /// <summary>
     /// Dispose the meter when the service is disposed.

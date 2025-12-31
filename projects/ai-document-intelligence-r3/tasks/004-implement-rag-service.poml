@@ -5,7 +5,7 @@
     <tags>service, rag, hybrid-search, azure-ai-search, dotnet</tags>
     <estimate>8h</estimate>
     <dependencies>003</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -76,4 +76,21 @@
     <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
     <next-task>005-add-redis-caching-for-embeddings.poml</next-task>
   </execution>
+
+  <notes>
+    <completion-date>2025-12-29</completion-date>
+    <summary>Implemented IRagService with hybrid search (keyword + vector + semantic ranking).</summary>
+    <findings>
+      <finding type="created">src/server/api/Sprk.Bff.Api/Services/Ai/IRagService.cs - Interface + supporting records (RagSearchOptions, RagSearchResponse, RagSearchResult, IndexResult)</finding>
+      <finding type="created">src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs - Full implementation with hybrid search, semantic ranking, telemetry</finding>
+      <finding type="created">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/RagServiceTests.cs - 27 unit tests</finding>
+      <finding type="modified">src/server/api/Sprk.Bff.Api/Services/Ai/IOpenAiClient.cs - Added GenerateEmbeddingAsync and GenerateEmbeddingsAsync methods</finding>
+      <finding type="modified">src/server/api/Sprk.Bff.Api/Services/Ai/OpenAiClient.cs - Added embedding generation implementation with circuit breaker</finding>
+      <finding type="modified">src/server/api/Sprk.Bff.Api/Configuration/DocumentIntelligenceOptions.cs - Added EmbeddingModel property</finding>
+      <finding type="modified">src/server/api/Sprk.Bff.Api/Program.cs - DI registration for IRagService</finding>
+      <finding type="note">Redis caching deferred to Task 005 - TODO comments in place for embedding caching</finding>
+      <finding type="note">Semantic ranking uses knowledge-semantic-config from index definition</finding>
+      <finding type="note">Hybrid search combines: keyword search on content/documentName/knowledgeSourceName, vector search on contentVector, semantic reranking</finding>
+    </findings>
+  </notes>
 </task>

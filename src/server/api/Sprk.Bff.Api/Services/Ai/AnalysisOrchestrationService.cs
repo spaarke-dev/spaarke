@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using Microsoft.Extensions.Options;
@@ -6,6 +7,8 @@ using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Services.Ai.Export;
+using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -29,8 +32,10 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
     private readonly IScopeResolverService _scopeResolver;
     private readonly IAnalysisContextBuilder _contextBuilder;
     private readonly IWorkingDocumentService _workingDocumentService;
+    private readonly ExportServiceRegistry _exportRegistry;
     private readonly AnalysisOptions _options;
     private readonly ILogger<AnalysisOrchestrationService> _logger;
+    private readonly AiTelemetry? _telemetry;
 
     // In-memory store for Phase 1 (will be replaced with Dataverse in Task 032)
     private static readonly Dictionary<Guid, AnalysisInternalModel> _analysisStore = new();
@@ -43,8 +48,10 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         IScopeResolverService scopeResolver,
         IAnalysisContextBuilder contextBuilder,
         IWorkingDocumentService workingDocumentService,
+        ExportServiceRegistry exportRegistry,
         IOptions<AnalysisOptions> options,
-        ILogger<AnalysisOrchestrationService> logger)
+        ILogger<AnalysisOrchestrationService> logger,
+        AiTelemetry? telemetry = null)
     {
         _dataverseService = dataverseService;
         _speFileStore = speFileStore;
@@ -53,8 +60,10 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         _scopeResolver = scopeResolver;
         _contextBuilder = contextBuilder;
         _workingDocumentService = workingDocumentService;
+        _exportRegistry = exportRegistry;
         _options = options.Value;
         _logger = logger;
+        _telemetry = telemetry;
     }
 
     /// <inheritdoc />
@@ -248,11 +257,14 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
     }
 
     /// <inheritdoc />
-    public Task<ExportResult> ExportAnalysisAsync(
+    public async Task<ExportResult> ExportAnalysisAsync(
         Guid analysisId,
         AnalysisExportRequest request,
         CancellationToken cancellationToken)
     {
+        var stopwatch = Stopwatch.StartNew();
+        var formatName = request.Format.ToString().ToLowerInvariant();
+
         _logger.LogInformation("Exporting analysis {AnalysisId} to {Format}", analysisId, request.Format);
 
         if (!_analysisStore.TryGetValue(analysisId, out var analysis))
@@ -260,13 +272,161 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             throw new KeyNotFoundException($"Analysis {analysisId} not found");
         }
 
-        // Phase 1: Return not implemented for export formats that require Dataverse
-        return Task.FromResult(new ExportResult
+        // Get the export service for the requested format
+        var exportService = _exportRegistry.GetService(request.Format);
+        if (exportService == null)
+        {
+            _logger.LogWarning("Export format {Format} not supported", request.Format);
+            stopwatch.Stop();
+            _telemetry?.RecordExport(formatName, stopwatch.Elapsed.TotalMilliseconds, false, errorCode: "format_not_supported");
+            return new ExportResult
+            {
+                ExportType = request.Format,
+                Success = false,
+                Error = $"Export format {request.Format} is not supported"
+            };
+        }
+
+        // Build export context from analysis
+        var context = new ExportContext
+        {
+            AnalysisId = analysisId,
+            Title = $"Analysis of {analysis.DocumentName}",
+            Content = analysis.WorkingDocument ?? analysis.FinalOutput ?? string.Empty,
+            Summary = ExtractSummary(analysis.FinalOutput),
+            SourceDocumentName = analysis.DocumentName,
+            SourceDocumentId = analysis.DocumentId,
+            CreatedAt = analysis.StartedOn.HasValue
+                ? new DateTimeOffset(analysis.StartedOn.Value, TimeSpan.Zero)
+                : DateTimeOffset.UtcNow,
+            CreatedBy = "User", // TODO: Extract from context when Dataverse integration is complete
+            Options = request.Options
+        };
+
+        // Validate
+        var validation = exportService.Validate(context);
+        if (!validation.IsValid)
+        {
+            _logger.LogWarning("Export validation failed for {AnalysisId}: {Errors}",
+                analysisId, string.Join(", ", validation.Errors));
+            stopwatch.Stop();
+            _telemetry?.RecordExport(formatName, stopwatch.Elapsed.TotalMilliseconds, false, errorCode: "validation_failed");
+            return new ExportResult
+            {
+                ExportType = request.Format,
+                Success = false,
+                Error = string.Join("; ", validation.Errors)
+            };
+        }
+
+        // Execute export
+        var result = await exportService.ExportAsync(context, cancellationToken);
+
+        if (!result.Success)
+        {
+            stopwatch.Stop();
+            _telemetry?.RecordExport(formatName, stopwatch.Elapsed.TotalMilliseconds, false, errorCode: "export_failed");
+            return new ExportResult
+            {
+                ExportType = request.Format,
+                Success = false,
+                Error = result.Error
+            };
+        }
+
+        // For file exports (DOCX, PDF), save to SPE and return result
+        if (result.FileBytes != null && request.Format is ExportFormat.Docx or ExportFormat.Pdf)
+        {
+            var savedDoc = await _workingDocumentService.SaveToSpeAsync(
+                analysisId,
+                result.FileName ?? $"export_{analysisId:N}.{request.Format.ToString().ToLowerInvariant()}",
+                result.FileBytes,
+                result.ContentType ?? "application/octet-stream",
+                cancellationToken);
+
+            stopwatch.Stop();
+            _telemetry?.RecordExport(formatName, stopwatch.Elapsed.TotalMilliseconds, true, fileSizeBytes: result.FileBytes.Length);
+
+            return new ExportResult
+            {
+                ExportType = request.Format,
+                Success = true,
+                Details = new ExportDetails
+                {
+                    DocumentId = savedDoc.DocumentId,
+                    WebUrl = savedDoc.WebUrl,
+                    Status = "Saved to SharePoint"
+                }
+            };
+        }
+
+        // For Email format, extract metadata from the result
+        if (request.Format == ExportFormat.Email && result.Metadata != null)
+        {
+            var recipients = result.Metadata.TryGetValue("Recipients", out var r) ? r as string[] : null;
+            var subject = result.Metadata.TryGetValue("Subject", out var s) ? s as string : null;
+            var sentAt = result.Metadata.TryGetValue("SentAt", out var t) ? t : null;
+
+            stopwatch.Stop();
+            _telemetry?.RecordExport(formatName, stopwatch.Elapsed.TotalMilliseconds, true);
+
+            return new ExportResult
+            {
+                ExportType = request.Format,
+                Success = true,
+                Details = new ExportDetails
+                {
+                    Status = $"Email sent to {recipients?.Length ?? 0} recipient(s)" +
+                             (sentAt != null ? $" at {sentAt:g}" : string.Empty)
+                }
+            };
+        }
+
+        // For other formats (Teams), return the result directly
+        stopwatch.Stop();
+        _telemetry?.RecordExport(formatName, stopwatch.Elapsed.TotalMilliseconds, true);
+
+        return new ExportResult
         {
             ExportType = request.Format,
-            Success = false,
-            Error = $"Export to {request.Format} will be implemented in Task 032 when Dataverse entity operations are added."
-        });
+            Success = true,
+            Details = new ExportDetails
+            {
+                Status = "Export completed"
+            }
+        };
+    }
+
+    /// <summary>
+    /// Extracts a summary from the analysis output.
+    /// Looks for a Summary section or takes the first paragraph.
+    /// </summary>
+    private static string? ExtractSummary(string? output)
+    {
+        if (string.IsNullOrWhiteSpace(output))
+            return null;
+
+        // Try to find a summary section
+        var summaryMatch = System.Text.RegularExpressions.Regex.Match(
+            output,
+            @"(?:##?\s*(?:Executive\s+)?Summary[\s:]*\n)([\s\S]*?)(?=\n##|\z)",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        if (summaryMatch.Success)
+        {
+            return summaryMatch.Groups[1].Value.Trim();
+        }
+
+        // Otherwise, take the first paragraph (up to 500 chars)
+        var firstPara = output.Split(["\n\n", "\r\n\r\n"], StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault()?.Trim();
+
+        if (firstPara != null && firstPara.Length > 500)
+        {
+            firstPara = firstPara[..500] + "...";
+        }
+
+        return firstPara;
     }
 
     /// <inheritdoc />

@@ -57,6 +57,14 @@ public class DocumentIntelligenceOptions
     public string? ImageSummarizeModel { get; set; }
 
     /// <summary>
+    /// Model deployment name for generating text embeddings.
+    /// Used for RAG vector search. Default: "text-embedding-3-small" (1536 dimensions).
+    /// Options: "text-embedding-3-small" (1536 dims), "text-embedding-3-large" (3072 dims)
+    /// Note: Model name should match Azure OpenAI deployment name.
+    /// </summary>
+    public string EmbeddingModel { get; set; } = "text-embedding-3-small";
+
+    /// <summary>
     /// Max tokens for summary output. Higher = longer summaries.
     /// Range: 100-4000. Default: 1000 (~750 words)
     /// </summary>
