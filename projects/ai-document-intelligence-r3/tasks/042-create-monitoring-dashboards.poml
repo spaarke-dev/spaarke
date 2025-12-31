@@ -5,8 +5,52 @@
     <tags>monitoring, dashboards, azure, observability</tags>
     <estimate>4h</estimate>
     <dependencies>040, 041</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
+
+  <notes>
+    <completed-date>2025-12-30</completed-date>
+    <implementation-summary>
+      Created Azure Dashboard and Alert Rules via Bicep for AI feature monitoring.
+
+      1. Dashboard Module (infrastructure/bicep/modules/dashboard.bicep):
+         - Row 1: Overview tiles (requests, success/failure, circuit breakers, tokens)
+         - Row 2: RAG Performance (latency, throughput, breakdown)
+         - Row 3: Tool Execution (executions, latency, token usage)
+         - Row 4: Export Operations (requests, latency, file size)
+         - Row 5: Resilience and Cache (circuit transitions, hit/miss, latency)
+
+      2. Alert Rules Module (infrastructure/bicep/modules/alerts.bicep):
+         - AI Failure Rate (dynamic threshold, critical)
+         - Circuit Breaker Open (>0 open circuits, critical)
+         - High RAG Latency (>3000ms avg, warning)
+         - Tool Failures (dynamic threshold, warning)
+         - Cache Miss Spike (dynamic threshold, warning)
+         - High Token Usage (dynamic threshold, warning)
+         - Export Failures (dynamic threshold, warning)
+
+      3. Stack Integration (model2-full.bicep):
+         - Added enableMonitoringDashboard parameter (default: true)
+         - Added alertNotificationEmail parameter
+         - Integrated dashboard and alerts modules
+
+      4. Documentation (docs/guides/AI-MONITORING-DASHBOARD.md):
+         - Dashboard panel descriptions
+         - Alert rule reference
+         - Access and sharing instructions
+         - KQL queries for custom analysis
+         - API endpoints for circuit breaker status
+         - Troubleshooting guide
+
+      Files Created:
+      - infrastructure/bicep/modules/dashboard.bicep
+      - infrastructure/bicep/modules/alerts.bicep
+      - docs/guides/AI-MONITORING-DASHBOARD.md
+
+      Files Modified:
+      - infrastructure/bicep/stacks/model2-full.bicep
+    </implementation-summary>
+  </notes>
 
   <prompt>
     <role>DevOps Engineer / Developer</role>

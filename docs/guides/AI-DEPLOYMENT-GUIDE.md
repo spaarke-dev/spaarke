@@ -1,9 +1,9 @@
 # AI Document Intelligence - Deployment Guide
 
-> **Version**: 2.0
+> **Version**: 2.1
 > **Created**: 2025-12-28
 > **Updated**: 2025-12-29
-> **Projects**: AI Document Intelligence R1 + R2
+> **Projects**: AI Document Intelligence R1 + R2 + R3
 
 ---
 
@@ -16,11 +16,12 @@
 5. [Phase 3: PCF Controls (R2)](#phase-3-pcf-controls-r2)
 6. [Phase 4: Custom Pages (R2)](#phase-4-custom-pages-r2)
 7. [Phase 5: Form Integration (R2)](#phase-5-form-integration-r2)
-8. [Environment Configuration](#environment-configuration)
-9. [Verification Procedures](#verification-procedures)
-10. [Known Issues](#known-issues)
-11. [Troubleshooting](#troubleshooting)
-12. [Reference](#reference)
+8. [Phase 6: RAG Infrastructure (R3)](#phase-6-rag-infrastructure-r3)
+9. [Environment Configuration](#environment-configuration)
+10. [Verification Procedures](#verification-procedures)
+11. [Known Issues](#known-issues)
+12. [Troubleshooting](#troubleshooting)
+13. [Reference](#reference)
 
 ---
 
@@ -42,6 +43,13 @@ This guide covers the complete deployment of AI Document Intelligence for the Sp
 - Custom Pages for hosting PCF controls
 - Document form integration (Analysis tab, subgrid, ribbon button)
 
+**R3 Scope (RAG Infrastructure)** *(Phase 1 Complete)*:
+- RAG knowledge index (`spaarke-knowledge-index`) with hybrid search
+- Multi-tenant deployment models (Shared, Dedicated, CustomerOwned)
+- `IKnowledgeDeploymentService` for SearchClient routing
+- `IRagService` for hybrid search with semantic ranking
+- Redis caching for embeddings
+
 ### Architecture Components
 
 | Component | Purpose | Version/Status |
@@ -55,6 +63,8 @@ This guide covers the complete deployment of AI Document Intelligence for the Sp
 | AnalysisBuilder PCF | Analysis configuration dialog | v1.12.0 |
 | AnalysisWorkspace PCF | Analysis workspace with chat | v1.0.29 |
 | Custom Pages | Power Apps hosts for PCF controls | Deployed |
+| KnowledgeDeploymentService | Multi-tenant RAG deployment routing | R3 (New) |
+| spaarke-knowledge-index | RAG vector index (1536 dims) | R3 (Deployed) |
 
 ---
 
@@ -450,6 +460,106 @@ pac solution import \
 
 ---
 
+## Phase 6: RAG Infrastructure (R3)
+
+### Overview
+
+Phase 6 adds multi-tenant RAG (Retrieval-Augmented Generation) infrastructure with hybrid search capabilities.
+
+### 6.1 Deploy RAG Knowledge Index
+
+The `spaarke-knowledge-index` was deployed in Task 002 of R3:
+
+```bash
+# Verify index exists
+az search index list \
+  --service-name spaarke-search-dev \
+  --resource-group spe-infrastructure-westus2 \
+  -o table
+
+# Expected output should include: spaarke-knowledge-index
+```
+
+**Index Definition**: [`infrastructure/ai-search/spaarke-knowledge-index.json`](../../infrastructure/ai-search/spaarke-knowledge-index.json)
+
+### 6.2 RAG Services Registration
+
+The following services are registered in `Program.cs` when AI Search is configured:
+
+| Service | Registration | Purpose |
+|---------|--------------|---------|
+| `SearchIndexClient` | Singleton | Azure SDK client for index management |
+| `IKnowledgeDeploymentService` | Singleton | Multi-tenant SearchClient routing |
+| `IRagService` | Scoped | Hybrid search with semantic ranking (Task 004) |
+
+### 6.3 Deployment Models
+
+The RAG system supports 3 deployment models configured per tenant:
+
+| Model | Index Location | Configuration |
+|-------|---------------|---------------|
+| **Shared** | `spaarke-knowledge-index` | Default, `tenantId` filter for isolation |
+| **Dedicated** | `{tenantId}-knowledge` | Per-customer index, requires index creation |
+| **CustomerOwned** | Customer Azure AI Search | Requires Key Vault secret for API key |
+
+### 6.4 Verify RAG Infrastructure
+
+```bash
+# 1. Check index is accessible
+curl -X GET "https://spaarke-search-dev.search.windows.net/indexes/spaarke-knowledge-index/docs/\$count?api-version=2024-07-01" \
+  -H "api-key: <your-api-key>"
+
+# 2. Verify service is registered (check API startup logs)
+# Look for: "✓ RAG Knowledge Deployment service enabled (index: spaarke-knowledge-index)"
+
+# 3. Test embeddings model deployment
+az cognitiveservices account deployment list \
+  --name spaarke-openai-dev \
+  --resource-group spe-infrastructure-westus2 \
+  -o table
+# Should show: text-embedding-3-small
+```
+
+### 6.5 R3 Phase 1 Status (Complete)
+
+| Task | Status | Description |
+|------|--------|-------------|
+| 001 | ✅ Complete | Verify R1/R2 Prerequisites |
+| 002 | ✅ Complete | Create RAG Index Schema (`spaarke-knowledge-index`) |
+| 003 | ✅ Complete | Implement `IKnowledgeDeploymentService` |
+| 004 | ✅ Complete | Implement `IRagService` with Hybrid Search |
+| 005 | ✅ Complete | Add Redis Caching for Embeddings (`IEmbeddingCache`) |
+| 006 | ✅ Complete | Test Shared Deployment Model |
+| 007 | ✅ Complete | Test Dedicated Deployment Model |
+| 008 | ✅ Complete | Document RAG Implementation |
+
+### 6.6 RAG Documentation
+
+| Document | Purpose |
+|----------|---------|
+| [RAG-ARCHITECTURE.md](RAG-ARCHITECTURE.md) | Full architecture overview |
+| [RAG-CONFIGURATION.md](RAG-CONFIGURATION.md) | Configuration reference |
+| [RAG-TROUBLESHOOTING.md](RAG-TROUBLESHOOTING.md) | Troubleshooting guide |
+
+### 6.7 Embedding Cache Configuration
+
+The embedding cache uses Redis (ADR-009) to reduce Azure OpenAI API costs and latency.
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Cache Key Format | `sdap:embedding:{sha256-hash}` | SHA256 hash of content for deterministic keys |
+| TTL | 7 days | Embeddings are deterministic for same model |
+| Serialization | Binary (Buffer.BlockCopy) | Efficient float[] → byte[] conversion |
+
+**Services:**
+- `IEmbeddingCache` / `EmbeddingCache` - Redis-based caching
+- Integrated into `RagService.SearchAsync` and `RagService.GetEmbeddingAsync`
+- Uses existing `CacheMetrics` with `cacheType="embedding"` for OpenTelemetry
+
+**Error Handling:** Cache failures are graceful - embedding generation continues without cache.
+
+---
+
 ## Environment Configuration
 
 ### BFF API App Settings
@@ -675,12 +785,14 @@ pac solution list
 
 | Document | Purpose |
 |----------|---------|
-| [SPAARKE-AI-ARCHITECTURE.md](./SPAARKE-AI-ARCHITECTURE.md) | Full AI architecture |
-| [ai-troubleshooting.md](./ai-troubleshooting.md) | Troubleshooting guide |
+| [RAG-ARCHITECTURE.md](RAG-ARCHITECTURE.md) | RAG system architecture |
+| [RAG-CONFIGURATION.md](RAG-CONFIGURATION.md) | RAG configuration reference |
+| [RAG-TROUBLESHOOTING.md](RAG-TROUBLESHOOTING.md) | RAG troubleshooting guide |
+| [ai-troubleshooting.md](./ai-troubleshooting.md) | General AI troubleshooting |
 | [PCF-V9-PACKAGING.md](./PCF-V9-PACKAGING.md) | PCF build/deploy guide |
 
 ---
 
 *Document created: 2025-12-28*
 *Last updated: 2025-12-29*
-*Projects: AI Document Intelligence R1 + R2*
+*Projects: AI Document Intelligence R1 + R2 + R3 (Phase 1 Complete)*

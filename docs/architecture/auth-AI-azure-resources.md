@@ -1,9 +1,9 @@
 # AI Azure Resources
 
-> **Last Updated**: December 28, 2025
+> **Last Updated**: December 29, 2025
 > **Purpose**: Quick reference for AI-related Azure resource IDs and configuration.
 > **Secrets**: Actual secrets stored in `config/ai-config.local.json` (gitignored)
-> **Verified**: Task 003 - AI Document Intelligence R1 (2025-12-28)
+> **Verified**: Task 003 - AI Document Intelligence R3 (2025-12-29)
 
 ---
 
@@ -175,13 +175,40 @@ az cognitiveservices account keys regenerate \
 | **Resource Name** | `spaarke-search-dev` |
 | **Resource Group** | `spe-infrastructure-westus2` |
 | **Region** | West US 2 |
+| **SKU** | Standard |
 | **Endpoint** | `https://spaarke-search-dev.search.windows.net/` |
 
 ### Indexes
 
-| Index Name | Purpose | Status |
-|------------|---------|--------|
-| `spaarke-records-index` | Document search | Active |
+| Index Name | Purpose | Vector Dims | Status |
+|------------|---------|-------------|--------|
+| `spaarke-records-index` | Record matching (Matters, Projects, etc.) | N/A | Active |
+| `spaarke-knowledge-index` | RAG knowledge retrieval (R3) | 1536 | Active |
+
+### RAG Knowledge Index (`spaarke-knowledge-index`)
+
+Deployed in R3 for hybrid RAG search with the following key features:
+
+| Feature | Configuration |
+|---------|---------------|
+| **Vector Field** | `contentVector` - 1536 dimensions (text-embedding-3-small) |
+| **Vector Algorithm** | HNSW (m=4, efConstruction=400, efSearch=500, cosine) |
+| **Semantic Config** | `knowledge-semantic-config` |
+| **Multi-Tenant Fields** | `tenantId`, `deploymentId`, `deploymentModel` |
+
+**Index Definition**: [`infrastructure/ai-search/spaarke-knowledge-index.json`](../../infrastructure/ai-search/spaarke-knowledge-index.json)
+
+### RAG Deployment Models (R3)
+
+The RAG system supports 3 deployment models for multi-tenant isolation:
+
+| Model | Index Location | Use Case |
+|-------|---------------|----------|
+| **Shared** | `spaarke-knowledge-index` with `tenantId` filter | Default, cost-effective |
+| **Dedicated** | `{tenantId}-knowledge` in Spaarke subscription | Per-customer isolation |
+| **CustomerOwned** | Customer's own Azure AI Search instance | Full data sovereignty (BYOK) |
+
+**Service**: `IKnowledgeDeploymentService` routes requests to the correct deployment model based on tenant configuration.
 
 ---
 

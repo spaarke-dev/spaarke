@@ -26,9 +26,9 @@ The system is **configuration-driven**, **Dataverse-first**, and designed to be 
 All chart-based visuals MUST use **Microsoft Fluent UI React Charting (v9)**.
 
 **Authoritative references (must be used by Claude Code):**
-- GitHub (source of truth):
+- GitHub (source of truth):  
   https://github.com/microsoft/fluentui/tree/master/packages/charts/react-charting
-- Storybook / Docs:
+- Storybook / Docs:  
   https://storybooks.fluentui.dev/react/?path=/docs/charts_introduction--docs
 
 **Rules**
@@ -41,12 +41,12 @@ All chart-based visuals MUST use **Microsoft Fluent UI React Charting (v9)**.
 
 # Visual Types (v1 Catalog)
 
-- Metric Card
-- Bar / Column Chart
-- Line / Area Chart
-- Donut Chart
-- Status Distribution Bar
-- Task / Deadline Calendar
+- Metric Card  
+- Bar / Column Chart  
+- Line / Area Chart  
+- Donut Chart  
+- Status Distribution Bar  
+- Task / Deadline Calendar  
 - Mini Table (Top-N)
 
 All chart visuals are backed by **Fluent UI v9 charting components**. The Calendar and Card visuals are custom Fluent v9 components.

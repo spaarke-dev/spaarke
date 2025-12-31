@@ -5,8 +5,17 @@
     <tags>export, teams, graph, dotnet</tags>
     <estimate>5h</estimate>
     <dependencies>032</dependencies>
-    <status>pending</status>
+    <status>skipped</status>
   </metadata>
+
+  <notes>
+    <skipped-date>2025-12-30</skipped-date>
+    <skip-reason>
+      Skipped per user decision. Teams export can be implemented in a future
+      iteration if needed. Email export (Task 032) provides the primary
+      sharing mechanism for analysis results.
+    </skip-reason>
+  </notes>
 
   <prompt>
     <role>Senior .NET Developer with Teams expertise</role>

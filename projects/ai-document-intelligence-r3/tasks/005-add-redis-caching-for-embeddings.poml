@@ -5,7 +5,7 @@
     <tags>redis, caching, embeddings, performance</tags>
     <estimate>4h</estimate>
     <dependencies>004</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -68,4 +68,22 @@
     <on-complete>Update TASK-INDEX.md status to ✅</on-complete>
     <next-task>006-test-shared-deployment-model.poml</next-task>
   </execution>
+
+  <notes>
+    <completion-date>2025-12-29</completion-date>
+    <summary>Implemented Redis-based embedding cache following GraphTokenCache patterns (ADR-009).</summary>
+    <findings>
+      <finding type="created">src/server/api/Sprk.Bff.Api/Services/Ai/IEmbeddingCache.cs - Interface with content hashing and caching methods</finding>
+      <finding type="created">src/server/api/Sprk.Bff.Api/Services/Ai/EmbeddingCache.cs - Redis implementation with SHA256 hashing, 7-day TTL, graceful error handling</finding>
+      <finding type="created">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/EmbeddingCacheTests.cs - 21 unit tests</finding>
+      <finding type="modified">src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs - Integrated IEmbeddingCache into SearchAsync and GetEmbeddingAsync</finding>
+      <finding type="modified">src/server/api/Sprk.Bff.Api/Program.cs - DI registration for IEmbeddingCache</finding>
+      <finding type="modified">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/RagServiceTests.cs - Added IEmbeddingCache mock, 8 new cache-related tests</finding>
+      <finding type="note">Cache key format: sdap:embedding:{SHA256-base64-hash}</finding>
+      <finding type="note">TTL: 7 days - embeddings are deterministic for same content + model</finding>
+      <finding type="note">Serialization: float[] → byte[] via Buffer.BlockCopy (efficient binary)</finding>
+      <finding type="note">Graceful error handling: cache failures don't break embedding generation</finding>
+      <finding type="note">Uses existing CacheMetrics with cacheType="embedding" for OpenTelemetry</finding>
+    </findings>
+  </notes>
 </task>

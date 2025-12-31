@@ -1,7 +1,7 @@
 # Component Interactions Guide
 
 > **Purpose**: Help AI coding agents understand how Spaarke components interact, so changes to one component can be evaluated for impact on others.
-> **Last Updated**: December 8, 2025
+> **Last Updated**: December 29, 2025
 
 ---
 
@@ -54,6 +54,8 @@ When modifying a component, check this table for potential downstream effects:
 │  │  • GET  /api/containers/{id}/children    ← File listing                 ││
 │  │  • GET  /api/documents/{id}/preview-url  ← Preview URLs                 ││
 │  │  • GET  /api/navmap/{entity}/lookup      ← Metadata discovery           ││
+│  │  • POST /api/v1/emails/{id}/save-as-document  ← Email-to-document       ││
+│  │  • GET  /api/v1/emails/{id}/document-status   ← Email status check      ││
 │  └─────────────────────────────────────────────────────────────────────────┘│
 │  ┌─────────────────────────────────────────────────────────────────────────┐│
 │  │  Infrastructure Layer                                                   ││
@@ -61,6 +63,11 @@ When modifying a component, check this table for potential downstream effects:
 │  │  • Graph/ — ContainerOperations, DriveItemOperations, UploadManager    ││
 │  │  • Dataverse/ — Web API client for metadata queries                    ││
 │  │  • Resilience/ — Polly retry policies                                  ││
+│  └─────────────────────────────────────────────────────────────────────────┘│
+│  ┌─────────────────────────────────────────────────────────────────────────┐│
+│  │  Services Layer                                                         ││
+│  │  • Email/EmailToEmlConverter — RFC 5322 .eml generation with MimeKit   ││
+│  │  • Email/IEmailToEmlConverter — Email conversion interface             ││
 │  └─────────────────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────────────────┘
            │                                              │
@@ -149,6 +156,38 @@ User → PCF (SpeFileViewer) → BFF API → Graph API → Preview URL
 | Modify preview URL structure | Update SpeFileViewer iframe handling |
 | Change caching TTL | Consider Graph API rate limits |
 | Add new preview types | Update both BFF and PCF |
+
+### Pattern 4: Email-to-Document Conversion Flow
+
+```
+User/Ribbon Button → BFF API (EmailEndpoints) → EmailToEmlConverter → Dataverse API (Email Activity)
+                                                         │
+                                                         └──→ MimeKit (.eml generation)
+                                                         │
+                                                         └──→ Graph API → SPE Container (.eml file)
+                                                         │
+                                                         └──→ Dataverse API → sprk_document record
+```
+
+**Components involved:**
+1. `src/server/api/Sprk.Bff.Api/Api/EmailEndpoints.cs` — API endpoints
+2. `src/server/api/Sprk.Bff.Api/Services/Email/EmailToEmlConverter.cs` — RFC 5322 conversion
+3. `src/server/api/Sprk.Bff.Api/Services/Email/IEmailToEmlConverter.cs` — Interface
+4. `src/server/api/Sprk.Bff.Api/Models/Email/EmailConversionModels.cs` — DTOs
+5. `src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs` — Email metadata fields
+
+**Change Impact:**
+| Change | Impact |
+|--------|--------|
+| Modify EmailEndpoints signature | Update any UI callers (ribbon button, PCF) |
+| Add email fields to sprk_document | Update DataverseWebApiService mappings |
+| Change attachment filtering rules | Update EmailProcessingOptions config |
+| Add new email metadata fields | Update EmailActivityMetadata, UpdateDocumentRequest |
+
+**Key Files:**
+- `EmailToEmlConverter.cs` — Uses MimeKit for RFC 5322 compliant .eml generation
+- `EmailEndpoints.cs` — POST /api/v1/emails/{emailId}/save-as-document
+- `EmailProcessingOptions.cs` — Attachment size limits, blocked extensions, signature patterns
 
 ---
 
@@ -272,6 +311,8 @@ src/ ─────────────✗────→ tests/ (no test c
 | BFF Endpoints | `src/server/api/Sprk.Bff.Api/Api/` | `tests/unit/Sprk.Bff.Api.Tests/` |
 | BFF Graph Operations | `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/` | Same test project |
 | BFF Auth | `src/server/api/Sprk.Bff.Api/Infrastructure/Auth/` | Same test project |
+| **BFF Email Services** | `src/server/api/Sprk.Bff.Api/Services/Email/` | `tests/unit/Sprk.Bff.Api.Tests/Services/Email/` |
+| **Email Models** | `src/server/api/Sprk.Bff.Api/Models/Email/` | — |
 | PCF UniversalQuickCreate | `src/client/pcf/UniversalQuickCreate/` | Manual testing |
 | PCF SpeFileViewer | `src/client/pcf/SpeFileViewer/` | Manual testing |
 | PCF Shared Auth | `src/client/pcf/*/services/auth/` | — |
