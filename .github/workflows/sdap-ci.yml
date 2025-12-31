@@ -90,14 +90,14 @@ jobs:
         continue-on-error: true  # Don't fail build on test failures during CI hardening phase
 
       - name: Upload test results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: test-results-${{ matrix.configuration }}
           path: ./TestResults/
 
       - name: Upload coverage reports
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: coverage-${{ matrix.configuration }}
@@ -135,7 +135,7 @@ jobs:
 
       - name: Upload ADR test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: adr-test-results
           path: ./TestResults/adr-results.trx
@@ -187,7 +187,7 @@ jobs:
           dotnet publish src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj -c Release -o ./publish/api --no-restore
 
       - name: Package artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: deployment-packages
           path: ./publish/**
