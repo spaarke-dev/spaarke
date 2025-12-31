@@ -1,9 +1,9 @@
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using QuestPDF.Fluent;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
-using System.Text.RegularExpressions;
 
 namespace Sprk.Bff.Api.Services.Ai.Export;
 

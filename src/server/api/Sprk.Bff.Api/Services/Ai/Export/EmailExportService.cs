@@ -1,13 +1,13 @@
+using System.Text;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Graph;
-using Microsoft.Graph.Models;
 using Microsoft.Graph.Me.SendMail;
+using Microsoft.Graph.Models;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
-using System.Text;
-using System.Text.RegularExpressions;
 
 namespace Sprk.Bff.Api.Services.Ai.Export;
 
