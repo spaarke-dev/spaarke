@@ -1,7 +1,7 @@
 # Spaarke Repository Architecture
 
 > **Version**: 1.2
-> **Date**: December 29, 2025
+> **Date**: December 30, 2025
 > **Purpose**: Comprehensive guide to the Spaarke repository structure for developers and AI coding agents
 
 ---
@@ -15,7 +15,7 @@ The Spaarke repository contains the **Spaarke Legal Operations Intelligence Plat
 | Component | Description | Status |
 |-----------|-------------|--------|
 | **SDAP** (SharePoint Document Access Platform) | Document storage, retrieval, and management via SPE | Production |
-| **Email-to-Document Automation** | Convert Dataverse emails to RFC 5322 .eml documents | Phase 1 Complete |
+| **Email-to-Document Automation** | Automatic email archival to .eml documents with webhooks | Phase 2 Complete |
 | **AI Document Intelligence** | AI-powered summarization, metadata extraction, and analysis | In Development |
 | **Legal Workflow Automation** | Matter management, deadline tracking, task automation | Planned |
 | **Operational Analytics** | Dashboards, reporting, and insights | Planned |
@@ -114,8 +114,9 @@ spaarke/
 ```
 Sprk.Bff.Api/
 ├── Api/                    # Endpoint definitions (Minimal API groups)
-│   ├── DocumentsEndpoints.cs
-│   └── EmailEndpoints.cs   # Email-to-document conversion (Phase 1)
+│   ├── DocumentsEndpoints.cs    # Document CRUD operations
+│   ├── EmailEndpoints.cs        # Email-to-document automation
+│   └── ...
 ├── Configuration/          # Strongly-typed configuration classes
 │   └── EmailProcessingOptions.cs  # Email attachment rules
 ├── Infrastructure/         # Cross-cutting concerns
@@ -133,8 +134,12 @@ Sprk.Bff.Api/
 │   ├── Email/              # Email-to-document services
 │   │   ├── IEmailToEmlConverter.cs
 │   │   ├── EmailToEmlConverter.cs  # RFC 5322 .eml generation
-│   │   ├── EmailActivityMetadata.cs
-│   │   └── EmailAttachmentInfo.cs
+│   │   ├── IEmailFilterService.cs
+│   │   └── EmailRuleSeedService.cs
+│   ├── Jobs/               # Async job processing
+│   │   ├── Handlers/       # Job type handlers
+│   │   │   └── EmailToDocumentJobHandler.cs
+│   │   └── EmailPollingBackupService.cs
 │   └── Ai/                 # AI analysis services
 │       ├── Export/         # Analysis export services
 │       │   ├── IExportService.cs       # Export service interface
@@ -144,6 +149,8 @@ Sprk.Bff.Api/
 │       │   └── EmailExportService.cs   # Email via Microsoft Graph
 │       └── Tools/          # AI tool handlers
 ├── Telemetry/              # OpenTelemetry metrics
+│   ├── AiTelemetry.cs
+│   └── EmailTelemetry.cs   # Email processing metrics
 └── Program.cs              # Application entry point
 ```
 

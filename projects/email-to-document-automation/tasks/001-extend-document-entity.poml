@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="E2D-001" project="Email-to-Document Automation">
+  <metadata>
+    <title>Extend sprk_document Entity with Email Fields</title>
+    <status>completed</status>
+    <phase>1</phase>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>dataverse, entity, schema</tags>
+  </metadata>
+
+  <prompt>
+    Extend the existing sprk_document entity in Dataverse to support email-specific metadata.
+    These fields enable tracking email origin, threading, and association for converted emails.
+  </prompt>
+
+  <role>
+    Dataverse solution developer with expertise in entity customization and Power Platform.
+  </role>
+
+  <goal>
+    sprk_document entity extended with all email-specific fields, deployed to development environment,
+    and ready for use by the EmailToDocumentJobHandler.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/email-to-document-automation/SPEC.md</file>
+    <file purpose="project-plan">projects/email-to-document-automation/PLAN.md</file>
+    <file purpose="project-context">projects/email-to-document-automation/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">Must not break existing sprk_document functionality</constraint>
+    <constraint source="project">All new fields must be optional (nullable)</constraint>
+    <constraint source="project">Use sprk_ prefix for all custom fields</constraint>
+    <constraint source="dataverse">Field logical names must be lowercase</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/entity-customization</topic>
+    <files>
+      <file>projects/email-to-document-automation/SPEC.md (Section 2.2)</file>
+      <file>docs/ai-knowledge/guides/HOW-TO-ADD-SDAP-TO-NEW-ENTITY.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Email-to-Document conversion requires storing email metadata on the Document record
+      to enable search, filtering, threading, and association tracking.
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Review SPEC.md">
+      Read SPEC.md Section 2.2 (sprk_document Extensions) for field definitions.
+    </step>
+    <step order="2" name="Open Solution">
+      Open the SpaarkeCore solution in the Dataverse environment.
+    </step>
+    <step order="3" name="Add Fields">
+      Add the following fields to sprk_document:
+      - sprk_emailcc (Multiple Lines of Text)
+      - sprk_emaildirection (Option Set: Incoming=0, Outgoing=1)
+      - sprk_emailactivityid (Lookup to Email)
+      - sprk_emailtrackingtoken (Single Line of Text, 100 chars)
+      - sprk_emailconversationindex (Single Line of Text, 512 chars)
+      - sprk_isemailarchive (Two Options: Yes/No)
+      - sprk_parentemaildocumentid (Lookup to sprk_document - self-referential)
+    </step>
+    <step order="4" name="Configure Lookups">
+      Configure the sprk_emailactivityid lookup relationship to the Email entity.
+      Configure the sprk_parentemaildocumentid self-referential lookup.
+    </step>
+    <step order="5" name="Publish">
+      Publish the solution changes.
+    </step>
+    <step order="6" name="Export Solution">
+      Export the updated solution as managed and unmanaged.
+    </step>
+    <step order="7" name="Document Changes">
+      Update TASK-INDEX.md with completion status.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI for solution operations</tool>
+    <tool name="dataverse-ui">Dataverse Maker Portal</tool>
+  </tools>
+
+  <outputs>
+    <output type="solution">src/solutions/SpaarkeCore/ (updated)</output>
+    <output type="docs">projects/email-to-document-automation/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 7 new fields exist on sprk_document entity</criterion>
+    <criterion testable="true">sprk_emailactivityid lookup resolves to Email entity</criterion>
+    <criterion testable="true">sprk_parentemaildocumentid lookup resolves to sprk_document</criterion>
+    <criterion testable="true">sprk_emaildirection option set has Incoming and Outgoing values</criterion>
+    <criterion testable="true">Solution exports successfully without errors</criterion>
+  </acceptance-criteria>
+</task>

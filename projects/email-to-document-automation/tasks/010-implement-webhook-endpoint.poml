@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="E2D-010" project="Email-to-Document Automation">
+  <metadata>
+    <title>Implement Webhook Endpoint /api/emails/webhook-trigger</title>
+    <status>not-started</status>
+    <phase>2</phase>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>backend, api, webhook, dataverse</tags>
+  </metadata>
+
+  <prompt>
+    Implement the Dataverse webhook receiver endpoint that provides near real-time email processing.
+    When Dataverse creates an Email activity, the webhook fires and this endpoint enqueues a
+    processing job immediately.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with Dataverse webhooks, Service Bus, and ADR-004 patterns.
+  </role>
+
+  <goal>
+    Working POST /api/emails/webhook-trigger endpoint that validates Dataverse webhook requests,
+    performs optional quick filtering, and enqueues ProcessEmailToDocumentJob on Service Bus.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/email-to-document-automation/SPEC.md</file>
+    <file purpose="project-plan">projects/email-to-document-automation/PLAN.md</file>
+    <file purpose="project-context">projects/email-to-document-automation/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-004">Use JobContract schema for Service Bus message</constraint>
+    <constraint source="project">Webhook signature validation required</constraint>
+    <constraint source="project">IdempotencyKey format: Email:{emailId}:Archive</constraint>
+    <constraint source="security">AllowAnonymous but validate shared secret</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/webhooks, service-bus</topic>
+    <files>
+      <file>projects/email-to-document-automation/SPEC.md (Section 3.2.1)</file>
+      <file>docs/reference/adr/ADR-004-async-job-contract.md</file>
+      <file>docs/ai-knowledge/guides/DATAVERSE-AUTHENTICATION-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      This endpoint is the primary trigger for email processing. It receives webhook calls from
+      Dataverse when new Email activities are created, enabling near real-time processing.
+    </background>
+    <dependencies>
+      <dependency task="E2D-005" status="required">Email endpoints structure</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Create Webhook DTOs">
+      Create DataverseWebhookPayload DTO matching Dataverse webhook format.
+    </step>
+    <step order="2" name="Add Webhook Endpoint">
+      Add POST /api/emails/webhook-trigger to EmailEndpoints.cs.
+      Mark as AllowAnonymous (uses secret validation).
+    </step>
+    <step order="3" name="Implement Signature Validation">
+      Create ValidateWebhookSignatureAsync method:
+      - Check X-Dataverse-Signature header
+      - Validate against configured shared secret
+      - Or validate Azure AD token if using app auth
+    </step>
+    <step order="4" name="Implement Handler">
+      Implement endpoint handler:
+      - Validate signature
+      - Parse webhook payload (get PrimaryEntityId = emailId)
+      - Optional: Quick filter check
+      - Create JobContract with IdempotencyKey
+      - Publish to Service Bus
+      - Return 202 Accepted
+    </step>
+    <step order="5" name="Add Configuration">
+      Add webhook secret to EmailProcessingOptions.
+    </step>
+    <step order="6" name="Document Changes">
+      Update TASK-INDEX.md with completion status.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and run .NET project</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/EmailEndpoints.cs (updated)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Email/DataverseWebhookPayload.cs</output>
+    <output type="docs">projects/email-to-document-automation/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Endpoint accessible at POST /api/emails/webhook-trigger</criterion>
+    <criterion testable="true">Returns 401 Unauthorized without valid signature</criterion>
+    <criterion testable="true">Returns 202 Accepted on success</criterion>
+    <criterion testable="true">Job published to Service Bus with correct JobContract</criterion>
+    <criterion testable="true">IdempotencyKey follows Email:{emailId}:Archive format</criterion>
+    <criterion testable="true">Correlation ID included in response and job</criterion>
+  </acceptance-criteria>
+</task>

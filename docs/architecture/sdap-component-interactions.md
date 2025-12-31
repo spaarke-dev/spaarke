@@ -1,7 +1,7 @@
 # Component Interactions Guide
 
 > **Purpose**: Help AI coding agents understand how Spaarke components interact, so changes to one component can be evaluated for impact on others.
-> **Last Updated**: December 29, 2025
+> **Last Updated**: December 30, 2025
 
 ---
 
@@ -17,6 +17,9 @@ When modifying a component, check this table for potential downstream effects:
 | Dataverse entity schema | BFF Dataverse queries, PCF form bindings |
 | Bicep modules | Environment configs, deployment pipelines |
 | Shared libraries | All consumers (search for ProjectReference) |
+| Email processing options | Webhook handler, polling service, job handler |
+| Email filter rules schema | EmailFilterService, EmailRuleSeedService |
+| Webhook endpoint | Dataverse Service Endpoint registration |
 
 ---
 
@@ -68,6 +71,9 @@ When modifying a component, check this table for potential downstream effects:
 │  │  Services Layer                                                         ││
 │  │  • Email/EmailToEmlConverter — RFC 5322 .eml generation with MimeKit   ││
 │  │  • Email/IEmailToEmlConverter — Email conversion interface             ││
+│  │  • Email/IEmailFilterService — Rule-based email filtering              ││
+│  │  • Jobs/EmailToDocumentJobHandler — Async email processing             ││
+│  │  • Jobs/EmailPollingBackupService — Backup polling for missed webhooks ││
 │  └─────────────────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────────────────┘
            │                                              │
@@ -157,36 +163,35 @@ User → PCF (SpeFileViewer) → BFF API → Graph API → Preview URL
 | Change caching TTL | Consider Graph API rate limits |
 | Add new preview types | Update both BFF and PCF |
 
-### Pattern 4: Email-to-Document Conversion Flow
+### Pattern 4: Email-to-Document Flow (Phase 2)
 
 ```
-User/Ribbon Button → BFF API (EmailEndpoints) → EmailToEmlConverter → Dataverse API (Email Activity)
-                                                         │
-                                                         └──→ MimeKit (.eml generation)
-                                                         │
-                                                         └──→ Graph API → SPE Container (.eml file)
-                                                         │
-                                                         └──→ Dataverse API → sprk_document record
+Dataverse Email → Webhook → BFF API → Filter Rules → Job Queue → SPE + Dataverse
+                    │
+                    └─→ (Backup) Polling Service → Job Queue
 ```
 
 **Components involved:**
-1. `src/server/api/Sprk.Bff.Api/Api/EmailEndpoints.cs` — API endpoints
-2. `src/server/api/Sprk.Bff.Api/Services/Email/EmailToEmlConverter.cs` — RFC 5322 conversion
-3. `src/server/api/Sprk.Bff.Api/Services/Email/IEmailToEmlConverter.cs` — Interface
-4. `src/server/api/Sprk.Bff.Api/Models/Email/EmailConversionModels.cs` — DTOs
-5. `src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs` — Email metadata fields
+1. `Dataverse Service Endpoint` — Webhook registration for email.Create
+2. `src/server/api/Sprk.Bff.Api/Api/EmailEndpoints.cs` — Webhook receiver, manual save
+3. `src/server/api/Sprk.Bff.Api/Services/Email/` — Converter, filter service, seed service
+4. `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/EmailToDocumentJobHandler.cs` — Async processing
+5. `src/server/api/Sprk.Bff.Api/Services/Jobs/EmailPollingBackupService.cs` — Backup polling
 
 **Change Impact:**
 | Change | Impact |
 |--------|--------|
+| Modify webhook endpoint URL | Update Dataverse Service Endpoint registration |
+| Change job payload schema | Update both webhook handler and job handler |
+| Modify filter rule schema | Update EmailFilterService, seed service, Dataverse entity |
+| Change default container | Update EmailProcessingOptions configuration |
 | Modify EmailEndpoints signature | Update any UI callers (ribbon button, PCF) |
 | Add email fields to sprk_document | Update DataverseWebApiService mappings |
 | Change attachment filtering rules | Update EmailProcessingOptions config |
-| Add new email metadata fields | Update EmailActivityMetadata, UpdateDocumentRequest |
 
 **Key Files:**
 - `EmailToEmlConverter.cs` — Uses MimeKit for RFC 5322 compliant .eml generation
-- `EmailEndpoints.cs` — POST /api/v1/emails/{emailId}/save-as-document
+- `EmailEndpoints.cs` — POST /api/v1/emails/{emailId}/save-as-document, webhook receiver
 - `EmailProcessingOptions.cs` — Attachment size limits, blocked extensions, signature patterns
 
 ---
@@ -201,6 +206,7 @@ User/Ribbon Button → BFF API (EmailEndpoints) → EmailToEmlConverter → Data
 | `ContainerTypeId` | Upload, listing endpoints | appsettings.json |
 | `Redis:InstanceName` | BFF caching | appsettings.json |
 | `AzureAd:*` | BFF auth, PCF MSAL | appsettings.json, msalConfig.ts |
+| `EmailProcessing:*` | Webhook, polling, job handler | appsettings.json |
 
 ### Shared Types/Contracts
 

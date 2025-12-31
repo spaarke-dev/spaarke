@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="E2D-011" project="Email-to-Document Automation">
+  <metadata>
+    <title>Create EmailPollingBackupService</title>
+    <status>not-started</status>
+    <phase>2</phase>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>backend, background-service, polling</tags>
+  </metadata>
+
+  <prompt>
+    Create the backup polling service that catches emails missed by the webhook. This service
+    runs every 5 minutes and queries Dataverse for unprocessed emails, ensuring reliable
+    processing even if webhooks fail.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with BackgroundService pattern (ADR-001), Dataverse queries, and Service Bus.
+  </role>
+
+  <goal>
+    Working EmailPollingBackupService that polls Dataverse for unprocessed emails on a configurable
+    interval and enqueues jobs using the same IdempotencyKey format as the webhook.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/email-to-document-automation/SPEC.md</file>
+    <file purpose="project-plan">projects/email-to-document-automation/PLAN.md</file>
+    <file purpose="project-context">projects/email-to-document-automation/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-001">Use BackgroundService pattern - no Azure Functions</constraint>
+    <constraint source="ADR-004">Use JobContract schema with same IdempotencyKey format</constraint>
+    <constraint source="project">Polling interval configurable (default 5 minutes)</constraint>
+    <constraint source="project">Lookback window configurable (default 24 hours)</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>background-service, adr-001</topic>
+    <files>
+      <file>projects/email-to-document-automation/SPEC.md (Section 3.2.2)</file>
+      <file>docs/reference/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>docs/reference/adr/ADR-004-async-job-contract.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs</file>
+    </files>
+    <patterns>
+      <pattern name="BackgroundService Pattern" location="src/server/api/Sprk.Bff.Api/Services/Jobs/">
+        Follow existing BackgroundService patterns with PeriodicTimer
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The polling service provides reliability in the hybrid trigger model. It catches emails
+      missed by webhooks (network issues, service restarts) and handles retries for failed jobs.
+    </background>
+    <dependencies>
+      <dependency task="E2D-005" status="required">Document creation patterns</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Create Service Class">
+      Create EmailPollingBackupService.cs inheriting from BackgroundService.
+    </step>
+    <step order="2" name="Implement ExecuteAsync">
+      Use PeriodicTimer with configurable interval (default 5 min).
+      Call EnqueueMissedEmailsAsync on each tick.
+    </step>
+    <step order="3" name="Implement Query">
+      Create GetUnprocessedEmailsAsync method:
+      - Query emails where statecode = Completed
+      - createdon within lookback window
+      - sprk_documentprocessingstatus IS NULL OR Pending OR Failed
+      - NOT EXISTS document with sprk_emailactivityid match
+    </step>
+    <step order="4" name="Implement Enqueue">
+      For each missed email:
+      - Create JobContract with IdempotencyKey = Email:{emailId}:Archive
+      - Set trigger = "PollingBackup" in payload
+      - Publish to Service Bus
+    </step>
+    <step order="5" name="Register Service">
+      Register service in Program.cs with AddHostedService.
+    </step>
+    <step order="6" name="Add Configuration">
+      Add PollingBackupIntervalMinutes, PollingLookbackHours to EmailProcessingOptions.
+    </step>
+    <step order="7" name="Document Changes">
+      Update TASK-INDEX.md with completion status.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and run .NET project</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Jobs/EmailPollingBackupService.cs</output>
+    <output type="docs">projects/email-to-document-automation/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Service inherits from BackgroundService</criterion>
+    <criterion testable="true">Uses PeriodicTimer with configurable interval</criterion>
+    <criterion testable="true">Queries unprocessed emails from Dataverse</criterion>
+    <criterion testable="true">Enqueues jobs with same IdempotencyKey format as webhook</criterion>
+    <criterion testable="true">Logs count of missed emails found</criterion>
+    <criterion testable="true">Service registered in Program.cs</criterion>
+    <criterion testable="true">Project builds without errors</criterion>
+  </acceptance-criteria>
+</task>

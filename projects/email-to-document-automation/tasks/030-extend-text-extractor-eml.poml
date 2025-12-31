@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="E2D-030" project="Email-to-Document Automation">
+  <metadata>
+    <title>Extend TextExtractorService for .eml Files</title>
+    <status>not-started</status>
+    <phase>4</phase>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>backend, ai, text-extraction</tags>
+  </metadata>
+
+  <prompt>
+    Extend the existing TextExtractorService to support .eml file format. This enables AI
+    Document Intelligence to process email documents for summarization and metadata extraction.
+    CRITICAL: Extend the EXISTING service - do not create a new one.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with MimeKit, existing TextExtractorService, and SDAP AI architecture.
+  </role>
+
+  <goal>
+    TextExtractorService extended with .eml support, enabling AI processing of email documents
+    through the existing Document Intelligence pipeline.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/email-to-document-automation/SPEC.md</file>
+    <file purpose="project-context">projects/email-to-document-automation/CLAUDE.md</file>
+    <file purpose="existing-service">src/server/api/Sprk.Bff.Api/Services/Ai/TextExtractorService.cs</file>
+    <file purpose="ai-architecture">docs/ai-knowledge/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">EXTEND existing TextExtractorService - do NOT create EmailTextExtractor</constraint>
+    <constraint source="project">Use MimeKit for parsing (already in project from task 004)</constraint>
+    <constraint source="project">Handle both HTML and plain text bodies</constraint>
+    <constraint source="project">Strip HTML tags from HTML body</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/text-extraction, mimekit</topic>
+    <files>
+      <file>projects/email-to-document-automation/SPEC.md (Section 3.4)</file>
+      <file>projects/email-to-document-automation/CLAUDE.md</file>
+      <file>docs/ai-knowledge/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/TextExtractorService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ITextExtractor.cs</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Email documents need to enter the existing AI Document Intelligence pipeline for
+      summarization and metadata extraction. The TextExtractorService must be extended
+      to handle .eml files, not replaced with a separate service.
+    </background>
+    <dependencies>
+      <dependency task="E2D-004" status="required">MimeKit already added to project</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Review Existing Service">
+      Read TextExtractorService.cs to understand the existing pattern.
+    </step>
+    <step order="2" name="Add .eml Method">
+      Add ExtractTextFromEmlAsync method to TextExtractorService:
+      - Parse .eml stream with MimeMessage.LoadAsync
+      - Extract text from plain text parts
+      - Extract and strip HTML from HTML parts
+      - Combine into single text output
+    </step>
+    <step order="3" name="Update Interface">
+      If needed, add method to ITextExtractor interface.
+    </step>
+    <step order="4" name="Update Configuration">
+      Add .eml to SupportedFileTypes configuration:
+      ".eml": { "Enabled": true, "Method": "Native" }
+    </step>
+    <step order="5" name="Update Dispatch Logic">
+      Update the service's file type dispatch to call ExtractTextFromEmlAsync for .eml files.
+    </step>
+    <step order="6" name="Test">
+      Test with sample .eml file to verify text extraction works.
+    </step>
+    <step order="7" name="Document Changes">
+      Update TASK-INDEX.md with completion status.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET project</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/TextExtractorService.cs (updated)</output>
+    <output type="config">appsettings.json - SupportedFileTypes updated</output>
+    <output type="docs">projects/email-to-document-automation/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ExtractTextFromEmlAsync method added to TextExtractorService</criterion>
+    <criterion testable="true">.eml added to SupportedFileTypes configuration</criterion>
+    <criterion testable="true">Can extract text from sample .eml file</criterion>
+    <criterion testable="true">HTML body has tags stripped</criterion>
+    <criterion testable="true">No new service class created (extended existing)</criterion>
+    <criterion testable="true">Project builds without errors</criterion>
+  </acceptance-criteria>
+</task>

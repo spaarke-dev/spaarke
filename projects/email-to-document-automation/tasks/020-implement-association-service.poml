@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="E2D-020" project="Email-to-Document Automation">
+  <metadata>
+    <title>Implement IEmailAssociationService</title>
+    <status>not-started</status>
+    <phase>3</phase>
+    <estimated-effort>6 hours</estimated-effort>
+    <tags>backend, service, association</tags>
+  </metadata>
+
+  <prompt>
+    Implement the smart email association service that determines which Matter, Account, or Contact
+    an email should be linked to. Uses multiple signals (tracking tokens, threading, sender matching)
+    with confidence scoring.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with Dataverse queries, email threading, and SDAP entity relationships.
+  </role>
+
+  <goal>
+    Working IEmailAssociationService that analyzes email metadata and returns the best association
+    target (Matter, Account, or Contact) with a confidence score, supporting manual override.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/email-to-document-automation/SPEC.md</file>
+    <file purpose="project-plan">projects/email-to-document-automation/PLAN.md</file>
+    <file purpose="project-context">projects/email-to-document-automation/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">Return confidence score 0.0 - 1.0</constraint>
+    <constraint source="project">Support multiple association methods with priority</constraint>
+    <constraint source="project">Tracking token match should have highest confidence (0.95)</constraint>
+    <constraint source="project">Use IDataverseService - do not create new Dataverse client</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>association, email-threading</topic>
+    <files>
+      <file>projects/email-to-document-automation/SPEC.md (Section 3.1 - IEmailAssociationService, Appendix B)</file>
+      <file>src/server/shared/Spaarke.Dataverse/IDataverseService.cs</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Smart association is a key differentiator for this feature. Emails should automatically
+      link to the correct Matter/Account/Contact based on tracking tokens, threading, and
+      sender/recipient matching.
+    </background>
+    <dependencies>
+      <dependency task="E2D-012" status="required">Job handler calls association service</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Create Interface">
+      Create IEmailAssociationService interface with:
+      - DetermineAssociationAsync(Guid emailId, CancellationToken)
+      - GetAssociationSignalsAsync(Guid emailId, CancellationToken)
+    </step>
+    <step order="2" name="Create DTOs">
+      Create AssociationResult, AssociationSignal, AssociationMethod DTOs.
+    </step>
+    <step order="3" name="Implement Association Methods">
+      Implement 6 association methods per SPEC.md Appendix B:
+      1. Tracking token match (0.95)
+      2. Conversation thread match (0.90)
+      3. Existing regarding match (0.85)
+      4. Recent sender-to-Matter activity (0.70)
+      5. Email domain to Account (0.60)
+      6. Contact email match (0.50)
+    </step>
+    <step order="4" name="Implement Scoring Logic">
+      Combine signals and return highest confidence match.
+      Include all signals in result for transparency.
+    </step>
+    <step order="5" name="Register Service">
+      Register service in DI container.
+    </step>
+    <step order="6" name="Document Changes">
+      Update TASK-INDEX.md with completion status.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET project</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Email/IEmailAssociationService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Email/EmailAssociationService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Email/AssociationResult.cs</output>
+    <output type="docs">projects/email-to-document-automation/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Interface defines DetermineAssociationAsync and GetAssociationSignalsAsync</criterion>
+    <criterion testable="true">All 6 association methods implemented</criterion>
+    <criterion testable="true">Tracking token match returns confidence 0.95</criterion>
+    <criterion testable="true">Result includes all signals with individual confidences</criterion>
+    <criterion testable="true">Returns null association if no match above threshold</criterion>
+    <criterion testable="true">Uses IDataverseService (not direct API calls)</criterion>
+    <criterion testable="true">Project builds without errors</criterion>
+  </acceptance-criteria>
+</task>

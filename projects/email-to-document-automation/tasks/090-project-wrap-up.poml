@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="E2D-090" project="Email-to-Document Automation">
+  <metadata>
+    <title>Project Wrap-up and Documentation</title>
+    <status>not-started</status>
+    <phase>wrap-up</phase>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>documentation, cleanup</tags>
+  </metadata>
+
+  <prompt>
+    Complete the project by updating documentation, creating lessons learned, archiving
+    project artifacts, and running repository cleanup validation.
+  </prompt>
+
+  <role>
+    Technical writer and project coordinator familiar with SDAP documentation standards.
+  </role>
+
+  <goal>
+    Project marked complete with all documentation updated, lessons learned captured,
+    ephemeral files cleaned up, and repository validated.
+  </goal>
+
+  <inputs>
+    <file purpose="project-readme">projects/email-to-document-automation/README.md</file>
+    <file purpose="project-plan">projects/email-to-document-automation/PLAN.md</file>
+    <file purpose="task-index">projects/email-to-document-automation/tasks/TASK-INDEX.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">All tasks must be complete before wrap-up</constraint>
+    <constraint source="project">Run /repo-cleanup skill for validation</constraint>
+    <constraint source="project">Remove ephemeral files from notes/ directory</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>project-management, documentation</topic>
+    <files>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>docs/ai-knowledge/guides/HOW-TO-INITIATE-NEW-PROJECT.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Project wrap-up ensures knowledge is captured, documentation is complete, and the
+      repository remains clean for future development.
+    </background>
+    <dependencies>
+      <dependency task="all-phases" status="required">All implementation phases complete</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Verify All Tasks Complete">
+      Review TASK-INDEX.md and verify all tasks are marked complete.
+      If any incomplete, block this task.
+    </step>
+    <step order="2" name="Update README Status">
+      Update projects/email-to-document-automation/README.md:
+      - Status: Complete
+      - All phase checkboxes marked complete
+      - Completion date added
+    </step>
+    <step order="3" name="Create Lessons Learned">
+      Create projects/email-to-document-automation/lessons-learned.md:
+      - What went well
+      - What could be improved
+      - Technical decisions that worked
+      - Technical debt introduced (if any)
+    </step>
+    <step order="4" name="Clean Up Notes">
+      Remove ephemeral files from projects/email-to-document-automation/notes/
+      - debug/
+      - spikes/
+      - drafts/
+      Keep only handoffs/ if any are reference-worthy.
+    </step>
+    <step order="5" name="Run Repository Cleanup">
+      Run /repo-cleanup skill to validate repository structure.
+    </step>
+    <step order="6" name="Update Root Task Index">
+      If a root-level TASK-INDEX.md exists, update with project completion.
+    </step>
+    <step order="7" name="Final Review">
+      Review all project files for completeness.
+      Ensure no TODO comments remain in code.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="git">Version control operations</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/email-to-document-automation/README.md (status: Complete)</output>
+    <output type="docs">projects/email-to-document-automation/lessons-learned.md</output>
+    <output type="cleanup">projects/email-to-document-automation/notes/ (cleaned)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All tasks in TASK-INDEX.md marked complete</criterion>
+    <criterion testable="true">README.md status updated to Complete</criterion>
+    <criterion testable="true">lessons-learned.md created</criterion>
+    <criterion testable="true">notes/ directory cleaned of ephemeral files</criterion>
+    <criterion testable="true">/repo-cleanup validation passes</criterion>
+    <criterion testable="true">No blocking TODO comments in code</criterion>
+  </acceptance-criteria>
+</task>

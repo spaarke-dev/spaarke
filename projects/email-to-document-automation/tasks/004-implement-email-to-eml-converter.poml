@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="E2D-004" project="Email-to-Document Automation">
+  <metadata>
+    <title>Implement IEmailToEmlConverter Service</title>
+    <status>completed</status>
+    <phase>1</phase>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>backend, api, service, mimekit</tags>
+  </metadata>
+
+  <prompt>
+    Implement the core IEmailToEmlConverter service that generates RFC 5322 compliant .eml files
+    from Dataverse Email activities using MimeKit. This is the foundation of email-to-document conversion.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with email standards (RFC 5322, MIME) and MimeKit library.
+  </role>
+
+  <goal>
+    Working IEmailToEmlConverter implementation that produces valid RFC 5322 .eml files from
+    Dataverse Email activities, with embedded attachments, proper headers, and correct encoding.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/email-to-document-automation/SPEC.md</file>
+    <file purpose="project-plan">projects/email-to-document-automation/PLAN.md</file>
+    <file purpose="project-context">projects/email-to-document-automation/CLAUDE.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-007">Use IDataverseService for all Dataverse operations - do not create new client</constraint>
+    <constraint source="RFC-5322">Output must be valid RFC 5322 format</constraint>
+    <constraint source="project">Must handle HTML and plain text bodies</constraint>
+    <constraint source="project">Must properly encode non-ASCII characters</constraint>
+    <constraint source="project">Filename sanitization for .eml output</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>email/rfc5322, mimekit</topic>
+    <files>
+      <file>projects/email-to-document-automation/SPEC.md (Section 3.1 - IEmailToEmlConverter)</file>
+      <file>projects/email-to-document-automation/CLAUDE.md</file>
+      <file>docs/reference/adr/ADR-007-spe-storage-seam-minimalism.md</file>
+      <file>src/server/shared/Spaarke.Dataverse/IDataverseService.cs</file>
+    </files>
+    <patterns>
+      <pattern name="Service Pattern" location="src/server/api/Sprk.Bff.Api/Services/">
+        Follow existing service patterns for DI registration and structure
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      RFC 5322 compliance is critical for legal discovery and email archival. The .eml format
+      must be readable by standard email clients and preserve all original email characteristics.
+    </background>
+  </context>
+
+  <steps>
+    <step order="1" name="Add MimeKit Package">
+      Add MimeKit NuGet package to Sprk.Bff.Api project.
+    </step>
+    <step order="2" name="Create Interface">
+      Create IEmailToEmlConverter interface in Services/Email/ with methods:
+      - ConvertToEmlAsync(Guid emailId, bool includeAttachments, CancellationToken)
+      - GenerateEmlFileNameAsync(Guid emailId, CancellationToken)
+    </step>
+    <step order="3" name="Implement Converter">
+      Create EmailToEmlConverter.cs implementing:
+      - Fetch email from Dataverse (subject, body, from, to, cc, dates)
+      - Fetch attachments from activitymimeattachment
+      - Build MimeMessage with proper headers
+      - Handle HTML/plain text multipart
+      - Embed attachments as MIME parts
+      - Generate sanitized filename
+    </step>
+    <step order="4" name="Register DI">
+      Register service in Program.cs or DI module.
+    </step>
+    <step order="5" name="Add Configuration">
+      Add EmailProcessingOptions to appsettings with configurable defaults.
+    </step>
+    <step order="6" name="Document Changes">
+      Update TASK-INDEX.md with completion status.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET project</tool>
+    <tool name="nuget">Package management</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Email/IEmailToEmlConverter.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Email/EmailToEmlConverter.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Configuration/EmailProcessingOptions.cs</output>
+    <output type="docs">projects/email-to-document-automation/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">MimeKit package added to project</criterion>
+    <criterion testable="true">IEmailToEmlConverter interface defined with both methods</criterion>
+    <criterion testable="true">Implementation fetches email data from Dataverse</criterion>
+    <criterion testable="true">Generated .eml opens in email client (Outlook, Thunderbird)</criterion>
+    <criterion testable="true">Attachments embedded in MIME structure</criterion>
+    <criterion testable="true">HTML and plain text bodies handled correctly</criterion>
+    <criterion testable="true">Non-ASCII characters encoded properly (UTF-8)</criterion>
+    <criterion testable="true">Project builds without errors</criterion>
+  </acceptance-criteria>
+</task>

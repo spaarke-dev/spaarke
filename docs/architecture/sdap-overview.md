@@ -1,7 +1,7 @@
 # SDAP System Overview
 
 > **Source**: SDAP-ARCHITECTURE-GUIDE.md (3000 lines) → Condensed overview
-> **Last Updated**: December 29, 2025
+> **Last Updated**: December 30, 2025
 > **Applies To**: Any work involving the SDAP document management system
 
 ---
@@ -10,7 +10,7 @@
 
 SDAP (SharePoint Document Access Platform) is an enterprise document management solution integrating Dataverse with SharePoint Embedded (SPE). Files stored in SPE containers (up to 250GB), metadata in Dataverse. Uses BFF pattern with Redis caching, PCF controls for UI.
 
-**New in Phase 1**: Email-to-Document conversion converts Dataverse email activities to RFC 5322 compliant `.eml` files stored in SPE with full metadata extraction.
+**New (Phase 2):** Email-to-Document automation converts Dataverse emails to archived .eml documents via webhooks and background processing.
 
 ---
 
@@ -21,8 +21,9 @@ SDAP (SharePoint Document Access Platform) is an enterprise document management 
 - Troubleshooting document-related issues
 - Understanding the authentication flow for document operations
 - Working with any `sprk_document` related code
-- **Converting Dataverse email activities to archived documents**
-- **Working with email-to-document automation rules**
+- Working with email-to-document automation (webhook, polling, job processing)
+- Converting Dataverse email activities to archived documents
+- Working with email-to-document automation rules
 
 ---
 
@@ -75,9 +76,14 @@ BFF API (https://spe-api-dev-67e2xz.azurewebsites.net):
 ├─ GET  /api/documents/{id}/office       → Office Online editor URL
 ├─ GET  /healthz                  → Health check
 │
-│  Email-to-Document Conversion (Phase 1):
-├─ POST /api/v1/emails/{emailId}/save-as-document  → Convert email to .eml document
-└─ GET  /api/v1/emails/{emailId}/document-status   → Check if email already saved
+├─ Email-to-Document (Phase 2):
+│  ├─ POST /api/v1/emails/{emailId}/save-as-document  → Manual email conversion
+│  ├─ GET  /api/v1/emails/{emailId}/document-status   → Check if already saved
+│  ├─ POST /api/v1/emails/webhook-trigger             → Dataverse webhook receiver
+│  └─ Admin:
+│     ├─ POST /api/v1/emails/admin/seed-rules         → Seed default filter rules
+│     ├─ GET  /api/v1/emails/admin/rules              → List active rules
+│     └─ POST /api/v1/emails/admin/refresh-rules-cache → Force cache refresh
 ```
 
 ---
@@ -97,7 +103,7 @@ sprk_graphdriveid       Text        SPE Container Drive ID
 sprk_matter             Lookup      → sprk_matter (1:N relationship)
 sprk_project            Lookup      → sprk_project (1:N relationship)
 
-# Email Archive Fields (Phase 1)
+# Email Archive Fields (Phase 1 & 2)
 sprk_isemailarchive     Boolean     Is this an archived email (.eml)
 sprk_email              Lookup      → email (email activity reference)
 sprk_emailsubject       Text        Email subject line
@@ -113,13 +119,15 @@ sprk_relationshiptype   Choice      Email Attachment = 100000000
 sprk_parentdocument     Lookup      → sprk_document (for attachments)
 ```
 
-**sprk_emailsaverule** (email automation rules)
+**sprk_emailprocessingrule** (filter rules for automation)
 ```
-sprk_emailsaveruleid    GUID        Primary key
-sprk_name               Text        Rule name
-sprk_direction          Choice      Received/Sent/Both
-sprk_isactive           Boolean     Rule enabled
-sprk_priority           Int         Rule priority order
+sprk_emailprocessingruleid  GUID    Primary key
+sprk_name                   Text    Rule name
+sprk_ruletype               Choice  Exclude=0, Include=1, Route=2
+sprk_targetfield            Text    subject, from, to, body, attachmentname
+sprk_pattern                Text    Regex pattern
+sprk_priority               Int     Evaluation order (lower = first)
+sprk_isactive               Boolean Rule enabled/disabled
 ```
 
 **sprk_matter / sprk_project** (parents - own the container)
@@ -214,6 +222,7 @@ src/controls/UniversalQuickCreate/config/EntityDocumentConfig.ts
 - [sdap-pcf-patterns.md](sdap-pcf-patterns.md) - PCF control implementation details
 - [sdap-bff-api-patterns.md](sdap-bff-api-patterns.md) - BFF API endpoints and services
 - [sdap-troubleshooting.md](sdap-troubleshooting.md) - Common issues and resolutions
+- [EMAIL-TO-DOCUMENT-ARCHITECTURE.md](../guides/EMAIL-TO-DOCUMENT-ARCHITECTURE.md) - Email automation architecture
 
 ---
 

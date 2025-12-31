@@ -184,7 +184,17 @@ public class DataverseWebApiService : IDataverseService
         if (request.EmailTo != null) payload["sprk_emailto"] = request.EmailTo;
         if (request.EmailDate.HasValue) payload["sprk_emaildate"] = request.EmailDate.Value;
         if (request.EmailBody != null) payload["sprk_emailbody"] = request.EmailBody;
+        if (request.EmailCc != null) payload["sprk_emailcc"] = request.EmailCc;
+        if (request.EmailMessageId != null) payload["sprk_emailmessageid"] = request.EmailMessageId;
+        if (request.EmailDirection.HasValue) payload["sprk_emaildirection"] = request.EmailDirection.Value;
+        if (request.EmailTrackingToken != null) payload["sprk_emailtrackingtoken"] = request.EmailTrackingToken;
+        if (request.EmailConversationIndex != null) payload["sprk_emailconversationindex"] = request.EmailConversationIndex;
+        if (request.IsEmailArchive.HasValue) payload["sprk_isemailarchive"] = request.IsEmailArchive.Value;
+        if (request.RelationshipType.HasValue) payload["sprk_relationshiptype"] = request.RelationshipType.Value;
         if (request.Attachments != null) payload["sprk_attachments"] = request.Attachments;
+        // Email activity lookup uses @odata.bind
+        if (request.EmailLookup.HasValue)
+            payload["sprk_Email@odata.bind"] = $"/emails({request.EmailLookup.Value})";
 
         // Parent document fields (for email attachments)
         if (request.ParentDocumentId != null) payload["sprk_parentdocumentid"] = request.ParentDocumentId;

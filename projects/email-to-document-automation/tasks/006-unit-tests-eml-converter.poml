@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="E2D-006" project="Email-to-Document Automation">
+  <metadata>
+    <title>Unit Tests for EmailToEmlConverter</title>
+    <status>not-started</status>
+    <phase>1</phase>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>testing, unit-tests</tags>
+  </metadata>
+
+  <prompt>
+    Create comprehensive unit tests for the EmailToEmlConverter service, validating RFC 5322
+    compliance, attachment handling, encoding, and edge cases.
+  </prompt>
+
+  <role>
+    .NET developer with expertise in unit testing, xUnit, and mocking frameworks.
+  </role>
+
+  <goal>
+    Unit test suite with 80%+ code coverage for EmailToEmlConverter, validating all
+    RFC 5322 requirements and edge cases documented in SPEC.md.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/email-to-document-automation/SPEC.md</file>
+    <file purpose="implementation">src/server/api/Sprk.Bff.Api/Services/Email/EmailToEmlConverter.cs</file>
+    <file purpose="test-patterns">tests/unit/Sprk.Bff.Api.Tests/</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">Use xUnit and Moq for testing</constraint>
+    <constraint source="project">Target 80% code coverage</constraint>
+    <constraint source="project">Follow existing test patterns in tests/unit/</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>testing/xunit, mocking</topic>
+    <files>
+      <file>projects/email-to-document-automation/SPEC.md (Section 3.1, Appendix A)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/SpeFileStoreTests.cs</file>
+    </files>
+    <patterns>
+      <pattern name="Test Pattern" location="tests/unit/Sprk.Bff.Api.Tests/">
+        Follow existing test class structure and naming conventions
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      RFC 5322 compliance is critical for legal discovery. Tests must validate that generated
+      .eml files meet the standard and handle various email scenarios correctly.
+    </background>
+    <dependencies>
+      <dependency task="E2D-004" status="required">EmailToEmlConverter implementation</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Create Test Class">
+      Create EmailToEmlConverterTests.cs in tests/unit/Sprk.Bff.Api.Tests/Services/Email/
+    </step>
+    <step order="2" name="Create Test Fixtures">
+      Create mock email data fixtures for various scenarios.
+    </step>
+    <step order="3" name="Implement Core Tests">
+      Test cases:
+      - ConvertToEmlAsync_ValidEmail_ReturnsRfc5322Stream
+      - ConvertToEmlAsync_WithAttachments_EmbedsAttachments
+      - ConvertToEmlAsync_HtmlBody_CreatesMultipart
+      - ConvertToEmlAsync_PlainTextOnly_CreatesSinglePart
+      - ConvertToEmlAsync_NonAsciiSubject_EncodesCorrectly
+      - ConvertToEmlAsync_EmailNotFound_ThrowsException
+    </step>
+    <step order="4" name="Implement Edge Case Tests">
+      Test cases:
+      - ConvertToEmlAsync_LargeAttachment_HandlesCorrectly
+      - ConvertToEmlAsync_SpecialCharactersInFilename_Sanitizes
+      - ConvertToEmlAsync_MissingFields_HandlesGracefully
+      - GenerateEmlFileNameAsync_ReturnsValidFilename
+    </step>
+    <step order="5" name="Run Tests">
+      Run all tests and verify they pass.
+    </step>
+    <step order="6" name="Check Coverage">
+      Generate code coverage report and verify 80%+ coverage.
+    </step>
+    <step order="7" name="Document Changes">
+      Update TASK-INDEX.md with completion status.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">dotnet test for running tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Email/EmailToEmlConverterTests.cs</output>
+    <output type="docs">projects/email-to-document-automation/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Test class created with at least 10 test methods</criterion>
+    <criterion testable="true">All tests pass</criterion>
+    <criterion testable="true">Code coverage for EmailToEmlConverter &gt;= 80%</criterion>
+    <criterion testable="true">RFC 5322 compliance validated in tests</criterion>
+    <criterion testable="true">Edge cases (null fields, special chars) covered</criterion>
+  </acceptance-criteria>
+</task>

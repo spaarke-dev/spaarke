@@ -26,6 +26,10 @@ This directory contains practical guides for implementing features, configuring 
 - [AI-STREAMING-SSE-IMPLEMENTATION.md](AI-STREAMING-SSE-IMPLEMENTATION.md)
 - [AI-TOOL-FRAMEWORK-GUIDE.md](AI-TOOL-FRAMEWORK-GUIDE.md)
 
+### Email Automation
+
+- [EMAIL-TO-DOCUMENT-ARCHITECTURE.md](EMAIL-TO-DOCUMENT-ARCHITECTURE.md) - Email-to-document automation architecture, webhooks, filtering, and processing
+
 ### Dataverse & Platform
 
 - [DATAVERSE-LOOKUP-INTEGRATION.md](DATAVERSE-LOOKUP-INTEGRATION.md)
@@ -52,6 +56,7 @@ This directory contains practical guides for implementing features, configuring 
 - Adding document support → Load HOW-TO-ADD-DOCUMENT-SUPPORT-TO-ENTITY.md
 - AI integration → Load AI-TOOL-FRAMEWORK-GUIDE.md, AI-STREAMING-SSE-IMPLEMENTATION.md
 - Dataverse work → Load DATAVERSE-*.md guides
+- Email automation → Load EMAIL-TO-DOCUMENT-ARCHITECTURE.md
 
 ## Phase 3 TODO
 
