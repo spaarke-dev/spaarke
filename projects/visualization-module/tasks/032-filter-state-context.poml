@@ -1,68 +1,91 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="032" project="visualization-module">
   <metadata>
-    <title>Implement filter state context</title>
+    <title>Implement filter state context with Dataset PCF integration</title>
     <phase>4: Drill-Through Workspace</phase>
-    <status>not-started</status>
-    <estimated-hours>3</estimated-hours>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
     <dependencies>031</dependencies>
     <blocks>033</blocks>
-    <tags>react, frontend</tags>
+    <tags>react, frontend, pcf, dataverse</tags>
   </metadata>
 
   <prompt>
     Create a React context that shares filter state between the chart and dataset grid.
-    When chart selection changes, the grid receives the new filter.
+    When chart selection changes, apply the filter to the platform dataset using
+    the dataset.filtering API. This requires DrillThroughWorkspace to be a Dataset PCF.
   </prompt>
 
   <role>
-    React developer with state management expertise.
+    PCF developer with React state management and Dataverse dataset expertise.
   </role>
 
   <goal>
-    A FilterStateContext that enables real-time filter synchronization
-    between chart component and dataset grid.
+    A FilterStateContext that:
+    1. Captures DrillInteraction from chart component
+    2. Translates to dataset filter expression
+    3. Applies filter via dataset.filtering.setFilter() API
+    4. Platform automatically re-fetches filtered data
   </goal>
 
   <context>
     <background>
-      When user clicks a chart element (bar, slice, day), the DrillInteraction
-      is captured and applied to filter the adjacent dataset grid.
+      DrillThroughWorkspace is a Dataset PCF control (per ADR-011 and spec FR-03).
+      The grid displays records from context.parameters.dataset, which is bound
+      to the same view (sprk_baseviewid) that the chart uses. When user clicks
+      a chart element, we apply a filter to the dataset via the platform API.
     </background>
+    <architecture-decision>
+      MUST use Dataset PCF pattern (not Standard PCF with WebAPI).
+      The platform handles paging, sorting, and security trimming automatically.
+      See src/client/pcf/UniversalDatasetGrid/ for reference implementation.
+    </architecture-decision>
   </context>
 
   <constraints>
+    <constraint source="ADR-011">MUST use Dataset PCF for drill-through grid</constraint>
     <constraint source="project">MUST use React Context (not external state lib)</constraint>
-    <constraint source="project">MUST support reset/clear action</constraint>
+    <constraint source="project">MUST apply filter via dataset.filtering.setFilter() API</constraint>
+    <constraint source="project">MUST support reset/clear action via dataset.filtering.clearFilter()</constraint>
     <constraint source="project">DrillInteraction format: field, operator, value</constraint>
   </constraints>
 
   <knowledge>
     <files>
       <file>.claude/patterns/pcf/react-hooks.md</file>
+      <file>.claude/adr/ADR-011-dataset-pcf.md</file>
+      <file>src/client/pcf/UniversalDatasetGrid/control/index.ts</file>
+      <file>src/client/pcf/UniversalDatasetGrid/control/components/DatasetGrid.tsx</file>
     </files>
   </knowledge>
 
   <steps>
-    <step order="1">Create FilterStateContext.tsx</step>
-    <step order="2">Define FilterState interface (activeFilter, setFilter, clearFilter)</step>
-    <step order="3">Create FilterStateProvider component</step>
-    <step order="4">Create useFilterState hook for consumers</step>
-    <step order="5">Wire chart DrillInteraction to setFilter</step>
-    <step order="6">Add clear button that calls clearFilter</step>
-    <step order="7">Create unit tests</step>
-    <step order="8">Update TASK-INDEX.md: change this task's status to completed</step>
+    <step order="1">Update DrillThroughWorkspace manifest to be Dataset PCF (add data-set element)</step>
+    <step order="2">Update DrillThroughWorkspace index.ts to access context.parameters.dataset</step>
+    <step order="3">Create FilterStateContext.tsx with dataset reference</step>
+    <step order="4">Define FilterState interface (activeFilter, setFilter, clearFilter, dataset)</step>
+    <step order="5">Implement setFilter to call dataset.filtering.setFilter()</step>
+    <step order="6">Implement clearFilter to call dataset.filtering.clearFilter()</step>
+    <step order="7">Create useFilterState hook for consumers</step>
+    <step order="8">Wire chart DrillInteraction to setFilter</step>
+    <step order="9">Add clear button that calls clearFilter</step>
+    <step order="10">Create unit tests</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to completed</step>
   </steps>
 
   <outputs>
+    <output type="manifest">src/client/pcf/DrillThroughWorkspace/control/ControlManifest.Input.xml (updated with data-set)</output>
+    <output type="code">src/client/pcf/DrillThroughWorkspace/control/index.ts (updated for dataset)</output>
     <output type="code">src/client/pcf/DrillThroughWorkspace/control/context/FilterStateContext.tsx</output>
     <output type="code">src/client/pcf/DrillThroughWorkspace/control/hooks/useFilterState.ts</output>
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">Context provides filter state to consumers</criterion>
-    <criterion testable="true">setFilter updates state and triggers re-render</criterion>
-    <criterion testable="true">clearFilter resets to unfiltered state</criterion>
+    <criterion testable="true">DrillThroughWorkspace manifest includes data-set element</criterion>
+    <criterion testable="true">Context provides filter state and dataset to consumers</criterion>
+    <criterion testable="true">setFilter calls dataset.filtering.setFilter() with correct expression</criterion>
+    <criterion testable="true">clearFilter calls dataset.filtering.clearFilter()</criterion>
+    <criterion testable="true">Dataset automatically refreshes when filter is applied</criterion>
   </acceptance-criteria>
 
   <execution>

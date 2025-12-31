@@ -1,6 +1,14 @@
 /**
  * Drill-Through Workspace App Component
- * Uses TwoPanelLayout: Chart (1/3) | Dataset Grid (2/3)
+ *
+ * Two-panel layout: Chart (1/3) | Dataset Grid (2/3)
+ * Click chart elements to filter dataset via FilterStateContext
+ *
+ * Architecture: Dataset PCF pattern (ADR-011)
+ * - Grid data from platform dataset binding
+ * - Filter via dataset.filtering.setFilter() API
+ *
+ * @version 1.1.0
  */
 
 import * as React from "react";
@@ -15,9 +23,23 @@ import {
   Text,
   Tooltip,
 } from "@fluentui/react-components";
-import { DismissRegular, ArrowMaximizeRegular, FilterRegular } from "@fluentui/react-icons";
+import {
+  DismissRegular,
+  ArrowMaximizeRegular,
+  FilterRegular,
+} from "@fluentui/react-icons";
+import { DrillInteraction } from "@spaarke/ui-components";
 import { TwoPanelLayout } from "./TwoPanelLayout";
+import { DrillThroughGrid } from "./DrillThroughGrid";
+import {
+  FilterStateProvider,
+  useFilterState,
+} from "../context/FilterStateContext";
 import { logger } from "../utils/logger";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Styles
+// ─────────────────────────────────────────────────────────────────────────────
 
 const useStyles = makeStyles({
   container: {
@@ -85,35 +107,46 @@ const useStyles = makeStyles({
   },
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Props
+// ─────────────────────────────────────────────────────────────────────────────
+
 export interface IDrillThroughWorkspaceAppProps {
   chartDefinitionId: string;
-  entityName: string;
-  initialFilter: string;
+  /** Platform-provided dataset (Dataset PCF pattern per ADR-011) */
+  dataset: ComponentFramework.PropertyTypes.DataSet;
+  /** WebAPI for loading chart configuration */
   webApi: ComponentFramework.WebApi;
   onRecordSelect: (recordIds: string[]) => void;
   onClose: () => void;
 }
 
-interface IActiveFilter {
-  field: string;
-  operator: "eq" | "in" | "between";
-  value: string | string[] | [string, string];
-  label?: string;
+// ─────────────────────────────────────────────────────────────────────────────
+// Inner Component (uses context)
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface IWorkspaceContentProps {
+  chartDefinitionId: string;
+  webApi: ComponentFramework.WebApi;
+  onClose: () => void;
 }
 
-export const DrillThroughWorkspaceApp: React.FC<IDrillThroughWorkspaceAppProps> = ({
+/**
+ * Inner workspace content that uses the FilterStateContext
+ */
+const WorkspaceContent: React.FC<IWorkspaceContentProps> = ({
   chartDefinitionId,
-  entityName,
-  initialFilter,
   webApi,
-  onRecordSelect,
   onClose,
 }) => {
   const styles = useStyles();
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [chartTitle, setChartTitle] = useState<string>("Chart");
-  const [activeFilter, setActiveFilter] = useState<IActiveFilter | null>(null);
+
+  // Get filter state from context
+  const { activeFilter, setFilter, clearFilter, isFiltered, dataset } =
+    useFilterState();
 
   // Load chart definition
   React.useEffect(() => {
@@ -126,17 +159,19 @@ export const DrillThroughWorkspaceApp: React.FC<IDrillThroughWorkspaceAppProps> 
     const loadChartDefinition = async () => {
       try {
         setIsLoading(true);
-        logger.info("DrillThroughWorkspaceApp", `Loading chart: ${chartDefinitionId}`);
+        logger.info(
+          "WorkspaceContent",
+          `Loading chart: ${chartDefinitionId}`
+        );
 
-        // Simulate loading delay
-        await new Promise((resolve) => setTimeout(resolve, 500));
-
+        // TODO: Use ConfigurationLoader from VisualHost to load chart definition
         // For now, show placeholder
+        await new Promise((resolve) => setTimeout(resolve, 500));
         setChartTitle("Drill-Through Chart");
-        setError("Configuration loader not yet implemented. Complete task 021.");
+        setError(null);
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : "Unknown error";
-        logger.error("DrillThroughWorkspaceApp", "Failed to load chart", err);
+        logger.error("WorkspaceContent", "Failed to load chart", err);
         setError(`Failed to load chart: ${errorMessage}`);
       } finally {
         setIsLoading(false);
@@ -148,33 +183,37 @@ export const DrillThroughWorkspaceApp: React.FC<IDrillThroughWorkspaceAppProps> 
 
   /**
    * Handle drill interaction from chart
+   * Calls setFilter from context which applies filter via platform API
    */
-  const handleDrillInteraction = useCallback((filter: IActiveFilter) => {
-    logger.info("DrillThroughWorkspaceApp", "Drill interaction", filter);
-    setActiveFilter(filter);
-    // TODO: Task 032 - Apply filter to dataset grid
-  }, []);
+  const handleDrillInteraction = useCallback(
+    (interaction: DrillInteraction) => {
+      logger.info("WorkspaceContent", "Drill interaction", interaction);
+      setFilter(interaction);
+    },
+    [setFilter]
+  );
 
   /**
-   * Clear active filter
+   * Handle clear filter
+   * Calls clearFilter from context which clears filter via platform API
    */
   const handleClearFilter = useCallback(() => {
-    logger.info("DrillThroughWorkspaceApp", "Clearing filter");
-    setActiveFilter(null);
-  }, []);
+    logger.info("WorkspaceContent", "Clearing filter");
+    clearFilter();
+  }, [clearFilter]);
 
   /**
    * Format filter label for display
    */
-  const getFilterLabel = (filter: IActiveFilter): string => {
+  const getFilterLabel = (filter: DrillInteraction): string => {
     if (filter.label) return filter.label;
     if (Array.isArray(filter.value)) {
-      if (filter.operator === "between") {
+      if (filter.operator === "between" && filter.value.length === 2) {
         return `${filter.field}: ${filter.value[0]} - ${filter.value[1]}`;
       }
       return `${filter.field}: ${filter.value.join(", ")}`;
     }
-    return `${filter.field}: ${filter.value}`;
+    return `${filter.field}: ${String(filter.value)}`;
   };
 
   /**
@@ -197,32 +236,48 @@ export const DrillThroughWorkspaceApp: React.FC<IDrillThroughWorkspaceAppProps> 
       );
     }
 
+    // TODO: Render actual chart component with onDrillInteraction callback
     return (
       <div className={styles.placeholder}>
         <ArrowMaximizeRegular style={{ fontSize: 48 }} />
         <Text>Chart visualization will render here</Text>
         <Text size={200}>Click chart elements to filter the dataset</Text>
+        <Text size={100} style={{ color: tokens.colorNeutralForeground4 }}>
+          Task 033: Integrate chart component with handleDrillInteraction
+        </Text>
       </div>
     );
   };
 
   /**
+   * Handle record selection from grid
+   */
+  const handleGridSelectionChange = useCallback(
+    (recordIds: string[]) => {
+      logger.debug("WorkspaceContent", "Grid selection changed", { recordIds });
+      // Selection is managed by DrillThroughGrid and synced with platform
+    },
+    []
+  );
+
+  /**
    * Render dataset grid content
+   * Dataset provided by platform via Dataset PCF binding (ADR-011)
    */
   const renderGridContent = () => {
+    if (!dataset) {
+      return (
+        <div className={styles.placeholder}>
+          <Spinner label="Waiting for dataset..." />
+        </div>
+      );
+    }
+
     return (
-      <div className={styles.placeholder}>
-        <FilterRegular style={{ fontSize: 48 }} />
-        <Text>Dataset grid will render here</Text>
-        <Text size={200}>
-          {activeFilter
-            ? "Showing filtered records"
-            : "Select a chart element to filter records"}
-        </Text>
-        <Text size={100} style={{ color: tokens.colorNeutralForeground4 }}>
-          Task 033: Implement dataset grid with filtering
-        </Text>
-      </div>
+      <DrillThroughGrid
+        dataset={dataset}
+        onSelectionChange={handleGridSelectionChange}
+      />
     );
   };
 
@@ -230,7 +285,7 @@ export const DrillThroughWorkspaceApp: React.FC<IDrillThroughWorkspaceAppProps> 
    * Render filter badge for right panel header
    */
   const renderRightActions = () => {
-    if (!activeFilter) return null;
+    if (!isFiltered || !activeFilter) return null;
 
     return (
       <div className={styles.filterActions}>
@@ -274,7 +329,7 @@ export const DrillThroughWorkspaceApp: React.FC<IDrillThroughWorkspaceAppProps> 
           leftContent={renderChartContent()}
           rightContent={renderGridContent()}
           leftTitle="Chart"
-          rightTitle={entityName ? `Dataset - ${entityName}` : "Dataset"}
+          rightTitle={`Dataset (${dataset?.sortedRecordIds?.length ?? 0} records)`}
           rightActions={renderRightActions()}
           showHeaders={true}
           enableResize={true}
@@ -283,8 +338,36 @@ export const DrillThroughWorkspaceApp: React.FC<IDrillThroughWorkspaceAppProps> 
 
       {/* Footer with version */}
       <div className={styles.footer}>
-        <Text size={100}>v1.0.0 • Built 2025-12-29</Text>
+        <Text size={100}>v1.1.0 • Dataset PCF</Text>
       </div>
     </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main Component (provides context)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Drill-Through Workspace App
+ *
+ * Wraps content with FilterStateProvider to enable filter sharing
+ * between chart and dataset grid.
+ */
+export const DrillThroughWorkspaceApp: React.FC<IDrillThroughWorkspaceAppProps> = ({
+  chartDefinitionId,
+  dataset,
+  webApi,
+  onRecordSelect,
+  onClose,
+}) => {
+  return (
+    <FilterStateProvider dataset={dataset}>
+      <WorkspaceContent
+        chartDefinitionId={chartDefinitionId}
+        webApi={webApi}
+        onClose={onClose}
+      />
+    </FilterStateProvider>
   );
 };

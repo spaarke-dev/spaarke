@@ -1,7 +1,7 @@
 # Project Plan: Spaarke Visuals Framework
 
-> **Last Updated**: 2025-12-29
-> **Status**: Ready for Tasks
+> **Last Updated**: 2025-12-30
+> **Status**: Phase 6 In Progress
 > **Spec**: [spec.md](spec.md)
 
 ---
@@ -83,20 +83,23 @@
 ### Phase Structure
 
 ```
-Phase 1: Foundation & Infrastructure (Days 1-5)
+Phase 1: Foundation & Infrastructure (Days 1-5) ✅ COMPLETE
 └─ sprk_chartdefinition entity, project scaffolding, shared types
 
-Phase 2: Core Chart Components (Days 6-15)
+Phase 2: Core Chart Components (Days 6-15) ✅ COMPLETE
 └─ Individual chart components (Bar, Line, Donut, etc.)
 
-Phase 3: Visual Host PCF (Days 16-20)
+Phase 3: Visual Host PCF (Days 16-20) ✅ COMPLETE
 └─ Unified PCF control, configuration binding, theme integration
 
-Phase 4: Drill-Through Workspace (Days 21-28)
+Phase 4: Drill-Through Workspace (Days 21-28) ✅ COMPLETE
 └─ Custom Page, interactive filtering, dataset integration
 
-Phase 5: Testing & Documentation (Days 29-35)
+Phase 5: Testing & Documentation (Days 29-35) ✅ COMPLETE
 └─ Unit tests, Storybook, integration testing, deployment
+
+Phase 6: Visual Host v1.1.0 Enhancements (Days 36-40) 🔄 IN PROGRESS
+└─ Hybrid chart selection, context filtering, chart definition UX
 ```
 
 ### Critical Path
@@ -205,20 +208,29 @@ Phase 5: Testing & Documentation (Days 29-35)
 - [ ] Two-panel layout component (1/3 chart, 2/3 grid)
 - [ ] Filter state context provider
 - [ ] `DrillInteraction` contract implementation
-- [ ] Dataset grid with dynamic filtering
+- [ ] Dataset grid with dynamic filtering (via `dataset.filtering` API)
 - [ ] Reset/clear selection action
+
+**Architecture Note - Dataset PCF:**
+The DrillThroughWorkspace PCF **MUST be a Dataset PCF control** (per ADR-011 and spec FR-03):
+- Manifest includes `<data-set>` element bound to the view from `sprk_baseviewid`
+- Grid displays records from the platform-provided `context.parameters.dataset`
+- Chart drill interactions apply filters via `dataset.filtering.setFilter()` API
+- Platform handles paging, sorting, security trimming automatically
+- This is the same pattern used by `UniversalDatasetGrid`
 
 **Critical Tasks:**
 - Custom Page must open as modal from Visual Host
 - Filter state must be shared between chart and grid
+- **DrillThroughWorkspace must use Dataset PCF pattern (not Standard PCF with WebAPI)**
 
-**Inputs**: Visual Host PCF, Dataset PCF pattern, Custom Page scripts
+**Inputs**: Visual Host PCF, Dataset PCF pattern (UniversalDatasetGrid), Custom Page scripts
 
-**Outputs**: Complete drill-through experience
+**Outputs**: Complete drill-through experience with platform-managed dataset
 
 ---
 
-### Phase 5: Testing & Documentation (Days 29-35)
+### Phase 5: Testing & Documentation (Days 29-35) ✅ COMPLETE
 
 **Objectives:**
 1. Achieve 80%+ test coverage on PCF controls
@@ -227,13 +239,13 @@ Phase 5: Testing & Documentation (Days 29-35)
 4. Deploy to development environment
 
 **Deliverables:**
-- [ ] Unit tests for all chart components
-- [ ] Unit tests for Visual Host PCF
-- [ ] Integration tests for Dataverse queries
-- [ ] Complete Storybook documentation
-- [ ] PCF control deployed to dev environment
-- [ ] Custom Page deployed
-- [ ] Admin documentation for chart creation
+- [x] Unit tests for all chart components
+- [x] Unit tests for Visual Host PCF
+- [x] Integration tests for Dataverse queries
+- [x] Complete Storybook documentation
+- [x] PCF control deployed to dev environment
+- [x] Custom Page deployed
+- [x] Admin documentation for chart creation
 
 **Critical Tasks:**
 - Test with all 6 supported entities
@@ -242,6 +254,62 @@ Phase 5: Testing & Documentation (Days 29-35)
 **Inputs**: All components, test harness
 
 **Outputs**: Tested, documented, deployed solution
+
+---
+
+### Phase 6: Visual Host v1.1.0 Enhancements (Days 36-40) 🔄 IN PROGRESS
+
+**Objectives:**
+1. Implement hybrid chart selection (lookup OR static ID) for multiple charts per form
+2. Add context filtering to show only related records on embedded visuals
+3. Improve Chart Definition form UX with Reporting Entity/View lookups
+4. Deploy v1.1.0 and validate all scenarios
+
+**Background:**
+During integration testing (Task 040), several enhancement requirements were identified:
+- **Multiple charts per form**: Static ID binding allows placing multiple Visual Hosts without extra lookup columns
+- **Context filtering**: Charts on entity forms must filter to related records (e.g., Documents for this Matter)
+- **UX improvement**: Replace manual GUID entry with lookup fields to sprk_reportingentity and sprk_reportingview
+
+**Deliverables:**
+- [ ] Visual Host PCF v1.1.0 with new properties:
+  - `chartDefinitionId` (static GUID for form-level config)
+  - `contextFieldName` (lookup field for related record filtering)
+- [ ] Chart Definition form JavaScript web resource (~30 lines)
+- [ ] Updated Chart Definition form with Reporting Entity/View lookups
+- [ ] Deployed and tested v1.1.0
+
+**Technical Design:**
+
+```
+Chart Definition Resolution:
+  IF chartDefinition lookup has value → use lookup ID
+  ELSE IF chartDefinitionId static has value → use static ID
+  ELSE → show "No chart configured"
+
+Context Filtering:
+  IF contextFieldName configured AND context record exists
+  → Add filter: {contextFieldName} eq '{contextRecordId}'
+  → Combined with view's base filter
+```
+
+**Schema Changes (Already Complete):**
+- `sprk_reportingentity` lookup added to `sprk_chartdefinition`
+- `sprk_reportingview` lookup added to `sprk_chartdefinition`
+- Related records filtering: Views filtered by selected Reporting Entity
+
+**Existing Infrastructure:**
+- `sprk_reportingentity` table (Display Name, Logical Name, Schema Name, etc.)
+- `sprk_reportingview` table (View Name, View ID GUID, Reporting Entity lookup, Is Default)
+
+**Critical Tasks:**
+- PCF manifest changes must maintain backward compatibility
+- Form JavaScript must sync lookup selections to backing text fields
+- Test all scenarios: static ID, lookup binding, hybrid, context filtering
+
+**Inputs**: Visual Host v1.0.3, sprk_chartdefinition with new lookups, sprk_reportingentity/view tables
+
+**Outputs**: Visual Host v1.1.0 deployed, Chart Definition form enhanced
 
 ---
 
@@ -339,8 +407,9 @@ Phase 5: Testing & Documentation (Days 29-35)
 
 ---
 
-**Status**: Ready for Tasks
-**Next Action**: Generate task files with `/task-create`
+**Status**: Phase 6 In Progress
+**Current Phase**: Visual Host v1.1.0 Enhancements
+**Next Tasks**: 050, 051, 052 (Phase 6 implementation)
 
 ---
 

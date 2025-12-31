@@ -27,6 +27,8 @@ The `sprk_chartdefinition` entity stores configuration for the Spaarke Visuals F
 | `sprk_aggregationtype` | Aggregation Type | OptionSet | No | Type of aggregation (default: count) |
 | `sprk_groupbyfield` | Group By Field | String (100) | No | Field to group by (for charts with categories) |
 | `sprk_optionsjson` | Options JSON | Multiline Text (100000) | No | JSON blob for per-visual-type advanced options |
+| `sprk_reportingentity` | Reporting Entity | Lookup | No | Lookup to sprk_reportingentity for user-friendly entity selection (v1.1.0+) |
+| `sprk_reportingview` | Reporting View | Lookup | No | Lookup to sprk_reportingview for user-friendly view selection (v1.1.0+) |
 
 ---
 
@@ -140,6 +142,24 @@ export enum AggregationType {
 - **Description**: JSON blob for advanced per-visual-type options
 - **Default**: `{}`
 - **Note**: Schema varies by visual type; see per-visual documentation
+
+### sprk_reportingentity (v1.1.0+)
+
+- **Type**: Lookup
+- **Related Entity**: sprk_reportingentity
+- **Required**: No (optional for better UX)
+- **Description**: Lookup for user-friendly entity selection
+- **Note**: Form JavaScript syncs this to sprk_entitylogicalname backing field
+- **Related Records Filtering**: None (shows all reporting entities)
+
+### sprk_reportingview (v1.1.0+)
+
+- **Type**: Lookup
+- **Related Entity**: sprk_reportingview
+- **Required**: No (optional for better UX)
+- **Description**: Lookup for user-friendly view selection
+- **Note**: Form JavaScript syncs View ID GUID to sprk_baseviewid backing field
+- **Related Records Filtering**: Filtered by selected sprk_reportingentity
 
 ---
 
@@ -299,7 +319,8 @@ pac solution import --path ./solutions/SpaarkeVisualization.zip
 | Date | Version | Change |
 |------|---------|--------|
 | 2025-12-29 | 1.0 | Initial schema definition |
+| 2025-12-30 | 1.1 | Added sprk_reportingentity and sprk_reportingview lookup fields (Phase 6) |
 
 ---
 
-*Entity schema for Task 001 of the Visualization Module project.*
+*Entity schema for Task 001 of the Visualization Module project. Updated for Phase 6 enhancements.*

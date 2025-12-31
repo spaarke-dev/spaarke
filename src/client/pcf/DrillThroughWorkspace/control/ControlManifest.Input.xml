@@ -1,45 +1,38 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="DrillThroughWorkspace" version="1.0.0" display-name-key="Drill-Through Workspace" description-key="Visualization drill-through workspace - displays chart and filtered dataset side-by-side (v1.0.0)" control-type="standard">
+  <control namespace="Spaarke.Controls" constructor="DrillThroughWorkspace" version="1.1.0" display-name-key="Drill-Through Workspace" description-key="Dataset PCF for drill-through visualizations - chart + filtered grid side-by-side (v1.1.0)" control-type="standard">
     <external-service-usage enabled="false">
     </external-service-usage>
 
     <!--
-      DRILL-THROUGH WORKSPACE PCF CONTROL
+      DRILL-THROUGH WORKSPACE PCF CONTROL (Dataset PCF)
 
       Purpose: Expanded workspace for drill-through visualizations
       - Two-panel layout: Chart (1/3) | Dataset Grid (2/3)
-      - Click chart elements to filter dataset grid
+      - Click chart elements to filter dataset grid via dataset.filtering API
       - Supports all 7 visual types from Visual Host
       - Opens as dialog from Visual Host expand button
+
+      Architecture (per ADR-011 and spec FR-03):
+      - This is a Dataset PCF control - grid data comes from platform dataset binding
+      - Bound to view from sprk_baseviewid via the <data-set> element
+      - Chart drill interactions apply filters via dataset.filtering.setFilter()
+      - Platform handles paging, sorting, security trimming automatically
 
       Used In: Drill-Through Custom Page (sprk_drillthroughworkspace)
       Design Reference: projects/visualization-module/spec.md
     -->
 
-    <!-- Chart Definition ID (INPUT - required) -->
+    <!-- Dataset (bound to view from sprk_baseviewid) -->
+    <data-set name="dataset" display-name-key="Dataset" />
+
+    <!-- Chart Definition ID (INPUT - required for chart configuration) -->
     <property name="chartDefinitionId"
               display-name-key="Chart Definition ID"
               description-key="GUID of the sprk_chartdefinition record"
               of-type="SingleLine.Text"
               usage="input"
               required="true" />
-
-    <!-- Entity Name (INPUT - for dataset grid) -->
-    <property name="entityName"
-              display-name-key="Entity Name"
-              description-key="Logical name of entity to display in grid"
-              of-type="SingleLine.Text"
-              usage="input"
-              required="false" />
-
-    <!-- Initial Filter (INPUT - optional FetchXML filter) -->
-    <property name="initialFilter"
-              display-name-key="Initial Filter"
-              description-key="Optional initial FetchXML filter condition"
-              of-type="Multiple"
-              usage="input"
-              required="false" />
 
     <!-- Should Close (OUTPUT - signals dialog should close) -->
     <property name="shouldClose"

@@ -20,18 +20,16 @@
     "build-storybook": "storybook build"
   },
   "dependencies": {
-    "@fluentui/react-charting": "^5.23.0",
-    "@fluentui/react-components": "^9.54.0",
-    "@fluentui/react-icons": "^2.0.311",
-    "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components"
   },
   "devDependencies": {
     "@babel/core": "^7.28.5",
     "@babel/preset-env": "^7.28.5",
     "@babel/preset-react": "^7.28.5",
     "@babel/preset-typescript": "^7.28.5",
+    "@fluentui/react-charting": "^5.23.0",
+    "@fluentui/react-components": "^9.54.0",
+    "@fluentui/react-icons": "^2.0.311",
     "@storybook/addon-actions": "^8.6.14",
     "@storybook/addon-essentials": "^8.6.14",
     "@storybook/addon-themes": "^8.6.14",
@@ -50,6 +48,8 @@
     "jest-environment-jsdom": "^30.2.0",
     "pcf-scripts": "^1",
     "pcf-start": "^1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
     "storybook": "^8.6.14",
     "ts-jest": "^29.4.6",
     "typescript": "^5.8.3",

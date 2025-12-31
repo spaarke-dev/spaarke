@@ -38,6 +38,16 @@ export interface IAggregationContext {
 }
 
 /**
+ * Context filter for related record filtering (v1.1.0)
+ */
+export interface IContextFilter {
+  /** Field name to filter on (e.g., _sprk_matterid_value) */
+  fieldName: string;
+  /** Record ID to filter by (current record's entity ID) */
+  recordId: string;
+}
+
+/**
  * Options for data aggregation
  */
 export interface IAggregationOptions {
@@ -47,6 +57,8 @@ export interface IAggregationOptions {
   skipCache?: boolean;
   /** Custom page size for fetching */
   pageSize?: number;
+  /** Context filter for related records (v1.1.0) */
+  contextFilter?: IContextFilter;
 }
 
 /**
@@ -102,9 +114,38 @@ function getCacheKey(
   viewId: string | undefined,
   aggregationType: AggregationType,
   aggregationField: string | undefined,
-  groupByField: string | undefined
+  groupByField: string | undefined,
+  contextFilter?: IContextFilter
 ): string {
-  return `${entityName}:${viewId || "all"}:${aggregationType}:${aggregationField || ""}:${groupByField || ""}`;
+  const contextPart = contextFilter
+    ? `:${contextFilter.fieldName}=${contextFilter.recordId}`
+    : "";
+  return `${entityName}:${viewId || "all"}:${aggregationType}:${aggregationField || ""}:${groupByField || ""}${contextPart}`;
+}
+
+/**
+ * Build OData filter expression for context filtering (v1.1.0)
+ * Filters data to show only records related to the current record
+ *
+ * @param contextFilter - Context filter configuration
+ * @returns OData filter expression or undefined if no context filter
+ */
+export function buildContextFilter(contextFilter?: IContextFilter): string | undefined {
+  if (!contextFilter?.fieldName || !contextFilter?.recordId) {
+    return undefined;
+  }
+
+  // Dataverse lookup field values use the format: _fieldname_value
+  // The filter should use eq operator with the GUID
+  const filterExpression = `${contextFilter.fieldName} eq '${contextFilter.recordId}'`;
+
+  logger.debug("DataAggregationService", "Built context filter", {
+    fieldName: contextFilter.fieldName,
+    recordId: contextFilter.recordId,
+    filter: filterExpression,
+  });
+
+  return filterExpression;
 }
 
 /**
@@ -416,13 +457,17 @@ export async function fetchAndAggregate(
     throw new AggregationError("Entity name is required for data aggregation");
   }
 
+  // v1.1.0: Build context filter if configured
+  const contextFilterExpr = buildContextFilter(options?.contextFilter);
+
   // Check cache
   const cacheKey = getCacheKey(
     entityName,
     viewId,
     aggregationType,
     aggregationField,
-    groupByField
+    groupByField,
+    options?.contextFilter
   );
 
   if (!options?.skipCache) {
@@ -438,6 +483,7 @@ export async function fetchAndAggregate(
     aggregationType,
     aggregationField,
     groupByField,
+    contextFilter: options?.contextFilter,
   });
 
   // Determine which columns to fetch
@@ -449,10 +495,11 @@ export async function fetchAndAggregate(
     selectColumns.push(aggregationField);
   }
 
-  // Fetch records
+  // Fetch records with optional context filter (v1.1.0)
   const records = await fetchRecords(context, entityName, {
     viewId,
     selectColumns: selectColumns.length > 0 ? selectColumns : undefined,
+    filter: contextFilterExpr,
     maxRecords: options?.maxRecords,
     pageSize: options?.pageSize,
   });

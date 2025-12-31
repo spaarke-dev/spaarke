@@ -240,12 +240,15 @@ export class DrillThroughWorkspace
     // Get input parameters
     const chartDefinitionId =
       this._context.parameters.chartDefinitionId?.raw || "";
-    const entityName = this._context.parameters.entityName?.raw || "";
-    const initialFilter = this._context.parameters.initialFilter?.raw || "";
+
+    // Get dataset from platform (Dataset PCF pattern per ADR-011)
+    const dataset = this._context.parameters.dataset;
 
     logger.info(
       "DrillThroughWorkspace",
-      `Rendering with chartDefinitionId: ${chartDefinitionId}`
+      `Rendering with chartDefinitionId: ${chartDefinitionId}, dataset records: ${
+        dataset?.sortedRecordIds?.length ?? 0
+      }`
     );
 
     // Create or update React root
@@ -259,8 +262,7 @@ export class DrillThroughWorkspace
         { theme: this._currentTheme },
         React.createElement(DrillThroughWorkspaceApp, {
           chartDefinitionId,
-          entityName,
-          initialFilter,
+          dataset,
           webApi: this._context.webAPI,
           onRecordSelect: this.handleRecordSelect.bind(this),
           onClose: this.handleClose.bind(this),

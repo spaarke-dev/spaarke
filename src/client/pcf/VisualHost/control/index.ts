@@ -65,10 +65,13 @@ export class VisualHost
       // Store latest context for theme listener callback
       this._context = context;
 
-      const chartDefinitionId = context.parameters.chartDefinitionId?.raw;
+      // Extract chart definition ID from lookup EntityReference
+      const lookupValue = context.parameters.chartDefinition?.raw;
+      const chartDefinitionId = lookupValue?.[0]?.id;
 
       logger.debug("VisualHost", "UpdateView - Re-rendering", {
         chartDefinitionId,
+        lookupValue,
       });
 
       // Re-render with new context

@@ -78,8 +78,22 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
   const [chartDefinition, setChartDefinition] = useState<IChartDefinition | null>(null);
   const [chartData, setChartData] = useState<IChartData | null>(null);
 
-  // Get chart definition ID from PCF input
-  const chartDefinitionId = context.parameters.chartDefinitionId?.raw;
+  // v1.1.0: Hybrid chart definition resolution
+  // Priority: 1) Lookup binding, 2) Static ID property
+  const lookupValue = context.parameters.chartDefinition?.raw;
+  const lookupId = lookupValue?.[0]?.id;
+  const staticId = context.parameters.chartDefinitionId?.raw?.trim();
+  const chartDefinitionId = lookupId || staticId || null;
+
+  // Log resolution source for debugging
+  const resolutionSource = lookupId ? "lookup" : staticId ? "static" : "none";
+
+  // v1.1.0: Context filtering parameters
+  const contextFieldName = context.parameters.contextFieldName?.raw?.trim() || null;
+  // Get current record ID from context for related record filtering
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const contextRecordId = (context.mode as any).contextInfo?.entityId || null;
+
   const showToolbar = context.parameters.showToolbar?.raw !== false;
   const enableDrillThrough = context.parameters.enableDrillThrough?.raw !== false;
   const height = context.parameters.height?.raw;
@@ -89,21 +103,27 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
       setIsLoading(false);
       setError(null);
       setChartDefinition(null);
+      logger.info("VisualHostRoot", "No chart definition configured");
       return;
     }
 
-    loadChartDefinition(chartDefinitionId);
-  }, [chartDefinitionId]);
+    loadChartDefinition(chartDefinitionId, resolutionSource);
+  }, [chartDefinitionId, resolutionSource, contextFieldName, contextRecordId]);
 
   /**
    * Load chart definition from Dataverse
+   * @param id - Chart definition GUID
+   * @param source - Resolution source for logging ("lookup" | "static" | "none")
    */
-  const loadChartDefinition = async (id: string) => {
+  const loadChartDefinition = async (id: string, source: string) => {
     try {
       setIsLoading(true);
       setError(null);
 
-      logger.info("VisualHostRoot", `Loading chart definition: ${id}`);
+      logger.info("VisualHostRoot", `Loading chart definition: ${id} (source: ${source})`, {
+        contextFieldName,
+        contextRecordId,
+      });
 
       // TODO: Implement actual Dataverse query in task 021
       // For now, show placeholder
@@ -195,7 +215,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
         <div className={styles.placeholder}>
           <Text size={400}>No chart configured</Text>
           <Text size={200}>
-            Bind this control to a sprk_chartdefinition record
+            Bind to a lookup column or set Chart Definition ID property
           </Text>
         </div>
       );
@@ -249,7 +269,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
 
       {/* Version footer - MANDATORY per CLAUDE.md */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.0.0 • Built 2025-12-29</Text>
+        <Text size={100}>v1.1.0 • Built 2025-12-30</Text>
       </div>
     </div>
   );
