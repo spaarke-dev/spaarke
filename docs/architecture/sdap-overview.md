@@ -1,7 +1,7 @@
 # SDAP System Overview
 
 > **Source**: SDAP-ARCHITECTURE-GUIDE.md (3000 lines) → Condensed overview
-> **Last Updated**: December 3, 2025
+> **Last Updated**: December 30, 2025
 > **Applies To**: Any work involving the SDAP document management system
 
 ---
@@ -9,6 +9,8 @@
 ## TL;DR
 
 SDAP (SharePoint Document Access Platform) is an enterprise document management solution integrating Dataverse with SharePoint Embedded (SPE). Files stored in SPE containers (up to 250GB), metadata in Dataverse. Uses BFF pattern with Redis caching, PCF controls for UI.
+
+**New (Phase 2):** Email-to-Document automation converts Dataverse emails to archived .eml documents via webhooks and background processing.
 
 ---
 
@@ -19,6 +21,7 @@ SDAP (SharePoint Document Access Platform) is an enterprise document management 
 - Troubleshooting document-related issues
 - Understanding the authentication flow for document operations
 - Working with any `sprk_document` related code
+- Working with email-to-document automation (webhook, polling, job processing)
 
 ---
 
@@ -69,7 +72,16 @@ BFF API (https://spe-api-dev-67e2xz.azurewebsites.net):
 ├─ GET  /api/navmap/{entity}/{relationship}/lookup  → Metadata discovery
 ├─ GET  /api/documents/{id}/preview-url  → File preview URL
 ├─ GET  /api/documents/{id}/office       → Office Online editor URL
-└─ GET  /healthz                  → Health check
+├─ GET  /healthz                  → Health check
+│
+├─ Email-to-Document (Phase 2):
+│  ├─ POST /api/v1/emails/{emailId}/save-as-document  → Manual email conversion
+│  ├─ GET  /api/v1/emails/{emailId}/document-status   → Check if already saved
+│  ├─ POST /api/v1/emails/webhook-trigger             → Dataverse webhook receiver
+│  └─ Admin:
+│     ├─ POST /api/v1/emails/admin/seed-rules         → Seed default filter rules
+│     ├─ GET  /api/v1/emails/admin/rules              → List active rules
+│     └─ POST /api/v1/emails/admin/refresh-rules-cache → Force cache refresh
 ```
 
 ---
@@ -88,6 +100,29 @@ sprk_graphitemid    Text        SPE DriveItem ID ← Links to SharePoint
 sprk_graphdriveid   Text        SPE Container Drive ID
 sprk_matter         Lookup      → sprk_matter (1:N relationship)
 sprk_project        Lookup      → sprk_project (1:N relationship)
+
+# Email-to-Document fields (Phase 2):
+sprk_isemailarchive Boolean     True if document is archived email
+sprk_documenttype   Choice      100000006 = Email
+sprk_email          Lookup      → email activity
+sprk_emailsubject   Text        Email subject line
+sprk_emailfrom      Text        Sender address
+sprk_emailto        Text        Recipients (comma-separated)
+sprk_emailcc        Text        CC recipients
+sprk_emaildate      DateTime    Email sent/received date
+sprk_emailmessageid Text        RFC 2822 Message-ID
+sprk_emaildirection Choice      Received=100000000, Sent=100000001
+```
+
+**sprk_emailprocessingrule** (filter rules for automation)
+```
+sprk_emailprocessingruleid  GUID    Primary key
+sprk_name                   Text    Rule name
+sprk_ruletype               Choice  Exclude=0, Include=1, Route=2
+sprk_targetfield            Text    subject, from, to, body, attachmentname
+sprk_pattern                Text    Regex pattern
+sprk_priority               Int     Evaluation order (lower = first)
+sprk_isactive               Boolean Rule enabled/disabled
 ```
 
 **sprk_matter / sprk_project** (parents - own the container)
@@ -182,6 +217,7 @@ src/controls/UniversalQuickCreate/config/EntityDocumentConfig.ts
 - [sdap-pcf-patterns.md](sdap-pcf-patterns.md) - PCF control implementation details
 - [sdap-bff-api-patterns.md](sdap-bff-api-patterns.md) - BFF API endpoints and services
 - [sdap-troubleshooting.md](sdap-troubleshooting.md) - Common issues and resolutions
+- [EMAIL-TO-DOCUMENT-ARCHITECTURE.md](../guides/EMAIL-TO-DOCUMENT-ARCHITECTURE.md) - Email automation architecture
 
 ---
 

@@ -1,0 +1,419 @@
+using System.Diagnostics;
+using System.Diagnostics.Metrics;
+
+namespace Sprk.Bff.Api.Telemetry;
+
+/// <summary>
+/// Metrics and tracing for email-to-document processing (OpenTelemetry-compatible).
+/// Tracks: conversion requests, webhook triggers, filter evaluations, job processing.
+///
+/// Usage:
+/// - Meter name: "Sprk.Bff.Api.Email" for OpenTelemetry configuration
+/// - Metrics: email.conversion.*, email.webhook.*, email.filter.*, email.job.*
+/// - Dimensions: email.trigger (manual/webhook/polling), email.status (success/failed/filtered)
+///
+/// Application Insights custom queries:
+/// - Conversion success rate: customMetrics | where name startswith "email.conversion" | summarize count() by customDimensions["email.status"]
+/// - Webhook latency: customMetrics | where name == "email.webhook.duration" | summarize avg(value), percentile(value, 95)
+/// - Filter rule hits: customMetrics | where name == "email.filter.matched" | summarize count() by customDimensions["email.filter.action"]
+/// </summary>
+public class EmailTelemetry : IDisposable
+{
+    private readonly Meter _meter;
+
+    // Conversion metrics
+    private readonly Counter<long> _conversionRequests;
+    private readonly Counter<long> _conversionSuccesses;
+    private readonly Counter<long> _conversionFailures;
+    private readonly Histogram<double> _conversionDuration;
+
+    // Webhook metrics
+    private readonly Counter<long> _webhookReceived;
+    private readonly Counter<long> _webhookEnqueued;
+    private readonly Counter<long> _webhookRejected;
+    private readonly Histogram<double> _webhookDuration;
+
+    // Polling metrics
+    private readonly Counter<long> _pollingRuns;
+    private readonly Counter<long> _pollingEmailsFound;
+    private readonly Counter<long> _pollingEmailsEnqueued;
+
+    // Filter metrics
+    private readonly Counter<long> _filterEvaluations;
+    private readonly Counter<long> _filterMatched;
+    private readonly Counter<long> _filterDefaultAction;
+
+    // Job processing metrics
+    private readonly Counter<long> _jobsProcessed;
+    private readonly Counter<long> _jobsSucceeded;
+    private readonly Counter<long> _jobsFailed;
+    private readonly Counter<long> _jobsSkippedDuplicate;
+    private readonly Histogram<double> _jobDuration;
+
+    // File metrics
+    private readonly Histogram<long> _emlFileSize;
+    private readonly Counter<long> _attachmentsProcessed;
+
+    // Meter name for OpenTelemetry
+    private const string MeterName = "Sprk.Bff.Api.Email";
+
+    // Static ActivitySource for distributed tracing
+    public static readonly ActivitySource ActivitySource = new(MeterName, "1.0.0");
+
+    public EmailTelemetry()
+    {
+        _meter = new Meter(MeterName, "1.0.0");
+
+        // ═══════════════════════════════════════════════════════════════════════════
+        // Conversion Metrics (Manual save endpoint)
+        // ═══════════════════════════════════════════════════════════════════════════
+        _conversionRequests = _meter.CreateCounter<long>(
+            name: "email.conversion.requests",
+            unit: "{request}",
+            description: "Total number of email-to-document conversion requests");
+
+        _conversionSuccesses = _meter.CreateCounter<long>(
+            name: "email.conversion.successes",
+            unit: "{request}",
+            description: "Number of successful email conversions");
+
+        _conversionFailures = _meter.CreateCounter<long>(
+            name: "email.conversion.failures",
+            unit: "{request}",
+            description: "Number of failed email conversions");
+
+        _conversionDuration = _meter.CreateHistogram<double>(
+            name: "email.conversion.duration",
+            unit: "ms",
+            description: "Email conversion duration in milliseconds");
+
+        // ═══════════════════════════════════════════════════════════════════════════
+        // Webhook Metrics
+        // ═══════════════════════════════════════════════════════════════════════════
+        _webhookReceived = _meter.CreateCounter<long>(
+            name: "email.webhook.received",
+            unit: "{request}",
+            description: "Total webhook requests received");
+
+        _webhookEnqueued = _meter.CreateCounter<long>(
+            name: "email.webhook.enqueued",
+            unit: "{job}",
+            description: "Jobs successfully enqueued from webhooks");
+
+        _webhookRejected = _meter.CreateCounter<long>(
+            name: "email.webhook.rejected",
+            unit: "{request}",
+            description: "Webhook requests rejected (invalid signature, disabled, etc.)");
+
+        _webhookDuration = _meter.CreateHistogram<double>(
+            name: "email.webhook.duration",
+            unit: "ms",
+            description: "Webhook processing duration in milliseconds");
+
+        // ═══════════════════════════════════════════════════════════════════════════
+        // Polling Metrics
+        // ═══════════════════════════════════════════════════════════════════════════
+        _pollingRuns = _meter.CreateCounter<long>(
+            name: "email.polling.runs",
+            unit: "{run}",
+            description: "Total polling service runs");
+
+        _pollingEmailsFound = _meter.CreateCounter<long>(
+            name: "email.polling.emails_found",
+            unit: "{email}",
+            description: "Emails found during polling");
+
+        _pollingEmailsEnqueued = _meter.CreateCounter<long>(
+            name: "email.polling.emails_enqueued",
+            unit: "{email}",
+            description: "Emails enqueued during polling");
+
+        // ═══════════════════════════════════════════════════════════════════════════
+        // Filter Metrics
+        // ═══════════════════════════════════════════════════════════════════════════
+        _filterEvaluations = _meter.CreateCounter<long>(
+            name: "email.filter.evaluations",
+            unit: "{evaluation}",
+            description: "Total filter rule evaluations");
+
+        _filterMatched = _meter.CreateCounter<long>(
+            name: "email.filter.matched",
+            unit: "{match}",
+            description: "Emails that matched a filter rule");
+
+        _filterDefaultAction = _meter.CreateCounter<long>(
+            name: "email.filter.default_action",
+            unit: "{evaluation}",
+            description: "Emails that used default action (no rule matched)");
+
+        // ═══════════════════════════════════════════════════════════════════════════
+        // Job Processing Metrics
+        // ═══════════════════════════════════════════════════════════════════════════
+        _jobsProcessed = _meter.CreateCounter<long>(
+            name: "email.job.processed",
+            unit: "{job}",
+            description: "Total email processing jobs handled");
+
+        _jobsSucceeded = _meter.CreateCounter<long>(
+            name: "email.job.succeeded",
+            unit: "{job}",
+            description: "Successfully completed email processing jobs");
+
+        _jobsFailed = _meter.CreateCounter<long>(
+            name: "email.job.failed",
+            unit: "{job}",
+            description: "Failed email processing jobs");
+
+        _jobsSkippedDuplicate = _meter.CreateCounter<long>(
+            name: "email.job.skipped_duplicate",
+            unit: "{job}",
+            description: "Jobs skipped due to idempotency (already processed)");
+
+        _jobDuration = _meter.CreateHistogram<double>(
+            name: "email.job.duration",
+            unit: "ms",
+            description: "Job processing duration in milliseconds");
+
+        // ═══════════════════════════════════════════════════════════════════════════
+        // File Metrics
+        // ═══════════════════════════════════════════════════════════════════════════
+        _emlFileSize = _meter.CreateHistogram<long>(
+            name: "email.eml.file_size",
+            unit: "By",
+            description: "Size of generated .eml files");
+
+        _attachmentsProcessed = _meter.CreateCounter<long>(
+            name: "email.attachments.processed",
+            unit: "{attachment}",
+            description: "Total attachments processed");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Conversion Methods
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Record the start of a conversion request.
+    /// </summary>
+    public Stopwatch RecordConversionStart(string trigger = "manual")
+    {
+        _conversionRequests.Add(1, new KeyValuePair<string, object?>("email.trigger", trigger));
+        return Stopwatch.StartNew();
+    }
+
+    /// <summary>
+    /// Record successful email conversion.
+    /// </summary>
+    public void RecordConversionSuccess(
+        Stopwatch stopwatch,
+        string trigger = "manual",
+        long? emlSizeBytes = null,
+        int attachmentCount = 0)
+    {
+        stopwatch.Stop();
+        var durationMs = stopwatch.Elapsed.TotalMilliseconds;
+
+        var tags = new TagList
+        {
+            { "email.trigger", trigger },
+            { "email.status", "success" }
+        };
+
+        _conversionSuccesses.Add(1, tags);
+        _conversionDuration.Record(durationMs, tags);
+
+        if (emlSizeBytes.HasValue)
+        {
+            _emlFileSize.Record(emlSizeBytes.Value, tags);
+        }
+
+        if (attachmentCount > 0)
+        {
+            _attachmentsProcessed.Add(attachmentCount, tags);
+        }
+    }
+
+    /// <summary>
+    /// Record failed email conversion.
+    /// </summary>
+    public void RecordConversionFailure(Stopwatch stopwatch, string errorCode, string trigger = "manual")
+    {
+        stopwatch.Stop();
+        var durationMs = stopwatch.Elapsed.TotalMilliseconds;
+
+        var tags = new TagList
+        {
+            { "email.trigger", trigger },
+            { "email.status", "failed" },
+            { "email.error_code", errorCode }
+        };
+
+        _conversionFailures.Add(1, tags);
+        _conversionDuration.Record(durationMs, tags);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Webhook Methods
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Record webhook request received.
+    /// </summary>
+    public Stopwatch RecordWebhookReceived()
+    {
+        _webhookReceived.Add(1);
+        return Stopwatch.StartNew();
+    }
+
+    /// <summary>
+    /// Record webhook successfully enqueued a job.
+    /// </summary>
+    public void RecordWebhookEnqueued(Stopwatch stopwatch, Guid emailId)
+    {
+        stopwatch.Stop();
+        _webhookEnqueued.Add(1);
+        _webhookDuration.Record(stopwatch.Elapsed.TotalMilliseconds,
+            new KeyValuePair<string, object?>("email.status", "enqueued"));
+    }
+
+    /// <summary>
+    /// Record webhook request rejected.
+    /// </summary>
+    public void RecordWebhookRejected(Stopwatch stopwatch, string reason)
+    {
+        stopwatch.Stop();
+        _webhookRejected.Add(1, new KeyValuePair<string, object?>("email.rejection_reason", reason));
+        _webhookDuration.Record(stopwatch.Elapsed.TotalMilliseconds,
+            new KeyValuePair<string, object?>("email.status", "rejected"),
+            new KeyValuePair<string, object?>("email.rejection_reason", reason));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Polling Methods
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Record polling service run.
+    /// </summary>
+    public void RecordPollingRun(int emailsFound, int emailsEnqueued)
+    {
+        _pollingRuns.Add(1);
+        _pollingEmailsFound.Add(emailsFound);
+        _pollingEmailsEnqueued.Add(emailsEnqueued);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Filter Methods
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Record filter evaluation result.
+    /// </summary>
+    public void RecordFilterEvaluation(Services.Email.EmailFilterAction action, bool ruleMatched, string? ruleName = null)
+    {
+        _filterEvaluations.Add(1);
+
+        var actionStr = action switch
+        {
+            Services.Email.EmailFilterAction.AutoSave => "process",
+            Services.Email.EmailFilterAction.Ignore => "ignore",
+            Services.Email.EmailFilterAction.ReviewRequired => "review",
+            _ => "unknown"
+        };
+
+        if (ruleMatched)
+        {
+            _filterMatched.Add(1,
+                new KeyValuePair<string, object?>("email.filter.action", actionStr),
+                new KeyValuePair<string, object?>("email.filter.rule", ruleName ?? "unknown"));
+        }
+        else
+        {
+            _filterDefaultAction.Add(1,
+                new KeyValuePair<string, object?>("email.filter.action", actionStr));
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Job Processing Methods
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Record start of job processing.
+    /// </summary>
+    public Stopwatch RecordJobStart()
+    {
+        _jobsProcessed.Add(1);
+        return Stopwatch.StartNew();
+    }
+
+    /// <summary>
+    /// Record successful job completion.
+    /// </summary>
+    public void RecordJobSuccess(Stopwatch stopwatch, long? emlSizeBytes = null, int attachmentCount = 0)
+    {
+        stopwatch.Stop();
+        _jobsSucceeded.Add(1);
+        _jobDuration.Record(stopwatch.Elapsed.TotalMilliseconds,
+            new KeyValuePair<string, object?>("email.status", "success"));
+
+        if (emlSizeBytes.HasValue)
+        {
+            _emlFileSize.Record(emlSizeBytes.Value);
+        }
+
+        if (attachmentCount > 0)
+        {
+            _attachmentsProcessed.Add(attachmentCount);
+        }
+    }
+
+    /// <summary>
+    /// Record failed job.
+    /// </summary>
+    public void RecordJobFailure(Stopwatch stopwatch, string errorCode)
+    {
+        stopwatch.Stop();
+        _jobsFailed.Add(1, new KeyValuePair<string, object?>("email.error_code", errorCode));
+        _jobDuration.Record(stopwatch.Elapsed.TotalMilliseconds,
+            new KeyValuePair<string, object?>("email.status", "failed"),
+            new KeyValuePair<string, object?>("email.error_code", errorCode));
+    }
+
+    /// <summary>
+    /// Record job skipped due to idempotency.
+    /// </summary>
+    public void RecordJobSkippedDuplicate()
+    {
+        _jobsSkippedDuplicate.Add(1);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Distributed Tracing
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Start a new Activity for distributed tracing.
+    /// </summary>
+    public Activity? StartActivity(string operationName, Guid? emailId = null, string? correlationId = null)
+    {
+        var activity = ActivitySource.StartActivity(operationName, ActivityKind.Internal);
+        if (activity != null)
+        {
+            if (emailId.HasValue)
+            {
+                activity.SetTag("email.id", emailId.Value.ToString());
+            }
+            if (!string.IsNullOrEmpty(correlationId))
+            {
+                activity.SetTag("correlation_id", correlationId);
+            }
+        }
+        return activity;
+    }
+
+    public void Dispose()
+    {
+        _meter?.Dispose();
+    }
+}

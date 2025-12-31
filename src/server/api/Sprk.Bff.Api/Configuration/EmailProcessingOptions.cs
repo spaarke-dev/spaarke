@@ -78,6 +78,18 @@ public class EmailProcessingOptions
     public int PollingIntervalMinutes { get; set; } = 5;
 
     /// <summary>
+    /// How far back in hours to look for unprocessed emails.
+    /// Default is 24 hours.
+    /// </summary>
+    public int PollingLookbackHours { get; set; } = 24;
+
+    /// <summary>
+    /// Maximum number of emails to process per polling cycle.
+    /// Prevents overwhelming the system with a large backlog.
+    /// </summary>
+    public int PollingBatchSize { get; set; } = 100;
+
+    /// <summary>
     /// Filename patterns that indicate a signature image (to be skipped).
     /// Regex patterns.
     /// </summary>
@@ -104,6 +116,12 @@ public class EmailProcessingOptions
     /// Whether to automatically queue documents for AI processing.
     /// </summary>
     public bool AutoEnqueueAi { get; set; } = true;
+
+    /// <summary>
+    /// Shared secret for Dataverse webhook validation.
+    /// Must match the secret configured in Dataverse Service Endpoint.
+    /// </summary>
+    public string? WebhookSecret { get; set; }
 
     /// <summary>
     /// Computed max attachment size in bytes.

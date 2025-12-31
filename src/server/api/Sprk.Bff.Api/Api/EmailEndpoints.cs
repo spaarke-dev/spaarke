@@ -1,3 +1,6 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Microsoft.Graph.Models.ODataErrors;
@@ -7,12 +10,13 @@ using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Email;
 using Sprk.Bff.Api.Services.Email;
+using Sprk.Bff.Api.Services.Jobs;
 
 namespace Sprk.Bff.Api.Api;
 
 /// <summary>
 /// Email-to-document conversion endpoints following ADR-008.
-/// Provides manual email conversion (synchronous) and status queries.
+/// Provides manual email conversion (synchronous), status queries, and webhook trigger.
 /// </summary>
 public static class EmailEndpoints
 {
@@ -25,6 +29,9 @@ public static class EmailEndpoints
 
     // Relationship type for email attachments
     private const int RelationshipTypeEmailAttachment = 100000000;
+
+    // Job type for email processing
+    private const string JobTypeProcessEmail = "ProcessEmailToDocument";
 
     public static IEndpointRouteBuilder MapEmailEndpoints(this IEndpointRouteBuilder app)
     {
@@ -49,7 +56,270 @@ public static class EmailEndpoints
             .Produces<EmailDocumentStatusResponse>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
 
+        // POST /api/v1/emails/webhook-trigger - Dataverse webhook receiver (AllowAnonymous with secret validation)
+        app.MapPost("/api/v1/emails/webhook-trigger", HandleWebhookTriggerAsync)
+            .AllowAnonymous()
+            .WithName("EmailWebhookTrigger")
+            .WithTags("Email Conversion")
+            .WithDescription("Receive Dataverse webhook notifications for new email activities")
+            .Produces<WebhookTriggerResponse>(StatusCodes.Status202Accepted)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
+            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
+
+        // Admin endpoints for email processing management
+        var adminGroup = app.MapGroup("/api/v1/emails/admin")
+            .RequireAuthorization()
+            .WithTags("Email Admin");
+
+        // POST /api/v1/emails/admin/seed-rules - Seed default email processing rules
+        adminGroup.MapPost("/seed-rules", SeedDefaultRulesAsync)
+            .WithName("SeedEmailProcessingRules")
+            .WithDescription("Seed default email processing rules to Dataverse (idempotent)")
+            .Produces<SeedRulesResponse>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
+
+        // GET /api/v1/emails/admin/rules - Get all active rules (for debugging/admin)
+        adminGroup.MapGet("/rules", GetActiveRulesAsync)
+            .WithName("GetActiveEmailRules")
+            .WithDescription("Get all active email processing rules from Dataverse")
+            .Produces<IReadOnlyList<EmailFilterRule>>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
+
+        // POST /api/v1/emails/admin/refresh-rules-cache - Force refresh rules cache
+        adminGroup.MapPost("/refresh-rules-cache", RefreshRulesCacheAsync)
+            .WithName("RefreshEmailRulesCache")
+            .WithDescription("Force refresh the email processing rules cache")
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
+
         return app;
+    }
+
+    /// <summary>
+    /// Handle Dataverse webhook notification for new email activities.
+    /// Validates webhook signature and enqueues a processing job.
+    /// </summary>
+    private static async Task<IResult> HandleWebhookTriggerAsync(
+        HttpRequest request,
+        JobSubmissionService jobSubmissionService,
+        IOptions<EmailProcessingOptions> emailOptions,
+        Telemetry.EmailTelemetry telemetry,
+        ILogger<Program> logger,
+        CancellationToken cancellationToken)
+    {
+        var traceId = request.HttpContext.TraceIdentifier;
+        var correlationId = request.Headers["X-Correlation-Id"].FirstOrDefault() ?? traceId;
+        var stopwatch = telemetry.RecordWebhookReceived();
+
+        try
+        {
+            // Step 1: Validate webhook is enabled
+            if (!emailOptions.Value.EnableWebhook)
+            {
+                logger.LogWarning("Webhook trigger received but webhooks are disabled");
+                telemetry.RecordWebhookRejected(stopwatch, "disabled");
+                return Results.Problem(
+                    title: "Webhook Disabled",
+                    detail: "Email webhook processing is currently disabled",
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+
+            // Step 2: Read and validate request body
+            request.EnableBuffering();
+            using var reader = new StreamReader(request.Body, Encoding.UTF8, leaveOpen: true);
+            var requestBody = await reader.ReadToEndAsync(cancellationToken);
+            request.Body.Position = 0;
+
+            if (string.IsNullOrWhiteSpace(requestBody))
+            {
+                logger.LogWarning("Empty webhook payload received");
+                telemetry.RecordWebhookRejected(stopwatch, "empty_payload");
+                return Results.Problem(
+                    title: "Invalid Payload",
+                    detail: "Webhook payload is empty",
+                    statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            // Step 3: Validate webhook signature
+            var signatureValid = await ValidateWebhookSignatureAsync(
+                request,
+                requestBody,
+                emailOptions.Value.WebhookSecret,
+                logger);
+
+            if (!signatureValid)
+            {
+                logger.LogWarning("Invalid webhook signature for request {TraceId}", traceId);
+                telemetry.RecordWebhookRejected(stopwatch, "invalid_signature");
+                return Results.Problem(
+                    title: "Unauthorized",
+                    detail: "Invalid webhook signature",
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            // Step 4: Parse webhook payload
+            DataverseWebhookPayload? payload;
+            try
+            {
+                payload = JsonSerializer.Deserialize<DataverseWebhookPayload>(requestBody, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+            }
+            catch (JsonException ex)
+            {
+                logger.LogWarning(ex, "Failed to parse webhook payload");
+                telemetry.RecordWebhookRejected(stopwatch, "invalid_json");
+                return Results.Problem(
+                    title: "Invalid Payload",
+                    detail: "Failed to parse webhook payload as JSON",
+                    statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            if (payload == null || payload.PrimaryEntityId == Guid.Empty)
+            {
+                logger.LogWarning("Webhook payload missing PrimaryEntityId");
+                telemetry.RecordWebhookRejected(stopwatch, "missing_entity_id");
+                return Results.Problem(
+                    title: "Invalid Payload",
+                    detail: "Webhook payload missing required PrimaryEntityId",
+                    statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            // Step 5: Validate entity type
+            if (!string.Equals(payload.PrimaryEntityName, "email", StringComparison.OrdinalIgnoreCase))
+            {
+                logger.LogWarning(
+                    "Webhook received for non-email entity: {EntityName}",
+                    payload.PrimaryEntityName);
+                telemetry.RecordWebhookRejected(stopwatch, "wrong_entity_type");
+                return Results.Problem(
+                    title: "Invalid Entity",
+                    detail: $"Webhook is for entity '{payload.PrimaryEntityName}', expected 'email'",
+                    statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            var emailId = payload.PrimaryEntityId;
+
+            logger.LogInformation(
+                "Received webhook for email {EmailId}, Message={Message}, CorrelationId={CorrelationId}",
+                emailId, payload.MessageName, correlationId);
+
+            // Step 6: Create and submit job
+            var jobPayload = JsonDocument.Parse(JsonSerializer.Serialize(new
+            {
+                EmailId = emailId,
+                TriggerSource = "Webhook",
+                MessageName = payload.MessageName,
+                WebhookCorrelationId = payload.CorrelationId
+            }));
+
+            var job = new JobContract
+            {
+                JobType = JobTypeProcessEmail,
+                SubjectId = emailId.ToString(),
+                CorrelationId = correlationId,
+                IdempotencyKey = $"Email:{emailId}:Archive",
+                Payload = jobPayload,
+                MaxAttempts = 3
+            };
+
+            await jobSubmissionService.SubmitJobAsync(job, cancellationToken);
+
+            logger.LogInformation(
+                "Submitted job {JobId} for email {EmailId} with IdempotencyKey={IdempotencyKey}",
+                job.JobId, emailId, job.IdempotencyKey);
+
+            telemetry.RecordWebhookEnqueued(stopwatch, emailId);
+
+            return Results.Accepted(
+                value: new WebhookTriggerResponse
+                {
+                    Accepted = true,
+                    JobId = job.JobId,
+                    CorrelationId = correlationId,
+                    Message = $"Email {emailId} queued for processing"
+                });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error processing webhook trigger, TraceId={TraceId}", traceId);
+            telemetry.RecordWebhookRejected(stopwatch, "internal_error");
+            return Results.Problem(
+                title: "Internal Server Error",
+                detail: "An unexpected error occurred processing the webhook",
+                statusCode: StatusCodes.Status500InternalServerError,
+                extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+        }
+    }
+
+    /// <summary>
+    /// Validate the webhook signature from Dataverse.
+    /// Dataverse webhooks can be validated using either:
+    /// 1. X-Dataverse-Signature header (HMAC-SHA256 of request body with shared secret)
+    /// 2. HttpHeader authentication type with custom header
+    /// </summary>
+    private static Task<bool> ValidateWebhookSignatureAsync(
+        HttpRequest request,
+        string requestBody,
+        string? webhookSecret,
+        ILogger logger)
+    {
+        // If no secret configured, skip validation (development mode)
+        if (string.IsNullOrEmpty(webhookSecret))
+        {
+            logger.LogWarning("Webhook secret not configured - skipping signature validation (DEVELOPMENT MODE)");
+            return Task.FromResult(true);
+        }
+
+        // Check for X-Dataverse-Signature header
+        var signature = request.Headers["X-Dataverse-Signature"].FirstOrDefault();
+
+        // Also check for custom authorization header (HttpHeader auth type)
+        if (string.IsNullOrEmpty(signature))
+        {
+            signature = request.Headers["X-Webhook-Secret"].FirstOrDefault();
+        }
+
+        if (string.IsNullOrEmpty(signature))
+        {
+            logger.LogWarning("No webhook signature header found");
+            return Task.FromResult(false);
+        }
+
+        // For HttpHeader auth type, just compare secrets directly
+        if (signature == webhookSecret)
+        {
+            return Task.FromResult(true);
+        }
+
+        // For HMAC signature, compute and compare
+        try
+        {
+            using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(webhookSecret));
+            var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(requestBody));
+            var computedSignature = Convert.ToBase64String(hash);
+
+            // Dataverse may send with or without "sha256=" prefix
+            var signatureToCompare = signature.StartsWith("sha256=", StringComparison.OrdinalIgnoreCase)
+                ? signature[7..]
+                : signature;
+
+            var isValid = string.Equals(computedSignature, signatureToCompare, StringComparison.Ordinal);
+
+            if (!isValid)
+            {
+                logger.LogWarning("Webhook signature mismatch");
+            }
+
+            return Task.FromResult(isValid);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error validating webhook signature");
+            return Task.FromResult(false);
+        }
     }
 
     /// <summary>
@@ -376,4 +646,110 @@ public static class EmailEndpoints
             GraphItemId = uploadResult.Id
         };
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Admin Endpoint Handlers
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Seed default email processing rules to Dataverse.
+    /// Idempotent - skips rules that already exist.
+    /// </summary>
+    private static async Task<IResult> SeedDefaultRulesAsync(
+        EmailRuleSeedService seedService,
+        ILogger<Program> logger,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            logger.LogInformation("Starting email processing rules seed operation");
+
+            var result = await seedService.SeedDefaultRulesAsync(forceUpdate: false, cancellationToken);
+
+            return Results.Ok(new SeedRulesResponse
+            {
+                Created = result.Created,
+                Skipped = result.Skipped,
+                Errors = result.Errors,
+                TotalRulesAvailable = EmailRuleSeedService.DefaultRules.Count,
+                Success = result.IsSuccess
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error seeding email processing rules");
+            return Results.Problem(
+                title: "Seed Operation Failed",
+                detail: ex.Message,
+                statusCode: StatusCodes.Status500InternalServerError);
+        }
+    }
+
+    /// <summary>
+    /// Get all active email processing rules (for debugging/admin).
+    /// </summary>
+    private static async Task<IResult> GetActiveRulesAsync(
+        IEmailFilterService filterService,
+        ILogger<Program> logger,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var rules = await filterService.GetActiveRulesAsync(cancellationToken);
+            return Results.Ok(rules);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error retrieving active email processing rules");
+            return Results.Problem(
+                title: "Failed to Retrieve Rules",
+                detail: ex.Message,
+                statusCode: StatusCodes.Status500InternalServerError);
+        }
+    }
+
+    /// <summary>
+    /// Force refresh the email processing rules cache.
+    /// </summary>
+    private static async Task<IResult> RefreshRulesCacheAsync(
+        IEmailFilterService filterService,
+        ILogger<Program> logger,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            logger.LogInformation("Force refreshing email processing rules cache");
+            await filterService.RefreshRulesAsync(cancellationToken);
+            return Results.NoContent();
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error refreshing email processing rules cache");
+            return Results.Problem(
+                title: "Cache Refresh Failed",
+                detail: ex.Message,
+                statusCode: StatusCodes.Status500InternalServerError);
+        }
+    }
+}
+
+/// <summary>
+/// Response from seeding default email processing rules.
+/// </summary>
+public record SeedRulesResponse
+{
+    /// <summary>Number of rules created.</summary>
+    public int Created { get; init; }
+
+    /// <summary>Number of rules skipped (already existed).</summary>
+    public int Skipped { get; init; }
+
+    /// <summary>List of error messages if any operations failed.</summary>
+    public List<string> Errors { get; init; } = [];
+
+    /// <summary>Total number of default rules available to seed.</summary>
+    public int TotalRulesAvailable { get; init; }
+
+    /// <summary>Whether the operation completed successfully (no errors).</summary>
+    public bool Success { get; init; }
 }

@@ -1,7 +1,7 @@
 # Spaarke Repository Architecture
 
-> **Version**: 1.1  
-> **Date**: December 8, 2025  
+> **Version**: 1.2
+> **Date**: December 30, 2025
 > **Purpose**: Comprehensive guide to the Spaarke repository structure for developers and AI coding agents
 
 ---
@@ -15,6 +15,7 @@ The Spaarke repository contains the **Spaarke Legal Operations Intelligence Plat
 | Component | Description | Status |
 |-----------|-------------|--------|
 | **SDAP** (SharePoint Document Access Platform) | Document storage, retrieval, and management via SPE | Production |
+| **Email-to-Document Automation** | Automatic email archival to .eml documents with webhooks | Phase 2 Complete |
 | **AI Document Intelligence** | AI-powered summarization, metadata extraction, and analysis | In Development |
 | **Legal Workflow Automation** | Matter management, deadline tracking, task automation | Planned |
 | **Operational Analytics** | Dashboards, reporting, and insights | Planned |
@@ -113,6 +114,9 @@ spaarke/
 ```
 Sprk.Bff.Api/
 ├── Api/                    # Endpoint definitions (Minimal API groups)
+│   ├── DocumentsEndpoints.cs    # Document CRUD operations
+│   ├── EmailEndpoints.cs        # Email-to-document automation
+│   └── ...
 ├── Configuration/          # Strongly-typed configuration classes
 ├── Infrastructure/         # Cross-cutting concerns
 │   ├── Auth/               # Authentication middleware
@@ -125,7 +129,17 @@ Sprk.Bff.Api/
 │   └── Validation/         # Request validation
 ├── Models/                 # DTOs and request/response models
 ├── Services/               # Business logic services
+│   ├── Email/              # Email-to-document services
+│   │   ├── IEmailToEmlConverter.cs
+│   │   ├── IEmailFilterService.cs
+│   │   └── EmailRuleSeedService.cs
+│   └── Jobs/               # Async job processing
+│       ├── Handlers/       # Job type handlers
+│       │   └── EmailToDocumentJobHandler.cs
+│       └── EmailPollingBackupService.cs
 ├── Telemetry/              # OpenTelemetry metrics
+│   ├── AiTelemetry.cs
+│   └── EmailTelemetry.cs   # Email processing metrics
 └── Program.cs              # Application entry point
 ```
 

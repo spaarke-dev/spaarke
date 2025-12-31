@@ -36,13 +36,13 @@
 
 | ID | Task | Status | Est. | Dependencies |
 |----|------|--------|------|--------------|
-| 010 | Implement webhook endpoint /api/emails/webhook-trigger | 🔲 | 3h | 005 |
-| 011 | Create EmailPollingBackupService | 🔲 | 3h | 005 |
-| 012 | Implement EmailToDocumentJobHandler | 🔲 | 4h | 004, 005 |
-| 013 | Create IEmailFilterService with rules engine | 🔲 | 4h | 002 |
-| 014 | Seed default exclusion rules | 🔲 | 2h | 002, 013 |
-| 015 | Add Application Insights custom events | 🔲 | 2h | 012 |
-| 016 | Register Dataverse webhook (Service Endpoint + Step) | 🔲 | 2h | 010 |
+| 010 | Implement webhook endpoint /api/emails/webhook-trigger | ✅ | 3h | 005 |
+| 011 | Create EmailPollingBackupService | ✅ | 3h | 005 |
+| 012 | Implement EmailToDocumentJobHandler | ✅ | 4h | 004, 005 |
+| 013 | Create IEmailFilterService with rules engine | ✅ | 4h | 002 |
+| 014 | Seed default exclusion rules | ✅ | 2h | 002, 013 |
+| 015 | Add Application Insights custom events | ✅ | 2h | 012 |
+| 016 | Register Dataverse webhook (Service Endpoint + Step) | ✅ | 2h | 010 |
 | **019** | **Phase 2 Deploy** | 🔲 | 2h | 010-016 |
 
 ---
