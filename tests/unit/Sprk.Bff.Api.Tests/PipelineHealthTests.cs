@@ -56,8 +56,8 @@ public class PipelineHealthTests : IClassFixture<CustomWebAppFactory>
 
         // Core services should be registered
         serviceProvider.GetService<Microsoft.AspNetCore.Authorization.IAuthorizationService>().Should().NotBeNull();
-        serviceProvider.GetService<Infrastructure.Graph.IGraphClientFactory>().Should().NotBeNull();
-        serviceProvider.GetService<Infrastructure.Graph.SpeFileStore>().Should().NotBeNull();
-        serviceProvider.GetService<Infrastructure.Graph.UserOperations>().Should().NotBeNull();
+        serviceProvider.GetService<Sprk.Bff.Api.Infrastructure.Graph.IGraphClientFactory>().Should().NotBeNull();
+        serviceProvider.GetService<Sprk.Bff.Api.Infrastructure.Graph.SpeFileStore>().Should().NotBeNull();
+        serviceProvider.GetService<Sprk.Bff.Api.Infrastructure.Graph.UserOperations>().Should().NotBeNull();
     }
 }

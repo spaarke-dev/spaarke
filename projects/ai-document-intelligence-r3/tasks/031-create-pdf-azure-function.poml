@@ -5,8 +5,69 @@
     <tags>export, pdf, azure-function</tags>
     <estimate>6h</estimate>
     <dependencies>030</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
+
+  <notes>
+    <completed-date>2025-12-30</completed-date>
+    <implementation-summary>
+      REFACTORED: Originally implemented as Azure Function, then refactored
+      to in-process PDF generation (ADR-001 compliant) because:
+      - QuestPDF is lightweight (no Chromium dependency)
+      - No Azure Function resource was deployed
+      - Simpler architecture, fewer moving parts
+      - Same ~50ms generation time
+
+      Final Implementation - In-Process PDF Generation:
+
+      1. PDF Document Generation (AnalysisPdfDocument.cs):
+         - Location: src/server/api/Sprk.Bff.Api/Services/Ai/Export/
+         - QuestPDF 2025.12.1 (Community license)
+         - A4 page size with professional styling
+         - Title section with branding color (#0078D4)
+         - Metadata bar with generation date, author, analysis ID
+         - Executive Summary section with shaded background
+         - Main content with paragraph parsing and HTML stripping
+         - Entities table (Organizations, People, Dates, Amounts, References)
+         - Clauses table with risk level color coding (High/Medium/Low)
+         - Page footer with page numbers
+
+      2. PdfExportService.cs:
+         - IExportService implementation for ExportFormat.Pdf
+         - Direct QuestPDF generation (no HTTP calls)
+         - Simple configuration: EnablePdfExport flag only
+         - Automatic filename generation with sanitization
+
+      3. Configuration (AnalysisOptions.cs):
+         - EnablePdfExport - Feature flag (default: true)
+         - Removed: PdfFunctionEndpoint, PdfFunctionKey, PdfGenerationTimeoutSeconds
+
+      4. Unit Tests (15 tests):
+         - Format property tests
+         - Validation tests (content, title, enabled)
+         - ExportAsync tests (success, PDF magic bytes, entities, clauses)
+         - Filename sanitization and truncation tests
+
+      Files Created:
+      - src/server/api/Sprk.Bff.Api/Services/Ai/Export/AnalysisPdfDocument.cs
+      - tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PdfExportServiceTests.cs
+
+      Files Modified:
+      - src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj (added QuestPDF)
+      - src/server/api/Sprk.Bff.Api/Services/Ai/Export/PdfExportService.cs (rewritten)
+      - src/server/api/Sprk.Bff.Api/Configuration/AnalysisOptions.cs (simplified)
+      - src/server/api/Sprk.Bff.Api/Program.cs (removed HttpClient registration)
+
+      Files Deleted:
+      - src/server/functions/Sprk.Functions.PdfExport/ (entire project removed)
+    </implementation-summary>
+    <test-results>
+      Total: 15 tests
+      Passed: 15
+      Failed: 0
+      Duration: ~800ms
+    </test-results>
+  </notes>
 
   <prompt>
     <role>Senior .NET Developer</role>

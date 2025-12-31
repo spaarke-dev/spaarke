@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 
@@ -26,6 +27,7 @@ public static class RagEndpoints
 
         // POST /api/ai/rag/search - Hybrid search
         group.MapPost("/search", Search)
+            .AddTenantAuthorizationFilter()
             .RequireRateLimiting("ai-batch")
             .WithName("RagSearch")
             .WithSummary("Search knowledge base using hybrid search")
@@ -37,6 +39,7 @@ public static class RagEndpoints
 
         // POST /api/ai/rag/index - Index a document
         group.MapPost("/index", IndexDocument)
+            .AddTenantAuthorizationFilter()
             .RequireRateLimiting("ai-batch")
             .WithName("RagIndexDocument")
             .WithSummary("Index a document chunk into the knowledge base")
@@ -48,6 +51,7 @@ public static class RagEndpoints
 
         // POST /api/ai/rag/index/batch - Batch index documents
         group.MapPost("/index/batch", IndexDocumentsBatch)
+            .AddTenantAuthorizationFilter()
             .RequireRateLimiting("ai-batch")
             .WithName("RagIndexDocumentsBatch")
             .WithSummary("Batch index multiple document chunks")
@@ -59,6 +63,7 @@ public static class RagEndpoints
 
         // DELETE /api/ai/rag/{documentId} - Delete a document
         group.MapDelete("/{documentId}", DeleteDocument)
+            .AddTenantAuthorizationFilter()
             .WithName("RagDeleteDocument")
             .WithSummary("Delete a document chunk from the knowledge base")
             .Produces<RagDeleteResult>()
@@ -69,6 +74,7 @@ public static class RagEndpoints
 
         // DELETE /api/ai/rag/source/{sourceDocumentId} - Delete all chunks for a source document
         group.MapDelete("/source/{sourceDocumentId}", DeleteBySourceDocument)
+            .AddTenantAuthorizationFilter()
             .WithName("RagDeleteBySourceDocument")
             .WithSummary("Delete all chunks for a source document")
             .Produces<RagDeleteResult>()

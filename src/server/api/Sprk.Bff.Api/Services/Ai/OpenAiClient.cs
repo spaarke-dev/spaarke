@@ -7,6 +7,8 @@ using OpenAI.Chat;
 using Polly;
 using Polly.CircuitBreaker;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Resilience;
+using ResilenceCircuitState = Sprk.Bff.Api.Infrastructure.Resilience.CircuitState;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -41,6 +43,7 @@ public class OpenAiClient : IOpenAiClient
     private readonly AzureOpenAIClient _client;
     private readonly DocumentIntelligenceOptions _options;
     private readonly ILogger<OpenAiClient> _logger;
+    private readonly ICircuitBreakerRegistry? _circuitRegistry;
     private readonly ResiliencePipeline _circuitBreaker;
 
     // Circuit breaker configuration (Task 072)
@@ -49,14 +52,21 @@ public class OpenAiClient : IOpenAiClient
     private const double FailureRatio = 0.5;      // 50% failure ratio to trip
     private const int MinimumThroughput = 5;      // Minimum calls before tripping
 
-    public OpenAiClient(IOptions<DocumentIntelligenceOptions> options, ILogger<OpenAiClient> logger)
+    public OpenAiClient(
+        IOptions<DocumentIntelligenceOptions> options,
+        ILogger<OpenAiClient> logger,
+        ICircuitBreakerRegistry? circuitRegistry = null)
     {
         _options = options.Value;
         _logger = logger;
+        _circuitRegistry = circuitRegistry;
 
         var endpoint = new Uri(_options.OpenAiEndpoint);
         var credential = new AzureKeyCredential(_options.OpenAiKey);
         _client = new AzureOpenAIClient(endpoint, credential);
+
+        // Register with circuit breaker registry
+        _circuitRegistry?.RegisterCircuit(CircuitBreakerRegistry.AzureOpenAI);
 
         // Build circuit breaker pipeline (Polly 8.x)
         _circuitBreaker = new ResiliencePipelineBuilder()
@@ -74,16 +84,26 @@ public class OpenAiClient : IOpenAiClient
                         MinimumThroughput,
                         BreakDuration.TotalSeconds,
                         args.Outcome.Exception?.Message ?? "unknown");
+                    _circuitRegistry?.RecordStateChange(
+                        CircuitBreakerRegistry.AzureOpenAI,
+                        ResilenceCircuitState.Open,
+                        BreakDuration);
                     return ValueTask.CompletedTask;
                 },
                 OnClosed = args =>
                 {
                     _logger.LogInformation("OpenAI circuit breaker CLOSED. Service recovered.");
+                    _circuitRegistry?.RecordStateChange(
+                        CircuitBreakerRegistry.AzureOpenAI,
+                        ResilenceCircuitState.Closed);
                     return ValueTask.CompletedTask;
                 },
                 OnHalfOpened = args =>
                 {
                     _logger.LogInformation("OpenAI circuit breaker HALF-OPEN. Testing service availability.");
+                    _circuitRegistry?.RecordStateChange(
+                        CircuitBreakerRegistry.AzureOpenAI,
+                        ResilenceCircuitState.HalfOpen);
                     return ValueTask.CompletedTask;
                 }
             })

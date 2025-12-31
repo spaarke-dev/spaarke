@@ -4,7 +4,9 @@ using Azure.Search.Documents;
 using Azure.Search.Documents.Models;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Resilience;
 using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -32,8 +34,10 @@ public class RagService : IRagService
     private readonly IKnowledgeDeploymentService _deploymentService;
     private readonly IOpenAiClient _openAiClient;
     private readonly IEmbeddingCache _embeddingCache;
+    private readonly IResilientSearchClient? _resilientClient;
     private readonly AnalysisOptions _analysisOptions;
     private readonly ILogger<RagService> _logger;
+    private readonly AiTelemetry? _telemetry;
 
     // Semantic configuration name from the index definition
     private const string SemanticConfigurationName = "knowledge-semantic-config";
@@ -50,13 +54,17 @@ public class RagService : IRagService
         IOpenAiClient openAiClient,
         IEmbeddingCache embeddingCache,
         IOptions<AnalysisOptions> analysisOptions,
-        ILogger<RagService> logger)
+        ILogger<RagService> logger,
+        IResilientSearchClient? resilientClient = null,
+        AiTelemetry? telemetry = null)
     {
         _deploymentService = deploymentService;
         _openAiClient = openAiClient;
         _embeddingCache = embeddingCache;
+        _resilientClient = resilientClient;
         _analysisOptions = analysisOptions.Value;
         _logger = logger;
+        _telemetry = telemetry;
     }
 
     /// <inheritdoc />
@@ -115,16 +123,28 @@ public class RagService : IRagService
             // Step 3: Build hybrid search options
             var searchOptions = BuildSearchOptions(options, queryEmbedding);
 
-            // Step 4: Execute search
+            // Step 4: Execute search (with optional resilience)
             var searchText = options.UseKeywordSearch ? query : "*";
-            var response = await searchClient.SearchAsync<KnowledgeDocument>(searchText, searchOptions, cancellationToken);
+            SearchResults<KnowledgeDocument> searchResults;
+
+            if (_resilientClient != null)
+            {
+                searchResults = await _resilientClient.SearchAsync<KnowledgeDocument>(
+                    searchClient, searchText, searchOptions, cancellationToken);
+            }
+            else
+            {
+                var response = await searchClient.SearchAsync<KnowledgeDocument>(
+                    searchText, searchOptions, cancellationToken);
+                searchResults = response.Value;
+            }
             searchStopwatch.Stop();
 
             // Step 5: Process results
             var results = new List<RagSearchResult>();
             long totalCount = 0;
 
-            await foreach (var result in response.Value.GetResultsAsync().WithCancellation(cancellationToken))
+            await foreach (var result in searchResults.GetResultsAsync().WithCancellation(cancellationToken))
             {
                 if (result.Document == null) continue;
 
@@ -154,7 +174,7 @@ public class RagService : IRagService
             }
 
             // Get total count from response
-            totalCount = response.Value.TotalCount ?? results.Count;
+            totalCount = searchResults.TotalCount ?? results.Count;
 
             totalStopwatch.Stop();
 
@@ -163,6 +183,15 @@ public class RagService : IRagService
                 "(embedding={EmbeddingMs}ms, search={SearchMs}ms)",
                 options.TenantId, results.Count, totalStopwatch.ElapsedMilliseconds,
                 embeddingStopwatch.ElapsedMilliseconds, searchStopwatch.ElapsedMilliseconds);
+
+            // Record telemetry
+            _telemetry?.RecordRagSearch(
+                totalDurationMs: totalStopwatch.Elapsed.TotalMilliseconds,
+                embeddingDurationMs: embeddingStopwatch.Elapsed.TotalMilliseconds,
+                searchDurationMs: searchStopwatch.Elapsed.TotalMilliseconds,
+                resultCount: results.Count,
+                success: true,
+                embeddingCacheHit: embeddingCacheHit);
 
             return new RagSearchResponse
             {
@@ -177,16 +206,49 @@ public class RagService : IRagService
         catch (RequestFailedException ex)
         {
             _logger.LogError(ex, "Azure AI Search error during RAG search for tenant {TenantId}", options.TenantId);
+            _telemetry?.RecordRagSearch(
+                totalDurationMs: totalStopwatch.Elapsed.TotalMilliseconds,
+                embeddingDurationMs: embeddingStopwatch.Elapsed.TotalMilliseconds,
+                searchDurationMs: searchStopwatch.Elapsed.TotalMilliseconds,
+                resultCount: 0,
+                success: false,
+                errorCode: "search_failed");
             throw;
         }
         catch (OpenAiCircuitBrokenException)
         {
             _logger.LogWarning("OpenAI circuit breaker open during RAG search for tenant {TenantId}", options.TenantId);
+            _telemetry?.RecordRagSearch(
+                totalDurationMs: totalStopwatch.Elapsed.TotalMilliseconds,
+                embeddingDurationMs: embeddingStopwatch.Elapsed.TotalMilliseconds,
+                searchDurationMs: 0,
+                resultCount: 0,
+                success: false,
+                errorCode: "openai_circuit_breaker_open");
+            throw;
+        }
+        catch (AiSearchCircuitBrokenException)
+        {
+            _logger.LogWarning("Azure AI Search circuit breaker open during RAG search for tenant {TenantId}", options.TenantId);
+            _telemetry?.RecordRagSearch(
+                totalDurationMs: totalStopwatch.Elapsed.TotalMilliseconds,
+                embeddingDurationMs: embeddingStopwatch.Elapsed.TotalMilliseconds,
+                searchDurationMs: searchStopwatch.Elapsed.TotalMilliseconds,
+                resultCount: 0,
+                success: false,
+                errorCode: "search_circuit_breaker_open");
             throw;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Unexpected error during RAG search for tenant {TenantId}", options.TenantId);
+            _telemetry?.RecordRagSearch(
+                totalDurationMs: totalStopwatch.Elapsed.TotalMilliseconds,
+                embeddingDurationMs: embeddingStopwatch.Elapsed.TotalMilliseconds,
+                searchDurationMs: searchStopwatch.Elapsed.TotalMilliseconds,
+                resultCount: 0,
+                success: false,
+                errorCode: "unexpected_error");
             throw;
         }
     }
@@ -217,13 +279,23 @@ public class RagService : IRagService
         }
         document.UpdatedAt = now;
 
-        // Get SearchClient and index document
+        // Get SearchClient and index document (with optional resilience)
         var searchClient = await _deploymentService.GetSearchClientAsync(document.TenantId, cancellationToken);
-        var response = await searchClient.MergeOrUploadDocumentsAsync(
-            new[] { document },
-            cancellationToken: cancellationToken);
+        IndexDocumentsResult indexResult;
 
-        var result = response.Value.Results.FirstOrDefault();
+        if (_resilientClient != null)
+        {
+            indexResult = await _resilientClient.MergeOrUploadDocumentsAsync(
+                searchClient, new[] { document }, cancellationToken);
+        }
+        else
+        {
+            var response = await searchClient.MergeOrUploadDocumentsAsync(
+                new[] { document }, cancellationToken: cancellationToken);
+            indexResult = response.Value;
+        }
+
+        var result = indexResult.Results.FirstOrDefault();
         if (result?.Succeeded != true)
         {
             throw new InvalidOperationException($"Failed to index document: {result?.ErrorMessage}");
@@ -285,9 +357,21 @@ public class RagService : IRagService
         for (int i = 0; i < documentList.Count; i += batchSize)
         {
             var batch = documentList.Skip(i).Take(batchSize).ToList();
-            var response = await searchClient.MergeOrUploadDocumentsAsync(batch, cancellationToken: cancellationToken);
+            IndexDocumentsResult indexResult;
 
-            foreach (var result in response.Value.Results)
+            if (_resilientClient != null)
+            {
+                indexResult = await _resilientClient.MergeOrUploadDocumentsAsync(
+                    searchClient, batch, cancellationToken);
+            }
+            else
+            {
+                var response = await searchClient.MergeOrUploadDocumentsAsync(
+                    batch, cancellationToken: cancellationToken);
+                indexResult = response.Value;
+            }
+
+            foreach (var result in indexResult.Results)
             {
                 results.Add(result.Succeeded
                     ? IndexResult.Success(result.Key)
@@ -314,12 +398,21 @@ public class RagService : IRagService
         _logger.LogDebug("Deleting document {DocumentId} for tenant {TenantId}", documentId, tenantId);
 
         var searchClient = await _deploymentService.GetSearchClientAsync(tenantId, cancellationToken);
-        var response = await searchClient.DeleteDocumentsAsync(
-            "id",
-            new[] { documentId },
-            cancellationToken: cancellationToken);
+        IndexDocumentsResult deleteResult;
 
-        var result = response.Value.Results.FirstOrDefault();
+        if (_resilientClient != null)
+        {
+            deleteResult = await _resilientClient.DeleteDocumentsAsync(
+                searchClient, "id", new[] { documentId }, cancellationToken);
+        }
+        else
+        {
+            var response = await searchClient.DeleteDocumentsAsync(
+                "id", new[] { documentId }, cancellationToken: cancellationToken);
+            deleteResult = response.Value;
+        }
+
+        var result = deleteResult.Results.FirstOrDefault();
         var succeeded = result?.Succeeded ?? false;
 
         if (succeeded)
@@ -357,10 +450,21 @@ public class RagService : IRagService
             Select = { "id" }
         };
 
-        var response = await searchClient.SearchAsync<KnowledgeDocument>("*", searchOptions, cancellationToken);
+        SearchResults<KnowledgeDocument> searchResults;
+        if (_resilientClient != null)
+        {
+            searchResults = await _resilientClient.SearchAsync<KnowledgeDocument>(
+                searchClient, "*", searchOptions, cancellationToken);
+        }
+        else
+        {
+            var response = await searchClient.SearchAsync<KnowledgeDocument>(
+                "*", searchOptions, cancellationToken);
+            searchResults = response.Value;
+        }
 
         var idsToDelete = new List<string>();
-        await foreach (var result in response.Value.GetResultsAsync().WithCancellation(cancellationToken))
+        await foreach (var result in searchResults.GetResultsAsync().WithCancellation(cancellationToken))
         {
             if (result.Document?.Id != null)
             {
@@ -374,9 +478,20 @@ public class RagService : IRagService
             return 0;
         }
 
-        // Delete all found chunks
-        var deleteResponse = await searchClient.DeleteDocumentsAsync("id", idsToDelete, cancellationToken: cancellationToken);
-        var deletedCount = deleteResponse.Value.Results.Count(r => r.Succeeded);
+        // Delete all found chunks (with optional resilience)
+        IndexDocumentsResult deleteResult;
+        if (_resilientClient != null)
+        {
+            deleteResult = await _resilientClient.DeleteDocumentsAsync(
+                searchClient, "id", idsToDelete, cancellationToken);
+        }
+        else
+        {
+            var deleteResponse = await searchClient.DeleteDocumentsAsync(
+                "id", idsToDelete, cancellationToken: cancellationToken);
+            deleteResult = deleteResponse.Value;
+        }
+        var deletedCount = deleteResult.Results.Count(r => r.Succeeded);
 
         _logger.LogInformation("Deleted {DeletedCount}/{TotalCount} chunks for source document {SourceDocumentId}",
             deletedCount, idsToDelete.Count, sourceDocumentId);

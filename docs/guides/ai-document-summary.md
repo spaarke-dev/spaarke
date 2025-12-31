@@ -6,12 +6,13 @@
 
 1. [Overview](#overview)
 2. [Configuration](#configuration)
-3. [API Reference](#api-reference)
-4. [SSE Response Format](#sse-response-format)
-5. [Error Handling](#error-handling)
-6. [Rate Limiting](#rate-limiting)
-7. [Monitoring](#monitoring)
-8. [Code Examples](#code-examples)
+3. [Authorization](#authorization)
+4. [API Reference](#api-reference)
+5. [SSE Response Format](#sse-response-format)
+6. [Error Handling](#error-handling)
+7. [Rate Limiting](#rate-limiting)
+8. [Monitoring](#monitoring)
+9. [Code Examples](#code-examples)
 
 ---
 
@@ -67,6 +68,16 @@ Client (PCF)          BFF API                    Azure Services
 | `MaxInputTokens` | int | `100000` | Max input tokens |
 | `MaxConcurrentStreams` | int | `3` | Max concurrent SSE per user |
 
+### AnalysisOptions (Export)
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `EnableDocxExport` | bool | `true` | Enable DOCX export format |
+| `EnablePdfExport` | bool | `true` | Enable PDF export format |
+| `EnableEmailExport` | bool | `true` | Enable email export via Graph |
+| `ExportBranding.CompanyName` | string | `"Spaarke AI"` | Branding in export footers |
+| `ExportBranding.LogoUrl` | string? | null | Logo URL for PDF exports |
+
 ### Example Configuration
 
 ```json
@@ -107,6 +118,61 @@ Configure via `SupportedFileTypes` dictionary:
 
 ---
 
+## Authorization
+
+All Document Intelligence endpoints require proper authentication and authorization.
+
+### Authentication
+
+All endpoints require Azure AD authentication via Bearer token. The user must be authenticated with a valid Azure AD JWT token containing at minimum:
+- `oid` claim (Azure AD Object ID) - used for Dataverse user lookup
+- `tid` claim (Tenant ID) - used for tenant isolation
+
+### Document-Level Authorization
+
+The `AiAuthorizationFilter` validates that the user has read access to the document being analyzed:
+
+```
+Request Flow:
+POST /api/ai/document-intelligence/analyze
+  → .RequireAuthorization()           (Azure AD JWT validation)
+  → .AddAiAuthorizationFilter()       (Document-level access check)
+  → .RequireRateLimiting("ai-stream") (Rate limiting)
+  → StreamAnalyze()                   (Handler)
+```
+
+**How it works:**
+1. **Claim Extraction**: Extracts the Azure AD `oid` (Object ID) from the JWT token
+2. **Dataverse Lookup**: Queries Dataverse to find the user by `azureactivedirectoryobjectid`
+3. **Permission Check**: Calls `RetrievePrincipalAccess` to verify user has read access to the `sprk_document` record
+4. **Fail-Closed**: If any step fails, access is denied (security-first design)
+
+### Claim Extraction Pattern
+
+The filter uses the `oid` claim with a fallback chain:
+
+```csharp
+var userId = httpContext.User.FindFirst("oid")?.Value
+    ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+    ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+```
+
+**IMPORTANT**: The `oid` claim is required because `DataverseAccessDataSource` queries:
+```
+systemusers?$filter=azureactivedirectoryobjectid eq '{oid}'
+```
+
+### Authorization Error Responses
+
+| Code | Cause | Resolution |
+|------|-------|------------|
+| `401` | Missing or invalid token | Provide valid Azure AD Bearer token |
+| `401` | User identity not found (no `oid` claim) | Ensure token contains Azure AD Object ID |
+| `403` | No read access to document | User must have Dataverse read access to the `sprk_document` record |
+| `400` | No document ID in request | Include `documentId` in request body |
+
+---
+
 ## API Reference
 
 ### POST /api/ai/document-intelligence/analyze
@@ -114,6 +180,8 @@ Configure via `SupportedFileTypes` dictionary:
 Stream document summarization via Server-Sent Events.
 
 **Authentication:** Bearer token (Azure AD)
+
+**Authorization:** User must have read access to the document (via `AiAuthorizationFilter`)
 
 **Rate Limit:** 10 requests/minute per user
 
@@ -153,11 +221,13 @@ data: {"type":"error","code":"openai_rate_limit","message":"Rate limit exceeded"
 
 ---
 
-### POST /api/ai/summarize/enqueue
+### POST /api/ai/document-intelligence/enqueue
 
 Enqueue a single document for background summarization.
 
 **Authentication:** Bearer token (Azure AD)
+
+**Authorization:** User must have read access to the document (via `AiAuthorizationFilter`)
 
 **Rate Limit:** 20 requests/minute per user
 
@@ -185,6 +255,8 @@ Enqueue a single document for background summarization.
 Enqueue multiple documents (max 10) for background summarization.
 
 **Authentication:** Bearer token (Azure AD)
+
+**Authorization:** User must have read access to ALL documents in the batch (via `AiAuthorizationFilter`)
 
 **Rate Limit:** 20 requests/minute per user
 
@@ -222,6 +294,70 @@ Enqueue multiple documents (max 10) for background summarization.
   "count": 2
 }
 ```
+
+---
+
+### POST /api/ai/analysis/{analysisId}/export
+
+Export analysis results to various formats.
+
+**Authentication:** Bearer token (Azure AD)
+
+**Rate Limit:** 10 requests/minute per user
+
+**Request Headers:**
+```
+Content-Type: application/json
+Authorization: Bearer {token}
+```
+
+**Request Body:**
+```json
+{
+  "format": "docx",
+  "emailTo": ["user@example.com"],
+  "includeEntities": true,
+  "includeClauses": true,
+  "includeSummary": true
+}
+```
+
+**Supported Formats:**
+
+| Format | Description | Response |
+|--------|-------------|----------|
+| `docx` | Microsoft Word document | File download (binary) |
+| `pdf` | PDF document | File download (binary) |
+| `email` | Send via Microsoft Graph | Action confirmation (JSON) |
+
+**DOCX/PDF Response:** `200 OK`
+```
+Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document
+Content-Disposition: attachment; filename="Analysis_Report_2025-12-30.docx"
+[Binary file content]
+```
+
+**Email Response:** `200 OK`
+```json
+{
+  "success": true,
+  "format": "email",
+  "metadata": {
+    "Recipients": ["user@example.com"],
+    "Subject": "Analysis: Contract Review",
+    "SentAt": "2025-12-30T10:15:00Z"
+  }
+}
+```
+
+**Error Responses:**
+
+| Code | Cause | Resolution |
+|------|-------|------------|
+| `400` | Invalid format or missing required fields | Check request body |
+| `403` | Export format disabled | Enable in configuration |
+| `404` | Analysis not found | Verify analysisId |
+| `422` | Validation failed (e.g., invalid email) | Fix validation errors |
 
 ---
 

@@ -5,6 +5,8 @@ using Polly.CircuitBreaker;
 using Polly.Extensions.Http;
 using Polly.Timeout;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Resilience;
+using ResilienceCircuitState = Sprk.Bff.Api.Infrastructure.Resilience.CircuitState;
 
 namespace Sprk.Bff.Api.Infrastructure.Http;
 
@@ -17,14 +19,21 @@ public class GraphHttpMessageHandler : DelegatingHandler
 {
     private readonly ILogger<GraphHttpMessageHandler> _logger;
     private readonly GraphResilienceOptions _options;
+    private readonly ICircuitBreakerRegistry? _circuitRegistry;
     private readonly IAsyncPolicy<HttpResponseMessage> _resiliencePolicy;
 
     public GraphHttpMessageHandler(
         ILogger<GraphHttpMessageHandler> logger,
-        IOptions<GraphResilienceOptions> options)
+        IOptions<GraphResilienceOptions> options,
+        ICircuitBreakerRegistry? circuitRegistry = null)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
+        _circuitRegistry = circuitRegistry;
+
+        // Register with circuit breaker registry
+        _circuitRegistry?.RegisterCircuit(CircuitBreakerRegistry.MicrosoftGraph);
+
         _resiliencePolicy = BuildResiliencePolicy();
     }
 
@@ -99,17 +108,24 @@ public class GraphHttpMessageHandler : DelegatingHandler
                         _options.CircuitBreakerFailureThreshold,
                         (int)statusCode,
                         duration.TotalSeconds);
-                    RecordCircuitBreakerState("open");
+                    _circuitRegistry?.RecordStateChange(
+                        CircuitBreakerRegistry.MicrosoftGraph,
+                        ResilienceCircuitState.Open,
+                        duration);
                 },
                 onReset: () =>
                 {
                     _logger.LogInformation("Circuit breaker RESET to closed state - service recovered");
-                    RecordCircuitBreakerState("closed");
+                    _circuitRegistry?.RecordStateChange(
+                        CircuitBreakerRegistry.MicrosoftGraph,
+                        ResilienceCircuitState.Closed);
                 },
                 onHalfOpen: () =>
                 {
                     _logger.LogInformation("Circuit breaker in HALF-OPEN state - testing connection");
-                    RecordCircuitBreakerState("half-open");
+                    _circuitRegistry?.RecordStateChange(
+                        CircuitBreakerRegistry.MicrosoftGraph,
+                        ResilienceCircuitState.HalfOpen);
                 });
 
         // 3. Timeout Policy: Per-request timeout
@@ -135,22 +151,15 @@ public class GraphHttpMessageHandler : DelegatingHandler
 
     private void RecordRetryAttempt(HttpStatusCode statusCode, int attempt)
     {
-        // TODO (Sprint 4): Emit telemetry (Application Insights, Prometheus, etc.)
-        // Example: _telemetry.TrackMetric("GraphApi.Retry", attempt, new { StatusCode = (int)statusCode });
+        // Retry telemetry is tracked via circuit breaker registry and OpenTelemetry metrics
+        _circuitRegistry?.RecordFailure(CircuitBreakerRegistry.MicrosoftGraph);
         _ = statusCode;
         _ = attempt;
     }
 
-    private void RecordCircuitBreakerState(string state)
-    {
-        // TODO (Sprint 4): Emit circuit breaker state change
-        // Example: _telemetry.TrackEvent("GraphApi.CircuitBreaker", new { State = state });
-        _ = state;
-    }
-
     private void RecordTimeout()
     {
-        // TODO (Sprint 4): Emit timeout event
-        // Example: _telemetry.TrackMetric("GraphApi.Timeout", 1);
+        // Timeout is counted as a failure for circuit breaker tracking
+        _circuitRegistry?.RecordFailure(CircuitBreakerRegistry.MicrosoftGraph);
     }
 }

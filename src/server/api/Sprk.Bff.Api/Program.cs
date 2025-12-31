@@ -333,6 +333,16 @@ if (analysisEnabled && documentIntelligenceEnabled)
     builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IScopeResolverService, Sprk.Bff.Api.Services.Ai.ScopeResolverService>();
     builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IAnalysisContextBuilder, Sprk.Bff.Api.Services.Ai.AnalysisContextBuilder>();
     builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IWorkingDocumentService, Sprk.Bff.Api.Services.Ai.WorkingDocumentService>();
+
+    // Export services - DOCX, PDF, and Email export for analysis results (R3 Phase 4)
+    // PDF uses QuestPDF in-process generation (ADR-001 compliant)
+    // Email uses Microsoft Graph /me/sendMail API
+    builder.Services.AddHttpContextAccessor(); // Required for email export (OBO flow)
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.Export.IExportService, Sprk.Bff.Api.Services.Ai.Export.DocxExportService>();
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.Export.IExportService, Sprk.Bff.Api.Services.Ai.Export.PdfExportService>();
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.Export.IExportService, Sprk.Bff.Api.Services.Ai.Export.EmailExportService>();
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.Export.ExportServiceRegistry>();
+
     builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IAnalysisOrchestrationService, Sprk.Bff.Api.Services.Ai.AnalysisOrchestrationService>();
 
     // Playbook Service - CRUD operations for analysis playbooks (R3 Phase 3)
@@ -812,13 +822,38 @@ builder.Services.AddRateLimiter(options =>
     };
 });
 
-// TODO: OpenTelemetry - API needs to be updated for .NET 8
-// builder.Services.AddOpenTelemetry()
-//     .WithTracing(tracing =>
-//     {
-//         tracing.AddAspNetCoreInstrumentation();
-//         tracing.AddHttpClientInstrumentation();
-//     });
+// OpenTelemetry configuration for AI metrics and distributed tracing
+// Metrics are collected via custom meters and exported to Application Insights
+// Custom meters: Sprk.Bff.Api.Ai (AI operations) and Sprk.Bff.Api.Cache (caching)
+builder.Services.AddOpenTelemetry()
+    .WithMetrics(metrics =>
+    {
+        metrics.AddMeter("Sprk.Bff.Api.Ai");   // AI telemetry (summarization, RAG, tools, export)
+        metrics.AddMeter("Sprk.Bff.Api.Cache"); // Cache metrics (hits, misses, latency)
+        metrics.AddMeter("Sprk.Bff.Api.CircuitBreaker"); // Circuit breaker metrics
+    })
+    .WithTracing(tracing =>
+    {
+        tracing.AddSource("Sprk.Bff.Api.Ai"); // AI distributed tracing
+    });
+
+// ============================================================================
+// CIRCUIT BREAKER REGISTRY - Centralized monitoring of all circuit breakers
+// ============================================================================
+builder.Services.AddSingleton<Sprk.Bff.Api.Infrastructure.Resilience.ICircuitBreakerRegistry,
+    Sprk.Bff.Api.Infrastructure.Resilience.CircuitBreakerRegistry>();
+
+// AI Search Resilience Options
+builder.Services
+    .AddOptions<Sprk.Bff.Api.Configuration.AiSearchResilienceOptions>()
+    .Bind(builder.Configuration.GetSection(Sprk.Bff.Api.Configuration.AiSearchResilienceOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+
+// Resilient Search Client (for AI Search circuit breaker protection)
+builder.Services.AddSingleton<Sprk.Bff.Api.Infrastructure.Resilience.IResilientSearchClient,
+    Sprk.Bff.Api.Infrastructure.Resilience.ResilientSearchClient>();
+Console.WriteLine("✓ Circuit breaker registry enabled");
 
 var app = builder.Build();
 
@@ -986,6 +1021,9 @@ if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled"))
     // RAG endpoints for knowledge base operations (R3)
     app.MapRagEndpoints();
 }
+
+// Resilience monitoring endpoints (circuit breaker status)
+app.MapResilienceEndpoints();
 
 // Record Matching endpoints (Phase 2 - only if enabled)
 if (app.Configuration.GetValue<bool>("DocumentIntelligence:RecordMatchingEnabled"))
