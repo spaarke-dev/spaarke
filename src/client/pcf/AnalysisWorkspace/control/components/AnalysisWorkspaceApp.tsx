@@ -42,8 +42,8 @@ import { useSseStream } from "../hooks/useSseStream";
 import { MsalAuthProvider, loginRequest } from "../services/auth";
 
 // Build info for version footer
-const VERSION = "1.0.18";
-const BUILD_DATE = "2025-12-14";
+const VERSION = "1.2.2";
+const BUILD_DATE = "2026-01-02";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles - 3-Column Layout
@@ -343,6 +343,7 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
     const dragStartWidthRef = React.useRef<number>(0);
 
     // Resolved document fields from expanded relationship
+    const [resolvedDocumentId, setResolvedDocumentId] = React.useState(documentId);
     const [resolvedContainerId, setResolvedContainerId] = React.useState(containerId);
     const [resolvedFileId, setResolvedFileId] = React.useState(fileId);
     const [resolvedDocumentName, setResolvedDocumentName] = React.useState("");
@@ -553,6 +554,9 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
             // Fetch document details separately if we have a document ID
             const docId = result._sprk_documentid_value;
             if (docId) {
+                // Store the document ID from analysis record
+                setResolvedDocumentId(docId);
+
                 try {
                     const docResult = await webApi.retrieveRecord(
                         "sprk_document",
@@ -568,7 +572,7 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
                     if (docResult.sprk_documentname) {
                         setResolvedDocumentName(docResult.sprk_documentname);
                     }
-                    logInfo("AnalysisWorkspaceApp", `Document fields resolved: container=${docResult.sprk_graphdriveid}, file=${docResult.sprk_graphitemid}`);
+                    logInfo("AnalysisWorkspaceApp", `Document fields resolved: docId=${docId}, container=${docResult.sprk_graphdriveid}, file=${docResult.sprk_graphitemid}`);
                 } catch (docErr) {
                     logError("AnalysisWorkspaceApp", "Failed to load document details", docErr);
                 }
@@ -846,7 +850,7 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
                     </div>
                     <div className={styles.documentPreview}>
                         <SourceDocumentViewer
-                            documentId={documentId}
+                            documentId={resolvedDocumentId}
                             containerId={resolvedContainerId}
                             fileId={resolvedFileId}
                             apiBaseUrl={apiBaseUrl}
