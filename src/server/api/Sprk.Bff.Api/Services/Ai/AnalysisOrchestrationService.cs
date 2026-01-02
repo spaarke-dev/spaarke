@@ -185,10 +185,12 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
     {
         _logger.LogInformation("Continuing analysis {AnalysisId}", analysisId);
 
-        // Get analysis from in-memory store
+        // Get analysis from in-memory store, or reload from Dataverse if not found
         if (!_analysisStore.TryGetValue(analysisId, out var analysis))
         {
-            throw new KeyNotFoundException($"Analysis {analysisId} not found");
+            _logger.LogInformation("Analysis {AnalysisId} not in memory, reloading from Dataverse", analysisId);
+            analysis = await ReloadAnalysisFromDataverseAsync(analysisId, cancellationToken);
+            _analysisStore[analysisId] = analysis;
         }
 
         // Build full prompt with document context via context builder service
@@ -722,6 +724,93 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
     {
         // Rough estimation: ~4 characters per token
         return (int)Math.Ceiling(text.Length / 4.0);
+    }
+
+    /// <summary>
+    /// Reload analysis context from Dataverse when not found in memory.
+    /// Extracts document text so chat continuations have context.
+    /// </summary>
+    private async Task<AnalysisInternalModel> ReloadAnalysisFromDataverseAsync(
+        Guid analysisId,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("Reloading analysis {AnalysisId} from Dataverse", analysisId);
+
+        // 1. Get analysis record from Dataverse
+        var analysisRecord = await _dataverseService.GetAnalysisAsync(analysisId.ToString(), cancellationToken)
+            ?? throw new KeyNotFoundException($"Analysis {analysisId} not found in Dataverse");
+
+        // 2. Get the associated document for text extraction
+        string? documentText = null;
+        string documentName = "Unknown";
+
+        if (analysisRecord.DocumentId != Guid.Empty)
+        {
+            try
+            {
+                var document = await _dataverseService.GetDocumentAsync(
+                    analysisRecord.DocumentId.ToString(), cancellationToken);
+
+                if (document != null)
+                {
+                    documentName = document.Name ?? document.FileName ?? "Unknown";
+                    documentText = await ExtractDocumentTextAsync(document, cancellationToken);
+                    _logger.LogInformation(
+                        "Extracted {CharCount} characters of document text for reloaded analysis {AnalysisId}",
+                        documentText?.Length ?? 0, analysisId);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Failed to extract document text for analysis {AnalysisId}. Continuing without document context.",
+                    analysisId);
+            }
+        }
+
+        // 3. Parse chat history from the analysis record
+        var chatHistory = Array.Empty<ChatMessageModel>();
+        if (!string.IsNullOrWhiteSpace(analysisRecord.ChatHistory))
+        {
+            try
+            {
+                var messages = System.Text.Json.JsonSerializer.Deserialize<ChatMessageModel[]>(
+                    analysisRecord.ChatHistory,
+                    new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+                if (messages != null)
+                {
+                    chatHistory = messages;
+                    _logger.LogDebug("Restored {Count} chat messages for analysis {AnalysisId}",
+                        messages.Length, analysisId);
+                }
+            }
+            catch (System.Text.Json.JsonException ex)
+            {
+                _logger.LogWarning(ex, "Failed to deserialize chat history for analysis {AnalysisId}", analysisId);
+            }
+        }
+
+        // 4. Build the internal model with document context
+        var analysis = new AnalysisInternalModel
+        {
+            Id = analysisId,
+            DocumentId = analysisRecord.DocumentId,
+            DocumentName = documentName,
+            ActionId = Guid.Empty,
+            Status = "InProgress",
+            DocumentText = documentText,
+            SystemPrompt = BuildDefaultSystemPrompt(),
+            WorkingDocument = analysisRecord.WorkingDocument,
+            ChatHistory = chatHistory,
+            StartedOn = DateTime.UtcNow
+        };
+
+        _logger.LogInformation(
+            "Successfully reloaded analysis {AnalysisId} with {DocChars} chars of document text and {ChatCount} chat messages",
+            analysisId, documentText?.Length ?? 0, chatHistory.Length);
+
+        return analysis;
     }
 }
 

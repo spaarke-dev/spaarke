@@ -215,7 +215,7 @@ export const SourceDocumentViewer: React.FC<ISourceDocumentViewerProps> = ({
             }
 
             // Call BFF API to get preview URL
-            const response = await fetch(`${apiBaseUrl}/documents/${documentId}/preview-url`, {
+            const response = await fetch(`${apiBaseUrl}/api/documents/${documentId}/preview-url`, {
                 method: "GET",
                 headers: {
                     "Content-Type": "application/json",

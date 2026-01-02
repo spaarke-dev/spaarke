@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="AnalysisWorkspace" version="1.2.2" display-name-key="Analysis Workspace" description-key="AI Document Analysis Workspace with MSAL auth and Rich Text Editor (v1.2.2)" control-type="standard">
+  <control namespace="Spaarke.Controls" constructor="AnalysisWorkspace" version="1.2.3" display-name-key="Analysis Workspace" description-key="AI Document Analysis Workspace with MSAL auth, Resume Dialog, and Rich Text Editor (v1.2.3)" control-type="standard">
     <external-service-usage enabled="false">
     </external-service-usage>
 

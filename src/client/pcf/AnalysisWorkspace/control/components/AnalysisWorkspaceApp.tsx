@@ -21,7 +21,13 @@ import {
     Button,
     Tooltip,
     Badge,
-    Textarea
+    Textarea,
+    Dialog,
+    DialogSurface,
+    DialogTitle,
+    DialogBody,
+    DialogActions,
+    DialogContent
 } from "@fluentui/react-components";
 import {
     ChatRegular,
@@ -32,7 +38,9 @@ import {
     ChevronDoubleRight20Regular,
     ChevronDoubleLeft20Regular,
     ChevronRight20Regular,
-    ChevronLeft20Regular
+    ChevronLeft20Regular,
+    HistoryRegular,
+    DocumentAddRegular
 } from "@fluentui/react-icons";
 import { IAnalysisWorkspaceAppProps, IChatMessage, IAnalysis } from "../types";
 import { logInfo, logError } from "../utils/logger";
@@ -42,7 +50,7 @@ import { useSseStream } from "../hooks/useSseStream";
 import { MsalAuthProvider, loginRequest } from "../services/auth";
 
 // Build info for version footer
-const VERSION = "1.2.2";
+const VERSION = "1.2.3";
 const BUILD_DATE = "2026-01-02";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -247,6 +255,48 @@ const useStyles = makeStyles({
         gap: tokens.spacingHorizontalXS,
         padding: tokens.spacingHorizontalS,
         color: tokens.colorBrandForeground1
+    },
+    // Choice Dialog Styles (ADR-023)
+    choiceDialogContent: {
+        display: "flex",
+        flexDirection: "column",
+        gap: tokens.spacingVerticalM
+    },
+    choiceOptionsContainer: {
+        display: "flex",
+        flexDirection: "column",
+        gap: tokens.spacingVerticalS,
+        marginTop: tokens.spacingVerticalM
+    },
+    choiceOptionButton: {
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "flex-start",
+        gap: tokens.spacingHorizontalM,
+        padding: tokens.spacingVerticalM,
+        width: "100%",
+        textAlign: "left" as const,
+        minHeight: "64px"
+    },
+    choiceOptionIcon: {
+        fontSize: "24px",
+        color: tokens.colorBrandForeground1,
+        flexShrink: 0
+    },
+    choiceOptionText: {
+        display: "flex",
+        flexDirection: "column",
+        gap: tokens.spacingVerticalXXS,
+        overflow: "hidden"
+    },
+    choiceOptionTitle: {
+        fontWeight: tokens.fontWeightSemibold,
+        color: tokens.colorNeutralForeground1
+    },
+    choiceOptionDescription: {
+        color: tokens.colorNeutralForeground2,
+        fontSize: tokens.fontSizeBase200,
+        lineHeight: tokens.lineHeightBase200
     }
 });
 
@@ -351,6 +401,10 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
     // Auth state
     const [isAuthInitialized, setIsAuthInitialized] = React.useState(false);
     const authProviderRef = React.useRef<MsalAuthProvider | null>(null);
+
+    // Choice dialog state (ADR-023: Resume vs Start Fresh)
+    const [showResumeDialog, setShowResumeDialog] = React.useState(false);
+    const [pendingChatHistory, setPendingChatHistory] = React.useState<IChatMessage[] | null>(null);
 
     // Initialize MSAL auth provider
     React.useEffect(() => {
@@ -578,13 +632,15 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
                 }
             }
 
-            // Parse chat history if exists
+            // Parse chat history if exists - show choice dialog (ADR-023)
             if (result.sprk_chathistory) {
                 try {
                     const parsed = JSON.parse(result.sprk_chathistory);
-                    if (Array.isArray(parsed)) {
-                        setChatMessages(parsed);
-                        logInfo("AnalysisWorkspaceApp", `Loaded ${parsed.length} chat messages`);
+                    if (Array.isArray(parsed) && parsed.length > 0) {
+                        // Store pending history and show choice dialog
+                        setPendingChatHistory(parsed);
+                        setShowResumeDialog(true);
+                        logInfo("AnalysisWorkspaceApp", `Found ${parsed.length} chat messages, showing resume dialog`);
                     }
                 } catch (e) {
                     logError("AnalysisWorkspaceApp", "Failed to parse chat history", e);
@@ -662,6 +718,34 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
     // ─────────────────────────────────────────────────────────────────────────
     // Event Handlers
     // ─────────────────────────────────────────────────────────────────────────
+
+    // Choice dialog handlers (ADR-023)
+    const handleResumeSession = () => {
+        if (pendingChatHistory) {
+            setChatMessages(pendingChatHistory);
+            logInfo("AnalysisWorkspaceApp", `Resumed session with ${pendingChatHistory.length} messages`);
+        }
+        setShowResumeDialog(false);
+        setPendingChatHistory(null);
+    };
+
+    const handleStartFresh = async () => {
+        // Clear chat history in Dataverse
+        if (analysisId && isWebApiAvailable(webApi)) {
+            try {
+                await webApi.updateRecord("sprk_analysis", analysisId, {
+                    sprk_chathistory: null
+                });
+                logInfo("AnalysisWorkspaceApp", "Chat history cleared in Dataverse");
+            } catch (err) {
+                logError("AnalysisWorkspaceApp", "Failed to clear chat history", err);
+            }
+        }
+        setChatMessages([]);
+        setShowResumeDialog(false);
+        setPendingChatHistory(null);
+        logInfo("AnalysisWorkspaceApp", "Started fresh session");
+    };
 
     const handleDocumentChange = (content: string) => {
         setWorkingDocument(content);
@@ -760,6 +844,54 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
 
     return (
         <div className={styles.container}>
+            {/* Resume Session Choice Dialog (ADR-023) */}
+            <Dialog open={showResumeDialog} onOpenChange={(_, data) => !data.open && handleStartFresh()}>
+                <DialogSurface>
+                    <DialogBody>
+                        <DialogTitle>Resume Previous Session?</DialogTitle>
+                        <DialogContent className={styles.choiceDialogContent}>
+                            <Text>
+                                This analysis has an existing conversation with{" "}
+                                <strong>{pendingChatHistory?.length || 0} messages</strong>.
+                            </Text>
+
+                            <div className={styles.choiceOptionsContainer}>
+                                <Button
+                                    appearance="outline"
+                                    className={styles.choiceOptionButton}
+                                    onClick={handleResumeSession}
+                                >
+                                    <span className={styles.choiceOptionIcon}><HistoryRegular /></span>
+                                    <div className={styles.choiceOptionText}>
+                                        <span className={styles.choiceOptionTitle}>Resume Session</span>
+                                        <span className={styles.choiceOptionDescription}>
+                                            Continue with your previous conversation history
+                                        </span>
+                                    </div>
+                                </Button>
+
+                                <Button
+                                    appearance="outline"
+                                    className={styles.choiceOptionButton}
+                                    onClick={handleStartFresh}
+                                >
+                                    <span className={styles.choiceOptionIcon}><DocumentAddRegular /></span>
+                                    <div className={styles.choiceOptionText}>
+                                        <span className={styles.choiceOptionTitle}>Start Fresh</span>
+                                        <span className={styles.choiceOptionDescription}>
+                                            Begin a new conversation (previous history will be cleared)
+                                        </span>
+                                    </div>
+                                </Button>
+                            </div>
+                        </DialogContent>
+                        <DialogActions>
+                            <Button appearance="secondary" onClick={handleStartFresh}>Cancel</Button>
+                        </DialogActions>
+                    </DialogBody>
+                </DialogSurface>
+            </Dialog>
+
             {/* Content - 3 Column Layout (no header - form already shows name/status) */}
             <div className={styles.content} ref={containerRef}>
                 {/* LEFT PANEL - Analysis Output / Working Document */}

@@ -142,6 +142,56 @@ public class DataverseWebApiService : IDataverseService
         }
     }
 
+    public async Task<AnalysisEntity?> GetAnalysisAsync(string id, CancellationToken ct = default)
+    {
+        await EnsureAuthenticatedAsync(ct);
+
+        if (!Guid.TryParse(id, out var guid))
+        {
+            _logger.LogWarning("Invalid analysis ID format: {Id}", id);
+            return null;
+        }
+
+        var url = $"sprk_analysises({guid})?$select=sprk_name,sprk_workingdocument,sprk_chathistory,statuscode,createdon,modifiedon,_sprk_documentid_value";
+        _logger.LogDebug("Retrieving analysis: {Id}", id);
+
+        try
+        {
+            var response = await _httpClient.GetAsync(url, ct);
+
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                _logger.LogWarning("Analysis not found: {Id}", id);
+                return null;
+            }
+
+            response.EnsureSuccessStatusCode();
+
+            var data = await response.Content.ReadFromJsonAsync<Dictionary<string, JsonElement>>(cancellationToken: ct);
+            if (data == null) return null;
+
+            return new AnalysisEntity
+            {
+                Id = guid,
+                Name = data.TryGetValue("sprk_name", out var name) ? name.GetString() : null,
+                DocumentId = data.TryGetValue("_sprk_documentid_value", out var docId) && docId.ValueKind != JsonValueKind.Null
+                    ? Guid.Parse(docId.GetString()!) : Guid.Empty,
+                WorkingDocument = data.TryGetValue("sprk_workingdocument", out var wd) && wd.ValueKind != JsonValueKind.Null
+                    ? wd.GetString() : null,
+                ChatHistory = data.TryGetValue("sprk_chathistory", out var ch) && ch.ValueKind != JsonValueKind.Null
+                    ? ch.GetString() : null,
+                StatusCode = data.TryGetValue("statuscode", out var status) ? status.GetInt32() : 0,
+                CreatedOn = data.TryGetValue("createdon", out var created) ? created.GetDateTime() : DateTime.MinValue,
+                ModifiedOn = data.TryGetValue("modifiedon", out var modified) ? modified.GetDateTime() : DateTime.MinValue
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(exception: ex, message: "Failed to retrieve analysis {Id}", id);
+            throw;
+        }
+    }
+
     public async Task UpdateDocumentAsync(string id, UpdateDocumentRequest request, CancellationToken ct = default)
     {
         await EnsureAuthenticatedAsync(ct);
