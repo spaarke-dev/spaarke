@@ -7,7 +7,7 @@
  */
 
 import * as React from "react";
-import * as ReactDOM from "react-dom/client";
+import * as ReactDOM from "react-dom";
 import { FluentProvider } from "@fluentui/react-components";
 import { IInputs, IOutputs } from "./generated/ManifestTypes";
 import { VisualHostRoot } from "./components/VisualHostRoot";
@@ -18,7 +18,7 @@ import { logger } from "./utils/logger";
 export class VisualHost
   implements ComponentFramework.StandardControl<IInputs, IOutputs>
 {
-  private root: ReactDOM.Root | null = null;
+  private container: HTMLDivElement | null = null;
   private notifyOutputChanged: () => void;
   private _cleanupThemeListener: (() => void) | null = null;
   private _context: ComponentFramework.Context<IInputs> | null = null;
@@ -34,18 +34,16 @@ export class VisualHost
     container: HTMLDivElement
   ): void {
     try {
-      logger.info("VisualHost", "Init - Creating React root");
+      logger.info("VisualHost", "Init - Setting up container");
 
       this.notifyOutputChanged = notifyOutputChanged;
       this._context = context;
-
-      // Create single React root
-      this.root = ReactDOM.createRoot(container);
+      this.container = container;
 
       // Set up theme listener for dynamic theme changes
       this._cleanupThemeListener = setupThemeListener((isDark) => {
         logger.info("VisualHost", `Theme changed: isDark=${isDark}`);
-        if (this._context && this.root) {
+        if (this._context && this.container) {
           this.renderReactTree(this._context);
         }
       }, context);
@@ -83,7 +81,7 @@ export class VisualHost
 
   public destroy(): void {
     try {
-      logger.info("VisualHost", "Destroy - Unmounting React root");
+      logger.info("VisualHost", "Destroy - Unmounting React");
 
       // Clean up theme listener
       if (this._cleanupThemeListener) {
@@ -91,9 +89,9 @@ export class VisualHost
         this._cleanupThemeListener = null;
       }
 
-      if (this.root) {
-        this.root.unmount();
-        this.root = null;
+      if (this.container) {
+        ReactDOM.unmountComponentAtNode(this.container);
+        this.container = null;
       }
 
       this._context = null;
@@ -109,17 +107,18 @@ export class VisualHost
   /**
    * Render the React component tree.
    * Called from init() and updateView().
+   * Uses React 16 API (ReactDOM.render) for platform library compatibility.
    */
   private renderReactTree(context: ComponentFramework.Context<IInputs>): void {
-    if (!this.root) {
-      logger.error("VisualHost", "Cannot render - root not initialized");
+    if (!this.container) {
+      logger.error("VisualHost", "Cannot render - container not initialized");
       return;
     }
 
     try {
       const theme = resolveTheme(context);
 
-      this.root.render(
+      ReactDOM.render(
         React.createElement(
           FluentProvider,
           { theme },
@@ -131,7 +130,8 @@ export class VisualHost
               notifyOutputChanged: this.notifyOutputChanged,
             })
           )
-        )
+        ),
+        this.container
       );
     } catch (error) {
       logger.error("VisualHost", "Render failed", error);

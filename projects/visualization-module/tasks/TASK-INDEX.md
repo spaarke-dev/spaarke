@@ -1,8 +1,8 @@
 # Task Index - Spaarke Visuals Framework
 
-> **Last Updated**: 2025-12-30
+> **Last Updated**: 2026-01-02
 > **Total Tasks**: 28
-> **Status**: Phase 6 In Progress
+> **Status**: ✅ PROJECT COMPLETE
 
 ---
 
@@ -15,8 +15,8 @@
 | Phase 3: Visual Host PCF | 4 | 4/4 complete |
 | Phase 4: Drill-Through | 5 | 5/5 complete |
 | Phase 5: Testing & Docs | 2 | 2/2 complete |
-| Phase 6: v1.1.0 Enhancements | 3 | 2/3 in-progress |
-| Wrap-up | 1 | 0/1 not-started |
+| Phase 6: v1.1.0 Enhancements | 3 | 3/3 complete |
+| Wrap-up | 1 | 1/1 complete |
 
 ---
 
@@ -77,13 +77,13 @@
 |----|-------|--------|--------------|------------|
 | 050 | [Visual Host v1.1.0 PCF changes](050-visualhost-v110-pcf.poml) | ✅ completed | 040 | 4 |
 | 051 | [Chart Definition form JavaScript](051-chartdefinition-form-js.poml) | ✅ completed | 050 | 2 |
-| 052 | [Deploy v1.1.0 and integration testing](052-deploy-v110-test.poml) | 🔄 in-progress | 050, 051 | 3 |
+| 052 | [Deploy v1.1.0 and integration testing](052-deploy-v110-test.poml) | ✅ completed | 050, 051 | 3 |
 
 ### Project Wrap-up
 
 | ID | Title | Status | Dependencies | Est. Hours |
 |----|-------|--------|--------------|------------|
-| 090 | [Project wrap-up and documentation](090-project-wrap-up.poml) | 🔲 not-started | 052 | 2 |
+| 090 | [Project wrap-up and documentation](090-project-wrap-up.poml) | ✅ completed | 052 | 2 |
 
 ---
 
@@ -117,11 +117,13 @@ Phase 6 (Current):
 
 ## Execution Notes
 
-- **Current Phase**: Phase 6 - Visual Host v1.1.0 Enhancements
-- **Next tasks**: Task 050, 051, 052 (v1.1.0 implementation)
-- **Phase 1-5 complete**: All core development and testing done
-- **Phase 6 scope**: Hybrid chart selection, context filtering, Chart Definition UX
-- **End with**: Task 090 (project wrap-up)
+- **Project Status**: ✅ COMPLETE (2026-01-02)
+- **All phases complete**: Foundation, Charts, PCF, Drill-Through, Testing, v1.1.0 Enhancements
+- **Final Version**: VisualHost v1.1.17, DrillThroughWorkspace v1.1.1
+
+### Future Enhancements (Documented for Separate Projects)
+- **Drill-Through Filtering**: Custom Page parameter passing deferred to UniversalDatasetGrid project
+- **UniversalDatasetGrid Fix**: See `projects/universal-dataset-grid-r2/README.md` - React 18 → React 16 migration required
 
 ### Architecture Clarification (2025-12-29)
 

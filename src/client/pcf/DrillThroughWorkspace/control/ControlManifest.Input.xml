@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="DrillThroughWorkspace" version="1.1.0" display-name-key="Drill-Through Workspace" description-key="Dataset PCF for drill-through visualizations - chart + filtered grid side-by-side (v1.1.0)" control-type="standard">
+  <control namespace="Spaarke.Controls" constructor="DrillThroughWorkspace" version="1.1.1" display-name-key="Drill-Through Workspace" description-key="Dataset PCF for drill-through visualizations - chart + filtered grid side-by-side (v1.1.1)" control-type="standard">
     <external-service-usage enabled="false">
     </external-service-usage>
 

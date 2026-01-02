@@ -1,35 +1,34 @@
 /**
- * BarChart Component
- * Renders vertical or horizontal bar charts using Fluent UI Charting
+ * LineChart Component
+ * Renders line or area charts using Fluent UI Charting
  * Supports click-to-drill for viewing underlying records
  */
 
 import * as React from "react";
 import { useRef, useState, useEffect } from "react";
 import {
-  VerticalBarChart,
-  HorizontalBarChart,
-  IVerticalBarChartDataPoint,
-  IHorizontalBarChartWithAxisDataPoint,
+  LineChart as FluentLineChart,
+  AreaChart,
+  ILineChartPoints,
   IChartProps,
 } from "@fluentui/react-charting";
 import { makeStyles, tokens, Text } from "@fluentui/react-components";
-import type { DrillInteraction, IAggregatedDataPoint } from "../types";
+import type { DrillInteraction, IAggregatedDataPoint } from "../../types";
 
-export type BarOrientation = "vertical" | "horizontal";
+export type ChartVariant = "line" | "area";
 
-export interface IBarChartProps {
+export interface ILineChartProps {
   /** Data points to display */
   data: IAggregatedDataPoint[];
   /** Chart title */
   title?: string;
-  /** Chart orientation */
-  orientation?: BarOrientation;
-  /** Whether to show data labels on bars */
+  /** Chart variant (line or area) */
+  variant?: ChartVariant;
+  /** Whether to show data labels */
   showLabels?: boolean;
   /** Whether to show the legend */
   showLegend?: boolean;
-  /** Callback when a bar is clicked for drill-through */
+  /** Callback when a point is clicked for drill-through */
   onDrillInteraction?: (interaction: DrillInteraction) => void;
   /** Field name for drill interaction */
   drillField?: string;
@@ -37,6 +36,8 @@ export interface IBarChartProps {
   height?: number;
   /** Whether the chart should be responsive */
   responsive?: boolean;
+  /** Line color override */
+  lineColor?: string;
 }
 
 const useStyles = makeStyles({
@@ -48,7 +49,7 @@ const useStyles = makeStyles({
     minHeight: "200px",
   },
   title: {
-    marginBottom: "2px",
+    marginBottom: tokens.spacingVerticalS,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
   },
@@ -67,38 +68,24 @@ const useStyles = makeStyles({
 });
 
 /**
- * Get Fluent-compatible color palette using design tokens
+ * LineChart - Renders time-series or trend data as line or area chart
  */
-const getColorPalette = (): string[] => [
-  tokens.colorBrandBackground,
-  tokens.colorPaletteBlueBorderActive,
-  tokens.colorPaletteTealBorderActive,
-  tokens.colorPaletteGreenBorderActive,
-  tokens.colorPaletteYellowBorderActive,
-  tokens.colorPaletteDarkOrangeBorderActive,
-  tokens.colorPaletteRedBorderActive,
-  tokens.colorPalettePurpleBorderActive,
-];
-
-/**
- * BarChart - Renders categorical data as vertical or horizontal bars
- */
-export const BarChart: React.FC<IBarChartProps> = ({
+export const LineChart: React.FC<ILineChartProps> = ({
   data,
   title,
-  orientation = "vertical",
-  showLabels = true,
+  variant = "line",
+  showLabels = false,
   showLegend = false,
   onDrillInteraction,
   drillField,
   height = 300,
   responsive = true,
+  lineColor,
 }) => {
   const styles = useStyles();
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState<number>(400);
 
-  // Handle responsive sizing
   useEffect(() => {
     if (!responsive || !containerRef.current) return;
 
@@ -112,8 +99,7 @@ export const BarChart: React.FC<IBarChartProps> = ({
     return () => resizeObserver.disconnect();
   }, [responsive]);
 
-  // Handle bar click for drill-through
-  const handleBarClick = (dataPoint: IAggregatedDataPoint) => {
+  const handlePointClick = (dataPoint: IAggregatedDataPoint) => {
     if (onDrillInteraction && drillField) {
       onDrillInteraction({
         field: drillField,
@@ -135,31 +121,20 @@ export const BarChart: React.FC<IBarChartProps> = ({
     );
   }
 
-  const colors = getColorPalette();
+  const color = lineColor || tokens.colorBrandBackground;
 
-  // Convert data to Fluent charting format
-  const chartData: IVerticalBarChartDataPoint[] = data.map((point, index) => ({
-    x: point.label,
-    y: point.value,
-    color: point.color || colors[index % colors.length],
-    legend: point.label,
-    xAxisCalloutData: point.label,
-    yAxisCalloutData: point.value.toString(),
-    onClick: () => handleBarClick(point),
-  }));
-
-  // For horizontal chart, we need different data format
-  const horizontalData: IHorizontalBarChartWithAxisDataPoint[] = data.map(
-    (point, index) => ({
-      x: point.value,
-      y: point.label,
-      color: point.color || colors[index % colors.length],
-      legend: point.label,
-      xAxisCalloutData: point.value.toString(),
-      yAxisCalloutData: point.label,
-      onClick: () => handleBarClick(point),
-    })
-  );
+  const chartData: ILineChartPoints[] = [
+    {
+      legend: title || "Data",
+      data: data.map((point, index) => ({
+        x: index,
+        y: point.value,
+        xAxisCalloutData: point.label,
+        onDataPointClick: () => handlePointClick(point),
+      })),
+      color: color,
+    },
+  ];
 
   const chartProps: IChartProps = {
     chartTitle: title,
@@ -169,30 +144,23 @@ export const BarChart: React.FC<IBarChartProps> = ({
     <div className={styles.container} ref={containerRef}>
       {title && <Text className={styles.title}>{title}</Text>}
       <div className={styles.chartWrapper}>
-        {orientation === "vertical" ? (
-          <VerticalBarChart
-            data={chartData}
+        {variant === "line" ? (
+          <FluentLineChart
+            data={{ lineChartData: chartData }}
             width={responsive ? containerWidth : undefined}
             height={height}
             hideLegend={!showLegend}
             hideTooltip={false}
-            barWidth={32}
-            yAxisTickCount={5}
             {...chartProps}
           />
         ) : (
-          <HorizontalBarChart
-            data={horizontalData.map((point) => ({
-              chartTitle: String(point.y),
-              chartData: [
-                {
-                  legend: point.legend || "",
-                  horizontalBarChartdata: { x: point.x, y: 0 },
-                  color: point.color,
-                  onClick: point.onClick,
-                },
-              ],
-            }))}
+          <AreaChart
+            data={{ lineChartData: chartData }}
+            width={responsive ? containerWidth : undefined}
+            height={height}
+            hideLegend={!showLegend}
+            hideTooltip={false}
+            {...chartProps}
           />
         )}
       </div>

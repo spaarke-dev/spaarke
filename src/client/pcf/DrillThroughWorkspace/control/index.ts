@@ -17,7 +17,7 @@
 
 import { IInputs, IOutputs } from "./generated/ManifestTypes";
 import * as React from "react";
-import * as ReactDOM from "react-dom/client";
+import * as ReactDOM from "react-dom";
 import {
   FluentProvider,
   webLightTheme,
@@ -140,7 +140,7 @@ export class DrillThroughWorkspace
   private _container: HTMLDivElement;
   private _context: ComponentFramework.Context<IInputs>;
   private _notifyOutputChanged: () => void;
-  private _root: ReactDOM.Root | null = null;
+  private _isRendered: boolean = false;
 
   // Output values
   private _shouldClose: boolean = false;
@@ -204,9 +204,9 @@ export class DrillThroughWorkspace
     logger.info("DrillThroughWorkspace", "destroy() called");
     this.cleanupThemeListeners();
     this.cleanupKeyboardHandler();
-    if (this._root) {
-      this._root.unmount();
-      this._root = null;
+    if (this._isRendered) {
+      ReactDOM.unmountComponentAtNode(this._container);
+      this._isRendered = false;
     }
   }
 
@@ -251,12 +251,8 @@ export class DrillThroughWorkspace
       }`
     );
 
-    // Create or update React root
-    if (!this._root) {
-      this._root = ReactDOM.createRoot(this._container);
-    }
-
-    this._root.render(
+    // Render React component (React 16 pattern per ADR-022)
+    ReactDOM.render(
       React.createElement(
         FluentProvider,
         { theme: this._currentTheme },
@@ -267,8 +263,10 @@ export class DrillThroughWorkspace
           onRecordSelect: this.handleRecordSelect.bind(this),
           onClose: this.handleClose.bind(this),
         })
-      )
+      ),
+      this._container
     );
+    this._isRendered = true;
   }
 
   private handleRecordSelect(recordIds: string[]): void {

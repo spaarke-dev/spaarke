@@ -170,37 +170,296 @@ If **Enable Drill-Through** is `True`:
 
 ---
 
-## Step 5: Create DrillThroughWorkspace Custom Page (Optional)
+## Step 5: Create Drill-Through Custom Page (Simplified Approach)
 
-This enables the full drill-through experience when clicking the expand button.
+This enables drill-through from VisualHost charts using the **built-in Data Table control**.
+
+> **Architecture Decision**: Use platform-native Data Table instead of custom PCF.
+> - No custom code deployment required
+> - Full platform features (sorting, paging, column customization)
+> - One Custom Page per entity type (Documents, Matters, etc.)
+> - All configuration done in Power Apps Maker Portal UI
 
 ### 5.1 Create Custom Page
 
-1. In Power Apps Maker, go to **Apps** → **+ New app** → **Page**
-2. Name: `sprk_drillthroughworkspace`
-3. This creates a Canvas App-style page
+1. Open https://make.powerapps.com
+2. Select environment: **SPAARKE DEV 1**
+3. Navigate to: **Solutions** → **PowerAppsToolsTemp_sprk** (or your target solution)
+4. Click **+ New** → **More** → **Custom page**
+5. Choose **Start from blank** → **Create**
+6. In the Properties panel (right side), set:
+   - **Name**: `Drill Through - Documents` (or entity name)
+   - **Display name**: `Drill Through - Documents`
 
-### 5.2 Add DrillThroughWorkspace PCF
+### 5.2 Configure App OnStart (Read URL Parameters)
 
-1. In the Custom Page editor, click **+** (Insert)
-2. Click **Get more components** at bottom of panel
-3. Switch to **Code** tab
-4. Search for **DrillThroughWorkspace** (or **Spaarke.Controls.DrillThroughWorkspace**)
-5. Add to the page
+The Custom Page receives filter parameters from VisualHost via URL.
 
-### 5.3 Configure Dataset Binding
+1. In the **Tree View** (left panel), click **App**
+2. In the **formula bar** at top, select **OnStart** from dropdown
+3. Enter this Power Fx formula:
+   ```
+   Set(varFilterField, Param("filterField"));
+   Set(varFilterValue, Param("filterValue"));
+   Set(varChartTitle, Param("chartTitle"))
+   ```
 
-The DrillThroughWorkspace is a **Dataset PCF** - it requires dataset binding:
+This reads three URL parameters:
+- `filterField` - The column to filter (e.g., `sprk_documenttype`)
+- `filterValue` - The value to filter by (e.g., `100000001` for Contract)
+- `chartTitle` - Optional title to display
 
-1. Select the DrillThroughWorkspace control
-2. In Properties panel, configure:
-   - **Items**: Bind to a data source (dynamically set based on chart definition)
-   - **chartDefinitionId**: Pass via URL parameter
+### 5.3 Add Header Label (Optional)
 
-### 5.4 Save and Publish Custom Page
+1. Click **+** (Insert) in left panel
+2. Under **Display**, click **Text label**
+3. Position at top of page
+4. Set properties:
+   - **Text**: `"Drill Through: " & If(IsBlank(varChartTitle), "Records", varChartTitle)`
+   - **X**: `20`
+   - **Y**: `10`
+   - **Width**: `Parent.Width - 40`
+   - **Height**: `40`
+   - **Size**: `20` (font size)
+   - **FontWeight**: `FontWeight.Semibold`
 
-1. **File** → **Save**
-2. **File** → **Publish**
+### 5.4 Add Data Table Control
+
+1. Click **+** (Insert) in left panel
+2. Under **Layout**, click **Data table**
+3. The Data table control appears on canvas
+4. Position below the header:
+   - **X**: `0`
+   - **Y**: `60`
+   - **Width**: `Parent.Width`
+   - **Height**: `Parent.Height - 60`
+
+### 5.5 Bind Data Source with Filter
+
+1. Select the **Data table** control
+2. In the Properties panel, find **Data source**
+3. Click **Select a data source** → **Dataverse** → **Documents** (or your entity)
+4. In the **formula bar**, select **Items** property
+5. Enter the filter formula:
+
+**For Documents (sprk_document):**
+```
+If(
+    IsBlank(varFilterField) || IsBlank(varFilterValue),
+    Documents,
+    Filter(Documents,
+        Switch(varFilterField,
+            "sprk_documenttype", sprk_documenttype = Value(varFilterValue),
+            "sprk_status", sprk_status = Value(varFilterValue),
+            "sprk_matterid", sprk_matterid = GUID(varFilterValue),
+            true
+        )
+    )
+)
+```
+
+This formula:
+- Shows all records if no filter parameters
+- Filters by the specified field/value when parameters are passed
+- Handles different field types (choice, lookup, etc.)
+
+### 5.6 Configure Data Table Columns
+
+1. Select the Data table control
+2. Click **Edit fields** in Properties panel
+3. Add columns you want to display:
+   - **Name** (`sprk_name`)
+   - **Document Type** (`sprk_documenttype`)
+   - **Status** (`sprk_status`)
+   - **Created On** (`createdon`)
+   - etc.
+4. Reorder columns by dragging
+5. Click outside to close the fields panel
+
+### 5.7 Add Close Button
+
+1. Click **+** (Insert) → **Button**
+2. Position in top-right corner:
+   - **X**: `Parent.Width - 120`
+   - **Y**: `10`
+   - **Width**: `100`
+   - **Height**: `40`
+3. Set properties:
+   - **Text**: `"Close"`
+   - **OnSelect**: `Back()`
+
+### 5.8 Save and Publish
+
+1. Click **File** (top left)
+2. Click **Save**
+3. Enter name: `sprk_drillthrough_documents`
+4. Click **Save**
+5. Click **Publish**
+6. Click **Publish this version**
+
+### 5.9 Test the Custom Page
+
+**Direct URL Test:**
+```
+https://spaarkedev1.crm.dynamics.com/main.aspx?appid=YOUR_APP_ID&pagetype=custom&name=sprk_drillthrough_documents&filterField=sprk_documenttype&filterValue=100000001&chartTitle=Contracts
+```
+
+Replace `YOUR_APP_ID` with your model-driven app GUID.
+
+**Expected Behavior:**
+1. Page loads with header showing "Drill Through: Contracts"
+2. Data Table shows only documents where Document Type = Contract
+3. Close button returns to previous page
+
+---
+
+## Step 5b: Create Additional Entity Custom Pages
+
+Repeat Step 5 for each entity type you need drill-through for:
+
+| Entity | Custom Page Name | Data Source |
+|--------|------------------|-------------|
+| Documents | `sprk_drillthrough_documents` | `Documents` |
+| Matters | `sprk_drillthrough_matters` | `Matters` |
+| Events | `sprk_drillthrough_events` | `Events` |
+| Invoices | `sprk_drillthrough_invoices` | `Invoices` |
+
+Each page uses the same pattern - just change the data source and filter fields.
+
+---
+
+## Step 5c: URL Parameters Reference
+
+When VisualHost opens a drill-through page, it passes these parameters:
+
+| Parameter | Description | Example |
+|-----------|-------------|---------|
+| `filterField` | Column logical name to filter | `sprk_documenttype` |
+| `filterValue` | Value to filter by | `100000001` |
+| `chartTitle` | Display title (optional) | `Contracts` |
+| `chartDefinitionId` | Chart Definition GUID (optional) | `9464fc2d-...` |
+
+**Full URL Pattern:**
+```
+https://{org}.crm.dynamics.com/main.aspx?
+  appid={appId}&
+  pagetype=custom&
+  name={customPageName}&
+  filterField={fieldLogicalName}&
+  filterValue={value}&
+  chartTitle={title}
+```
+
+---
+
+## Step 5d: Future Enhancement - Full Grid Experience
+
+The current Data Table approach provides **read-only** viewing with sorting and paging. For more advanced scenarios requiring editing, row selection, or custom rendering, consider these upgrade paths:
+
+### Current Data Table Limitations
+
+| Feature | Data Table | Advanced Grid |
+|---------|------------|---------------|
+| View records | ✅ | ✅ |
+| Sort columns | ✅ | ✅ |
+| Paging | ✅ | ✅ |
+| Inline editing | ❌ | ✅ |
+| Row selection (checkboxes) | ❌ | ✅ |
+| Bulk actions | ❌ | ✅ |
+| Custom column rendering | ❌ | ✅ |
+| Conditional formatting | ❌ | ✅ |
+| Export to Excel | ❌ | ✅ |
+
+### Option 1: Gallery Control (Medium Effort)
+
+Replace the Data Table with a **Gallery** control for more customization:
+
+**Pros:**
+- Full control over row layout and styling
+- Can add edit icons, buttons per row
+- Conditional formatting via Power Fx
+- No code deployment
+
+**Cons:**
+- Must manually build column headers
+- More complex Power Fx formulas
+- Performance may degrade with large datasets
+
+**Implementation:**
+1. Replace Data Table with Vertical Gallery
+2. Create header row manually
+3. Add Edit/View buttons per row
+4. Use `Patch()` for inline edits
+
+### Option 2: Power Apps Editable Grid (Model-Driven Apps)
+
+For Model-Driven App contexts, use the **Power Apps grid control**:
+
+**Pros:**
+- Full editing capabilities
+- Bulk selection and actions
+- Excel-like experience
+- Platform-native, no deployment
+
+**Cons:**
+- Only works in Model-Driven App grids (not Custom Pages)
+- Less control over appearance
+- Requires form/view configuration
+
+**Implementation:**
+1. Create a Model-Driven App view for the entity
+2. Enable "Power Apps grid control" in view settings
+3. Configure editable columns
+4. Navigate to view URL instead of Custom Page
+
+### Option 3: DrillThroughWorkspace PCF (High Effort, Maximum Control)
+
+Use the custom **DrillThroughWorkspace PCF** already built in this project:
+
+**Pros:**
+- Full custom React UI
+- Chart + Grid side-by-side layout
+- Click-to-filter interactions
+- Complete control over UX
+
+**Cons:**
+- Requires PCF deployment
+- More maintenance overhead
+- Bundle size considerations
+
+**Implementation:**
+1. The PCF is already deployed (v1.1.1)
+2. Create Custom Page with DrillThroughWorkspace control
+3. Bind to dataset
+4. See [DrillThroughWorkspace control](../../../src/client/pcf/DrillThroughWorkspace/)
+
+### Option 4: UniversalDatasetGrid PCF (Future - Not Currently Working)
+
+> **Status**: Broken - React 18 incompatible with Dataverse platform libraries
+> **Fix Required**: See [universal-dataset-grid-r2 project](../../universal-dataset-grid-r2/README.md)
+
+The **UniversalDatasetGrid** PCF (v2.1.4) provides document management features:
+- File operations (download, delete, replace)
+- SDAP/SharePoint Embedded integration
+- Command bar with bulk actions
+
+**Currently Not Deployable**: Uses React 18's `createRoot()` API which is incompatible with Dataverse's platform-provided React 16.14.0. Requires migration to `ReactDOM.render()` pattern per ADR-022.
+
+**When Fixed** (future project):
+1. Deploy UniversalDatasetGrid
+2. Use in Custom Page instead of Data Table
+3. Full document management capabilities
+
+### Recommendation
+
+| Use Case | Recommended Approach |
+|----------|---------------------|
+| Read-only drill-through | **Data Table** (current) |
+| Simple inline edits | **Gallery** with Patch() |
+| Full editing + bulk actions | **Power Apps grid control** (Model-Driven view) |
+| Custom visualizations + interactions | **DrillThroughWorkspace PCF** |
+
+**For most drill-through scenarios**, the Data Table is sufficient. Upgrade only when specific editing or customization requirements emerge.
 
 ---
 

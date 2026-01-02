@@ -14,7 +14,7 @@ import {
   IChartProps,
 } from "@fluentui/react-charting";
 import { makeStyles, tokens, Text } from "@fluentui/react-components";
-import type { DrillInteraction, IAggregatedDataPoint } from "../types";
+import type { DrillInteraction, IAggregatedDataPoint } from "../../types";
 
 export type BarOrientation = "vertical" | "horizontal";
 

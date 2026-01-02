@@ -1,35 +1,29 @@
 /**
- * BarChart Component
- * Renders vertical or horizontal bar charts using Fluent UI Charting
+ * DonutChart Component
+ * Renders donut/pie charts using Fluent UI Charting
  * Supports click-to-drill for viewing underlying records
  */
 
 import * as React from "react";
 import { useRef, useState, useEffect } from "react";
 import {
-  VerticalBarChart,
-  HorizontalBarChart,
-  IVerticalBarChartDataPoint,
-  IHorizontalBarChartWithAxisDataPoint,
+  DonutChart as FluentDonutChart,
+  IChartDataPoint,
   IChartProps,
 } from "@fluentui/react-charting";
 import { makeStyles, tokens, Text } from "@fluentui/react-components";
-import type { DrillInteraction, IAggregatedDataPoint } from "../types";
+import type { DrillInteraction, IAggregatedDataPoint } from "../../types";
 
-export type BarOrientation = "vertical" | "horizontal";
-
-export interface IBarChartProps {
+export interface IDonutChartProps {
   /** Data points to display */
   data: IAggregatedDataPoint[];
   /** Chart title */
   title?: string;
-  /** Chart orientation */
-  orientation?: BarOrientation;
-  /** Whether to show data labels on bars */
-  showLabels?: boolean;
+  /** Inner radius ratio (0-1, 0 = pie chart, 0.5 = typical donut) */
+  innerRadius?: number;
   /** Whether to show the legend */
   showLegend?: boolean;
-  /** Callback when a bar is clicked for drill-through */
+  /** Callback when a slice is clicked for drill-through */
   onDrillInteraction?: (interaction: DrillInteraction) => void;
   /** Field name for drill interaction */
   drillField?: string;
@@ -37,6 +31,10 @@ export interface IBarChartProps {
   height?: number;
   /** Whether the chart should be responsive */
   responsive?: boolean;
+  /** Whether to show value in center */
+  showCenterValue?: boolean;
+  /** Custom center label */
+  centerLabel?: string;
 }
 
 const useStyles = makeStyles({
@@ -46,16 +44,21 @@ const useStyles = makeStyles({
     height: "100%",
     width: "100%",
     minHeight: "200px",
+    alignItems: "center",
   },
   title: {
-    marginBottom: "2px",
+    marginBottom: tokens.spacingVerticalS,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
+    textAlign: "center",
   },
   chartWrapper: {
     flex: 1,
     position: "relative",
     minHeight: "150px",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
   },
   placeholder: {
     display: "flex",
@@ -67,7 +70,7 @@ const useStyles = makeStyles({
 });
 
 /**
- * Get Fluent-compatible color palette using design tokens
+ * Get Fluent-compatible color palette
  */
 const getColorPalette = (): string[] => [
   tokens.colorBrandBackground,
@@ -81,24 +84,24 @@ const getColorPalette = (): string[] => [
 ];
 
 /**
- * BarChart - Renders categorical data as vertical or horizontal bars
+ * DonutChart - Renders proportional data as donut/pie chart
  */
-export const BarChart: React.FC<IBarChartProps> = ({
+export const DonutChart: React.FC<IDonutChartProps> = ({
   data,
   title,
-  orientation = "vertical",
-  showLabels = true,
-  showLegend = false,
+  innerRadius = 0.5,
+  showLegend = true,
   onDrillInteraction,
   drillField,
   height = 300,
   responsive = true,
+  showCenterValue = true,
+  centerLabel,
 }) => {
   const styles = useStyles();
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState<number>(400);
 
-  // Handle responsive sizing
   useEffect(() => {
     if (!responsive || !containerRef.current) return;
 
@@ -112,8 +115,7 @@ export const BarChart: React.FC<IBarChartProps> = ({
     return () => resizeObserver.disconnect();
   }, [responsive]);
 
-  // Handle bar click for drill-through
-  const handleBarClick = (dataPoint: IAggregatedDataPoint) => {
+  const handleSliceClick = (dataPoint: IAggregatedDataPoint) => {
     if (onDrillInteraction && drillField) {
       onDrillInteraction({
         field: drillField,
@@ -136,65 +138,35 @@ export const BarChart: React.FC<IBarChartProps> = ({
   }
 
   const colors = getColorPalette();
+  const total = data.reduce((sum, point) => sum + point.value, 0);
 
-  // Convert data to Fluent charting format
-  const chartData: IVerticalBarChartDataPoint[] = data.map((point, index) => ({
-    x: point.label,
-    y: point.value,
-    color: point.color || colors[index % colors.length],
+  const chartData: IChartDataPoint[] = data.map((point, index) => ({
     legend: point.label,
-    xAxisCalloutData: point.label,
-    yAxisCalloutData: point.value.toString(),
-    onClick: () => handleBarClick(point),
+    data: point.value,
+    color: point.color || colors[index % colors.length],
+    onClick: () => handleSliceClick(point),
   }));
-
-  // For horizontal chart, we need different data format
-  const horizontalData: IHorizontalBarChartWithAxisDataPoint[] = data.map(
-    (point, index) => ({
-      x: point.value,
-      y: point.label,
-      color: point.color || colors[index % colors.length],
-      legend: point.label,
-      xAxisCalloutData: point.value.toString(),
-      yAxisCalloutData: point.label,
-      onClick: () => handleBarClick(point),
-    })
-  );
 
   const chartProps: IChartProps = {
     chartTitle: title,
   };
 
+  const chartSize = Math.min(containerWidth, height);
+
   return (
     <div className={styles.container} ref={containerRef}>
       {title && <Text className={styles.title}>{title}</Text>}
       <div className={styles.chartWrapper}>
-        {orientation === "vertical" ? (
-          <VerticalBarChart
-            data={chartData}
-            width={responsive ? containerWidth : undefined}
-            height={height}
-            hideLegend={!showLegend}
-            hideTooltip={false}
-            barWidth={32}
-            yAxisTickCount={5}
-            {...chartProps}
-          />
-        ) : (
-          <HorizontalBarChart
-            data={horizontalData.map((point) => ({
-              chartTitle: String(point.y),
-              chartData: [
-                {
-                  legend: point.legend || "",
-                  horizontalBarChartdata: { x: point.x, y: 0 },
-                  color: point.color,
-                  onClick: point.onClick,
-                },
-              ],
-            }))}
-          />
-        )}
+        <FluentDonutChart
+          data={{ chartData }}
+          width={chartSize}
+          height={chartSize}
+          hideLegend={!showLegend}
+          hideTooltip={false}
+          innerRadius={innerRadius * (chartSize / 2)}
+          valueInsideDonut={showCenterValue ? (centerLabel || total.toLocaleString()) : undefined}
+          {...chartProps}
+        />
       </div>
     </div>
   );

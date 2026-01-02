@@ -20,6 +20,15 @@ import { IInputs } from "../generated/ManifestTypes";
 import { IChartDefinition, IChartData, DrillInteraction } from "../types";
 import { ChartRenderer } from "./ChartRenderer";
 import { logger } from "../utils/logger";
+import {
+  loadChartDefinition as loadChartDefinitionFromDataverse,
+  ConfigurationNotFoundError,
+  ConfigurationLoadError,
+} from "../services/ConfigurationLoader";
+import {
+  fetchAndAggregate,
+  AggregationError,
+} from "../services/DataAggregationService";
 
 const useStyles = makeStyles({
   container: {
@@ -28,12 +37,15 @@ const useStyles = makeStyles({
     height: "100%",
     minHeight: "200px",
     padding: tokens.spacingVerticalM,
+    paddingBottom: "36px", // Extra space for version badge
     boxSizing: "border-box",
+    position: "relative",
   },
-  toolbar: {
-    display: "flex",
-    justifyContent: "flex-end",
-    marginBottom: tokens.spacingVerticalS,
+  expandButton: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    zIndex: 10,
   },
   chartContainer: {
     flex: 1,
@@ -42,12 +54,14 @@ const useStyles = makeStyles({
     justifyContent: "center",
     minHeight: "150px",
   },
-  versionFooter: {
-    display: "flex",
-    justifyContent: "flex-end",
-    paddingTop: tokens.spacingVerticalXS,
+  versionBadge: {
+    position: "absolute",
+    bottom: 0,
+    left: "8px",
     fontSize: tokens.fontSizeBase100,
     color: tokens.colorNeutralForeground4,
+    opacity: 0.6,
+    pointerEvents: "none",
   },
   placeholder: {
     display: "flex",
@@ -125,17 +139,60 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
         contextRecordId,
       });
 
-      // TODO: Implement actual Dataverse query in task 021
-      // For now, show placeholder
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // Load from Dataverse using ConfigurationLoader service
+      const definition = await loadChartDefinitionFromDataverse(
+        { webAPI: context.webAPI },
+        id
+      );
 
-      // Placeholder - will be replaced with actual data fetch
-      setChartDefinition(null);
-      setError("Chart definition loading not yet implemented. Complete task 021.");
+      setChartDefinition(definition);
+      logger.info("VisualHostRoot", `Loaded: ${definition.sprk_name}`, {
+        visualType: definition.sprk_visualtype,
+        entity: definition.sprk_entitylogicalname,
+      });
+
+      // Fetch and aggregate data using DataAggregationService
+      if (definition.sprk_entitylogicalname) {
+        try {
+          const data = await fetchAndAggregate(
+            { webAPI: context.webAPI },
+            definition,
+            {
+              // v1.1.0: Add context filter if configured
+              contextFilter: contextFieldName && contextRecordId
+                ? { fieldName: contextFieldName, recordId: contextRecordId }
+                : undefined,
+            }
+          );
+          setChartData(data);
+          logger.info("VisualHostRoot", `Data loaded: ${data.dataPoints.length} data points from ${data.totalRecords} records`);
+        } catch (aggErr) {
+          if (aggErr instanceof AggregationError) {
+            logger.error("VisualHostRoot", "Data aggregation error", aggErr);
+            // Show chart with no data rather than error - data fetch failed but config is valid
+            setChartData(null);
+          } else {
+            throw aggErr;
+          }
+        }
+      } else {
+        logger.warn("VisualHostRoot", "No entity configured, skipping data fetch");
+        setChartData(null);
+      }
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Unknown error";
-      logger.error("VisualHostRoot", "Failed to load chart definition", err);
-      setError(`Failed to load chart: ${errorMessage}`);
+      if (err instanceof ConfigurationNotFoundError) {
+        logger.warn("VisualHostRoot", `Chart definition not found: ${id}`);
+        setError(`Chart definition not found. Please verify the ID is correct.`);
+      } else if (err instanceof ConfigurationLoadError) {
+        logger.error("VisualHostRoot", "Configuration load error", err);
+        setError(`Failed to load chart: ${err.message}`);
+      } else {
+        const errorMessage = err instanceof Error ? err.message : "Unknown error";
+        logger.error("VisualHostRoot", "Failed to load chart definition", err);
+        setError(`Failed to load chart: ${errorMessage}`);
+      }
+      setChartDefinition(null);
+      setChartData(null);
     } finally {
       setIsLoading(false);
     }
@@ -161,13 +218,40 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
   );
 
   /**
+   * Map entity logical name to Custom Page name
+   * Each entity has its own drill-through page configured in Power Apps
+   *
+   * Custom Page Names:
+   * - sprk_visualizationdrillthroughworkspace_e48a5: "Visualization Drill Through Documents"
+   */
+  const getCustomPageName = useCallback((entityLogicalName: string | undefined): string => {
+    // Entity-specific Custom Page mapping
+    // Update these as you create Custom Pages for each entity
+    const pageMapping: Record<string, string> = {
+      "sprk_document": "sprk_visualizationdrillthroughworkspace_e48a5", // Visualization Drill Through Documents
+      // Future pages (create and add mappings):
+      // "sprk_matter": "sprk_drillthrough_matters",
+      // "sprk_event": "sprk_drillthrough_events",
+      // "sprk_invoice": "sprk_drillthrough_invoices",
+    };
+
+    if (entityLogicalName && pageMapping[entityLogicalName]) {
+      return pageMapping[entityLogicalName];
+    }
+
+    // Fallback: use Documents page as default
+    return "sprk_visualizationdrillthroughworkspace_e48a5";
+  }, []);
+
+  /**
    * Handle expand button click - opens drill-through workspace Custom Page
+   * Passes filter parameters via URL for the Custom Page to apply
    */
   const handleExpandClick = useCallback(async () => {
     logger.info("VisualHostRoot", "Expand clicked", { chartDefinitionId });
 
-    if (!chartDefinitionId) {
-      logger.warn("VisualHostRoot", "No chart definition ID to expand");
+    if (!chartDefinitionId || !chartDefinition) {
+      logger.warn("VisualHostRoot", "No chart definition to expand");
       return;
     }
 
@@ -182,13 +266,66 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
         return;
       }
 
-      // Open the drill-through workspace as a dialog
-      // Custom Page name: sprk_drillthroughworkspace
+      // Determine which Custom Page to open based on entity
+      const customPageName = getCustomPageName(chartDefinition.sprk_entitylogicalname);
+
+      // Build URL parameters for the Custom Page
+      // The Custom Page reads these via Param() function in Power Fx
+      const params: Record<string, string> = {
+        chartDefinitionId: chartDefinitionId,
+        chartTitle: chartDefinition.sprk_name || "Drill Through",
+      };
+
+      // If the chart has a groupBy field, pass it as the default filter field
+      if (chartDefinition.sprk_groupbyfield) {
+        params.filterField = chartDefinition.sprk_groupbyfield;
+      }
+
+      logger.info("VisualHostRoot", "Opening Custom Page", {
+        pageName: customPageName,
+        params,
+      });
+
+      // Get app context for URL construction
+      const globalContext = xrm.Utility?.getGlobalContext?.();
+      const appId = globalContext?.getCurrentAppId?.() || "";
+      const baseUrl = globalContext?.getClientUrl?.() || window.location.origin;
+
+      // Build the Custom Page URL with parameters
+      // Custom Pages read params via Param("filterField"), Param("filterValue"), etc.
+      const queryParams = new URLSearchParams({
+        pagetype: "custom",
+        name: customPageName,
+        ...params,
+      });
+
+      if (appId) {
+        queryParams.set("appid", appId);
+      }
+
+      const customPageUrl = `${baseUrl}/main.aspx?${queryParams.toString()}`;
+
+      // Store params in sessionStorage for Custom Page to read
+      // Custom Page can read via: JSON.parse(sessionStorage.getItem("drillThroughParams"))
+      try {
+        sessionStorage.setItem("drillThroughParams", JSON.stringify(params));
+      } catch {
+        // sessionStorage may be unavailable in some contexts
+      }
+
+      // Open Custom Page as modal dialog per spec FR-04
+      // Use the pattern from dialog-patterns.md
+      logger.info("VisualHostRoot", "Opening as modal dialog", {
+        pageName: customPageName,
+        recordId: chartDefinitionId,
+        params
+      });
+
       await xrm.Navigation.navigateTo(
         {
           pageType: "custom",
-          name: "sprk_drillthroughworkspace",
-          recordId: chartDefinitionId,
+          name: customPageName,
+          recordId: chartDefinitionId, // Custom Page reads via Param("recordId")
         },
         {
           target: 2, // Dialog
@@ -198,13 +335,13 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
         }
       );
 
-      logger.info("VisualHostRoot", "Drill-through workspace opened");
+      logger.info("VisualHostRoot", "Drill-through modal opened");
     } catch (err) {
       logger.error("VisualHostRoot", "Failed to open drill-through workspace", err);
       // Fallback: log for debugging
-      console.log("Expand clicked for chart:", chartDefinitionId);
+      console.log("Expand clicked for chart:", chartDefinitionId, chartDefinition);
     }
-  }, [chartDefinitionId]);
+  }, [chartDefinitionId, chartDefinition, getCustomPageName]);
 
   /**
    * Render the appropriate visual based on chart definition
@@ -238,21 +375,22 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
 
   return (
     <div className={styles.container} style={containerStyle}>
-      {/* Toolbar area with expand button */}
-      {showToolbar && (
-        <div className={styles.toolbar}>
-          {enableDrillThrough && chartDefinition && (
-            <Tooltip content="View details" relationship="label">
-              <Button
-                appearance="subtle"
-                icon={<OpenRegular />}
-                onClick={handleExpandClick}
-                aria-label="View details in expanded workspace"
-              />
-            </Tooltip>
-          )}
+      {/* Expand button - upper right, aligned with chart title */}
+      {showToolbar && enableDrillThrough && chartDefinition && (
+        <div className={styles.expandButton}>
+          <Tooltip content="View details" relationship="label">
+            <Button
+              appearance="subtle"
+              icon={<OpenRegular />}
+              onClick={handleExpandClick}
+              aria-label="View details in expanded workspace"
+            />
+          </Tooltip>
         </div>
       )}
+
+      {/* Version badge - lower left, unobtrusive */}
+      <span className={styles.versionBadge}>v1.1.17 • 2026-01-02</span>
 
       {/* Main chart area */}
       <div className={styles.chartContainer}>
@@ -265,11 +403,6 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
         ) : (
           renderVisual()
         )}
-      </div>
-
-      {/* Version footer - MANDATORY per CLAUDE.md */}
-      <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.0 • Built 2025-12-30</Text>
       </div>
     </div>
   );

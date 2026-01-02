@@ -10,10 +10,7 @@
 
 import * as React from "react";
 import { createContext, useContext, useState, useCallback, useMemo } from "react";
-import {
-  DrillInteraction,
-  DrillOperator,
-} from "@spaarke/ui-components";
+import type { DrillInteraction, DrillOperator } from "../types";
 import { logger } from "../utils/logger";
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -8,11 +8,11 @@
  * - Grid data from platform dataset binding
  * - Filter via dataset.filtering.setFilter() API
  *
- * @version 1.1.0
+ * @version 1.1.1
  */
 
 import * as React from "react";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   makeStyles,
   tokens,
@@ -25,16 +25,22 @@ import {
 } from "@fluentui/react-components";
 import {
   DismissRegular,
-  ArrowMaximizeRegular,
   FilterRegular,
 } from "@fluentui/react-icons";
-import { DrillInteraction } from "@spaarke/ui-components";
+import type { DrillInteraction, IChartDefinition, IChartData } from "../types";
 import { TwoPanelLayout } from "./TwoPanelLayout";
 import { DrillThroughGrid } from "./DrillThroughGrid";
+import { ChartRenderer } from "./charts";
 import {
   FilterStateProvider,
   useFilterState,
 } from "../context/FilterStateContext";
+import {
+  loadChartDefinition,
+  ConfigurationNotFoundError,
+  ConfigurationLoadError,
+} from "../services/ConfigurationLoader";
+import { fetchAndAggregate, AggregationError } from "../services/DataAggregationService";
 import { logger } from "../utils/logger";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -95,6 +101,12 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     textAlign: "center",
   },
+  chartContainer: {
+    height: "100%",
+    padding: tokens.spacingVerticalM,
+    paddingTop: tokens.spacingVerticalS,
+    boxSizing: "border-box",
+  },
   footer: {
     display: "flex",
     justifyContent: "flex-end",
@@ -142,44 +154,82 @@ const WorkspaceContent: React.FC<IWorkspaceContentProps> = ({
   const styles = useStyles();
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [chartTitle, setChartTitle] = useState<string>("Chart");
+  const [chartDefinition, setChartDefinition] = useState<IChartDefinition | null>(null);
+  const [chartData, setChartData] = useState<IChartData | null>(null);
 
   // Get filter state from context
   const { activeFilter, setFilter, clearFilter, isFiltered, dataset } =
     useFilterState();
 
-  // Load chart definition
-  React.useEffect(() => {
+  // Load chart definition and data
+  useEffect(() => {
     if (!chartDefinitionId) {
       setIsLoading(false);
       setError("No chart definition ID provided");
       return;
     }
 
-    const loadChartDefinition = async () => {
+    const loadChart = async () => {
       try {
         setIsLoading(true);
+        setError(null);
         logger.info(
           "WorkspaceContent",
-          `Loading chart: ${chartDefinitionId}`
+          `Loading chart definition: ${chartDefinitionId}`
         );
 
-        // TODO: Use ConfigurationLoader from VisualHost to load chart definition
-        // For now, show placeholder
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        setChartTitle("Drill-Through Chart");
-        setError(null);
+        // Load chart definition from Dataverse
+        const definition = await loadChartDefinition(
+          { webAPI: webApi },
+          chartDefinitionId
+        );
+        setChartDefinition(definition);
+
+        logger.info(
+          "WorkspaceContent",
+          `Loaded definition: ${definition.sprk_name}`
+        );
+
+        // Fetch and aggregate data for the chart
+        if (definition.sprk_entitylogicalname) {
+          logger.info(
+            "WorkspaceContent",
+            `Fetching data from ${definition.sprk_entitylogicalname}`
+          );
+
+          const data = await fetchAndAggregate(
+            { webAPI: webApi },
+            definition
+          );
+          setChartData(data);
+
+          logger.info(
+            "WorkspaceContent",
+            `Aggregated ${data.dataPoints.length} data points from ${data.totalRecords} records`
+          );
+        }
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : "Unknown error";
-        logger.error("WorkspaceContent", "Failed to load chart", err);
-        setError(`Failed to load chart: ${errorMessage}`);
+        if (err instanceof ConfigurationNotFoundError) {
+          logger.warn("WorkspaceContent", `Chart not found: ${chartDefinitionId}`);
+          setError(`Chart definition not found: ${chartDefinitionId}`);
+        } else if (err instanceof ConfigurationLoadError) {
+          logger.error("WorkspaceContent", "Failed to load configuration", err);
+          setError(`Failed to load chart: ${err.message}`);
+        } else if (err instanceof AggregationError) {
+          logger.error("WorkspaceContent", "Failed to aggregate data", err);
+          setError(`Failed to load chart data: ${err.message}`);
+        } else {
+          const errorMessage = err instanceof Error ? err.message : "Unknown error";
+          logger.error("WorkspaceContent", "Failed to load chart", err);
+          setError(`Failed to load chart: ${errorMessage}`);
+        }
       } finally {
         setIsLoading(false);
       }
     };
 
-    loadChartDefinition();
-  }, [chartDefinitionId]);
+    loadChart();
+  }, [chartDefinitionId, webApi]);
 
   /**
    * Handle drill interaction from chart
@@ -236,15 +286,23 @@ const WorkspaceContent: React.FC<IWorkspaceContentProps> = ({
       );
     }
 
-    // TODO: Render actual chart component with onDrillInteraction callback
+    if (!chartDefinition) {
+      return (
+        <div className={styles.placeholder}>
+          <Text>No chart configuration available</Text>
+        </div>
+      );
+    }
+
+    // Render actual chart with ChartRenderer
     return (
-      <div className={styles.placeholder}>
-        <ArrowMaximizeRegular style={{ fontSize: 48 }} />
-        <Text>Chart visualization will render here</Text>
-        <Text size={200}>Click chart elements to filter the dataset</Text>
-        <Text size={100} style={{ color: tokens.colorNeutralForeground4 }}>
-          Task 033: Integrate chart component with handleDrillInteraction
-        </Text>
+      <div className={styles.chartContainer}>
+        <ChartRenderer
+          chartDefinition={chartDefinition}
+          chartData={chartData || undefined}
+          onDrillInteraction={handleDrillInteraction}
+          height={280}
+        />
       </div>
     );
   };
@@ -304,6 +362,8 @@ const WorkspaceContent: React.FC<IWorkspaceContentProps> = ({
     );
   };
 
+  const chartTitle = chartDefinition?.sprk_name || "Chart";
+
   return (
     <div className={styles.container}>
       {/* Header with title and close button */}
@@ -338,7 +398,7 @@ const WorkspaceContent: React.FC<IWorkspaceContentProps> = ({
 
       {/* Footer with version */}
       <div className={styles.footer}>
-        <Text size={100}>v1.1.0 • Dataset PCF</Text>
+        <Text size={100}>v1.1.1 • Dataset PCF</Text>
       </div>
     </div>
   );
