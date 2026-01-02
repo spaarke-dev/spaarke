@@ -1,7 +1,7 @@
 # Current Task State - AI Document Intelligence R3
 
 > **Purpose**: Context recovery file for resuming work across sessions
-> **Last Updated**: 2025-12-30
+> **Last Updated**: 2025-12-31
 
 ---
 
@@ -12,8 +12,26 @@
 | **Task ID** | 045 |
 | **Task File** | `tasks/045-deploy-to-production.poml` |
 | **Title** | Deploy to Production |
-| **Status** | not-started |
+| **Status** | in-progress |
 | **Phase** | Phase 5: Production Readiness |
+| **Started** | 2025-12-31 |
+
+### Deployment Progress
+
+| Step | Status | Notes |
+|------|--------|-------|
+| Create deployment checklist | ✅ | `notes/task-045-deployment-checklist.md` |
+| Create rollback plan | ✅ | `notes/task-045-rollback-plan.md` |
+| Fix circular dependency | ✅ | EmailExportService → IServiceProvider |
+| Configure Azure credentials | ✅ | OIDC federated identity for GitHub Actions |
+| Deploy to staging | ✅ | API live at spe-api-dev-67e2xz.azurewebsites.net |
+| Add missing App Service config | ✅ | AzureAd, Graph, Dataverse, ServiceBus settings |
+| API Health Check | ✅ | `/ping` → pong, `/healthz` → Healthy |
+| Fix PCF authentication | ✅ | Added MSAL AuthService to AnalysisWorkspace PCF |
+| Deploy updated PCF control | 🔲 | **PENDING** - Re-deploy PCF with auth support |
+| Configure PCF auth parameters | 🔲 | **PENDING** - Add tenantId, clientAppId, bffAppId to Custom Page |
+| Power App integration testing | 🔲 | **AWAITING** - Test after PCF deployment |
+| Mark task complete | 🔲 | After Power App verification |
 
 ## Completed Tasks
 
@@ -59,7 +77,7 @@
 | Phase 2: Tool Framework | 010-015 | ✅ Complete (6/6) |
 | Phase 3: Playbook System | 020-024 | ✅ Complete (5/5) |
 | Phase 4: Export Services | 030-036 | ✅ Complete (5/6, 2 skipped) |
-| Phase 5: Production Readiness | 040-048 | 🟡 In Progress (5/9) |
+| Phase 5: Production Readiness | 040-048 | 🟡 In Progress (6/9 - staging deployed) |
 | Project Wrap-up | 090 | 🔲 Not Started |
 
 ---

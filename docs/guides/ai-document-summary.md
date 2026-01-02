@@ -68,15 +68,31 @@ Client (PCF)          BFF API                    Azure Services
 | `MaxInputTokens` | int | `100000` | Max input tokens |
 | `MaxConcurrentStreams` | int | `3` | Max concurrent SSE per user |
 
-### AnalysisOptions (Export)
+### AnalysisOptions (Analysis & Export)
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
+| `MaxChatHistoryMessages` | int | `20` | Max chat messages to include in continuation context |
+| `MaxDocumentContextLength` | int | `100000` | Max characters of document text in continuation prompts (1000-200000) |
 | `EnableDocxExport` | bool | `true` | Enable DOCX export format |
 | `EnablePdfExport` | bool | `true` | Enable PDF export format |
 | `EnableEmailExport` | bool | `true` | Enable email export via Graph |
 | `ExportBranding.CompanyName` | string | `"Spaarke AI"` | Branding in export footers |
 | `ExportBranding.LogoUrl` | string? | null | Logo URL for PDF exports |
+
+### Chat Continuation Context
+
+When users continue an analysis via chat, the system includes full document context to provide accurate, document-specific responses:
+
+| Context Section | Description | Truncation |
+|-----------------|-------------|------------|
+| System Instructions | Original action + skill prompts | None |
+| Original Document | Full document text from SPE | Truncated to `MaxDocumentContextLength` |
+| Current Analysis | Working document from previous response | None |
+| Conversation History | Recent chat messages | Limited to `MaxChatHistoryMessages` |
+| User Request | New user message | None |
+
+This context is built by `IAnalysisContextBuilder.BuildContinuationPromptWithContext()` and ensures the AI can reference the original document content when answering follow-up questions.
 
 ### Example Configuration
 
@@ -638,4 +654,4 @@ public async Task SummarizeInBackgroundAsync(
 
 ---
 
-*Last updated: December 2025*
+*Last updated: January 2026*

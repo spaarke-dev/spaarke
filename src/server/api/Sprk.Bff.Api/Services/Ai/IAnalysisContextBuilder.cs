@@ -42,4 +42,21 @@ public interface IAnalysisContextBuilder
         ChatMessageModel[] history,
         string userMessage,
         string currentWorkingDocument);
+
+    /// <summary>
+    /// Build continuation prompt with full context including system prompt and document text.
+    /// Used for chat continuations that need the original document context to provide accurate responses.
+    /// </summary>
+    /// <param name="systemPrompt">System prompt from original analysis (action + skills).</param>
+    /// <param name="documentText">Original document text being analyzed.</param>
+    /// <param name="history">Previous chat messages.</param>
+    /// <param name="userMessage">New user message.</param>
+    /// <param name="currentWorkingDocument">Current state of working document.</param>
+    /// <returns>Complete continuation prompt with full context.</returns>
+    string BuildContinuationPromptWithContext(
+        string? systemPrompt,
+        string? documentText,
+        ChatMessageModel[] history,
+        string userMessage,
+        string currentWorkingDocument);
 }

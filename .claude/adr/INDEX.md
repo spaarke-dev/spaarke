@@ -25,6 +25,23 @@ This directory will contain AI-optimized versions of Architecture Decision Recor
 - [ ] Keep to 100-150 line target
 - [ ] Cross-reference full ADR for deep dives
 
+## ADR Index
+
+| ADR | Title | Key Constraint |
+|-----|-------|----------------|
+| ADR-001 | Minimal API + BackgroundService | No Azure Functions |
+| ADR-002 | Thin Dataverse plugins | No HTTP/Graph calls in plugins |
+| ADR-006 | PCF over webresources | No new legacy JS webresources |
+| ADR-007 | SpeFileStore facade | No Graph SDK types leak above facade |
+| ADR-008 | Endpoint filters for auth | No global auth middleware |
+| ADR-010 | DI minimalism | ≤15 non-framework DI registrations |
+| ADR-012 | Shared component library | Reuse `@spaarke/ui-components` |
+| ADR-013 | AI Architecture | AI Tool Framework; extend BFF |
+| ADR-021 | Fluent UI v9 Design System | All UI uses Fluent v9; dark mode required |
+| ADR-023 | Choice Dialog Pattern | Rich option buttons for 2-4 choices |
+
+---
+
 ## Usage by AI Agents
 
 Load concise ADRs proactively when creating new components:
@@ -33,6 +50,7 @@ Load concise ADRs proactively when creating new components:
 - Creating Plugin → Load ADR-002
 - Working with auth → Load ADR-004, ADR-016
 - Working with SPE → Load ADR-007, ADR-019
+- Creating dialogs → Load ADR-021, ADR-023
 
 Full ADRs in `docs/adr/` should be loaded only when:
 - Need historical context

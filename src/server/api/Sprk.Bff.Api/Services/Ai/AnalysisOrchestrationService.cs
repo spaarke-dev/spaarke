@@ -123,6 +123,14 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         var userPrompt = await _contextBuilder.BuildUserPromptAsync(
             documentText, scopes.Knowledge, cancellationToken);
 
+        // Store document text and system prompt for continuation
+        analysis = analysis with
+        {
+            DocumentText = documentText,
+            SystemPrompt = systemPrompt
+        };
+        _analysisStore[analysisId] = analysis;
+
         // 7. Stream AI completion
         var outputBuilder = new StringBuilder();
         var inputTokens = EstimateTokens(systemPrompt + userPrompt);
@@ -146,7 +154,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             }
         }
 
-        // 8. Finalize analysis
+        // 8. Finalize analysis (preserve DocumentText and SystemPrompt for continuations)
         var finalOutput = outputBuilder.ToString();
         analysis = analysis with
         {
@@ -156,6 +164,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             CompletedOn = DateTime.UtcNow,
             InputTokens = inputTokens,
             OutputTokens = outputTokens
+            // DocumentText and SystemPrompt already set above
         };
         _analysisStore[analysisId] = analysis;
 
@@ -182,8 +191,10 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             throw new KeyNotFoundException($"Analysis {analysisId} not found");
         }
 
-        // Build continuation prompt
-        var continuationPrompt = _contextBuilder.BuildContinuationPrompt(
+        // Build full prompt with document context via context builder service
+        var fullPrompt = _contextBuilder.BuildContinuationPromptWithContext(
+            analysis.SystemPrompt,
+            analysis.DocumentText,
             analysis.ChatHistory,
             userMessage,
             analysis.WorkingDocument ?? string.Empty);
@@ -194,10 +205,10 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
 
         // Stream AI completion
         var outputBuilder = new StringBuilder();
-        var inputTokens = EstimateTokens(continuationPrompt);
+        var inputTokens = EstimateTokens(fullPrompt);
 
         await foreach (var token in _openAiClient.StreamCompletionAsync(
-            continuationPrompt,
+            fullPrompt,
             cancellationToken: cancellationToken))
         {
             outputBuilder.Append(token);
@@ -209,7 +220,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         var outputTokens = EstimateTokens(response);
         chatHistory.Add(new ChatMessageModel("assistant", response, DateTime.UtcNow));
 
-        // Update analysis in store
+        // Update analysis in store (preserve DocumentText and SystemPrompt)
         analysis = analysis with
         {
             WorkingDocument = response,
@@ -461,6 +472,122 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         });
     }
 
+    /// <inheritdoc />
+    public async Task<AnalysisResumeResult> ResumeAnalysisAsync(
+        Guid analysisId,
+        AnalysisResumeRequest request,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogInformation(
+            "Resuming analysis {AnalysisId} for document {DocumentId}, IncludeChatHistory={IncludeChatHistory}",
+            analysisId, request.DocumentId, request.IncludeChatHistory);
+
+        try
+        {
+            // Parse chat history if provided and requested
+            var chatHistory = Array.Empty<ChatMessageModel>();
+            var chatMessagesRestored = 0;
+
+            if (request.IncludeChatHistory && !string.IsNullOrWhiteSpace(request.ChatHistory))
+            {
+                try
+                {
+                    var messages = System.Text.Json.JsonSerializer.Deserialize<ChatMessageModel[]>(
+                        request.ChatHistory,
+                        new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+                    if (messages != null)
+                    {
+                        chatHistory = messages;
+                        chatMessagesRestored = messages.Length;
+                        _logger.LogDebug("Restored {Count} chat messages for analysis {AnalysisId}",
+                            chatMessagesRestored, analysisId);
+                    }
+                }
+                catch (System.Text.Json.JsonException ex)
+                {
+                    _logger.LogWarning(ex, "Failed to deserialize chat history for analysis {AnalysisId}", analysisId);
+                    // Continue with empty chat history rather than failing
+                }
+            }
+
+            // Extract document text for context in chat continuations
+            string? documentText = null;
+            string? systemPrompt = null;
+
+            try
+            {
+                var document = await _dataverseService.GetDocumentAsync(
+                    request.DocumentId.ToString(), cancellationToken);
+
+                if (document != null)
+                {
+                    _logger.LogDebug("Extracting document text for resumed analysis {AnalysisId}", analysisId);
+                    documentText = await ExtractDocumentTextAsync(document, cancellationToken);
+
+                    // Build a default system prompt for continuations
+                    systemPrompt = BuildDefaultSystemPrompt();
+
+                    _logger.LogInformation(
+                        "Extracted {CharCount} characters of document text for analysis {AnalysisId}",
+                        documentText?.Length ?? 0, analysisId);
+                }
+                else
+                {
+                    _logger.LogWarning("Document {DocumentId} not found in Dataverse", request.DocumentId);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Failed to extract document text for resumed analysis {AnalysisId}. Continuing without document context.",
+                    analysisId);
+                // Continue without document text rather than failing the resume
+            }
+
+            // Create or update in-memory session with document context
+            var analysis = new AnalysisInternalModel
+            {
+                Id = analysisId,
+                DocumentId = request.DocumentId,
+                DocumentName = request.DocumentName ?? "Unknown",
+                ActionId = Guid.Empty, // Not needed for resumed session
+                Status = "InProgress",
+                DocumentText = documentText,
+                SystemPrompt = systemPrompt,
+                WorkingDocument = request.WorkingDocument,
+                ChatHistory = chatHistory,
+                StartedOn = DateTime.UtcNow
+            };
+
+            _analysisStore[analysisId] = analysis;
+
+            _logger.LogInformation(
+                "Analysis {AnalysisId} resumed successfully: {ChatMessages} messages, WorkingDoc={HasWorkingDoc}, HasDocText={HasDocText}",
+                analysisId, chatMessagesRestored, !string.IsNullOrWhiteSpace(request.WorkingDocument),
+                !string.IsNullOrWhiteSpace(documentText));
+
+            return new AnalysisResumeResult
+            {
+                AnalysisId = analysisId,
+                Success = true,
+                ChatMessagesRestored = chatMessagesRestored,
+                WorkingDocumentRestored = !string.IsNullOrWhiteSpace(request.WorkingDocument)
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to resume analysis {AnalysisId}", analysisId);
+
+            return new AnalysisResumeResult
+            {
+                AnalysisId = analysisId,
+                Success = false,
+                Error = ex.Message
+            };
+        }
+    }
+
     // === Private Helper Methods ===
 
     /// <summary>
@@ -570,6 +697,27 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         return $"{systemPrompt}\n\n---\n\n{userPrompt}";
     }
 
+    /// <summary>
+    /// Build a default system prompt for resumed analysis sessions.
+    /// Used when the original action/skills are not available.
+    /// </summary>
+    private static string BuildDefaultSystemPrompt()
+    {
+        return """
+            You are an AI assistant helping to analyze and discuss documents.
+
+            ## Instructions
+            - Provide helpful, accurate responses to questions about the document
+            - Use the document content as your primary source of information
+            - If asked to modify or update the analysis, provide the complete updated content
+            - Format responses in clear, readable Markdown
+            - Be concise but thorough in your answers
+
+            ## Output Format
+            Provide your response in Markdown format with appropriate headings and structure.
+            """;
+    }
+
     private static int EstimateTokens(string text)
     {
         // Rough estimation: ~4 characters per token
@@ -590,6 +738,8 @@ public record AnalysisInternalModel
     public Guid ActionId { get; init; }
     public string ActionName { get; init; } = string.Empty;
     public string Status { get; init; } = string.Empty;
+    public string? DocumentText { get; init; }  // Extracted document content for context
+    public string? SystemPrompt { get; init; }  // System prompt for continuations
     public string? WorkingDocument { get; init; }
     public string? FinalOutput { get; init; }
     public int InputTokens { get; init; }

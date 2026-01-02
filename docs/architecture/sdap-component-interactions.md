@@ -1,7 +1,7 @@
 # Component Interactions Guide
 
 > **Purpose**: Help AI coding agents understand how Spaarke components interact, so changes to one component can be evaluated for impact on others.
-> **Last Updated**: December 29, 2025
+> **Last Updated**: January 2026
 
 ---
 
@@ -67,7 +67,9 @@ When modifying a component, check this table for potential downstream effects:
 │  ┌─────────────────────────────────────────────────────────────────────────┐│
 │  │  Services Layer                                                         ││
 │  │  • Email/EmailToEmlConverter — RFC 5322 .eml generation with MimeKit   ││
-│  │  • Email/IEmailToEmlConverter — Email conversion interface             ││
+│  │  • Ai/AnalysisOrchestrationService — Document analysis orchestration   ││
+│  │  • Ai/AnalysisContextBuilder — Prompt construction for AI analysis     ││
+│  │  • Ai/RagService — Hybrid vector search for knowledge retrieval        ││
 │  └─────────────────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────────────────┘
            │                                              │
@@ -157,7 +159,32 @@ User → PCF (SpeFileViewer) → BFF API → Graph API → Preview URL
 | Change caching TTL | Consider Graph API rate limits |
 | Add new preview types | Update both BFF and PCF |
 
-### Pattern 4: Email-to-Document Conversion Flow
+### Pattern 4: Analysis Flow (AI Document Intelligence)
+
+```
+User → PCF (AnalysisWorkspace) → BFF API (AnalysisEndpoints) → Azure OpenAI
+                                         │
+                                         ├──→ SpeFileStore → SPE Container (document text)
+                                         ├──→ ScopeResolver → Dataverse (playbooks, skills)
+                                         └──→ AnalysisContextBuilder → Prompt construction
+```
+
+**Components involved:**
+1. `src/client/pcf/AnalysisWorkspace/` — Analysis UI, SSE streaming, chat interface
+2. `src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs` — Execute, Continue, Export endpoints
+3. `src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs` — Orchestration
+4. `src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisContextBuilder.cs` — Prompt construction
+5. `src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs` — Playbook/skill resolution
+
+**Change Impact:**
+| Change | Impact |
+|--------|--------|
+| Modify analysis endpoint signature | Update PCF AnalysisWorkspace API client |
+| Change prompt structure | Update AnalysisContextBuilder methods |
+| Add new export format | Update ExportServiceRegistry and PCF export UI |
+| Modify playbook resolution | Update ScopeResolverService and Dataverse entities |
+
+### Pattern 5: Email-to-Document Conversion Flow
 
 ```
 User/Ribbon Button → BFF API (EmailEndpoints) → EmailToEmlConverter → Dataverse API (Email Activity)
@@ -313,8 +340,12 @@ src/ ─────────────✗────→ tests/ (no test c
 | BFF Auth | `src/server/api/Sprk.Bff.Api/Infrastructure/Auth/` | Same test project |
 | **BFF Email Services** | `src/server/api/Sprk.Bff.Api/Services/Email/` | `tests/unit/Sprk.Bff.Api.Tests/Services/Email/` |
 | **Email Models** | `src/server/api/Sprk.Bff.Api/Models/Email/` | — |
+| **BFF AI Services** | `src/server/api/Sprk.Bff.Api/Services/Ai/` | `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/` |
+| **AI Endpoints** | `src/server/api/Sprk.Bff.Api/Api/Ai/` | Same test project |
+| **AI Models** | `src/server/api/Sprk.Bff.Api/Models/Ai/` | — |
 | PCF UniversalQuickCreate | `src/client/pcf/UniversalQuickCreate/` | Manual testing |
 | PCF SpeFileViewer | `src/client/pcf/SpeFileViewer/` | Manual testing |
+| PCF AnalysisWorkspace | `src/client/pcf/AnalysisWorkspace/` | Manual testing |
 | PCF Shared Auth | `src/client/pcf/*/services/auth/` | — |
 | Bicep Modules | `infrastructure/bicep/modules/` | `what-if` validation |
 | Dataverse Plugins | `src/dataverse/plugins/` | `tests/unit/` |
