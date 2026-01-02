@@ -96,6 +96,18 @@ public static class AnalysisEndpoints
             .ProducesProblem(403)
             .ProducesProblem(404);
 
+        // POST /api/ai/analysis/{analysisId}/resume - Resume existing analysis session
+        group.MapPost("/{analysisId:guid}/resume", ResumeAnalysis)
+            .AddAnalysisRecordAuthorizationFilter()
+            .WithName("ResumeAnalysis")
+            .WithSummary("Resume an existing analysis session")
+            .WithDescription("Creates an in-memory session for an existing analysis. Call this before /continue when reopening an analysis from Dataverse.")
+            .Produces<AnalysisResumeResult>()
+            .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(403)
+            .ProducesProblem(500);
+
         return app;
     }
 
@@ -324,6 +336,34 @@ public static class AnalysisEndpoints
         {
             return Results.NotFound(new { error = $"Analysis {analysisId} not found" });
         }
+    }
+
+    /// <summary>
+    /// Resume an existing analysis by creating an in-memory session.
+    /// POST /api/ai/analysis/{analysisId}/resume
+    /// </summary>
+    private static async Task<IResult> ResumeAnalysis(
+        Guid analysisId,
+        AnalysisResumeRequest request,
+        IAnalysisOrchestrationService orchestrationService,
+        ILogger<AnalysisOrchestrationService> logger,
+        CancellationToken cancellationToken)
+    {
+        logger.LogInformation("Resuming analysis {AnalysisId}, IncludeChatHistory={IncludeChatHistory}",
+            analysisId, request.IncludeChatHistory);
+
+        var result = await orchestrationService.ResumeAnalysisAsync(analysisId, request, cancellationToken);
+
+        if (!result.Success)
+        {
+            logger.LogWarning("Failed to resume analysis {AnalysisId}: {Error}", analysisId, result.Error);
+            return Results.BadRequest(new { error = result.Error });
+        }
+
+        logger.LogInformation("Analysis {AnalysisId} resumed: {ChatMessages} messages restored",
+            analysisId, result.ChatMessagesRestored);
+
+        return Results.Ok(result);
     }
 
     /// <summary>

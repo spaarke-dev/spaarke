@@ -38,11 +38,12 @@ import { IAnalysisWorkspaceAppProps, IChatMessage, IAnalysis } from "../types";
 import { logInfo, logError } from "../utils/logger";
 import { RichTextEditor } from "./RichTextEditor";
 import { SourceDocumentViewer } from "./SourceDocumentViewer";
+import { ResumeSessionDialog } from "./ResumeSessionDialog";
 import { useSseStream } from "../hooks/useSseStream";
 
 // Build info for version footer
-const VERSION = "1.0.18";
-const BUILD_DATE = "2025-12-14";
+const VERSION = "1.0.26";
+const BUILD_DATE = "2025-01-02";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles - 3-Column Layout
@@ -312,6 +313,8 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
     fileId,
     apiBaseUrl,
     webApi,
+    getAccessToken,
+    isAuthReady,
     onWorkingDocumentChange,
     onChatHistoryChange,
     onStatusChange
@@ -331,6 +334,12 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
     const [isConversationPanelVisible, setIsConversationPanelVisible] = React.useState(true);
     const [isDocumentPanelVisible, setIsDocumentPanelVisible] = React.useState(true);
 
+    // Session management state
+    const [isSessionResumed, setIsSessionResumed] = React.useState(false);
+    const [isResumingSession, setIsResumingSession] = React.useState(false);
+    const [showResumeDialog, setShowResumeDialog] = React.useState(false);
+    const [pendingChatHistory, setPendingChatHistory] = React.useState<string | null>(null);
+
     // Panel resize state
     const [leftPanelWidth, setLeftPanelWidth] = React.useState<number | null>(null);
     const [centerPanelWidth, setCenterPanelWidth] = React.useState<number | null>(null);
@@ -342,6 +351,8 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
     const dragStartWidthRef = React.useRef<number>(0);
 
     // Resolved document fields from expanded relationship
+    // Note: documentId prop may be empty - we resolve the actual document ID from the Analysis record
+    const [resolvedDocumentId, setResolvedDocumentId] = React.useState(documentId);
     const [resolvedContainerId, setResolvedContainerId] = React.useState(containerId);
     const [resolvedFileId, setResolvedFileId] = React.useState(fileId);
     const [resolvedDocumentName, setResolvedDocumentName] = React.useState("");
@@ -350,6 +361,7 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
     const [sseState, sseActions] = useSseStream({
         apiBaseUrl,
         analysisId,
+        getAccessToken,
         onToken: (token) => {
             setStreamingResponse(prev => prev + token);
         },
@@ -520,38 +532,55 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
             // Fetch document details separately if we have a document ID
             const docId = result._sprk_documentid_value;
             if (docId) {
+                // Set the resolved document ID (the input prop may be empty)
+                setResolvedDocumentId(docId);
                 try {
+                    // Query document for SPE integration fields
+                    // Document entity field names: sprk_containerid, sprk_graphitemid/sprk_driveitemid
+                    // sprk_filename is used for display name (not sprk_name)
                     const docResult = await webApi.retrieveRecord(
                         "sprk_document",
                         docId,
-                        "?$select=sprk_name,sprk_containerid,sprk_fileid"
+                        "?$select=sprk_filename,sprk_containerid,sprk_graphitemid,sprk_driveitemid"
                     );
                     if (docResult.sprk_containerid) {
                         setResolvedContainerId(docResult.sprk_containerid);
                     }
-                    if (docResult.sprk_fileid) {
-                        setResolvedFileId(docResult.sprk_fileid);
+                    // Use graphitemid or driveitemid as the file ID (they should be the same value)
+                    const fileIdValue = docResult.sprk_graphitemid || docResult.sprk_driveitemid;
+                    if (fileIdValue) {
+                        setResolvedFileId(fileIdValue);
                     }
-                    if (docResult.sprk_name) {
-                        setResolvedDocumentName(docResult.sprk_name);
+                    if (docResult.sprk_filename) {
+                        setResolvedDocumentName(docResult.sprk_filename);
                     }
-                    logInfo("AnalysisWorkspaceApp", `Document fields resolved: container=${docResult.sprk_containerid}, file=${docResult.sprk_fileid}`);
+                    logInfo("AnalysisWorkspaceApp", `Document fields resolved: container=${docResult.sprk_containerid}, file=${fileIdValue}, name=${docResult.sprk_filename}`);
                 } catch (docErr) {
                     logError("AnalysisWorkspaceApp", "Failed to load document details", docErr);
                 }
             }
 
-            // Parse chat history if exists
+            // Check if there's existing chat history
             if (result.sprk_chathistory) {
                 try {
                     const parsed = JSON.parse(result.sprk_chathistory);
-                    if (Array.isArray(parsed)) {
-                        setChatMessages(parsed);
-                        logInfo("AnalysisWorkspaceApp", `Loaded ${parsed.length} chat messages`);
+                    if (Array.isArray(parsed) && parsed.length > 0) {
+                        // Store the raw chat history and show resume dialog
+                        setPendingChatHistory(result.sprk_chathistory);
+                        setShowResumeDialog(true);
+                        logInfo("AnalysisWorkspaceApp", `Found ${parsed.length} chat messages - showing resume dialog`);
+                    } else {
+                        // No chat history - auto-resume with empty session
+                        await resumeSession(false);
                     }
                 } catch (e) {
                     logError("AnalysisWorkspaceApp", "Failed to parse chat history", e);
+                    // Resume with empty session on parse error
+                    await resumeSession(false);
                 }
+            } else {
+                // No chat history - auto-resume with empty session
+                await resumeSession(false);
             }
 
             onStatusChange(getStatusString(result.statuscode));
@@ -578,6 +607,108 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
         } finally {
             setIsLoading(false);
         }
+    };
+
+    /**
+     * Resume session by calling the BFF API /resume endpoint.
+     * Creates an in-memory session on the server so chat can work.
+     */
+    const resumeSession = async (includeChatHistory: boolean) => {
+        if (!analysisId || !resolvedDocumentId) {
+            logInfo("AnalysisWorkspaceApp", "Cannot resume - missing analysisId or documentId");
+            setIsSessionResumed(true); // Allow chat anyway for new records
+            return;
+        }
+
+        setIsResumingSession(true);
+        setShowResumeDialog(false);
+
+        try {
+            // Build request headers with authentication
+            const headers: Record<string, string> = {
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+            };
+
+            if (getAccessToken) {
+                try {
+                    const accessToken = await getAccessToken();
+                    headers["Authorization"] = `Bearer ${accessToken}`;
+                } catch (tokenError) {
+                    logError("AnalysisWorkspaceApp", "Failed to acquire access token for resume", tokenError);
+                    throw new Error("Authentication failed");
+                }
+            }
+
+            // Build request body
+            const requestBody = {
+                documentId: resolvedDocumentId,
+                documentName: resolvedDocumentName || "Unknown",
+                workingDocument: workingDocument,
+                chatHistory: includeChatHistory ? pendingChatHistory : null,
+                includeChatHistory
+            };
+
+            // Call the resume endpoint
+            const baseUrl = apiBaseUrl.replace(/\/+$/, '');
+            const apiPath = baseUrl.endsWith('/api') ? '' : '/api';
+            const url = `${baseUrl}${apiPath}/ai/analysis/${analysisId}/resume`;
+
+            logInfo("AnalysisWorkspaceApp", `Calling resume API: ${url}, includeChatHistory=${includeChatHistory}`);
+
+            const response = await fetch(url, {
+                method: "POST",
+                headers,
+                body: JSON.stringify(requestBody)
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.error || `HTTP ${response.status}`);
+            }
+
+            const result = await response.json();
+            logInfo("AnalysisWorkspaceApp", `Session resumed: ${result.chatMessagesRestored} messages restored`);
+
+            // Load chat history into UI if resuming with history
+            if (includeChatHistory && pendingChatHistory) {
+                try {
+                    const parsed = JSON.parse(pendingChatHistory);
+                    if (Array.isArray(parsed)) {
+                        setChatMessages(parsed);
+                    }
+                } catch (e) {
+                    logError("AnalysisWorkspaceApp", "Failed to parse pending chat history", e);
+                }
+            } else {
+                // Starting fresh - clear chat messages
+                setChatMessages([]);
+            }
+
+            setIsSessionResumed(true);
+            setPendingChatHistory(null);
+
+        } catch (err) {
+            logError("AnalysisWorkspaceApp", "Failed to resume session", err);
+            // Still allow chat even if resume fails - the error will show on first message
+            setIsSessionResumed(true);
+        } finally {
+            setIsResumingSession(false);
+        }
+    };
+
+    // Dialog handlers
+    const handleResumeWithHistory = () => {
+        resumeSession(true);
+    };
+
+    const handleStartFresh = () => {
+        resumeSession(false);
+    };
+
+    const handleDismissResumeDialog = () => {
+        // If user dismisses, start fresh by default
+        resumeSession(false);
     };
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -813,10 +944,12 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
                     </div>
                     <div className={styles.documentPreview}>
                         <SourceDocumentViewer
-                            documentId={documentId}
+                            documentId={resolvedDocumentId}
                             containerId={resolvedContainerId}
                             fileId={resolvedFileId}
                             apiBaseUrl={apiBaseUrl}
+                            getAccessToken={getAccessToken}
+                            isAuthReady={isAuthReady}
                         />
                     </div>
                 </div>
@@ -894,24 +1027,35 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
                             )}
                         </div>
                         <div className={styles.chatInputContainer}>
-                            <div className={styles.chatInputWrapper}>
-                                <Textarea
-                                    className={styles.chatTextarea}
-                                    placeholder="Type a message..."
-                                    value={chatInput}
-                                    onChange={(_e, data) => setChatInput(data.value)}
-                                    onKeyDown={handleChatKeyDown}
-                                    disabled={sseState.isStreaming}
-                                    resize="vertical"
-                                    rows={2}
-                                />
-                                <Button
-                                    icon={<Send24Regular />}
-                                    appearance="primary"
-                                    onClick={handleSendMessage}
-                                    disabled={!chatInput.trim() || sseState.isStreaming}
-                                />
-                            </div>
+                            {isResumingSession ? (
+                                <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "12px", justifyContent: "center" }}>
+                                    <Spinner size="tiny" />
+                                    <Text size={200}>Initializing session...</Text>
+                                </div>
+                            ) : !isSessionResumed && showResumeDialog ? (
+                                <div style={{ padding: "12px", textAlign: "center", color: tokens.colorNeutralForeground3 }}>
+                                    <Text size={200}>Choose how to continue...</Text>
+                                </div>
+                            ) : (
+                                <div className={styles.chatInputWrapper}>
+                                    <Textarea
+                                        className={styles.chatTextarea}
+                                        placeholder={isSessionResumed ? "Type a message..." : "Waiting for session..."}
+                                        value={chatInput}
+                                        onChange={(_e, data) => setChatInput(data.value)}
+                                        onKeyDown={handleChatKeyDown}
+                                        disabled={sseState.isStreaming || !isSessionResumed}
+                                        resize="vertical"
+                                        rows={2}
+                                    />
+                                    <Button
+                                        icon={<Send24Regular />}
+                                        appearance="primary"
+                                        onClick={handleSendMessage}
+                                        disabled={!chatInput.trim() || sseState.isStreaming || !isSessionResumed}
+                                    />
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -921,6 +1065,21 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
             <div className={styles.versionFooter}>
                 v{VERSION} • Built {BUILD_DATE}
             </div>
+
+            {/* Resume Session Dialog */}
+            <ResumeSessionDialog
+                open={showResumeDialog}
+                chatMessageCount={(() => {
+                    try {
+                        return pendingChatHistory ? JSON.parse(pendingChatHistory).length : 0;
+                    } catch {
+                        return 0;
+                    }
+                })()}
+                onResumeWithHistory={handleResumeWithHistory}
+                onStartFresh={handleStartFresh}
+                onDismiss={handleDismissResumeDialog}
+            />
         </div>
     );
 };

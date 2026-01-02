@@ -38,6 +38,7 @@ import {
 import { AnalysisWorkspaceApp } from "./components/AnalysisWorkspaceApp";
 import { logInfo, logError } from "./utils/logger";
 import { getApiBaseUrl } from "./utils/environmentVariables";
+import { AuthService } from "./services/AuthService";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Theme Utilities
@@ -121,6 +122,13 @@ export class AnalysisWorkspace implements ComponentFramework.StandardControl<IIn
     // Environment variable loaded API URL
     private _apiBaseUrl: string = "";
 
+    // Authentication
+    private _authService: AuthService | null = null;
+    private _isAuthReady: boolean = false;
+    private _tenantId: string = "";
+    private _clientAppId: string = "";
+    private _bffAppId: string = "";
+
     constructor() {
         logInfo("AnalysisWorkspace", "Constructor called");
     }
@@ -141,13 +149,27 @@ export class AnalysisWorkspace implements ComponentFramework.StandardControl<IIn
         this._currentTheme = getResolvedTheme();
         this.setupThemeListeners();
 
-        // Load configuration from environment variables asynchronously
-        this.loadConfiguration().then(() => {
-            logInfo("AnalysisWorkspace", `Configuration loaded, API URL: ${this._apiBaseUrl}`);
+        // Load configuration and initialize authentication
+        this.initializeAsync().then(() => {
+            logInfo("AnalysisWorkspace", `Initialization complete`);
+        }).catch((error) => {
+            logError("AnalysisWorkspace", "Initialization failed", error);
         });
 
-        // Initial render
+        // Initial render (will re-render once auth is ready)
         this.renderComponent();
+    }
+
+    /**
+     * Initialize configuration and authentication asynchronously
+     */
+    private async initializeAsync(): Promise<void> {
+        // Load API URL configuration
+        await this.loadConfiguration();
+        logInfo("AnalysisWorkspace", `API URL configured: ${this._apiBaseUrl}`);
+
+        // Initialize MSAL authentication
+        await this.initializeAuth();
     }
 
     /**
@@ -174,6 +196,55 @@ export class AnalysisWorkspace implements ComponentFramework.StandardControl<IIn
             this.renderComponent();
         }
     }
+
+    /**
+     * Initialize MSAL authentication
+     */
+    private async initializeAuth(): Promise<void> {
+        try {
+            // Read auth configuration from parameters
+            this._tenantId = this._context.parameters.tenantId?.raw || "";
+            this._clientAppId = this._context.parameters.clientAppId?.raw || "";
+            this._bffAppId = this._context.parameters.bffAppId?.raw || "";
+
+            // Validate auth configuration
+            if (!this._tenantId || !this._clientAppId || !this._bffAppId) {
+                logError("AnalysisWorkspace", "Missing auth configuration", {
+                    tenantId: !!this._tenantId,
+                    clientAppId: !!this._clientAppId,
+                    bffAppId: !!this._bffAppId
+                });
+                // Don't throw - render in degraded mode (no auth)
+                return;
+            }
+
+            logInfo("AnalysisWorkspace", `Initializing MSAL with tenantId: ${this._tenantId}, clientAppId: ${this._clientAppId.substring(0, 8)}...`);
+
+            // Create and initialize AuthService
+            this._authService = new AuthService(this._tenantId, this._clientAppId, this._bffAppId);
+            await this._authService.initialize();
+            this._isAuthReady = true;
+            logInfo("AnalysisWorkspace", `MSAL initialized. Scope: ${this._authService.getScope()}`);
+
+            // Re-render with auth available
+            this.renderComponent();
+
+        } catch (error) {
+            logError("AnalysisWorkspace", "Failed to initialize authentication", error);
+            // Don't throw - render in degraded mode (no auth)
+        }
+    }
+
+    /**
+     * Get access token for BFF API calls
+     * This is passed to the React component
+     */
+    private getAccessToken = async (): Promise<string> => {
+        if (!this._authService) {
+            throw new Error("Authentication not initialized");
+        }
+        return this._authService.getAccessToken();
+    };
 
     public updateView(context: ComponentFramework.Context<IInputs>): void {
         logInfo("AnalysisWorkspace", "updateView() called");
@@ -249,6 +320,8 @@ export class AnalysisWorkspace implements ComponentFramework.StandardControl<IIn
                     fileId,
                     apiBaseUrl,
                     webApi: this._context.webAPI,
+                    getAccessToken: this.getAccessToken,
+                    isAuthReady: this._isAuthReady,
                     onWorkingDocumentChange: this.handleWorkingDocumentChange.bind(this),
                     onChatHistoryChange: this.handleChatHistoryChange.bind(this),
                     onStatusChange: this.handleStatusChange.bind(this)

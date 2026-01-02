@@ -39,6 +39,10 @@ export interface ISourceDocumentViewerProps {
     fileId: string;
     /** BFF API base URL */
     apiBaseUrl: string;
+    /** Function to get access token for BFF API calls */
+    getAccessToken?: () => Promise<string>;
+    /** Whether authentication is ready (MSAL initialized) */
+    isAuthReady?: boolean;
     /** Callback when fullscreen is requested */
     onFullscreen?: () => void;
 }
@@ -148,6 +152,8 @@ export const SourceDocumentViewer: React.FC<ISourceDocumentViewerProps> = ({
     containerId,
     fileId,
     apiBaseUrl,
+    getAccessToken,
+    isAuthReady = false,
     onFullscreen
 }) => {
     const styles = useStyles();
@@ -171,19 +177,21 @@ export const SourceDocumentViewer: React.FC<ISourceDocumentViewerProps> = ({
         };
     }, []);
 
-    // Load preview when document changes
+    // Load preview when document changes AND auth is ready
     React.useEffect(() => {
-        if (documentId && containerId && fileId) {
+        if (documentId && containerId && fileId && isAuthReady) {
             loadPreview();
-        } else {
+        } else if (!documentId || !containerId || !fileId) {
             setPreviewUrl(null);
             setDocumentInfo(null);
             setError(null);
         }
-    }, [documentId, containerId, fileId]);
+        // If auth is not ready, we just wait (don't clear state or show error)
+    }, [documentId, containerId, fileId, isAuthReady]);
 
     /**
      * Load preview URL from BFF API
+     * Uses same pattern as SpeDocumentViewer for authenticated API calls
      */
     const loadPreview = async () => {
         if (!documentId) {
@@ -198,13 +206,38 @@ export const SourceDocumentViewer: React.FC<ISourceDocumentViewerProps> = ({
         logInfo("SourceDocumentViewer", `Loading preview for document: ${documentId}`);
 
         try {
-            // Call BFF API to get preview URL
-            const response = await fetch(`${apiBaseUrl}/documents/${documentId}/preview-url`, {
-                method: "GET",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Accept": "application/json"
+            // Build request headers - authentication is required for BFF API
+            const headers: Record<string, string> = {
+                "Accept": "application/json"
+            };
+
+            // Acquire access token if getAccessToken is provided (same pattern as SpeDocumentViewer)
+            if (getAccessToken) {
+                try {
+                    logInfo("SourceDocumentViewer", "Acquiring access token...");
+                    const accessToken = await getAccessToken();
+                    headers["Authorization"] = `Bearer ${accessToken}`;
+                    logInfo("SourceDocumentViewer", "Access token acquired successfully");
+                } catch (tokenError) {
+                    logError("SourceDocumentViewer", "Failed to acquire access token", tokenError);
+                    throw new Error(`Authentication failed: ${tokenError instanceof Error ? tokenError.message : String(tokenError)}`);
                 }
+            } else {
+                logInfo("SourceDocumentViewer", "Warning: No getAccessToken function provided - request will be unauthenticated");
+            }
+
+            // Call BFF API to get preview URL (same endpoint as SpeDocumentViewer)
+            // Handle both cases: apiBaseUrl with or without /api suffix
+            // SpeDocumentViewer uses: ${baseUrl}/api/documents/${documentId}/preview-url
+            const baseUrl = apiBaseUrl.replace(/\/+$/, ''); // Remove trailing slashes
+            const apiPath = baseUrl.endsWith('/api') ? '' : '/api';
+            const url = `${baseUrl}${apiPath}/documents/${documentId}/preview-url`;
+
+            logInfo("SourceDocumentViewer", `Calling BFF API: ${url}`);
+
+            const response = await fetch(url, {
+                method: "GET",
+                headers
             });
 
             if (!response.ok) {
@@ -300,6 +333,15 @@ export const SourceDocumentViewer: React.FC<ISourceDocumentViewerProps> = ({
                 <Text size={200}>
                     Select a document to preview the original source
                 </Text>
+            </div>
+        );
+    }
+
+    // Auth initializing state - show loading while MSAL initializes
+    if (!isAuthReady && !previewUrl) {
+        return (
+            <div className={styles.loadingContainer}>
+                <Spinner size="large" label="Initializing authentication..." />
             </div>
         );
     }

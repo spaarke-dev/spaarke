@@ -1,6 +1,8 @@
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Models.Ai;
 
+// Note: AnalysisResumeResult is in Sprk.Bff.Api.Models.Ai namespace
+
 namespace Sprk.Bff.Api.Services.Ai;
 
 /// <summary>
@@ -80,5 +82,18 @@ public interface IAnalysisOrchestrationService
     /// <exception cref="KeyNotFoundException">When analysis not found.</exception>
     Task<AnalysisDetailResult> GetAnalysisAsync(
         Guid analysisId,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Resume an existing analysis by creating an in-memory session.
+    /// Used when opening an existing Analysis record from Dataverse.
+    /// </summary>
+    /// <param name="analysisId">The analysis record ID from Dataverse.</param>
+    /// <param name="request">Resume request with optional chat history and working document.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Resume result indicating success and what was restored.</returns>
+    Task<AnalysisResumeResult> ResumeAnalysisAsync(
+        Guid analysisId,
+        AnalysisResumeRequest request,
         CancellationToken cancellationToken);
 }

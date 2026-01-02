@@ -461,6 +461,85 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         });
     }
 
+    /// <inheritdoc />
+    public Task<AnalysisResumeResult> ResumeAnalysisAsync(
+        Guid analysisId,
+        AnalysisResumeRequest request,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogInformation(
+            "Resuming analysis {AnalysisId} for document {DocumentId}, IncludeChatHistory={IncludeChatHistory}",
+            analysisId, request.DocumentId, request.IncludeChatHistory);
+
+        try
+        {
+            // Parse chat history if provided and requested
+            var chatHistory = Array.Empty<ChatMessageModel>();
+            var chatMessagesRestored = 0;
+
+            if (request.IncludeChatHistory && !string.IsNullOrWhiteSpace(request.ChatHistory))
+            {
+                try
+                {
+                    var messages = System.Text.Json.JsonSerializer.Deserialize<ChatMessageModel[]>(
+                        request.ChatHistory,
+                        new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+                    if (messages != null)
+                    {
+                        chatHistory = messages;
+                        chatMessagesRestored = messages.Length;
+                        _logger.LogDebug("Restored {Count} chat messages for analysis {AnalysisId}",
+                            chatMessagesRestored, analysisId);
+                    }
+                }
+                catch (System.Text.Json.JsonException ex)
+                {
+                    _logger.LogWarning(ex, "Failed to deserialize chat history for analysis {AnalysisId}", analysisId);
+                    // Continue with empty chat history rather than failing
+                }
+            }
+
+            // Create or update in-memory session
+            var analysis = new AnalysisInternalModel
+            {
+                Id = analysisId,
+                DocumentId = request.DocumentId,
+                DocumentName = request.DocumentName ?? "Unknown",
+                ActionId = Guid.Empty, // Not needed for resumed session
+                Status = "InProgress",
+                WorkingDocument = request.WorkingDocument,
+                ChatHistory = chatHistory,
+                StartedOn = DateTime.UtcNow
+            };
+
+            _analysisStore[analysisId] = analysis;
+
+            _logger.LogInformation(
+                "Analysis {AnalysisId} resumed successfully: {ChatMessages} messages, WorkingDoc={HasWorkingDoc}",
+                analysisId, chatMessagesRestored, !string.IsNullOrWhiteSpace(request.WorkingDocument));
+
+            return Task.FromResult(new AnalysisResumeResult
+            {
+                AnalysisId = analysisId,
+                Success = true,
+                ChatMessagesRestored = chatMessagesRestored,
+                WorkingDocumentRestored = !string.IsNullOrWhiteSpace(request.WorkingDocument)
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to resume analysis {AnalysisId}", analysisId);
+
+            return Task.FromResult(new AnalysisResumeResult
+            {
+                AnalysisId = analysisId,
+                Success = false,
+                Error = ex.Message
+            });
+        }
+    }
+
     // === Private Helper Methods ===
 
     /// <summary>
