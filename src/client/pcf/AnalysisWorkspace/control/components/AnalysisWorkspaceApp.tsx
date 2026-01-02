@@ -50,7 +50,7 @@ import { useSseStream } from "../hooks/useSseStream";
 import { MsalAuthProvider, loginRequest } from "../services/auth";
 
 // Build info for version footer
-const VERSION = "1.2.3";
+const VERSION = "1.2.7";
 const BUILD_DATE = "2026-01-02";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -609,6 +609,7 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
             );
 
             logInfo("AnalysisWorkspaceApp", "Analysis loaded", result);
+            logInfo("AnalysisWorkspaceApp", `Chat history field: ${result.sprk_chathistory ? `exists (${result.sprk_chathistory.length} chars)` : "null/undefined"}`);
 
             setAnalysis(result as unknown as IAnalysis);
             setWorkingDocument(result.sprk_workingdocument || "");
@@ -649,10 +650,14 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
                         setPendingChatHistory(parsed);
                         setShowResumeDialog(true);
                         logInfo("AnalysisWorkspaceApp", `Found ${parsed.length} chat messages, showing resume dialog`);
+                    } else {
+                        logInfo("AnalysisWorkspaceApp", `Chat history parsed but empty or not array: ${JSON.stringify(parsed)}`);
                     }
                 } catch (e) {
                     logError("AnalysisWorkspaceApp", "Failed to parse chat history", e);
                 }
+            } else {
+                logInfo("AnalysisWorkspaceApp", "No chat history in analysis record");
             }
 
             onStatusChange(getStatusString(result.statuscode));
@@ -755,6 +760,15 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
         logInfo("AnalysisWorkspaceApp", "Started fresh session");
     };
 
+    // Dismiss dialog without clearing history (Cancel/Escape/click outside)
+    const handleDismissDialog = () => {
+        // Just close the dialog - don't clear history in Dataverse
+        // The history remains in Dataverse for next time
+        setShowResumeDialog(false);
+        setPendingChatHistory(null);
+        logInfo("AnalysisWorkspaceApp", "Dialog dismissed - history preserved in Dataverse");
+    };
+
     const handleDocumentChange = (content: string) => {
         setWorkingDocument(content);
         setIsDirty(true);
@@ -853,7 +867,7 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
     return (
         <div className={styles.container}>
             {/* Resume Session Choice Dialog (ADR-023) */}
-            <Dialog open={showResumeDialog} onOpenChange={(_, data) => !data.open && handleStartFresh()}>
+            <Dialog open={showResumeDialog} onOpenChange={(_, data) => !data.open && handleDismissDialog()}>
                 <DialogSurface>
                     <DialogBody>
                         <DialogTitle>Resume Previous Session?</DialogTitle>
@@ -894,7 +908,7 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
                             </div>
                         </DialogContent>
                         <DialogActions>
-                            <Button appearance="secondary" onClick={handleStartFresh}>Cancel</Button>
+                            <Button appearance="secondary" onClick={handleDismissDialog}>Cancel</Button>
                         </DialogActions>
                     </DialogBody>
                 </DialogSurface>
