@@ -524,18 +524,18 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
                     const docResult = await webApi.retrieveRecord(
                         "sprk_document",
                         docId,
-                        "?$select=sprk_name,sprk_containerid,sprk_fileid"
+                        "?$select=sprk_documentname,sprk_graphdriveid,sprk_graphitemid"
                     );
-                    if (docResult.sprk_containerid) {
-                        setResolvedContainerId(docResult.sprk_containerid);
+                    if (docResult.sprk_graphdriveid) {
+                        setResolvedContainerId(docResult.sprk_graphdriveid);
                     }
-                    if (docResult.sprk_fileid) {
-                        setResolvedFileId(docResult.sprk_fileid);
+                    if (docResult.sprk_graphitemid) {
+                        setResolvedFileId(docResult.sprk_graphitemid);
                     }
-                    if (docResult.sprk_name) {
-                        setResolvedDocumentName(docResult.sprk_name);
+                    if (docResult.sprk_documentname) {
+                        setResolvedDocumentName(docResult.sprk_documentname);
                     }
-                    logInfo("AnalysisWorkspaceApp", `Document fields resolved: container=${docResult.sprk_containerid}, file=${docResult.sprk_fileid}`);
+                    logInfo("AnalysisWorkspaceApp", `Document fields resolved: container=${docResult.sprk_graphdriveid}, file=${docResult.sprk_graphitemid}`);
                 } catch (docErr) {
                     logError("AnalysisWorkspaceApp", "Failed to load document details", docErr);
                 }
