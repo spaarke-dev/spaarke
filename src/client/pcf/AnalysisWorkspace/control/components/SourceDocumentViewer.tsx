@@ -39,6 +39,8 @@ export interface ISourceDocumentViewerProps {
     fileId: string;
     /** BFF API base URL */
     apiBaseUrl: string;
+    /** Function to get access token for API calls */
+    getAccessToken?: () => Promise<string>;
     /** Callback when fullscreen is requested */
     onFullscreen?: () => void;
 }
@@ -148,6 +150,7 @@ export const SourceDocumentViewer: React.FC<ISourceDocumentViewerProps> = ({
     containerId,
     fileId,
     apiBaseUrl,
+    getAccessToken,
     onFullscreen
 }) => {
     const styles = useStyles();
@@ -198,12 +201,26 @@ export const SourceDocumentViewer: React.FC<ISourceDocumentViewerProps> = ({
         logInfo("SourceDocumentViewer", `Loading preview for document: ${documentId}`);
 
         try {
+            // Get access token if auth function provided
+            let authHeaders: Record<string, string> = {};
+            if (getAccessToken) {
+                try {
+                    const token = await getAccessToken();
+                    authHeaders = { "Authorization": `Bearer ${token}` };
+                    logInfo("SourceDocumentViewer", "Auth token acquired for preview");
+                } catch (authErr) {
+                    logError("SourceDocumentViewer", "Failed to acquire auth token", authErr);
+                    throw new Error("Authentication failed. Please refresh and try again.");
+                }
+            }
+
             // Call BFF API to get preview URL
             const response = await fetch(`${apiBaseUrl}/documents/${documentId}/preview-url`, {
                 method: "GET",
                 headers: {
                     "Content-Type": "application/json",
-                    "Accept": "application/json"
+                    "Accept": "application/json",
+                    ...authHeaders
                 }
             });
 

@@ -39,6 +39,7 @@ import { logInfo, logError } from "../utils/logger";
 import { RichTextEditor } from "./RichTextEditor";
 import { SourceDocumentViewer } from "./SourceDocumentViewer";
 import { useSseStream } from "../hooks/useSseStream";
+import { MsalAuthProvider, loginRequest } from "../services/auth";
 
 // Build info for version footer
 const VERSION = "1.0.18";
@@ -346,10 +347,42 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
     const [resolvedFileId, setResolvedFileId] = React.useState(fileId);
     const [resolvedDocumentName, setResolvedDocumentName] = React.useState("");
 
+    // Auth state
+    const [isAuthInitialized, setIsAuthInitialized] = React.useState(false);
+    const authProviderRef = React.useRef<MsalAuthProvider | null>(null);
+
+    // Initialize MSAL auth provider
+    React.useEffect(() => {
+        const initAuth = async () => {
+            try {
+                logInfo("AnalysisWorkspaceApp", "Initializing MSAL auth provider...");
+                const authProvider = MsalAuthProvider.getInstance();
+                await authProvider.initialize();
+                authProviderRef.current = authProvider;
+                setIsAuthInitialized(true);
+                logInfo("AnalysisWorkspaceApp", "MSAL auth initialized successfully");
+            } catch (err) {
+                logError("AnalysisWorkspaceApp", "Failed to initialize MSAL auth", err);
+                // Continue without auth - will fail on API calls
+                setIsAuthInitialized(true);
+            }
+        };
+        initAuth();
+    }, []);
+
+    // Function to get access token for API calls
+    const getAccessToken = React.useCallback(async (): Promise<string> => {
+        if (!authProviderRef.current) {
+            throw new Error("Auth provider not initialized");
+        }
+        return authProviderRef.current.getToken(loginRequest.scopes);
+    }, []);
+
     // SSE Stream Hook for AI Chat
     const [sseState, sseActions] = useSseStream({
         apiBaseUrl,
         analysisId,
+        getAccessToken: isAuthInitialized ? getAccessToken : undefined,
         onToken: (token) => {
             setStreamingResponse(prev => prev + token);
         },
@@ -817,6 +850,7 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
                             containerId={resolvedContainerId}
                             fileId={resolvedFileId}
                             apiBaseUrl={apiBaseUrl}
+                            getAccessToken={isAuthInitialized ? getAccessToken : undefined}
                         />
                     </div>
                 </div>
