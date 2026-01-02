@@ -402,6 +402,9 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
     const [isAuthInitialized, setIsAuthInitialized] = React.useState(false);
     const authProviderRef = React.useRef<MsalAuthProvider | null>(null);
 
+    // Ref to track current chatMessages for save operations (avoids stale closure)
+    const chatMessagesRef = React.useRef<IChatMessage[]>([]);
+
     // Choice dialog state (ADR-023: Resume vs Start Fresh)
     const [showResumeDialog, setShowResumeDialog] = React.useState(false);
     const [pendingChatHistory, setPendingChatHistory] = React.useState<IChatMessage[] | null>(null);
@@ -471,6 +474,11 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
     React.useEffect(() => {
         loadAnalysis();
     }, [analysisId]);
+
+    // Keep chatMessagesRef in sync with state (MUST run before auto-save effect)
+    React.useEffect(() => {
+        chatMessagesRef.current = chatMessages;
+    }, [chatMessages]);
 
     // Auto-save effect
     React.useEffect(() => {
@@ -694,7 +702,7 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
 
             await webApi.updateRecord("sprk_analysis", analysisId, {
                 sprk_workingdocument: workingDocument,
-                sprk_chathistory: JSON.stringify(chatMessages)
+                sprk_chathistory: JSON.stringify(chatMessagesRef.current)
             });
 
             setIsDirty(false);
