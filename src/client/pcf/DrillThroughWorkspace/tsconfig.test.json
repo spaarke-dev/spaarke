@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "jest", "@testing-library/jest-dom", "powerapps-component-framework"]
+  },
+  "include": ["control/**/*", "jest.setup.ts"]
+}

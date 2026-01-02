@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="visualization-module">
+  <metadata>
+    <title>Deploy PCF and Custom Page to Dataverse</title>
+    <phase>4: Drill-Through Workspace</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>033</dependencies>
+    <blocks>040</blocks>
+    <tags>deploy, dataverse, pcf</tags>
+  </metadata>
+
+  <prompt>
+    Deploy the Visual Host PCF control and Drill-Through Custom Page to the
+    Dataverse development environment. Verify end-to-end functionality.
+  </prompt>
+
+  <role>
+    Dataverse deployment specialist.
+  </role>
+
+  <goal>
+    Both PCF controls and Custom Page deployed to dev environment,
+    with end-to-end drill-through workflow verified.
+  </goal>
+
+  <context>
+    <background>
+      This is the first full deployment of the visualization framework.
+      It enables integration testing with real Dataverse data.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="project">Deploy to dev environment only</constraint>
+    <constraint source="project">Bundle size must be under 5MB</constraint>
+    <constraint source="project">Update version in 4 locations per PCF pattern</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Build PCF controls: npm run build</step>
+    <step order="2">Verify bundle size under 5MB</step>
+    <step order="3">Update version numbers in all 4 locations</step>
+    <step order="4">Deploy Visual Host PCF: pac pcf push</step>
+    <step order="5">Deploy DrillThroughWorkspace PCF</step>
+    <step order="6">Deploy Custom Page</step>
+    <step order="7">Place Visual Host on a test form</step>
+    <step order="8">Create a chart definition record</step>
+    <step order="9">Verify chart renders with real data</step>
+    <step order="10">Verify drill-through opens and filters correctly</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <outputs>
+    <output type="solution">PCF controls deployed to Dataverse</output>
+    <output type="solution">Custom Page deployed</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Visual Host PCF renders on form</criterion>
+    <criterion testable="true">Chart shows real aggregated data</criterion>
+    <criterion testable="true">Drill-through opens Custom Page</criterion>
+    <criterion testable="true">Dataset grid filters on chart click</criterion>
+    <criterion testable="true">Bundle size under 5MB</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <skill>.claude/skills/dataverse-deploy/SKILL.md</skill>
+  </execution>
+</task>

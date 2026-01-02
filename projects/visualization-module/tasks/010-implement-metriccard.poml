@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="visualization-module">
+  <metadata>
+    <title>Implement MetricCard component</title>
+    <phase>2: Core Chart Components</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>004</dependencies>
+    <blocks>017, 020</blocks>
+    <tags>pcf, react, fluent-ui, frontend</tags>
+  </metadata>
+
+  <prompt>
+    Build the MetricCard component that displays a single aggregate value (count, sum, avg)
+    with optional trend indicator. This is a custom component using Fluent v9 primitives.
+  </prompt>
+
+  <role>
+    React developer with Fluent UI v9 expertise. Focus on clean, accessible UI.
+  </role>
+
+  <goal>
+    A reusable MetricCard component that displays a metric value with label,
+    optional trend indicator, and click handler for drill-through.
+  </goal>
+
+  <context>
+    <background>
+      Metric cards show single aggregated values like "45 Open Matters" or "$1.2M Revenue".
+      They support click-to-drill for viewing underlying records.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/VisualHost/control/components/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">MUST use @fluentui/react-components v9</constraint>
+    <constraint source="ADR-021">MUST use Fluent design tokens, no hard-coded colors</constraint>
+    <constraint source="ADR-021">MUST support light, dark, and high-contrast modes</constraint>
+    <constraint source="project">MUST emit DrillInteraction on click</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create MetricCard.tsx component file</step>
+    <step order="2">Define props interface (value, label, trend, onClick)</step>
+    <step order="3">Build UI with Card, Text, and Icon from Fluent v9</step>
+    <step order="4">Add trend indicator (up/down arrow with color)</step>
+    <step order="5">Implement click handler that emits DrillInteraction</step>
+    <step order="6">Style with makeStyles and Fluent tokens</step>
+    <step order="7">Create Storybook story with multiple variations</step>
+    <step order="8">Verify dark mode appearance</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/VisualHost/control/components/MetricCard.tsx</output>
+    <output type="code">src/client/pcf/VisualHost/stories/MetricCard.stories.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Component renders value and label correctly</criterion>
+    <criterion testable="true">Trend indicator shows up/down with appropriate colors</criterion>
+    <criterion testable="true">Click emits DrillInteraction with correct field/value</criterion>
+    <criterion testable="true">Component looks correct in dark mode (Storybook)</criterion>
+    <criterion testable="true">No hard-coded colors in component code</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

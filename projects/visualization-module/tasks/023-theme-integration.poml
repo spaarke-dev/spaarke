@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="visualization-module">
+  <metadata>
+    <title>Integrate theme management</title>
+    <phase>3: Visual Host PCF Control</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>030</blocks>
+    <tags>pcf, fluent-ui, frontend</tags>
+  </metadata>
+
+  <prompt>
+    Integrate the established theme management pattern to support Power App MDA theme,
+    dark mode, and high-contrast. Chart colors should follow the app theme.
+  </prompt>
+
+  <role>
+    PCF developer with Fluent UI v9 theming expertise.
+  </role>
+
+  <goal>
+    Visual Host PCF correctly detects and applies the Power App theme,
+    supports dark mode, and charts use appropriate color palettes.
+  </goal>
+
+  <context>
+    <background>
+      Per ADR-021 and project requirements, charts must follow the MDA app theme
+      and support dark mode. The theme-management pattern is established.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">MUST support light, dark, and high-contrast modes</constraint>
+    <constraint source="project">Chart colors follow Power App MDA theme</constraint>
+    <constraint source="project">MUST use established theme-management pattern</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Import theme utilities from established pattern</step>
+    <step order="2">Implement resolveTheme using PCF context.fluentDesignLanguage</step>
+    <step order="3">Add theme listener for dynamic theme changes</step>
+    <step order="4">Create chart color palette from Fluent tokens</step>
+    <step order="5">Pass palette to chart components</step>
+    <step order="6">Test theme switching in Storybook</step>
+    <step order="7">Verify high-contrast mode accessibility</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/pcf/VisualHost/control/utils/themeUtils.ts</output>
+    <output type="code">src/client/pcf/VisualHost/control/utils/chartColors.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Theme resolves correctly from PCF context</criterion>
+    <criterion testable="true">Dark mode works when MDA app is in dark mode</criterion>
+    <criterion testable="true">Chart colors use Fluent tokens (no hard-coded colors)</criterion>
+    <criterion testable="true">Theme changes dynamically without refresh</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

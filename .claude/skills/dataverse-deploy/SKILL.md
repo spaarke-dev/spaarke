@@ -56,6 +56,26 @@ Unable to remove directory "obj\Debug\Metadata"
 pac solution import --path obj/PowerAppsToolsTemp_sprk/bin/Debug/PowerAppsToolsTemp_sprk.zip --publish-changes
 ```
 
+### Manual Pack Fallback
+
+If the zip file doesn't exist after `pac pcf push` fails, build the solution wrapper manually:
+
+```bash
+# 1. Copy build output to solution folder
+mkdir -p obj/PowerAppsToolsTemp_sprk/bin/net462/control
+cp out/controls/*/bundle.js obj/PowerAppsToolsTemp_sprk/bin/net462/control/
+cp out/controls/*/ControlManifest.xml obj/PowerAppsToolsTemp_sprk/bin/net462/control/
+cp control/css/styles.css obj/PowerAppsToolsTemp_sprk/bin/net462/control/ 2>/dev/null || true
+
+# 2. Build solution wrapper (creates the zip)
+cd obj/PowerAppsToolsTemp_sprk
+dotnet build *.cdsproj --configuration Debug
+# Ignore the file lock error at the end - zip is created
+
+# 3. Import the solution
+pac solution import --path bin/Debug/PowerAppsToolsTemp_sprk.zip --publish-changes
+```
+
 ---
 
 ## Decision Tree: Which Workflow?
@@ -82,15 +102,48 @@ Automate deployment of Dataverse components using PAC CLI. This skill handles th
 
 ---
 
+## Critical Constraints
+
+### ⚠️ UNMANAGED SOLUTIONS ONLY
+
+**ALWAYS use unmanaged solutions for all deployments.** Managed solutions have caused issues in past projects and should NEVER be used unless the user explicitly instructs otherwise.
+
+| Solution Type | When to Use | Default? |
+|---------------|-------------|----------|
+| **Unmanaged** | All development, testing, and production | ✅ YES - ALWAYS |
+| **Managed** | NEVER - unless user explicitly requests | ❌ NO |
+
+**Why unmanaged:**
+- Allows components to be modified/removed freely
+- No solution layering complexity
+- Easier troubleshooting and rollback
+- Consistent behavior across environments
+
+**Commands that default to unmanaged:**
+- `pac pcf push` → Creates unmanaged temp solution
+- `pac solution pack --zipfile X --folder Y` → Unmanaged by default
+- `pac solution export --name X --path Y` → Add `--managed false` explicitly
+
+**NEVER run:**
+```bash
+# ❌ NEVER use managed unless explicitly instructed
+pac solution export --managed true
+pac solution pack --managed
+```
+
+---
+
 ## Best Practices
 
 | Practice | Implementation |
 |----------|----------------|
+| **Always use unmanaged** | Never export/pack as managed unless user explicitly requests |
 | **Always build fresh** | Never import from bin/ or obj/ without building first |
 | **Delete old artifacts** | Run `npm run clean` or delete bin/obj before building |
 | **Version footer** | Every PCF MUST display `vX.Y.Z • Built YYYY-MM-DD` in the UI |
 | **Version bumping** | Increment version in 4 locations (see Scenario 1d) |
 | **Verify deployment** | ALWAYS run `pac solution list` after import to confirm version |
+| **Use React 16 APIs** | Dataverse provides React 16.14.0 - see ADR-022 |
 
 ### Key Guidance
 
@@ -226,6 +279,18 @@ Add `<platform-library>` elements:
 </resources>
 ```
 
+#### Create featureconfig.json (CRITICAL)
+
+pcf-scripts requires a feature flag to externalize ReactDOM:
+
+```json
+{
+  "pcfReactPlatformLibraries": "on"
+}
+```
+
+Without this file, React is externalized but ReactDOM is still bundled, causing React version mismatch errors at runtime.
+
 #### Fix package.json
 
 Move React/Fluent to `devDependencies` (type-checking only):
@@ -319,12 +384,11 @@ pac solution list | grep -i "{SolutionName}"
 # List available solutions
 pac solution list
 
-# Export unmanaged solution (for editing)
+# Export unmanaged solution (ALWAYS use unmanaged)
 pac solution export --name "{SolutionName}" --path "./{SolutionName}.zip" --managed false
-
-# Export managed solution (for production)
-pac solution export --name "{SolutionName}" --path "./{SolutionName}_managed.zip" --managed true
 ```
+
+> **⚠️ NEVER export as managed** unless the user explicitly requests it. Managed solutions have caused issues in past projects.
 
 ---
 
@@ -419,6 +483,9 @@ pac solution publish-all
 | `File exceeds 5MB limit` | React/Fluent bundled | Use platform libraries (Scenario 1b) |
 | PCF version regresses in Custom Page | Registry has older version | Update registry FIRST (Scenario 1c) |
 | `PowerAppsToolsTemp` solutions appear | Created by `pac pcf push` | Delete after deployment if needed |
+| `Cannot create property '_updatedFibers'` | Using React 18 APIs with React 16 runtime | Use `ReactDOM.render()`, not `createRoot()` - see ADR-022 |
+| `createRoot is not a function` | Importing from `react-dom/client` | Import from `react-dom` instead |
+| Solution zip not created | `pac pcf push` failed before packing | Use Manual Pack Fallback (above) |
 
 ---
 
@@ -450,7 +517,15 @@ pac solution check --path Y             # Validate solution before import
 
 - `ribbon-edit` - Ribbon customizations use solution export/import workflow
 - `spaarke-conventions` - Naming conventions for all Dataverse components
-- `adr-aware` - ADR-006 governs PCF control patterns
+- `adr-aware` - ADR-006 governs PCF control patterns, ADR-022 governs React version
+
+## Related ADRs
+
+| ADR | Relevance |
+|-----|-----------|
+| [ADR-006](.claude/adr/ADR-006-pcf-over-webresources.md) | PCF over legacy webresources |
+| [ADR-022](.claude/adr/ADR-022-pcf-platform-libraries.md) | React 16 compatibility (CRITICAL) |
+| [ADR-021](.claude/adr/ADR-021-fluent-design-system.md) | Fluent UI v9 design system |
 
 ---
 

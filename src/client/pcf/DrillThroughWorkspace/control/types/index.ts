@@ -1,0 +1,101 @@
+/**
+ * Drill-Through Workspace PCF Types
+ * Local type definitions to avoid bundling shared library components
+ * Note: These mirror the types in VisualHost and @spaarke/ui-components
+ */
+
+/**
+ * Visual type enumeration matching Dataverse option set values
+ */
+export enum VisualType {
+  MetricCard = 100000000,
+  BarChart = 100000001,
+  LineChart = 100000002,
+  AreaChart = 100000003,
+  DonutChart = 100000004,
+  StatusBar = 100000005,
+  Calendar = 100000006,
+  MiniTable = 100000007,
+}
+
+/**
+ * Aggregation type enumeration matching Dataverse option set values
+ */
+export enum AggregationType {
+  Count = 100000000,
+  Sum = 100000001,
+  Average = 100000002,
+  Min = 100000003,
+  Max = 100000004,
+}
+
+/**
+ * Chart Definition interface matching sprk_chartdefinition entity
+ */
+export interface IChartDefinition {
+  sprk_chartdefinitionid: string;
+  sprk_name: string;
+  sprk_description?: string;
+  sprk_visualtype: VisualType;
+  sprk_sourceentity?: string;
+  sprk_entitylogicalname?: string;
+  sprk_baseviewid?: string;
+  sprk_aggregationfield?: string;
+  sprk_aggregationtype?: AggregationType;
+  sprk_groupbyfield?: string;
+  sprk_optionsjson?: string;
+  sprk_configurationjson?: string;
+}
+
+/**
+ * Drill interaction contract
+ */
+export type DrillOperator = "eq" | "in" | "between";
+
+export interface DrillInteraction {
+  field: string;
+  operator: DrillOperator;
+  value: unknown;
+  label?: string;
+}
+
+/** Alias for backwards compatibility */
+export type IDrillInteraction = DrillInteraction;
+
+/**
+ * Aggregated data point for chart rendering
+ */
+export interface IAggregatedDataPoint {
+  label: string;
+  value: number;
+  color?: string;
+  fieldValue: unknown;
+}
+
+/**
+ * Chart data structure passed to chart components
+ */
+export interface IChartData {
+  dataPoints: IAggregatedDataPoint[];
+  totalRecords: number;
+  aggregationType: AggregationType;
+  aggregationField?: string;
+  groupByField?: string;
+}
+
+/**
+ * Workspace configuration
+ */
+export interface IWorkspaceConfig {
+  showToolbar: boolean;
+  height?: number;
+  enableDrillThrough: boolean;
+}
+
+/**
+ * Default workspace configuration
+ */
+export const DEFAULT_WORKSPACE_CONFIG: IWorkspaceConfig = {
+  showToolbar: true,
+  enableDrillThrough: true,
+};

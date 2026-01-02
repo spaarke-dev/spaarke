@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="visualization-module">
+  <metadata>
+    <title>Create shared TypeScript types</title>
+    <phase>1: Foundation and Infrastructure</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>003, 010-016</blocks>
+    <tags>typescript, frontend, types</tags>
+  </metadata>
+
+  <prompt>
+    Create TypeScript interfaces and types that mirror the sprk_chartdefinition entity schema.
+    These types will be shared across all chart components and the Visual Host PCF.
+  </prompt>
+
+  <role>
+    TypeScript developer. Expert in type-safe design and shared library patterns.
+  </role>
+
+  <goal>
+    A complete set of TypeScript types in the shared library that match the Dataverse entity
+    schema and provide type safety for chart configuration throughout the codebase.
+  </goal>
+
+  <context>
+    <background>
+      Type safety is critical for the configuration-driven approach. All chart components
+      and the Visual Host PCF must use the same type definitions to ensure consistency.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/</file>
+      <file>projects/visualization-module/notes/entity-schema.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Types must be exported from @spaarke/ui-components</constraint>
+    <constraint source="project">Enum values must match Dataverse option set integer values</constraint>
+    <constraint source="project">Types must be generic enough for all 7 visual types</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/</file>
+      <file>projects/visualization-module/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review entity schema from task 001</step>
+    <step order="2">Create ChartDefinition interface matching entity fields</step>
+    <step order="3">Create VisualType enum with matching integer values</step>
+    <step order="4">Create AggregationType enum</step>
+    <step order="5">Create DrillInteraction type for chart click handling</step>
+    <step order="6">Create per-visual-type option interfaces (BarChartOptions, etc.)</step>
+    <step order="7">Export all types from shared library index</step>
+    <step order="8">Verify TypeScript compiles without errors</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">TypeScript compilation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/types/ChartDefinition.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/types/DrillInteraction.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/types/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ChartDefinition interface has all 9 fields from entity schema</criterion>
+    <criterion testable="true">VisualType enum has 8 values with correct integer mappings</criterion>
+    <criterion testable="true">DrillInteraction type matches spec contract</criterion>
+    <criterion testable="true">npm run build succeeds without type errors</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

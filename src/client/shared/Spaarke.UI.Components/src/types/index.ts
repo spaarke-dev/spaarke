@@ -2,6 +2,8 @@ export * from "./DatasetTypes";
 export * from "./CommandTypes";
 export * from "./ColumnRendererTypes";
 export * from "./EntityConfigurationTypes";
+export * from "./ChartDefinitionTypes";
+export * from "./DrillInteractionTypes";
 export { PrivilegeService } from "../services/PrivilegeService";
 export { FieldSecurityService } from "../services/FieldSecurityService";
 export { ColumnRendererService } from "../services/ColumnRendererService";

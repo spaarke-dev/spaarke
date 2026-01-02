@@ -400,6 +400,7 @@ ADRs are in `/docs/reference/adr/`. The key constraints are summarized here—**
 | ADR-012 | Shared component library | **Reuse `@spaarke/ui-components` across modules** |
 | ADR-013 | AI Architecture | **AI Tool Framework; extend BFF, not separate service** |
 | ADR-021 | Fluent UI v9 Design System | **All UI must use Fluent v9; no hard-coded colors; dark mode required** |
+| ADR-022 | PCF Platform Libraries | **React 16 APIs only; unmanaged solutions only** |
 
 ## AI Architecture
 

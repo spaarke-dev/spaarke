@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<manifest>
+  <control namespace="Spaarke.Visuals"
+           constructor="VisualHost"
+           version="1.1.17"
+           display-name-key="Visual Host"
+           description-key="Configuration-driven visualization control for charts, cards, and calendars"
+           control-type="standard">
+
+    <external-service-usage enabled="false" />
+
+    <!-- Chart Definition - lookup to sprk_chartdefinition entity (optional in v1.1.0) -->
+    <property name="chartDefinition"
+              display-name-key="Chart Definition"
+              description-key="Lookup to sprk_chartdefinition record. Takes precedence over static ID if both provided."
+              of-type="Lookup.Simple"
+              usage="bound"
+              required="false" />
+
+    <!-- Static Chart Definition ID - for form-level configuration without lookup column (v1.1.0) -->
+    <property name="chartDefinitionId"
+              display-name-key="Chart Definition ID"
+              description-key="Static GUID of sprk_chartdefinition record. Used when lookup is empty. Enables multiple charts per form."
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false" />
+
+    <!-- Context Field Name - for related record filtering (v1.1.0) -->
+    <property name="contextFieldName"
+              display-name-key="Context Field Name"
+              description-key="Lookup field name to filter data by current record (e.g., _sprk_matterid_value). Shows only related records."
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false" />
+
+    <!-- Optional: Height override -->
+    <property name="height"
+              display-name-key="Height"
+              description-key="Optional height in pixels (default: auto)"
+              of-type="Whole.None"
+              usage="input"
+              required="false" />
+
+    <!-- Optional: Show toolbar -->
+    <property name="showToolbar"
+              display-name-key="Show Toolbar"
+              description-key="Show the chart toolbar with expand button"
+              of-type="TwoOptions"
+              usage="input"
+              required="false"
+              default-value="true" />
+
+    <!-- Optional: Enable drill-through -->
+    <property name="enableDrillThrough"
+              display-name-key="Enable Drill-Through"
+              description-key="Enable click interactions to drill into underlying data"
+              of-type="TwoOptions"
+              usage="input"
+              required="false"
+              default-value="true" />
+
+    <resources>
+      <code path="index.ts" order="1" />
+      <css path="styles.css" order="2" />
+      <!-- Host-provided libraries (Dataverse runtime provides these) -->
+      <platform-library name="React" version="16.14.0" />
+      <platform-library name="Fluent" version="9.46.2" />
+    </resources>
+
+    <feature-usage>
+      <uses-feature name="WebAPI" required="true" />
+    </feature-usage>
+  </control>
+</manifest>

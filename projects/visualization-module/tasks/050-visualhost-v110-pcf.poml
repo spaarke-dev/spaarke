@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="050" project="visualization-module">
+  <metadata>
+    <title>Visual Host v1.1.0 PCF Changes</title>
+    <phase>6</phase>
+    <status>completed</status>
+    <estimate>4 hours</estimate>
+    <dependencies>040</dependencies>
+    <tags>pcf, manifest, typescript, context-filtering</tags>
+    <created>2025-12-30</created>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Update Visual Host PCF to v1.1.0 with hybrid chart selection and context filtering support.
+    </goal>
+
+    <context>
+      During integration testing, two key requirements were identified:
+      1. Multiple charts per form - Need static ID binding (not just lookup)
+      2. Context filtering - Charts must filter to related records (e.g., Documents for this Matter)
+
+      Current state: Visual Host v1.0.3 uses Lookup.Simple binding only.
+      Target state: Visual Host v1.1.0 with hybrid selection + context filtering.
+    </context>
+
+    <constraints>
+      - MUST maintain backward compatibility with v1.0.3 lookup binding
+      - MUST follow ADR-006 (PCF over webresources)
+      - MUST follow ADR-021 (Fluent v9 design system)
+      - MUST NOT break existing chart definitions
+      - Bundle size MUST remain under 5MB
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/VisualHost/control/ControlManifest.Input.xml</file>
+      <file>src/client/pcf/VisualHost/control/index.ts</file>
+      <file>src/client/pcf/VisualHost/control/components/VisualHostRoot.tsx</file>
+      <file>src/client/pcf/VisualHost/control/services/DataAggregationService.ts</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step id="1">
+      <action>Update ControlManifest.Input.xml</action>
+      <details>
+        1. Bump version to 1.1.0
+        2. Make chartDefinition lookup optional (required="false")
+        3. Add chartDefinitionId property (SingleLine.Text, usage="input", required="false")
+        4. Add contextFieldName property (SingleLine.Text, usage="input", required="false")
+        5. Update descriptions for clarity
+      </details>
+    </step>
+
+    <step id="2">
+      <action>Regenerate manifest types</action>
+      <details>
+        Run: npm run refreshTypes
+        Verify IInputs includes new properties.
+      </details>
+    </step>
+
+    <step id="3">
+      <action>Update index.ts with hybrid resolution</action>
+      <details>
+        Implement resolution logic:
+        - Extract lookupId from chartDefinition lookup
+        - Extract staticId from chartDefinitionId property
+        - Resolved ID = lookupId || staticId || null
+        - Log resolution for debugging
+      </details>
+    </step>
+
+    <step id="4">
+      <action>Update VisualHostRoot.tsx</action>
+      <details>
+        1. Update chartDefinitionId resolution (lookup OR static)
+        2. Extract contextFieldName from parameters
+        3. Extract contextRecordId from context.mode.contextInfo.entityId
+        4. Pass context info to data loading functions
+      </details>
+    </step>
+
+    <step id="5">
+      <action>Update DataAggregationService.ts</action>
+      <details>
+        1. Add buildContextFilter method
+        2. Accept contextFieldName and contextRecordId parameters
+        3. Combine context filter with view's base filter
+        4. Apply filter when querying Dataverse WebAPI
+      </details>
+    </step>
+
+    <step id="6">
+      <action>Update version footer</action>
+      <details>
+        Update VisualHostRoot.tsx version footer to v1.1.0 with current date.
+      </details>
+    </step>
+
+    <step id="7">
+      <action>Build and verify</action>
+      <details>
+        1. Run: npm run build
+        2. Verify bundle size under 5MB
+        3. Verify no TypeScript errors
+        4. Run existing unit tests
+      </details>
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Bash</tool>
+  </tools>
+
+  <outputs>
+    <output>Updated ControlManifest.Input.xml (v1.1.0)</output>
+    <output>Updated index.ts with hybrid resolution</output>
+    <output>Updated VisualHostRoot.tsx with context support</output>
+    <output>Updated DataAggregationService.ts with context filtering</output>
+    <output>Passing build with no errors</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Manifest version is 1.1.0</criterion>
+    <criterion>chartDefinitionId property exists as optional text input</criterion>
+    <criterion>contextFieldName property exists as optional text input</criterion>
+    <criterion>chartDefinition lookup is optional (required="false")</criterion>
+    <criterion>Resolution logic: lookup takes precedence over static ID</criterion>
+    <criterion>Context filter applied when contextFieldName is configured</criterion>
+    <criterion>Build succeeds with no errors</criterion>
+    <criterion>Bundle size under 5MB</criterion>
+    <criterion>Existing unit tests pass</criterion>
+  </acceptance-criteria>
+</task>

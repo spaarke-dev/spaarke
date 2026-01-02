@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest>
+  <control namespace="Spaarke.Controls" constructor="DrillThroughWorkspace" version="1.1.1" display-name-key="Drill-Through Workspace" description-key="Dataset PCF for drill-through visualizations - chart + filtered grid side-by-side (v1.1.1)" control-type="standard">
+    <external-service-usage enabled="false">
+    </external-service-usage>
+
+    <!--
+      DRILL-THROUGH WORKSPACE PCF CONTROL (Dataset PCF)
+
+      Purpose: Expanded workspace for drill-through visualizations
+      - Two-panel layout: Chart (1/3) | Dataset Grid (2/3)
+      - Click chart elements to filter dataset grid via dataset.filtering API
+      - Supports all 7 visual types from Visual Host
+      - Opens as dialog from Visual Host expand button
+
+      Architecture (per ADR-011 and spec FR-03):
+      - This is a Dataset PCF control - grid data comes from platform dataset binding
+      - Bound to view from sprk_baseviewid via the <data-set> element
+      - Chart drill interactions apply filters via dataset.filtering.setFilter()
+      - Platform handles paging, sorting, security trimming automatically
+
+      Used In: Drill-Through Custom Page (sprk_drillthroughworkspace)
+      Design Reference: projects/visualization-module/spec.md
+    -->
+
+    <!-- Dataset (bound to view from sprk_baseviewid) -->
+    <data-set name="dataset" display-name-key="Dataset" />
+
+    <!-- Chart Definition ID (INPUT - required for chart configuration) -->
+    <property name="chartDefinitionId"
+              display-name-key="Chart Definition ID"
+              description-key="GUID of the sprk_chartdefinition record"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="true" />
+
+    <!-- Should Close (OUTPUT - signals dialog should close) -->
+    <property name="shouldClose"
+              display-name-key="Should Close"
+              description-key="Set to true when workspace should close"
+              of-type="TwoOptions"
+              usage="output"
+              required="false" />
+
+    <!-- Selected Record IDs (OUTPUT - for external actions) -->
+    <property name="selectedRecordIds"
+              display-name-key="Selected Record IDs"
+              description-key="Comma-separated GUIDs of selected records in grid"
+              of-type="SingleLine.Text"
+              usage="output"
+              required="false" />
+
+    <resources>
+      <code path="index.ts" order="1" />
+      <!-- Host-provided libraries -->
+      <platform-library name="React" version="16.14.0" />
+      <platform-library name="Fluent" version="9.46.2" />
+    </resources>
+
+    <feature-usage>
+      <uses-feature name="WebAPI" required="true" />
+      <uses-feature name="Utility" required="true" />
+    </feature-usage>
+  </control>
+</manifest>
