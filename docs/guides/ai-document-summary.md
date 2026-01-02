@@ -24,6 +24,9 @@ The AI Document Summary feature provides automatic document summarization using 
 - **Background processing** via Service Bus jobs
 - **Multiple file types**: Text, PDF, DOCX, images
 - **Production resilience**: Rate limiting, circuit breaker, telemetry
+- **Session persistence**: Chat history and working document saved to Dataverse (R3)
+- **Export capabilities**: DOCX, PDF, Email, Teams adaptive cards (R3)
+- **RAG integration**: Hybrid vector search for knowledge retrieval (R3)
 
 ### Architecture
 
@@ -345,6 +348,7 @@ Authorization: Bearer {token}
 | `docx` | Microsoft Word document | File download (binary) |
 | `pdf` | PDF document | File download (binary) |
 | `email` | Send via Microsoft Graph | Action confirmation (JSON) |
+| `teams` | Post adaptive card to Teams channel | Action confirmation (JSON) |
 
 **DOCX/PDF Response:** `200 OK`
 ```
@@ -646,12 +650,45 @@ public async Task SummarizeInBackgroundAsync(
 
 ---
 
-## Related Documentation
+## PCF Analysis Workspace (v1.2.7)
 
-- [AI Troubleshooting Guide](ai-troubleshooting.md) - Common issues and solutions
-- [Project README](../../projects/ai-document-summary/README.md) - Project overview
-- [Design Specification](../../projects/ai-document-summary/spec.md) - Original design
+The `AnalysisWorkspace` PCF control provides the user interface for document analysis.
+
+### Resume Session Dialog (ADR-023)
+
+When an analysis has existing chat history, users are presented with a choice dialog:
+
+| Option | Behavior |
+|--------|----------|
+| **Resume Session** | Load previous chat messages, continue conversation |
+| **Start Fresh** | Clear chat history in Dataverse, start new conversation |
+| **Cancel** | Close dialog, preserve history in Dataverse for next time |
+
+**Key Implementation Details:**
+- Dialog follows ADR-023 Choice Dialog Pattern (Fluent UI v9)
+- Chat history stored in `sprk_analysis.sprk_chathistory` as JSON
+- Working document stored in `sprk_analysis.sprk_workingdocument`
+- Uses `chatMessagesRef` to avoid stale closures in auto-save
+
+### URL Normalization
+
+The control normalizes the BFF API base URL to prevent double path segments:
+
+```typescript
+// Handles case where apiBaseUrl already ends with /api
+const normalizedBaseUrl = apiBaseUrl.replace(/\/api\/?$/, "");
+const url = `${normalizedBaseUrl}/api/documents/${documentId}/preview-url`;
+```
 
 ---
 
-*Last updated: January 2026*
+## Related Documentation
+
+- [AI Troubleshooting Guide](ai-troubleshooting.md) - Common issues and solutions
+- [RAG Architecture Guide](RAG-ARCHITECTURE.md) - Hybrid search and knowledge retrieval
+- [AI Architecture Guide](SPAARKE-AI-ARCHITECTURE.md) - Overall AI architecture
+- [ADR-023: Choice Dialog Pattern](../adr/ADR-023-choice-dialog-pattern.md) - Resume dialog design
+
+---
+
+*Last updated: January 2026 (R3 Phases 1-5)*

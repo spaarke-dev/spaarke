@@ -4,9 +4,9 @@
 |-------|-------|
 | Status | **Accepted** |
 | Date | 2025-12-05 |
-| Updated | 2025-12-05 |
+| Updated | 2026-01-02 |
 | Authors | Spaarke Engineering |
-| Sprint | Sprint 7 - AI Foundation |
+| Sprint | Sprint 7 - AI Foundation (R3 Phases 1-5 Complete) |
 
 ---
 
@@ -57,18 +57,38 @@ Without a clear architecture decision, we risk:
 │  │   ├── POST /enqueue        ← enqueue background analysis (ADR-004)        │
 │  │   └── POST /enqueue-batch  ← enqueue batch background analysis            │
 │  ├── AnalysisEndpoints.cs              ← /api/ai/analysis/*                   │
+│  │   ├── POST /execute        ← start new analysis (SSE)                     │
+│  │   ├── POST /{id}/continue  ← continue analysis chat (SSE)                 │
+│  │   └── POST /{id}/export    ← export to DOCX/PDF/Email (R3)                │
+│  ├── RagEndpoints.cs                   ← /api/ai/rag/* (R3 Phase 1)          │
+│  │   ├── POST /search         ← hybrid vector search                         │
+│  │   ├── POST /index          ← index document                               │
+│  │   └── POST /embedding      ← generate embedding                           │
+│  ├── ResilienceEndpoints.cs            ← /api/ai/resilience/* (R3 Phase 4)   │
 │  └── RecordMatchEndpoints.cs           ← record matching/association          │
 │                                                                              │
 │  Services/Ai/                                                                │
 │  ├── DocumentIntelligenceService.cs    ← summarization/entity extraction      │
 │  ├── AnalysisOrchestrationService.cs   ← orchestration + SSE                  │
-│  └── TextExtractorService.cs           ← text extraction (native/Doc Intel)   │
+│  ├── RagService.cs                     ← hybrid search + embeddings (R3)      │
+│  ├── TextExtractorService.cs           ← text extraction (native/Doc Intel)   │
+│  ├── OpenAiClient.cs                   ← Azure OpenAI with resilience         │
+│  └── Export/                           ← Export services (R3 Phase 3)         │
+│      ├── DocxExportService.cs          ← Word document export                 │
+│      ├── PdfExportService.cs           ← PDF export with QuestPDF             │
+│      ├── EmailExportService.cs         ← Email via Microsoft Graph            │
+│      └── TeamsExportService.cs         ← Teams adaptive cards                 │
 │                                                                              │
-│  Services/Jobs/Handlers/                                                     │
-│  └── DocumentAnalysisJobHandler.cs     ← JobType: "ai-analyze"                │
+│  Infrastructure/Resilience/            ← Circuit breaker (R3 Phase 4)         │
+│  ├── ResilientSearchClient.cs          ← Polly-wrapped search client          │
+│  └── CircuitBreakerRegistry.cs         ← Named circuit breaker management     │
+│                                                                              │
+│  Telemetry/                            ← Monitoring (R3 Phase 4)              │
+│  └── AiTelemetry.cs                    ← Application Insights AI metrics      │
 │                                                                              │
 │  Api/Filters/                                                                │
 │  ├── AiAuthorizationFilter.cs         ← document-level checks (ADR-008)      │
+│  ├── TenantAuthorizationFilter.cs     ← tenant isolation (R3 Phase 5)        │
 │  └── Analysis*AuthorizationFilter.cs  ← analysis resource checks (ADR-008)   │
 └─────────────────────────────────────────────────────────────────────────────┘
                                       │
@@ -101,9 +121,14 @@ Without a clear architecture decision, we risk:
 
 ## Implementation Notes (Current)
 
-- Streaming is implemented via Server-Sent Events (SSE) on `/api/ai/document-intelligence/analyze` and `/api/ai/analysis/execute`.
+- Streaming is implemented via Server-Sent Events (SSE) on `/api/ai/document-intelligence/analyze`, `/api/ai/analysis/execute`, and `/api/ai/analysis/{id}/continue`.
 - Background processing uses ADR-004 `JobContract` via `JobSubmissionService` and `ServiceBusJobProcessor`.
 - `ai-analyze` is the current background job type for document intelligence analysis.
+- **R3 Phase 1**: RAG hybrid search via `RagService` with Redis-cached embeddings (text-embedding-3-small).
+- **R3 Phase 2**: Analysis orchestration with playbook-based prompts and SSE streaming.
+- **R3 Phase 3**: Export services (DOCX via Open XML SDK, PDF via QuestPDF, Email via Graph, Teams adaptive cards).
+- **R3 Phase 4**: Application Insights telemetry (`AiTelemetry.cs`) and Polly circuit breakers for resilience.
+- **R3 Phase 5**: Security hardening with `TenantAuthorizationFilter` for RAG endpoint tenant isolation.
 
 ### Temporary Exceptions, Hidden/Orphaned Elements, and Exit Criteria
 
@@ -119,9 +144,17 @@ AI work frequently introduces **temporary shortcuts** (e.g., temporarily disable
 
 | Area | Exception / Orphan | Why it exists | Tracking | Exit criteria |
 |------|---------------------|--------------|----------|--------------|
-| Authorization | `DocumentIntelligenceEndpoints` does **not** enforce `.AddAiAuthorizationFilter()` (resource-level document checks) | Dataverse OBO-backed access checks are not yet configured for these endpoints | **REQUIRED:** add work item ID | Configure Dataverse OBO access for document checks; enable the filter on `/analyze`, `/enqueue`, `/enqueue-batch`; add tests proving forbidden access is blocked |
-| Caching | Redis caching for AI outputs is not fully implemented/standardized (do not assume cache coverage) | Implementation is incremental and must avoid caching unsafe/PII-heavy payloads without policy | **REQUIRED:** add work item ID | Define cacheable artifacts + TTLs; implement via ADR-009 patterns; centralize key/TTL definitions; add cache hit/miss telemetry |
-| Data persistence | Some “status update” flows are not fully wired (e.g., placeholder updates for pending/completed states) | Dataverse update schema/fields may still be evolving | **REQUIRED:** add work item ID | Finalize Dataverse fields; implement real updates in all enqueue/handler paths; ensure consistent status transitions and error states |
+| Authorization | ✅ **RESOLVED** (R3 Phase 5): `AiAuthorizationFilter` now extracts `oid` claim correctly for Dataverse user lookup | Fixed in Task 044 | R3-044 | Verified working with Dataverse `azureactivedirectoryobjectid` field |
+| RAG Tenant Isolation | ✅ **RESOLVED** (R3 Phase 5): `TenantAuthorizationFilter` validates `tid` claim matches request tenant | Added to RAG endpoints | R3-044 | All RAG endpoints protected with tenant isolation |
+| Caching | Redis caching implemented for embeddings (7-day TTL) and search results (5-min TTL) | `EmbeddingCache` with SHA256 hash keys | R3-001-010 | ✅ Implemented with cache hit/miss telemetry via `AiTelemetry.cs` |
+| Data persistence | Dataverse fields finalized (`sprk_workingdocument`, `sprk_chathistory`) | Analysis record updates via Web API | R3 Phase 2 | ✅ Status transitions implemented in `AnalysisOrchestrationService` |
+
+**Remaining Items (Non-Blocking)**
+
+| Area | Item | Status | Notes |
+|------|------|--------|-------|
+| Load Testing | Production load baseline not established | Pending | Load test scripts created (`scripts/load-tests/`), baseline pending production deployment |
+| Dashboard Deployment | Azure Monitor dashboards defined but not deployed | Pending | Bicep modules ready (`infrastructure/bicep/modules/dashboard.bicep`) |
 
 ---
 
@@ -182,29 +215,52 @@ AI work frequently introduces **temporary shortcuts** (e.g., temporarily disable
 ```
 src/server/api/Sprk.Bff.Api/
 ├── Api/
-│   └── Ai/
-│       ├── DocumentIntelligenceEndpoints.cs
-│       ├── AnalysisEndpoints.cs
-│       └── RecordMatchEndpoints.cs
+│   ├── Ai/
+│   │   ├── DocumentIntelligenceEndpoints.cs
+│   │   ├── AnalysisEndpoints.cs
+│   │   ├── RagEndpoints.cs              # R3 Phase 1: RAG search/indexing
+│   │   ├── ResilienceEndpoints.cs       # R3 Phase 4: Circuit breaker status
+│   │   └── RecordMatchEndpoints.cs
+│   └── Filters/
+│       ├── AiAuthorizationFilter.cs     # Document-level auth (oid claim)
+│       ├── TenantAuthorizationFilter.cs # R3: Tenant isolation (tid claim)
+│       └── Analysis*AuthorizationFilter.cs
 ├── Services/
 │   └── Ai/
 │       ├── DocumentIntelligenceService.cs
 │       ├── AnalysisOrchestrationService.cs
+│       ├── AnalysisContextBuilder.cs    # Prompt construction
+│       ├── RagService.cs                # R3: Hybrid search + embeddings
 │       ├── TextExtractorService.cs
-│       └── OpenAiClient.cs
+│       ├── OpenAiClient.cs              # Azure OpenAI with resilience
+│       └── Export/                      # R3 Phase 3: Export services
+│           ├── IExportService.cs
+│           ├── DocxExportService.cs     # Open XML SDK
+│           ├── PdfExportService.cs      # QuestPDF
+│           ├── EmailExportService.cs    # Microsoft Graph
+│           └── TeamsExportService.cs    # Adaptive Cards
+├── Infrastructure/
+│   └── Resilience/                      # R3 Phase 4
+│       ├── ResilientSearchClient.cs     # Polly circuit breaker wrapper
+│       └── CircuitBreakerRegistry.cs
+├── Telemetry/                           # R3 Phase 4
+│   └── AiTelemetry.cs                   # Application Insights AI metrics
 ├── Services/Jobs/
 │   ├── JobContract.cs
 │   ├── ServiceBusJobProcessor.cs
 │   └── Handlers/
 │       └── DocumentAnalysisJobHandler.cs
-├── Api/Filters/
-│   └── Analysis*AuthorizationFilter.cs
 └── Configuration/
-    └── DocumentIntelligenceOptions.cs
+    ├── DocumentIntelligenceOptions.cs
+    ├── AnalysisOptions.cs               # R3: Export and context settings
+    └── AiSearchResilienceOptions.cs     # R3: Circuit breaker config
 
 src/client/pcf/
-├── UniversalQuickCreate/               # Upload + AI summary + record match (SSE client utilities)
-├── AnalysisWorkspace/                  # Interactive analysis surface (SSE streaming)
+├── UniversalQuickCreate/               # Upload + AI summary + record match (SSE client)
+├── AnalysisWorkspace/                  # v1.2.7: Analysis workspace with:
+│   └── components/                     #   - Resume/Fresh session dialog (ADR-023)
+│       ├── AnalysisWorkspaceApp.tsx    #   - Chat history persistence
+│       └── SourceDocumentViewer.tsx    #   - SSE streaming chat
 ├── AnalysisBuilder/                    # Analysis configuration/building blocks
 ├── AIMetadataExtractor/                # Metadata extraction tooling/control
 └── shared/                             # Shared PCF React/TS code
@@ -482,6 +538,7 @@ public class AiIndexingJobHandler : IJobHandler<AiIndexingJob>
 | Date | Author | Change |
 |------|--------|--------|
 | 2025-12-05 | Spaarke Engineering | Initial ADR created |
+| 2026-01-02 | Spaarke Engineering | R3 Phases 1-5 complete: RAG, Export, Monitoring, Security |
 
 ---
 

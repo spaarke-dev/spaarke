@@ -1,11 +1,11 @@
 # Spaarke AI Architecture
 
-> **Version**: 1.5
-> **Date**: December 29, 2025
-> **Status**: Draft
+> **Version**: 1.6
+> **Date**: January 2, 2026
+> **Status**: Production (R3 Phases 1-5 Complete)
 > **Author**: Spaarke Engineering
 > **Related**: [SPAARKE-AI-STRATEGY.md](../../reference/architecture/SPAARKE-AI-STRATEGY.md)
-> **R3 Updates**: RAG Deployment Models, Tool Framework, Playbook System, Export Services
+> **R3 Updates**: RAG Foundation, Analysis Orchestration, Export Services, Monitoring/Resilience, Security
 
 ---
 
@@ -2617,9 +2617,120 @@ public class AiSearchServiceTests
 
 ---
 
-## 13. Deployment Checklist
+## 14. Monitoring & Resilience (R3 Phase 4-5)
 
-### 13.1 Pre-Deployment
+### 14.1 Application Insights Telemetry
+
+The `AiTelemetry` class provides custom metrics for AI operations.
+
+**Location**: `src/server/api/Sprk.Bff.Api/Telemetry/AiTelemetry.cs`
+
+**Metrics tracked:**
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `ai.operation.duration` | Histogram | Latency of AI operations |
+| `ai.embedding.cache_hit` | Counter | Embedding cache hits |
+| `ai.embedding.cache_miss` | Counter | Embedding cache misses |
+| `ai.circuit_breaker.state_change` | Event | Circuit state transitions |
+| `ai.search.latency` | Histogram | AI Search query latency |
+| `ai.token.usage` | Counter | Token consumption by model |
+
+**Usage:**
+```csharp
+// Injected via DI
+public class RagService
+{
+    private readonly AiTelemetry _telemetry;
+
+    public async Task<RagSearchResponse> SearchAsync(...)
+    {
+        using var _ = _telemetry.TrackOperation("rag_search");
+        // ...operation code...
+    }
+}
+```
+
+### 14.2 Circuit Breaker Pattern
+
+AI Search operations are protected by Polly circuit breakers via `ResilientSearchClient`.
+
+**Location**: `src/server/api/Sprk.Bff.Api/Infrastructure/Resilience/`
+
+**Configuration** (`AiSearchResilienceOptions`):
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `FailureRatioThreshold` | 0.5 | Opens at 50% failure rate |
+| `MinimumThroughput` | 5 | Min calls before evaluation |
+| `BreakDuration` | 30s | Wait before half-open |
+| `Timeout` | 30s | Per-request timeout |
+
+**Circuit States:**
+- **Closed**: Normal operation
+- **Open**: All requests fail fast with `ai_circuit_open`
+- **Half-Open**: Testing if service recovered
+
+**Monitoring endpoint:**
+```
+GET /api/ai/resilience/status
+→ { "aiSearch": { "state": "Closed", "lastStateChange": "..." } }
+```
+
+### 14.3 Security - Tenant Authorization Filter
+
+**Location**: `src/server/api/Sprk.Bff.Api/Api/Filters/TenantAuthorizationFilter.cs`
+
+The `TenantAuthorizationFilter` validates tenant isolation on RAG endpoints:
+
+```csharp
+// Applied to RAG endpoints
+group.MapPost("/search", RagSearch)
+    .AddEndpointFilter<TenantAuthorizationFilter>();
+```
+
+**Validation flow:**
+1. Extract `tid` claim from JWT token
+2. Extract `tenantId` from request body
+3. Compare values (must match)
+4. Return 403 if mismatch
+
+### 14.4 Authorization Filter Fixes (R3 Phase 5)
+
+The `AiAuthorizationFilter` was updated to correctly extract user identity:
+
+| Before | After | Why |
+|--------|-------|-----|
+| `ClaimTypes.NameIdentifier` | `oid` claim | Dataverse queries `azureactivedirectoryobjectid` |
+
+**Claim extraction order:**
+1. `oid` (Azure AD Object ID) - **primary**
+2. `http://schemas.microsoft.com/identity/claims/objectidentifier` - fallback
+3. `ClaimTypes.NameIdentifier` - last resort
+
+### 14.5 Azure Monitor Dashboards
+
+Bicep modules for Azure Monitor dashboards are available:
+
+**Location**: `infrastructure/bicep/modules/dashboard.bicep`, `alerts.bicep`
+
+**Key dashboard tiles:**
+- AI operation success rate (4-hour trend)
+- Embedding cache hit rate
+- Circuit breaker state timeline
+- Token consumption by model
+- P95 latency by operation type
+
+**Alerts configured:**
+- Circuit breaker opened (Severity 1)
+- Error rate > 5% (Severity 2)
+- P95 latency > 2s (Severity 3)
+
+---
+
+## 15. Deployment Checklist
+
+### 15.1 Pre-Deployment
 
 - [ ] Azure OpenAI resource provisioned with required model deployments
 - [ ] Azure AI Search resource provisioned with index created
@@ -2627,19 +2738,29 @@ public class AiSearchServiceTests
 - [ ] Key Vault secrets configured for all AI service keys
 - [ ] Service Bus queue `ai-indexing` created
 - [ ] Rate limiting configuration reviewed per environment
+- [ ] Application Insights configured with AI telemetry
+- [ ] Circuit breaker thresholds reviewed
 
-### 13.2 Configuration
+### 15.2 Configuration
 
 - [ ] `appsettings.{Environment}.json` updated with AI configuration
 - [ ] Key Vault references validated
 - [ ] Redis instance sized appropriately for embedding cache
+- [ ] Resilience options configured in `AiSearchResilienceOptions`
 
-### 13.3 Testing
+### 15.3 Testing
 
 - [ ] Unit tests passing
 - [ ] Integration tests with AI services validated
 - [ ] Customer isolation verified (no cross-tenant data leakage)
 - [ ] Rate limiting tested under load
+- [ ] Circuit breaker behavior validated
+
+### 15.4 Post-Deployment
+
+- [ ] Azure Monitor dashboard deployed
+- [ ] Alerts configured and tested
+- [ ] Load test baseline established
 
 ---
 
