@@ -214,8 +214,11 @@ export const SourceDocumentViewer: React.FC<ISourceDocumentViewerProps> = ({
                 }
             }
 
+            // Normalize apiBaseUrl - remove trailing /api if present to avoid double /api/api/
+            const normalizedBaseUrl = apiBaseUrl.replace(/\/api\/?$/, "");
+
             // Call BFF API to get preview URL
-            const response = await fetch(`${apiBaseUrl}/api/documents/${documentId}/preview-url`, {
+            const response = await fetch(`${normalizedBaseUrl}/api/documents/${documentId}/preview-url`, {
                 method: "GET",
                 headers: {
                     "Content-Type": "application/json",

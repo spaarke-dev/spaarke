@@ -130,8 +130,11 @@ export function useSseStream(options: ISseStreamOptions): [ISseStreamState, ISse
                 message
             };
 
+            // Normalize apiBaseUrl - remove trailing /api if present to avoid double /api/api/
+            const normalizedBaseUrl = apiBaseUrl.replace(/\/api\/?$/, "");
+
             // Make fetch request to BFF API continue endpoint
-            const response = await fetch(`${apiBaseUrl}/api/ai/analysis/${analysisId}/continue`, {
+            const response = await fetch(`${normalizedBaseUrl}/api/ai/analysis/${analysisId}/continue`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
