@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Http;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Models.Ai;
 
@@ -20,6 +21,7 @@ public interface IAnalysisOrchestrationService
     /// 5. Working document updates
     /// </summary>
     /// <param name="request">Analysis request with document IDs, action, and scopes.</param>
+    /// <param name="httpContext">HTTP context for OBO authentication when downloading files from SPE.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Async enumerable of stream chunks for SSE response.</returns>
     /// <remarks>
@@ -28,6 +30,7 @@ public interface IAnalysisOrchestrationService
     /// </remarks>
     IAsyncEnumerable<AnalysisStreamChunk> ExecuteAnalysisAsync(
         AnalysisExecuteRequest request,
+        HttpContext httpContext,
         CancellationToken cancellationToken);
 
     /// <summary>
@@ -36,12 +39,14 @@ public interface IAnalysisOrchestrationService
     /// </summary>
     /// <param name="analysisId">The analysis record ID.</param>
     /// <param name="userMessage">User's refinement message.</param>
+    /// <param name="httpContext">HTTP context for OBO authentication when downloading files from SPE.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Async enumerable of stream chunks for SSE response.</returns>
     /// <exception cref="KeyNotFoundException">When analysis not found.</exception>
     IAsyncEnumerable<AnalysisStreamChunk> ContinueAnalysisAsync(
         Guid analysisId,
         string userMessage,
+        HttpContext httpContext,
         CancellationToken cancellationToken);
 
     /// <summary>
@@ -80,5 +85,19 @@ public interface IAnalysisOrchestrationService
     /// <exception cref="KeyNotFoundException">When analysis not found.</exception>
     Task<AnalysisDetailResult> GetAnalysisAsync(
         Guid analysisId,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Resume an analysis session, restoring context and chat history.
+    /// </summary>
+    /// <param name="analysisId">The analysis record ID.</param>
+    /// <param name="request">Resume request with document ID and chat history options.</param>
+    /// <param name="httpContext">HTTP context for OBO authentication when downloading files from SPE.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Resume result with restored context.</returns>
+    Task<AnalysisResumeResult> ResumeAnalysisAsync(
+        Guid analysisId,
+        AnalysisResumeRequest request,
+        HttpContext httpContext,
         CancellationToken cancellationToken);
 }

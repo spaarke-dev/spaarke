@@ -37,6 +37,15 @@ import {
 import { logInfo, logError } from "../utils/logger";
 import "../css/AnalysisBuilder.css";
 
+// Declare global Xrm object for Dataverse Web API operations
+declare const Xrm: {
+    WebApi: {
+        online: {
+            execute: (request: unknown) => Promise<unknown>;
+        };
+    };
+};
+
 const useStyles = makeStyles({
     container: {
         display: "flex",
@@ -97,7 +106,7 @@ const useStyles = makeStyles({
 
 // Build date for version footer
 const BUILD_DATE = new Date().toISOString().split("T")[0];
-const VERSION = "1.5.0";
+const VERSION = "2.7.0";
 
 export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (props) => {
     const styles = useStyles();
@@ -173,16 +182,16 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (props) =>
     const loadPlaybooks = async (): Promise<void> => {
         try {
             const result = await webApi.retrieveMultipleRecords(
-                "sprk_aiplaybook",
-                "?$select=sprk_aiplaybookid,sprk_name,sprk_description,sprk_icon,sprk_isdefault&$filter=statecode eq 0&$orderby=sprk_name"
+                "sprk_analysisplaybook",
+                "?$select=sprk_analysisplaybookid,sprk_name,sprk_description&$filter=statecode eq 0&$orderby=sprk_name"
             );
 
             const loadedPlaybooks: IPlaybook[] = result.entities.map((entity: ComponentFramework.WebApi.Entity) => ({
-                id: entity.sprk_aiplaybookid as string,
+                id: entity.sprk_analysisplaybookid as string,
                 name: entity.sprk_name as string,
                 description: entity.sprk_description as string || "",
-                icon: entity.sprk_icon as string || "Lightbulb",
-                isDefault: entity.sprk_isdefault as boolean || false
+                icon: "Lightbulb", // Default icon - field doesn't exist in Dataverse
+                isDefault: false
             }));
 
             setPlaybooks(loadedPlaybooks);
@@ -202,15 +211,15 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (props) =>
     const loadActions = async (): Promise<void> => {
         try {
             const result = await webApi.retrieveMultipleRecords(
-                "sprk_aiaction",
-                "?$select=sprk_aiactionid,sprk_name,sprk_description,sprk_icon&$filter=statecode eq 0&$orderby=sprk_name"
+                "sprk_analysisaction",
+                "?$select=sprk_analysisactionid,sprk_name,sprk_description&$filter=statecode eq 0&$orderby=sprk_name"
             );
 
             const loadedActions: IAction[] = result.entities.map((entity: ComponentFramework.WebApi.Entity) => ({
-                id: entity.sprk_aiactionid as string,
+                id: entity.sprk_analysisactionid as string,
                 name: entity.sprk_name as string,
                 description: entity.sprk_description as string || "",
-                icon: entity.sprk_icon as string || "Play",
+                icon: "Play", // Default icon - field doesn't exist in Dataverse
                 isSelected: false
             }));
 
@@ -224,16 +233,16 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (props) =>
     const loadSkills = async (): Promise<void> => {
         try {
             const result = await webApi.retrieveMultipleRecords(
-                "sprk_aiskill",
-                "?$select=sprk_aiskillid,sprk_name,sprk_description,sprk_icon,sprk_skilltype&$filter=statecode eq 0&$orderby=sprk_name"
+                "sprk_analysisskill",
+                "?$select=sprk_analysisskillid,sprk_name,sprk_description&$filter=statecode eq 0&$orderby=sprk_name"
             );
 
             const loadedSkills: ISkill[] = result.entities.map((entity: ComponentFramework.WebApi.Entity) => ({
-                id: entity.sprk_aiskillid as string,
+                id: entity.sprk_analysisskillid as string,
                 name: entity.sprk_name as string,
                 description: entity.sprk_description as string || "",
-                icon: entity.sprk_icon as string || "Brain",
-                type: (entity.sprk_skilltype as "extraction" | "analysis" | "generation" | "transformation") || "analysis",
+                icon: "Brain", // Default icon - field doesn't exist in Dataverse
+                type: "analysis" as const,
                 isSelected: false
             }));
 
@@ -247,16 +256,16 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (props) =>
     const loadKnowledge = async (): Promise<void> => {
         try {
             const result = await webApi.retrieveMultipleRecords(
-                "sprk_aiknowledge",
-                "?$select=sprk_aiknowledgeid,sprk_name,sprk_description,sprk_icon,sprk_source&$filter=statecode eq 0&$orderby=sprk_name"
+                "sprk_analysisknowledge",
+                "?$select=sprk_analysisknowledgeid,sprk_name,sprk_description&$filter=statecode eq 0&$orderby=sprk_name"
             );
 
             const loadedKnowledge: IKnowledge[] = result.entities.map((entity: ComponentFramework.WebApi.Entity) => ({
-                id: entity.sprk_aiknowledgeid as string,
+                id: entity.sprk_analysisknowledgeid as string,
                 name: entity.sprk_name as string,
                 description: entity.sprk_description as string || "",
-                icon: entity.sprk_icon as string || "Library",
-                source: (entity.sprk_source as "dataverse" | "sharepoint" | "external") || "dataverse",
+                icon: "Library", // Default icon - field doesn't exist in Dataverse
+                source: "dataverse" as const, // Default source - field doesn't exist in Dataverse
                 isSelected: false
             }));
 
@@ -270,16 +279,16 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (props) =>
     const loadTools = async (): Promise<void> => {
         try {
             const result = await webApi.retrieveMultipleRecords(
-                "sprk_aitool",
-                "?$select=sprk_aitoolid,sprk_name,sprk_description,sprk_icon,sprk_tooltype&$filter=statecode eq 0&$orderby=sprk_name"
+                "sprk_analysistool",
+                "?$select=sprk_analysistoolid,sprk_name,sprk_description&$filter=statecode eq 0&$orderby=sprk_name"
             );
 
             const loadedTools: ITool[] = result.entities.map((entity: ComponentFramework.WebApi.Entity) => ({
-                id: entity.sprk_aitoolid as string,
+                id: entity.sprk_analysistoolid as string,
                 name: entity.sprk_name as string,
                 description: entity.sprk_description as string || "",
-                icon: entity.sprk_icon as string || "Wrench",
-                toolType: (entity.sprk_tooltype as "search" | "calculation" | "api" | "workflow") || "api",
+                icon: "Wrench", // Default icon - field doesn't exist in Dataverse
+                toolType: "api" as const, // Default type - field doesn't exist in Dataverse
                 isSelected: false
             }));
 
@@ -366,6 +375,13 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (props) =>
     };
 
     const handleExecute = async (): Promise<void> => {
+        // Validate required fields
+        if (!documentId) {
+            setError("Document ID is required. Please ensure a document is selected.");
+            logError("AnalysisBuilderApp", "Missing documentId", { documentId });
+            return;
+        }
+
         if (!selectedActionId) {
             setError("Please select an action before executing.");
             return;
@@ -384,25 +400,87 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (props) =>
             });
 
             // Create analysis record in Dataverse
-            const analysisRecord = {
+            // Lookup fields use @odata.bind syntax
+            // Note: statuscode defaults automatically, no need to set it
+            const analysisRecord: Record<string, unknown> = {
                 "sprk_name": `Analysis - ${documentName || "Document"}`,
-                "sprk_Document@odata.bind": `/sprk_documents(${documentId})`,
-                "sprk_status": 100000000, // Draft
-                "sprk_actionid": selectedActionId,
-                "sprk_skillids": selectedSkillIds.join(","),
-                "sprk_knowledgeids": selectedKnowledgeIds.join(","),
-                "sprk_toolids": selectedToolIds.join(","),
-                "sprk_outputformat": selectedOutputFormat || "markdown"
+                "sprk_documentid@odata.bind": `/sprk_documents(${documentId})`
             };
 
-            if (selectedPlaybook) {
-                (analysisRecord as Record<string, unknown>)["sprk_Playbook@odata.bind"] = `/sprk_aiplaybooks(${selectedPlaybook.id})`;
+            // Add action lookup (required)
+            if (selectedActionId) {
+                analysisRecord["sprk_actionid@odata.bind"] = `/sprk_analysisactions(${selectedActionId})`;
             }
 
+            // Add playbook lookup (optional)
+            if (selectedPlaybook) {
+                analysisRecord["sprk_playbookid@odata.bind"] = `/sprk_analysisplaybooks(${selectedPlaybook.id})`;
+            }
+
+            // Create the analysis record first
             const result = await webApi.createRecord("sprk_analysis", analysisRecord);
             const analysisId = result.id;
+            logInfo("AnalysisBuilderApp", `Analysis record created: ${analysisId}`);
 
-            logInfo("AnalysisBuilderApp", `Analysis created: ${analysisId}`);
+            // Associate N:N relationships after record creation using Xrm.WebApi
+            // Skills (N:N relationship: sprk_analysis_skill)
+            for (const skillId of selectedSkillIds) {
+                try {
+                    await (Xrm as any).WebApi.online.execute({
+                        getMetadata: () => ({
+                            boundParameter: undefined,
+                            parameterTypes: {},
+                            operationType: 2, // Associate
+                            operationName: "Associate"
+                        }),
+                        target: { entityType: "sprk_analysis", id: analysisId },
+                        relatedEntities: [{ entityType: "sprk_analysisskill", id: skillId }],
+                        relationship: "sprk_analysis_skill"
+                    });
+                } catch (assocErr) {
+                    logError("AnalysisBuilderApp", `Failed to associate skill ${skillId}`, assocErr);
+                }
+            }
+
+            // Knowledge (N:N relationship: sprk_analysis_knowledge)
+            for (const knowledgeId of selectedKnowledgeIds) {
+                try {
+                    await (Xrm as any).WebApi.online.execute({
+                        getMetadata: () => ({
+                            boundParameter: undefined,
+                            parameterTypes: {},
+                            operationType: 2,
+                            operationName: "Associate"
+                        }),
+                        target: { entityType: "sprk_analysis", id: analysisId },
+                        relatedEntities: [{ entityType: "sprk_analysisknowledge", id: knowledgeId }],
+                        relationship: "sprk_analysis_knowledge"
+                    });
+                } catch (assocErr) {
+                    logError("AnalysisBuilderApp", `Failed to associate knowledge ${knowledgeId}`, assocErr);
+                }
+            }
+
+            // Tools (N:N relationship: sprk_analysis_tool)
+            for (const toolId of selectedToolIds) {
+                try {
+                    await (Xrm as any).WebApi.online.execute({
+                        getMetadata: () => ({
+                            boundParameter: undefined,
+                            parameterTypes: {},
+                            operationType: 2,
+                            operationName: "Associate"
+                        }),
+                        target: { entityType: "sprk_analysis", id: analysisId },
+                        relatedEntities: [{ entityType: "sprk_analysistool", id: toolId }],
+                        relationship: "sprk_analysis_tool"
+                    });
+                } catch (assocErr) {
+                    logError("AnalysisBuilderApp", `Failed to associate tool ${toolId}`, assocErr);
+                }
+            }
+
+            logInfo("AnalysisBuilderApp", `Analysis created with associations: ${analysisId}`);
             onExecute(analysisId);
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : "Failed to create analysis";

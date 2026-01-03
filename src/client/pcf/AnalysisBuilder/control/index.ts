@@ -238,7 +238,7 @@ export class AnalysisBuilder implements ComponentFramework.StandardControl<IInpu
 
         logInfo("AnalysisBuilder", `Container size: ${allocatedWidth}x${allocatedHeight}`);
 
-        // Get input parameters
+        // Get input parameters from Custom Page bindings
         const documentId = this._context.parameters.documentId?.raw || "";
         const documentName = this._context.parameters.documentName?.raw || "";
         const containerId = this._context.parameters.containerId?.raw || "";
@@ -249,7 +249,17 @@ export class AnalysisBuilder implements ComponentFramework.StandardControl<IInpu
             this._context.parameters.apiBaseUrl?.raw ||
             "https://spe-api-dev-67e2xz.azurewebsites.net/api";
 
-        logInfo("AnalysisBuilder", `Rendering with documentId: ${documentId}, apiUrl: ${apiBaseUrl.substring(0, 30)}...`);
+        // Debug logging for parameter binding issues
+        logInfo("AnalysisBuilder", `Parameters received:`, {
+            documentId: documentId || "(empty)",
+            documentName: documentName || "(empty)",
+            containerId: containerId || "(empty)",
+            fileId: fileId || "(empty)",
+            apiBaseUrl: apiBaseUrl ? apiBaseUrl.substring(0, 40) + "..." : "(empty)",
+            hasDocumentIdParam: !!this._context.parameters.documentId,
+            documentIdRaw: this._context.parameters.documentId?.raw,
+            documentIdType: this._context.parameters.documentId?.type
+        });
 
         // Create or update React root
         if (!this._root) {
@@ -308,6 +318,9 @@ export class AnalysisBuilder implements ComponentFramework.StandardControl<IInpu
         this._createdAnalysisId = analysisId;
         this._shouldClose = true;
         this._notifyOutputChanged();
+
+        // Close the custom page dialog after successful execution
+        this.closeDialog();
     }
 
     private handleCancel(): void {

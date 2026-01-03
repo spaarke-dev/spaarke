@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Graph;
@@ -31,16 +32,17 @@ public class EmailExportServiceTests
         _loggerMock = new Mock<ILogger<EmailExportService>>();
     }
 
-    private EmailExportService CreateService(AnalysisOptions? options = null, IEnumerable<IExportService>? exportServices = null)
+    private EmailExportService CreateService(AnalysisOptions? options = null, IServiceProvider? serviceProvider = null)
     {
         options ??= new AnalysisOptions { EnableEmailExport = true };
+        serviceProvider ??= new ServiceCollection().BuildServiceProvider();
 
         return new EmailExportService(
             _graphClientFactoryMock.Object,
             _httpContextAccessorMock.Object,
             _loggerMock.Object,
             Options.Create(options),
-            exportServices ?? []);
+            serviceProvider);
     }
 
     private static ExportContext CreateValidContext(

@@ -140,7 +140,7 @@ public static class AnalysisEndpoints
 
         try
         {
-            await foreach (var chunk in orchestrationService.ExecuteAnalysisAsync(request, cancellationToken))
+            await foreach (var chunk in orchestrationService.ExecuteAnalysisAsync(request, context, cancellationToken))
             {
                 await WriteSSEAsync(response, chunk, cancellationToken);
             }
@@ -190,7 +190,7 @@ public static class AnalysisEndpoints
 
         try
         {
-            await foreach (var chunk in orchestrationService.ContinueAnalysisAsync(analysisId, request.Message, cancellationToken))
+            await foreach (var chunk in orchestrationService.ContinueAnalysisAsync(analysisId, request.Message, context, cancellationToken))
             {
                 await WriteSSEAsync(response, chunk, cancellationToken);
             }

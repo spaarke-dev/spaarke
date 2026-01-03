@@ -9,7 +9,7 @@ export interface IAnalysis {
     sprk_analysisid: string;
     sprk_name: string;
     sprk_documentid: string;
-    sprk_actionid?: string;
+    _sprk_actionid_value?: string;  // Lookup field (OData format: _fieldname_value)
     statuscode: AnalysisStatusCode;  // Standard Power Apps Status Reason field
     sprk_workingdocument?: string;
     sprk_chathistory?: string;

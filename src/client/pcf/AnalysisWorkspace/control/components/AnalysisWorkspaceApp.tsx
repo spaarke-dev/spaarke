@@ -44,13 +44,14 @@ import {
 } from "@fluentui/react-icons";
 import { IAnalysisWorkspaceAppProps, IChatMessage, IAnalysis } from "../types";
 import { logInfo, logError } from "../utils/logger";
+import { markdownToHtml, isMarkdown } from "../utils/markdownToHtml";
 import { RichTextEditor } from "./RichTextEditor";
 import { SourceDocumentViewer } from "./SourceDocumentViewer";
 import { useSseStream } from "../hooks/useSseStream";
 import { MsalAuthProvider, loginRequest } from "../services/auth";
 
 // Build info for version footer
-const VERSION = "1.2.7";
+const VERSION = "1.2.12";
 const BUILD_DATE = "2026-01-02";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -409,6 +410,13 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
     const [showResumeDialog, setShowResumeDialog] = React.useState(false);
     const [pendingChatHistory, setPendingChatHistory] = React.useState<IChatMessage[] | null>(null);
 
+    // Initial execution state - tracks if we're running the first AI analysis
+    const [isExecuting, setIsExecuting] = React.useState(false);
+    const [executionProgress, setExecutionProgress] = React.useState("");
+
+    // Pending execution - stores analysis data when auth wasn't ready at load time
+    const [pendingExecution, setPendingExecution] = React.useState<{ analysis: IAnalysis; docId: string } | null>(null);
+
     // Initialize MSAL auth provider
     React.useEffect(() => {
         const initAuth = async () => {
@@ -470,10 +478,174 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
         }
     });
 
+    /**
+     * Execute the initial AI analysis via BFF API with SSE streaming.
+     * Called when loading a Draft analysis with empty working document.
+     */
+    const executeAnalysis = React.useCallback(async (analysis: IAnalysis, docId: string): Promise<void> => {
+        if (!analysis._sprk_actionid_value) {
+            logError("AnalysisWorkspaceApp", "Cannot execute: no action ID set");
+            setError("Cannot execute analysis: no action selected. Please edit the analysis and select an action.");
+            return;
+        }
+
+        setIsExecuting(true);
+        setExecutionProgress("Starting analysis...");
+        logInfo("AnalysisWorkspaceApp", `Executing analysis for document ${docId} with action ${analysis._sprk_actionid_value}`);
+
+        try {
+            // Get access token
+            let authHeaders: Record<string, string> = {};
+            if (authProviderRef.current) {
+                try {
+                    const token = await authProviderRef.current.getToken(loginRequest.scopes);
+                    authHeaders = { "Authorization": `Bearer ${token}` };
+                } catch (authErr) {
+                    logError("AnalysisWorkspaceApp", "Failed to acquire auth token for execute", authErr);
+                    throw new Error("Authentication failed. Please refresh and try again.");
+                }
+            }
+
+            // Build request body matching AnalysisExecuteRequest
+            // Note: Skills, knowledge, and tools are resolved server-side from the action
+            // Lookup fields use _fieldname_value format in OData responses
+            const requestBody = {
+                documentIds: [docId],
+                actionId: analysis._sprk_actionid_value,
+                outputType: 0 // Document
+            };
+
+            logInfo("AnalysisWorkspaceApp", "Execute request body", requestBody);
+
+            // Normalize apiBaseUrl - remove trailing /api if present
+            const normalizedBaseUrl = apiBaseUrl.replace(/\/api\/?$/, "");
+
+            // Make fetch request to execute endpoint with SSE
+            const response = await fetch(`${normalizedBaseUrl}/api/ai/analysis/execute`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Accept": "text/event-stream",
+                    ...authHeaders
+                },
+                body: JSON.stringify(requestBody)
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`HTTP ${response.status}: ${errorText || response.statusText}`);
+            }
+
+            // Get reader for streaming
+            const reader = response.body?.getReader();
+            if (!reader) {
+                throw new Error("Response body is not readable");
+            }
+
+            const decoder = new TextDecoder();
+            let accumulatedText = "";
+            let buffer = "";
+
+            setExecutionProgress("Analyzing document...");
+
+            // Read stream
+            while (true) {
+                const { done, value } = await reader.read();
+
+                if (done) {
+                    logInfo("AnalysisWorkspaceApp", "Execute stream completed");
+                    break;
+                }
+
+                // Decode chunk
+                buffer += decoder.decode(value, { stream: true });
+
+                // Process SSE events
+                const lines = buffer.split("\n");
+                buffer = lines.pop() || "";
+
+                for (const line of lines) {
+                    if (line.startsWith("data: ")) {
+                        const data = line.slice(6).trim();
+                        if (data === "[DONE]") continue;
+
+                        try {
+                            const parsed = JSON.parse(data);
+
+                            if (parsed.type === "metadata") {
+                                setExecutionProgress(`Analyzing: ${parsed.documentName || "document"}...`);
+                            }
+
+                            if (parsed.type === "chunk" && parsed.content) {
+                                accumulatedText += parsed.content;
+                                // Convert markdown to HTML for RichTextEditor display
+                                const htmlContent = markdownToHtml(accumulatedText);
+                                setWorkingDocument(htmlContent);
+                            }
+
+                            if (parsed.type === "error" || parsed.error) {
+                                throw new Error(parsed.error || "Unknown error during analysis");
+                            }
+
+                            if (parsed.type === "done") {
+                                logInfo("AnalysisWorkspaceApp", "Execute completed", parsed);
+                            }
+                        } catch (parseError) {
+                            if (parseError instanceof Error && !parseError.message.includes("Unexpected token")) {
+                                throw parseError;
+                            }
+                            // Non-JSON data, treat as content
+                            if (data && data !== "[DONE]") {
+                                accumulatedText += data;
+                                // Convert markdown to HTML for RichTextEditor display
+                                const htmlContent = markdownToHtml(accumulatedText);
+                                setWorkingDocument(htmlContent);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Save the working document to Dataverse (as HTML for RichTextEditor compatibility)
+            if (accumulatedText && isWebApiAvailable(webApi)) {
+                logInfo("AnalysisWorkspaceApp", "Saving executed analysis to Dataverse");
+                // Convert final markdown to HTML before saving
+                const finalHtml = markdownToHtml(accumulatedText);
+                await webApi.updateRecord("sprk_analysis", analysisId, {
+                    sprk_workingdocument: finalHtml,
+                    statuscode: 100000001 // In Progress
+                });
+                setIsDirty(false);
+                setLastSaved(new Date());
+            }
+
+            setExecutionProgress("");
+            logInfo("AnalysisWorkspaceApp", `Analysis execution completed: ${accumulatedText.length} chars`);
+
+        } catch (err) {
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            logError("AnalysisWorkspaceApp", "Analysis execution failed", err);
+            setError(`Analysis failed: ${errorMessage}`);
+            setExecutionProgress("");
+        } finally {
+            setIsExecuting(false);
+        }
+    }, [apiBaseUrl, analysisId, webApi]);
+
     // Load analysis data on mount
     React.useEffect(() => {
         loadAnalysis();
     }, [analysisId]);
+
+    // Execute pending analysis when auth becomes available
+    React.useEffect(() => {
+        if (isAuthInitialized && pendingExecution && !isExecuting) {
+            logInfo("AnalysisWorkspaceApp", "Auth now initialized, executing pending analysis");
+            setIsLoading(false);
+            executeAnalysis(pendingExecution.analysis, pendingExecution.docId);
+            setPendingExecution(null); // Clear pending
+        }
+    }, [isAuthInitialized, pendingExecution, isExecuting, executeAnalysis]);
 
     // Keep chatMessagesRef in sync with state (MUST run before auto-save effect)
     React.useEffect(() => {
@@ -601,18 +773,23 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
                 return;
             }
 
-            // Fetch analysis record from Dataverse
+            // Fetch analysis record from Dataverse (include fields needed for execute)
             const result = await webApi.retrieveRecord(
                 "sprk_analysis",
                 analysisId,
-                "?$select=sprk_name,statuscode,sprk_workingdocument,sprk_chathistory,createdon,modifiedon,_sprk_documentid_value"
+                "?$select=sprk_name,statuscode,sprk_workingdocument,sprk_chathistory,_sprk_actionid_value,createdon,modifiedon,_sprk_documentid_value"
             );
 
             logInfo("AnalysisWorkspaceApp", "Analysis loaded", result);
             logInfo("AnalysisWorkspaceApp", `Chat history field: ${result.sprk_chathistory ? `exists (${result.sprk_chathistory.length} chars)` : "null/undefined"}`);
 
             setAnalysis(result as unknown as IAnalysis);
-            setWorkingDocument(result.sprk_workingdocument || "");
+            // Load working document - convert markdown to HTML if needed for RichTextEditor
+            const savedContent = result.sprk_workingdocument || "";
+            const displayContent = savedContent && isMarkdown(savedContent)
+                ? markdownToHtml(savedContent)
+                : savedContent;
+            setWorkingDocument(displayContent);
 
             // Fetch document details separately if we have a document ID
             const docId = result._sprk_documentid_value;
@@ -638,6 +815,30 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
                     logInfo("AnalysisWorkspaceApp", `Document fields resolved: docId=${docId}, container=${docResult.sprk_graphdriveid}, file=${docResult.sprk_graphitemid}`);
                 } catch (docErr) {
                     logError("AnalysisWorkspaceApp", "Failed to load document details", docErr);
+                }
+
+                // Check if we need to execute the analysis (Draft with empty working document)
+                const isDraft = result.statuscode === 1; // Draft status
+                const hasEmptyWorkingDoc = !result.sprk_workingdocument || result.sprk_workingdocument.trim() === "";
+                // Note: Lookup fields use _fieldname_value format in OData responses
+                const actionId = result._sprk_actionid_value;
+                const hasAction = !!actionId;
+
+                logInfo("AnalysisWorkspaceApp", `Execute check: statuscode=${result.statuscode} (isDraft=${isDraft}), hasEmptyWorkingDoc=${hasEmptyWorkingDoc}, actionId=${actionId} (hasAction=${hasAction})`);
+
+                if (isDraft && hasEmptyWorkingDoc && hasAction) {
+                    logInfo("AnalysisWorkspaceApp", `Draft analysis with empty working document - auth ready: ${isAuthInitialized}`);
+
+                    if (isAuthInitialized) {
+                        // Auth is ready, execute now
+                        setIsLoading(false);
+                        executeAnalysis(result as unknown as IAnalysis, docId);
+                        return;
+                    } else {
+                        // Auth not ready, store for later execution
+                        logInfo("AnalysisWorkspaceApp", "Auth not initialized yet, storing pending execution");
+                        setPendingExecution({ analysis: result as unknown as IAnalysis, docId });
+                    }
                 }
             }
 
@@ -850,6 +1051,18 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
         return (
             <div className={styles.loadingContainer}>
                 <Spinner size="large" label="Loading analysis..." />
+            </div>
+        );
+    }
+
+    // Show execution progress overlay while running initial AI analysis
+    if (isExecuting) {
+        return (
+            <div className={styles.loadingContainer}>
+                <Spinner size="large" label={executionProgress || "Executing analysis..."} />
+                <Text size={300} style={{ marginTop: "12px", color: tokens.colorNeutralForeground2 }}>
+                    The AI is analyzing your document. This may take a moment...
+                </Text>
             </div>
         );
     }

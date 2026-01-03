@@ -89,11 +89,14 @@ public class AnalysisContextBuilder : IAnalysisContextBuilder
                 }
             }
 
-            // RAG knowledge - would require async search
+            // Note: RAG knowledge sources are processed by AnalysisOrchestrationService
+            // before reaching this method. They are converted to Inline type with
+            // content from Azure AI Search results. Any remaining RAG sources here
+            // are skipped (e.g., if RAG processing failed for them).
             if (ragKnowledge.Length > 0)
             {
-                // TODO: Implement RAG retrieval via Azure AI Search
-                _logger.LogDebug("RAG knowledge sources specified but retrieval not yet implemented");
+                _logger.LogDebug("Skipping {RagCount} unprocessed RAG knowledge sources (processed by orchestration service)",
+                    ragKnowledge.Length);
             }
         }
 

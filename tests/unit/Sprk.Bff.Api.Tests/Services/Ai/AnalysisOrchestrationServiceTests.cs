@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -27,6 +28,8 @@ public class AnalysisOrchestrationServiceTests
     private readonly Mock<IAnalysisContextBuilder> _contextBuilderMock;
     private readonly Mock<IWorkingDocumentService> _workingDocumentServiceMock;
     private readonly ExportServiceRegistry _exportRegistry;
+    private readonly Mock<IRagService> _ragServiceMock;
+    private readonly Mock<IHttpContextAccessor> _httpContextAccessorMock;
     private readonly Mock<ILogger<AnalysisOrchestrationService>> _loggerMock;
     private readonly IOptions<AnalysisOptions> _options;
     private readonly AnalysisOrchestrationService _service;
@@ -40,6 +43,8 @@ public class AnalysisOrchestrationServiceTests
         _scopeResolverMock = new Mock<IScopeResolverService>();
         _contextBuilderMock = new Mock<IAnalysisContextBuilder>();
         _workingDocumentServiceMock = new Mock<IWorkingDocumentService>();
+        _ragServiceMock = new Mock<IRagService>();
+        _httpContextAccessorMock = new Mock<IHttpContextAccessor>();
         _loggerMock = new Mock<ILogger<AnalysisOrchestrationService>>();
 
         _options = Options.Create(new AnalysisOptions
@@ -60,6 +65,8 @@ public class AnalysisOrchestrationServiceTests
             _contextBuilderMock.Object,
             _workingDocumentServiceMock.Object,
             _exportRegistry,
+            _ragServiceMock.Object,
+            _httpContextAccessorMock.Object,
             _options,
             _loggerMock.Object);
     }

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Security.Claims;
 using System.Text;
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
@@ -33,6 +34,8 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
     private readonly IAnalysisContextBuilder _contextBuilder;
     private readonly IWorkingDocumentService _workingDocumentService;
     private readonly ExportServiceRegistry _exportRegistry;
+    private readonly IRagService _ragService;
+    private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly AnalysisOptions _options;
     private readonly ILogger<AnalysisOrchestrationService> _logger;
     private readonly AiTelemetry? _telemetry;
@@ -49,6 +52,8 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         IAnalysisContextBuilder contextBuilder,
         IWorkingDocumentService workingDocumentService,
         ExportServiceRegistry exportRegistry,
+        IRagService ragService,
+        IHttpContextAccessor httpContextAccessor,
         IOptions<AnalysisOptions> options,
         ILogger<AnalysisOrchestrationService> logger,
         AiTelemetry? telemetry = null)
@@ -61,6 +66,8 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         _contextBuilder = contextBuilder;
         _workingDocumentService = workingDocumentService;
         _exportRegistry = exportRegistry;
+        _ragService = ragService;
+        _httpContextAccessor = httpContextAccessor;
         _options = options.Value;
         _logger = logger;
         _telemetry = telemetry;
@@ -69,6 +76,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
     /// <inheritdoc />
     public async IAsyncEnumerable<AnalysisStreamChunk> ExecuteAnalysisAsync(
         AnalysisExecuteRequest request,
+        HttpContext httpContext,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         // Phase 1: Process only the first document
@@ -80,6 +88,13 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         // 1. Get document details from Dataverse
         var document = await _dataverseService.GetDocumentAsync(documentId.ToString(), cancellationToken)
             ?? throw new KeyNotFoundException($"Document {documentId} not found");
+
+        // Log document details for debugging extraction issues
+        _logger.LogInformation(
+            "Document retrieved from Dataverse: Id={DocumentId}, Name={Name}, HasFile={HasFile}, " +
+            "FileName={FileName}, GraphDriveId={GraphDriveId}, GraphItemId={GraphItemId}",
+            document.Id, document.Name, document.HasFile,
+            document.FileName, document.GraphDriveId ?? "(null)", document.GraphItemId ?? "(null)");
 
         // 2. Create analysis record (in-memory for Phase 1)
         var analysisId = Guid.NewGuid();
@@ -115,13 +130,32 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         var action = await _scopeResolver.GetActionAsync(request.ActionId, cancellationToken)
             ?? throw new KeyNotFoundException($"Action {request.ActionId} not found");
 
-        // 5. Extract document text from SPE via TextExtractor
-        var documentText = await ExtractDocumentTextAsync(document, cancellationToken);
+        // 5. Extract document text from SPE via TextExtractor (uses OBO auth)
+        var documentText = await ExtractDocumentTextAsync(document, httpContext, cancellationToken);
 
-        // 6. Build prompts
+        // Log extraction result for debugging
+        var textPreview = documentText.Length > 200 ? documentText[..200] + "..." : documentText;
+        _logger.LogInformation(
+            "Document text extracted: Length={TextLength}, Preview={Preview}",
+            documentText.Length, textPreview);
+
+        // Check for extraction failure indicators
+        if (documentText.Contains("No file content available") ||
+            documentText.Contains("not configured") ||
+            documentText.Contains("not supported") ||
+            documentText.Contains("Failed to download"))
+        {
+            _logger.LogWarning("Document extraction returned fallback message: {Message}", textPreview);
+        }
+
+        // 6. Process RAG knowledge sources (query Azure AI Search)
+        var processedKnowledge = await ProcessRagKnowledgeAsync(
+            scopes.Knowledge, documentText, cancellationToken);
+
+        // 7. Build prompts
         var systemPrompt = _contextBuilder.BuildSystemPrompt(action, scopes.Skills);
         var userPrompt = await _contextBuilder.BuildUserPromptAsync(
-            documentText, scopes.Knowledge, cancellationToken);
+            documentText, processedKnowledge, cancellationToken);
 
         // Store document text and system prompt for continuation
         analysis = analysis with
@@ -181,6 +215,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
     public async IAsyncEnumerable<AnalysisStreamChunk> ContinueAnalysisAsync(
         Guid analysisId,
         string userMessage,
+        HttpContext httpContext,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         _logger.LogInformation("Continuing analysis {AnalysisId}", analysisId);
@@ -189,7 +224,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         if (!_analysisStore.TryGetValue(analysisId, out var analysis))
         {
             _logger.LogInformation("Analysis {AnalysisId} not in memory, reloading from Dataverse", analysisId);
-            analysis = await ReloadAnalysisFromDataverseAsync(analysisId, cancellationToken);
+            analysis = await ReloadAnalysisFromDataverseAsync(analysisId, httpContext, cancellationToken);
             _analysisStore[analysisId] = analysis;
         }
 
@@ -478,6 +513,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
     public async Task<AnalysisResumeResult> ResumeAnalysisAsync(
         Guid analysisId,
         AnalysisResumeRequest request,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         _logger.LogInformation(
@@ -525,7 +561,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                 if (document != null)
                 {
                     _logger.LogDebug("Extracting document text for resumed analysis {AnalysisId}", analysisId);
-                    documentText = await ExtractDocumentTextAsync(document, cancellationToken);
+                    documentText = await ExtractDocumentTextAsync(document, httpContext, cancellationToken);
 
                     // Build a default system prompt for continuations
                     systemPrompt = BuildDefaultSystemPrompt();
@@ -593,18 +629,154 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
     // === Private Helper Methods ===
 
     /// <summary>
+    /// Process knowledge sources, replacing RAG types with inline content from search results.
+    /// This implements RAG (Retrieval-Augmented Generation) by querying Azure AI Search.
+    /// </summary>
+    /// <param name="knowledge">Original knowledge sources from scope resolution.</param>
+    /// <param name="documentText">Document text to use as search query for RAG.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Processed knowledge array with RAG sources replaced by inline content.</returns>
+    private async Task<AnalysisKnowledge[]> ProcessRagKnowledgeAsync(
+        AnalysisKnowledge[] knowledge,
+        string documentText,
+        CancellationToken cancellationToken)
+    {
+        if (knowledge.Length == 0)
+        {
+            return knowledge;
+        }
+
+        var ragSources = knowledge.Where(k => k.Type == KnowledgeType.RagIndex).ToArray();
+        if (ragSources.Length == 0)
+        {
+            _logger.LogDebug("No RAG knowledge sources to process");
+            return knowledge;
+        }
+
+        // Get tenant ID from HttpContext claims
+        var tenantId = GetTenantIdFromClaims();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            _logger.LogWarning("Cannot process RAG knowledge: TenantId not found in claims");
+            // Return knowledge as-is; the context builder will just skip RAG sources
+            return knowledge;
+        }
+
+        _logger.LogInformation("Processing {RagCount} RAG knowledge sources for tenant {TenantId}",
+            ragSources.Length, tenantId);
+
+        // Build search query from document text (use first 500 chars for query efficiency)
+        var searchQuery = documentText.Length > 500 ? documentText[..500] : documentText;
+
+        var processedKnowledge = new List<AnalysisKnowledge>();
+
+        foreach (var source in knowledge)
+        {
+            if (source.Type != KnowledgeType.RagIndex)
+            {
+                // Keep non-RAG sources as-is
+                processedKnowledge.Add(source);
+                continue;
+            }
+
+            try
+            {
+                // Search RAG index for this knowledge source
+                var searchOptions = new RagSearchOptions
+                {
+                    TenantId = tenantId,
+                    DeploymentId = source.DeploymentId,
+                    KnowledgeSourceId = source.Id.ToString(),
+                    TopK = _options.MaxKnowledgeResults,
+                    MinScore = _options.MinRelevanceScore,
+                    UseSemanticRanking = true,
+                    UseVectorSearch = true,
+                    UseKeywordSearch = true
+                };
+
+                _logger.LogDebug("Searching RAG index for knowledge source {SourceId}: {SourceName}",
+                    source.Id, source.Name);
+
+                var searchResult = await _ragService.SearchAsync(searchQuery, searchOptions, cancellationToken);
+
+                if (searchResult.Results.Count == 0)
+                {
+                    _logger.LogDebug("No RAG results found for knowledge source {SourceId}", source.Id);
+                    continue; // Skip this source if no results
+                }
+
+                // Convert RAG results to inline knowledge content
+                var ragContent = new StringBuilder();
+                ragContent.AppendLine($"Retrieved from knowledge base: {source.Name}");
+                ragContent.AppendLine();
+
+                foreach (var result in searchResult.Results)
+                {
+                    ragContent.AppendLine($"### {result.DocumentName} (Relevance: {result.Score:P0})");
+                    ragContent.AppendLine(result.Content);
+                    ragContent.AppendLine();
+                }
+
+                // Replace RAG source with inline source containing search results
+                var inlineSource = source with
+                {
+                    Type = KnowledgeType.Inline,
+                    Content = ragContent.ToString()
+                };
+
+                processedKnowledge.Add(inlineSource);
+
+                _logger.LogInformation(
+                    "RAG search for {SourceName} returned {ResultCount} results in {Duration}ms",
+                    source.Name, searchResult.Results.Count, searchResult.SearchDurationMs);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to search RAG index for knowledge source {SourceId}: {SourceName}",
+                    source.Id, source.Name);
+                // Continue without this knowledge source rather than failing the analysis
+            }
+        }
+
+        _logger.LogDebug("Processed {OriginalCount} knowledge sources into {ProcessedCount} sources",
+            knowledge.Length, processedKnowledge.Count);
+
+        return processedKnowledge.ToArray();
+    }
+
+    /// <summary>
+    /// Gets the tenant ID from the current HTTP context claims.
+    /// </summary>
+    private string? GetTenantIdFromClaims()
+    {
+        var user = _httpContextAccessor.HttpContext?.User;
+        if (user == null)
+        {
+            return null;
+        }
+
+        // Try common claim types for tenant ID
+        return user.FindFirstValue("tid") ??
+               user.FindFirstValue("http://schemas.microsoft.com/identity/claims/tenantid") ??
+               user.FindFirstValue("tenant_id");
+    }
+
+    /// <summary>
     /// Extract text from a document stored in SharePoint Embedded.
-    /// Downloads the file and uses TextExtractor to extract readable text.
+    /// Downloads the file using OBO authentication and uses TextExtractor to extract readable text.
     /// </summary>
     private async Task<string> ExtractDocumentTextAsync(
         DocumentEntity document,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
-        // Check if document has a file
-        if (!document.HasFile || string.IsNullOrEmpty(document.GraphDriveId) || string.IsNullOrEmpty(document.GraphItemId))
+        // Check if document has SPE file reference
+        // Presence of valid Graph IDs is sufficient - HasFile flag may not always be set
+        var hasValidGraphIds = !string.IsNullOrEmpty(document.GraphDriveId) && !string.IsNullOrEmpty(document.GraphItemId);
+        if (!hasValidGraphIds)
         {
             _logger.LogWarning(
-                "Document {DocumentId} has no file attached (HasFile={HasFile}, DriveId={DriveId}, ItemId={ItemId})",
+                "Document {DocumentId} has no SPE file reference (HasFile={HasFile}, DriveId={DriveId}, ItemId={ItemId})",
                 document.Id, document.HasFile, document.GraphDriveId, document.GraphItemId);
 
             return $"[Document: {document.Name}]\n\nNo file content available for this document.";
@@ -625,26 +797,38 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
 
         try
         {
-            _logger.LogDebug(
-                "Downloading document {DocumentId} from SPE (Drive={DriveId}, Item={ItemId})",
-                document.Id, document.GraphDriveId, document.GraphItemId);
+            _logger.LogInformation(
+                "Downloading document {DocumentId} from SPE (Drive={DriveId}, Item={ItemId}, FileName={FileName})",
+                document.Id, document.GraphDriveId, document.GraphItemId, fileName);
 
-            // Download file from SharePoint Embedded
-            using var fileStream = await _speFileStore.DownloadFileAsync(
-                document.GraphDriveId,
-                document.GraphItemId,
+            // Download file from SharePoint Embedded using OBO authentication
+            // This ensures the user's token is used for file access (fixes "Access denied" errors)
+            // Graph IDs validated as non-empty above, safe to use null-forgiving operator
+            using var fileStream = await _speFileStore.DownloadFileAsUserAsync(
+                httpContext,
+                document.GraphDriveId!,
+                document.GraphItemId!,
                 cancellationToken);
 
             if (fileStream == null)
             {
-                _logger.LogWarning("Failed to download document {DocumentId} from SPE", document.Id);
+                _logger.LogWarning("Failed to download document {DocumentId} from SPE - stream is null", document.Id);
                 return $"[Document: {document.Name}]\n\nFailed to download file from storage.";
             }
 
-            _logger.LogDebug("Extracting text from {FileName} ({FileSize} bytes)", fileName, document.FileSize);
+            // Check if stream has content
+            var streamLength = fileStream.CanSeek ? fileStream.Length : -1;
+            _logger.LogInformation(
+                "Downloaded document {DocumentId}, stream length: {StreamLength} bytes, extracting text from {FileName}",
+                document.Id, streamLength, fileName);
 
             // Extract text using TextExtractor
             var extractionResult = await _textExtractor.ExtractAsync(fileStream, fileName, cancellationToken);
+
+            _logger.LogInformation(
+                "Extraction result for {DocumentId}: Success={Success}, Method={Method}, TextLength={TextLength}, Error={Error}",
+                document.Id, extractionResult.Success, extractionResult.Method,
+                extractionResult.Text?.Length ?? 0, extractionResult.ErrorMessage ?? "none");
 
             if (!extractionResult.Success)
             {
@@ -732,6 +916,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
     /// </summary>
     private async Task<AnalysisInternalModel> ReloadAnalysisFromDataverseAsync(
         Guid analysisId,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         _logger.LogInformation("Reloading analysis {AnalysisId} from Dataverse", analysisId);
@@ -754,7 +939,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                 if (document != null)
                 {
                     documentName = document.Name ?? document.FileName ?? "Unknown";
-                    documentText = await ExtractDocumentTextAsync(document, cancellationToken);
+                    documentText = await ExtractDocumentTextAsync(document, httpContext, cancellationToken);
                     _logger.LogInformation(
                         "Extracted {CharCount} characters of document text for reloaded analysis {AnalysisId}",
                         documentText?.Length ?? 0, analysisId);
