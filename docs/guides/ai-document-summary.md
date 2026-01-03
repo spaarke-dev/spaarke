@@ -37,17 +37,38 @@ Client (PCF)          BFF API                    Azure Services
 | EventSource|   | endpoint       |         | (gpt-4o-mini)    |
 +-----------+    +----------------+         +------------------+
                         |
-                        v
+                        ↓ HttpContext (OBO token)
                  +----------------+         +------------------+
-                 | TextExtractor  |-------->| Doc Intelligence |
-                 +----------------+         | (PDF/DOCX)       |
-                        |                   +------------------+
-                        v
+                 | Orchestration  |         | Doc Intelligence |
+                 | Service        |-------->| (PDF/DOCX)       |
+                 +----------------+         +------------------+
+                        |
+                        ↓ DownloadFileAsUserAsync (OBO)
                  +----------------+         +------------------+
                  | SpeFileStore   |-------->| SharePoint       |
                  +----------------+         | Embedded         |
                                             +------------------+
 ```
+
+### SPE File Access Authentication (Critical)
+
+**OBO Authentication Required**: Downloading files from SharePoint Embedded for analysis requires On-Behalf-Of (OBO) authentication. App-only authentication returns HTTP 403 (Access Denied).
+
+```csharp
+// ✅ CORRECT: Use OBO via HttpContext
+var fileStream = await _speFileStore.DownloadFileAsUserAsync(
+    httpContext,           // Passed from endpoint
+    document.GraphDriveId!,
+    document.GraphItemId!,
+    cancellationToken);
+
+// ❌ WRONG: App-only auth fails with 403
+// var fileStream = await _speFileStore.DownloadFileAsync(driveId, itemId, ct);
+```
+
+**Why**: SPE containers use user-level permissions, not app-level permissions. The user's token must be exchanged via OBO to access files they have permission to view.
+
+**HttpContext propagation**: All analysis endpoint methods accept and propagate `HttpContext` through the orchestration layer to enable OBO authentication for file downloads. See [SDAP Auth Patterns](../architecture/sdap-auth-patterns.md#pattern-4-obo-for-ai-analysis-spe-file-access) for details.
 
 ---
 

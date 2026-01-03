@@ -1,8 +1,8 @@
 # AI Document Intelligence - Deployment Guide
 
-> **Version**: 2.1
+> **Version**: 2.2
 > **Created**: 2025-12-28
-> **Updated**: 2025-12-29
+> **Updated**: 2026-01-03
 > **Projects**: AI Document Intelligence R1 + R2 + R3
 
 ---
@@ -682,6 +682,28 @@ pac solution list
 ## Troubleshooting
 
 ### Azure Deployment Issues
+
+#### Error: 403 Access Denied During AI Analysis
+
+**Symptom**: AI analysis fails with "Access denied" or 403 error when downloading file from SharePoint Embedded
+
+**Root Cause**: The analysis service was using app-only authentication (`DownloadFileAsync`) instead of OBO authentication for SPE file access.
+
+**Resolution**: Analysis orchestration must use `DownloadFileAsUserAsync(httpContext, ...)` with On-Behalf-Of (OBO) authentication. This requires:
+1. `HttpContext` to be passed from endpoints through orchestration service
+2. Use `ISpeFileOperations.DownloadFileAsUserAsync(httpContext, driveId, itemId, ct)`
+3. Never use `DownloadFileAsync` (app-only) for AI file access
+
+**Verification**:
+```bash
+# Check Application Insights logs
+az monitor app-insights query \
+  --app sprkspaarkedev-aif-insights \
+  --analytics-query "traces | where message contains 'Access denied' | project timestamp, message" \
+  --offset 1h
+```
+
+See [SDAP Auth Patterns - Pattern 4](../architecture/sdap-auth-patterns.md#pattern-4-obo-for-ai-analysis-spe-file-access) for implementation details.
 
 #### Error: Service Bus Connection String Missing
 

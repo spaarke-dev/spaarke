@@ -96,7 +96,7 @@ All AI implementations **must** follow existing Architecture Decision Records:
 | **ADR-001** | Minimal API + BackgroundService | AI endpoints via Minimal API; `AiIndexingJobHandler` via Service Bus | ❌ Azure Functions for AI |
 | **ADR-003** | Lean authorization seams | Use existing `AuthorizationService`; add `AiAuthorizationFilter` | ❌ New `IAiAuthorizationService` |
 | **ADR-004** | Standard job contract | `JobType: "ai-indexing"` with standard schema | ❌ Custom message format |
-| **ADR-007** | SpeFileStore facade | AI services use `SpeFileStore` for document access | ❌ Inject `GraphServiceClient` into AI services |
+| **ADR-007** | SpeFileStore facade | AI services use `SpeFileStore.DownloadFileAsUserAsync(httpContext)` with OBO auth | ❌ Use `DownloadFileAsync` (app-only auth fails with 403) |
 | **ADR-008** | Endpoint filters | `AiAuthorizationFilter` for per-resource auth | ❌ Global AI middleware |
 | **ADR-009** | Redis-first caching | Embeddings/results in Redis; per-request in `HttpContext.Items` | ❌ `IMemoryCache` for embeddings |
 | **ADR-010** | DI minimalism (≤15) | 3 new services: `AiSearchService`, `AiChatService`, `EmbeddingService` | ❌ 10+ AI service interfaces |
@@ -110,7 +110,8 @@ All AI implementations **must** follow existing Architecture Decision Records:
 - [ ] AI endpoints use Minimal API pattern
 - [ ] `AiAuthorizationFilter` applied to all AI endpoints
 - [ ] Background work uses `JobContract` with `JobType: "ai-indexing"`
-- [ ] Document access via `SpeFileStore`, not direct Graph calls
+- [ ] Document access via `SpeFileStore.DownloadFileAsUserAsync(httpContext)` for OBO auth
+- [ ] HttpContext propagated through orchestration methods for SPE file access
 - [ ] No `IMemoryCache` for AI data (use Redis)
 - [ ] ≤3 new DI registrations for AI services
 - [ ] Per-customer isolation via filter queries

@@ -1,7 +1,7 @@
 # Text Extraction Pattern
 
 > **Domain**: AI / Document Processing
-> **Last Validated**: 2025-12-19
+> **Last Validated**: 2025-01-03
 > **Source ADRs**: ADR-013
 
 ---
@@ -12,6 +12,51 @@
 |------|---------|
 | `src/server/api/Sprk.Bff.Api/Services/Ai/TextExtractorService.cs` | Extraction logic |
 | `src/server/api/Sprk.Bff.Api/Services/Ai/ITextExtractor.cs` | Interface definition |
+| `src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs` | File download + extraction orchestration |
+
+---
+
+## File Download (OBO Authentication Required)
+
+Before text extraction, files must be downloaded from SharePoint Embedded (SPE). **This requires On-Behalf-Of (OBO) authentication** using the user's token, not app-only authentication.
+
+```csharp
+// ✅ CORRECT: OBO authentication via HttpContext
+private async Task<string> ExtractDocumentTextAsync(
+    DocumentEntity document,
+    HttpContext httpContext,  // Required for OBO token exchange
+    CancellationToken cancellationToken)
+{
+    // Download using user's delegated permissions
+    using var fileStream = await _speFileStore.DownloadFileAsUserAsync(
+        httpContext,
+        document.GraphDriveId!,
+        document.GraphItemId!,
+        cancellationToken);
+
+    // Extract text from stream
+    var result = await _textExtractor.ExtractTextAsync(
+        fileStream,
+        document.FileName ?? "document",
+        cancellationToken);
+
+    return result.Text;
+}
+
+// ❌ WRONG: App-only authentication returns 403 Access Denied
+// var fileStream = await _speFileStore.DownloadFileAsync(driveId, itemId, ct);
+```
+
+**Why OBO is required:**
+- SPE containers grant file access based on user permissions, not app permissions
+- App-only tokens (`_factory.ForApp()`) don't inherit container-level access
+- The user's token must be exchanged via OBO (`_factory.ForUserAsync(httpContext, ct)`)
+
+**HttpContext propagation:**
+All analysis methods that need file access must accept and propagate `HttpContext`:
+- `ExecuteAnalysisAsync(request, httpContext, ct)`
+- `ContinueAnalysisAsync(analysisId, message, httpContext, ct)`
+- `ResumeAnalysisAsync(analysisId, request, httpContext, ct)`
 
 ---
 
