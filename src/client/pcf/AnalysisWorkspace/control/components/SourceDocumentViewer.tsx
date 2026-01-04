@@ -15,8 +15,7 @@ import {
     Text,
     MessageBar,
     MessageBarBody,
-    Button,
-    Tooltip
+    Button
 } from "@fluentui/react-components";
 import {
     DocumentRegular,
@@ -39,6 +38,8 @@ export interface ISourceDocumentViewerProps {
     fileId: string;
     /** BFF API base URL */
     apiBaseUrl: string;
+    /** Function to get access token for API calls */
+    getAccessToken?: () => Promise<string>;
     /** Callback when fullscreen is requested */
     onFullscreen?: () => void;
 }
@@ -148,6 +149,7 @@ export const SourceDocumentViewer: React.FC<ISourceDocumentViewerProps> = ({
     containerId,
     fileId,
     apiBaseUrl,
+    getAccessToken,
     onFullscreen
 }) => {
     const styles = useStyles();
@@ -171,19 +173,21 @@ export const SourceDocumentViewer: React.FC<ISourceDocumentViewerProps> = ({
         };
     }, []);
 
-    // Load preview when document changes
+    // Load preview when document changes AND auth is ready (getAccessToken provided)
     React.useEffect(() => {
-        if (documentId && containerId && fileId) {
+        if (documentId && containerId && fileId && getAccessToken) {
             loadPreview();
-        } else {
+        } else if (!documentId || !containerId || !fileId) {
             setPreviewUrl(null);
             setDocumentInfo(null);
             setError(null);
         }
-    }, [documentId, containerId, fileId]);
+        // If getAccessToken not provided, we just wait (don't clear state or show error)
+    }, [documentId, containerId, fileId, getAccessToken]);
 
     /**
      * Load preview URL from BFF API
+     * Uses same pattern as SpeDocumentViewer for authenticated API calls
      */
     const loadPreview = async () => {
         if (!documentId) {
@@ -198,12 +202,29 @@ export const SourceDocumentViewer: React.FC<ISourceDocumentViewerProps> = ({
         logInfo("SourceDocumentViewer", `Loading preview for document: ${documentId}`);
 
         try {
+            // Get access token if auth function provided
+            let authHeaders: Record<string, string> = {};
+            if (getAccessToken) {
+                try {
+                    const token = await getAccessToken();
+                    authHeaders = { "Authorization": `Bearer ${token}` };
+                    logInfo("SourceDocumentViewer", "Auth token acquired for preview");
+                } catch (authErr) {
+                    logError("SourceDocumentViewer", "Failed to acquire auth token", authErr);
+                    throw new Error("Authentication failed. Please refresh and try again.");
+                }
+            }
+
+            // Normalize apiBaseUrl - remove trailing /api if present to avoid double /api/api/
+            const normalizedBaseUrl = apiBaseUrl.replace(/\/api\/?$/, "");
+
             // Call BFF API to get preview URL
-            const response = await fetch(`${apiBaseUrl}/documents/${documentId}/preview-url`, {
+            const response = await fetch(`${normalizedBaseUrl}/api/documents/${documentId}/preview-url`, {
                 method: "GET",
                 headers: {
                     "Content-Type": "application/json",
-                    "Accept": "application/json"
+                    "Accept": "application/json",
+                    ...authHeaders
                 }
             });
 
@@ -304,6 +325,15 @@ export const SourceDocumentViewer: React.FC<ISourceDocumentViewerProps> = ({
         );
     }
 
+    // Auth initializing state - show loading while MSAL initializes
+    if (!getAccessToken && !previewUrl) {
+        return (
+            <div className={styles.loadingContainer}>
+                <Spinner size="large" label="Initializing authentication..." />
+            </div>
+        );
+    }
+
     // Loading state
     if (isLoading) {
         return (
@@ -345,31 +375,32 @@ export const SourceDocumentViewer: React.FC<ISourceDocumentViewerProps> = ({
                         )}
                     </div>
                     <div className={styles.toolbarActions}>
-                        <Tooltip content="Refresh" relationship="label">
-                            <Button
-                                icon={<ArrowClockwiseRegular />}
-                                appearance="subtle"
-                                size="small"
-                                onClick={handleRefresh}
-                            />
-                        </Tooltip>
-                        <Tooltip content="Open in new tab" relationship="label">
-                            <Button
-                                icon={<OpenRegular />}
-                                appearance="subtle"
-                                size="small"
-                                onClick={handleOpenInNewTab}
-                            />
-                        </Tooltip>
+                        {/* Using native title instead of Tooltip to avoid portal rendering issues in PCF */}
+                        <Button
+                            icon={<ArrowClockwiseRegular />}
+                            appearance="subtle"
+                            size="small"
+                            onClick={handleRefresh}
+                            title="Refresh"
+                            aria-label="Refresh"
+                        />
+                        <Button
+                            icon={<OpenRegular />}
+                            appearance="subtle"
+                            size="small"
+                            onClick={handleOpenInNewTab}
+                            title="Open in new tab"
+                            aria-label="Open in new tab"
+                        />
                         {onFullscreen && (
-                            <Tooltip content="Fullscreen" relationship="label">
-                                <Button
-                                    icon={<FullScreenMaximize24Regular />}
-                                    appearance="subtle"
-                                    size="small"
-                                    onClick={onFullscreen}
-                                />
-                            </Tooltip>
+                            <Button
+                                icon={<FullScreenMaximize24Regular />}
+                                appearance="subtle"
+                                size="small"
+                                onClick={onFullscreen}
+                                title="Fullscreen"
+                                aria-label="Fullscreen"
+                            />
                         )}
                     </div>
                 </div>

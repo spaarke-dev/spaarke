@@ -18,7 +18,6 @@ import {
     Toolbar,
     ToolbarButton,
     ToolbarDivider,
-    Tooltip,
     Popover,
     PopoverTrigger,
     PopoverSurface,
@@ -325,130 +324,119 @@ export function ToolbarPlugin({ isDarkMode = false }: ToolbarPluginProps): React
         ? `${styles.toolbar} ${styles.toolbarDark}`
         : styles.toolbar;
 
+    // Using native title attributes instead of Tooltip to avoid portal rendering issues in PCF
     return (
         <Toolbar className={toolbarClass} size="small">
             {/* Undo/Redo */}
-            <Tooltip content="Undo (Ctrl+Z)" relationship="label">
-                <ToolbarButton
-                    icon={<ArrowUndoRegular />}
-                    onClick={undo}
-                    disabled={!canUndo}
-                    aria-label="Undo"
-                />
-            </Tooltip>
-            <Tooltip content="Redo (Ctrl+Y)" relationship="label">
-                <ToolbarButton
-                    icon={<ArrowRedoRegular />}
-                    onClick={redo}
-                    disabled={!canRedo}
-                    aria-label="Redo"
-                />
-            </Tooltip>
+            <ToolbarButton
+                icon={<ArrowUndoRegular />}
+                onClick={undo}
+                disabled={!canUndo}
+                aria-label="Undo"
+                title="Undo (Ctrl+Z)"
+            />
+            <ToolbarButton
+                icon={<ArrowRedoRegular />}
+                onClick={redo}
+                disabled={!canRedo}
+                aria-label="Redo"
+                title="Redo (Ctrl+Y)"
+            />
 
             <ToolbarDivider />
 
             {/* Text Formatting */}
-            <Tooltip content="Bold (Ctrl+B)" relationship="label">
-                <ToolbarButton
-                    icon={<TextBoldRegular />}
-                    onClick={formatBold}
-                    className={isBold ? styles.buttonActive : undefined}
-                    aria-label="Bold"
-                    aria-pressed={isBold}
-                />
-            </Tooltip>
-            <Tooltip content="Italic (Ctrl+I)" relationship="label">
-                <ToolbarButton
-                    icon={<TextItalicRegular />}
-                    onClick={formatItalic}
-                    className={isItalic ? styles.buttonActive : undefined}
-                    aria-label="Italic"
-                    aria-pressed={isItalic}
-                />
-            </Tooltip>
-            <Tooltip content="Underline (Ctrl+U)" relationship="label">
-                <ToolbarButton
-                    icon={<TextUnderlineRegular />}
-                    onClick={formatUnderline}
-                    className={isUnderline ? styles.buttonActive : undefined}
-                    aria-label="Underline"
-                    aria-pressed={isUnderline}
-                />
-            </Tooltip>
-            <Tooltip content="Strikethrough" relationship="label">
-                <ToolbarButton
-                    icon={<TextStrikethroughRegular />}
-                    onClick={formatStrikethrough}
-                    className={isStrikethrough ? styles.buttonActive : undefined}
-                    aria-label="Strikethrough"
-                    aria-pressed={isStrikethrough}
-                />
-            </Tooltip>
+            <ToolbarButton
+                icon={<TextBoldRegular />}
+                onClick={formatBold}
+                className={isBold ? styles.buttonActive : undefined}
+                aria-label="Bold"
+                aria-pressed={isBold}
+                title="Bold (Ctrl+B)"
+            />
+            <ToolbarButton
+                icon={<TextItalicRegular />}
+                onClick={formatItalic}
+                className={isItalic ? styles.buttonActive : undefined}
+                aria-label="Italic"
+                aria-pressed={isItalic}
+                title="Italic (Ctrl+I)"
+            />
+            <ToolbarButton
+                icon={<TextUnderlineRegular />}
+                onClick={formatUnderline}
+                className={isUnderline ? styles.buttonActive : undefined}
+                aria-label="Underline"
+                aria-pressed={isUnderline}
+                title="Underline (Ctrl+U)"
+            />
+            <ToolbarButton
+                icon={<TextStrikethroughRegular />}
+                onClick={formatStrikethrough}
+                className={isStrikethrough ? styles.buttonActive : undefined}
+                aria-label="Strikethrough"
+                aria-pressed={isStrikethrough}
+                title="Strikethrough"
+            />
 
             <ToolbarDivider />
 
             {/* Headings */}
-            <Tooltip content="Heading 1" relationship="label">
-                <ToolbarButton
-                    icon={<TextHeader1Regular />}
-                    onClick={() => formatHeading("h1")}
-                    className={blockType === "h1" ? styles.buttonActive : undefined}
-                    aria-label="Heading 1"
-                    aria-pressed={blockType === "h1"}
-                />
-            </Tooltip>
-            <Tooltip content="Heading 2" relationship="label">
-                <ToolbarButton
-                    icon={<TextHeader2Regular />}
-                    onClick={() => formatHeading("h2")}
-                    className={blockType === "h2" ? styles.buttonActive : undefined}
-                    aria-label="Heading 2"
-                    aria-pressed={blockType === "h2"}
-                />
-            </Tooltip>
-            <Tooltip content="Heading 3" relationship="label">
-                <ToolbarButton
-                    icon={<TextHeader3Regular />}
-                    onClick={() => formatHeading("h3")}
-                    className={blockType === "h3" ? styles.buttonActive : undefined}
-                    aria-label="Heading 3"
-                    aria-pressed={blockType === "h3"}
-                />
-            </Tooltip>
+            <ToolbarButton
+                icon={<TextHeader1Regular />}
+                onClick={() => formatHeading("h1")}
+                className={blockType === "h1" ? styles.buttonActive : undefined}
+                aria-label="Heading 1"
+                aria-pressed={blockType === "h1"}
+                title="Heading 1"
+            />
+            <ToolbarButton
+                icon={<TextHeader2Regular />}
+                onClick={() => formatHeading("h2")}
+                className={blockType === "h2" ? styles.buttonActive : undefined}
+                aria-label="Heading 2"
+                aria-pressed={blockType === "h2"}
+                title="Heading 2"
+            />
+            <ToolbarButton
+                icon={<TextHeader3Regular />}
+                onClick={() => formatHeading("h3")}
+                className={blockType === "h3" ? styles.buttonActive : undefined}
+                aria-label="Heading 3"
+                aria-pressed={blockType === "h3"}
+                title="Heading 3"
+            />
 
             <ToolbarDivider />
 
             {/* Lists */}
-            <Tooltip content="Bullet List" relationship="label">
-                <ToolbarButton
-                    icon={<TextBulletListRegular />}
-                    onClick={formatBulletList}
-                    className={blockType === "ul" ? styles.buttonActive : undefined}
-                    aria-label="Bullet List"
-                    aria-pressed={blockType === "ul"}
-                />
-            </Tooltip>
-            <Tooltip content="Numbered List" relationship="label">
-                <ToolbarButton
-                    icon={<TextNumberListLtrRegular />}
-                    onClick={formatNumberedList}
-                    className={blockType === "ol" ? styles.buttonActive : undefined}
-                    aria-label="Numbered List"
-                    aria-pressed={blockType === "ol"}
-                />
-            </Tooltip>
+            <ToolbarButton
+                icon={<TextBulletListRegular />}
+                onClick={formatBulletList}
+                className={blockType === "ul" ? styles.buttonActive : undefined}
+                aria-label="Bullet List"
+                aria-pressed={blockType === "ul"}
+                title="Bullet List"
+            />
+            <ToolbarButton
+                icon={<TextNumberListLtrRegular />}
+                onClick={formatNumberedList}
+                className={blockType === "ol" ? styles.buttonActive : undefined}
+                aria-label="Numbered List"
+                aria-pressed={blockType === "ol"}
+                title="Numbered List"
+            />
 
             <ToolbarDivider />
 
             {/* Overflow Menu - Less frequent tools */}
             <Menu>
                 <MenuTrigger disableButtonEnhancement>
-                    <Tooltip content="More formatting options" relationship="label">
-                        <ToolbarButton
-                            icon={<MoreHorizontalRegular />}
-                            aria-label="More formatting options"
-                        />
-                    </Tooltip>
+                    <ToolbarButton
+                        icon={<MoreHorizontalRegular />}
+                        aria-label="More formatting options"
+                        title="More formatting options"
+                    />
                 </MenuTrigger>
                 <MenuPopover>
                     <MenuList>

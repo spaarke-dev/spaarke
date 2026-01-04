@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Spaarke" constructor="SpeFileViewer" version="2.0.0" display-name-key="SpeFileViewer" description-key="SpeFileViewer description" control-type="standard" >
+  <control namespace="Spaarke" constructor="SpeFileViewer" version="2.0.1" display-name-key="SpeFileViewer" description-key="Replace Tooltip with native title for PCF compatibility (v2.0.1)" control-type="standard" >
     <external-service-usage enabled="false">
     </external-service-usage>
 

@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="visualization-module">
+  <metadata>
+    <title>Implement configuration loader service</title>
+    <phase>3: Visual Host PCF Control</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>005, 020</dependencies>
+    <blocks>022</blocks>
+    <tags>pcf, dataverse, frontend</tags>
+  </metadata>
+
+  <prompt>
+    Create a service that loads sprk_chartdefinition records from Dataverse WebAPI.
+    Parse the configuration and return typed ChartDefinition objects.
+  </prompt>
+
+  <role>
+    PCF developer with Dataverse WebAPI expertise.
+  </role>
+
+  <goal>
+    A ConfigurationLoader service that fetches chart definitions from Dataverse
+    and returns strongly-typed ChartDefinition objects.
+  </goal>
+
+  <context>
+    <background>
+      The Visual Host needs to load its configuration from Dataverse.
+      This service handles WebAPI calls and type conversion.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/VisualHost/control/services/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">MUST use PCF context.webAPI for queries</constraint>
+    <constraint source="project">MUST parse sprk_optionsjson as JSON</constraint>
+    <constraint source="project">MUST handle missing/invalid configurations gracefully</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/pcf/dataverse-queries.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create ConfigurationLoader.ts service file</step>
+    <step order="2">Implement loadChartDefinition(id: string) method</step>
+    <step order="3">Use context.webAPI.retrieveRecord to fetch entity</step>
+    <step order="4">Map Dataverse fields to ChartDefinition interface</step>
+    <step order="5">Parse sprk_optionsjson with error handling</step>
+    <step order="6">Add caching to avoid redundant API calls</step>
+    <step order="7">Create unit tests with mocked WebAPI</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/pcf/VisualHost/control/services/ConfigurationLoader.ts</output>
+    <output type="test">src/client/pcf/VisualHost/control/services/__tests__/ConfigurationLoader.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Service loads chart definition by ID from Dataverse</criterion>
+    <criterion testable="true">Returns typed ChartDefinition object</criterion>
+    <criterion testable="true">Handles missing record with appropriate error</criterion>
+    <criterion testable="true">Parses sprk_optionsjson correctly</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

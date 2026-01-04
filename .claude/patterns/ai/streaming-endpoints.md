@@ -1,7 +1,7 @@
 # Streaming Endpoints Pattern
 
 > **Domain**: AI / Server-Sent Events
-> **Last Validated**: 2025-12-19
+> **Last Validated**: 2025-01-03
 > **Source ADRs**: ADR-013
 
 ---
@@ -20,24 +20,29 @@
 ```csharp
 app.MapPost("/api/ai/analysis/execute", async (
     AnalysisRequest request,
-    HttpContext ctx,
+    HttpContext context,
     IAnalysisOrchestrationService orchestration,
     CancellationToken ct) =>
 {
     // 1. Set SSE headers
-    ctx.Response.ContentType = "text/event-stream";
-    ctx.Response.Headers.CacheControl = "no-cache";
-    ctx.Response.Headers.Connection = "keep-alive";
+    context.Response.ContentType = "text/event-stream";
+    context.Response.Headers.CacheControl = "no-cache";
+    context.Response.Headers.Connection = "keep-alive";
 
-    // 2. Stream chunks
-    await foreach (var chunk in orchestration.ExecuteStreamingAsync(request, ct))
+    // 2. Stream chunks - HttpContext required for OBO authentication
+    // The orchestration service uses HttpContext to download files from SPE
+    // using the user's delegated permissions (not app-only auth)
+    await foreach (var chunk in orchestration.ExecuteAnalysisAsync(request, context, ct))
     {
         var json = JsonSerializer.Serialize(chunk);
-        await ctx.Response.WriteAsync($"data: {json}\n\n", ct);
-        await ctx.Response.Body.FlushAsync(ct);
+        await context.Response.WriteAsync($"data: {json}\n\n", ct);
+        await context.Response.Body.FlushAsync(ct);
     }
 }).RequireAuthorization();
 ```
+
+**HttpContext for OBO Authentication:**
+The `HttpContext` must be passed to orchestration methods because SPE file access requires On-Behalf-Of (OBO) authentication. See [Text Extraction Pattern](text-extraction.md#file-download-obo-authentication-required) for details.
 
 ---
 

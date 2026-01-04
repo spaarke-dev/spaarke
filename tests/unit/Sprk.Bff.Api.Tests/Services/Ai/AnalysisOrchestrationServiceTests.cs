@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -27,9 +28,12 @@ public class AnalysisOrchestrationServiceTests
     private readonly Mock<IAnalysisContextBuilder> _contextBuilderMock;
     private readonly Mock<IWorkingDocumentService> _workingDocumentServiceMock;
     private readonly ExportServiceRegistry _exportRegistry;
+    private readonly Mock<IRagService> _ragServiceMock;
+    private readonly Mock<IHttpContextAccessor> _httpContextAccessorMock;
     private readonly Mock<ILogger<AnalysisOrchestrationService>> _loggerMock;
     private readonly IOptions<AnalysisOptions> _options;
     private readonly AnalysisOrchestrationService _service;
+    private readonly HttpContext _mockHttpContext;
 
     public AnalysisOrchestrationServiceTests()
     {
@@ -40,7 +44,10 @@ public class AnalysisOrchestrationServiceTests
         _scopeResolverMock = new Mock<IScopeResolverService>();
         _contextBuilderMock = new Mock<IAnalysisContextBuilder>();
         _workingDocumentServiceMock = new Mock<IWorkingDocumentService>();
+        _ragServiceMock = new Mock<IRagService>();
+        _httpContextAccessorMock = new Mock<IHttpContextAccessor>();
         _loggerMock = new Mock<ILogger<AnalysisOrchestrationService>>();
+        _mockHttpContext = new DefaultHttpContext();
 
         _options = Options.Create(new AnalysisOptions
         {
@@ -60,6 +67,8 @@ public class AnalysisOrchestrationServiceTests
             _contextBuilderMock.Object,
             _workingDocumentServiceMock.Object,
             _exportRegistry,
+            _ragServiceMock.Object,
+            _httpContextAccessorMock.Object,
             _options,
             _loggerMock.Object);
     }
@@ -104,7 +113,7 @@ public class AnalysisOrchestrationServiceTests
 
         // Act
         var chunks = new List<AnalysisStreamChunk>();
-        await foreach (var chunk in _service.ExecuteAnalysisAsync(request, CancellationToken.None))
+        await foreach (var chunk in _service.ExecuteAnalysisAsync(request, _mockHttpContext, CancellationToken.None))
         {
             chunks.Add(chunk);
         }
@@ -131,7 +140,7 @@ public class AnalysisOrchestrationServiceTests
         var chunks = new List<AnalysisStreamChunk>();
         var act = async () =>
         {
-            await foreach (var chunk in _service.ExecuteAnalysisAsync(request, CancellationToken.None))
+            await foreach (var chunk in _service.ExecuteAnalysisAsync(request, _mockHttpContext, CancellationToken.None))
             {
                 chunks.Add(chunk);
             }
@@ -165,7 +174,7 @@ public class AnalysisOrchestrationServiceTests
         var chunks = new List<AnalysisStreamChunk>();
         var act = async () =>
         {
-            await foreach (var chunk in _service.ExecuteAnalysisAsync(request, CancellationToken.None))
+            await foreach (var chunk in _service.ExecuteAnalysisAsync(request, _mockHttpContext, CancellationToken.None))
             {
                 chunks.Add(chunk);
             }
@@ -210,7 +219,7 @@ public class AnalysisOrchestrationServiceTests
 
         // Act
         var chunks = new List<AnalysisStreamChunk>();
-        await foreach (var chunk in _service.ExecuteAnalysisAsync(request, CancellationToken.None))
+        await foreach (var chunk in _service.ExecuteAnalysisAsync(request, _mockHttpContext, CancellationToken.None))
         {
             chunks.Add(chunk);
         }
@@ -236,7 +245,7 @@ public class AnalysisOrchestrationServiceTests
 
         // Act
         var chunks = new List<AnalysisStreamChunk>();
-        await foreach (var chunk in _service.ExecuteAnalysisAsync(request, CancellationToken.None))
+        await foreach (var chunk in _service.ExecuteAnalysisAsync(request, _mockHttpContext, CancellationToken.None))
         {
             chunks.Add(chunk);
         }
@@ -264,7 +273,7 @@ public class AnalysisOrchestrationServiceTests
 
         // Act
         var chunks = new List<AnalysisStreamChunk>();
-        await foreach (var chunk in _service.ExecuteAnalysisAsync(request, CancellationToken.None))
+        await foreach (var chunk in _service.ExecuteAnalysisAsync(request, _mockHttpContext, CancellationToken.None))
         {
             chunks.Add(chunk);
         }
@@ -290,7 +299,7 @@ public class AnalysisOrchestrationServiceTests
         var chunks = new List<AnalysisStreamChunk>();
         var act = async () =>
         {
-            await foreach (var chunk in _service.ContinueAnalysisAsync(analysisId, "Continue", CancellationToken.None))
+            await foreach (var chunk in _service.ContinueAnalysisAsync(analysisId, "Continue", _mockHttpContext, CancellationToken.None))
             {
                 chunks.Add(chunk);
             }

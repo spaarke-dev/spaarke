@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="visualization-module">
+  <metadata>
+    <title>Implement MiniTable component</title>
+    <phase>2: Core Chart Components</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>004</dependencies>
+    <blocks>017, 020</blocks>
+    <tags>pcf, react, fluent-ui, frontend</tags>
+  </metadata>
+
+  <prompt>
+    Build the MiniTable component - a compact Top-N list using Fluent v9 Table.
+    Shows ranked items with row click for drill-through.
+  </prompt>
+
+  <role>
+    React developer with Fluent UI v9 expertise.
+  </role>
+
+  <goal>
+    A reusable MiniTable component that displays a compact ranked list
+    (e.g., Top 5 Clients by Revenue) with row click for drill-through.
+  </goal>
+
+  <context>
+    <background>
+      Mini tables show Top-N rankings like "Top 5 Matters by Hours" or
+      "Recent 10 Documents". Compact visualization for quick insights.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">MUST use @fluentui/react-components Table</constraint>
+    <constraint source="ADR-021">MUST use Fluent design tokens</constraint>
+    <constraint source="project">MUST emit DrillInteraction on row click</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create MiniTable.tsx component file</step>
+    <step order="2">Define props interface (items, columns, topN, onRowClick)</step>
+    <step order="3">Implement using Table from @fluentui/react-components</step>
+    <step order="4">Add rank number column</step>
+    <step order="5">Implement onRowClick that emits DrillInteraction</step>
+    <step order="6">Create Storybook stories</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/pcf/VisualHost/control/components/MiniTable.tsx</output>
+    <output type="code">src/client/pcf/VisualHost/stories/MiniTable.stories.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Component renders compact table with rank column</criterion>
+    <criterion testable="true">Row click emits DrillInteraction</criterion>
+    <criterion testable="true">Component looks correct in dark mode</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

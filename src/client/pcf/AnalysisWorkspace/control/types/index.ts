@@ -9,7 +9,7 @@ export interface IAnalysis {
     sprk_analysisid: string;
     sprk_name: string;
     sprk_documentid: string;
-    sprk_actionid?: string;
+    _sprk_actionid_value?: string;  // Lookup field (OData format: _fieldname_value)
     statuscode: AnalysisStatusCode;  // Standard Power Apps Status Reason field
     sprk_workingdocument?: string;
     sprk_chathistory?: string;
@@ -58,6 +58,10 @@ export interface IAnalysisWorkspaceAppProps {
     fileId: string;
     apiBaseUrl: string;
     webApi: ComponentFramework.WebApi;
+    /** Function to get access token for BFF API calls */
+    getAccessToken: () => Promise<string>;
+    /** Whether authentication is ready (MSAL initialized) */
+    isAuthReady: boolean;
     onWorkingDocumentChange: (content: string) => void;
     onChatHistoryChange: (history: string) => void;
     onStatusChange: (status: string) => void;

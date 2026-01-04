@@ -31,7 +31,9 @@ export interface ISseStreamOptions {
     onComplete: (fullResponse: string) => void;
     /** Callback on error */
     onError: (error: Error) => void;
-    /** Optional headers (e.g., auth token) */
+    /** Function to get access token for API calls */
+    getAccessToken?: () => Promise<string>;
+    /** Optional static headers (e.g., for testing) */
     headers?: Record<string, string>;
 }
 
@@ -65,7 +67,7 @@ const RETRY_DELAY_MS = 1000;
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function useSseStream(options: ISseStreamOptions): [ISseStreamState, ISseStreamActions] {
-    const { apiBaseUrl, analysisId, onToken, onComplete, onError, headers } = options;
+    const { apiBaseUrl, analysisId, onToken, onComplete, onError, getAccessToken, headers } = options;
 
     // State
     const [isStreaming, setIsStreaming] = React.useState(false);
@@ -110,17 +112,34 @@ export function useSseStream(options: ISseStreamOptions): [ISseStreamState, ISse
         logInfo("useSseStream", `Starting stream for analysis: ${analysisId}`);
 
         try {
+            // Get access token if auth function provided
+            let authHeaders: Record<string, string> = {};
+            if (getAccessToken) {
+                try {
+                    const token = await getAccessToken();
+                    authHeaders = { "Authorization": `Bearer ${token}` };
+                    logInfo("useSseStream", "Auth token acquired successfully");
+                } catch (authErr) {
+                    logError("useSseStream", "Failed to acquire auth token", authErr);
+                    throw new Error("Authentication failed. Please refresh and try again.");
+                }
+            }
+
             // Build request body - only message, analysisId is in URL path
             const requestBody = {
                 message
             };
 
+            // Normalize apiBaseUrl - remove trailing /api if present to avoid double /api/api/
+            const normalizedBaseUrl = apiBaseUrl.replace(/\/api\/?$/, "");
+
             // Make fetch request to BFF API continue endpoint
-            const response = await fetch(`${apiBaseUrl}/api/ai/analysis/${analysisId}/continue`, {
+            const response = await fetch(`${normalizedBaseUrl}/api/ai/analysis/${analysisId}/continue`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
                     "Accept": "text/event-stream",
+                    ...authHeaders,
                     ...headers
                 },
                 body: JSON.stringify(requestBody),
@@ -241,7 +260,7 @@ export function useSseStream(options: ISseStreamOptions): [ISseStreamState, ISse
             setIsStreaming(false);
             onError(streamError);
         }
-    }, [apiBaseUrl, analysisId, headers, onToken, onComplete, onError]);
+    }, [apiBaseUrl, analysisId, getAccessToken, headers, onToken, onComplete, onError]);
 
     /**
      * Abort the current stream

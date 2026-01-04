@@ -106,6 +106,31 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         return MapToDocumentEntity(entity);
     }
 
+    public async Task<AnalysisEntity?> GetAnalysisAsync(string id, CancellationToken ct = default)
+    {
+        var entity = await _serviceClient.RetrieveAsync(
+            "sprk_analysis",
+            Guid.Parse(id),
+            new ColumnSet("sprk_name", "sprk_workingdocument", "sprk_chathistory",
+                         "statuscode", "createdon", "modifiedon", "sprk_documentid"),
+            ct);
+
+        if (entity == null)
+            return null;
+
+        return new AnalysisEntity
+        {
+            Id = entity.Id,
+            Name = entity.GetAttributeValue<string>("sprk_name"),
+            DocumentId = entity.GetAttributeValue<EntityReference>("sprk_documentid")?.Id ?? Guid.Empty,
+            WorkingDocument = entity.GetAttributeValue<string>("sprk_workingdocument"),
+            ChatHistory = entity.GetAttributeValue<string>("sprk_chathistory"),
+            StatusCode = entity.GetAttributeValue<OptionSetValue>("statuscode")?.Value ?? 0,
+            CreatedOn = entity.GetAttributeValue<DateTime>("createdon"),
+            ModifiedOn = entity.GetAttributeValue<DateTime>("modifiedon")
+        };
+    }
+
     public async Task UpdateDocumentAsync(string id, UpdateDocumentRequest request, CancellationToken ct = default)
     {
         var document = new Entity("sprk_document", Guid.Parse(id));

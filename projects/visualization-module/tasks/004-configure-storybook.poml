@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="visualization-module">
+  <metadata>
+    <title>Configure Storybook for chart components</title>
+    <phase>1: Foundation and Infrastructure</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>003</dependencies>
+    <blocks>010-016</blocks>
+    <tags>testing, frontend, fluent-ui, storybook</tags>
+  </metadata>
+
+  <prompt>
+    Set up Storybook configuration for developing and documenting chart components.
+    This enables isolated component development with visual testing.
+  </prompt>
+
+  <role>
+    Frontend developer with Storybook expertise. Familiar with Fluent UI v9 theming.
+  </role>
+
+  <goal>
+    A working Storybook configuration that supports Fluent UI v9 theming (light/dark),
+    ready for chart component story development.
+  </goal>
+
+  <context>
+    <background>
+      Storybook is required per ADR-011 for all chart components. It provides
+      isolated development environment and serves as living documentation.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/VisualHost/</file>
+      <file>src/client/shared/Spaarke.UI.Components/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-011">MUST include Storybook stories for components</constraint>
+    <constraint source="ADR-021">MUST support light, dark, and high-contrast themes</constraint>
+    <constraint source="project">Stories must demonstrate drill interaction callbacks</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-011-dataset-pcf.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Install Storybook dependencies (@storybook/react, @storybook/addon-essentials)</step>
+    <step order="2">Create .storybook/main.ts configuration</step>
+    <step order="3">Create .storybook/preview.tsx with FluentProvider decorator</step>
+    <step order="4">Add theme switcher addon for light/dark mode testing</step>
+    <step order="5">Create a sample story template for chart components</step>
+    <step order="6">Verify npm run storybook launches correctly</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Package management</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/VisualHost/.storybook/main.ts</output>
+    <output type="code">src/client/pcf/VisualHost/.storybook/preview.tsx</output>
+    <output type="code">src/client/pcf/VisualHost/stories/ChartTemplate.stories.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run storybook launches without errors</criterion>
+    <criterion testable="true">Theme switcher allows toggling between light and dark modes</criterion>
+    <criterion testable="true">Sample story renders with FluentProvider wrapper</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

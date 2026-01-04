@@ -1,7 +1,7 @@
 # SDAP Authentication Patterns
 
 > **Source**: SDAP-ARCHITECTURE-GUIDE.md (Authentication & Security section)
-> **Last Updated**: December 3, 2025
+> **Last Updated**: January 3, 2026
 > **Applies To**: Authentication code, token handling, Azure AD configuration
 
 ---
@@ -164,12 +164,78 @@ public DataverseServiceClientImpl(IConfiguration config)
 
 ---
 
+## Pattern 4: OBO for AI Analysis (SPE File Access)
+
+**When**: AI analysis service needs to download files from SharePoint Embedded
+
+**Critical**: AI analysis features that process documents stored in SPE containers **must use OBO authentication** via `HttpContext`, not app-only authentication. App-only tokens don't have SPE container-level permissions and will return HTTP 403 (Access Denied).
+
+```csharp
+// AnalysisOrchestrationService.cs
+private async Task<string> ExtractDocumentTextAsync(
+    DocumentEntity document,
+    HttpContext httpContext,  // Required for OBO token exchange
+    CancellationToken cancellationToken)
+{
+    // ✅ CORRECT: OBO authentication via HttpContext
+    using var fileStream = await _speFileStore.DownloadFileAsUserAsync(
+        httpContext,
+        document.GraphDriveId!,
+        document.GraphItemId!,
+        cancellationToken);
+
+    var result = await _textExtractor.ExtractTextAsync(
+        fileStream,
+        document.FileName ?? "document",
+        cancellationToken);
+
+    return result.Text;
+}
+
+// ❌ WRONG: App-only authentication returns 403 Access Denied
+// using var fileStream = await _speFileStore.DownloadFileAsync(driveId, itemId, ct);
+```
+
+**How it works internally**:
+```csharp
+// DriveItemOperations.cs - DownloadFileAsUserAsync
+public async Task<Stream> DownloadFileAsUserAsync(
+    HttpContext ctx,
+    string driveId,
+    string itemId,
+    CancellationToken ct = default)
+{
+    // Uses OBO to exchange user token for Graph token
+    var graphClient = await _factory.ForUserAsync(ctx, ct);
+
+    return await graphClient.Drives[driveId]
+        .Items[itemId]
+        .Content
+        .GetAsync(cancellationToken: ct) ?? Stream.Null;
+}
+```
+
+**HttpContext propagation**: All analysis endpoint methods must propagate `HttpContext` through the call chain:
+- `AnalysisEndpoints.MapAnalysisEndpoints()` → passes `HttpContext context`
+- `IAnalysisOrchestrationService.ExecuteAnalysisAsync(request, httpContext, ct)`
+- `IAnalysisOrchestrationService.ContinueAnalysisAsync(id, message, httpContext, ct)`
+- `IAnalysisOrchestrationService.ResumeAnalysisAsync(id, request, httpContext, ct)`
+
+**Why OBO is required for AI Analysis**:
+1. SPE containers have user-level permissions, not app-level permissions
+2. The app registration (`1e40baad-...`) doesn't have container owner permissions
+3. Users access files through their Dataverse user identity, which maps to SPE permissions
+4. OBO preserves the user's identity when the BFF downloads files for analysis
+
+---
+
 ## Token Scopes Reference
 
 | Token For | Scope | Pattern |
 |-----------|-------|---------|
 | BFF API (from PCF) | `api://1e40baad-.../user_impersonation` | MSAL.js |
 | Graph API (from BFF) | `https://graph.microsoft.com/.default` | OBO |
+| Graph API for AI Analysis | `https://graph.microsoft.com/.default` | OBO (via HttpContext) |
 | Dataverse (from BFF) | `https://{org}.crm.dynamics.com/.default` | ClientCredentials |
 
 ---
@@ -237,6 +303,7 @@ pac admin list-service-principals --environment https://spaarkedev1.crm.dynamics
 | No Application User | ServiceClient connection failed | Create via Power Platform Admin Center |
 | Using ManagedIdentity for Dataverse | No User Assigned Managed Identity found | Use ClientSecret connection string |
 | Expired client secret | 401 on all BFF calls | Rotate secret in Azure AD + Key Vault |
+| Using app-only auth for AI file download | 403 Access Denied from SPE | Use `DownloadFileAsUserAsync(httpContext, ...)` with OBO |
 
 ---
 

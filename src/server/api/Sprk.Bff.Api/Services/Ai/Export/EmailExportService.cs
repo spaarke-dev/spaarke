@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Graph;
@@ -21,27 +22,30 @@ public partial class EmailExportService : IExportService
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ILogger<EmailExportService> _logger;
     private readonly AnalysisOptions _options;
-    private readonly Lazy<IExportService?> _docxService;
-    private readonly Lazy<IExportService?> _pdfService;
+    private readonly IServiceProvider _serviceProvider;
 
     public EmailExportService(
         IGraphClientFactory graphClientFactory,
         IHttpContextAccessor httpContextAccessor,
         ILogger<EmailExportService> logger,
         IOptions<AnalysisOptions> options,
-        IEnumerable<IExportService> exportServices)
+        IServiceProvider serviceProvider)
     {
         _graphClientFactory = graphClientFactory;
         _httpContextAccessor = httpContextAccessor;
         _logger = logger;
         _options = options.Value;
-
-        // Lazy resolve to avoid circular dependency
-        _docxService = new Lazy<IExportService?>(() =>
-            exportServices.FirstOrDefault(s => s.Format == ExportFormat.Docx));
-        _pdfService = new Lazy<IExportService?>(() =>
-            exportServices.FirstOrDefault(s => s.Format == ExportFormat.Pdf));
+        _serviceProvider = serviceProvider;
     }
+
+    // Lazily resolve export services from IServiceProvider to avoid circular dependency
+    private IExportService? GetDocxService() =>
+        _serviceProvider.GetServices<IExportService>()
+            .FirstOrDefault(s => s.Format == ExportFormat.Docx && s is not EmailExportService);
+
+    private IExportService? GetPdfService() =>
+        _serviceProvider.GetServices<IExportService>()
+            .FirstOrDefault(s => s.Format == ExportFormat.Pdf && s is not EmailExportService);
 
     /// <inheritdoc />
     public ExportFormat Format => ExportFormat.Email;
@@ -334,12 +338,19 @@ public partial class EmailExportService : IExportService
 
         // Determine which format to attach
         var attachFormat = options.AttachmentFormat;
-        IExportService? attachService = attachFormat switch
+
+        // Resolve export services from DI to avoid circular dependency
+        var exportServices = _serviceProvider.GetServices<IExportService>();
+        var targetFormat = attachFormat switch
         {
-            SaveDocumentFormat.Pdf => _pdfService.Value,
-            SaveDocumentFormat.Docx => _docxService.Value,
-            _ => null
+            SaveDocumentFormat.Pdf => ExportFormat.Pdf,
+            SaveDocumentFormat.Docx => ExportFormat.Docx,
+            _ => (ExportFormat?)null
         };
+
+        IExportService? attachService = targetFormat.HasValue
+            ? exportServices.FirstOrDefault(s => s.Format == targetFormat.Value)
+            : null;
 
         if (attachService == null)
         {

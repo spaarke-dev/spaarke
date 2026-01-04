@@ -65,13 +65,14 @@ jobs:
         uses: azure/webapps-deploy@v2
         with:
           app-name: ${{ secrets.STAGING_APP_NAME }}
-          package: ./artifacts/publish/api
-          slot-name: staging
+          package: ./artifacts/api
+          # Note: Deployment slots require Standard tier or higher
+          # B1 tier does not support slots, deploying directly
 
       - name: Health check
         shell: pwsh
         run: |
-          $uri = "https://${{ secrets.STAGING_APP_NAME }}-staging.azurewebsites.net/ping"
+          $uri = "https://${{ secrets.STAGING_APP_NAME }}.azurewebsites.net/ping"
           $maxAttempts = 10
           $attempt = 0
 
@@ -196,5 +197,5 @@ jobs:
           echo "| Integration Tests | ${{ needs.integration-tests.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Environment URLs" >> $GITHUB_STEP_SUMMARY
-          echo "- **API**: https://${{ secrets.STAGING_APP_NAME }}-staging.azurewebsites.net" >> $GITHUB_STEP_SUMMARY
-          echo "- **Health Check**: https://${{ secrets.STAGING_APP_NAME }}-staging.azurewebsites.net/ping" >> $GITHUB_STEP_SUMMARY
+          echo "- **API**: https://${{ secrets.STAGING_APP_NAME }}.azurewebsites.net" >> $GITHUB_STEP_SUMMARY
+          echo "- **Health Check**: https://${{ secrets.STAGING_APP_NAME }}.azurewebsites.net/ping" >> $GITHUB_STEP_SUMMARY
