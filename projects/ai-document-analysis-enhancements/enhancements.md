@@ -22,6 +22,10 @@ This project captures enhancement requests for the AI Document Analysis features
 | ENH-006 | Ambiguity & Error Detection | Medium | API |
 | ENH-007 | Multi-User Annotations | Low | PCF, Dataverse |
 | ENH-008 | Document Version Comparison | Low | PCF, API |
+| ENH-009 | Seed Data: Actions & Skills | High | Dataverse |
+| ENH-010 | Seed Data: Knowledge Sources | High | Dataverse, API |
+| ENH-011 | Seed Data: Sample Playbooks | High | Dataverse |
+| ENH-012 | End-to-End Playbook Testing | High | All |
 
 ---
 
@@ -251,14 +255,176 @@ This project captures enhancement requests for the AI Document Analysis features
 
 ---
 
+### ENH-009: Seed Data: Actions & Skills
+
+**Priority**: High
+**Component**: Dataverse
+**Status**: Proposed
+
+**Background**:
+R3 spec (Phase 3) specified "Seed data: 5 Actions, 10 Skills, 5 Knowledge sources" but only the infrastructure was built. No actual seed data records were created.
+
+**Required Actions (5)**:
+| Action Name | Description |
+|-------------|-------------|
+| Extract Entities | Extract key entities (parties, dates, amounts) from document |
+| Analyze Clauses | Identify and analyze contract clauses |
+| Classify Document | Determine document type and category |
+| Summarize Content | Generate executive summary of document |
+| Detect Risks | Identify potential risks and compliance issues |
+
+**Required Skills (10)**:
+| Skill Name | Description |
+|------------|-------------|
+| Contract Analysis | Full contract review workflow |
+| Invoice Processing | Invoice data extraction and validation |
+| NDA Review | Non-disclosure agreement analysis |
+| Lease Review | Commercial/residential lease analysis |
+| Employment Contract | Employment agreement review |
+| SLA Analysis | Service level agreement evaluation |
+| Compliance Check | Regulatory compliance verification |
+| Executive Summary | High-level document summarization |
+| Risk Assessment | Comprehensive risk identification |
+| Clause Comparison | Compare clauses to standards |
+
+**Acceptance Criteria**:
+- [ ] 5 Action records created in Dataverse (sprk_aiaction)
+- [ ] 10 Skill records created in Dataverse (sprk_aiskill)
+- [ ] Actions linked to appropriate Tool handlers
+- [ ] Skills linked to relevant Actions
+- [ ] Records accessible via Admin forms
+
+---
+
+### ENH-010: Seed Data: Knowledge Sources
+
+**Priority**: High
+**Component**: Dataverse, API
+**Status**: Proposed
+
+**Background**:
+R3 spec specified 5 Knowledge sources but none were created. Knowledge sources provide context for RAG-enhanced analysis.
+
+**Required Knowledge Sources (5)**:
+| Source Name | Description | Content Type |
+|-------------|-------------|--------------|
+| Standard Contract Terms | Organization's standard clause library | Internal |
+| Regulatory Guidelines | Industry compliance requirements | Reference |
+| Best Practices | Legal review best practices | Internal |
+| Risk Categories | Risk classification taxonomy | Internal |
+| Defined Terms | Standard definitions and acronyms | Reference |
+
+**Technical Requirements**:
+- Each Knowledge source needs:
+  - Dataverse record (sprk_aiknowledge)
+  - Associated documents/content
+  - Embeddings generated and indexed in Azure AI Search
+  - RAG retrieval tested
+
+**Acceptance Criteria**:
+- [ ] 5 Knowledge source records created in Dataverse
+- [ ] Sample content documents created for each source
+- [ ] Documents embedded via EmbeddingService
+- [ ] Content indexed in spaarke-knowledge-index
+- [ ] RAG retrieval returns relevant context
+
+---
+
+### ENH-011: Seed Data: Sample Playbooks
+
+**Priority**: High
+**Component**: Dataverse
+**Status**: Proposed
+
+**Background**:
+The PlaybookService infrastructure was built in R3 but no actual Playbooks were created. Users need sample playbooks to understand the system.
+
+**Required Playbooks (5)**:
+| Playbook Name | Target Document Type | Skills Used |
+|---------------|---------------------|-------------|
+| Quick Contract Review | Any Contract | Extract Entities, Detect Risks |
+| Full NDA Analysis | Non-Disclosure Agreements | NDA Review, Clause Comparison |
+| Invoice Validation | Invoices | Invoice Processing |
+| Lease Due Diligence | Commercial Leases | Lease Review, Risk Assessment |
+| Comprehensive Contract | Complex Contracts | All Skills |
+
+**Required Tool Configurations**:
+| Tool Name | Handler | Parameters |
+|-----------|---------|------------|
+| Entity Extractor | EntityExtractorHandler | entity_types, confidence_threshold |
+| Clause Analyzer | ClauseAnalyzerHandler | risk_threshold, clause_categories |
+| Document Classifier | DocumentClassifierHandler | classification_taxonomy |
+
+**Acceptance Criteria**:
+- [ ] 5 Playbook records created (sprk_aiplaybook)
+- [ ] Each Playbook links to appropriate Skills
+- [ ] Tool configuration records created for each tool
+- [ ] Playbooks visible in AnalysisWorkspace dropdown
+- [ ] Sample playbook documentation created
+
+---
+
+### ENH-012: End-to-End Playbook Testing
+
+**Priority**: High
+**Component**: All (PCF, API, Dataverse)
+**Status**: Proposed
+
+**Background**:
+With seed data created (ENH-009 through ENH-011), comprehensive end-to-end testing is needed to verify the complete workflow.
+
+**Test Scenarios**:
+
+1. **Playbook Selection Flow**
+   - User opens AnalysisWorkspace with document
+   - User selects "Quick Contract Review" playbook
+   - System loads playbook configuration
+   - Analysis runs with playbook settings
+
+2. **Full Analysis Workflow**
+   - Upload test contract document
+   - Select "Full NDA Analysis" playbook
+   - Verify EntityExtractor runs and returns entities
+   - Verify ClauseAnalyzer identifies clauses
+   - Verify DocumentClassifier categorizes document
+   - Verify RAG context retrieved from Knowledge sources
+   - Verify analysis output formatted correctly
+   - Test export to DOCX/PDF
+
+3. **Playbook CRUD Operations**
+   - Create new playbook via Admin form
+   - Link Skills to playbook
+   - Edit playbook configuration
+   - Share playbook with team
+   - Delete playbook
+
+4. **Negative Testing**
+   - Playbook with missing Skills
+   - Knowledge source with no content
+   - Tool handler timeout/failure
+
+**Test Documents Required**:
+| Document | Type | Purpose |
+|----------|------|---------|
+| sample-nda.pdf | NDA | Full NDA analysis test |
+| sample-contract.pdf | Contract | Quick review test |
+| sample-lease.pdf | Lease | Lease review test |
+| sample-invoice.pdf | Invoice | Invoice processing test |
+| malformed-doc.pdf | Invalid | Error handling test |
+
+**Acceptance Criteria**:
+- [ ] All 4 test scenarios pass
+- [ ] Test documents created and stored
+- [ ] Playbook UI works end-to-end
+- [ ] RAG retrieval improves analysis quality
+- [ ] Export produces valid documents
+- [ ] Error handling tested
+
+---
+
 ## Future Enhancements
 
 *Add additional enhancement requests below as they are identified.*
-
-| ID | Title | Priority | Status |
-|----|-------|----------|--------|
-| ENH-009 | *Reserved* | - | - |
-| ENH-010 | *Reserved* | - | - |
 
 ---
 
@@ -280,4 +446,6 @@ This project captures enhancement requests for the AI Document Analysis features
 | Date | Change |
 |------|--------|
 | 2026-01-04 | Initial document created with ENH-001, ENH-002, ENH-003 |
+| 2026-01-04 | Added ENH-004 through ENH-008 from user feedback |
+| 2026-01-04 | Added ENH-009 through ENH-012 for R3 seed data gap (playbooks, actions, skills, knowledge) |
 
