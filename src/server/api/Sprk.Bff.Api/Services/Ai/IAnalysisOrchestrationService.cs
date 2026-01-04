@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Http;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Models.Ai;
 
+// Note: AnalysisResumeResult is in Sprk.Bff.Api.Models.Ai namespace
+
 namespace Sprk.Bff.Api.Services.Ai;
 
 /// <summary>

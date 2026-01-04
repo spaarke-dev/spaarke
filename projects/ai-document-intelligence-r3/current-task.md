@@ -28,8 +28,8 @@
 | Add missing App Service config | ✅ | AzureAd, Graph, Dataverse, ServiceBus settings |
 | API Health Check | ✅ | `/ping` → pong, `/healthz` → Healthy |
 | Fix PCF authentication | ✅ | Added MSAL AuthService to AnalysisWorkspace PCF |
-| Deploy updated PCF control | 🔲 | **PENDING** - Re-deploy PCF with auth support |
-| Configure PCF auth parameters | 🔲 | **PENDING** - Add tenantId, clientAppId, bffAppId to Custom Page |
+| Deploy updated PCF control | ✅ | Re-deployed PCF with auth support |
+| Fix PCF tooltip issue | ✅ | Replace Tooltip with native title for PCF compatibility |
 | Power App integration testing | 🔲 | **AWAITING** - Test after PCF deployment |
 | Mark task complete | 🔲 | After Power App verification |
 

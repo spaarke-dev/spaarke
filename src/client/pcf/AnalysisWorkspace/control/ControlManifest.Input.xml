@@ -31,6 +31,11 @@
     <!-- BFF API Base URL (from Environment Variable) -->
     <property name="apiBaseUrl" display-name-key="API Base URL" description-key="Base URL for BFF API (from sprk_BffApiBaseUrl environment variable)" of-type="SingleLine.Text" usage="input" required="false" />
 
+    <!-- Authentication Configuration -->
+    <property name="tenantId" display-name-key="Tenant ID" description-key="Azure AD Tenant ID for MSAL authentication" of-type="SingleLine.Text" usage="input" required="true" />
+    <property name="clientAppId" display-name-key="Client App ID" description-key="PCF Client Application ID registered in Azure AD" of-type="SingleLine.Text" usage="input" required="true" />
+    <property name="bffAppId" display-name-key="BFF App ID" description-key="BFF API Application ID for scope construction (api://{bffAppId}/SDAP.Access)" of-type="SingleLine.Text" usage="input" required="true" />
+
     <!-- Working Document Content (OUTPUT - for auto-save binding) -->
     <property name="workingDocumentContent" display-name-key="Working Document Content" description-key="Current content of the working document (Markdown)" of-type="Multiple" usage="output" required="false" />
 

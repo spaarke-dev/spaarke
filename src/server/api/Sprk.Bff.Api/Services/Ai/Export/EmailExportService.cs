@@ -338,12 +338,19 @@ public partial class EmailExportService : IExportService
 
         // Determine which format to attach
         var attachFormat = options.AttachmentFormat;
-        IExportService? attachService = attachFormat switch
+
+        // Resolve export services from DI to avoid circular dependency
+        var exportServices = _serviceProvider.GetServices<IExportService>();
+        var targetFormat = attachFormat switch
         {
-            SaveDocumentFormat.Pdf => GetPdfService(),
-            SaveDocumentFormat.Docx => GetDocxService(),
-            _ => null
+            SaveDocumentFormat.Pdf => ExportFormat.Pdf,
+            SaveDocumentFormat.Docx => ExportFormat.Docx,
+            _ => (ExportFormat?)null
         };
+
+        IExportService? attachService = targetFormat.HasValue
+            ? exportServices.FirstOrDefault(s => s.Format == targetFormat.Value)
+            : null;
 
         if (attachService == null)
         {

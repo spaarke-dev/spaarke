@@ -58,6 +58,10 @@ export interface IAnalysisWorkspaceAppProps {
     fileId: string;
     apiBaseUrl: string;
     webApi: ComponentFramework.WebApi;
+    /** Function to get access token for BFF API calls */
+    getAccessToken: () => Promise<string>;
+    /** Whether authentication is ready (MSAL initialized) */
+    isAuthReady: boolean;
     onWorkingDocumentChange: (content: string) => void;
     onChatHistoryChange: (history: string) => void;
     onStatusChange: (status: string) => void;

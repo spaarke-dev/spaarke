@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="visualization-module">
+  <metadata>
+    <title>Complete Storybook documentation</title>
+    <phase>5: Testing &amp; Documentation</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>040</dependencies>
+    <blocks>090</blocks>
+    <tags>documentation, storybook, frontend</tags>
+  </metadata>
+
+  <prompt>
+    Complete the Storybook documentation for all visualization components.
+    Include usage examples, props documentation, and interactive demos.
+  </prompt>
+
+  <role>
+    Technical writer with React and Storybook expertise.
+  </role>
+
+  <goal>
+    Comprehensive Storybook documentation that serves as the primary reference
+    for developers using the visualization framework.
+  </goal>
+
+  <context>
+    <background>
+      Storybook provides interactive component documentation. Each visual type
+      needs stories showing various configurations and data shapes.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">MUST document Fluent v9 theming integration</constraint>
+    <constraint source="project">MUST include code examples for each visual</constraint>
+    <constraint source="project">MUST show DrillInteraction contract usage</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing Storybook stories for completeness</step>
+    <step order="2">Add MDX documentation pages for each visual type</step>
+    <step order="3">Document ChartDefinition schema with examples</step>
+    <step order="4">Document DrillInteraction contract</step>
+    <step order="5">Add interactive controls for props exploration</step>
+    <step order="6">Create theme switching demo story</step>
+    <step order="7">Document Visual Host PCF usage in MDA forms</step>
+    <step order="8">Document DrillThroughWorkspace Custom Page setup</step>
+    <step order="9">Add troubleshooting section</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <outputs>
+    <output type="documentation">Complete Storybook stories and MDX docs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 7 visual types have documented stories</criterion>
+    <criterion testable="true">ChartDefinition schema fully documented</criterion>
+    <criterion testable="true">DrillInteraction contract documented with examples</criterion>
+    <criterion testable="true">Setup guide for Visual Host on MDA forms</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

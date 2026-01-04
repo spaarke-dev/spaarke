@@ -46,10 +46,11 @@ This directory will contain AI-optimized versions of Architecture Decision Recor
 
 Load concise ADRs proactively when creating new components:
 - Creating API → Load ADR-001, ADR-008, ADR-010
-- Creating PCF → Load ADR-006, ADR-012, ADR-014, ADR-015, ADR-018
+- Creating PCF → Load ADR-006, ADR-012, ADR-022 (React 16 compatibility)
 - Creating Plugin → Load ADR-002
 - Working with auth → Load ADR-004, ADR-016
 - Working with SPE → Load ADR-007, ADR-019
+- Working with UI/UX → Load ADR-021, ADR-022
 - Creating dialogs → Load ADR-021, ADR-023
 
 Full ADRs in `docs/adr/` should be loaded only when:

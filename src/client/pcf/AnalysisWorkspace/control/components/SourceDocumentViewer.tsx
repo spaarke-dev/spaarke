@@ -173,19 +173,21 @@ export const SourceDocumentViewer: React.FC<ISourceDocumentViewerProps> = ({
         };
     }, []);
 
-    // Load preview when document changes
+    // Load preview when document changes AND auth is ready (getAccessToken provided)
     React.useEffect(() => {
-        if (documentId && containerId && fileId) {
+        if (documentId && containerId && fileId && getAccessToken) {
             loadPreview();
-        } else {
+        } else if (!documentId || !containerId || !fileId) {
             setPreviewUrl(null);
             setDocumentInfo(null);
             setError(null);
         }
-    }, [documentId, containerId, fileId]);
+        // If getAccessToken not provided, we just wait (don't clear state or show error)
+    }, [documentId, containerId, fileId, getAccessToken]);
 
     /**
      * Load preview URL from BFF API
+     * Uses same pattern as SpeDocumentViewer for authenticated API calls
      */
     const loadPreview = async () => {
         if (!documentId) {
@@ -319,6 +321,15 @@ export const SourceDocumentViewer: React.FC<ISourceDocumentViewerProps> = ({
                 <Text size={200}>
                     Select a document to preview the original source
                 </Text>
+            </div>
+        );
+    }
+
+    // Auth initializing state - show loading while MSAL initializes
+    if (!getAccessToken && !previewUrl) {
+        return (
+            <div className={styles.loadingContainer}>
+                <Spinner size="large" label="Initializing authentication..." />
             </div>
         );
     }

@@ -47,6 +47,7 @@ import { logInfo, logError } from "../utils/logger";
 import { markdownToHtml, isMarkdown } from "../utils/markdownToHtml";
 import { RichTextEditor } from "./RichTextEditor";
 import { SourceDocumentViewer } from "./SourceDocumentViewer";
+import { ResumeSessionDialog } from "./ResumeSessionDialog";
 import { useSseStream } from "../hooks/useSseStream";
 import { MsalAuthProvider, loginRequest } from "../services/auth";
 
@@ -373,6 +374,8 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
     fileId,
     apiBaseUrl,
     webApi,
+    getAccessToken,
+    isAuthReady,
     onWorkingDocumentChange,
     onChatHistoryChange,
     onStatusChange
@@ -392,6 +395,12 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
     const [isConversationPanelVisible, setIsConversationPanelVisible] = React.useState(true);
     const [isDocumentPanelVisible, setIsDocumentPanelVisible] = React.useState(true);
 
+    // Session management state
+    const [isSessionResumed, setIsSessionResumed] = React.useState(false);
+    const [isResumingSession, setIsResumingSession] = React.useState(false);
+    const [showResumeDialog, setShowResumeDialog] = React.useState(false);
+    const [pendingChatHistory, setPendingChatHistory] = React.useState<string | null>(null);
+
     // Panel resize state
     const [leftPanelWidth, setLeftPanelWidth] = React.useState<number | null>(null);
     const [centerPanelWidth, setCenterPanelWidth] = React.useState<number | null>(null);
@@ -403,6 +412,7 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
     const dragStartWidthRef = React.useRef<number>(0);
 
     // Resolved document fields from expanded relationship
+    // Note: documentId prop may be empty - we resolve the actual document ID from the Analysis record
     const [resolvedDocumentId, setResolvedDocumentId] = React.useState(documentId);
     const [resolvedContainerId, setResolvedContainerId] = React.useState(containerId);
     const [resolvedFileId, setResolvedFileId] = React.useState(fileId);
@@ -807,6 +817,9 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
                 setResolvedDocumentId(docId);
 
                 try {
+                    // Query document for SPE integration fields
+                    // Document entity field names: sprk_containerid, sprk_graphitemid/sprk_driveitemid
+                    // sprk_filename is used for display name (not sprk_name)
                     const docResult = await webApi.retrieveRecord(
                         "sprk_document",
                         docId,
@@ -894,6 +907,108 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
         } finally {
             setIsLoading(false);
         }
+    };
+
+    /**
+     * Resume session by calling the BFF API /resume endpoint.
+     * Creates an in-memory session on the server so chat can work.
+     */
+    const resumeSession = async (includeChatHistory: boolean) => {
+        if (!analysisId || !resolvedDocumentId) {
+            logInfo("AnalysisWorkspaceApp", "Cannot resume - missing analysisId or documentId");
+            setIsSessionResumed(true); // Allow chat anyway for new records
+            return;
+        }
+
+        setIsResumingSession(true);
+        setShowResumeDialog(false);
+
+        try {
+            // Build request headers with authentication
+            const headers: Record<string, string> = {
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+            };
+
+            if (getAccessToken) {
+                try {
+                    const accessToken = await getAccessToken();
+                    headers["Authorization"] = `Bearer ${accessToken}`;
+                } catch (tokenError) {
+                    logError("AnalysisWorkspaceApp", "Failed to acquire access token for resume", tokenError);
+                    throw new Error("Authentication failed");
+                }
+            }
+
+            // Build request body
+            const requestBody = {
+                documentId: resolvedDocumentId,
+                documentName: resolvedDocumentName || "Unknown",
+                workingDocument: workingDocument,
+                chatHistory: includeChatHistory ? pendingChatHistory : null,
+                includeChatHistory
+            };
+
+            // Call the resume endpoint
+            const baseUrl = apiBaseUrl.replace(/\/+$/, '');
+            const apiPath = baseUrl.endsWith('/api') ? '' : '/api';
+            const url = `${baseUrl}${apiPath}/ai/analysis/${analysisId}/resume`;
+
+            logInfo("AnalysisWorkspaceApp", `Calling resume API: ${url}, includeChatHistory=${includeChatHistory}`);
+
+            const response = await fetch(url, {
+                method: "POST",
+                headers,
+                body: JSON.stringify(requestBody)
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.error || `HTTP ${response.status}`);
+            }
+
+            const result = await response.json();
+            logInfo("AnalysisWorkspaceApp", `Session resumed: ${result.chatMessagesRestored} messages restored`);
+
+            // Load chat history into UI if resuming with history
+            if (includeChatHistory && pendingChatHistory) {
+                try {
+                    const parsed = JSON.parse(pendingChatHistory);
+                    if (Array.isArray(parsed)) {
+                        setChatMessages(parsed);
+                    }
+                } catch (e) {
+                    logError("AnalysisWorkspaceApp", "Failed to parse pending chat history", e);
+                }
+            } else {
+                // Starting fresh - clear chat messages
+                setChatMessages([]);
+            }
+
+            setIsSessionResumed(true);
+            setPendingChatHistory(null);
+
+        } catch (err) {
+            logError("AnalysisWorkspaceApp", "Failed to resume session", err);
+            // Still allow chat even if resume fails - the error will show on first message
+            setIsSessionResumed(true);
+        } finally {
+            setIsResumingSession(false);
+        }
+    };
+
+    // Dialog handlers
+    const handleResumeWithHistory = () => {
+        resumeSession(true);
+    };
+
+    const handleStartFresh = () => {
+        resumeSession(false);
+    };
+
+    const handleDismissResumeDialog = () => {
+        // If user dismisses, start fresh by default
+        resumeSession(false);
     };
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -1334,24 +1449,35 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
                             )}
                         </div>
                         <div className={styles.chatInputContainer}>
-                            <div className={styles.chatInputWrapper}>
-                                <Textarea
-                                    className={styles.chatTextarea}
-                                    placeholder="Type a message..."
-                                    value={chatInput}
-                                    onChange={(_e, data) => setChatInput(data.value)}
-                                    onKeyDown={handleChatKeyDown}
-                                    disabled={sseState.isStreaming}
-                                    resize="vertical"
-                                    rows={2}
-                                />
-                                <Button
-                                    icon={<Send24Regular />}
-                                    appearance="primary"
-                                    onClick={handleSendMessage}
-                                    disabled={!chatInput.trim() || sseState.isStreaming}
-                                />
-                            </div>
+                            {isResumingSession ? (
+                                <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "12px", justifyContent: "center" }}>
+                                    <Spinner size="tiny" />
+                                    <Text size={200}>Initializing session...</Text>
+                                </div>
+                            ) : !isSessionResumed && showResumeDialog ? (
+                                <div style={{ padding: "12px", textAlign: "center", color: tokens.colorNeutralForeground3 }}>
+                                    <Text size={200}>Choose how to continue...</Text>
+                                </div>
+                            ) : (
+                                <div className={styles.chatInputWrapper}>
+                                    <Textarea
+                                        className={styles.chatTextarea}
+                                        placeholder={isSessionResumed ? "Type a message..." : "Waiting for session..."}
+                                        value={chatInput}
+                                        onChange={(_e, data) => setChatInput(data.value)}
+                                        onKeyDown={handleChatKeyDown}
+                                        disabled={sseState.isStreaming || !isSessionResumed}
+                                        resize="vertical"
+                                        rows={2}
+                                    />
+                                    <Button
+                                        icon={<Send24Regular />}
+                                        appearance="primary"
+                                        onClick={handleSendMessage}
+                                        disabled={!chatInput.trim() || sseState.isStreaming || !isSessionResumed}
+                                    />
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -1361,6 +1487,21 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
             <div className={styles.versionFooter}>
                 v{VERSION} • Built {BUILD_DATE}
             </div>
+
+            {/* Resume Session Dialog */}
+            <ResumeSessionDialog
+                open={showResumeDialog}
+                chatMessageCount={(() => {
+                    try {
+                        return pendingChatHistory ? JSON.parse(pendingChatHistory).length : 0;
+                    } catch {
+                        return 0;
+                    }
+                })()}
+                onResumeWithHistory={handleResumeWithHistory}
+                onStartFresh={handleStartFresh}
+                onDismiss={handleDismissResumeDialog}
+            />
         </div>
     );
 };
