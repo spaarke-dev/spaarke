@@ -89,15 +89,15 @@ public class ConvertEmailToDocumentResponse
         string graphItemId,
         int attachmentCount,
         IReadOnlyList<AttachmentDocumentInfo> attachmentDocuments) => new()
-    {
-        Success = true,
-        DocumentId = documentId,
-        FileName = fileName,
-        FileSizeBytes = fileSizeBytes,
-        GraphItemId = graphItemId,
-        AttachmentCount = attachmentCount,
-        AttachmentDocuments = attachmentDocuments
-    };
+        {
+            Success = true,
+            DocumentId = documentId,
+            FileName = fileName,
+            FileSizeBytes = fileSizeBytes,
+            GraphItemId = graphItemId,
+            AttachmentCount = attachmentCount,
+            AttachmentDocuments = attachmentDocuments
+        };
 
     /// <summary>
     /// Create a failure response.

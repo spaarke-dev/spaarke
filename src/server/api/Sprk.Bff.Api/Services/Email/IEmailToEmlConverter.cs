@@ -72,13 +72,13 @@ public class EmlConversionResult
         EmailActivityMetadata metadata,
         IReadOnlyList<EmailAttachmentInfo> attachments,
         long fileSizeBytes) => new()
-    {
-        Success = true,
-        EmlStream = emlStream,
-        Metadata = metadata,
-        Attachments = attachments,
-        FileSizeBytes = fileSizeBytes
-    };
+        {
+            Success = true,
+            EmlStream = emlStream,
+            Metadata = metadata,
+            Attachments = attachments,
+            FileSizeBytes = fileSizeBytes
+        };
 
     public static EmlConversionResult Failed(string errorMessage) => new()
     {
