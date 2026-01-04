@@ -72,6 +72,7 @@ src/server/api/Sprk.Bff.Api/Services/Ai/
 | `dataverse-deploy` | Deploying playbook forms |
 | `adr-check` | Validating AI architecture compliance |
 | `push-to-github` | Committing completed phases |
+| 'task-execute' | When running each task |
 
 ## Phase Overview
 
@@ -99,12 +100,57 @@ src/server/api/Sprk.Bff.Api/Services/Ai/
 - [ ] Production deployment healthy
 - [ ] Customer deployment guide validated
 
+## Context Management
+
+### Thresholds
+
+| Usage | Action |
+|-------|--------|
+| < 60% | Proceed normally |
+| 60-70% | Run `/checkpoint` - proactive save, then continue |
+| > 70% | STOP - Run `/checkpoint`, request `/compact` |
+| > 85% | EMERGENCY - Immediately run `/checkpoint` and stop |
+
+**Commands**: `/context` (check) · `/checkpoint` (save) · `/compact` (compress)
+
+### Proactive Checkpointing (MANDATORY)
+
+| Condition | Action |
+|-----------|--------|
+| After every 3 completed task steps | Run `context-handoff` (silent) |
+| After modifying 5+ files in session | Run `context-handoff` |
+| After any deployment operation | Run `context-handoff` |
+| Context > 60% | Run `context-handoff` (verbose) |
+| Context > 70% | Run `context-handoff` + STOP + request `/compact` |
+
+### Key Skills for Context Management
+
+| Skill | Purpose |
+|-------|---------|
+| `context-handoff` | Save state to `current-task.md` before compaction |
+| `project-continue` | Restore state after compaction or new session |
+| `task-execute` | Execute tasks with mandatory checkpointing |
+
+### Reference Documents
+
+- [AIP-001: Task Execution Protocol](../../.claude/protocols/AIP-001-task-execution.md)
+- [Context Recovery Procedure](../../docs/procedures/context-recovery.md)
+- [context-handoff Skill](../../.claude/skills/context-handoff/SKILL.md)
+- [project-continue Skill](../../.claude/skills/project-continue/SKILL.md)
+
+---
+
 ## Context Recovery
 
 If resuming work, check:
-1. `current-task.md` for active task state
+1. **Read `current-task.md` Quick Recovery section** - Task, Step, Next Action
 2. `tasks/TASK-INDEX.md` for overall progress
 3. Git status for uncommitted changes
+
+**Recovery Commands**:
+- "Where was I?" - Triggers `project-continue` skill
+- "Continue task 045" - Resume specific task
+- "/project-status" - Check project state
 
 ---
 

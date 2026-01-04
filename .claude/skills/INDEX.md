@@ -22,6 +22,8 @@
 | [spaarke-conventions](spaarke-conventions/SKILL.md) | Coding standards and naming conventions | **Yes** | Auto-applied |
 | [task-create](task-create/SKILL.md) | Decompose plan.md into POML task files | No | `/task-create`, "create tasks" |
 | [task-execute](task-execute/SKILL.md) | Execute POML task with mandatory knowledge loading | No | "execute task", "run task", "work on task" |
+| [project-continue](project-continue/SKILL.md) | Continue project after PR merge or new session | No | `/project-continue`, "continue project", "resume project" |
+| [context-handoff](context-handoff/SKILL.md) | Save working state before compaction or session end | No | `/checkpoint`, `/context-handoff`, "save progress" |
 | [ribbon-edit](ribbon-edit/SKILL.md) | Edit Dataverse ribbon via solution export/import | No | "edit ribbon", "add ribbon button" |
 | [worktree-setup](worktree-setup/SKILL.md) | Create and manage git worktrees for parallel development | No | `/worktree-setup`, "create worktree", "new project worktree" |
 
@@ -35,6 +37,7 @@
 ### 🚀 Project Lifecycle
 - **design-to-spec** - Component: Transform human design docs into AI-optimized spec.md (Tier 1)
 - **project-pipeline** - **⭐ RECOMMENDED**: Full orchestrator - spec.md → ready tasks + branch (Tier 2)
+- **project-continue** - Orchestrator: Resume project after PR merge or new session (Tier 2)
 - **project-setup** - Component (AI-internal): Generate artifacts only (Tier 1)
 - **task-create** - Component (AI-internal): Decompose plan into task files (Tier 1)
 - **task-execute** - Orchestrator: Execute individual task with context loading (Tier 2)
@@ -56,6 +59,7 @@
 - **pull-from-github** - Pull latest changes from GitHub
 - **push-to-github** - Commit changes and push to GitHub
 - **worktree-setup** - Create and manage git worktrees for parallel project development
+- **context-handoff** - Save working state before compaction or session end for recovery
 
 ## Skill Flow
 
@@ -124,13 +128,62 @@ AI-Optimized Spec (spec.md)
         │  Validate +      │     Cleanup ephemeral files
         │  cleanup         │
         └──────────────────┘
+
+─────────────────────────────────────────────────────────────────
+                    SESSION/PR CONTINUATION
+─────────────────────────────────────────────────────────────────
+
+After PR merge, new session, or context compaction:
+
+┌───────────────────────┐
+│  project-continue     │  ← Tier 2 Orchestrator (resumption)
+│  Sync + context load  │     Full project context recovery
+└───────────────────────┘
+    │
+    ├─→ Step 1: Identify project/branch
+    ├─→ Step 2: Sync with master (uses pull-from-github patterns)
+    ├─→ Step 3: Check PR status
+    ├─→ Step 4: Load ALL project files (CLAUDE.md, plan.md, etc.)
+    ├─→ Step 5: Load ADRs via adr-aware
+    ├─→ Step 6: Determine resume point from current-task.md
+    └─→ Step 7: Hand off to task-execute
+           │
+           ▼
+    ┌──────────────────┐
+    │  task-execute    │  ← Continues from correct step
+    └──────────────────┘
+
+─────────────────────────────────────────────────────────────────
+                    CONTEXT PRESERVATION
+─────────────────────────────────────────────────────────────────
+
+Before compaction (manual or proactive):
+
+┌───────────────────────┐
+│  context-handoff      │  ← Tier 3 Operational (state save)
+│  Save state for       │     Creates recovery checkpoint
+│  reliable recovery    │
+└───────────────────────┘
+    │
+    ├─→ Step 1: Identify current project
+    ├─→ Step 2: Capture critical state (task, step, files, decisions)
+    ├─→ Step 3: Update current-task.md with Quick Recovery section
+    └─→ Step 4: Verify and report
+           │
+           ▼
+    Ready for /compact or session end
+           │
+           ▼ (next session)
+    ┌──────────────────┐
+    │  project-continue │  ← Reads Quick Recovery section
+    └──────────────────┘
 ```
 
 **Skill Tiers**:
 - **Tier 0**: Always-Apply (adr-aware, script-aware, spaarke-conventions)
 - **Tier 1**: Components (design-to-spec, project-setup, task-create)
-- **Tier 2**: Orchestrators (project-pipeline, task-execute)
-- **Tier 3**: Operational (code-review, adr-check, dataverse-deploy, etc.)
+- **Tier 2**: Orchestrators (project-pipeline, project-continue, task-execute)
+- **Tier 3**: Operational (code-review, adr-check, dataverse-deploy, context-handoff, etc.)
 
 ## ADR Awareness Flow
 
@@ -222,6 +275,8 @@ alwaysApply: false  # Only true for universal skills like conventions
 │   └── SKILL.md
 ├── design-to-spec/               ← Transform design docs to AI-ready spec.md
 │   └── SKILL.md
+├── project-continue/             ← Resume project after PR/session
+│   └── SKILL.md
 ├── project-pipeline/             ← RECOMMENDED: Full orchestrator
 │   └── SKILL.md
 ├── project-setup/                ← AI-internal: Artifact generation
@@ -238,10 +293,12 @@ alwaysApply: false  # Only true for universal skills like conventions
 ├── task-create/
 │   ├── SKILL.md
 │   └── references/
-└── worktree-setup/             ← Git worktree management for parallel development
+├── worktree-setup/             ← Git worktree management for parallel development
+│   └── SKILL.md
+└── context-handoff/            ← State preservation before compaction
     └── SKILL.md
 ```
 
 ---
 
-*Last updated: December 25, 2025*
+*Last updated: January 4, 2026 (added context-handoff)*

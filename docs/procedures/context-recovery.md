@@ -1,7 +1,7 @@
 # Context Recovery Protocol
 
 > **Purpose**: Recover full working context after Claude Code compaction, session restart, or context reset
-> **Last Updated**: December 24, 2025
+> **Last Updated**: January 4, 2026
 > **Protocol ID**: CRP-001
 
 ---
@@ -12,6 +12,15 @@ Claude Code's context window is finite. When context usage exceeds thresholds or
 
 **Design Principle**: Everything Claude needs to continue work must be recoverable from persistent files. No critical state exists only in conversation history.
 
+### Key Skills for Context Management
+
+| Skill | Purpose | When to Use |
+|-------|---------|-------------|
+| **context-handoff** | Save state before compaction | "Save my progress", `/context-handoff` |
+| **project-continue** | Restore state after compaction | "Where was I?", `/project-continue` |
+
+These skills work together: `context-handoff` creates checkpoints, `project-continue` recovers from them.
+
 ---
 
 ## How to Use This Protocol (Developer Guide)
@@ -21,7 +30,7 @@ Claude Code's context window is finite. When context usage exceeds thresholds or
 When you open Claude Code in a new session and want to continue previous work:
 
 ```
-# Option 1: Quick resume (recommended)
+# Option 1: Quick resume (recommended) - triggers project-continue skill
 You: "Where was I?"
 
 # Option 2: Resume specific project
@@ -32,13 +41,18 @@ You: "Continue task 013"
 
 # Option 4: Check all project status first
 You: "/project-status"
+
+# Option 5: Explicit skill invocation
+You: "/project-continue ai-document-intelligence-r3"
 ```
 
-Claude Code will automatically:
-1. Find your `current-task.md` file
-2. Load the active task and all required context
-3. Report what was completed and what's next
-4. Ask if you're ready to continue
+Claude Code will automatically invoke the **project-continue** skill, which:
+1. Syncs your branch with master (pull latest changes)
+2. Checks PR status if one exists
+3. Loads all project context (CLAUDE.md, plan.md, spec.md, README.md)
+4. Reads the **Quick Recovery** section from `current-task.md`
+5. Reports what was completed and what's next
+6. Asks if you're ready to continue
 
 ### During Work (Proactive Updates)
 
@@ -52,16 +66,26 @@ Claude Code automatically updates `current-task.md` during task execution:
 
 ### Before Ending a Session
 
-If you need to stop mid-task:
+If you need to stop mid-task, invoke the **context-handoff** skill:
 
 ```
-You: "I need to stop for today, save my progress"
+# Option 1: Natural language (recommended)
+You: "Save my progress"
+
+# Option 2: Explicit skill invocation
+You: "/context-handoff"
+
+# Option 3: Before manual compaction
+You: "I need to compact, save my progress first"
 ```
 
-Claude Code will:
-1. Update `current-task.md` with complete state
-2. Add handoff notes for next session
-3. Confirm the handoff is saved
+Claude Code will invoke the **context-handoff** skill, which:
+1. Captures critical state (task ID, current step, files modified, decisions)
+2. Updates `current-task.md` with a **Quick Recovery** section at the top
+3. Verifies the checkpoint is complete
+4. Reports: "✅ State saved. Ready for /compact or session end."
+
+The Quick Recovery section is designed to be readable in < 30 seconds for fast context restoration.
 
 ### After Using /compact
 
@@ -317,19 +341,51 @@ Task 002 starts
 
 **Location**: `projects/{project-name}/current-task.md`
 
+**Template**: `.claude/templates/current-task.template.md`
+
 ```markdown
 # Current Task State
 
-> **Auto-updated by task-execute skill**
-> **Last Updated**: {ISO timestamp}
+> **Auto-updated by task-execute and context-handoff skills**
+> **Last Updated**: {YYYY-MM-DD HH:MM}
+> **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
-## Active Task
+---
 
-- **Task ID**: {NNN}
-- **Task File**: `tasks/{NNN}-{slug}.poml`
-- **Title**: {Task title from POML}
-- **Phase**: {Phase number and name}
-- **Status**: {not-started | in-progress | blocked | completed | none}
+## Quick Recovery (READ THIS FIRST)
+
+<!-- This section is for FAST context restoration after compaction -->
+<!-- Must be readable in < 30 seconds -->
+
+| Field | Value |
+|-------|-------|
+| **Task** | {NNN} - {Title} |
+| **Step** | {N} of {Total}: {Step description} |
+| **Status** | {in-progress / blocked / not-started / none} |
+| **Next Action** | {EXPLICIT next action - what command to run or file to edit} |
+
+### Files Modified This Session
+<!-- Only files touched in CURRENT session, not all time -->
+- `{path}` - {Created/Modified} - {brief purpose}
+
+### Critical Context
+<!-- 1-3 sentences of essential context for continuation -->
+{What must be understood to continue effectively}
+
+---
+
+## Active Task (Full Details)
+
+| Field | Value |
+|-------|-------|
+| **Task ID** | {NNN or "none"} |
+| **Task File** | `tasks/{NNN}-{slug}.poml` |
+| **Title** | {Task title from POML metadata} |
+| **Phase** | {Phase number}: {Phase name} |
+| **Status** | {not-started / in-progress / blocked / completed / none} |
+| **Started** | {YYYY-MM-DD HH:MM or "—"} |
+
+---
 
 ## Progress
 
@@ -339,7 +395,7 @@ Task 002 starts
 - [x] Step 2: {description} ({timestamp})
 - [ ] Step 3: {description} ← **Next**
 
-### Files Modified
+### Files Modified (All Task)
 <!-- Track all files touched during this task -->
 - `src/path/to/file.ts` - Created/Modified (purpose)
 - `src/another/file.cs` - Modified (purpose)
@@ -348,15 +404,22 @@ Task 002 starts
 <!-- Log implementation decisions for context -->
 - {timestamp}: Chose approach X over Y because {reason}
 
+---
+
 ## Next Action
 
 **Next Step**: Step 3 - {step description}
 
-**Context Needed**:
+**Pre-conditions**:
+- {What must be true before starting}
+
+**Key Context**:
 - Refer to {file} for {reason}
 - ADR-XXX applies to this step
 
 **Blockers**: {none | description of blocker}
+
+---
 
 ## Handoff Notes
 
@@ -364,43 +427,76 @@ Task 002 starts
 {Free-form notes for context handoff}
 ```
 
+### Quick Recovery Section Purpose
+
+The **Quick Recovery** section at the top enables fast context restoration:
+
+| Requirement | Why |
+|-------------|-----|
+| Readable in < 30 seconds | Post-compaction recovery must be fast |
+| Task + Step in one glance | Know exactly where you are |
+| Next Action is EXPLICIT | "Run `dotnet test`" not "Continue working" |
+| Session-scoped files | Only current session, not all-time history |
+| Critical Context | 1-3 sentences, not paragraphs |
+
 ---
 
 ## Handoff Creation (Pre-Compaction)
 
-When context usage approaches limits, create a handoff summary before compaction:
+When context usage approaches limits, use the **context-handoff** skill to create a checkpoint.
 
 ### Trigger Conditions
-- Context usage > 70%
-- User requests `/compact`
-- Session ending with work in progress
 
-### Handoff Procedure
+| Condition | Trigger Type | Action |
+|-----------|--------------|--------|
+| Context usage > 70% | Proactive (Claude should self-invoke) | Run context-handoff |
+| User requests `/compact` | Manual | User says "save my progress" first |
+| Session ending mid-task | Manual | User says "save my progress" |
+| After completing 3-5 task steps | Proactive | Claude checkpoints silently |
+| After modifying 5+ files | Proactive | Claude runs full context-handoff |
 
+### Using the context-handoff Skill
+
+**Manual invocation:**
 ```
-1. UPDATE current-task.md with latest state
-   - All completed steps
-   - All files modified
-   - Clear next action
-
-2. ADD handoff notes section
-   - Key decisions made this session
-   - Gotchas or warnings discovered
-   - Important context not in other files
-
-3. VERIFY current-task.md is complete
-   - Another Claude instance could continue from this file alone
-
-4. COMMIT current-task.md (optional but recommended)
-   git add projects/{name}/current-task.md
-   git commit -m "chore: update task state for handoff"
-
-5. REPORT to user:
-   "✅ Handoff created at projects/{name}/current-task.md
-
-    Ready for /compact or new session.
-    Context can be fully recovered from files."
+You: "Save my progress"
+# OR
+You: "/context-handoff"
 ```
+
+**The skill performs:**
+```
+1. IDENTIFY active project
+   - Check current worktree or branch
+   - Locate projects/{name}/current-task.md
+
+2. CAPTURE critical state
+   - Task ID and current step
+   - Files modified this session
+   - Key decisions made
+   - Explicit next action
+
+3. UPDATE current-task.md
+   - Populate Quick Recovery section at top
+   - Update timestamps
+   - Session-scoped file list
+
+4. VERIFY and REPORT
+   - Confirm current-task.md is complete
+   - Report: "✅ State saved. Ready for /compact."
+```
+
+### Proactive Checkpointing (Claude Self-Invokes)
+
+Claude should proactively checkpoint without user prompting:
+
+| After This | Claude Does |
+|------------|-------------|
+| Completing a task step | Updates current-task.md "Completed Steps" |
+| Modifying 5+ files | Runs full context-handoff |
+| 30+ minutes of work | Runs full context-handoff |
+| Before a large operation | "Let me checkpoint first..." + context-handoff |
+| Context feels "heavy" | Check /context, consider checkpoint |
 
 ---
 
@@ -438,7 +534,29 @@ When context usage approaches limits, create a handoff summary before compaction
 
 ## Integration with Skills
 
-### task-execute Skill
+### context-handoff Skill (State Preservation)
+
+The `context-handoff` skill MUST:
+1. Identify the active project from worktree or branch
+2. Capture critical state (task, step, files, decisions)
+3. Update `current-task.md` with Quick Recovery section
+4. Verify checkpoint is complete before reporting
+
+**Location**: `.claude/skills/context-handoff/SKILL.md`
+
+### project-continue Skill (State Recovery)
+
+The `project-continue` skill MUST:
+1. Sync branch with master before loading context
+2. Check PR status if applicable
+3. Load ALL project files (CLAUDE.md, plan.md, spec.md, README.md)
+4. Read Quick Recovery section from `current-task.md`
+5. Load ADRs via adr-aware skill
+6. Determine resume point and hand off to task-execute
+
+**Location**: `.claude/skills/project-continue/SKILL.md`
+
+### task-execute Skill (Task Execution)
 
 The `task-execute` skill MUST:
 1. Initialize/update `current-task.md` at task start
@@ -446,20 +564,27 @@ The `task-execute` skill MUST:
 3. Update `files_modified` when touching files
 4. Log decisions in `decisions_made`
 5. Update on task completion (status → completed, clear next_step)
+6. **Proactively checkpoint** after every 3-5 steps
 
-### project-pipeline Skill
+**Location**: `.claude/skills/task-execute/SKILL.md`
+
+### project-pipeline Skill (Project Initialization)
 
 The `project-pipeline` skill MUST:
 1. Create `current-task.md` during Step 2 (artifact generation)
 2. Initialize with `status: none` until task execution starts
 3. Reference this protocol in generated `CLAUDE.md`
 
-### repo-cleanup Skill
+**Location**: `.claude/skills/project-pipeline/SKILL.md`
+
+### repo-cleanup Skill (Project Finalization)
 
 The `repo-cleanup` skill should:
 1. Check `current-task.md` for `status: none` or `status: completed`
 2. Archive or reset `current-task.md` for completed projects
 3. Warn if `current-task.md` shows work in progress
+
+**Location**: `.claude/skills/repo-cleanup/SKILL.md`
 
 ---
 
@@ -493,8 +618,17 @@ After recovery, verify:
 
 ## Related Documents
 
-- [task-execute Skill](.claude/skills/task-execute/SKILL.md) - Task execution with context persistence
-- [project-pipeline Skill](.claude/skills/project-pipeline/SKILL.md) - Project initialization
+### Skills
+- [context-handoff Skill](../../.claude/skills/context-handoff/SKILL.md) - State preservation before compaction
+- [project-continue Skill](../../.claude/skills/project-continue/SKILL.md) - State recovery after compaction
+- [task-execute Skill](../../.claude/skills/task-execute/SKILL.md) - Task execution with context persistence
+- [project-pipeline Skill](../../.claude/skills/project-pipeline/SKILL.md) - Project initialization
+
+### Templates
+- [current-task.template.md](../../.claude/templates/current-task.template.md) - Template with Quick Recovery section
+
+### Protocols
+- [AIP-001: Task Execution Protocol](../../.claude/protocols/AIP-001-task-execution.md) - Task execution and handoff rules
 - [Root CLAUDE.md](../../CLAUDE.md) - Context management rules
 
 ---

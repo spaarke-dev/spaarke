@@ -1,12 +1,34 @@
 # Current Task State
 
-> **Auto-updated by task-execute skill**
+> **Auto-updated by task-execute and context-handoff skills**
 > **Last Updated**: {YYYY-MM-DD HH:MM}
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
 
-## Active Task
+## Quick Recovery (READ THIS FIRST)
+
+<!-- This section is for FAST context restoration after compaction -->
+<!-- Must be readable in < 30 seconds -->
+
+| Field | Value |
+|-------|-------|
+| **Task** | {NNN} - {Title} |
+| **Step** | {N} of {Total}: {Step description} |
+| **Status** | {in-progress / blocked / not-started / none} |
+| **Next Action** | {EXPLICIT next action - what command to run or file to edit} |
+
+### Files Modified This Session
+<!-- Only files touched in CURRENT session, not all time -->
+- `{path}` - {Created/Modified} - {brief purpose}
+
+### Critical Context
+<!-- 1-3 sentences of essential context for continuation -->
+{What must be understood to continue effectively}
+
+---
+
+## Active Task (Full Details)
 
 | Field | Value |
 |-------|-------|
@@ -36,7 +58,7 @@
 - {Sub-action 1}
 - {Sub-action 2}
 
-### Files Modified
+### Files Modified (All Task)
 
 <!-- Track all files created or modified during this task -->
 <!-- Format: - `path/to/file` - {Created|Modified} - {brief purpose} -->
@@ -121,10 +143,16 @@
 
 **To recover context after compaction or new session:**
 
-1. Read this file (`current-task.md`)
-2. Load the task file listed above
-3. Load knowledge files from the task's `<knowledge>` section
-4. Resume from the "Current Step" section
+1. **Quick Recovery**: Read the "Quick Recovery" section above (< 30 seconds)
+2. **If more context needed**: Read Active Task and Progress sections
+3. **Load task file**: `tasks/{task-id}-*.poml`
+4. **Load knowledge files**: From task's `<knowledge>` section
+5. **Resume**: From the "Next Action" section
+
+**Commands**:
+- `/project-continue` - Full project context reload + master sync
+- `/context-handoff` - Save current state before compaction
+- "where was I?" - Quick context recovery
 
 **For full protocol**: See [docs/procedures/context-recovery.md](../../docs/procedures/context-recovery.md)
 

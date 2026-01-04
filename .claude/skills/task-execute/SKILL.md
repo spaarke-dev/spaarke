@@ -9,7 +9,7 @@ alwaysApply: false
 # task-execute
 
 > **Category**: Project Lifecycle
-> **Last Updated**: December 2025
+> **Last Updated**: January 2026
 
 ---
 
@@ -20,6 +20,8 @@ Execute a single POML task file with **mandatory context loading** and **persist
 **Critical**: This skill prevents the common failure mode where Claude Code starts implementing without loading the knowledge files referenced in the task.
 
 **Context Persistence**: All progress is tracked in `current-task.md` so work can continue after compaction or new sessions.
+
+**Proactive Checkpointing**: Claude MUST checkpoint progress frequently using the `context-handoff` skill to ensure reliable recovery.
 
 ---
 
@@ -258,6 +260,102 @@ FOR each <step> in <steps>:
       - [x] Step {N}: {description} ({timestamp})
 
     UPDATE Next Step to Step {N+1}
+
+    ─────────────────────────────────────────────────────
+    CHECKPOINT CHECK (MANDATORY after EVERY step):
+    ─────────────────────────────────────────────────────
+    EVALUATE checkpoint conditions:
+
+    IF any of these are true → RUN context-handoff:
+      • Just completed step 3, 6, 9, etc. (every 3 steps)
+      • Total files modified this session ≥ 5
+      • Made a significant implementation decision
+      • About to start a large/complex step
+      • Context usage > 60%
+
+    IF checkpoint triggered:
+      → Invoke context-handoff skill
+      → Update Quick Recovery section in current-task.md
+      → Report: "✅ Checkpoint saved. Continuing..."
+      → Continue to next step
+
+    IF context > 70%:
+      → STOP after checkpoint
+      → Report: "Context at {X}%. State saved. Ready for /compact."
+```
+
+### Step 8.5: Proactive Checkpointing Rules (MANDATORY)
+
+**Claude MUST checkpoint frequently to ensure reliable recovery. These rules are NOT optional.**
+
+#### Automatic Checkpoint Triggers
+
+| Condition | Action | Rationale |
+|-----------|--------|-----------|
+| After every 3 completed steps | Run context-handoff | Regular checkpoints prevent data loss |
+| After modifying 5+ files | Run context-handoff | Significant work should be preserved |
+| After any deployment operation | Run context-handoff | Deployment state is critical |
+| Before starting a complex step | Run context-handoff | Preserve clean state before risky work |
+| Context usage > 60% | Run context-handoff | Pre-emptive save before threshold |
+| Context usage > 70% | Run context-handoff + STOP | Cannot continue safely |
+| After significant decision | Update Decisions section | Document rationale for recovery |
+
+#### Checkpoint Behavior
+
+```
+WHEN checkpointing:
+
+1. UPDATE current-task.md Quick Recovery section:
+   | Field | Value |
+   |-------|-------|
+   | **Task** | {NNN} - {Title} |
+   | **Step** | {N} of {Total}: {Current step} |
+   | **Status** | in-progress |
+   | **Next Action** | {EXPLICIT next command or file to edit} |
+
+2. UPDATE "Files Modified This Session" (session-scoped)
+
+3. UPDATE "Critical Context" (1-3 sentences)
+
+4. REPORT briefly (don't interrupt flow):
+   "✅ Checkpoint saved. Continuing with step {N+1}..."
+
+5. CONTINUE working (don't wait for user)
+```
+
+#### Silent vs. Verbose Checkpoints
+
+| Checkpoint Type | When | User Notification |
+|-----------------|------|-------------------|
+| **Silent** | After steps 3, 6, 9... | Brief: "✅ Checkpoint." |
+| **Verbose** | Context > 60% | Full report with state summary |
+| **Blocking** | Context > 70% | STOP and request /compact |
+
+#### Example Checkpoint Flow
+
+```
+[Completing step 3 of 8]
+
+Claude:
+  1. Update current-task.md Completed Steps
+  2. Check: Step 3 complete → checkpoint trigger
+  3. Run context-handoff (Quick Recovery update)
+  4. Report: "✅ Checkpoint saved. Continuing with step 4..."
+  5. Begin step 4
+
+[After step 6, context at 65%]
+
+Claude:
+  1. Update current-task.md Completed Steps
+  2. Check: Step 6 complete → checkpoint trigger
+  3. Check: Context 65% > 60% → verbose checkpoint
+  4. Run context-handoff
+  5. Report:
+     "✅ Checkpoint saved.
+      Task: 013 - Add dark mode, Step 6 of 8
+      Context: 65%
+      Continuing with step 7..."
+  6. Begin step 7
 ```
 
 ### Step 9: Verify Acceptance Criteria
@@ -360,36 +458,53 @@ TRANSITION current-task.md:
 
 ## Handoff Protocol (Pre-Compaction)
 
-When context usage is high or session ending:
+When context usage is high or session ending, use the **context-handoff** skill:
 
 ```
-UPDATE current-task.md completely:
+INVOKE context-handoff skill (or run manually if needed):
 
-1. Completed Steps: Mark all finished steps with timestamps
+The skill will:
+1. Update Quick Recovery section with current state
+2. Update Files Modified This Session
+3. Update Critical Context (1-3 sentences)
+4. Verify checkpoint is complete
+5. Report readiness for /compact
 
-2. Current Step: Document exactly where you are:
-   - What was being done
-   - What's left to do on this step
+ALTERNATIVELY, manual update of current-task.md:
 
-3. Files Modified: Complete list with purposes
+1. Quick Recovery section:
+   - Task: {NNN} - {Title}
+   - Step: {N} of {Total}
+   - Status: in-progress
+   - Next Action: {EXPLICIT command or file}
+
+2. Files Modified This Session: Complete list with purposes
+
+3. Critical Context: 1-3 sentences of essential info
 
 4. Decisions Made: All implementation choices with rationale
 
-5. Session Notes → Handoff Notes:
+5. Handoff Notes:
    - Key context not captured elsewhere
    - Gotchas discovered
    - Important warnings
-   - "Another Claude should know..."
 
-6. Next Action: Clear, specific next step
-
-VERIFY: Another Claude instance could continue from current-task.md alone
+VERIFY: Quick Recovery section readable in < 30 seconds
 
 REPORT to user:
   "✅ State saved to current-task.md
    Ready for /compact or new session.
-   Run 'continue task' or 'where was I?' to resume."
+   Say 'where was I?' or '/checkpoint' to resume."
 ```
+
+### Trigger Phrases for Handoff
+
+| User Says | Action |
+|-----------|--------|
+| "Save my progress" | Run context-handoff |
+| "/context-handoff" | Run context-handoff |
+| "/checkpoint" | Run context-handoff (alias) |
+| "I need to compact" | Run context-handoff first |
 
 ---
 
@@ -530,6 +645,8 @@ When task has `deploy` tag:
 
 ## Related Skills
 
+- **context-handoff**: Checkpoint state before compaction (invoked proactively)
+- **project-continue**: Restore state after compaction or new session
 - **task-create**: Creates the task files this skill executes
 - **adr-aware**: Proactive ADR loading (always-apply)
 - **script-aware**: Script library discovery and maintenance (always-apply)
@@ -540,6 +657,7 @@ When task has `deploy` tag:
 ## Related Protocols
 
 - **[Context Recovery Protocol](../../../docs/procedures/context-recovery.md)**: Full recovery procedure
+- **[AIP-001: Task Execution Protocol](../../protocols/AIP-001-task-execution.md)**: Task execution and handoff rules
 
 ---
 

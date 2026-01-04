@@ -1,6 +1,6 @@
 # CLAUDE.md - Spaarke Repository Instructions
 
-> **Last Updated**: December 28, 2025
+> **Last Updated**: January 4, 2026
 >
 > **Purpose**: This file provides repository-wide context and instructions for Claude Code when working in this codebase.
 
@@ -138,11 +138,30 @@ These skills are **called BY orchestrators** and should NOT be invoked directly 
 
 | Usage | Action |
 |-------|--------|
-| < 70% | ✅ Proceed normally |
-| > 70% | 🛑 STOP - Update `current-task.md`, create handoff, request new session |
-| > 85% | 🚨 EMERGENCY - Immediately update `current-task.md` and stop |
+| < 60% | ✅ Proceed normally |
+| 60-70% | ⚠️ Run `/checkpoint` - proactive save, then continue |
+| > 70% | 🛑 STOP - Run `/checkpoint`, request `/compact` |
+| > 85% | 🚨 EMERGENCY - Immediately run `/checkpoint` and stop |
 
-**Commands**: `/context` (check) · `/clear` (wipe) · `/compact` (compress)
+**Commands**: `/context` (check) · `/checkpoint` (save state) · `/compact` (compress) · `/clear` (wipe)
+
+### Proactive Checkpointing (MANDATORY)
+
+**Claude MUST checkpoint frequently during task execution. These rules are NOT optional.**
+
+| Condition | Action |
+|-----------|--------|
+| After every 3 completed task steps | Run `context-handoff` (silent: "✅ Checkpoint.") |
+| After modifying 5+ files in session | Run `context-handoff` |
+| After any deployment operation | Run `context-handoff` |
+| Before starting a complex step | Run `context-handoff` |
+| Context > 60% | Run `context-handoff` (verbose report) |
+| Context > 70% | Run `context-handoff` + STOP + request `/compact` |
+
+**Checkpoint behavior**:
+- Update `current-task.md` Quick Recovery section
+- Report briefly: "✅ Checkpoint saved. Continuing..."
+- Continue working (don't wait for user unless context > 70%)
 
 ### Context Persistence
 
@@ -162,7 +181,7 @@ These skills are **called BY orchestrators** and should NOT be invoked directly 
 | Resume specific task | "Continue task 013" |
 | Resume specific project | "Continue work on {project-name}" |
 | Check all project status | "/project-status" |
-| Save progress before stopping | "Save my progress" |
+| Save progress before stopping | "Save my progress" (invokes `context-handoff`) |
 
 **Full Protocol**: [Context Recovery Procedure](docs/procedures/context-recovery.md)
 
@@ -220,6 +239,8 @@ When these phrases are detected, **STOP** and load the corresponding skill:
 | "push to github", "create PR", "commit and push", "ready to merge", "submit changes" | `push-to-github` | Load `.claude/skills/push-to-github/SKILL.md` and follow procedure |
 | "update AI procedures", "add new ADR", "propagate changes", "maintain procedures" | `ai-procedure-maintenance` | Load `.claude/skills/ai-procedure-maintenance/SKILL.md` and follow checklists |
 | "create worktree", "setup worktree", "new project worktree", "worktree for project" | `worktree-setup` | Load `.claude/skills/worktree-setup/SKILL.md` and follow procedure |
+| "continue project", "resume project", "where was I", "pick up where I left off" | `project-continue` | Load `.claude/skills/project-continue/SKILL.md` and sync + load context |
+| "save progress", "save my state", "context handoff", "checkpoint", "checkpoint before compaction" | `context-handoff` | Load `.claude/skills/context-handoff/SKILL.md` and save state for recovery |
 
 ### Auto-Detection Rules
 
@@ -232,6 +253,7 @@ When these phrases are detected, **STOP** and load the corresponding skill:
 | Writing any code | Apply `spaarke-conventions` (always-apply) |
 | Running `pac` commands, deploying to Dataverse | Load `dataverse-deploy` skill first |
 | Modifying ribbon XML, `RibbonDiffXml`, or command bar | Load `ribbon-edit` skill first |
+| Resuming work on existing project (has tasks/, CLAUDE.md) | Run `project-continue` to sync and load context |
 
 ### Always-Apply Skills
 
@@ -263,6 +285,9 @@ Use these commands to explicitly invoke skills:
 | `/push-to-github` | Commit changes and push to GitHub |
 | `/ai-procedure-maintenance` | Propagate updates when adding ADRs, patterns, constraints, skills |
 | `/worktree-setup` | Create and manage git worktrees for parallel project development |
+| `/project-continue {name}` | Continue project after PR merge or new session with full context |
+| `/context-handoff` | Save working state before compaction for reliable recovery |
+| `/checkpoint` | Alias for `/context-handoff` - quick state save |
 
 ---
 
@@ -609,4 +634,4 @@ See `CLAUDE.md` files in subdirectories for module-specific guidance:
 
 ---
 
-*Last updated: December 25, 2025*
+*Last updated: January 4, 2026*
