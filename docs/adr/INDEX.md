@@ -33,6 +33,7 @@ Architecture Decision Records capture important architectural decisions made dur
 | [ADR-019](ADR-019-api-errors-and-problemdetails.md) | API Errors and ProblemDetails | Backend | Accepted |
 | [ADR-020](ADR-020-versioning-strategy-apis-jobs-client-packages.md) | Versioning Strategy | Operations | Accepted |
 | [ADR-021](ADR-021-fluent-ui-design-system.md) | Fluent UI v9 Design System | **UI/UX** | **Accepted** |
+| [ADR-022](ADR-022-pcf-platform-libraries.md) | PCF Platform Libraries (React 16) | Frontend | Accepted |
 
 ## ADRs by Domain
 
@@ -44,6 +45,7 @@ Architecture Decision Records capture important architectural decisions made dur
 | [ADR-006](ADR-006-prefer-pcf-over-webresources.md) | Use PCF controls, not legacy webresources |
 | [ADR-011](ADR-011-dataset-pcf-over-subgrids.md) | Dataset PCF for list-based UI |
 | [ADR-012](ADR-012-shared-component-library.md) | Shared component library with Fluent v9 |
+| [ADR-022](ADR-022-pcf-platform-libraries.md) | PCF must use React 16 APIs (platform-provided) |
 
 ### Backend / API
 

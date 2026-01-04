@@ -1,0 +1,21 @@
+# Build outputs
+out/
+bin/
+obj/
+
+# Dependencies
+node_modules/
+
+# Generated files
+control/generated/
+
+# IDE files
+.vs/
+*.suo
+*.user
+
+# Lock files (optional - may want to commit for reproducibility)
+# package-lock.json
+
+# Debug logs
+npm-debug.log*
