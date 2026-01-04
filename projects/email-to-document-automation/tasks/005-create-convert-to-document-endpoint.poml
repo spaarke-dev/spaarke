@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="E2D-005" project="Email-to-Document Automation">
+  <metadata>
+    <title>Create POST /api/emails/convert-to-document Endpoint</title>
+    <status>completed</status>
+    <phase>1</phase>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>backend, api, endpoint</tags>
+  </metadata>
+
+  <prompt>
+    Create the manual email conversion API endpoint that allows users to convert a single
+    Email activity to a Document. This endpoint is used by the ribbon button for manual conversion.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with Minimal APIs, ADR-008 endpoint filters, and SDAP patterns.
+  </role>
+
+  <goal>
+    Working POST /api/emails/convert-to-document endpoint that validates the request, calls
+    IEmailToEmlConverter, uploads to SPE via SpeFileStore, creates Document record, and returns
+    the new document ID.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/email-to-document-automation/SPEC.md</file>
+    <file purpose="project-plan">projects/email-to-document-automation/PLAN.md</file>
+    <file purpose="project-context">projects/email-to-document-automation/CLAUDE.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-007">Use SpeFileStore for all SPE operations - do not inject GraphServiceClient</constraint>
+    <constraint source="ADR-008">Use endpoint filter for authorization, not global middleware</constraint>
+    <constraint source="ADR-019">Return ProblemDetails for errors</constraint>
+    <constraint source="project">MUST reuse existing SpeFileStore, IDataverseService</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>api/minimal-api, authorization</topic>
+    <files>
+      <file>projects/email-to-document-automation/SPEC.md (Section 4.1)</file>
+      <file>projects/email-to-document-automation/CLAUDE.md</file>
+      <file>docs/reference/adr/ADR-007-spe-storage-seam-minimalism.md</file>
+      <file>docs/reference/adr/ADR-008-authorization-endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/DocumentsEndpoints.cs</file>
+    </files>
+    <patterns>
+      <pattern name="Endpoint Pattern" location="src/server/api/Sprk.Bff.Api/Api/">
+        Follow existing endpoint patterns with route groups and filters
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      This endpoint enables manual email-to-document conversion from the Email form ribbon button.
+      It performs synchronous conversion suitable for single emails with immediate feedback.
+    </background>
+    <dependencies>
+      <dependency task="E2D-001" status="required">sprk_document entity extensions</dependency>
+      <dependency task="E2D-004" status="required">IEmailToEmlConverter service</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="1" name="Create Request/Response DTOs">
+      Create ConvertEmailToDocumentRequest and ConvertEmailToDocumentResponse DTOs.
+    </step>
+    <step order="2" name="Create Endpoint">
+      Create EmailEndpoints.cs with MapEmailEndpoints() extension.
+      Add POST /api/emails/convert-to-document endpoint.
+    </step>
+    <step order="3" name="Implement Handler">
+      Implement endpoint handler:
+      - Validate emailId exists
+      - Check user has read access to email
+      - Call IEmailToEmlConverter
+      - Upload via SpeFileStore.UploadSmallAsync()
+      - Create sprk_document record via IDataverseService
+      - Return document ID
+    </step>
+    <step order="4" name="Add Authorization Filter">
+      Create EmailAuthorizationFilter if needed, or reuse existing patterns.
+    </step>
+    <step order="5" name="Register Endpoint">
+      Register endpoints in Program.cs.
+    </step>
+    <step order="6" name="Test Manually">
+      Test endpoint with sample email via Swagger/REST client.
+    </step>
+    <step order="7" name="Document Changes">
+      Update TASK-INDEX.md with completion status.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and run .NET project</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/EmailEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Email/ConvertEmailToDocumentRequest.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Email/ConvertEmailToDocumentResponse.cs</output>
+    <output type="docs">projects/email-to-document-automation/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Endpoint accessible at POST /api/emails/convert-to-document</criterion>
+    <criterion testable="true">Valid request creates .eml file in SPE</criterion>
+    <criterion testable="true">sprk_document record created with email fields populated</criterion>
+    <criterion testable="true">Returns 201 Created with document ID on success</criterion>
+    <criterion testable="true">Returns 400 Bad Request for invalid email ID</criterion>
+    <criterion testable="true">Returns 404 Not Found if email doesn't exist</criterion>
+    <criterion testable="true">Uses SpeFileStore (not GraphServiceClient directly)</criterion>
+    <criterion testable="true">Project builds without errors</criterion>
+  </acceptance-criteria>
+</task>

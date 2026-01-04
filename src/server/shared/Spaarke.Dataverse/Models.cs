@@ -90,6 +90,30 @@ public class UpdateDocumentRequest
     /// <summary>Email body content (truncated to 10K chars). Maps to sprk_EmailBody.</summary>
     public string? EmailBody { get; set; }
 
+    /// <summary>Email CC recipients. Maps to sprk_EmailCc (if field exists).</summary>
+    public string? EmailCc { get; set; }
+
+    /// <summary>Email Message-ID header (RFC 5322). Maps to sprk_EmailMessageId.</summary>
+    public string? EmailMessageId { get; set; }
+
+    /// <summary>Email direction choice value: Received=100000000, Sent=100000001. Maps to sprk_EmailDirection.</summary>
+    public int? EmailDirection { get; set; }
+
+    /// <summary>Email tracking token. Maps to sprk_EmailTrackingToken.</summary>
+    public string? EmailTrackingToken { get; set; }
+
+    /// <summary>Email conversation index. Maps to sprk_EmailConversationIndex.</summary>
+    public string? EmailConversationIndex { get; set; }
+
+    /// <summary>Email activity lookup. Maps to sprk_Email@odata.bind.</summary>
+    public Guid? EmailLookup { get; set; }
+
+    /// <summary>Is this document an email archive (.eml). Maps to sprk_IsEmailArchive.</summary>
+    public bool? IsEmailArchive { get; set; }
+
+    /// <summary>Relationship type choice value: Email Attachment=100000000. Maps to sprk_RelationshipType.</summary>
+    public int? RelationshipType { get; set; }
+
     /// <summary>JSON array of attachment metadata. Maps to sprk_Attachments.</summary>
     public string? Attachments { get; set; }
 

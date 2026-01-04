@@ -420,12 +420,44 @@ else
     Console.WriteLine("⚠ Record Matching services disabled (DocumentIntelligence:RecordMatchingEnabled = false)");
 }
 
+// ============================================================================
+// EMAIL-TO-DOCUMENT CONVERSION SERVICES (Email-to-Document Automation project)
+// ============================================================================
+// Email telemetry - OpenTelemetry-compatible metrics for email processing
+builder.Services.AddSingleton<Sprk.Bff.Api.Telemetry.EmailTelemetry>();
+
+// Register Email Processing configuration
+builder.Services.Configure<Sprk.Bff.Api.Configuration.EmailProcessingOptions>(
+    builder.Configuration.GetSection(Sprk.Bff.Api.Configuration.EmailProcessingOptions.SectionName));
+
+// Email-to-EML converter - uses HttpClient for Dataverse Web API calls
+builder.Services.AddHttpClient<Sprk.Bff.Api.Services.Email.EmailToEmlConverter>();
+builder.Services.AddScoped<Sprk.Bff.Api.Services.Email.IEmailToEmlConverter>(sp =>
+    sp.GetRequiredService<Sprk.Bff.Api.Services.Email.EmailToEmlConverter>());
+
+// Email filter service - evaluates rules from Dataverse with Redis caching (NFR-06: 5min TTL)
+builder.Services.AddScoped<Sprk.Bff.Api.Services.Email.IEmailFilterService,
+    Sprk.Bff.Api.Services.Email.EmailFilterService>();
+
+// Email rule seed service - seeds default exclusion rules to Dataverse
+builder.Services.AddScoped<Sprk.Bff.Api.Services.Email.EmailRuleSeedService>();
+
+// HttpClient for email polling backup service (Dataverse queries)
+builder.Services.AddHttpClient("DataversePolling")
+    .ConfigureHttpClient(client =>
+    {
+        client.Timeout = TimeSpan.FromSeconds(30);
+    });
+
+Console.WriteLine("✓ Email-to-Document conversion services registered");
+
 // Background Job Processing (ADR-004) - Service Bus Strategy
 // Always register JobSubmissionService (unified entry point)
 builder.Services.AddSingleton<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>();
 
 // Register job handlers
 builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.DocumentProcessingJobHandler>();
+builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.EmailToDocumentJobHandler>();
 if (documentIntelligenceEnabled)
 {
     builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.DocumentAnalysisJobHandler>();
@@ -443,8 +475,10 @@ if (string.IsNullOrWhiteSpace(serviceBusConnectionString))
 
 builder.Services.AddSingleton(sp => new Azure.Messaging.ServiceBus.ServiceBusClient(serviceBusConnectionString));
 builder.Services.AddHostedService<Sprk.Bff.Api.Services.Jobs.ServiceBusJobProcessor>();
+builder.Services.AddHostedService<Sprk.Bff.Api.Services.Jobs.EmailPollingBackupService>();
 builder.Logging.AddConsole();
 Console.WriteLine("✓ Job processing configured with Service Bus (queue: sdap-jobs)");
+Console.WriteLine("✓ Email polling backup service configured");
 
 // ============================================================================
 // HEALTH CHECKS - Redis availability monitoring
@@ -1005,6 +1039,9 @@ app.MapOBOEndpoints();
 
 // Document checkout/checkin/discard operations (document-checkout-viewer project)
 app.MapDocumentOperationsEndpoints();
+
+// Email-to-document conversion endpoints (Email-to-Document Automation project)
+app.MapEmailEndpoints();
 
 // Document Intelligence endpoints (only if enabled)
 if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled"))
