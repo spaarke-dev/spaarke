@@ -1,9 +1,10 @@
 # RAG Architecture Guide
 
-> **Version**: 1.0
+> **Version**: 1.1
 > **Created**: 2025-12-29
+> **Updated**: 2026-01-02
 > **Project**: AI Document Intelligence R3
-> **Status**: Phase 1 Complete
+> **Status**: R3 Phases 1-5 Complete
 
 ---
 
@@ -584,13 +585,33 @@ User Query in Analysis Workspace
     Generate Analysis Response
 ```
 
-### Future Integrations (Phase 2+)
+### Completed Integrations (R3)
 
-| Integration | Purpose | Phase |
-|-------------|---------|-------|
-| Tool Framework | RAG as tool for AI agents | Phase 2 |
-| Playbook System | Pre-configured RAG queries | Phase 3 |
-| Export Services | Include RAG sources in exports | Phase 4 |
+| Integration | Purpose | Phase | Status |
+|-------------|---------|-------|--------|
+| Analysis Orchestration | RAG context in analysis prompts | Phase 2 | ✅ Complete |
+| Playbook System | Pre-configured RAG queries | Phase 2 | ✅ Complete |
+| Export Services | Include sources in DOCX/PDF/Email/Teams exports | Phase 3 | ✅ Complete |
+| Circuit Breaker | Polly resilience for AI Search | Phase 4 | ✅ Complete |
+| Tenant Authorization | `TenantAuthorizationFilter` for isolation | Phase 5 | ✅ Complete |
+
+### Resilience (R3 Phase 4)
+
+The RAG system includes circuit breaker protection via `ResilientSearchClient`:
+
+| Parameter | Value | Behavior |
+|-----------|-------|----------|
+| Failure ratio threshold | 50% | Circuit opens after 50% failures |
+| Minimum throughput | 5 calls | Needs 5 calls before evaluating |
+| Break duration | 30 seconds | Wait before retrying |
+| Timeout | 30 seconds | Per-request timeout |
+
+When the circuit is open, returns `503 Service Unavailable` with error code `ai_circuit_open`.
+
+**Monitoring:**
+- `AiTelemetry.cs` tracks circuit state changes
+- Application Insights custom metrics for AI operations
+- Azure Monitor alerts on circuit breaker state
 
 ---
 
@@ -606,4 +627,5 @@ User Query in Analysis Workspace
 ---
 
 *Document created: 2025-12-29*
-*AI Document Intelligence R3 - Phase 1 Complete*
+*Updated: 2026-01-02*
+*AI Document Intelligence R3 - Phases 1-5 Complete*

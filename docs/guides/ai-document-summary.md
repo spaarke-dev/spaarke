@@ -24,6 +24,9 @@ The AI Document Summary feature provides automatic document summarization using 
 - **Background processing** via Service Bus jobs
 - **Multiple file types**: Text, PDF, DOCX, images
 - **Production resilience**: Rate limiting, circuit breaker, telemetry
+- **Session persistence**: Chat history and working document saved to Dataverse (R3)
+- **Export capabilities**: DOCX, PDF, Email, Teams adaptive cards (R3)
+- **RAG integration**: Hybrid vector search for knowledge retrieval (R3)
 
 ### Architecture
 
@@ -34,17 +37,38 @@ Client (PCF)          BFF API                    Azure Services
 | EventSource|   | endpoint       |         | (gpt-4o-mini)    |
 +-----------+    +----------------+         +------------------+
                         |
-                        v
+                        ↓ HttpContext (OBO token)
                  +----------------+         +------------------+
-                 | TextExtractor  |-------->| Doc Intelligence |
-                 +----------------+         | (PDF/DOCX)       |
-                        |                   +------------------+
-                        v
+                 | Orchestration  |         | Doc Intelligence |
+                 | Service        |-------->| (PDF/DOCX)       |
+                 +----------------+         +------------------+
+                        |
+                        ↓ DownloadFileAsUserAsync (OBO)
                  +----------------+         +------------------+
                  | SpeFileStore   |-------->| SharePoint       |
                  +----------------+         | Embedded         |
                                             +------------------+
 ```
+
+### SPE File Access Authentication (Critical)
+
+**OBO Authentication Required**: Downloading files from SharePoint Embedded for analysis requires On-Behalf-Of (OBO) authentication. App-only authentication returns HTTP 403 (Access Denied).
+
+```csharp
+// ✅ CORRECT: Use OBO via HttpContext
+var fileStream = await _speFileStore.DownloadFileAsUserAsync(
+    httpContext,           // Passed from endpoint
+    document.GraphDriveId!,
+    document.GraphItemId!,
+    cancellationToken);
+
+// ❌ WRONG: App-only auth fails with 403
+// var fileStream = await _speFileStore.DownloadFileAsync(driveId, itemId, ct);
+```
+
+**Why**: SPE containers use user-level permissions, not app-level permissions. The user's token must be exchanged via OBO to access files they have permission to view.
+
+**HttpContext propagation**: All analysis endpoint methods accept and propagate `HttpContext` through the orchestration layer to enable OBO authentication for file downloads. See [SDAP Auth Patterns](../architecture/sdap-auth-patterns.md#pattern-4-obo-for-ai-analysis-spe-file-access) for details.
 
 ---
 
@@ -68,15 +92,31 @@ Client (PCF)          BFF API                    Azure Services
 | `MaxInputTokens` | int | `100000` | Max input tokens |
 | `MaxConcurrentStreams` | int | `3` | Max concurrent SSE per user |
 
-### AnalysisOptions (Export)
+### AnalysisOptions (Analysis & Export)
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
+| `MaxChatHistoryMessages` | int | `20` | Max chat messages to include in continuation context |
+| `MaxDocumentContextLength` | int | `100000` | Max characters of document text in continuation prompts (1000-200000) |
 | `EnableDocxExport` | bool | `true` | Enable DOCX export format |
 | `EnablePdfExport` | bool | `true` | Enable PDF export format |
 | `EnableEmailExport` | bool | `true` | Enable email export via Graph |
 | `ExportBranding.CompanyName` | string | `"Spaarke AI"` | Branding in export footers |
 | `ExportBranding.LogoUrl` | string? | null | Logo URL for PDF exports |
+
+### Chat Continuation Context
+
+When users continue an analysis via chat, the system includes full document context to provide accurate, document-specific responses:
+
+| Context Section | Description | Truncation |
+|-----------------|-------------|------------|
+| System Instructions | Original action + skill prompts | None |
+| Original Document | Full document text from SPE | Truncated to `MaxDocumentContextLength` |
+| Current Analysis | Working document from previous response | None |
+| Conversation History | Recent chat messages | Limited to `MaxChatHistoryMessages` |
+| User Request | New user message | None |
+
+This context is built by `IAnalysisContextBuilder.BuildContinuationPromptWithContext()` and ensures the AI can reference the original document content when answering follow-up questions.
 
 ### Example Configuration
 
@@ -329,6 +369,7 @@ Authorization: Bearer {token}
 | `docx` | Microsoft Word document | File download (binary) |
 | `pdf` | PDF document | File download (binary) |
 | `email` | Send via Microsoft Graph | Action confirmation (JSON) |
+| `teams` | Post adaptive card to Teams channel | Action confirmation (JSON) |
 
 **DOCX/PDF Response:** `200 OK`
 ```
@@ -630,12 +671,45 @@ public async Task SummarizeInBackgroundAsync(
 
 ---
 
-## Related Documentation
+## PCF Analysis Workspace (v1.2.7)
 
-- [AI Troubleshooting Guide](ai-troubleshooting.md) - Common issues and solutions
-- [Project README](../../projects/ai-document-summary/README.md) - Project overview
-- [Design Specification](../../projects/ai-document-summary/spec.md) - Original design
+The `AnalysisWorkspace` PCF control provides the user interface for document analysis.
+
+### Resume Session Dialog (ADR-023)
+
+When an analysis has existing chat history, users are presented with a choice dialog:
+
+| Option | Behavior |
+|--------|----------|
+| **Resume Session** | Load previous chat messages, continue conversation |
+| **Start Fresh** | Clear chat history in Dataverse, start new conversation |
+| **Cancel** | Close dialog, preserve history in Dataverse for next time |
+
+**Key Implementation Details:**
+- Dialog follows ADR-023 Choice Dialog Pattern (Fluent UI v9)
+- Chat history stored in `sprk_analysis.sprk_chathistory` as JSON
+- Working document stored in `sprk_analysis.sprk_workingdocument`
+- Uses `chatMessagesRef` to avoid stale closures in auto-save
+
+### URL Normalization
+
+The control normalizes the BFF API base URL to prevent double path segments:
+
+```typescript
+// Handles case where apiBaseUrl already ends with /api
+const normalizedBaseUrl = apiBaseUrl.replace(/\/api\/?$/, "");
+const url = `${normalizedBaseUrl}/api/documents/${documentId}/preview-url`;
+```
 
 ---
 
-*Last updated: December 2025*
+## Related Documentation
+
+- [AI Troubleshooting Guide](ai-troubleshooting.md) - Common issues and solutions
+- [RAG Architecture Guide](RAG-ARCHITECTURE.md) - Hybrid search and knowledge retrieval
+- [AI Architecture Guide](SPAARKE-AI-ARCHITECTURE.md) - Overall AI architecture
+- [ADR-023: Choice Dialog Pattern](../adr/ADR-023-choice-dialog-pattern.md) - Resume dialog design
+
+---
+
+*Last updated: January 2026 (R3 Phases 1-5)*

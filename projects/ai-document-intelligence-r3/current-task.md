@@ -27,7 +27,10 @@
 | Deploy to staging | ✅ | API live at spe-api-dev-67e2xz.azurewebsites.net |
 | Add missing App Service config | ✅ | AzureAd, Graph, Dataverse, ServiceBus settings |
 | API Health Check | ✅ | `/ping` → pong, `/healthz` → Healthy |
-| Power App integration testing | 🔲 | **AWAITING** - Manual testing required |
+| Fix PCF authentication | ✅ | Added MSAL AuthService to AnalysisWorkspace PCF |
+| Deploy updated PCF control | ✅ | Re-deployed PCF with auth support |
+| Fix PCF tooltip issue | ✅ | Replace Tooltip with native title for PCF compatibility |
+| Power App integration testing | 🔲 | **AWAITING** - Test after PCF deployment |
 | Mark task complete | 🔲 | After Power App verification |
 
 ## Completed Tasks

@@ -238,7 +238,7 @@ export class AnalysisBuilder implements ComponentFramework.StandardControl<IInpu
 
         logInfo("AnalysisBuilder", `Container size: ${allocatedWidth}x${allocatedHeight}`);
 
-        // Get input parameters
+        // Get input parameters from Custom Page bindings
         const documentId = this._context.parameters.documentId?.raw || "";
         const documentName = this._context.parameters.documentName?.raw || "";
         const containerId = this._context.parameters.containerId?.raw || "";
@@ -249,7 +249,17 @@ export class AnalysisBuilder implements ComponentFramework.StandardControl<IInpu
             this._context.parameters.apiBaseUrl?.raw ||
             "https://spe-api-dev-67e2xz.azurewebsites.net/api";
 
-        logInfo("AnalysisBuilder", `Rendering with documentId: ${documentId}, apiUrl: ${apiBaseUrl.substring(0, 30)}...`);
+        // Debug logging for parameter binding issues
+        logInfo("AnalysisBuilder", `Parameters received:`, {
+            documentId: documentId || "(empty)",
+            documentName: documentName || "(empty)",
+            containerId: containerId || "(empty)",
+            fileId: fileId || "(empty)",
+            apiBaseUrl: apiBaseUrl ? apiBaseUrl.substring(0, 40) + "..." : "(empty)",
+            hasDocumentIdParam: !!this._context.parameters.documentId,
+            documentIdRaw: this._context.parameters.documentId?.raw,
+            documentIdType: this._context.parameters.documentId?.type
+        });
 
         // Create or update React root
         if (!this._root) {
@@ -308,6 +318,49 @@ export class AnalysisBuilder implements ComponentFramework.StandardControl<IInpu
         this._createdAnalysisId = analysisId;
         this._shouldClose = true;
         this._notifyOutputChanged();
+
+        // Navigate to Analysis Workspace with the created analysis
+        this.navigateToWorkspace(analysisId);
+    }
+
+    private navigateToWorkspace(analysisId: string): void {
+        try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const xrm = (window as any).Xrm;
+
+            if (xrm?.Navigation?.navigateTo) {
+                logInfo("AnalysisBuilder", `Navigating to Analysis record: ${analysisId}`);
+
+                // Navigate to the Analysis entity record form
+                // The form contains the AnalysisWorkspace PCF control
+                xrm.Navigation.navigateTo(
+                    {
+                        pageType: "entityrecord",
+                        entityName: "sprk_analysis",
+                        entityId: analysisId
+                    },
+                    {
+                        target: 1 // 1 = Inline (replaces current page), 2 = Dialog
+                    }
+                ).then(
+                    () => {
+                        logInfo("AnalysisBuilder", "Navigation to Analysis record succeeded");
+                    },
+                    (err: unknown) => {
+                        logError("AnalysisBuilder", "Navigation to Analysis record failed", err);
+                        // Fallback: just close the dialog
+                        this.closeDialog();
+                    }
+                );
+            } else {
+                // Xrm.Navigation not available - fallback to close
+                logInfo("AnalysisBuilder", "Xrm.Navigation not available, falling back to close");
+                this.closeDialog();
+            }
+        } catch (err) {
+            logError("AnalysisBuilder", "navigateToWorkspace error", err);
+            this.closeDialog();
+        }
     }
 
     private handleCancel(): void {

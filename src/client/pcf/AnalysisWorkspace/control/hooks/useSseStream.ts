@@ -31,9 +31,9 @@ export interface ISseStreamOptions {
     onComplete: (fullResponse: string) => void;
     /** Callback on error */
     onError: (error: Error) => void;
-    /** Function to get access token (async) */
+    /** Function to get access token for API calls */
     getAccessToken?: () => Promise<string>;
-    /** Optional additional headers */
+    /** Optional static headers (e.g., for testing) */
     headers?: Record<string, string>;
 }
 
@@ -112,43 +112,36 @@ export function useSseStream(options: ISseStreamOptions): [ISseStreamState, ISse
         logInfo("useSseStream", `Starting stream for analysis: ${analysisId}`);
 
         try {
+            // Get access token if auth function provided
+            let authHeaders: Record<string, string> = {};
+            if (getAccessToken) {
+                try {
+                    const token = await getAccessToken();
+                    authHeaders = { "Authorization": `Bearer ${token}` };
+                    logInfo("useSseStream", "Auth token acquired successfully");
+                } catch (authErr) {
+                    logError("useSseStream", "Failed to acquire auth token", authErr);
+                    throw new Error("Authentication failed. Please refresh and try again.");
+                }
+            }
+
             // Build request body - only message, analysisId is in URL path
             const requestBody = {
                 message
             };
 
-            // Build headers with authentication
-            const requestHeaders: Record<string, string> = {
-                "Content-Type": "application/json",
-                "Accept": "text/event-stream",
-                ...headers
-            };
-
-            // Acquire access token if getAccessToken is provided
-            if (getAccessToken) {
-                try {
-                    logInfo("useSseStream", "Acquiring access token...");
-                    const accessToken = await getAccessToken();
-                    requestHeaders["Authorization"] = `Bearer ${accessToken}`;
-                    logInfo("useSseStream", "Access token acquired successfully");
-                } catch (tokenError) {
-                    logError("useSseStream", "Failed to acquire access token", tokenError instanceof Error ? tokenError : new Error(String(tokenError)));
-                    throw new Error(`Authentication failed: ${tokenError instanceof Error ? tokenError.message : String(tokenError)}`);
-                }
-            } else {
-                logWarn("useSseStream", "No getAccessToken function provided - request will be unauthenticated");
-            }
+            // Normalize apiBaseUrl - remove trailing /api if present to avoid double /api/api/
+            const normalizedBaseUrl = apiBaseUrl.replace(/\/api\/?$/, "");
 
             // Make fetch request to BFF API continue endpoint
-            // Handle both cases: apiBaseUrl with or without /api suffix
-            const baseUrl = apiBaseUrl.replace(/\/+$/, ''); // Remove trailing slashes
-            const apiPath = baseUrl.endsWith('/api') ? '' : '/api';
-            const url = `${baseUrl}${apiPath}/ai/analysis/${analysisId}/continue`;
-            logInfo("useSseStream", `Calling BFF API: ${url}`);
-
-            const response = await fetch(url, {
+            const response = await fetch(`${normalizedBaseUrl}/api/ai/analysis/${analysisId}/continue`, {
                 method: "POST",
-                headers: requestHeaders,
+                headers: {
+                    "Content-Type": "application/json",
+                    "Accept": "text/event-stream",
+                    ...authHeaders,
+                    ...headers
+                },
                 body: JSON.stringify(requestBody),
                 signal
             });

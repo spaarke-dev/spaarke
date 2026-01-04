@@ -124,6 +124,13 @@ public class AnalysisOptions
     /// </summary>
     public int MaxChatInputTokens { get; set; } = 50_000;
 
+    /// <summary>
+    /// Maximum document text length (characters) to include in continuation prompts.
+    /// Very large documents are truncated to fit within token limits.
+    /// </summary>
+    [Range(1000, 200_000, ErrorMessage = "Analysis:MaxDocumentContextLength must be between 1000 and 200000")]
+    public int MaxDocumentContextLength { get; set; } = 100_000;
+
     // === Export Settings ===
 
     /// <summary>

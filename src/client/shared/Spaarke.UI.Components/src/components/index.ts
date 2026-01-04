@@ -14,3 +14,6 @@ export * from "./Toolbar";
 
 // Rich Text Editor
 export * from "./RichTextEditor";
+
+// Dialogs
+export * from "./ChoiceDialog";

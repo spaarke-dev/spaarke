@@ -38,6 +38,15 @@ public partial class EmailExportService : IExportService
         _serviceProvider = serviceProvider;
     }
 
+    // Lazily resolve export services from IServiceProvider to avoid circular dependency
+    private IExportService? GetDocxService() =>
+        _serviceProvider.GetServices<IExportService>()
+            .FirstOrDefault(s => s.Format == ExportFormat.Docx && s is not EmailExportService);
+
+    private IExportService? GetPdfService() =>
+        _serviceProvider.GetServices<IExportService>()
+            .FirstOrDefault(s => s.Format == ExportFormat.Pdf && s is not EmailExportService);
+
     /// <inheritdoc />
     public ExportFormat Format => ExportFormat.Email;
 

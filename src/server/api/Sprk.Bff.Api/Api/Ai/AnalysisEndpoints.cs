@@ -152,7 +152,7 @@ public static class AnalysisEndpoints
 
         try
         {
-            await foreach (var chunk in orchestrationService.ExecuteAnalysisAsync(request, cancellationToken))
+            await foreach (var chunk in orchestrationService.ExecuteAnalysisAsync(request, context, cancellationToken))
             {
                 await WriteSSEAsync(response, chunk, cancellationToken);
             }
@@ -202,7 +202,7 @@ public static class AnalysisEndpoints
 
         try
         {
-            await foreach (var chunk in orchestrationService.ContinueAnalysisAsync(analysisId, request.Message, cancellationToken))
+            await foreach (var chunk in orchestrationService.ContinueAnalysisAsync(analysisId, request.Message, context, cancellationToken))
             {
                 await WriteSSEAsync(response, chunk, cancellationToken);
             }
@@ -345,6 +345,7 @@ public static class AnalysisEndpoints
     private static async Task<IResult> ResumeAnalysis(
         Guid analysisId,
         AnalysisResumeRequest request,
+        HttpContext httpContext,
         IAnalysisOrchestrationService orchestrationService,
         ILogger<AnalysisOrchestrationService> logger,
         CancellationToken cancellationToken)
@@ -352,7 +353,7 @@ public static class AnalysisEndpoints
         logger.LogInformation("Resuming analysis {AnalysisId}, IncludeChatHistory={IncludeChatHistory}",
             analysisId, request.IncludeChatHistory);
 
-        var result = await orchestrationService.ResumeAnalysisAsync(analysisId, request, cancellationToken);
+        var result = await orchestrationService.ResumeAnalysisAsync(analysisId, request, httpContext, cancellationToken);
 
         if (!result.Success)
         {

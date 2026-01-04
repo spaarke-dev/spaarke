@@ -15,8 +15,7 @@ import {
     Text,
     MessageBar,
     MessageBarBody,
-    Button,
-    Tooltip
+    Button
 } from "@fluentui/react-components";
 import {
     DocumentRegular,
@@ -39,10 +38,8 @@ export interface ISourceDocumentViewerProps {
     fileId: string;
     /** BFF API base URL */
     apiBaseUrl: string;
-    /** Function to get access token for BFF API calls */
+    /** Function to get access token for API calls */
     getAccessToken?: () => Promise<string>;
-    /** Whether authentication is ready (MSAL initialized) */
-    isAuthReady?: boolean;
     /** Callback when fullscreen is requested */
     onFullscreen?: () => void;
 }
@@ -153,7 +150,6 @@ export const SourceDocumentViewer: React.FC<ISourceDocumentViewerProps> = ({
     fileId,
     apiBaseUrl,
     getAccessToken,
-    isAuthReady = false,
     onFullscreen
 }) => {
     const styles = useStyles();
@@ -177,17 +173,17 @@ export const SourceDocumentViewer: React.FC<ISourceDocumentViewerProps> = ({
         };
     }, []);
 
-    // Load preview when document changes AND auth is ready
+    // Load preview when document changes AND auth is ready (getAccessToken provided)
     React.useEffect(() => {
-        if (documentId && containerId && fileId && isAuthReady) {
+        if (documentId && containerId && fileId && getAccessToken) {
             loadPreview();
         } else if (!documentId || !containerId || !fileId) {
             setPreviewUrl(null);
             setDocumentInfo(null);
             setError(null);
         }
-        // If auth is not ready, we just wait (don't clear state or show error)
-    }, [documentId, containerId, fileId, isAuthReady]);
+        // If getAccessToken not provided, we just wait (don't clear state or show error)
+    }, [documentId, containerId, fileId, getAccessToken]);
 
     /**
      * Load preview URL from BFF API
@@ -206,38 +202,30 @@ export const SourceDocumentViewer: React.FC<ISourceDocumentViewerProps> = ({
         logInfo("SourceDocumentViewer", `Loading preview for document: ${documentId}`);
 
         try {
-            // Build request headers - authentication is required for BFF API
-            const headers: Record<string, string> = {
-                "Accept": "application/json"
-            };
-
-            // Acquire access token if getAccessToken is provided (same pattern as SpeDocumentViewer)
+            // Get access token if auth function provided
+            let authHeaders: Record<string, string> = {};
             if (getAccessToken) {
                 try {
-                    logInfo("SourceDocumentViewer", "Acquiring access token...");
-                    const accessToken = await getAccessToken();
-                    headers["Authorization"] = `Bearer ${accessToken}`;
-                    logInfo("SourceDocumentViewer", "Access token acquired successfully");
-                } catch (tokenError) {
-                    logError("SourceDocumentViewer", "Failed to acquire access token", tokenError);
-                    throw new Error(`Authentication failed: ${tokenError instanceof Error ? tokenError.message : String(tokenError)}`);
+                    const token = await getAccessToken();
+                    authHeaders = { "Authorization": `Bearer ${token}` };
+                    logInfo("SourceDocumentViewer", "Auth token acquired for preview");
+                } catch (authErr) {
+                    logError("SourceDocumentViewer", "Failed to acquire auth token", authErr);
+                    throw new Error("Authentication failed. Please refresh and try again.");
                 }
-            } else {
-                logInfo("SourceDocumentViewer", "Warning: No getAccessToken function provided - request will be unauthenticated");
             }
 
-            // Call BFF API to get preview URL (same endpoint as SpeDocumentViewer)
-            // Handle both cases: apiBaseUrl with or without /api suffix
-            // SpeDocumentViewer uses: ${baseUrl}/api/documents/${documentId}/preview-url
-            const baseUrl = apiBaseUrl.replace(/\/+$/, ''); // Remove trailing slashes
-            const apiPath = baseUrl.endsWith('/api') ? '' : '/api';
-            const url = `${baseUrl}${apiPath}/documents/${documentId}/preview-url`;
+            // Normalize apiBaseUrl - remove trailing /api if present to avoid double /api/api/
+            const normalizedBaseUrl = apiBaseUrl.replace(/\/api\/?$/, "");
 
-            logInfo("SourceDocumentViewer", `Calling BFF API: ${url}`);
-
-            const response = await fetch(url, {
+            // Call BFF API to get preview URL
+            const response = await fetch(`${normalizedBaseUrl}/api/documents/${documentId}/preview-url`, {
                 method: "GET",
-                headers
+                headers: {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    ...authHeaders
+                }
             });
 
             if (!response.ok) {
@@ -338,7 +326,7 @@ export const SourceDocumentViewer: React.FC<ISourceDocumentViewerProps> = ({
     }
 
     // Auth initializing state - show loading while MSAL initializes
-    if (!isAuthReady && !previewUrl) {
+    if (!getAccessToken && !previewUrl) {
         return (
             <div className={styles.loadingContainer}>
                 <Spinner size="large" label="Initializing authentication..." />
@@ -387,31 +375,32 @@ export const SourceDocumentViewer: React.FC<ISourceDocumentViewerProps> = ({
                         )}
                     </div>
                     <div className={styles.toolbarActions}>
-                        <Tooltip content="Refresh" relationship="label">
-                            <Button
-                                icon={<ArrowClockwiseRegular />}
-                                appearance="subtle"
-                                size="small"
-                                onClick={handleRefresh}
-                            />
-                        </Tooltip>
-                        <Tooltip content="Open in new tab" relationship="label">
-                            <Button
-                                icon={<OpenRegular />}
-                                appearance="subtle"
-                                size="small"
-                                onClick={handleOpenInNewTab}
-                            />
-                        </Tooltip>
+                        {/* Using native title instead of Tooltip to avoid portal rendering issues in PCF */}
+                        <Button
+                            icon={<ArrowClockwiseRegular />}
+                            appearance="subtle"
+                            size="small"
+                            onClick={handleRefresh}
+                            title="Refresh"
+                            aria-label="Refresh"
+                        />
+                        <Button
+                            icon={<OpenRegular />}
+                            appearance="subtle"
+                            size="small"
+                            onClick={handleOpenInNewTab}
+                            title="Open in new tab"
+                            aria-label="Open in new tab"
+                        />
                         {onFullscreen && (
-                            <Tooltip content="Fullscreen" relationship="label">
-                                <Button
-                                    icon={<FullScreenMaximize24Regular />}
-                                    appearance="subtle"
-                                    size="small"
-                                    onClick={onFullscreen}
-                                />
-                            </Tooltip>
+                            <Button
+                                icon={<FullScreenMaximize24Regular />}
+                                appearance="subtle"
+                                size="small"
+                                onClick={onFullscreen}
+                                title="Fullscreen"
+                                aria-label="Fullscreen"
+                            />
                         )}
                     </div>
                 </div>

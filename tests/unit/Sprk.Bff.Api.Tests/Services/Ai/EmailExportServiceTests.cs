@@ -32,20 +32,10 @@ public class EmailExportServiceTests
         _loggerMock = new Mock<ILogger<EmailExportService>>();
     }
 
-    private EmailExportService CreateService(AnalysisOptions? options = null, IEnumerable<IExportService>? exportServices = null)
+    private EmailExportService CreateService(AnalysisOptions? options = null, IServiceProvider? serviceProvider = null)
     {
         options ??= new AnalysisOptions { EnableEmailExport = true };
-
-        // Create a service provider that can resolve export services
-        var services = new ServiceCollection();
-        if (exportServices != null)
-        {
-            foreach (var svc in exportServices)
-            {
-                services.AddScoped<IExportService>(_ => svc);
-            }
-        }
-        var serviceProvider = services.BuildServiceProvider();
+        serviceProvider ??= new ServiceCollection().BuildServiceProvider();
 
         return new EmailExportService(
             _graphClientFactoryMock.Object,

@@ -1,7 +1,7 @@
 # Component Interactions Guide
 
 > **Purpose**: Help AI coding agents understand how Spaarke components interact, so changes to one component can be evaluated for impact on others.
-> **Last Updated**: December 29, 2025
+> **Last Updated**: January 2026
 
 ---
 
@@ -67,7 +67,20 @@ When modifying a component, check this table for potential downstream effects:
 │  ┌─────────────────────────────────────────────────────────────────────────┐│
 │  │  Services Layer                                                         ││
 │  │  • Email/EmailToEmlConverter — RFC 5322 .eml generation with MimeKit   ││
-│  │  • Email/IEmailToEmlConverter — Email conversion interface             ││
+│  │  • Ai/AnalysisOrchestrationService — Document analysis orchestration   ││
+│  │  • Ai/AnalysisContextBuilder — Prompt construction for AI analysis     ││
+│  │  • Ai/RagService — Hybrid vector search for knowledge retrieval        ││
+│  │  • Ai/Export/ — DOCX, PDF, Email, Teams export services (R3)           ││
+│  │  • Ai/OpenAiClient — Azure OpenAI with Polly resilience (R3)           ││
+│  └─────────────────────────────────────────────────────────────────────────┘│
+│  ┌─────────────────────────────────────────────────────────────────────────┐│
+│  │  Infrastructure/Resilience (R3 Phase 4)                                 ││
+│  │  • ResilientSearchClient — Polly circuit breaker for AI Search         ││
+│  │  • CircuitBreakerRegistry — Named circuit breaker management           ││
+│  └─────────────────────────────────────────────────────────────────────────┘│
+│  ┌─────────────────────────────────────────────────────────────────────────┐│
+│  │  Telemetry (R3 Phase 4)                                                 ││
+│  │  • AiTelemetry.cs — Application Insights custom metrics for AI ops     ││
 │  └─────────────────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────────────────┘
            │                                              │
@@ -157,7 +170,45 @@ User → PCF (SpeFileViewer) → BFF API → Graph API → Preview URL
 | Change caching TTL | Consider Graph API rate limits |
 | Add new preview types | Update both BFF and PCF |
 
-### Pattern 4: Email-to-Document Conversion Flow
+### Pattern 4: Analysis Flow (AI Document Intelligence)
+
+```
+User → PCF (AnalysisWorkspace v1.2.7) → BFF API (AnalysisEndpoints) → Azure OpenAI
+                │                                │
+                │  Resume Dialog                 ├──→ SpeFileStore → SPE Container (document text)
+                │  (ADR-023)                     ├──→ ScopeResolver → Dataverse (playbooks, skills)
+                │                                ├──→ AnalysisContextBuilder → Prompt construction
+                ▼                                └──→ Dataverse → sprk_analysis (chat history)
+        Chat History
+        Persistence
+```
+
+**Components involved:**
+1. `src/client/pcf/AnalysisWorkspace/` — Analysis UI (v1.2.7), SSE streaming, chat interface
+   - `AnalysisWorkspaceApp.tsx` — Main app with resume dialog (ADR-023), chat history ref
+   - `SourceDocumentViewer.tsx` — Document preview with URL normalization
+   - `useSseStream.ts` — SSE streaming hook for chat
+2. `src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs` — Execute, Continue, Export endpoints
+3. `src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs` — Orchestration
+4. `src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisContextBuilder.cs` — Prompt construction
+5. `src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs` — Playbook/skill resolution
+
+**R3 Additions (v1.2.7):**
+- Resume/Fresh session choice dialog (ADR-023 pattern)
+- Chat history persistence to `sprk_analysis.sprk_chathistory` (JSON)
+- Working document auto-save to `sprk_analysis.sprk_workingdocument`
+- `chatMessagesRef` pattern to avoid stale closures in auto-save
+
+**Change Impact:**
+| Change | Impact |
+|--------|--------|
+| Modify analysis endpoint signature | Update PCF AnalysisWorkspace API client |
+| Change prompt structure | Update AnalysisContextBuilder methods |
+| Add new export format | Update ExportServiceRegistry and PCF export UI |
+| Modify playbook resolution | Update ScopeResolverService and Dataverse entities |
+| Change chat history schema | Update PCF `IChatMessage` interface |
+
+### Pattern 5: Email-to-Document Conversion Flow
 
 ```
 User/Ribbon Button → BFF API (EmailEndpoints) → EmailToEmlConverter → Dataverse API (Email Activity)
@@ -188,6 +239,44 @@ User/Ribbon Button → BFF API (EmailEndpoints) → EmailToEmlConverter → Data
 - `EmailToEmlConverter.cs` — Uses MimeKit for RFC 5322 compliant .eml generation
 - `EmailEndpoints.cs` — POST /api/v1/emails/{emailId}/save-as-document
 - `EmailProcessingOptions.cs` — Attachment size limits, blocked extensions, signature patterns
+
+### Pattern 6: Analysis Export Flow (R3 Phase 3)
+
+```
+User → PCF (AnalysisWorkspace) → BFF API (POST /api/ai/analysis/{id}/export)
+                                              │
+                                              ├──→ ExportServiceRegistry → Select export service
+                                              │
+                                              ├──→ DocxExportService → Open XML SDK → .docx file
+                                              ├──→ PdfExportService → QuestPDF → .pdf file
+                                              ├──→ EmailExportService → Microsoft Graph → Email sent
+                                              └──→ TeamsExportService → Graph API → Adaptive Card
+```
+
+**Components involved:**
+1. `src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs` — Export endpoint
+2. `src/server/api/Sprk.Bff.Api/Services/Ai/Export/IExportService.cs` — Export interface
+3. `src/server/api/Sprk.Bff.Api/Services/Ai/Export/DocxExportService.cs` — Word export
+4. `src/server/api/Sprk.Bff.Api/Services/Ai/Export/PdfExportService.cs` — PDF export
+5. `src/server/api/Sprk.Bff.Api/Services/Ai/Export/EmailExportService.cs` — Email via Graph
+6. `src/server/api/Sprk.Bff.Api/Services/Ai/Export/TeamsExportService.cs` — Teams adaptive cards
+
+**Export Formats:**
+
+| Format | Library | Output | Config Option |
+|--------|---------|--------|---------------|
+| DOCX | Open XML SDK | File download | `AnalysisOptions.EnableDocxExport` |
+| PDF | QuestPDF | File download | `AnalysisOptions.EnablePdfExport` |
+| Email | Microsoft Graph | Send from user mailbox | `AnalysisOptions.EnableEmailExport` |
+| Teams | Microsoft Graph | Post adaptive card | `AnalysisOptions.EnableTeamsExport` |
+
+**Change Impact:**
+| Change | Impact |
+|--------|--------|
+| Add new export format | Create new `IExportService`, register in DI |
+| Modify export branding | Update `AnalysisOptions.ExportBranding` |
+| Change email template | Update `EmailExportService.BuildHtmlEmailBody()` |
+| Change PDF layout | Update `PdfExportService` QuestPDF document definition |
 
 ---
 
@@ -313,11 +402,21 @@ src/ ─────────────✗────→ tests/ (no test c
 | BFF Auth | `src/server/api/Sprk.Bff.Api/Infrastructure/Auth/` | Same test project |
 | **BFF Email Services** | `src/server/api/Sprk.Bff.Api/Services/Email/` | `tests/unit/Sprk.Bff.Api.Tests/Services/Email/` |
 | **Email Models** | `src/server/api/Sprk.Bff.Api/Models/Email/` | — |
+| **BFF AI Services** | `src/server/api/Sprk.Bff.Api/Services/Ai/` | `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/` |
+| **AI Export Services** | `src/server/api/Sprk.Bff.Api/Services/Ai/Export/` | `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/` |
+| **AI Endpoints** | `src/server/api/Sprk.Bff.Api/Api/Ai/` | Same test project |
+| **AI Models** | `src/server/api/Sprk.Bff.Api/Models/Ai/` | — |
+| **AI Resilience** | `src/server/api/Sprk.Bff.Api/Infrastructure/Resilience/` | Same test project |
+| **AI Telemetry** | `src/server/api/Sprk.Bff.Api/Telemetry/` | — |
+| **AI Filters** | `src/server/api/Sprk.Bff.Api/Api/Filters/` | Same test project |
 | PCF UniversalQuickCreate | `src/client/pcf/UniversalQuickCreate/` | Manual testing |
 | PCF SpeFileViewer | `src/client/pcf/SpeFileViewer/` | Manual testing |
+| PCF AnalysisWorkspace | `src/client/pcf/AnalysisWorkspace/` (v1.2.7) | Manual testing |
 | PCF Shared Auth | `src/client/pcf/*/services/auth/` | — |
 | Bicep Modules | `infrastructure/bicep/modules/` | `what-if` validation |
+| Bicep AI Modules | `infrastructure/bicep/modules/dashboard.bicep`, `alerts.bicep` | `what-if` validation |
 | Dataverse Plugins | `src/dataverse/plugins/` | `tests/unit/` |
+| Load Test Scripts | `scripts/load-tests/` | — |
 
 ---
 

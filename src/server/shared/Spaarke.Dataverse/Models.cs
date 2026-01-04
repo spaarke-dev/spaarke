@@ -189,3 +189,18 @@ public record LookupNavigationMetadata
     /// </summary>
     public required string TargetEntityLogicalName { get; init; }
 }
+
+/// <summary>
+/// Analysis entity model (sprk_analysis)
+/// </summary>
+public class AnalysisEntity
+{
+    public Guid Id { get; set; }
+    public string? Name { get; set; }
+    public Guid DocumentId { get; set; }
+    public string? WorkingDocument { get; set; }
+    public string? ChatHistory { get; set; }
+    public int StatusCode { get; set; }
+    public DateTime CreatedOn { get; set; }
+    public DateTime ModifiedOn { get; set; }
+}

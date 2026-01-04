@@ -4,8 +4,7 @@ namespace Sprk.Bff.Api.Models.Ai;
 
 /// <summary>
 /// Request model for POST /api/ai/analysis/{analysisId}/resume.
-/// Resumes an existing analysis by creating an in-memory session.
-/// Used when opening an existing Analysis record from Dataverse.
+/// Resumes an existing analysis session with optional chat history.
 /// </summary>
 public record AnalysisResumeRequest
 {
@@ -46,22 +45,27 @@ public record AnalysisResumeRequest
 public record AnalysisResumeResult
 {
     /// <summary>
-    /// Analysis ID that was resumed.
+    /// The analysis ID that was resumed.
     /// </summary>
-    public Guid AnalysisId { get; init; }
+    public required Guid AnalysisId { get; init; }
 
     /// <summary>
-    /// Whether the session was created successfully.
+    /// Whether the resume operation was successful.
     /// </summary>
-    public bool Success { get; init; }
+    public required bool Success { get; init; }
 
     /// <summary>
-    /// Number of chat messages restored (0 if starting fresh).
+    /// Number of chat messages restored from history.
     /// </summary>
     public int ChatMessagesRestored { get; init; }
 
     /// <summary>
-    /// Whether the working document was restored.
+    /// Whether document context was loaded.
+    /// </summary>
+    public bool HasDocumentContext { get; init; }
+
+    /// <summary>
+    /// Whether working document content was restored.
     /// </summary>
     public bool WorkingDocumentRestored { get; init; }
 
