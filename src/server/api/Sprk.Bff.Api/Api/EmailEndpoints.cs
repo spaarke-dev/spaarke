@@ -3,7 +3,6 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
-using Microsoft.Graph.Models.ODataErrors;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Errors;
@@ -507,10 +506,15 @@ public static class EmailEndpoints
                     emlResult.Attachments.Count,
                     attachmentDocs));
         }
-        catch (ODataError ex)
+        catch (Exception ex) when (ex.GetType().FullName?.StartsWith("Microsoft.Graph") == true)
         {
+            // Graph API error - log and return generic error (ADR-007: don't expose Graph types in endpoints)
             logger.LogError(ex, "Graph API error during email conversion for {EmailId}", emailId);
-            return ProblemDetailsHelper.FromGraphException(ex);
+            return Results.Problem(
+                title: "Storage Service Error",
+                detail: "An error occurred while accessing the storage service",
+                statusCode: StatusCodes.Status500InternalServerError,
+                extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
         }
         catch (Exception ex)
         {
