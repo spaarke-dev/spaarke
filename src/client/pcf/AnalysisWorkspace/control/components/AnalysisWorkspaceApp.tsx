@@ -40,7 +40,8 @@ import {
     ChevronRight20Regular,
     ChevronLeft20Regular,
     HistoryRegular,
-    DocumentAddRegular
+    DocumentAddRegular,
+    ArrowSync24Regular
 } from "@fluentui/react-icons";
 import { IAnalysisWorkspaceAppProps, IChatMessage, IAnalysis } from "../types";
 import { logInfo, logError } from "../utils/logger";
@@ -51,8 +52,8 @@ import { useSseStream } from "../hooks/useSseStream";
 import { MsalAuthProvider, loginRequest } from "../services/auth";
 
 // Build info for version footer
-const VERSION = "1.2.12";
-const BUILD_DATE = "2026-01-02";
+const VERSION = "1.2.14";
+const BUILD_DATE = "2026-01-03";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles - 3-Column Layout
@@ -979,6 +980,23 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
         saveWorkingDocument();
     };
 
+    /**
+     * Handle manual re-execution of analysis.
+     * Allows user to re-run the AI analysis on demand.
+     */
+    const handleReExecute = async () => {
+        if (!_analysis || isExecuting) return;
+
+        const docId = resolvedDocumentId;
+        if (!docId) {
+            setError("Cannot re-execute: no document associated with this analysis.");
+            return;
+        }
+
+        logInfo("AnalysisWorkspaceApp", "User triggered re-execution of analysis");
+        await executeAnalysis(_analysis, docId);
+    };
+
     // ─────────────────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────────────────
@@ -1055,17 +1073,9 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
         );
     }
 
-    // Show execution progress overlay while running initial AI analysis
-    if (isExecuting) {
-        return (
-            <div className={styles.loadingContainer}>
-                <Spinner size="large" label={executionProgress || "Executing analysis..."} />
-                <Text size={300} style={{ marginTop: "12px", color: tokens.colorNeutralForeground2 }}>
-                    The AI is analyzing your document. This may take a moment...
-                </Text>
-            </div>
-        );
-    }
+    // NOTE: We no longer show a full-screen spinner during execution.
+    // Instead, we show the workspace layout with streaming content visible in the
+    // Analysis Output panel - providing a ChatGPT-like streaming experience.
 
     if (error) {
         return (
@@ -1134,18 +1144,34 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
                     <div className={styles.panelHeader}>
                         <div className={styles.panelHeaderLeft}>
                             <Text weight="semibold">ANALYSIS OUTPUT</Text>
-                            <span className={`${styles.statusIndicator} ${isDirty ? styles.unsavedIndicator : styles.savedIndicator}`}>
-                                {isDirty ? "• Unsaved" : formatLastSaved()}
-                            </span>
+                            {isExecuting ? (
+                                <span className={styles.streamingIndicator}>
+                                    <Spinner size="tiny" />
+                                    <Text size={200}>{executionProgress || "Analyzing..."}</Text>
+                                </span>
+                            ) : (
+                                <span className={`${styles.statusIndicator} ${isDirty ? styles.unsavedIndicator : styles.savedIndicator}`}>
+                                    {isDirty ? "• Unsaved" : formatLastSaved()}
+                                </span>
+                            )}
                         </div>
                         <div className={styles.panelHeaderActions}>
+                            <Tooltip content="Re-execute analysis" relationship="label">
+                                <Button
+                                    icon={<ArrowSync24Regular />}
+                                    appearance="subtle"
+                                    size="small"
+                                    onClick={handleReExecute}
+                                    disabled={isExecuting || !_analysis?._sprk_actionid_value}
+                                />
+                            </Tooltip>
                             <Tooltip content="Save" relationship="label">
                                 <Button
                                     icon={<SaveRegular />}
                                     appearance="subtle"
                                     size="small"
                                     onClick={handleManualSave}
-                                    disabled={!isDirty || isSaving}
+                                    disabled={!isDirty || isSaving || isExecuting}
                                 />
                             </Tooltip>
                             <Tooltip content="Copy to clipboard" relationship="label">

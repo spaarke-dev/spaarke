@@ -319,8 +319,49 @@ export class AnalysisBuilder implements ComponentFramework.StandardControl<IInpu
         this._shouldClose = true;
         this._notifyOutputChanged();
 
-        // Close the custom page dialog after successful execution
-        this.closeDialog();
+        // Navigate to Analysis Workspace with the created analysis
+        this.navigateToWorkspace(analysisId);
+    }
+
+    private navigateToWorkspace(analysisId: string): void {
+        try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const xrm = (window as any).Xrm;
+
+            if (xrm?.Navigation?.navigateTo) {
+                logInfo("AnalysisBuilder", `Navigating to Analysis Workspace: ${analysisId}`);
+
+                // Navigate to Analysis Workspace Custom Page
+                // This will replace the current dialog with the Workspace
+                xrm.Navigation.navigateTo(
+                    {
+                        pageType: "custom",
+                        name: "sprk_analysisworkspace_52748",
+                        entityName: "sprk_analysis",
+                        recordId: analysisId
+                    },
+                    {
+                        target: 1 // 1 = Inline (replaces current page), 2 = Dialog
+                    }
+                ).then(
+                    () => {
+                        logInfo("AnalysisBuilder", "Navigation to Workspace succeeded");
+                    },
+                    (err: unknown) => {
+                        logError("AnalysisBuilder", "Navigation to Workspace failed", err);
+                        // Fallback: just close the dialog
+                        this.closeDialog();
+                    }
+                );
+            } else {
+                // Xrm.Navigation not available - fallback to close
+                logInfo("AnalysisBuilder", "Xrm.Navigation not available, falling back to close");
+                this.closeDialog();
+            }
+        } catch (err) {
+            logError("AnalysisBuilder", "navigateToWorkspace error", err);
+            this.closeDialog();
+        }
     }
 
     private handleCancel(): void {
