@@ -329,26 +329,25 @@ export class AnalysisBuilder implements ComponentFramework.StandardControl<IInpu
             const xrm = (window as any).Xrm;
 
             if (xrm?.Navigation?.navigateTo) {
-                logInfo("AnalysisBuilder", `Navigating to Analysis Workspace: ${analysisId}`);
+                logInfo("AnalysisBuilder", `Navigating to Analysis record: ${analysisId}`);
 
-                // Navigate to Analysis Workspace Custom Page
-                // This will replace the current dialog with the Workspace
+                // Navigate to the Analysis entity record form
+                // The form contains the AnalysisWorkspace PCF control
                 xrm.Navigation.navigateTo(
                     {
-                        pageType: "custom",
-                        name: "sprk_analysisworkspace_52748",
+                        pageType: "entityrecord",
                         entityName: "sprk_analysis",
-                        recordId: analysisId
+                        entityId: analysisId
                     },
                     {
                         target: 1 // 1 = Inline (replaces current page), 2 = Dialog
                     }
                 ).then(
                     () => {
-                        logInfo("AnalysisBuilder", "Navigation to Workspace succeeded");
+                        logInfo("AnalysisBuilder", "Navigation to Analysis record succeeded");
                     },
                     (err: unknown) => {
-                        logError("AnalysisBuilder", "Navigation to Workspace failed", err);
+                        logError("AnalysisBuilder", "Navigation to Analysis record failed", err);
                         // Fallback: just close the dialog
                         this.closeDialog();
                     }

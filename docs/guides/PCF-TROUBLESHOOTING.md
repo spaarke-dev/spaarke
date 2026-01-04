@@ -219,6 +219,59 @@ npm run build:prod
 
 ## Runtime Errors
 
+### PCF Goes Blank on Toolbar Button Hover
+
+**Symptom:** Hovering over toolbar buttons causes the entire PCF control to go blank/disappear, then reappear when mouse moves away.
+
+**Cause:** Fluent UI v9 `Tooltip` component uses React portals to render tooltips to `document.body`. In PCF controls running within Dataverse Model-Driven Apps, this portal rendering conflicts with the Dataverse form DOM, causing the PCF container to momentarily unmount.
+
+**Affected Components:**
+- All `<Tooltip>` components from `@fluentui/react-components`
+- This affects PCF controls in:
+  - Entity record forms
+  - Custom Pages (Canvas Apps)
+  - Dashboards
+
+**Solution:** Replace Fluent UI `Tooltip` with native HTML `title` attribute:
+
+```tsx
+// ❌ BEFORE - causes blank screen on hover in PCF
+import { Tooltip, Button } from "@fluentui/react-components";
+
+<Tooltip content="Refresh" relationship="label">
+    <Button icon={<ArrowClockwiseRegular />} onClick={handleRefresh} />
+</Tooltip>
+
+// ✅ AFTER - works correctly in PCF
+import { Button } from "@fluentui/react-components";
+
+<Button
+    icon={<ArrowClockwiseRegular />}
+    onClick={handleRefresh}
+    title="Refresh"
+    aria-label="Refresh"
+/>
+```
+
+**Key Points:**
+1. Remove `Tooltip` import from `@fluentui/react-components`
+2. Add `title` attribute directly to the button/element
+3. Add `aria-label` for accessibility (screen readers)
+4. Native `title` renders via browser, doesn't use portals
+
+**Files Fixed in Spaarke (January 2026):**
+- `AnalysisWorkspaceApp.tsx` - Panel header buttons
+- `ToolbarPlugin.tsx` - Rich Text Editor formatting toolbar
+- `SourceDocumentViewer.tsx` - Document preview toolbar
+- `FilePreview.tsx` (SpeFileViewer) - File viewer toolbar and status badges
+
+**Why This Happens:**
+Fluent UI v9 uses `@fluentui/react-portal` for floating UI elements (Tooltip, Popover, Menu, Dialog). These portals render outside the PCF container, directly to `document.body`. In Dataverse, this interacts poorly with the form's React/DOM management, causing the PCF to re-render or unmount when portal elements appear.
+
+**Note:** `Menu` and `Popover` components may also exhibit similar issues, but are less problematic because they require explicit clicks rather than hover events. Monitor for issues with these components as well.
+
+---
+
 ### Multiple React Instances
 
 **Error in console:**

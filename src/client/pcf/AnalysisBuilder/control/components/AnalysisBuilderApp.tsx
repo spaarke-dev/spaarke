@@ -106,7 +106,7 @@ const useStyles = makeStyles({
 
 // Build date for version footer
 const BUILD_DATE = new Date().toISOString().split("T")[0];
-const VERSION = "2.8.0";
+const VERSION = "2.8.1";
 
 export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (props) => {
     const styles = useStyles();

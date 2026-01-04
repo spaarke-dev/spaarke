@@ -19,7 +19,6 @@ import {
     MessageBar,
     MessageBarBody,
     MessageBarTitle,
-    Tooltip,
     tokens
 } from '@fluentui/react-components';
 import {
@@ -411,70 +410,61 @@ export class FilePreview extends React.Component<FilePreviewProps, FilePreviewSt
                             {/* Action Buttons Header */}
                             {!isIframeLoading && documentInfo && (
                                 <div className="spe-file-viewer__actions">
-                                    {/* Refresh Button */}
-                                    <Tooltip content="Refresh preview" relationship="label">
-                                        <Button
-                                            appearance="outline"
-                                            icon={<ArrowClockwiseRegular />}
-                                            onClick={this.handleRefresh}
-                                            disabled={anyButtonLoading}
-                                            aria-label="Refresh preview"
-                                            data-testid="refresh-btn"
-                                        >
-                                            Refresh
-                                        </Button>
-                                    </Tooltip>
+                                    {/* Refresh Button - using native title for PCF compatibility */}
+                                    <Button
+                                        appearance="outline"
+                                        icon={<ArrowClockwiseRegular />}
+                                        onClick={this.handleRefresh}
+                                        disabled={anyButtonLoading}
+                                        aria-label="Refresh preview"
+                                        title="Refresh preview"
+                                        data-testid="refresh-btn"
+                                    >
+                                        Refresh
+                                    </Button>
 
-                                    {/* Checkout Status Badge */}
+                                    {/* Checkout Status Badge - using native title for PCF compatibility */}
                                     {isCheckedOut ? (
-                                        <Tooltip
-                                            content={isCheckedOutByCurrentUser
+                                        <div
+                                            style={{
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: tokens.spacingHorizontalXS,
+                                                padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
+                                                backgroundColor: isCheckedOutByCurrentUser
+                                                    ? tokens.colorPaletteGreenBackground2
+                                                    : tokens.colorPaletteYellowBackground2,
+                                                borderRadius: tokens.borderRadiusMedium,
+                                                fontSize: tokens.fontSizeBase200,
+                                                fontWeight: tokens.fontWeightSemibold
+                                            }}
+                                            title={isCheckedOutByCurrentUser
                                                 ? 'You have this document checked out'
                                                 : `Checked out by ${checkedOutByName}`}
-                                            relationship="label"
                                         >
-                                            <div
-                                                style={{
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    gap: tokens.spacingHorizontalXS,
-                                                    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
-                                                    backgroundColor: isCheckedOutByCurrentUser
-                                                        ? tokens.colorPaletteGreenBackground2
-                                                        : tokens.colorPaletteYellowBackground2,
-                                                    borderRadius: tokens.borderRadiusMedium,
-                                                    fontSize: tokens.fontSizeBase200,
-                                                    fontWeight: tokens.fontWeightSemibold
-                                                }}
-                                            >
-                                                <LockClosedRegular />
-                                                <span>
-                                                    {isCheckedOutByCurrentUser
-                                                        ? 'Checked out by you'
-                                                        : `Checked out by ${checkedOutByName}`}
-                                                </span>
-                                            </div>
-                                        </Tooltip>
+                                            <LockClosedRegular />
+                                            <span>
+                                                {isCheckedOutByCurrentUser
+                                                    ? 'Checked out by you'
+                                                    : `Checked out by ${checkedOutByName}`}
+                                            </span>
+                                        </div>
                                     ) : (
-                                        <Tooltip
-                                            content="Document is checked in and available for checkout"
-                                            relationship="label"
+                                        <div
+                                            style={{
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: tokens.spacingHorizontalXS,
+                                                padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
+                                                backgroundColor: tokens.colorNeutralBackground3,
+                                                borderRadius: tokens.borderRadiusMedium,
+                                                fontSize: tokens.fontSizeBase200,
+                                                color: tokens.colorNeutralForeground2
+                                            }}
+                                            title="Document is checked in and available for checkout"
                                         >
-                                            <div
-                                                style={{
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    gap: tokens.spacingHorizontalXS,
-                                                    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
-                                                    backgroundColor: tokens.colorNeutralBackground3,
-                                                    borderRadius: tokens.borderRadiusMedium,
-                                                    fontSize: tokens.fontSizeBase200,
-                                                    color: tokens.colorNeutralForeground2
-                                                }}
-                                            >
-                                                <span>Checked In</span>
-                                            </div>
-                                        </Tooltip>
+                                            <span>Checked In</span>
+                                        </div>
                                     )}
 
                                     {/* Spacer */}
@@ -482,34 +472,32 @@ export class FilePreview extends React.Component<FilePreviewProps, FilePreviewSt
 
                                     {/* Open in Desktop Button - Only for Office files */}
                                     {this.isOfficeFile(documentInfo.fileExtension) && (
-                                        <Tooltip content="Open in Word, Excel, or PowerPoint" relationship="label">
-                                            <Button
-                                                appearance="outline"
-                                                icon={isEditLoading ? <Spinner size="tiny" /> : <EditRegular />}
-                                                onClick={this.handleEditInDesktop}
-                                                disabled={anyButtonLoading}
-                                                aria-label={isEditLoading ? 'Opening...' : 'Open in Desktop'}
-                                                data-testid="edit-in-desktop-btn"
-                                            >
-                                                {isEditLoading ? 'Opening...' : 'Open in Desktop'}
-                                            </Button>
-                                        </Tooltip>
+                                        <Button
+                                            appearance="outline"
+                                            icon={isEditLoading ? <Spinner size="tiny" /> : <EditRegular />}
+                                            onClick={this.handleEditInDesktop}
+                                            disabled={anyButtonLoading}
+                                            aria-label={isEditLoading ? 'Opening...' : 'Open in Desktop'}
+                                            title="Open in Word, Excel, or PowerPoint"
+                                            data-testid="edit-in-desktop-btn"
+                                        >
+                                            {isEditLoading ? 'Opening...' : 'Open in Desktop'}
+                                        </Button>
                                     )}
 
                                     {/* Open in Web Button */}
                                     {this.isOfficeFile(documentInfo.fileExtension) && (
-                                        <Tooltip content="Open in Office Online (browser)" relationship="label">
-                                            <Button
-                                                appearance="outline"
-                                                icon={isWebLoading ? <Spinner size="tiny" /> : <GlobeRegular />}
-                                                onClick={this.handleOpenInWeb}
-                                                disabled={anyButtonLoading}
-                                                aria-label={isWebLoading ? 'Opening...' : 'Open in Web'}
-                                                data-testid="open-in-web-btn"
-                                            >
-                                                {isWebLoading ? 'Opening...' : 'Open in Web'}
-                                            </Button>
-                                        </Tooltip>
+                                        <Button
+                                            appearance="outline"
+                                            icon={isWebLoading ? <Spinner size="tiny" /> : <GlobeRegular />}
+                                            onClick={this.handleOpenInWeb}
+                                            disabled={anyButtonLoading}
+                                            aria-label={isWebLoading ? 'Opening...' : 'Open in Web'}
+                                            title="Open in Office Online (browser)"
+                                            data-testid="open-in-web-btn"
+                                        >
+                                            {isWebLoading ? 'Opening...' : 'Open in Web'}
+                                        </Button>
                                     )}
                                 </div>
                             )}
@@ -548,7 +536,7 @@ export class FilePreview extends React.Component<FilePreviewProps, FilePreviewSt
                             opacity: 0.7
                         }}
                     >
-                        v2.0.0 - Built 2025-12-19
+                        v2.0.1 - Built 2026-01-03
                     </div>
                 </div>
             </FluentProvider>

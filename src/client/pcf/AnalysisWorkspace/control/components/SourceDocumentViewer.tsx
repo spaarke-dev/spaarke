@@ -15,8 +15,7 @@ import {
     Text,
     MessageBar,
     MessageBarBody,
-    Button,
-    Tooltip
+    Button
 } from "@fluentui/react-components";
 import {
     DocumentRegular,
@@ -365,31 +364,32 @@ export const SourceDocumentViewer: React.FC<ISourceDocumentViewerProps> = ({
                         )}
                     </div>
                     <div className={styles.toolbarActions}>
-                        <Tooltip content="Refresh" relationship="label">
-                            <Button
-                                icon={<ArrowClockwiseRegular />}
-                                appearance="subtle"
-                                size="small"
-                                onClick={handleRefresh}
-                            />
-                        </Tooltip>
-                        <Tooltip content="Open in new tab" relationship="label">
-                            <Button
-                                icon={<OpenRegular />}
-                                appearance="subtle"
-                                size="small"
-                                onClick={handleOpenInNewTab}
-                            />
-                        </Tooltip>
+                        {/* Using native title instead of Tooltip to avoid portal rendering issues in PCF */}
+                        <Button
+                            icon={<ArrowClockwiseRegular />}
+                            appearance="subtle"
+                            size="small"
+                            onClick={handleRefresh}
+                            title="Refresh"
+                            aria-label="Refresh"
+                        />
+                        <Button
+                            icon={<OpenRegular />}
+                            appearance="subtle"
+                            size="small"
+                            onClick={handleOpenInNewTab}
+                            title="Open in new tab"
+                            aria-label="Open in new tab"
+                        />
                         {onFullscreen && (
-                            <Tooltip content="Fullscreen" relationship="label">
-                                <Button
-                                    icon={<FullScreenMaximize24Regular />}
-                                    appearance="subtle"
-                                    size="small"
-                                    onClick={onFullscreen}
-                                />
-                            </Tooltip>
+                            <Button
+                                icon={<FullScreenMaximize24Regular />}
+                                appearance="subtle"
+                                size="small"
+                                onClick={onFullscreen}
+                                title="Fullscreen"
+                                aria-label="Fullscreen"
+                            />
                         )}
                     </div>
                 </div>

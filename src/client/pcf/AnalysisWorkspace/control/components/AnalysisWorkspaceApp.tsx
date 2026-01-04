@@ -19,7 +19,6 @@ import {
     MessageBar,
     MessageBarBody,
     Button,
-    Tooltip,
     Badge,
     Textarea,
     Dialog,
@@ -52,7 +51,7 @@ import { useSseStream } from "../hooks/useSseStream";
 import { MsalAuthProvider, loginRequest } from "../services/auth";
 
 // Build info for version footer
-const VERSION = "1.2.14";
+const VERSION = "1.2.17";
 const BUILD_DATE = "2026-01-03";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -149,7 +148,13 @@ const useStyles = makeStyles({
     panelHeaderActions: {
         display: "flex",
         alignItems: "center",
-        gap: tokens.spacingHorizontalXS
+        gap: tokens.spacingHorizontalXS,
+        flexShrink: 0,
+        // Prevent layout shifts on hover by ensuring consistent dimensions
+        "& button": {
+            minWidth: "32px",
+            minHeight: "32px"
+        }
     },
     editorContainer: {
         flex: 1,
@@ -235,7 +240,9 @@ const useStyles = makeStyles({
         alignItems: "center",
         gap: tokens.spacingHorizontalXS,
         fontSize: tokens.fontSizeBase200,
-        color: tokens.colorNeutralForeground3
+        color: tokens.colorNeutralForeground3,
+        padding: tokens.spacingHorizontalS,
+        minHeight: "24px"
     },
     savedIndicator: {
         color: tokens.colorStatusSuccessForeground1
@@ -256,7 +263,8 @@ const useStyles = makeStyles({
         alignItems: "center",
         gap: tokens.spacingHorizontalXS,
         padding: tokens.spacingHorizontalS,
-        color: tokens.colorBrandForeground1
+        color: tokens.colorBrandForeground1,
+        minHeight: "24px"
     },
     // Choice Dialog Styles (ADR-023)
     choiceDialogContent: {
@@ -1156,47 +1164,48 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
                             )}
                         </div>
                         <div className={styles.panelHeaderActions}>
-                            <Tooltip content="Re-execute analysis" relationship="label">
-                                <Button
-                                    icon={<ArrowSync24Regular />}
-                                    appearance="subtle"
-                                    size="small"
-                                    onClick={handleReExecute}
-                                    disabled={isExecuting || !_analysis?._sprk_actionid_value}
-                                />
-                            </Tooltip>
-                            <Tooltip content="Save" relationship="label">
-                                <Button
-                                    icon={<SaveRegular />}
-                                    appearance="subtle"
-                                    size="small"
-                                    onClick={handleManualSave}
-                                    disabled={!isDirty || isSaving || isExecuting}
-                                />
-                            </Tooltip>
-                            <Tooltip content="Copy to clipboard" relationship="label">
-                                <Button
-                                    icon={<Copy24Regular />}
-                                    appearance="subtle"
-                                    size="small"
-                                    onClick={() => navigator.clipboard.writeText(workingDocument)}
-                                />
-                            </Tooltip>
-                            <Tooltip content="Download" relationship="label">
-                                <Button
-                                    icon={<ArrowDownload24Regular />}
-                                    appearance="subtle"
-                                    size="small"
-                                />
-                            </Tooltip>
-                            <Tooltip content={isDocumentPanelVisible ? "Hide document" : "Show document"} relationship="label">
-                                <Button
-                                    icon={isDocumentPanelVisible ? <ChevronRight20Regular /> : <ChevronLeft20Regular />}
-                                    appearance="subtle"
-                                    size="small"
-                                    onClick={() => setIsDocumentPanelVisible(!isDocumentPanelVisible)}
-                                />
-                            </Tooltip>
+                            {/* Using native title instead of Tooltip to avoid portal rendering issues in PCF */}
+                            <Button
+                                icon={<ArrowSync24Regular />}
+                                appearance="subtle"
+                                size="small"
+                                onClick={handleReExecute}
+                                disabled={isExecuting || !_analysis?._sprk_actionid_value}
+                                title="Re-execute analysis"
+                                aria-label="Re-execute analysis"
+                            />
+                            <Button
+                                icon={<SaveRegular />}
+                                appearance="subtle"
+                                size="small"
+                                onClick={handleManualSave}
+                                disabled={!isDirty || isSaving || isExecuting}
+                                title="Save"
+                                aria-label="Save"
+                            />
+                            <Button
+                                icon={<Copy24Regular />}
+                                appearance="subtle"
+                                size="small"
+                                onClick={() => navigator.clipboard.writeText(workingDocument)}
+                                title="Copy to clipboard"
+                                aria-label="Copy to clipboard"
+                            />
+                            <Button
+                                icon={<ArrowDownload24Regular />}
+                                appearance="subtle"
+                                size="small"
+                                title="Download"
+                                aria-label="Download"
+                            />
+                            <Button
+                                icon={isDocumentPanelVisible ? <ChevronRight20Regular /> : <ChevronLeft20Regular />}
+                                appearance="subtle"
+                                size="small"
+                                onClick={() => setIsDocumentPanelVisible(!isDocumentPanelVisible)}
+                                title={isDocumentPanelVisible ? "Hide document" : "Show document"}
+                                aria-label={isDocumentPanelVisible ? "Hide document" : "Show document"}
+                            />
                         </div>
                     </div>
                     <div className={styles.editorContainer}>
@@ -1231,14 +1240,14 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
                             </Text>
                         </div>
                         <div className={styles.panelHeaderActions}>
-                            <Tooltip content={isConversationPanelVisible ? "Hide conversation" : "Show conversation"} relationship="label">
-                                <Button
-                                    icon={isConversationPanelVisible ? <ChevronDoubleRight20Regular /> : <ChevronDoubleLeft20Regular />}
-                                    appearance="subtle"
-                                    size="small"
-                                    onClick={() => setIsConversationPanelVisible(!isConversationPanelVisible)}
-                                />
-                            </Tooltip>
+                            <Button
+                                icon={isConversationPanelVisible ? <ChevronDoubleRight20Regular /> : <ChevronDoubleLeft20Regular />}
+                                appearance="subtle"
+                                size="small"
+                                onClick={() => setIsConversationPanelVisible(!isConversationPanelVisible)}
+                                title={isConversationPanelVisible ? "Hide conversation" : "Show conversation"}
+                                aria-label={isConversationPanelVisible ? "Hide conversation" : "Show conversation"}
+                            />
                         </div>
                     </div>
                     <div className={styles.documentPreview}>

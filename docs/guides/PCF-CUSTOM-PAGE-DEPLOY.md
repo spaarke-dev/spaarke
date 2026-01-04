@@ -144,6 +144,16 @@ Hard refresh browser and check footer version.
 
 ## Troubleshooting Custom Page Issues
 
+### PCF Goes Blank on Button Hover
+
+**Symptom:** Hovering over toolbar buttons causes the entire Custom Page to go blank momentarily.
+
+**Cause:** Fluent UI v9 `Tooltip` component uses portals that conflict with Dataverse DOM management.
+
+**Solution:** Replace all `Tooltip` components with native HTML `title` attributes. See [PCF-TROUBLESHOOTING.md#pcf-goes-blank-on-toolbar-button-hover](PCF-TROUBLESHOOTING.md#pcf-goes-blank-on-toolbar-button-hover) for detailed fix.
+
+---
+
 ### "PCF shows old version after import"
 
 1. Did you republish the Custom Page? (Most common cause)

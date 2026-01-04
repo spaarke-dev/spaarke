@@ -214,21 +214,43 @@ interface InitialContentPluginProps {
 
 function InitialContentPlugin({ html }: InitialContentPluginProps): null {
     const [editor] = useLexicalComposerContext();
-    const hasInitialized = React.useRef(false);
+    const lastExternalHtmlRef = React.useRef<string>("");
+    const isInternalUpdateRef = React.useRef(false);
 
     useEffect(() => {
-        if (html && !hasInitialized.current) {
-            hasInitialized.current = true;
-            editor.update(() => {
-                const parser = new DOMParser();
-                const dom = parser.parseFromString(html, "text/html");
-                const nodes = $generateNodesFromDOM(editor, dom);
-                const root = $getRoot();
-                root.clear();
-                $insertNodes(nodes);
-            });
+        // Skip if this is an internal update (from editor onChange)
+        if (isInternalUpdateRef.current) {
+            isInternalUpdateRef.current = false;
+            return;
+        }
+
+        // Only update if the html has actually changed from external source
+        // and is different from what we last set
+        if (html !== lastExternalHtmlRef.current) {
+            lastExternalHtmlRef.current = html;
+
+            if (html) {
+                editor.update(() => {
+                    const parser = new DOMParser();
+                    const dom = parser.parseFromString(html, "text/html");
+                    const nodes = $generateNodesFromDOM(editor, dom);
+                    const root = $getRoot();
+                    root.clear();
+                    $insertNodes(nodes);
+                });
+            }
         }
     }, [editor, html]);
+
+    // Listen for internal changes to avoid re-setting content we just edited
+    useEffect(() => {
+        return editor.registerUpdateListener(({ tags }) => {
+            // If the update was from user input, mark it as internal
+            if (!tags.has("historic")) {
+                isInternalUpdateRef.current = true;
+            }
+        });
+    }, [editor]);
 
     return null;
 }
