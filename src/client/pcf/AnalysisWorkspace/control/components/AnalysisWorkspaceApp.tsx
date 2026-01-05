@@ -44,7 +44,7 @@ import { useSseStream } from "../hooks/useSseStream";
 import { MsalAuthProvider, loginRequest } from "../services/auth";
 
 // Build info for version footer
-const VERSION = "1.2.20";
+const VERSION = "1.2.24";
 const BUILD_DATE = "2026-01-05";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -381,6 +381,7 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
     const [workingDocument, setWorkingDocument] = React.useState("");
     const [chatMessages, setChatMessages] = React.useState<IChatMessage[]>([]);
     const [isDirty, setIsDirty] = React.useState(false);
+    const [isChatDirty, setIsChatDirty] = React.useState(false); // Tracks unsaved chat changes
     const [lastSaved, setLastSaved] = React.useState<Date | null>(null);
     const [isSaving, setIsSaving] = React.useState(false);
     const [streamingResponse, setStreamingResponse] = React.useState("");
@@ -412,7 +413,6 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
 
     // Playbook info (loaded from analysis record)
     const [playbookId, setPlaybookId] = React.useState<string | null>(null);
-    const [playbookName, setPlaybookName] = React.useState<string | null>(null);
 
     // Auth state
     const [isAuthInitialized, setIsAuthInitialized] = React.useState(false);
@@ -473,7 +473,7 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
             };
             setChatMessages(prev => [...prev, assistantMessage]);
             setStreamingResponse("");
-            setIsDirty(true);
+            setIsChatDirty(true); // Mark chat as dirty to trigger auto-save
         },
         onError: (err) => {
             logError("AnalysisWorkspaceApp", "SSE stream error", err);
@@ -670,15 +670,27 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
         chatMessagesRef.current = chatMessages;
     }, [chatMessages]);
 
-    // Auto-save effect
+    // Auto-save effect for working document changes
     React.useEffect(() => {
         if (isDirty && !isSaving) {
             const timer = setTimeout(() => {
-                saveWorkingDocument();
+                saveAnalysisState();
             }, 3000); // Auto-save after 3 seconds of no changes
             return () => clearTimeout(timer);
         }
     }, [workingDocument, isDirty]);
+
+    // Auto-save effect for chat message changes
+    // Triggers save when isChatDirty is set (after user sends message or AI responds)
+    React.useEffect(() => {
+        if (!isChatDirty) return;
+
+        const timer = setTimeout(() => {
+            logInfo("AnalysisWorkspaceApp", `Auto-saving chat history (${chatMessages.length} messages)`);
+            saveAnalysisState();
+        }, 2000); // Save 2 seconds after chat changes
+        return () => clearTimeout(timer);
+    }, [isChatDirty, chatMessages.length]);
 
     // Notify parent of changes
     React.useEffect(() => {
@@ -802,14 +814,10 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
             logInfo("AnalysisWorkspaceApp", "Analysis loaded", result);
             logInfo("AnalysisWorkspaceApp", `Chat history field: ${result.sprk_chathistory ? `exists (${result.sprk_chathistory.length} chars)` : "null/undefined"}`);
 
-            // Store playbook info if present
+            // Store playbook ID if present (for execute request)
             if (result._sprk_playbook_value) {
                 setPlaybookId(result._sprk_playbook_value);
                 logInfo("AnalysisWorkspaceApp", `Playbook loaded: ${result._sprk_playbook_value}`);
-                // Try to get playbook name from formatted value
-                if (result["_sprk_playbook_value@OData.Community.Display.V1.FormattedValue"]) {
-                    setPlaybookName(result["_sprk_playbook_value@OData.Community.Display.V1.FormattedValue"]);
-                }
             }
 
             setAnalysis(result as unknown as IAnalysis);
@@ -875,10 +883,16 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
                     setIsSessionResumed(true);
                 }
 
-                // Check if we need to execute the analysis (Draft with empty working document)
+                // Check if we need to auto-execute the analysis (Draft with empty working document)
                 // Skip if we have chat history (user should choose to resume/fresh first)
+                //
+                // NOTE: "Draft" refers to the ANALYSIS record's statuscode (sprk_analysis.statuscode = 1),
+                // NOT the Document record's status. A Draft analysis with no working document means:
+                // - User selected action/playbook in AnalysisBuilder
+                // - AnalysisBuilder created the analysis record but didn't execute yet
+                // - AnalysisWorkspace should auto-execute when opened
                 if (!hasChatHistory) {
-                    const isDraft = result.statuscode === 1; // Draft status
+                    const isDraft = result.statuscode === 1; // Analysis record statuscode: 1 = Draft
                     const hasEmptyWorkingDoc = !result.sprk_workingdocument || result.sprk_workingdocument.trim() === "";
                     // Note: Lookup fields use _fieldname_value format in OData responses
                     const actionId = result._sprk_actionid_value;
@@ -940,6 +954,11 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
             return;
         }
 
+        // IMPORTANT: Capture pending history in local variable BEFORE async operations
+        // React state closures can become stale during async operations
+        const historyToLoad = includeChatHistory ? pendingChatHistory : null;
+        logInfo("AnalysisWorkspaceApp", `Resume session: includeChatHistory=${includeChatHistory}, historyToLoad has ${historyToLoad?.length ?? 0} messages`);
+
         setIsResumingSession(true);
         setShowResumeDialog(false);
 
@@ -965,7 +984,7 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
                 documentId: resolvedDocumentId,
                 documentName: resolvedDocumentName || "Unknown",
                 workingDocument: workingDocument,
-                chatHistory: includeChatHistory ? pendingChatHistory : null,
+                chatHistory: historyToLoad,
                 includeChatHistory
             };
 
@@ -991,11 +1010,12 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
             logInfo("AnalysisWorkspaceApp", `Session resumed: ${result.chatMessagesRestored} messages restored`);
 
             // Load chat history into UI if resuming with history
-            if (includeChatHistory && pendingChatHistory) {
-                // pendingChatHistory is already parsed IChatMessage[]
-                setChatMessages(pendingChatHistory);
+            if (historyToLoad && historyToLoad.length > 0) {
+                logInfo("AnalysisWorkspaceApp", `Loading ${historyToLoad.length} chat messages into UI`);
+                setChatMessages(historyToLoad);
             } else {
                 // Starting fresh - clear chat messages
+                logInfo("AnalysisWorkspaceApp", "Starting fresh - clearing chat messages");
                 setChatMessages([]);
             }
 
@@ -1005,7 +1025,13 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
         } catch (err) {
             logError("AnalysisWorkspaceApp", "Failed to resume session", err);
             // Still allow chat even if resume fails - the error will show on first message
+            // Also load chat history into UI if user wanted to resume with history
+            if (historyToLoad && historyToLoad.length > 0) {
+                logInfo("AnalysisWorkspaceApp", `Loading ${historyToLoad.length} chat messages despite API error`);
+                setChatMessages(historyToLoad);
+            }
             setIsSessionResumed(true);
+            setPendingChatHistory(null);
         } finally {
             setIsResumingSession(false);
         }
@@ -1029,20 +1055,25 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
     // Save Operations
     // ─────────────────────────────────────────────────────────────────────────
 
-    const saveWorkingDocument = async () => {
+    /**
+     * Save analysis state (working document + chat history) to Dataverse.
+     * Called by auto-save effects when either workingDocument or chatMessages change.
+     */
+    const saveAnalysisState = async () => {
         if (!analysisId || isSaving) return;
 
         // Skip save in design-time mode
         if (!isWebApiAvailable(webApi)) {
             logInfo("AnalysisWorkspaceApp", "Design-time mode - save skipped");
             setIsDirty(false);
+            setIsChatDirty(false);
             setLastSaved(new Date());
             return;
         }
 
         try {
             setIsSaving(true);
-            logInfo("AnalysisWorkspaceApp", "Saving working document");
+            logInfo("AnalysisWorkspaceApp", "Saving analysis state (working document + chat history)");
 
             await webApi.updateRecord("sprk_analysis", analysisId, {
                 sprk_workingdocument: workingDocument,
@@ -1050,8 +1081,9 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
             });
 
             setIsDirty(false);
+            setIsChatDirty(false);
             setLastSaved(new Date());
-            logInfo("AnalysisWorkspaceApp", "Working document saved");
+            logInfo("AnalysisWorkspaceApp", "Analysis state saved");
 
         } catch (err) {
             // Handle "not implemented" errors from design-time environment
@@ -1059,9 +1091,10 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
             if (errorMessage.toLowerCase().includes("not implemented")) {
                 logInfo("AnalysisWorkspaceApp", "Design-time mode - save skipped");
                 setIsDirty(false);
+                setIsChatDirty(false);
                 return;
             }
-            logError("AnalysisWorkspaceApp", "Failed to save working document", err);
+            logError("AnalysisWorkspaceApp", "Failed to save analysis state", err);
         } finally {
             setIsSaving(false);
         }
@@ -1077,7 +1110,7 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
     };
 
     const handleManualSave = () => {
-        saveWorkingDocument();
+        saveAnalysisState();
     };
 
     /**
@@ -1140,7 +1173,7 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
         setChatMessages(prev => [...prev, userMessage]);
         const messageText = chatInput.trim();
         setChatInput("");
-        setIsDirty(true);
+        setIsChatDirty(true); // Mark chat as dirty to trigger auto-save
 
         logInfo("AnalysisWorkspaceApp", "Chat message sent", userMessage);
 
@@ -1198,11 +1231,6 @@ export const AnalysisWorkspaceApp: React.FC<IAnalysisWorkspaceAppProps> = ({
                     <div className={styles.panelHeader}>
                         <div className={styles.panelHeaderLeft}>
                             <Text weight="semibold">ANALYSIS OUTPUT</Text>
-                            {playbookName && (
-                                <Badge appearance="outline" size="small" color="brand" title={`Playbook: ${playbookName}`}>
-                                    {playbookName}
-                                </Badge>
-                            )}
                             {isExecuting ? (
                                 <span className={styles.streamingIndicator}>
                                     <Spinner size="tiny" />
