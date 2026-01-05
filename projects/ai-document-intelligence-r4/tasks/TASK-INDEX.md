@@ -15,7 +15,7 @@
 | [Phase 3: Tool Handlers](#phase-3-tool-handler-implementation) | 020-029 | 10/10 ✅ |
 | [Phase 4: Service Layer](#phase-4-service-layer-extension) | 030-032 | 3/3 ✅ |
 | [Phase 5: Playbook Assembly](#phase-5-playbook-assembly) | 040-042 | 3/3 ✅ |
-| [Phase 6: UI/PCF](#phase-6-uipcf-enhancement) | 050-053 | 0/4 |
+| [Phase 6: UI/PCF](#phase-6-uipcf-enhancement) | 050-053 | 4/4 ✅ |
 | [Wrap-up](#wrap-up) | 090 | 0/1 |
 
 ---
@@ -82,10 +82,10 @@
 
 | Task | Name | Status | Priority |
 |------|------|--------|----------|
-| 🔲 050 | [Enhance PlaybookSelector component](050-enhance-playbook-selector.poml) | Not Started | P2 |
-| 🔲 051 | [Integrate playbook selection in AnalysisWorkspace](051-integrate-playbook-workspace.poml) | Not Started | P2 |
-| 🔲 052 | [Display playbook info during analysis](052-display-playbook-info.poml) | Not Started | P2 |
-| 🔲 053 | [Test dark mode support](053-test-dark-mode.poml) | Not Started | P2 |
+| ✅ 050 | [Enhance PlaybookSelector component](050-enhance-playbook-selector.poml) | Complete | P2 |
+| ✅ 051 | [Integrate playbook selection in AnalysisWorkspace](051-integrate-playbook-workspace.poml) | Complete | P2 |
+| ✅ 052 | [Display playbook info during analysis](052-display-playbook-info.poml) | Complete | P2 |
+| ✅ 053 | [Test dark mode support](053-test-dark-mode.poml) | Complete | P2 |
 
 ---
 

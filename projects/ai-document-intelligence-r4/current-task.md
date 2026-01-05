@@ -9,75 +9,16 @@
 
 | Field | Value |
 |-------|-------|
-| Task ID | Bug Fixes + Azure Deployment |
-| Task File | N/A - Post-Phase 6 bug fixes |
-| Status | Ready for Azure API Deployment |
-| Started | 2026-01-05 |
+| Task ID | 090 - Project Wrap-up |
+| Task File | tasks/090-project-wrap-up.poml |
+| Status | Ready to Execute |
+| Started | - |
 
 ---
 
-## HANDOFF: Azure Deployment Required
+## R4 Project Complete - All Phases Done ✅
 
-### Bug Fixes Completed (This Session)
-
-Three bugs were discovered during user testing and fixed:
-
-#### Bug 1: 400 error when selecting playbook ✅ DEPLOYED
-- **Root cause**: Wrong N:N relationship name `sprk_playbook_action` → should be `sprk_analysisplaybook_action`
-- **Fixed in**: `AnalysisBuilderApp.tsx` (v2.9.1)
-- **PCF deployed to Dataverse**: ✅
-
-#### Bug 2: Different action types produce same "summary" output ✅ CODE READY
-- **Root cause**: `ScopeResolverService.GetActionAsync` used hardcoded stub data instead of fetching from Dataverse
-- **Fixed by**:
-  1. Added `GetAnalysisActionAsync` to `IDataverseService.cs`
-  2. Added `AnalysisActionEntity` to `Models.cs`
-  3. Implemented in `DataverseWebApiService.cs` and `DataverseServiceClientImpl.cs`
-  4. Updated `ScopeResolverService.GetActionAsync` to fetch `sprk_systemprompt` from Dataverse
-- **API deployment needed**: ⚠️ YES
-
-#### Bug 3: Chat shows "waiting for session" and doesn't connect ✅ DEPLOYED
-- **Root cause**: When no chat history exists, `isSessionResumed` never got set to `true`
-- **Fixed in**: `AnalysisWorkspaceApp.tsx` (v1.2.19) - auto-sets `isSessionResumed = true`
-- **PCF deployed to Dataverse**: ✅
-
----
-
-## Next Steps for New Session
-
-### 1. Deploy BFF API to Azure
-The API changes for Bug 2 need deployment:
-
-```bash
-# Build and deploy API
-dotnet publish src/server/api/Sprk.Bff.Api -c Release
-
-# Or use existing deployment workflow
-```
-
-### 2. Test All Three Fixes
-After API deployment:
-- [ ] Select a playbook → should load scopes (Bug 1)
-- [ ] Select different actions (Summarize vs Risk Analysis) → should produce different outputs (Bug 2)
-- [ ] Open Analysis Workspace with no chat history → chat should be immediately usable (Bug 3)
-
-### 3. Consider Committing Changes
-Uncommitted files:
-- `src/server/shared/Spaarke.Dataverse/IDataverseService.cs`
-- `src/server/shared/Spaarke.Dataverse/Models.cs`
-- `src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs`
-- `src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs`
-- `src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs`
-- `src/client/pcf/AnalysisBuilder/control/components/AnalysisBuilderApp.tsx`
-- `src/client/pcf/AnalysisBuilder/control/ControlManifest.Input.xml`
-- `src/client/pcf/AnalysisWorkspace/control/components/AnalysisWorkspaceApp.tsx`
-- `src/client/pcf/AnalysisWorkspace/control/ControlManifest.Input.xml`
-
----
-
-## Progress Summary
-
-### Completed Phases (R4 Project)
+### Phase Summary
 
 | Phase | Status | Summary |
 |-------|--------|---------|
@@ -86,35 +27,31 @@ Uncommitted files:
 | Phase 3: Tool Handler Implementation | ✅ | 5 handlers, 312+ tests |
 | Phase 4: Service Layer Extension | ✅ | Scope endpoints + auth |
 | Phase 5: Playbook Assembly | ✅ | 3 MVP playbooks configured |
-| Phase 6: UI/PCF Enhancement | ✅ | PCF v2.9.1 + v1.2.19 deployed |
-| Bug Fixes | ✅ | 3 bugs fixed, API deployment pending |
-
-### PCF Versions Deployed
-- **AnalysisBuilder**: v2.9.1 (N:N relationship fix)
-- **AnalysisWorkspace**: v1.2.19 (chat session auto-resume fix)
+| Phase 6: UI/PCF Enhancement | ✅ | Verified working + dark mode compliant |
+| Bug Fixes | ✅ | All bugs resolved |
 
 ---
 
-## Files Modified (This Session)
+## Phase 6 Completion Notes
 
-### Backend (API deployment required)
-- `src/server/shared/Spaarke.Dataverse/IDataverseService.cs` - Added `GetAnalysisActionAsync`
-- `src/server/shared/Spaarke.Dataverse/Models.cs` - Added `AnalysisActionEntity`
-- `src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs` - Implemented `GetAnalysisActionAsync`
-- `src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs` - Implemented `GetAnalysisActionAsync`
-- `src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs` - Updated `GetActionAsync` to fetch from Dataverse
-
-### Frontend (PCFs deployed)
-- `src/client/pcf/AnalysisBuilder/control/components/AnalysisBuilderApp.tsx` - Fixed N:N relationship names
-- `src/client/pcf/AnalysisBuilder/control/ControlManifest.Input.xml` - v2.9.1
-- `src/client/pcf/AnalysisWorkspace/control/components/AnalysisWorkspaceApp.tsx` - Added auto-resume
-- `src/client/pcf/AnalysisWorkspace/control/ControlManifest.Input.xml` - v1.2.19
+- **Task 050**: PlaybookSelector already loads from Dataverse with Fluent v9
+- **Task 051**: Playbook ID flows via Analysis record to AnalysisWorkspace
+- **Task 052**: Playbook name displayed via `sprk_playbook` lookup on form
+- **Task 053**: Dark mode verified compliant by user testing
 
 ---
 
-## Blockers
+## PCF Versions Deployed
 
-_None - API deployment is the only remaining action_
+- **AnalysisBuilder**: v2.9.2 (playbook lookup field fix)
+- **AnalysisWorkspace**: v1.2.24 (chat auto-save with isChatDirty)
+
+---
+
+## Next Steps
+
+1. Execute Task 090 (Project Wrap-up) if desired
+2. Or mark PR as ready for review and merge
 
 ---
 
