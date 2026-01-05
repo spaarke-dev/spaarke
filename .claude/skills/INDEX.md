@@ -2,7 +2,7 @@
 
 > **Purpose**: Central registry of all Claude Code skills — the **single source of truth** for what skills exist, their triggers, and how to create new ones.
 >
-> **Last Updated**: January 5, 2026 (added azure-deploy skill)
+> **Last Updated**: January 6, 2026 (added ci-cd skill for GitHub Actions workflow integration)
 
 ---
 
