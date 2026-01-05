@@ -1,0 +1,64 @@
+<task id="010" project="ai-document-intelligence-r4">
+  <metadata>
+    <title>Populate Type Lookup Tables</title>
+    <phase>2</phase>
+    <priority>P0</priority>
+    <estimate>2h</estimate>
+    <status>completed</status>
+    <completed-date>2026-01-04</completed-date>
+    <tags>dataverse, seed-data, lookup-tables</tags>
+    <dependencies>001</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Populate the type lookup tables (ActionType, SkillType, KnowledgeType, ToolType) with categories.
+    </goal>
+    <context>
+      Type lookup tables provide categorization for scope records. Each table should have 4-5 categories
+      with sort order for display. These lookups are referenced by the main scope entities.
+    </context>
+    <constraints>
+      - Each table needs 4-5 meaningful categories
+      - Include sort order (sprk_sortorder) for UI display
+      - Use Dataverse Web API or PAC CLI for data insertion
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r4/ai-dataverse-entity-model.md</file>
+      <file>projects/ai-document-intelligence-r4/AI-ANALYSIS-IMPLEMENTATION-DESIGN.md</file>
+      <file>projects/ai-document-intelligence-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define category values for each type table based on design document</step>
+    <step order="2">Create seed data script (PowerShell or JSON)</step>
+    <step order="3">Populate sprk_aiactiontype with categories</step>
+    <step order="4">Populate sprk_aiskilltype with categories</step>
+    <step order="5">Populate sprk_aiknowledgetype with categories</step>
+    <step order="6">Populate sprk_aitooltype with categories</step>
+    <step order="7">Verify data via query</step>
+  </steps>
+
+  <tools>
+    <tool>Read - for design document reference</tool>
+    <tool>Write - for seed data scripts</tool>
+    <tool>Bash - for PAC CLI or curl commands</tool>
+  </tools>
+
+  <outputs>
+    <output>scripts/seed-data/type-lookups.json or .ps1</output>
+    <output>Type tables populated with 4-5 categories each</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>sprk_aiactiontype has 4-5 categories</criterion>
+    <criterion>sprk_aiskilltype has 4-5 categories</criterion>
+    <criterion>sprk_aiknowledgetype has 4-5 categories</criterion>
+    <criterion>sprk_aitooltype has 4-5 categories</criterion>
+    <criterion>All records have sort order populated</criterion>
+  </acceptance-criteria>
+</task>

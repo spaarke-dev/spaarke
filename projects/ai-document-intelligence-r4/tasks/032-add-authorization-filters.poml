@@ -1,0 +1,57 @@
+<task id="032" project="ai-document-intelligence-r4">
+  <metadata>
+    <title>Add Authorization Filters</title>
+    <phase>4</phase>
+    <priority>P1</priority>
+    <estimate>2h</estimate>
+    <tags>security, authorization, api</tags>
+    <dependencies>030</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Add authorization filters to scope endpoints following ADR-008 patterns.
+    </goal>
+    <context>
+      All scope endpoints must have proper authorization. Use endpoint filter pattern
+      consistent with existing AI endpoints.
+    </context>
+    <constraints>
+      - Follow ADR-008 endpoint filter pattern
+      - Use existing filter patterns from Api/Filters/
+      - Apply to all scope endpoints
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/AiAuthorizationFilter.cs</file>
+      <file>docs/adr/ADR-008-authorization-endpoint-filters.md</file>
+      <file>projects/ai-document-intelligence-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing authorization filters</step>
+    <step order="2">Create ScopeAuthorizationFilter if needed</step>
+    <step order="3">Apply filters to ScopeEndpoints</step>
+    <step order="4">Verify authorization works</step>
+    <step order="5">Build and test</step>
+  </steps>
+
+  <tools>
+    <tool>Read - for filter patterns</tool>
+    <tool>Write/Edit - for filter implementation</tool>
+    <tool>Bash - for dotnet build</tool>
+  </tools>
+
+  <outputs>
+    <output>Authorization filters applied to scope endpoints</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All scope endpoints have authorization</criterion>
+    <criterion>Follows ADR-008 pattern</criterion>
+    <criterion>dotnet build succeeds</criterion>
+  </acceptance-criteria>
+</task>

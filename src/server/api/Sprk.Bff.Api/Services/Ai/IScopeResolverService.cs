@@ -39,6 +39,60 @@ public interface IScopeResolverService
     Task<AnalysisAction?> GetActionAsync(
         Guid actionId,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// List all available skills with pagination.
+    /// </summary>
+    Task<ScopeListResult<AnalysisSkill>> ListSkillsAsync(
+        ScopeListOptions options,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// List all available knowledge sources with pagination.
+    /// </summary>
+    Task<ScopeListResult<AnalysisKnowledge>> ListKnowledgeAsync(
+        ScopeListOptions options,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// List all available tools with pagination.
+    /// </summary>
+    Task<ScopeListResult<AnalysisTool>> ListToolsAsync(
+        ScopeListOptions options,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// List all available actions with pagination.
+    /// </summary>
+    Task<ScopeListResult<AnalysisAction>> ListActionsAsync(
+        ScopeListOptions options,
+        CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// Options for listing scope items.
+/// </summary>
+public record ScopeListOptions
+{
+    public int Page { get; init; } = 1;
+    public int PageSize { get; init; } = 20;
+    public string? NameFilter { get; init; }
+    public string? CategoryFilter { get; init; }
+    public string SortBy { get; init; } = "name";
+    public bool SortDescending { get; init; } = false;
+}
+
+/// <summary>
+/// Paginated result for scope listings.
+/// </summary>
+public record ScopeListResult<T>
+{
+    public required T[] Items { get; init; }
+    public int TotalCount { get; init; }
+    public int Page { get; init; }
+    public int PageSize { get; init; }
+    public int TotalPages => (int)Math.Ceiling((double)TotalCount / PageSize);
+    public bool HasMore => Page < TotalPages;
 }
 
 /// <summary>
@@ -128,6 +182,21 @@ public enum ToolType
 
     /// <summary>Document classification tool.</summary>
     DocumentClassifier = 2,
+
+    /// <summary>Document summarization tool.</summary>
+    Summary = 3,
+
+    /// <summary>Risk detection and assessment tool.</summary>
+    RiskDetector = 4,
+
+    /// <summary>Clause comparison tool.</summary>
+    ClauseComparison = 5,
+
+    /// <summary>Date extraction and normalization tool.</summary>
+    DateExtractor = 6,
+
+    /// <summary>Financial calculation tool.</summary>
+    FinancialCalculator = 7,
 
     /// <summary>Custom tool with handler class.</summary>
     Custom = 99

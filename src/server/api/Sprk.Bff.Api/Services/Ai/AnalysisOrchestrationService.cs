@@ -35,6 +35,8 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
     private readonly IWorkingDocumentService _workingDocumentService;
     private readonly ExportServiceRegistry _exportRegistry;
     private readonly IRagService _ragService;
+    private readonly IPlaybookService _playbookService;
+    private readonly IToolHandlerRegistry _toolHandlerRegistry;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly AnalysisOptions _options;
     private readonly ILogger<AnalysisOrchestrationService> _logger;
@@ -53,6 +55,8 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         IWorkingDocumentService workingDocumentService,
         ExportServiceRegistry exportRegistry,
         IRagService ragService,
+        IPlaybookService playbookService,
+        IToolHandlerRegistry toolHandlerRegistry,
         IHttpContextAccessor httpContextAccessor,
         IOptions<AnalysisOptions> options,
         ILogger<AnalysisOrchestrationService> logger,
@@ -67,6 +71,8 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         _workingDocumentService = workingDocumentService;
         _exportRegistry = exportRegistry;
         _ragService = ragService;
+        _playbookService = playbookService;
+        _toolHandlerRegistry = toolHandlerRegistry;
         _httpContextAccessor = httpContextAccessor;
         _options = options.Value;
         _logger = logger;
@@ -996,6 +1002,197 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             analysisId, documentText?.Length ?? 0, chatHistory.Length);
 
         return analysis;
+    }
+
+    /// <inheritdoc />
+    public async IAsyncEnumerable<AnalysisStreamChunk> ExecutePlaybookAsync(
+        PlaybookExecuteRequest request,
+        HttpContext httpContext,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var documentId = request.DocumentIds[0];
+
+        _logger.LogInformation("Starting playbook execution: Playbook {PlaybookId}, Document {DocumentId}",
+            request.PlaybookId, documentId);
+
+        // 1. Load playbook from Dataverse
+        var playbook = await _playbookService.GetPlaybookAsync(request.PlaybookId, cancellationToken)
+            ?? throw new KeyNotFoundException($"Playbook {request.PlaybookId} not found");
+
+        _logger.LogDebug("Loaded playbook {PlaybookName} with {ToolCount} tools",
+            playbook.Name, playbook.ToolIds?.Length ?? 0);
+
+        // 2. Get document details from Dataverse
+        var document = await _dataverseService.GetDocumentAsync(documentId.ToString(), cancellationToken)
+            ?? throw new KeyNotFoundException($"Document {documentId} not found");
+
+        // 3. Create analysis record
+        var analysisId = Guid.NewGuid();
+
+        // Use first action from playbook if no override specified
+        var actionId = request.ActionId ?? playbook.ActionIds?.FirstOrDefault() ?? Guid.Empty;
+
+        var analysis = new AnalysisInternalModel
+        {
+            Id = analysisId,
+            DocumentId = documentId,
+            DocumentName = document.Name ?? "Unknown",
+            ActionId = actionId,
+            Status = "InProgress",
+            StartedOn = DateTime.UtcNow,
+            ChatHistory = []
+        };
+        _analysisStore[analysisId] = analysis;
+
+        // Emit metadata chunk
+        yield return AnalysisStreamChunk.Metadata(analysisId, document.Name ?? "Unknown");
+
+        // 4. Resolve playbook scopes (Skills, Knowledge, Tools)
+        var scopes = await _scopeResolver.ResolvePlaybookScopesAsync(request.PlaybookId, cancellationToken);
+
+        _logger.LogDebug("Resolved scopes: {SkillCount} skills, {KnowledgeCount} knowledge, {ToolCount} tools",
+            scopes.Skills.Length, scopes.Knowledge.Length, scopes.Tools.Length);
+
+        // 5. Get action definition
+        var action = await _scopeResolver.GetActionAsync(actionId, cancellationToken)
+            ?? new AnalysisAction
+            {
+                Id = actionId,
+                Name = "Playbook Analysis",
+                Description = $"Analysis using playbook: {playbook.Name}",
+                SystemPrompt = BuildDefaultSystemPrompt()
+            };
+
+        // 6. Extract document text from SPE
+        var documentText = await ExtractDocumentTextAsync(document, httpContext, cancellationToken);
+
+        _logger.LogInformation("Extracted {CharCount} characters from document {DocumentId}",
+            documentText.Length, documentId);
+
+        // 7. Process RAG knowledge sources
+        var processedKnowledge = await ProcessRagKnowledgeAsync(scopes.Knowledge, documentText, cancellationToken);
+
+        // Get tenant ID from claims
+        var tenantId = GetTenantIdFromClaims() ?? "default";
+
+        // 8. Build execution context for tools
+        var executionContext = new ToolExecutionContext
+        {
+            AnalysisId = analysisId,
+            TenantId = tenantId,
+            Document = new DocumentContext
+            {
+                DocumentId = documentId,
+                Name = document.Name ?? "Unknown",
+                FileName = document.FileName,
+                ExtractedText = documentText,
+                Metadata = new Dictionary<string, object?>
+                {
+                    ["PlaybookId"] = request.PlaybookId,
+                    ["PlaybookName"] = playbook.Name
+                }
+            },
+            UserContext = request.AdditionalContext
+        };
+
+        // Store document text and system prompt
+        analysis = analysis with
+        {
+            DocumentText = documentText,
+            SystemPrompt = action.SystemPrompt
+        };
+        _analysisStore[analysisId] = analysis;
+
+        // 9. Execute tools from playbook
+        var toolResults = new StringBuilder();
+        var totalInputTokens = 0;
+        var totalOutputTokens = 0;
+
+        foreach (var tool in scopes.Tools)
+        {
+            // Stream progress update
+            yield return AnalysisStreamChunk.TextChunk($"[Executing: {tool.Name}]\n");
+
+            // Execute tool and collect result (can't yield inside try-catch)
+            ToolResult? toolResult = null;
+            string? errorMessage = null;
+
+            // Get handler for this tool type
+            var handlers = _toolHandlerRegistry.GetHandlersByType(tool.Type);
+            var handler = handlers.FirstOrDefault();
+
+            if (handler == null)
+            {
+                _logger.LogWarning("No handler found for tool type {ToolType}", tool.Type);
+                yield return AnalysisStreamChunk.TextChunk($"[Tool {tool.Name}: No handler available]\n");
+                continue;
+            }
+
+            // Validate
+            var validation = handler.Validate(executionContext, tool);
+            if (!validation.IsValid)
+            {
+                _logger.LogWarning("Tool validation failed for {ToolName}: {Errors}",
+                    tool.Name, string.Join(", ", validation.Errors));
+                yield return AnalysisStreamChunk.TextChunk($"[Tool {tool.Name}: Validation failed]\n");
+                continue;
+            }
+
+            // Execute with error handling
+            try
+            {
+                toolResult = await handler.ExecuteAsync(executionContext, tool, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error executing tool {ToolName}", tool.Name);
+                errorMessage = ex.Message;
+            }
+
+            // Process result (outside try-catch so we can yield)
+            if (toolResult != null && toolResult.Success)
+            {
+                var summary = toolResult.Summary ?? "No summary available";
+                toolResults.AppendLine($"### {tool.Name}");
+                toolResults.AppendLine(summary);
+                toolResults.AppendLine();
+
+                yield return AnalysisStreamChunk.TextChunk($"### {tool.Name}\n{summary}\n\n");
+
+                totalInputTokens += toolResult.Execution.InputTokens.GetValueOrDefault();
+                totalOutputTokens += toolResult.Execution.OutputTokens.GetValueOrDefault();
+            }
+            else if (toolResult != null)
+            {
+                _logger.LogWarning("Tool {ToolName} execution failed: {Error}",
+                    tool.Name, toolResult.ErrorMessage);
+                yield return AnalysisStreamChunk.TextChunk($"[Tool {tool.Name}: {toolResult.ErrorMessage}]\n");
+            }
+            else if (errorMessage != null)
+            {
+                yield return AnalysisStreamChunk.TextChunk($"[Tool {tool.Name}: Error - {errorMessage}]\n");
+            }
+        }
+
+        // 10. Finalize analysis
+        var finalOutput = toolResults.ToString();
+        analysis = analysis with
+        {
+            WorkingDocument = finalOutput,
+            FinalOutput = finalOutput,
+            Status = "Completed",
+            CompletedOn = DateTime.UtcNow,
+            InputTokens = totalInputTokens,
+            OutputTokens = totalOutputTokens
+        };
+        _analysisStore[analysisId] = analysis;
+
+        await _workingDocumentService.FinalizeAnalysisAsync(analysisId, totalInputTokens, totalOutputTokens, cancellationToken);
+
+        _logger.LogInformation("Playbook execution completed: Analysis {AnalysisId}, {ToolCount} tools executed",
+            analysisId, scopes.Tools.Length);
+
+        yield return AnalysisStreamChunk.Completed(analysisId, new TokenUsage(totalInputTokens, totalOutputTokens));
     }
 }
 

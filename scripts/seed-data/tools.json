@@ -1,0 +1,178 @@
+{
+  "description": "Tool seed data for AI Document Intelligence R4",
+  "created": "2026-01-04",
+  "entity": "sprk_analysistools",
+
+  "toolTypes": {
+    "01 - Entity Extraction": "a45cc316-eae9-f011-8406-7ced8d1dc988",
+    "02 - Classification": "a144311b-eae9-f011-8406-7c1e520aa4df",
+    "03 - Analysis": "a244311b-eae9-f011-8406-7c1e520aa4df",
+    "04 - Calculation": "a444311b-eae9-f011-8406-7c1e520aa4df"
+  },
+
+  "tools": [
+    {
+      "id": "TL-001",
+      "sprk_name": "Entity Extractor",
+      "sprk_description": "Extract named entities from documents including parties, dates, monetary amounts, addresses, and key defined terms.",
+      "sprk_handlerclass": "EntityExtractorHandler",
+      "toolType": "01 - Entity Extraction",
+      "sprk_configuration": {
+        "entity_types": [
+          "party",
+          "date",
+          "monetary_amount",
+          "address",
+          "defined_term",
+          "jurisdiction",
+          "percentage",
+          "duration"
+        ],
+        "confidence_threshold": 0.7,
+        "include_context": true,
+        "max_context_chars": 200,
+        "deduplicate": true
+      }
+    },
+    {
+      "id": "TL-002",
+      "sprk_name": "Clause Analyzer",
+      "sprk_description": "Identify and analyze contract clauses by category, extracting obligations, rights, conditions, and risk factors.",
+      "sprk_handlerclass": "ClauseAnalyzerHandler",
+      "toolType": "03 - Analysis",
+      "sprk_configuration": {
+        "clause_categories": [
+          "term_termination",
+          "payment",
+          "liability",
+          "confidentiality",
+          "intellectual_property",
+          "representations_warranties",
+          "dispute_resolution",
+          "general_provisions"
+        ],
+        "risk_threshold": 0.6,
+        "extract_obligations": true,
+        "identify_missing_clauses": true,
+        "flag_unusual_terms": true
+      }
+    },
+    {
+      "id": "TL-003",
+      "sprk_name": "Document Classifier",
+      "sprk_description": "Classify documents into appropriate type and subtype based on content analysis and structural patterns.",
+      "sprk_handlerclass": "DocumentClassifierHandler",
+      "toolType": "02 - Classification",
+      "sprk_configuration": {
+        "taxonomy": "standard",
+        "confidence_threshold": 0.8,
+        "return_alternatives": true,
+        "max_alternatives": 3,
+        "include_indicators": true,
+        "document_types": [
+          "contract",
+          "corporate",
+          "financial",
+          "legal",
+          "correspondence"
+        ]
+      }
+    },
+    {
+      "id": "TL-004",
+      "sprk_name": "Summary Generator",
+      "sprk_description": "Generate concise document summaries focusing on key points, parties, terms, and essential obligations.",
+      "sprk_handlerclass": "SummaryHandler",
+      "toolType": "03 - Analysis",
+      "sprk_configuration": {
+        "max_length": 500,
+        "format": "structured",
+        "include_sections": [
+          "executive_summary",
+          "key_terms",
+          "obligations",
+          "notable_provisions"
+        ],
+        "use_plain_language": true,
+        "highlight_time_sensitive": true
+      }
+    },
+    {
+      "id": "TL-005",
+      "sprk_name": "Risk Detector",
+      "sprk_description": "Identify potential risks including legal, financial, operational, and compliance risks with severity assessment.",
+      "sprk_handlerclass": "RiskDetectorHandler",
+      "toolType": "03 - Analysis",
+      "sprk_configuration": {
+        "risk_categories": [
+          "legal",
+          "financial",
+          "operational",
+          "compliance",
+          "reputational"
+        ],
+        "threshold": 0.5,
+        "severity_levels": ["critical", "high", "medium", "low"],
+        "include_mitigation": true,
+        "compare_to_standards": true,
+        "flag_missing_protections": true
+      }
+    },
+    {
+      "id": "TL-006",
+      "sprk_name": "Clause Comparator",
+      "sprk_description": "Compare document clauses against standard terms and industry benchmarks to identify deviations.",
+      "sprk_handlerclass": "ClauseComparisonHandler",
+      "toolType": "03 - Analysis",
+      "sprk_configuration": {
+        "similarity_threshold": 0.7,
+        "comparison_mode": "semantic",
+        "deviation_categories": ["favorable", "neutral", "unfavorable", "critical"],
+        "include_recommendations": true,
+        "suggest_alternatives": true,
+        "reference_standards": ["market_standard", "industry_benchmark"]
+      }
+    },
+    {
+      "id": "TL-007",
+      "sprk_name": "Date Extractor",
+      "sprk_description": "Extract and normalize all date references including effective dates, deadlines, renewal dates, and notice periods.",
+      "sprk_handlerclass": "DateExtractorHandler",
+      "toolType": "01 - Entity Extraction",
+      "sprk_configuration": {
+        "date_format": "ISO8601",
+        "handle_relative_dates": true,
+        "calculate_derived_dates": true,
+        "categories": [
+          "contract_dates",
+          "deadlines",
+          "payment_dates",
+          "milestone_dates"
+        ],
+        "flag_conflicts": true,
+        "importance_levels": ["critical", "high", "medium", "low"]
+      }
+    },
+    {
+      "id": "TL-008",
+      "sprk_name": "Financial Calculator",
+      "sprk_description": "Calculate and validate monetary amounts, payment schedules, and financial terms with currency handling.",
+      "sprk_handlerclass": "FinancialCalculatorHandler",
+      "toolType": "04 - Calculation",
+      "sprk_configuration": {
+        "currency": "USD",
+        "supported_currencies": ["USD", "EUR", "GBP", "CAD", "AUD"],
+        "calculate_totals": true,
+        "validate_math": true,
+        "categories": [
+          "base_amounts",
+          "payment_schedules",
+          "penalties_fees",
+          "caps_limits"
+        ],
+        "flag_inconsistencies": true,
+        "show_methodology": true
+      }
+    }
+  ]
+}

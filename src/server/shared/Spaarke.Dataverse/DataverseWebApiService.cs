@@ -192,6 +192,53 @@ public class DataverseWebApiService : IDataverseService
         }
     }
 
+    public async Task<AnalysisActionEntity?> GetAnalysisActionAsync(string id, CancellationToken ct = default)
+    {
+        await EnsureAuthenticatedAsync(ct);
+
+        if (!Guid.TryParse(id, out var guid))
+        {
+            _logger.LogWarning("Invalid analysis action ID format: {Id}", id);
+            return null;
+        }
+
+        var url = $"sprk_analysisactions({guid})?$select=sprk_name,sprk_description,sprk_systemprompt,sprk_sortorder";
+        _logger.LogDebug("Retrieving analysis action: {Id}", id);
+
+        try
+        {
+            var response = await _httpClient.GetAsync(url, ct);
+
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                _logger.LogWarning("Analysis action not found: {Id}", id);
+                return null;
+            }
+
+            response.EnsureSuccessStatusCode();
+
+            var data = await response.Content.ReadFromJsonAsync<Dictionary<string, JsonElement>>(cancellationToken: ct);
+            if (data == null) return null;
+
+            return new AnalysisActionEntity
+            {
+                Id = guid,
+                Name = data.TryGetValue("sprk_name", out var name) ? name.GetString() : null,
+                Description = data.TryGetValue("sprk_description", out var desc) && desc.ValueKind != JsonValueKind.Null
+                    ? desc.GetString() : null,
+                SystemPrompt = data.TryGetValue("sprk_systemprompt", out var prompt) && prompt.ValueKind != JsonValueKind.Null
+                    ? prompt.GetString() : null,
+                SortOrder = data.TryGetValue("sprk_sortorder", out var sort) && sort.ValueKind != JsonValueKind.Null
+                    ? sort.GetInt32() : 0
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(exception: ex, message: "Failed to retrieve analysis action {Id}", id);
+            throw;
+        }
+    }
+
     public async Task UpdateDocumentAsync(string id, UpdateDocumentRequest request, CancellationToken ct = default)
     {
         await EnsureAuthenticatedAsync(ct);

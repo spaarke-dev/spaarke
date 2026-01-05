@@ -1,0 +1,49 @@
+<task id="027" project="ai-document-intelligence-r4">
+  <metadata>
+    <title>Write DateExtractorHandler Tests</title>
+    <phase>3</phase>
+    <priority>P0</priority>
+    <estimate>2h</estimate>
+    <tags>testing, unit-tests, tool-handler</tags>
+    <dependencies>026</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Write unit tests for DateExtractorHandler.
+    </goal>
+    <context>
+      Test date extraction and normalization with various date formats.
+    </context>
+    <constraints>
+      - Test multiple date formats
+      - Verify ISO normalization
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/EntityExtractorHandlerTests.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/DateExtractorHandler.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create DateExtractorHandlerTests.cs</step>
+    <step order="2">Write tests for various date formats</step>
+    <step order="3">Run tests and verify</step>
+  </steps>
+
+  <tools>
+    <tool>Write - for test implementation</tool>
+    <tool>Bash - for dotnet test</tool>
+  </tools>
+
+  <outputs>
+    <output>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/DateExtractorHandlerTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All tests pass</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,42 +1,111 @@
 # Spaarke AI Strategy & Architecture
 
-> **Version**: 2.0  
-> **Date**: December 4, 2025  
-> **Status**: Draft  
-> **Authors**: Spaarke Engineering  
-> **Updated**: Reflects Microsoft Foundry announcements (Ignite 2025)
+> **Version**: 2.1
+> **Date**: January 4, 2026
+> **Status**: Active
+> **Authors**: Spaarke Engineering
+> **Updated**: Clarified custom "Spaarke IQ" approach vs Microsoft Foundry adoption
 
 ---
 
 ## Executive Summary
 
-Spaarke will build **custom AI capabilities** integrated into the SharePoint Document Access Platform (SDAP) using **Microsoft Foundry** services, **Microsoft Agent Framework**, and custom RAG pipelines. This strategy is **independent of M365 Copilot and Copilot Studio**, ensuring consistent AI features across both deployment models.
+Spaarke builds **custom AI capabilities** ("Spaarke IQ") integrated into the SharePoint Document Access Platform (SDAP). While we use the **same underlying Azure components** as Microsoft Foundry (Azure OpenAI, Azure AI Search, Document Intelligence), we maintain **full control** over our implementation, enabling unique capabilities like our **Playbook System** that Microsoft doesn't offer.
 
-> **Note (December 2025)**: Azure AI Foundry has been rebranded to **Microsoft Foundry**. Semantic Kernel has evolved into **Microsoft Agent Framework** - a unified SDK combining Semantic Kernel and AutoGen for building AI agents.
+This strategy is **independent of M365 Copilot and Copilot Studio**, ensuring consistent AI features across both deployment models.
+
+> **Note (January 2026)**: Microsoft Foundry (formerly Azure AI Foundry) represents Microsoft's "packaged" AI services. Our custom implementation uses the same backends but provides domain-specific capabilities and flexibility that managed services cannot match.
 
 **Key Decisions:**
-- Build Spaarke-owned AI Copilots (not M365 Copilot dependent)
-- Use **Microsoft Foundry** (Azure OpenAI + AI Search + Foundry IQ) as primary AI stack
-- Leverage **Microsoft Agent Framework** for orchestration (successor to Semantic Kernel)
+- Build **"Spaarke IQ"** - custom AI stack with full control over implementation
+- Use **Azure primitives directly** (Azure OpenAI, Azure AI Search, Document Intelligence) rather than managed abstractions
+- Maintain **Playbook System** as our unique differentiator (no Microsoft equivalent)
+- **Optionally adopt** Foundry IQ/Agent Service post-GA where it adds value without sacrificing control
 - Support both Spaarke-hosted and Customer-hosted deployments
 - Design for multi-tenant isolation from day one
 
 ---
 
+## Why Custom "Spaarke IQ" vs Microsoft Foundry
+
+### The "Spaarke IQ" Approach
+
+We are essentially building our own "IQ" service - custom AI capabilities using the same Azure components that Microsoft packages into Foundry:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    "SPAARKE IQ" (Custom Stack)                   │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   UNIQUE TO SPAARKE (No Microsoft Equivalent):                   │
+│   ┌──────────────────────────────────────────────────────────┐  │
+│   │  Playbook System - No-code AI workflow composition       │  │
+│   │  • Domain experts create analysis workflows              │  │
+│   │  • Link Actions, Skills, Knowledge, Tools                │  │
+│   │  • Stored as Dataverse records (not code)                │  │
+│   │  • Shareable, versionable, auditable                     │  │
+│   └──────────────────────────────────────────────────────────┘  │
+│                                                                  │
+│   CUSTOM IMPLEMENTATIONS (Full Control):                         │
+│   ┌────────────────┐  ┌────────────────┐  ┌────────────────┐   │
+│   │ RagService     │  │ Orchestration  │  │ Tool Handlers  │   │
+│   │ (Hybrid RAG)   │  │ Service        │  │ (C# plugins)   │   │
+│   └────────────────┘  └────────────────┘  └────────────────┘   │
+│                                                                  │
+│   AZURE PRIMITIVES (Same as Foundry Backend):                    │
+│   ┌────────────────┐  ┌────────────────┐  ┌────────────────┐   │
+│   │ Azure OpenAI   │  │ Azure AI       │  │ Document       │   │
+│   │ (GPT-4, embed) │  │ Search         │  │ Intelligence   │   │
+│   └────────────────┘  └────────────────┘  └────────────────┘   │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Why Custom is Better (For Our Use Case)
+
+| Aspect | Custom "Spaarke IQ" | Microsoft Foundry (Managed) |
+|--------|--------------------|-----------------------------|
+| **Playbook System** | ✅ Unique differentiator | ❌ No equivalent |
+| **Multi-tenant RAG** | ✅ Custom tenantId filtering | ❓ Unknown/limited |
+| **Domain-specific UI** | ✅ Custom PCF controls | ❌ Generic Copilot chat |
+| **Chunking strategy** | ✅ Full control | ❌ Pre-built strategies |
+| **Caching** | ✅ Redis with SHA256 keys | ❌ Managed (opaque) |
+| **Cost optimization** | ✅ Direct control | ⚠️ Abstraction overhead |
+| **Dataverse integration** | ✅ Deep entity integration | ❌ Limited |
+| **Debugging** | ✅ Full observability | ⚠️ Black box |
+
+### Where Foundry Adoption Makes Sense (Future)
+
+We may adopt specific Foundry services post-GA where they add value:
+
+| Service | Adoption Timeline | Use Case | Trade-off |
+|---------|------------------|----------|-----------|
+| **Foundry IQ** | Post-GA (mid-2026) | Simplify RAG for simple queries | Less chunking/caching control |
+| **Foundry Agent Service** | Post-GA (2026+) | Runtime hosting option | Keep Playbook as config layer |
+| **Model Router** | When GA | Cost optimization | Adds latency |
+
+**Principle**: Adopt managed services only when they **add clear value** without sacrificing our differentiators (Playbook system, multi-tenant isolation, domain-specific UX).
+
+> **Detailed Analysis**: See [Spaarke-Microsoft-IQ-ADOPTION-ANALYSIS.md](Spaarke-Microsoft-IQ-ADOPTION-ANALYSIS.md) for comprehensive comparison and migration paths.
+
+---
+
 ## Table of Contents
 
+- [Why Custom "Spaarke IQ" vs Microsoft Foundry](#why-custom-spaarke-iq-vs-microsoft-foundry)
 1. [Deployment Models](#1-deployment-models)
 2. [Architecture Overview](#2-architecture-overview)
 3. [ADR Alignment](#3-adr-alignment)
-4. [Azure Services & Components](#4-azure-services--components)
-5. [Application Components](#5-application-components)
-6. [Use Cases & Solutions](#6-use-cases--solutions)
-7. [Data Flow & Pipelines](#7-data-flow--pipelines)
-8. [Security & Compliance](#8-security--compliance)
-9. [Implementation Details](#9-implementation-details)
-10. [Implementation Roadmap](#10-implementation-roadmap)
-11. [Cost Model](#11-cost-model)
-12. [Future Considerations](#12-future-considerations)
+4. [BFF Orchestration Pattern](#4-bff-orchestration-pattern)
+5. [Azure Services & Components](#5-azure-services--components)
+6. [Application Components](#6-application-components)
+7. [Use Cases & Solutions](#7-use-cases--solutions)
+8. [Data Flow & Pipelines](#8-data-flow--pipelines)
+9. [Security & Compliance](#9-security--compliance)
+10. [Implementation Details](#10-implementation-details)
+11. [Implementation Roadmap](#11-implementation-roadmap)
+12. [Cost Model](#12-cost-model)
+13. [Future Considerations](#13-future-considerations)
 
 ---
 
@@ -191,19 +260,32 @@ With Model 2 (Customer-hosted), customers have **full control** over their AI re
 
 > **Implementation Details**: For detailed code structure, DI patterns, and endpoint implementations, see [SPAARKE-AI-ARCHITECTURE.md](../../ai-knowledge/guides/SPAARKE-AI-ARCHITECTURE.md)
 
-### 2.1 Microsoft Foundry Platform
+### 2.1 Azure Components (Shared with Microsoft Foundry)
 
-Microsoft Foundry (formerly Azure AI Foundry) is Microsoft's unified AI platform for building AI apps and agents. Spaarke will leverage the following Foundry components:
+Spaarke uses the **same Azure primitives** that Microsoft packages into Foundry, but we access them directly for maximum control:
 
-| Component | Purpose | Spaarke Usage |
-|-----------|---------|---------------|
-| **Foundry Models** | 11,000+ frontier models, model router | Azure OpenAI GPT-4.1/5 series, embeddings |
-| **Foundry IQ** | Dynamic RAG, multi-source grounding | Document retrieval, context enrichment |
-| **Foundry Agent Service** | Hosted agents, multi-agent workflows | Future: autonomous document agents |
-| **Foundry Tools** | MCP tool catalog, API connectors | SPE/Dataverse integrations |
-| **Foundry Control Plane** | Identity, observability, security | Agent governance, monitoring |
+| Azure Component | Microsoft Foundry Name | Spaarke Implementation | Status |
+|-----------------|----------------------|------------------------|--------|
+| **Azure OpenAI** | Foundry Models | Direct SDK usage | ✅ Active |
+| **Azure AI Search** | Foundry IQ (backend) | Custom RagService | ✅ Active |
+| **Document Intelligence** | (part of Foundry) | Direct SDK usage | ✅ Active |
+| **Azure Redis** | N/A | Custom EmbeddingCache | ✅ Active |
 
-### 2.2 Layered Architecture
+### 2.2 Microsoft Foundry Services (Future Consideration)
+
+Microsoft Foundry provides "managed" abstractions over Azure components. We may adopt these post-GA where they add value:
+
+| Foundry Service | Purpose | Spaarke Status | Decision |
+|-----------------|---------|----------------|----------|
+| **Foundry IQ** | Managed RAG-as-a-Service | 🔮 Future | Evaluate post-GA for simple queries |
+| **Foundry Agent Service** | Hosted agent runtime | 🔮 Future | Potential runtime option (keep Playbook system) |
+| **Model Router** | Dynamic model selection | 🔮 Future | Cost optimization when GA |
+| **Foundry Tools (MCP)** | Tool catalog, connectors | 🔮 Future | May expose SPE/Dataverse as MCP tools |
+| **Foundry Control Plane** | Governance, observability | ⚠️ Evaluate | May adopt for enterprise governance |
+
+**Current Approach**: Build custom ("Spaarke IQ") now, adopt Foundry services selectively post-GA where they add measurable value without sacrificing our unique capabilities.
+
+### 2.3 Layered Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -1133,47 +1215,84 @@ app.MapGroup("/api/ai")
 
 ---
 
-## 12. Future Considerations
+## 13. Future Considerations
 
-### 12.1 M365 Copilot Integration (Model 2 Only)
+> **Detailed Analysis**: See [Spaarke-Microsoft-IQ-ADOPTION-ANALYSIS.md](Spaarke-Microsoft-IQ-ADOPTION-ANALYSIS.md) for comprehensive comparison of custom vs managed approaches, migration paths, and decision framework.
+
+### 13.1 Microsoft Foundry Adoption Strategy
+
+Our approach is "**custom first, adopt selectively**":
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Adoption Decision Framework                   │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   NOW (Jan 2026)      June 2026 (Launch)      Post-GA (2026+)   │
+│   ──────────────      ─────────────────      ───────────────    │
+│   Custom "Spaarke IQ" Launch with custom     Evaluate Foundry   │
+│   ├─ RagService       ├─ Full control        ├─ Foundry IQ      │
+│   ├─ Orchestration    ├─ Proven architecture │   for simple RAG │
+│   ├─ Tool Handlers    ├─ Playbook System     ├─ Agent Service   │
+│   └─ Playbook System  └─ Multi-tenant        │   for runtime    │
+│                                              └─ Model Router    │
+│                                                  for cost opt   │
+│                                                                  │
+│   ALWAYS KEEP: Playbook System (our differentiator)              │
+│                Custom PCF Controls (domain-specific UX)          │
+│                Multi-tenant RAG isolation                        │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+| Foundry Service | Adoption Decision | Rationale |
+|-----------------|-------------------|-----------|
+| **Foundry IQ** | ⏳ Evaluate post-GA | May simplify RAG for basic queries; keep custom for advanced |
+| **Foundry Agent Service** | ⏳ Evaluate post-GA | Runtime option; keep Playbook as config layer above it |
+| **Model Router** | ⏳ Evaluate when GA | Cost optimization without changing architecture |
+| **Foundry Control Plane** | ✅ Consider early | Governance/compliance without changing code |
+
+### 13.2 M365 Copilot Integration (Model 2 Only)
 
 If customers with M365 Copilot licenses want integration:
 - **Graph Connector**: Index SPE documents to Microsoft Search
 - **Declarative Agent**: Spaarke-specific agent in customer's Copilot
 - **Plugin**: Expose Spaarke AI as Copilot plugin
-- **Agent 365**: Deploy from Foundry Agent Service to M365 (Public Preview)
+- **Agent 365**: Deploy from Foundry Agent Service to M365 (optional)
 
-### 12.2 Foundry Agent Service Adoption
+### 13.3 Foundry Agent Service (Future Runtime Option)
 
 | Feature | Timeline | Description |
 |---------|----------|-------------|
-| **Hosted Agents** | 2025 H2 | Move from self-hosted to Foundry-managed agents |
-| **Multi-Agent Workflows** | 2026 | Document review, contract analysis agents |
-| **Memory** | 2026 | Cross-session context for personalization |
-| **Foundry Tools (MCP)** | 2026 | Expose Spaarke APIs via MCP protocol |
+| **Hosted Agents** | Post-GA 2026 | Optional runtime for our tool handlers |
+| **Multi-Agent Workflows** | 2026+ | Document review, contract analysis agents |
+| **Memory** | 2026+ | Cross-session context for personalization |
+| **Foundry Tools (MCP)** | 2026+ | Expose Spaarke APIs via MCP protocol |
 
-### 12.3 Advanced Capabilities
+**Key Principle**: If we adopt Foundry Agent Service, our **Playbook System remains** as the configuration layer above it. Foundry would be the runtime; Playbooks define the workflows.
+
+### 13.4 Advanced Capabilities
 
 | Capability | Timeline | Description |
 |------------|----------|-------------|
-| **Multimodal** | 2025 H2 | Process images, diagrams in documents (GPT-4.1/5 with vision) |
-| **Agentic workflows** | 2026 | Multi-step reasoning, tool use via Agent Framework |
-| **Model Router** | 2026 | Dynamic model selection per task (cost/quality) |
-| **Foundry Local** | 2026+ | Edge deployment for offline/privacy scenarios |
+| **Multimodal** | 2026 | Process images, diagrams in documents (GPT-4/5 with vision) |
+| **Agentic workflows** | 2026+ | Multi-step reasoning, tool use via Agent Framework |
+| **Model Router** | Post-GA | Dynamic model selection per task (cost/quality) |
+| **Foundry Local** | 2027+ | Edge deployment for offline/privacy scenarios |
 
-### 12.4 Technology Watch
+### 13.5 Technology Watch
 
 | Technology | Interest | Notes |
 |------------|----------|-------|
-| **Microsoft Agent Framework GA** | High | Migrate from Semantic Kernel when stable |
-| **Foundry IQ GA** | High | Simplify RAG implementation |
-| **GPT-5.1+ / o3** | High | Performance improvements, latest capabilities |
+| **Foundry IQ GA** | High | Evaluate for RAG simplification post-GA |
+| **Foundry Agent Service GA** | High | Evaluate as optional runtime |
+| **GPT-5+ / o3** | High | Performance improvements, latest capabilities |
 | **Anthropic Claude (via Foundry)** | Medium | Alternative for specific tasks |
 | **Mistral Large 3** | Medium | Cost-effective, open-weight |
-| **Foundry Local (Android/iOS)** | Medium | Mobile offline AI |
-| **Model Router** | Medium | Automatic model selection |
+| **Foundry Local (Android/iOS)** | Low | Mobile offline AI (future) |
+| **Model Router** | Medium | Automatic model selection for cost optimization |
 
-### 12.5 Migration Path: Semantic Kernel → Microsoft Agent Framework
+### 13.6 Migration Path: Semantic Kernel → Microsoft Agent Framework
 
 Microsoft Agent Framework is the successor to Semantic Kernel. Current guidance:
 

@@ -1,0 +1,55 @@
+<task id="023" project="ai-document-intelligence-r4">
+  <metadata>
+    <title>Write RiskDetectorHandler Tests</title>
+    <phase>3</phase>
+    <priority>P0</priority>
+    <estimate>2h</estimate>
+    <tags>testing, unit-tests, tool-handler</tags>
+    <dependencies>022</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Write unit tests for RiskDetectorHandler.
+    </goal>
+    <context>
+      Follow the established test pattern. Test validation, execution, and error handling.
+    </context>
+    <constraints>
+      - Mock IOpenAiClient
+      - Test risk categorization logic
+      - Test severity classification
+      - Verify confidence score handling
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/EntityExtractorHandlerTests.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/RiskDetectorHandler.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create RiskDetectorHandlerTests.cs</step>
+    <step order="2">Write validation tests</step>
+    <step order="3">Write execution success tests</step>
+    <step order="4">Write error handling tests</step>
+    <step order="5">Run tests and verify</step>
+  </steps>
+
+  <tools>
+    <tool>Read - for pattern reference</tool>
+    <tool>Write - for test implementation</tool>
+    <tool>Bash - for dotnet test</tool>
+  </tools>
+
+  <outputs>
+    <output>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/RiskDetectorHandlerTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Test file created</criterion>
+    <criterion>All tests pass</criterion>
+  </acceptance-criteria>
+</task>

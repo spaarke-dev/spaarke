@@ -1,0 +1,57 @@
+<task id="051" project="ai-document-intelligence-r4">
+  <metadata>
+    <title>Integrate Playbook Selection in AnalysisWorkspace</title>
+    <phase>6</phase>
+    <priority>P2</priority>
+    <estimate>3h</estimate>
+    <tags>pcf, ui, integration</tags>
+    <dependencies>050</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Integrate playbook selection into AnalysisWorkspace workflow.
+    </goal>
+    <context>
+      When starting an analysis, users should be able to select a playbook. The workspace
+      should pass the playbook ID to the analysis API.
+    </context>
+    <constraints>
+      - Integrate with existing AnalysisWorkspace
+      - Pass playbook ID to analysis endpoint
+      - Maintain existing workflow
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/AnalysisWorkspace/control/components/AnalysisWorkspaceApp.tsx</file>
+      <file>projects/ai-document-intelligence-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review AnalysisWorkspaceApp.tsx</step>
+    <step order="2">Add playbook selection state</step>
+    <step order="3">Pass playbook ID to analysis API calls</step>
+    <step order="4">Update UI to show selected playbook</step>
+    <step order="5">Test integration</step>
+    <step order="6">Build PCF</step>
+  </steps>
+
+  <tools>
+    <tool>Read - for existing component</tool>
+    <tool>Edit - for integration</tool>
+    <tool>Bash - for npm build</tool>
+  </tools>
+
+  <outputs>
+    <output>Updated AnalysisWorkspaceApp.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Playbook selection integrated in workflow</criterion>
+    <criterion>Playbook ID passed to API</criterion>
+    <criterion>PCF builds successfully</criterion>
+  </acceptance-criteria>
+</task>

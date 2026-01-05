@@ -1,0 +1,61 @@
+<task id="013" project="ai-document-intelligence-r4" status="completed" completed="2026-01-04">
+  <metadata>
+    <title>Create Knowledge Seed Data</title>
+    <phase>2</phase>
+    <priority>P0</priority>
+    <estimate>2h</estimate>
+    <tags>dataverse, seed-data, knowledge</tags>
+    <dependencies>010</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Create 10 Knowledge seed records (KNW-001 through KNW-010) in Dataverse.
+    </goal>
+    <context>
+      Knowledge records provide context for AI analysis. They can be Inline (content stored directly)
+      or RAG-based (reference to an AI Search deployment). Knowledge is linked to Playbooks via N:N.
+    </context>
+    <constraints>
+      - Create 10 Knowledge records as specified in design
+      - Mix of Inline and RagIndex types
+      - Each must have Name, Description, Type, and Content/DeploymentRef
+      - Link to appropriate KnowledgeType category
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r4/AI-ANALYSIS-IMPLEMENTATION-DESIGN.md</file>
+      <file>projects/ai-document-intelligence-r4/ai-dataverse-entity-model.md</file>
+      <file>projects/ai-document-intelligence-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review Knowledge definitions from design document</step>
+    <step order="2">Create seed data JSON/script for 10 Knowledge records</step>
+    <step order="3">Define Inline content for static knowledge</step>
+    <step order="4">Define RAG deployment references for search-based knowledge</step>
+    <step order="5">Execute seed data script</step>
+    <step order="6">Verify 10 Knowledge records exist</step>
+  </steps>
+
+  <tools>
+    <tool>Read - for design document</tool>
+    <tool>Write - for seed data scripts</tool>
+    <tool>Bash - for data insertion</tool>
+  </tools>
+
+  <outputs>
+    <output>scripts/seed-data/knowledge.json</output>
+    <output>10 Knowledge records in Dataverse</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>10 Knowledge records exist (KNW-001 through KNW-010)</criterion>
+    <criterion>Mix of Inline and RagIndex types</criterion>
+    <criterion>Each has Name, Description, Type populated</criterion>
+    <criterion>Inline records have Content, RAG records have DeploymentRef</criterion>
+  </acceptance-criteria>
+</task>

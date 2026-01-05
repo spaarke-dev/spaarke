@@ -1,0 +1,64 @@
+<task id="022" project="ai-document-intelligence-r4">
+  <metadata>
+    <title>Implement RiskDetectorHandler</title>
+    <phase>3</phase>
+    <priority>P0</priority>
+    <estimate>3h</estimate>
+    <tags>tool-handler, ai, implementation</tags>
+    <dependencies>001</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Implement RiskDetectorHandler.cs for identifying and categorizing risks in documents.
+    </goal>
+    <context>
+      RiskDetectorHandler analyzes documents for potential risks, categorizes them by severity
+      (high/medium/low), and provides explanations. Uses Azure OpenAI for analysis.
+    </context>
+    <constraints>
+      - Implement IAnalysisToolHandler interface
+      - Return structured risk categories with severity
+      - Support configurable risk categories via Configuration
+      - Include confidence scores for each risk
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/EntityExtractorHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IAnalysisToolHandler.cs</file>
+      <file>projects/ai-document-intelligence-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create RiskDetectorHandler.cs in Services/Ai/Tools/</step>
+    <step order="2">Define RiskItem and RiskDetectionResult classes</step>
+    <step order="3">Implement HandlerId, Metadata properties</step>
+    <step order="4">Implement Validate method</step>
+    <step order="5">Implement ExecuteAsync with risk detection prompt</step>
+    <step order="6">Parse AI response into structured risk items</step>
+    <step order="7">Register handler in ToolHandlerRegistry</step>
+    <step order="8">Build and verify</step>
+  </steps>
+
+  <tools>
+    <tool>Read - for pattern reference</tool>
+    <tool>Write - for handler implementation</tool>
+    <tool>Edit - for registry updates</tool>
+    <tool>Bash - for dotnet build</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/RiskDetectorHandler.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>RiskDetectorHandler implements IAnalysisToolHandler</criterion>
+    <criterion>Returns structured risk items with severity</criterion>
+    <criterion>Includes confidence scores</criterion>
+    <criterion>Handler registered in DI</criterion>
+    <criterion>dotnet build succeeds</criterion>
+  </acceptance-criteria>
+</task>

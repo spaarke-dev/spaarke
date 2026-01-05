@@ -1,0 +1,58 @@
+<task id="042" project="ai-document-intelligence-r4">
+  <metadata>
+    <title>Validate Playbook Configurations</title>
+    <phase>5</phase>
+    <priority>P1</priority>
+    <estimate>2h</estimate>
+    <tags>validation, testing, integration</tags>
+    <dependencies>041,031</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Validate that MVP playbook configurations work end-to-end.
+    </goal>
+    <context>
+      Test each playbook by loading it, resolving scopes, and verifying tools can be executed.
+      This validates the complete scope composition system.
+    </context>
+    <constraints>
+      - Test each MVP playbook
+      - Verify scope resolution works
+      - Verify tool handlers are found
+      - Document any issues
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r4/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load PB-001 and verify scope resolution</step>
+    <step order="2">Load PB-002 and verify scope resolution</step>
+    <step order="3">Load PB-010 and verify scope resolution</step>
+    <step order="4">Test ExecutePlaybookAsync with each playbook</step>
+    <step order="5">Document validation results</step>
+  </steps>
+
+  <tools>
+    <tool>Read - for service code</tool>
+    <tool>Bash - for test execution</tool>
+    <tool>Write - for validation report</tool>
+  </tools>
+
+  <outputs>
+    <output>notes/playbook-validation-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All 3 MVP playbooks load successfully</criterion>
+    <criterion>Scopes resolve correctly for each</criterion>
+    <criterion>Tool handlers found for all tools</criterion>
+    <criterion>ExecutePlaybookAsync runs without errors</criterion>
+  </acceptance-criteria>
+</task>

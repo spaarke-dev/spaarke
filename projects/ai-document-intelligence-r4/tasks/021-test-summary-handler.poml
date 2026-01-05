@@ -1,0 +1,65 @@
+<task id="021" project="ai-document-intelligence-r4">
+  <metadata>
+    <title>Write SummaryHandler Tests</title>
+    <phase>3</phase>
+    <priority>P0</priority>
+    <estimate>2h</estimate>
+    <tags>testing, unit-tests, tool-handler</tags>
+    <dependencies>020</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Write unit tests for SummaryHandler following the EntityExtractorHandlerTests pattern.
+    </goal>
+    <context>
+      Unit tests verify handler behavior with mocked dependencies. Follow existing test patterns
+      for tool handlers, using Moq for OpenAiClient mocking.
+    </context>
+    <constraints>
+      - Follow EntityExtractorHandlerTests pattern
+      - Mock IOpenAiClient for AI calls
+      - Test validation logic
+      - Test successful execution
+      - Test error handling
+      - Achieve 80%+ code coverage
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/EntityExtractorHandlerTests.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/SummaryHandler.cs</file>
+      <file>projects/ai-document-intelligence-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read EntityExtractorHandlerTests for pattern reference</step>
+    <step order="2">Create SummaryHandlerTests.cs in Tests/Services/Ai/</step>
+    <step order="3">Write test for Validate with valid input</step>
+    <step order="4">Write test for Validate with missing document</step>
+    <step order="5">Write test for ExecuteAsync success case</step>
+    <step order="6">Write test for ExecuteAsync error handling</step>
+    <step order="7">Write test for configuration parsing</step>
+    <step order="8">Run tests and verify all pass</step>
+  </steps>
+
+  <tools>
+    <tool>Read - for pattern reference</tool>
+    <tool>Write - for test implementation</tool>
+    <tool>Bash - for dotnet test</tool>
+  </tools>
+
+  <outputs>
+    <output>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/SummaryHandlerTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Test file created following naming convention</criterion>
+    <criterion>Tests use Moq for dependency mocking</criterion>
+    <criterion>Validation tests cover success and failure</criterion>
+    <criterion>Execution tests cover success and error</criterion>
+    <criterion>All tests pass (dotnet test)</criterion>
+  </acceptance-criteria>
+</task>

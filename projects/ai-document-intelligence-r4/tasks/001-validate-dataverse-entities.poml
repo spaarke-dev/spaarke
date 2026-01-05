@@ -1,0 +1,63 @@
+<task id="001" project="ai-document-intelligence-r4">
+  <metadata>
+    <title>Validate Dataverse Entity Fields</title>
+    <phase>1</phase>
+    <priority>P0</priority>
+    <estimate>2h</estimate>
+    <status>completed</status>
+    <completed-date>2026-01-04</completed-date>
+    <tags>dataverse, validation, entity-model</tags>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Validate that Dataverse entity fields match the expected C# model definitions for the R4 scope system.
+    </goal>
+    <context>
+      R4 builds on R3 infrastructure. Before implementing tool handlers and seed data, we must confirm
+      the Dataverse entities have the expected fields. The entity model is documented in
+      ai-dataverse-entity-model.md.
+    </context>
+    <constraints>
+      - Do not modify Dataverse schema in this task (validation only)
+      - Document any discrepancies found
+      - Focus on: sprk_analysisaction, sprk_analysisskill, sprk_analysisknowledge, sprk_analysistool
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r4/ai-dataverse-entity-model.md</file>
+      <file>projects/ai-document-intelligence-r4/CLAUDE.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read ai-dataverse-entity-model.md for expected field definitions</step>
+    <step order="2">Query Dataverse metadata for each entity (sprk_analysisaction, sprk_analysisskill, sprk_analysisknowledge, sprk_analysistool)</step>
+    <step order="3">Compare field names, types, and relationships</step>
+    <step order="4">Verify N:N intersection tables exist</step>
+    <step order="5">Document any discrepancies in notes/entity-validation-report.md</step>
+    <step order="6">Update current-task.md with findings</step>
+  </steps>
+
+  <tools>
+    <tool>Read - for entity model documentation</tool>
+    <tool>Bash - for Dataverse metadata queries via PAC CLI or Web API</tool>
+    <tool>Write - for validation report</tool>
+  </tools>
+
+  <outputs>
+    <output>notes/entity-validation-report.md with field comparison</output>
+    <output>Confirmation that entities are ready for seed data</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All expected fields documented in ai-dataverse-entity-model.md exist</criterion>
+    <criterion>N:N relationships between Playbook and scopes confirmed</criterion>
+    <criterion>Type lookup tables (sprk_ai*type) confirmed to exist</criterion>
+    <criterion>Any discrepancies documented with recommendations</criterion>
+  </acceptance-criteria>
+</task>

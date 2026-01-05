@@ -1,0 +1,70 @@
+<task id="020" project="ai-document-intelligence-r4" status="completed" completed="2026-01-04">
+  <metadata>
+    <title>Implement SummaryHandler</title>
+    <phase>3</phase>
+    <priority>P0</priority>
+    <estimate>3h</estimate>
+    <tags>tool-handler, ai, implementation</tags>
+    <dependencies>001</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Implement SummaryHandler.cs for document summarization following the IAnalysisToolHandler pattern.
+    </goal>
+    <context>
+      SummaryHandler generates document summaries with configurable length (short/medium/long).
+      It uses Azure OpenAI for summarization. Follow the EntityExtractorHandler pattern exactly.
+    </context>
+    <constraints>
+      - Implement IAnalysisToolHandler interface
+      - Use existing OpenAiClient for AI calls
+      - Support configurable summary length via Configuration JSON
+      - Complete within 30 seconds for standard documents
+      - Register in ToolHandlerRegistry
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/EntityExtractorHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IAnalysisToolHandler.cs</file>
+      <file>projects/ai-document-intelligence-r4/CLAUDE.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read EntityExtractorHandler.cs for pattern reference</step>
+    <step order="2">Create SummaryHandler.cs in Services/Ai/Tools/</step>
+    <step order="3">Implement HandlerId, Metadata properties</step>
+    <step order="4">Implement Validate method for input validation</step>
+    <step order="5">Implement ExecuteAsync with OpenAI summarization</step>
+    <step order="6">Add configuration parsing for summary length</step>
+    <step order="7">Register handler in ToolHandlerRegistry</step>
+    <step order="8">Build and verify no compilation errors</step>
+  </steps>
+
+  <tools>
+    <tool>Read - for pattern reference</tool>
+    <tool>Write - for handler implementation</tool>
+    <tool>Edit - for registry updates</tool>
+    <tool>Bash - for dotnet build</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/SummaryHandler.cs</output>
+    <output>Updated ToolHandlerRegistry.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>SummaryHandler implements IAnalysisToolHandler</criterion>
+    <criterion>HandlerId returns "SummaryHandler"</criterion>
+    <criterion>Metadata describes summarization capability</criterion>
+    <criterion>Validate checks for document context</criterion>
+    <criterion>ExecuteAsync returns ToolResult with summary</criterion>
+    <criterion>Configuration supports length parameter</criterion>
+    <criterion>Handler registered in DI</criterion>
+    <criterion>dotnet build succeeds</criterion>
+  </acceptance-criteria>
+</task>

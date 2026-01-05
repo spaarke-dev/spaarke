@@ -29,6 +29,8 @@ public class AnalysisOrchestrationServiceTests
     private readonly Mock<IWorkingDocumentService> _workingDocumentServiceMock;
     private readonly ExportServiceRegistry _exportRegistry;
     private readonly Mock<IRagService> _ragServiceMock;
+    private readonly Mock<IPlaybookService> _playbookServiceMock;
+    private readonly Mock<IToolHandlerRegistry> _toolHandlerRegistryMock;
     private readonly Mock<IHttpContextAccessor> _httpContextAccessorMock;
     private readonly Mock<ILogger<AnalysisOrchestrationService>> _loggerMock;
     private readonly IOptions<AnalysisOptions> _options;
@@ -45,6 +47,8 @@ public class AnalysisOrchestrationServiceTests
         _contextBuilderMock = new Mock<IAnalysisContextBuilder>();
         _workingDocumentServiceMock = new Mock<IWorkingDocumentService>();
         _ragServiceMock = new Mock<IRagService>();
+        _playbookServiceMock = new Mock<IPlaybookService>();
+        _toolHandlerRegistryMock = new Mock<IToolHandlerRegistry>();
         _httpContextAccessorMock = new Mock<IHttpContextAccessor>();
         _loggerMock = new Mock<ILogger<AnalysisOrchestrationService>>();
         _mockHttpContext = new DefaultHttpContext();
@@ -68,6 +72,8 @@ public class AnalysisOrchestrationServiceTests
             _workingDocumentServiceMock.Object,
             _exportRegistry,
             _ragServiceMock.Object,
+            _playbookServiceMock.Object,
+            _toolHandlerRegistryMock.Object,
             _httpContextAccessorMock.Object,
             _options,
             _loggerMock.Object);
@@ -371,7 +377,231 @@ public class AnalysisOrchestrationServiceTests
 
     #endregion
 
+    #region ExecutePlaybookAsync Tests - Playbook Validation (Task 042)
+
+    [Fact]
+    public async Task ExecutePlaybookAsync_ValidPlaybook_LoadsPlaybookAndResolvesScopesAndYieldsMetadata()
+    {
+        // Arrange - PB-001 Quick Document Review simulation
+        var playbookId = Guid.NewGuid();
+        var documentId = Guid.NewGuid();
+        var request = new PlaybookExecuteRequest
+        {
+            PlaybookId = playbookId,
+            DocumentIds = [documentId]
+        };
+
+        var document = CreateDocument(documentId);
+        var scopes = CreateEmptyScopes();
+        var playbook = CreatePlaybook(playbookId, "Quick Document Review");
+
+        // Setup PlaybookService mock
+        _playbookServiceMock
+            .Setup(x => x.GetPlaybookAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(playbook);
+
+        _scopeResolverMock
+            .Setup(x => x.ResolvePlaybookScopesAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(scopes);
+
+        _dataverseServiceMock
+            .Setup(x => x.GetDocumentAsync(documentId.ToString(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(document);
+
+        // Act
+        var chunks = new List<AnalysisStreamChunk>();
+        await foreach (var chunk in _service.ExecutePlaybookAsync(request, _mockHttpContext, CancellationToken.None))
+        {
+            chunks.Add(chunk);
+        }
+
+        // Assert - Should have metadata chunk
+        chunks.Should().HaveCountGreaterOrEqualTo(1);
+        chunks[0].Type.Should().Be("metadata");
+        chunks[0].AnalysisId.Should().NotBeEmpty();
+
+        // Verify scope resolution was called
+        _scopeResolverMock.Verify(
+            x => x.ResolvePlaybookScopesAsync(playbookId, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task ExecutePlaybookAsync_WithToolScopes_ResolvesToolsFromPlaybook()
+    {
+        // Arrange - PB-010 Risk Scan simulation with tools
+        var playbookId = Guid.NewGuid();
+        var documentId = Guid.NewGuid();
+        var tool1Id = Guid.NewGuid();
+        var tool2Id = Guid.NewGuid();
+
+        var request = new PlaybookExecuteRequest
+        {
+            PlaybookId = playbookId,
+            DocumentIds = [documentId]
+        };
+
+        var document = CreateDocument(documentId);
+        var playbook = CreatePlaybook(playbookId, "Risk Scan");
+
+        // Create scopes with tools
+        var tools = new[]
+        {
+            new AnalysisTool { Id = tool1Id, Name = "Entity Extractor", HandlerClass = "EntityExtractorHandler" },
+            new AnalysisTool { Id = tool2Id, Name = "Risk Detector", HandlerClass = "RiskDetectorHandler" }
+        };
+        var scopes = new ResolvedScopes([], [], tools);
+
+        // Setup PlaybookService mock
+        _playbookServiceMock
+            .Setup(x => x.GetPlaybookAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(playbook);
+
+        _scopeResolverMock
+            .Setup(x => x.ResolvePlaybookScopesAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(scopes);
+
+        _dataverseServiceMock
+            .Setup(x => x.GetDocumentAsync(documentId.ToString(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(document);
+
+        // Setup tool handler registry to return empty collection (no handlers available)
+        _toolHandlerRegistryMock
+            .Setup(x => x.GetHandlersByType(It.IsAny<ToolType>()))
+            .Returns(Array.Empty<IAnalysisToolHandler>());
+
+        // Act
+        var chunks = new List<AnalysisStreamChunk>();
+        await foreach (var chunk in _service.ExecutePlaybookAsync(request, _mockHttpContext, CancellationToken.None))
+        {
+            chunks.Add(chunk);
+        }
+
+        // Assert - Scope resolution should return our tools
+        _scopeResolverMock.Verify(
+            x => x.ResolvePlaybookScopesAsync(playbookId, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task ExecutePlaybookAsync_DocumentNotFound_ThrowsKeyNotFoundException()
+    {
+        // Arrange
+        var playbookId = Guid.NewGuid();
+        var documentId = Guid.NewGuid();
+        var request = new PlaybookExecuteRequest
+        {
+            PlaybookId = playbookId,
+            DocumentIds = [documentId]
+        };
+
+        var scopes = CreateEmptyScopes();
+        var playbook = CreatePlaybook(playbookId, "Test Playbook");
+
+        // Setup PlaybookService mock
+        _playbookServiceMock
+            .Setup(x => x.GetPlaybookAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(playbook);
+
+        _scopeResolverMock
+            .Setup(x => x.ResolvePlaybookScopesAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(scopes);
+
+        _dataverseServiceMock
+            .Setup(x => x.GetDocumentAsync(documentId.ToString(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DocumentEntity?)null);
+
+        // Act & Assert
+        var chunks = new List<AnalysisStreamChunk>();
+        var act = async () =>
+        {
+            await foreach (var chunk in _service.ExecutePlaybookAsync(request, _mockHttpContext, CancellationToken.None))
+            {
+                chunks.Add(chunk);
+            }
+        };
+
+        await act.Should().ThrowAsync<KeyNotFoundException>()
+            .WithMessage("*not found*");
+    }
+
+    [Fact]
+    public async Task ExecutePlaybookAsync_WithSkillsAndKnowledge_ResolvesAllScopes()
+    {
+        // Arrange - PB-002 Full Contract Analysis with all scope types
+        var playbookId = Guid.NewGuid();
+        var documentId = Guid.NewGuid();
+
+        var request = new PlaybookExecuteRequest
+        {
+            PlaybookId = playbookId,
+            DocumentIds = [documentId]
+        };
+
+        var document = CreateDocument(documentId);
+        var playbook = CreatePlaybook(playbookId, "Full Contract Analysis");
+
+        // Create full scopes with skills, knowledge, and tools
+        var skills = new[]
+        {
+            new AnalysisSkill { Id = Guid.NewGuid(), Name = "Contract Analysis", PromptFragment = "Analyze contracts..." },
+            new AnalysisSkill { Id = Guid.NewGuid(), Name = "Risk Assessment", PromptFragment = "Assess risks..." }
+        };
+        var knowledge = new[]
+        {
+            new AnalysisKnowledge { Id = Guid.NewGuid(), Name = "Standard Contract Terms", Content = "..." },
+            new AnalysisKnowledge { Id = Guid.NewGuid(), Name = "Best Practices", Content = "..." }
+        };
+        var tools = new[]
+        {
+            new AnalysisTool { Id = Guid.NewGuid(), Name = "Entity Extractor", HandlerClass = "EntityExtractorHandler" },
+            new AnalysisTool { Id = Guid.NewGuid(), Name = "Clause Analyzer", HandlerClass = "ClauseAnalyzerHandler" }
+        };
+        var scopes = new ResolvedScopes(skills, knowledge, tools);
+
+        // Setup PlaybookService mock
+        _playbookServiceMock
+            .Setup(x => x.GetPlaybookAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(playbook);
+
+        _scopeResolverMock
+            .Setup(x => x.ResolvePlaybookScopesAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(scopes);
+
+        _dataverseServiceMock
+            .Setup(x => x.GetDocumentAsync(documentId.ToString(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(document);
+
+        // Setup tool handler registry to return empty collection (no handlers available)
+        _toolHandlerRegistryMock
+            .Setup(x => x.GetHandlersByType(It.IsAny<ToolType>()))
+            .Returns(Array.Empty<IAnalysisToolHandler>());
+
+        // Act
+        var chunks = new List<AnalysisStreamChunk>();
+        await foreach (var chunk in _service.ExecutePlaybookAsync(request, _mockHttpContext, CancellationToken.None))
+        {
+            chunks.Add(chunk);
+        }
+
+        // Assert - Should have metadata chunk and resolve full scopes
+        chunks.Should().HaveCountGreaterOrEqualTo(1);
+        _scopeResolverMock.Verify(
+            x => x.ResolvePlaybookScopesAsync(playbookId, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    #endregion
+
     #region Helper Methods
+
+    private static PlaybookResponse CreatePlaybook(Guid? id = null, string? name = null) => new()
+    {
+        Id = id ?? Guid.NewGuid(),
+        Name = name ?? "Test Playbook",
+        Description = "Test playbook description",
+        IsPublic = true
+    };
 
     private void SetupMocks(Guid documentId, DocumentEntity document, AnalysisAction action, ResolvedScopes scopes)
     {

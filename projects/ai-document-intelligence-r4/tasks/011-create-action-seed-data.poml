@@ -1,0 +1,63 @@
+<task id="011" project="ai-document-intelligence-r4">
+  <metadata>
+    <title>Create Action Seed Data</title>
+    <phase>2</phase>
+    <priority>P0</priority>
+    <estimate>2h</estimate>
+    <status>completed</status>
+    <completed-date>2026-01-04</completed-date>
+    <tags>dataverse, seed-data, actions</tags>
+    <dependencies>010</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Create 8 Action seed records (ACT-001 through ACT-008) in Dataverse.
+    </goal>
+    <context>
+      Actions define system prompts and handler references for AI operations. Each Action has a Name,
+      Description, SystemPrompt, and reference to a handler class. Actions will be linked to Playbooks
+      via N:N relationships.
+    </context>
+    <constraints>
+      - Create 8 Action records as specified in design
+      - Each Action must have Name, Description, SystemPrompt, Handler reference
+      - Link to appropriate ActionType category
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r4/AI-ANALYSIS-IMPLEMENTATION-DESIGN.md</file>
+      <file>projects/ai-document-intelligence-r4/ai-dataverse-entity-model.md</file>
+      <file>projects/ai-document-intelligence-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review Action definitions from design document</step>
+    <step order="2">Create seed data JSON/script for 8 Actions</step>
+    <step order="3">Include SystemPrompt content for each Action</step>
+    <step order="4">Reference handler class names matching tool handlers</step>
+    <step order="5">Execute seed data script</step>
+    <step order="6">Verify 8 Action records exist</step>
+  </steps>
+
+  <tools>
+    <tool>Read - for design document</tool>
+    <tool>Write - for seed data scripts</tool>
+    <tool>Bash - for data insertion</tool>
+  </tools>
+
+  <outputs>
+    <output>scripts/seed-data/actions.json</output>
+    <output>8 Action records in Dataverse</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>8 Action records exist (ACT-001 through ACT-008)</criterion>
+    <criterion>Each Action has Name, Description, SystemPrompt</criterion>
+    <criterion>Each Action has Handler reference populated</criterion>
+    <criterion>Each Action linked to ActionType category</criterion>
+  </acceptance-criteria>
+</task>

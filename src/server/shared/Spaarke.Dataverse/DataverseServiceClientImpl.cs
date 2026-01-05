@@ -131,6 +131,27 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         };
     }
 
+    public async Task<AnalysisActionEntity?> GetAnalysisActionAsync(string id, CancellationToken ct = default)
+    {
+        var entity = await _serviceClient.RetrieveAsync(
+            "sprk_analysisaction",
+            Guid.Parse(id),
+            new ColumnSet("sprk_name", "sprk_description", "sprk_systemprompt", "sprk_sortorder"),
+            ct);
+
+        if (entity == null)
+            return null;
+
+        return new AnalysisActionEntity
+        {
+            Id = entity.Id,
+            Name = entity.GetAttributeValue<string>("sprk_name"),
+            Description = entity.GetAttributeValue<string>("sprk_description"),
+            SystemPrompt = entity.GetAttributeValue<string>("sprk_systemprompt"),
+            SortOrder = entity.GetAttributeValue<int?>("sprk_sortorder") ?? 0
+        };
+    }
+
     public async Task UpdateDocumentAsync(string id, UpdateDocumentRequest request, CancellationToken ct = default)
     {
         var document = new Entity("sprk_document", Guid.Parse(id));

@@ -102,4 +102,42 @@ public interface IAnalysisOrchestrationService
         AnalysisResumeRequest request,
         HttpContext httpContext,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Execute analysis using a playbook configuration.
+    /// Loads playbook, resolves scopes, and orchestrates tool execution.
+    /// </summary>
+    /// <param name="request">Playbook execution request with playbook ID and document IDs.</param>
+    /// <param name="httpContext">HTTP context for OBO authentication when downloading files from SPE.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Async enumerable of stream chunks for SSE response.</returns>
+    /// <remarks>
+    /// This method:
+    /// 1. Loads playbook configuration from Dataverse via IPlaybookService
+    /// 2. Resolves scopes (Skills, Knowledge, Tools) via IScopeResolverService
+    /// 3. Executes tools from playbook configuration via IToolHandlerRegistry
+    /// 4. Streams results back to client
+    /// </remarks>
+    IAsyncEnumerable<AnalysisStreamChunk> ExecutePlaybookAsync(
+        PlaybookExecuteRequest request,
+        HttpContext httpContext,
+        CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// Request for playbook-based analysis execution.
+/// </summary>
+public record PlaybookExecuteRequest
+{
+    /// <summary>The playbook ID to execute.</summary>
+    public required Guid PlaybookId { get; init; }
+
+    /// <summary>Document IDs to analyze.</summary>
+    public required Guid[] DocumentIds { get; init; }
+
+    /// <summary>Optional action ID override. If not specified, uses playbook's default action.</summary>
+    public Guid? ActionId { get; init; }
+
+    /// <summary>Additional context or instructions for the analysis.</summary>
+    public string? AdditionalContext { get; init; }
 }

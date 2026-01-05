@@ -1,0 +1,49 @@
+<task id="025" project="ai-document-intelligence-r4">
+  <metadata>
+    <title>Write ClauseComparisonHandler Tests</title>
+    <phase>3</phase>
+    <priority>P0</priority>
+    <estimate>2h</estimate>
+    <tags>testing, unit-tests, tool-handler</tags>
+    <dependencies>024</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Write unit tests for ClauseComparisonHandler.
+    </goal>
+    <context>
+      Follow the established test pattern. Test comparison logic and deviation detection.
+    </context>
+    <constraints>
+      - Mock dependencies
+      - Test with various comparison scenarios
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/EntityExtractorHandlerTests.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/ClauseComparisonHandler.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create ClauseComparisonHandlerTests.cs</step>
+    <step order="2">Write validation and execution tests</step>
+    <step order="3">Run tests and verify</step>
+  </steps>
+
+  <tools>
+    <tool>Write - for test implementation</tool>
+    <tool>Bash - for dotnet test</tool>
+  </tools>
+
+  <outputs>
+    <output>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ClauseComparisonHandlerTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All tests pass</criterion>
+  </acceptance-criteria>
+</task>

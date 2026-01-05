@@ -1,0 +1,60 @@
+<task id="024" project="ai-document-intelligence-r4">
+  <metadata>
+    <title>Implement ClauseComparisonHandler</title>
+    <phase>3</phase>
+    <priority>P0</priority>
+    <estimate>3h</estimate>
+    <tags>tool-handler, ai, implementation</tags>
+    <dependencies>001</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Implement ClauseComparisonHandler.cs for comparing document clauses to standard terms.
+    </goal>
+    <context>
+      ClauseComparisonHandler compares clauses in the document against standard/reference terms,
+      identifying deviations and potential issues. Uses Knowledge records for standard terms.
+    </context>
+    <constraints>
+      - Implement IAnalysisToolHandler interface
+      - Support comparison against standard terms from Knowledge
+      - Return structured comparison results with deviation indicators
+      - Include recommendations for each deviation
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/EntityExtractorHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/ClauseAnalyzerHandler.cs</file>
+      <file>projects/ai-document-intelligence-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create ClauseComparisonHandler.cs</step>
+    <step order="2">Define ComparisonResult and DeviationItem classes</step>
+    <step order="3">Implement comparison prompt with standard terms context</step>
+    <step order="4">Parse AI response into structured deviations</step>
+    <step order="5">Register handler</step>
+    <step order="6">Build and verify</step>
+  </steps>
+
+  <tools>
+    <tool>Read - for pattern reference</tool>
+    <tool>Write - for handler implementation</tool>
+    <tool>Bash - for dotnet build</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/ClauseComparisonHandler.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>ClauseComparisonHandler implements IAnalysisToolHandler</criterion>
+    <criterion>Returns structured comparison results</criterion>
+    <criterion>Identifies deviations from standard terms</criterion>
+    <criterion>dotnet build succeeds</criterion>
+  </acceptance-criteria>
+</task>

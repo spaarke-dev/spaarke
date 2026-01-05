@@ -1,0 +1,62 @@
+<task id="012" project="ai-document-intelligence-r4">
+  <metadata>
+    <title>Create Tool Seed Data</title>
+    <phase>2</phase>
+    <priority>P0</priority>
+    <estimate>2h</estimate>
+    <status>completed</status>
+    <completed-date>2026-01-04</completed-date>
+    <tags>dataverse, seed-data, tools</tags>
+    <dependencies>010</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Create 8 Tool seed records (TL-001 through TL-008) in Dataverse.
+    </goal>
+    <context>
+      Tools define handler configurations for specific AI operations. Each Tool has a HandlerClass
+      reference and JSON Configuration. Tools are linked to Playbooks via N:N relationships.
+    </context>
+    <constraints>
+      - Create 8 Tool records as specified in design
+      - Each Tool must have Name, Description, HandlerClass, Configuration JSON
+      - Link to appropriate ToolType category
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r4/AI-ANALYSIS-IMPLEMENTATION-DESIGN.md</file>
+      <file>projects/ai-document-intelligence-r4/ai-dataverse-entity-model.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/EntityExtractorHandler.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review Tool definitions from design document</step>
+    <step order="2">Create seed data JSON/script for 8 Tools</step>
+    <step order="3">Define Configuration JSON for each Tool (parameters, thresholds)</step>
+    <step order="4">Reference handler class names (existing + new handlers)</step>
+    <step order="5">Execute seed data script</step>
+    <step order="6">Verify 8 Tool records exist</step>
+  </steps>
+
+  <tools>
+    <tool>Read - for design document and existing handlers</tool>
+    <tool>Write - for seed data scripts</tool>
+    <tool>Bash - for data insertion</tool>
+  </tools>
+
+  <outputs>
+    <output>scripts/seed-data/tools.json</output>
+    <output>8 Tool records in Dataverse</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>8 Tool records exist (TL-001 through TL-008)</criterion>
+    <criterion>Each Tool has Name, Description, HandlerClass</criterion>
+    <criterion>Each Tool has valid Configuration JSON</criterion>
+    <criterion>Each Tool linked to ToolType category</criterion>
+  </acceptance-criteria>
+</task>

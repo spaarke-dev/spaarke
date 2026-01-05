@@ -1,0 +1,60 @@
+<task id="040" project="ai-document-intelligence-r4">
+  <metadata>
+    <title>Create MVP Playbooks in Dataverse</title>
+    <phase>5</phase>
+    <priority>P1</priority>
+    <estimate>2h</estimate>
+    <tags>dataverse, playbooks, seed-data</tags>
+    <dependencies>015</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Create 3 MVP playbooks (PB-001, PB-002, PB-010) in Dataverse.
+    </goal>
+    <context>
+      MVP playbooks demonstrate the scope composition system. Each playbook combines different
+      Skills, Knowledge, Tools, and Actions for specific analysis scenarios.
+    </context>
+    <constraints>
+      - Create PB-001 Quick Review (basic document review)
+      - Create PB-002 Full Contract (comprehensive analysis)
+      - Create PB-010 Risk Scan (risk-focused analysis)
+      - Each must have appropriate name, description, output type
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r4/AI-ANALYSIS-IMPLEMENTATION-DESIGN.md</file>
+      <file>projects/ai-document-intelligence-r4/ai-dataverse-entity-model.md</file>
+      <file>projects/ai-document-intelligence-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define playbook configurations from design</step>
+    <step order="2">Create PB-001 Quick Review playbook</step>
+    <step order="3">Create PB-002 Full Contract playbook</step>
+    <step order="4">Create PB-010 Risk Scan playbook</step>
+    <step order="5">Verify playbooks exist in Dataverse</step>
+  </steps>
+
+  <tools>
+    <tool>Read - for design specifications</tool>
+    <tool>Write - for seed data scripts</tool>
+    <tool>Bash - for data insertion</tool>
+  </tools>
+
+  <outputs>
+    <output>3 Playbook records in Dataverse</output>
+    <output>scripts/seed-data/playbooks.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>PB-001 Quick Review exists</criterion>
+    <criterion>PB-002 Full Contract exists</criterion>
+    <criterion>PB-010 Risk Scan exists</criterion>
+    <criterion>Each has name, description, output type</criterion>
+  </acceptance-criteria>
+</task>
