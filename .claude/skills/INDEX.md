@@ -2,7 +2,7 @@
 
 > **Purpose**: Central registry of all Claude Code skills — the **single source of truth** for what skills exist, their triggers, and how to create new ones.
 >
-> **Last Updated**: January 5, 2026
+> **Last Updated**: January 5, 2026 (added azure-deploy skill)
 
 ---
 
@@ -37,6 +37,7 @@
 | [ai-procedure-maintenance](ai-procedure-maintenance/SKILL.md) | Maintain AI procedures when adding ADRs, patterns, skills | No | "update AI procedures", "add new ADR" |
 | [script-aware](script-aware/SKILL.md) | Discover and reuse scripts from library before writing new code | **Yes** | Auto-applied |
 | [adr-check](adr-check/SKILL.md) | Validate code against Architecture Decision Records | No | `/adr-check`, "check ADRs" |
+| [azure-deploy](azure-deploy/SKILL.md) | Deploy Azure infrastructure, BFF API, and configure App Service | No | "deploy to azure", "deploy api", "azure deployment" |
 | [code-review](code-review/SKILL.md) | Comprehensive code review (security, performance, style) | No | `/code-review`, "review code" |
 | [dataverse-deploy](dataverse-deploy/SKILL.md) | Deploy solutions, PCF controls, web resources to Dataverse | No | "deploy to dataverse", "pac pcf push" |
 | [design-to-spec](design-to-spec/SKILL.md) | Transform human design documents into AI-optimized spec.md | No | `/design-to-spec`, "design to spec" |
@@ -76,6 +77,9 @@
 
 ### 🔧 Maintenance
 - **ai-procedure-maintenance** - Propagate updates when adding ADRs, constraints, patterns, skills
+
+### ☁️ Azure/Infrastructure
+- **azure-deploy** - Deploy Azure infrastructure, BFF API, App Service configuration
 
 ### ⚙️ Dataverse/Platform
 - **dataverse-deploy** - Deploy solutions, PCF controls, web resources via PAC CLI
@@ -293,6 +297,8 @@ alwaysApply: false  # Only true for universal skills like conventions
 │   ├── SKILL.md
 │   └── references/
 │       └── adr-validation-rules.md
+├── azure-deploy/                ← Azure infrastructure and API deployment
+│   └── SKILL.md
 ├── code-review/
 │   ├── SKILL.md
 │   └── references/

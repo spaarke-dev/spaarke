@@ -233,6 +233,7 @@ When these phrases are detected, **STOP** and load the corresponding skill:
 | "create tasks", "decompose plan", "generate tasks" | `task-create` | Load `.claude/skills/task-create/SKILL.md` and follow procedure |
 | "review code", "code review" | `code-review` | Load `.claude/skills/code-review/SKILL.md` and follow checklist |
 | "check ADRs", "validate architecture" | `adr-check` | Load `.claude/skills/adr-check/SKILL.md` and validate |
+| "deploy to azure", "deploy api", "azure deployment", "deploy infrastructure" | `azure-deploy` | Load `.claude/skills/azure-deploy/SKILL.md` and follow procedure |
 | "deploy to dataverse", "pac pcf push", "solution import", "deploy control", "publish customizations" | `dataverse-deploy` | Load `.claude/skills/dataverse-deploy/SKILL.md` and follow procedure |
 | "edit ribbon", "add ribbon button", "ribbon customization", "command bar button" | `ribbon-edit` | Load `.claude/skills/ribbon-edit/SKILL.md` and follow procedure |
 | "pull from github", "update from remote", "sync with github", "git pull", "get latest" | `pull-from-github` | Load `.claude/skills/pull-from-github/SKILL.md` and follow procedure |
@@ -252,6 +253,7 @@ When these phrases are detected, **STOP** and load the corresponding skill:
 | Creating API endpoint, PCF control, or plugin | Apply `adr-aware` (always-apply) |
 | Writing any code | Apply `spaarke-conventions` (always-apply) |
 | Running `pac` commands, deploying to Dataverse | Load `dataverse-deploy` skill first |
+| Running `az` commands, deploying to Azure | Load `azure-deploy` skill first |
 | Modifying ribbon XML, `RibbonDiffXml`, or command bar | Load `ribbon-edit` skill first |
 | Resuming work on existing project (has tasks/, CLAUDE.md) | Run `project-continue` to sync and load context |
 
@@ -279,6 +281,7 @@ Use these commands to explicitly invoke skills:
 | `/repo-cleanup` | Repository hygiene audit and ephemeral file cleanup |
 | `/code-review` | Review recent changes |
 | `/adr-check` | Validate ADR compliance |
+| `/azure-deploy` | Deploy Azure infrastructure, BFF API, or configure App Service |
 | `/dataverse-deploy` | Deploy PCF, solutions, or web resources to Dataverse |
 | `/ribbon-edit` | Edit Dataverse ribbon via solution export/import |
 | `/pull-from-github` | Pull latest changes from GitHub |
@@ -595,4 +598,4 @@ See `CLAUDE.md` files in subdirectories for module-specific guidance:
 
 ---
 
-*Last updated: January 5, 2026*
+*Last updated: January 5, 2026 (added azure-deploy skill)*
