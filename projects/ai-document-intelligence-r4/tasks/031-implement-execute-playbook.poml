@@ -1,0 +1,64 @@
+<task id="031" project="ai-document-intelligence-r4">
+  <metadata>
+    <title>Implement ExecutePlaybookAsync</title>
+    <phase>4</phase>
+    <priority>P1</priority>
+    <estimate>4h</estimate>
+    <tags>service, orchestration, implementation</tags>
+    <dependencies>029,030</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Extend AnalysisOrchestrationService with ExecutePlaybookAsync method.
+    </goal>
+    <context>
+      ExecutePlaybookAsync loads a playbook, resolves its scopes (Skills, Knowledge, Tools, Actions),
+      and orchestrates tool execution. This is the core method for playbook-based analysis.
+    </context>
+    <constraints>
+      - EXTEND existing AnalysisOrchestrationService (DO NOT recreate)
+      - Use existing ScopeResolverService for scope loading
+      - Use existing ToolHandlerRegistry for handler discovery
+      - Support streaming via SSE
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ToolHandlerRegistry.cs</file>
+      <file>projects/ai-document-intelligence-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing AnalysisOrchestrationService.cs</step>
+    <step order="2">Add ExecutePlaybookAsync method signature</step>
+    <step order="3">Load playbook via PlaybookService</step>
+    <step order="4">Resolve scopes via ScopeResolverService</step>
+    <step order="5">Build analysis context with resolved scopes</step>
+    <step order="6">Execute tools via ToolHandlerRegistry</step>
+    <step order="7">Return orchestration result</step>
+    <step order="8">Build and verify</step>
+  </steps>
+
+  <tools>
+    <tool>Read - for existing service code</tool>
+    <tool>Edit - for service extension</tool>
+    <tool>Bash - for dotnet build</tool>
+  </tools>
+
+  <outputs>
+    <output>Extended AnalysisOrchestrationService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>ExecutePlaybookAsync method added</criterion>
+    <criterion>Uses existing services (not recreating)</criterion>
+    <criterion>Loads playbook and resolves scopes</criterion>
+    <criterion>Executes tools from playbook</criterion>
+    <criterion>dotnet build succeeds</criterion>
+  </acceptance-criteria>
+</task>

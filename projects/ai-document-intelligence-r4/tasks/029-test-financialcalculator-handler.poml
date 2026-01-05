@@ -1,0 +1,49 @@
+<task id="029" project="ai-document-intelligence-r4">
+  <metadata>
+    <title>Write FinancialCalculatorHandler Tests</title>
+    <phase>3</phase>
+    <priority>P0</priority>
+    <estimate>2h</estimate>
+    <tags>testing, unit-tests, tool-handler</tags>
+    <dependencies>028</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Write unit tests for FinancialCalculatorHandler.
+    </goal>
+    <context>
+      Test financial extraction and calculation accuracy.
+    </context>
+    <constraints>
+      - Test various currency formats
+      - Verify calculation accuracy
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/EntityExtractorHandlerTests.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/FinancialCalculatorHandler.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create FinancialCalculatorHandlerTests.cs</step>
+    <step order="2">Write tests for financial extraction</step>
+    <step order="3">Run tests and verify</step>
+  </steps>
+
+  <tools>
+    <tool>Write - for test implementation</tool>
+    <tool>Bash - for dotnet test</tool>
+  </tools>
+
+  <outputs>
+    <output>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/FinancialCalculatorHandlerTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All tests pass</criterion>
+  </acceptance-criteria>
+</task>

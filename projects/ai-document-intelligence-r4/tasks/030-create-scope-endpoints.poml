@@ -1,0 +1,66 @@
+<task id="030" project="ai-document-intelligence-r4">
+  <metadata>
+    <title>Create Scope Listing Endpoints</title>
+    <phase>4</phase>
+    <priority>P1</priority>
+    <estimate>3h</estimate>
+    <tags>api, endpoints, minimal-api</tags>
+    <dependencies>015</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Create scope listing API endpoints following PlaybookEndpoints.cs pattern.
+    </goal>
+    <context>
+      Add endpoints to list Skills, Knowledge, Tools, and Actions from Dataverse.
+      Follow ADR-001 Minimal API pattern and ADR-008 endpoint filter authorization.
+    </context>
+    <constraints>
+      - Follow PlaybookEndpoints.cs pattern exactly
+      - Use endpoint groups with RequireAuthorization()
+      - Support pagination (page, pageSize parameters)
+      - Return typed responses
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookEndpoints.cs</file>
+      <file>docs/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>docs/adr/ADR-008-authorization-endpoint-filters.md</file>
+      <file>projects/ai-document-intelligence-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create ScopeEndpoints.cs in Api/Ai/</step>
+    <step order="2">Define endpoint group /api/ai/scopes</step>
+    <step order="3">Add GET /skills endpoint with pagination</step>
+    <step order="4">Add GET /knowledge endpoint with pagination</step>
+    <step order="5">Add GET /tools endpoint with pagination</step>
+    <step order="6">Add GET /actions endpoint with pagination</step>
+    <step order="7">Register endpoints in Program.cs</step>
+    <step order="8">Build and verify</step>
+  </steps>
+
+  <tools>
+    <tool>Read - for pattern reference</tool>
+    <tool>Write - for endpoint implementation</tool>
+    <tool>Edit - for Program.cs registration</tool>
+    <tool>Bash - for dotnet build</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Api/Ai/ScopeEndpoints.cs</output>
+    <output>Updated Program.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>ScopeEndpoints.cs follows PlaybookEndpoints pattern</criterion>
+    <criterion>All four scope types have listing endpoints</criterion>
+    <criterion>Pagination works correctly</criterion>
+    <criterion>Endpoints registered in Program.cs</criterion>
+    <criterion>dotnet build succeeds</criterion>
+  </acceptance-criteria>
+</task>

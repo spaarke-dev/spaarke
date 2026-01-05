@@ -1,0 +1,62 @@
+<task id="014" project="ai-document-intelligence-r4">
+  <metadata>
+    <title>Create Skill Seed Data</title>
+    <phase>2</phase>
+    <priority>P0</priority>
+    <estimate>2h</estimate>
+    <tags>dataverse, seed-data, skills</tags>
+    <dependencies>010</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Create 10 Skill seed records (SKL-001 through SKL-010) in Dataverse.
+    </goal>
+    <context>
+      Skills are prompt fragments that can be composed into Playbooks. Each Skill has a Name,
+      Description, and PromptFragment that gets injected into the analysis prompt. Skills are
+      categorized by SkillType and linked to Playbooks via N:N.
+    </context>
+    <constraints>
+      - Create 10 Skill records as specified in design
+      - Each must have Name, Description, PromptFragment
+      - Link to appropriate SkillType category
+      - Prompt fragments should be reusable across playbooks
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r4/AI-ANALYSIS-IMPLEMENTATION-DESIGN.md</file>
+      <file>projects/ai-document-intelligence-r4/ai-dataverse-entity-model.md</file>
+      <file>projects/ai-document-intelligence-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review Skill definitions from design document</step>
+    <step order="2">Create seed data JSON/script for 10 Skill records</step>
+    <step order="3">Define PromptFragment content for each Skill</step>
+    <step order="4">Assign appropriate SkillType categories</step>
+    <step order="5">Execute seed data script</step>
+    <step order="6">Verify 10 Skill records exist</step>
+  </steps>
+
+  <tools>
+    <tool>Read - for design document</tool>
+    <tool>Write - for seed data scripts</tool>
+    <tool>Bash - for data insertion</tool>
+  </tools>
+
+  <outputs>
+    <output>scripts/seed-data/skills.json</output>
+    <output>10 Skill records in Dataverse</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>10 Skill records exist (SKL-001 through SKL-010)</criterion>
+    <criterion>Each has Name, Description, PromptFragment</criterion>
+    <criterion>Each linked to SkillType category</criterion>
+    <criterion>Prompt fragments are well-formed and reusable</criterion>
+  </acceptance-criteria>
+</task>

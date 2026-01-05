@@ -1,0 +1,55 @@
+<task id="052" project="ai-document-intelligence-r4">
+  <metadata>
+    <title>Display Playbook Info During Analysis</title>
+    <phase>6</phase>
+    <priority>P2</priority>
+    <estimate>2h</estimate>
+    <tags>pcf, ui, display</tags>
+    <dependencies>051</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Display playbook name and info during and after analysis in AnalysisWorkspace.
+    </goal>
+    <context>
+      Users should see which playbook is being used during analysis. This provides
+      context and helps users understand the analysis approach.
+    </context>
+    <constraints>
+      - Show playbook name in analysis header
+      - Use Fluent v9 Badge or Tag component
+      - Support dark mode
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/AnalysisWorkspace/control/components/AnalysisWorkspaceApp.tsx</file>
+      <file>docs/adr/ADR-021-fluent-ui-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add playbook info display component</step>
+    <step order="2">Show during analysis (in progress state)</step>
+    <step order="3">Show after analysis (in results view)</step>
+    <step order="4">Style with Fluent v9 semantic tokens</step>
+    <step order="5">Test in dark mode</step>
+  </steps>
+
+  <tools>
+    <tool>Edit - for component updates</tool>
+    <tool>Bash - for npm build</tool>
+  </tools>
+
+  <outputs>
+    <output>Playbook display in AnalysisWorkspace</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Playbook name displayed during analysis</criterion>
+    <criterion>Playbook name shown in results</criterion>
+    <criterion>Dark mode works</criterion>
+  </acceptance-criteria>
+</task>

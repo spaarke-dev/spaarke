@@ -1,0 +1,60 @@
+<task id="053" project="ai-document-intelligence-r4">
+  <metadata>
+    <title>Test Dark Mode Support</title>
+    <phase>6</phase>
+    <priority>P2</priority>
+    <estimate>2h</estimate>
+    <tags>testing, pcf, dark-mode</tags>
+    <dependencies>052</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Verify all PCF changes work correctly in dark mode.
+    </goal>
+    <context>
+      Per ADR-021, all UI must support dark mode. This task verifies the R4 PCF changes
+      render correctly in light, dark, and high-contrast modes.
+    </context>
+    <constraints>
+      - Test all new/modified components
+      - Verify no hard-coded colors
+      - Check contrast ratios
+      - Document any issues
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-021-fluent-ui-design-system.md</file>
+      <file>projects/ai-document-intelligence-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Deploy PCF to Dataverse dev environment</step>
+    <step order="2">Open model-driven app in light mode</step>
+    <step order="3">Verify PlaybookSelector renders correctly</step>
+    <step order="4">Verify playbook display renders correctly</step>
+    <step order="5">Switch to dark mode</step>
+    <step order="6">Verify all components render correctly</step>
+    <step order="7">Check high-contrast mode</step>
+    <step order="8">Document test results</step>
+  </steps>
+
+  <tools>
+    <tool>Skill - dataverse-deploy for PCF deployment</tool>
+    <tool>Write - for test documentation</tool>
+  </tools>
+
+  <outputs>
+    <output>notes/dark-mode-test-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All components work in light mode</criterion>
+    <criterion>All components work in dark mode</criterion>
+    <criterion>No hard-coded colors found</criterion>
+    <criterion>Contrast ratios meet WCAG 2.1 AA</criterion>
+  </acceptance-criteria>
+</task>

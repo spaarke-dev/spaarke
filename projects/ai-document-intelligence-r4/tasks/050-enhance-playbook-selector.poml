@@ -1,0 +1,62 @@
+<task id="050" project="ai-document-intelligence-r4">
+  <metadata>
+    <title>Enhance PlaybookSelector Component</title>
+    <phase>6</phase>
+    <priority>P2</priority>
+    <estimate>3h</estimate>
+    <tags>pcf, ui, fluent-v9</tags>
+    <dependencies>030</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Enhance PlaybookSelector component in AnalysisBuilder to load and display available playbooks.
+    </goal>
+    <context>
+      The PlaybookSelector should fetch playbooks from the scope API and allow users to select
+      one for analysis. Must use Fluent UI v9 and support dark mode.
+    </context>
+    <constraints>
+      - Use Fluent UI v9 components only
+      - Support dark mode via semantic tokens
+      - Fetch playbooks from /api/ai/playbooks/public
+      - Follow ADR-021 design system
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/AnalysisBuilder/</file>
+      <file>src/client/pcf/AnalysisWorkspace/control/components/AnalysisWorkspaceApp.tsx</file>
+      <file>docs/adr/ADR-021-fluent-ui-design-system.md</file>
+      <file>projects/ai-document-intelligence-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing AnalysisBuilder PCF</step>
+    <step order="2">Create/enhance PlaybookSelector component</step>
+    <step order="3">Implement playbook fetching from API</step>
+    <step order="4">Add Fluent v9 Combobox/Dropdown for selection</step>
+    <step order="5">Use semantic tokens for styling</step>
+    <step order="6">Test in light and dark modes</step>
+    <step order="7">Build PCF control</step>
+  </steps>
+
+  <tools>
+    <tool>Read - for existing components</tool>
+    <tool>Write/Edit - for component updates</tool>
+    <tool>Bash - for npm build</tool>
+  </tools>
+
+  <outputs>
+    <output>Enhanced PlaybookSelector component</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>PlaybookSelector fetches playbooks from API</criterion>
+    <criterion>Uses Fluent v9 components</criterion>
+    <criterion>Works in dark mode</criterion>
+    <criterion>PCF builds successfully</criterion>
+  </acceptance-criteria>
+</task>

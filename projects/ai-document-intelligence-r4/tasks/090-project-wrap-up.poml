@@ -1,0 +1,68 @@
+<task id="090" project="ai-document-intelligence-r4">
+  <metadata>
+    <title>Project Wrap-up</title>
+    <phase>7</phase>
+    <priority>P1</priority>
+    <estimate>2h</estimate>
+    <tags>wrap-up, documentation, cleanup</tags>
+    <dependencies>053</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Complete project wrap-up activities including documentation updates and cleanup.
+    </goal>
+    <context>
+      Final task to close out R4 project. Update documentation, clean ephemeral files,
+      create lessons learned, and prepare for merge.
+    </context>
+    <constraints>
+      - Update README status to Complete
+      - Create lessons-learned.md
+      - Run /repo-cleanup
+      - Prepare PR for merge
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r4/README.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>.claude/skills/push-to-github/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Update README.md status to Complete</step>
+    <step order="2">Update all task statuses in TASK-INDEX.md</step>
+    <step order="3">Create lessons-learned.md with project insights</step>
+    <step order="4">Run /repo-cleanup to validate structure</step>
+    <step order="5">Clean up notes/ ephemeral files</step>
+    <step order="6">Run final dotnet test and npm run build</step>
+    <step order="7">Update PR for merge</step>
+    <step order="8">Final commit and push</step>
+  </steps>
+
+  <tools>
+    <tool>Edit - for documentation updates</tool>
+    <tool>Skill - repo-cleanup</tool>
+    <tool>Skill - push-to-github</tool>
+    <tool>Bash - for final builds and tests</tool>
+  </tools>
+
+  <outputs>
+    <output>Updated README.md with Complete status</output>
+    <output>lessons-learned.md</output>
+    <output>Clean repository structure</output>
+    <output>PR ready for merge</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>README status is Complete</criterion>
+    <criterion>All tasks marked complete in TASK-INDEX.md</criterion>
+    <criterion>lessons-learned.md created</criterion>
+    <criterion>/repo-cleanup passes</criterion>
+    <criterion>All tests pass</criterion>
+    <criterion>PR updated and ready for review</criterion>
+  </acceptance-criteria>
+</task>

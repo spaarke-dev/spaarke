@@ -1,0 +1,56 @@
+<task id="041" project="ai-document-intelligence-r4">
+  <metadata>
+    <title>Link Scopes to Playbooks</title>
+    <phase>5</phase>
+    <priority>P1</priority>
+    <estimate>2h</estimate>
+    <tags>dataverse, relationships, n-n</tags>
+    <dependencies>040</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Link Skills, Knowledge, Tools, and Actions to MVP playbooks via N:N relationships.
+    </goal>
+    <context>
+      Each playbook needs associated scopes. The N:N relationships connect playbooks to
+      their component scopes via intersection tables.
+    </context>
+    <constraints>
+      - Use N:N relationship APIs
+      - Each playbook must have at least one Skill
+      - Link appropriate scopes based on playbook purpose
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r4/AI-ANALYSIS-IMPLEMENTATION-DESIGN.md</file>
+      <file>projects/ai-document-intelligence-r4/ai-dataverse-entity-model.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Identify scope assignments for each playbook</step>
+    <step order="2">Create N:N relationship records for PB-001</step>
+    <step order="3">Create N:N relationship records for PB-002</step>
+    <step order="4">Create N:N relationship records for PB-010</step>
+    <step order="5">Verify relationships via query</step>
+  </steps>
+
+  <tools>
+    <tool>Read - for scope assignments</tool>
+    <tool>Write - for relationship scripts</tool>
+    <tool>Bash - for data insertion</tool>
+  </tools>
+
+  <outputs>
+    <output>N:N relationship records linking scopes to playbooks</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Each playbook has linked Skills</criterion>
+    <criterion>Playbooks have linked Knowledge, Tools, Actions as designed</criterion>
+    <criterion>Relationships queryable via ScopeResolverService</criterion>
+  </acceptance-criteria>
+</task>

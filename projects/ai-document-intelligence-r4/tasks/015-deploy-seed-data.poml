@@ -1,0 +1,62 @@
+<task id="015" project="ai-document-intelligence-r4">
+  <metadata>
+    <title>Deploy Seed Data to Dataverse</title>
+    <phase>2</phase>
+    <priority>P0</priority>
+    <estimate>1h</estimate>
+    <tags>dataverse, seed-data, deploy</tags>
+    <dependencies>011,012,013,014</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Execute all seed data scripts and verify data exists in Dataverse.
+    </goal>
+    <context>
+      This deployment task runs after all seed data scripts are created. It executes the scripts
+      and validates the expected record counts exist in each table.
+    </context>
+    <constraints>
+      - Run scripts in correct order (type lookups first, then scopes)
+      - Verify record counts: 8 Actions, 8 Tools, 10 Knowledge, 10 Skills
+      - Document any deployment issues
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-document-intelligence-r4/CLAUDE.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify PAC CLI authentication</step>
+    <step order="2">Run type lookup seed script</step>
+    <step order="3">Run Actions seed script</step>
+    <step order="4">Run Tools seed script</step>
+    <step order="5">Run Knowledge seed script</step>
+    <step order="6">Run Skills seed script</step>
+    <step order="7">Query and verify record counts</step>
+    <step order="8">Document deployment results</step>
+  </steps>
+
+  <tools>
+    <tool>Bash - for script execution and PAC CLI</tool>
+    <tool>Read - for seed data scripts</tool>
+    <tool>Write - for deployment log</tool>
+  </tools>
+
+  <outputs>
+    <output>notes/seed-data-deployment-log.md</output>
+    <output>Verified seed data in Dataverse</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All type lookup tables populated</criterion>
+    <criterion>8 Action records verified</criterion>
+    <criterion>8 Tool records verified</criterion>
+    <criterion>10 Knowledge records verified</criterion>
+    <criterion>10 Skill records verified</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,57 @@
+<task id="028" project="ai-document-intelligence-r4">
+  <metadata>
+    <title>Implement FinancialCalculatorHandler</title>
+    <phase>3</phase>
+    <priority>P0</priority>
+    <estimate>3h</estimate>
+    <tags>tool-handler, ai, implementation</tags>
+    <dependencies>001</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Implement FinancialCalculatorHandler.cs for extracting and calculating financial data.
+    </goal>
+    <context>
+      FinancialCalculatorHandler extracts monetary values, calculates totals, identifies payment
+      terms, and summarizes financial obligations in documents.
+    </context>
+    <constraints>
+      - Implement IAnalysisToolHandler interface
+      - Extract monetary values with currency
+      - Calculate totals and identify payment terms
+      - Return structured financial summary
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/EntityExtractorHandler.cs</file>
+      <file>projects/ai-document-intelligence-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create FinancialCalculatorHandler.cs</step>
+    <step order="2">Define FinancialItem and FinancialSummary classes</step>
+    <step order="3">Implement financial extraction and calculation logic</step>
+    <step order="4">Register handler</step>
+    <step order="5">Build and verify</step>
+  </steps>
+
+  <tools>
+    <tool>Write - for handler implementation</tool>
+    <tool>Bash - for dotnet build</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/FinancialCalculatorHandler.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>FinancialCalculatorHandler implements IAnalysisToolHandler</criterion>
+    <criterion>Extracts monetary values with currency</criterion>
+    <criterion>Calculates totals</criterion>
+    <criterion>dotnet build succeeds</criterion>
+  </acceptance-criteria>
+</task>

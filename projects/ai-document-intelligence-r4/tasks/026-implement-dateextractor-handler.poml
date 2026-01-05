@@ -1,0 +1,57 @@
+<task id="026" project="ai-document-intelligence-r4">
+  <metadata>
+    <title>Implement DateExtractorHandler</title>
+    <phase>3</phase>
+    <priority>P0</priority>
+    <estimate>3h</estimate>
+    <tags>tool-handler, ai, implementation</tags>
+    <dependencies>001</dependencies>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Implement DateExtractorHandler.cs for extracting and normalizing dates from documents.
+    </goal>
+    <context>
+      DateExtractorHandler finds dates in documents, normalizes them to ISO format, and identifies
+      their context (effective date, expiry date, signature date, etc.).
+    </context>
+    <constraints>
+      - Implement IAnalysisToolHandler interface
+      - Normalize dates to ISO 8601 format
+      - Identify date context/type
+      - Handle various date formats
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/EntityExtractorHandler.cs</file>
+      <file>projects/ai-document-intelligence-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create DateExtractorHandler.cs</step>
+    <step order="2">Define ExtractedDate and DateExtractionResult classes</step>
+    <step order="3">Implement date extraction and normalization logic</step>
+    <step order="4">Register handler</step>
+    <step order="5">Build and verify</step>
+  </steps>
+
+  <tools>
+    <tool>Write - for handler implementation</tool>
+    <tool>Bash - for dotnet build</tool>
+  </tools>
+
+  <outputs>
+    <output>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/DateExtractorHandler.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>DateExtractorHandler implements IAnalysisToolHandler</criterion>
+    <criterion>Returns normalized dates in ISO format</criterion>
+    <criterion>Identifies date context</criterion>
+    <criterion>dotnet build succeeds</criterion>
+  </acceptance-criteria>
+</task>
