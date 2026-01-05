@@ -86,7 +86,7 @@ Skills are organized in three tiers by complexity and scope:
 |------|------|---------|-------------------|
 | **Tier 1** | Component | project-setup, task-create | ❌ No (pure operations) |
 | **Tier 2** | Orchestrator | project-pipeline, task-execute | ✅ Yes (compose Tier 1) |
-| **Tier 3** | Operational | dataverse-deploy, ribbon-edit | ❌ No (domain-specific) |
+| **Tier 3** | Operational | azure-deploy, dataverse-deploy, ribbon-edit | ❌ No (domain-specific) |
 | **Tier 0** | Always-Apply | adr-aware, spaarke-conventions | N/A (automatic) |
 
 ---
@@ -318,9 +318,13 @@ Step 9: Update Task Status (task-execute)
   ✅ Output: "Task 001 complete. Next: execute task 002"
 
 Step 10: Special Task Types
-  IF task has tag="deploy":
+  IF task has tag="azure" or "infrastructure":
+    🔧 CALLS: azure-deploy
+      → Follow Azure deployment procedure
+
+  IF task has tag="deploy" or "dataverse":
     🔧 CALLS: dataverse-deploy
-      → Follow deployment procedure
+      → Follow Dataverse deployment procedure
 
   IF task involves ribbon:
     🔧 CALLS: ribbon-edit
@@ -668,6 +672,8 @@ START: I need to work on something
   │   │
   │   └─ NO → Is this a known operation?
   │       │
+  │       ├─ Deploy to Azure → azure-deploy
+  │       │
   │       ├─ Deploy to Dataverse → dataverse-deploy
   │       │
   │       ├─ Edit ribbon → ribbon-edit
@@ -719,8 +725,9 @@ START: I'm about to write code
   └─ Do I need to deploy or do platform operations?
       │
       └─ Explicitly invoke domain skill
-          ├─ /dataverse-deploy
-          └─ /ribbon-edit
+          ├─ /azure-deploy (Azure infrastructure, BFF API)
+          ├─ /dataverse-deploy (Dataverse, PCF, solutions)
+          └─ /ribbon-edit (ribbon customizations)
 ```
 
 ---
@@ -774,8 +781,10 @@ START: I'm about to write code
 **Principle**: Tier 3 (Operational) domain skills should NOT call other skills.
 
 **Examples**:
+- ✅ azure-deploy handles Azure infrastructure independently
 - ✅ dataverse-deploy completes deployment independently
 - ✅ ribbon-edit handles full ribbon edit cycle
+- ❌ azure-deploy should NOT call dataverse-deploy
 - ❌ dataverse-deploy should NOT call push-to-github
 - ❌ ribbon-edit should NOT call code-review
 
@@ -854,7 +863,10 @@ Use task tags to determine which domain skills to invoke:
 task-execute loads task file
   → Read <metadata><tags>
 
-  IF "deploy" in tags:
+  IF "azure" or "infrastructure" in tags:
+    → Call azure-deploy
+
+  IF "deploy" or "dataverse" in tags:
     → Call dataverse-deploy
 
   IF "ribbon" in tags:
@@ -908,7 +920,8 @@ project-pipeline (Developer-Facing)
         └─→ spaarke-conventions (implicit)
         └─→ code-review (after code)
         └─→ adr-check (after code)
-        └─→ dataverse-deploy (if tagged)
+        └─→ azure-deploy (if azure/infrastructure tagged)
+        └─→ dataverse-deploy (if deploy/dataverse tagged)
         └─→ ribbon-edit (if ribbon task)
 
 task-execute (Developer-Facing - Natural Language)
