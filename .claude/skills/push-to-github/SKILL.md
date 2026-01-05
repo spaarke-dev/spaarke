@@ -219,9 +219,34 @@ git push origin HEAD
 git push -u origin HEAD
 ```
 
-### Step 7: Create Pull Request
+### Step 7: Create or Update Pull Request
 
-#### Option A: Using GitHub CLI (Preferred)
+#### First: Check for Existing PR
+
+```powershell
+# Check if PR already exists for this branch
+gh pr list --head {current-branch} --state open --json number,url,title
+```
+
+```
+IF PR exists:
+  → "✅ PR #{number} already exists: {title}"
+  → "   {PR URL}"
+  → "   Changes pushed to existing PR."
+  → SKIP PR creation
+  → DONE
+
+IF no PR exists:
+  → "No PR found for branch '{branch}'. Create one? (y/n)"
+  → IF user says no:
+      → "Pushed to remote. Create PR manually when ready:"
+      → "  https://github.com/spaarke-dev/spaarke/compare/{branch}?expand=1"
+      → DONE
+  → IF user says yes:
+      → Continue to PR creation below
+```
+
+#### Create New PR: Using GitHub CLI (Preferred)
 
 ```powershell
 # Check if gh is available
@@ -255,7 +280,7 @@ gh pr create --title "{title}" --body @- << 'EOF'
 EOF
 ```
 
-#### Option B: Manual (Browser)
+#### Create New PR: Manual (Browser)
 
 ```
 PROVIDE GitHub PR URL:
