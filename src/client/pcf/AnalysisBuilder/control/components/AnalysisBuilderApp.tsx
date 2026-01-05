@@ -106,7 +106,7 @@ const useStyles = makeStyles({
 
 // Build date for version footer
 const BUILD_DATE = new Date().toISOString().split("T")[0];
-const VERSION = "2.8.1";
+const VERSION = "2.9.2";
 
 export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (props) => {
     const styles = useStyles();
@@ -309,28 +309,111 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (props) =>
         setSelectedOutputFormat("markdown");
     };
 
+    /**
+     * Load scopes (skills, knowledge, tools, actions) linked to a playbook via N:N relationships.
+     * Uses $expand to fetch related entities in a single query per scope type.
+     */
+    const loadPlaybookScopes = async (playbookId: string): Promise<{
+        skillIds: string[];
+        knowledgeIds: string[];
+        toolIds: string[];
+        actionIds: string[];
+    }> => {
+        const scopeIds = {
+            skillIds: [] as string[],
+            knowledgeIds: [] as string[],
+            toolIds: [] as string[],
+            actionIds: [] as string[]
+        };
+
+        try {
+            // Load playbook with all related scopes in one query using $expand
+            // N:N relationship names from Dataverse:
+            // - sprk_playbook_skill (Skills)
+            // - sprk_playbook_knowledge (Knowledge)
+            // - sprk_playbook_tool (Tools)
+            // - sprk_analysisplaybook_action (Actions - note different pattern)
+            const playbook = await webApi.retrieveRecord(
+                "sprk_analysisplaybook",
+                playbookId,
+                "?$expand=sprk_playbook_skill($select=sprk_analysisskillid),sprk_playbook_knowledge($select=sprk_analysisknowledgeid),sprk_playbook_tool($select=sprk_analysistoolid),sprk_analysisplaybook_action($select=sprk_analysisactionid)"
+            );
+
+            // Extract skill IDs
+            if (playbook.sprk_playbook_skill && Array.isArray(playbook.sprk_playbook_skill)) {
+                scopeIds.skillIds = playbook.sprk_playbook_skill.map(
+                    (s: { sprk_analysisskillid: string }) => s.sprk_analysisskillid
+                );
+            }
+
+            // Extract knowledge IDs
+            if (playbook.sprk_playbook_knowledge && Array.isArray(playbook.sprk_playbook_knowledge)) {
+                scopeIds.knowledgeIds = playbook.sprk_playbook_knowledge.map(
+                    (k: { sprk_analysisknowledgeid: string }) => k.sprk_analysisknowledgeid
+                );
+            }
+
+            // Extract tool IDs
+            if (playbook.sprk_playbook_tool && Array.isArray(playbook.sprk_playbook_tool)) {
+                scopeIds.toolIds = playbook.sprk_playbook_tool.map(
+                    (t: { sprk_analysistoolid: string }) => t.sprk_analysistoolid
+                );
+            }
+
+            // Extract action IDs (note: different relationship name pattern)
+            if (playbook.sprk_analysisplaybook_action && Array.isArray(playbook.sprk_analysisplaybook_action)) {
+                scopeIds.actionIds = playbook.sprk_analysisplaybook_action.map(
+                    (a: { sprk_analysisactionid: string }) => a.sprk_analysisactionid
+                );
+            }
+
+            logInfo("AnalysisBuilderApp", `Loaded playbook scopes: ${scopeIds.skillIds.length} skills, ${scopeIds.knowledgeIds.length} knowledge, ${scopeIds.toolIds.length} tools, ${scopeIds.actionIds.length} actions`);
+        } catch (err) {
+            logError("AnalysisBuilderApp", "Error loading playbook scopes", err);
+            // Fall back gracefully - playbook will be selected but scopes won't auto-populate
+        }
+
+        return scopeIds;
+    };
+
     // Event handlers
-    const handlePlaybookSelect = (playbook: IPlaybook): void => {
+    const handlePlaybookSelect = async (playbook: IPlaybook): Promise<void> => {
         setSelectedPlaybook(playbook);
         onPlaybookSelect(playbook.id);
         logInfo("AnalysisBuilderApp", `Selected playbook: ${playbook.name}`);
 
-        // Apply playbook configuration
-        if (playbook.actionId) {
-            setSelectedActionId(playbook.actionId);
-            onActionSelect(playbook.actionId);
-        }
-        if (playbook.skillIds) {
-            setSelectedSkillIds(playbook.skillIds);
-            onSkillsSelect(playbook.skillIds);
-        }
-        if (playbook.knowledgeIds) {
-            setSelectedKnowledgeIds(playbook.knowledgeIds);
-            onKnowledgeSelect(playbook.knowledgeIds);
-        }
-        if (playbook.toolIds) {
-            setSelectedToolIds(playbook.toolIds);
-            onToolsSelect(playbook.toolIds);
+        // Clear all previous scope selections first (important when switching playbooks)
+        setSelectedActionId(undefined);
+        setSelectedSkillIds([]);
+        setSelectedKnowledgeIds([]);
+        setSelectedToolIds([]);
+
+        // Load scopes from playbook's N:N relationships
+        try {
+            const scopes = await loadPlaybookScopes(playbook.id);
+
+            // Apply loaded scope selections from the new playbook
+            if (scopes.actionIds.length > 0) {
+                const actionId = scopes.actionIds[0]; // Use first action (single select)
+                setSelectedActionId(actionId);
+                onActionSelect(actionId);
+            }
+            if (scopes.skillIds.length > 0) {
+                setSelectedSkillIds(scopes.skillIds);
+                onSkillsSelect(scopes.skillIds);
+            }
+            if (scopes.knowledgeIds.length > 0) {
+                setSelectedKnowledgeIds(scopes.knowledgeIds);
+                onKnowledgeSelect(scopes.knowledgeIds);
+            }
+            if (scopes.toolIds.length > 0) {
+                setSelectedToolIds(scopes.toolIds);
+                onToolsSelect(scopes.toolIds);
+            }
+
+            logInfo("AnalysisBuilderApp", `Applied playbook scopes for: ${playbook.name}`);
+        } catch (err) {
+            logError("AnalysisBuilderApp", "Error applying playbook scopes", err);
         }
     };
 
@@ -413,8 +496,10 @@ export const AnalysisBuilderApp: React.FC<IAnalysisBuilderAppProps> = (props) =>
             }
 
             // Add playbook lookup (optional)
+            // Note: The lookup field is sprk_playbook (not sprk_playbookid)
+            // Read as _sprk_playbook_value, write as sprk_Playbook@odata.bind
             if (selectedPlaybook) {
-                analysisRecord["sprk_playbookid@odata.bind"] = `/sprk_analysisplaybooks(${selectedPlaybook.id})`;
+                analysisRecord["sprk_Playbook@odata.bind"] = `/sprk_analysisplaybooks(${selectedPlaybook.id})`;
             }
 
             // Create the analysis record first

@@ -160,22 +160,45 @@ public class ScopeResolverService : IScopeResolverService
     }
 
     /// <inheritdoc />
-    public Task<AnalysisAction?> GetActionAsync(
+    public async Task<AnalysisAction?> GetActionAsync(
         Guid actionId,
         CancellationToken cancellationToken)
     {
-        _logger.LogDebug("Loading action {ActionId}", actionId);
+        _logger.LogDebug("Loading action {ActionId} from Dataverse", actionId);
 
-        // Phase 1: Use stub actions or create default
+        try
+        {
+            // Fetch action from Dataverse
+            var actionEntity = await _dataverseService.GetAnalysisActionAsync(actionId.ToString(), cancellationToken);
+
+            if (actionEntity != null)
+            {
+                _logger.LogDebug("Found action in Dataverse: {ActionName}", actionEntity.Name);
+                return new AnalysisAction
+                {
+                    Id = actionEntity.Id,
+                    Name = actionEntity.Name ?? "Unknown",
+                    Description = actionEntity.Description ?? "",
+                    SystemPrompt = actionEntity.SystemPrompt ?? "You are an AI assistant that analyzes documents.",
+                    SortOrder = actionEntity.SortOrder
+                };
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to fetch action {ActionId} from Dataverse, falling back to stub data", actionId);
+        }
+
+        // Fallback: Check stub actions
         if (_stubActions.TryGetValue(actionId, out var action))
         {
             _logger.LogDebug("Found stub action: {ActionName}", action.Name);
-            return Task.FromResult<AnalysisAction?>(action);
+            return action;
         }
 
         // Return a default action for any unknown ID
-        _logger.LogInformation("Action {ActionId} not in stub data, returning default action", actionId);
-        return Task.FromResult<AnalysisAction?>(new AnalysisAction
+        _logger.LogInformation("Action {ActionId} not found in Dataverse or stub data, returning default action", actionId);
+        return new AnalysisAction
         {
             Id = actionId,
             Name = "Default Analysis",
@@ -183,7 +206,7 @@ public class ScopeResolverService : IScopeResolverService
             SystemPrompt = "You are an AI assistant that analyzes documents and provides helpful insights. " +
                           "Be thorough, accurate, and provide clear explanations.",
             SortOrder = 0
-        });
+        };
     }
 
     /// <inheritdoc />

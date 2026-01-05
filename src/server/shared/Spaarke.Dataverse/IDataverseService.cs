@@ -11,6 +11,7 @@ public interface IDataverseService
 
     // Analysis operations
     Task<AnalysisEntity?> GetAnalysisAsync(string id, CancellationToken ct = default);
+    Task<AnalysisActionEntity?> GetAnalysisActionAsync(string id, CancellationToken ct = default);
     Task UpdateDocumentAsync(string id, UpdateDocumentRequest request, CancellationToken ct = default);
     Task DeleteDocumentAsync(string id, CancellationToken ct = default);
     Task<IEnumerable<DocumentEntity>> GetDocumentsByContainerAsync(string containerId, CancellationToken ct = default);

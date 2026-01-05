@@ -9,110 +9,112 @@
 
 | Field | Value |
 |-------|-------|
-| Task ID | Phase 5 Complete |
-| Task File | N/A - Phase 5 finished |
-| Status | Ready for Phase 6 |
+| Task ID | Bug Fixes + Azure Deployment |
+| Task File | N/A - Post-Phase 6 bug fixes |
+| Status | Ready for Azure API Deployment |
 | Started | 2026-01-05 |
 
 ---
 
-## Progress
+## HANDOFF: Azure Deployment Required
 
-### Completed Phases
+### Bug Fixes Completed (This Session)
 
-#### Phase 1: Dataverse Entity Validation ✅
-- ✅ Task 001: Validate Dataverse Entity Fields
+Three bugs were discovered during user testing and fixed:
 
-#### Phase 2: Seed Data Population ✅
-- ✅ Task 010: Populate type lookup tables (19 records)
-- ✅ Task 011: Create Action seed data (8 records)
-- ✅ Task 012: Create Tool seed data (8 records)
-- ✅ Task 013: Create Knowledge seed data (10 records)
-- ✅ Task 014: Create Skill seed data (10 records)
-- ✅ Task 015: Deploy seed data to Dataverse
+#### Bug 1: 400 error when selecting playbook ✅ DEPLOYED
+- **Root cause**: Wrong N:N relationship name `sprk_playbook_action` → should be `sprk_analysisplaybook_action`
+- **Fixed in**: `AnalysisBuilderApp.tsx` (v2.9.1)
+- **PCF deployed to Dataverse**: ✅
 
-#### Phase 3: Tool Handler Implementation ✅
-- ✅ Task 020: Implement SummaryHandler
-- ✅ Task 021: Write SummaryHandler tests (41 tests)
-- ✅ Task 022: Implement RiskDetectorHandler
-- ✅ Task 023: Write RiskDetectorHandler tests (49 tests)
-- ✅ Task 024: Implement ClauseComparisonHandler
-- ✅ Task 025: Write ClauseComparisonHandler tests (35 tests)
-- ✅ Task 026: Implement DateExtractorHandler
-- ✅ Task 027: Write DateExtractorHandler tests (36 tests)
-- ✅ Task 028: Implement FinancialCalculatorHandler
-- ✅ Task 029: Write FinancialCalculatorHandler tests (37 tests)
+#### Bug 2: Different action types produce same "summary" output ✅ CODE READY
+- **Root cause**: `ScopeResolverService.GetActionAsync` used hardcoded stub data instead of fetching from Dataverse
+- **Fixed by**:
+  1. Added `GetAnalysisActionAsync` to `IDataverseService.cs`
+  2. Added `AnalysisActionEntity` to `Models.cs`
+  3. Implemented in `DataverseWebApiService.cs` and `DataverseServiceClientImpl.cs`
+  4. Updated `ScopeResolverService.GetActionAsync` to fetch `sprk_systemprompt` from Dataverse
+- **API deployment needed**: ⚠️ YES
 
-**Phase 3 Summary**: All 5 tool handlers implemented with 312+ unit tests.
-
-#### Phase 4: Service Layer Extension ✅
-- ✅ Task 030: Create scope listing endpoints
-- ✅ Task 031: Implement ExecutePlaybookAsync
-- ✅ Task 032: Add authorization filters
-
-**Phase 4 Summary**: Service layer extended with:
-- Scope listing endpoints (skills, knowledge, tools, actions) with pagination
-- ExecutePlaybookAsync for playbook-based analysis orchestration
-- RequireAuthorization on all scope endpoints (ADR-008 compliant)
-
-#### Phase 5: Playbook Assembly ✅
-- ✅ Task 040: Create MVP playbooks in Dataverse (3 playbooks: PB-001, PB-002, PB-010)
-- ✅ Task 041: Link scopes to playbooks (N:N relationships created)
-- ✅ Task 042: Validate playbook configurations (4 new tests, all passing)
-
-**Phase 5 Summary**: MVP playbooks fully configured with scope composition:
-- Created playbooks.json seed data with scope assignments
-- Created Deploy-Playbooks.ps1 for deployment with N:N relationships
-- Created Verify-Playbooks.ps1 for validation
-- Added 4 ExecutePlaybookAsync unit tests
-
-### Next Phase: Phase 6 - UI/PCF Enhancement
-- Task 050: Enhance PlaybookSelector component
-- Task 051: Integrate playbook selection in AnalysisWorkspace
-- Task 052: Display playbook info during analysis
-- Task 053: Test dark mode support
+#### Bug 3: Chat shows "waiting for session" and doesn't connect ✅ DEPLOYED
+- **Root cause**: When no chat history exists, `isSessionResumed` never got set to `true`
+- **Fixed in**: `AnalysisWorkspaceApp.tsx` (v1.2.19) - auto-sets `isSessionResumed = true`
+- **PCF deployed to Dataverse**: ✅
 
 ---
 
-## Files Created in Phase 5
+## Next Steps for New Session
 
-### Seed Data
-- `scripts/seed-data/playbooks.json` - MVP playbook definitions
-- `scripts/seed-data/Deploy-Playbooks.ps1` - Deployment script with N:N relationships
-- `scripts/seed-data/Verify-Playbooks.ps1` - Verification script
+### 1. Deploy BFF API to Azure
+The API changes for Bug 2 need deployment:
 
-### Tests
-- Extended `AnalysisOrchestrationServiceTests.cs` with 4 playbook validation tests:
-  - ExecutePlaybookAsync_ValidPlaybook_LoadsPlaybookAndResolvesScopesAndYieldsMetadata
-  - ExecutePlaybookAsync_WithToolScopes_ResolvesToolsFromPlaybook
-  - ExecutePlaybookAsync_DocumentNotFound_ThrowsKeyNotFoundException
-  - ExecutePlaybookAsync_WithSkillsAndKnowledge_ResolvesAllScopes
+```bash
+# Build and deploy API
+dotnet publish src/server/api/Sprk.Bff.Api -c Release
 
-### Notes
-- `projects/ai-document-intelligence-r4/notes/task-042-playbook-validation-report.md`
+# Or use existing deployment workflow
+```
+
+### 2. Test All Three Fixes
+After API deployment:
+- [ ] Select a playbook → should load scopes (Bug 1)
+- [ ] Select different actions (Summarize vs Risk Analysis) → should produce different outputs (Bug 2)
+- [ ] Open Analysis Workspace with no chat history → chat should be immediately usable (Bug 3)
+
+### 3. Consider Committing Changes
+Uncommitted files:
+- `src/server/shared/Spaarke.Dataverse/IDataverseService.cs`
+- `src/server/shared/Spaarke.Dataverse/Models.cs`
+- `src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs`
+- `src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs`
+- `src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs`
+- `src/client/pcf/AnalysisBuilder/control/components/AnalysisBuilderApp.tsx`
+- `src/client/pcf/AnalysisBuilder/control/ControlManifest.Input.xml`
+- `src/client/pcf/AnalysisWorkspace/control/components/AnalysisWorkspaceApp.tsx`
+- `src/client/pcf/AnalysisWorkspace/control/ControlManifest.Input.xml`
 
 ---
 
-## Decisions Made
+## Progress Summary
 
-| Decision | Rationale |
-|----------|-----------|
-| 3 MVP playbooks | Quick Review, Full Contract, Risk Scan cover primary use cases |
-| N:N relationships for scopes | Enables flexible scope composition per playbook |
-| IPlaybookService + IToolHandlerRegistry mocks | Required for ExecutePlaybookAsync testing |
-| Empty handler list in tests | Tests scope resolution path without executing handlers |
+### Completed Phases (R4 Project)
+
+| Phase | Status | Summary |
+|-------|--------|---------|
+| Phase 1: Dataverse Entity Validation | ✅ | All entities validated |
+| Phase 2: Seed Data Population | ✅ | 55+ records deployed |
+| Phase 3: Tool Handler Implementation | ✅ | 5 handlers, 312+ tests |
+| Phase 4: Service Layer Extension | ✅ | Scope endpoints + auth |
+| Phase 5: Playbook Assembly | ✅ | 3 MVP playbooks configured |
+| Phase 6: UI/PCF Enhancement | ✅ | PCF v2.9.1 + v1.2.19 deployed |
+| Bug Fixes | ✅ | 3 bugs fixed, API deployment pending |
+
+### PCF Versions Deployed
+- **AnalysisBuilder**: v2.9.1 (N:N relationship fix)
+- **AnalysisWorkspace**: v1.2.19 (chat session auto-resume fix)
+
+---
+
+## Files Modified (This Session)
+
+### Backend (API deployment required)
+- `src/server/shared/Spaarke.Dataverse/IDataverseService.cs` - Added `GetAnalysisActionAsync`
+- `src/server/shared/Spaarke.Dataverse/Models.cs` - Added `AnalysisActionEntity`
+- `src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs` - Implemented `GetAnalysisActionAsync`
+- `src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs` - Implemented `GetAnalysisActionAsync`
+- `src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs` - Updated `GetActionAsync` to fetch from Dataverse
+
+### Frontend (PCFs deployed)
+- `src/client/pcf/AnalysisBuilder/control/components/AnalysisBuilderApp.tsx` - Fixed N:N relationship names
+- `src/client/pcf/AnalysisBuilder/control/ControlManifest.Input.xml` - v2.9.1
+- `src/client/pcf/AnalysisWorkspace/control/components/AnalysisWorkspaceApp.tsx` - Added auto-resume
+- `src/client/pcf/AnalysisWorkspace/control/ControlManifest.Input.xml` - v1.2.19
 
 ---
 
 ## Blockers
 
-_None_
-
----
-
-## Next Action
-
-To start Phase 6: `work on task 050` to enhance the PlaybookSelector PCF component.
+_None - API deployment is the only remaining action_
 
 ---
 
