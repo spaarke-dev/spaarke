@@ -598,4 +598,4 @@ See `CLAUDE.md` files in subdirectories for module-specific guidance:
 
 ---
 
-*Last updated: January 5, 2026 (added azure-deploy skill)*
+*Last updated: January 6, 2026*
