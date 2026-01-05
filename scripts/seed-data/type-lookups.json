@@ -1,0 +1,36 @@
+{
+  "description": "Type lookup seed data for AI Document Intelligence R4",
+  "created": "2026-01-04",
+  "notes": "Type tables only have sprk_name field (no sortorder). Using numbered prefix for display ordering.",
+
+  "sprk_analysisactiontype": [
+    { "sprk_name": "01 - Extraction" },
+    { "sprk_name": "02 - Classification" },
+    { "sprk_name": "03 - Summarization" },
+    { "sprk_name": "04 - Analysis" },
+    { "sprk_name": "05 - Comparison" }
+  ],
+
+  "sprk_aiskilltype": [
+    { "sprk_name": "01 - Document Analysis" },
+    { "sprk_name": "02 - Contract Specific" },
+    { "sprk_name": "03 - Compliance" },
+    { "sprk_name": "04 - Risk Analysis" },
+    { "sprk_name": "05 - Financial" }
+  ],
+
+  "sprk_aiknowledgetype": [
+    { "sprk_name": "01 - Standards" },
+    { "sprk_name": "02 - Regulations" },
+    { "sprk_name": "03 - Best Practices" },
+    { "sprk_name": "04 - Templates" },
+    { "sprk_name": "05 - Taxonomy" }
+  ],
+
+  "sprk_aitooltype": [
+    { "sprk_name": "01 - Entity Extraction" },
+    { "sprk_name": "02 - Classification" },
+    { "sprk_name": "03 - Analysis" },
+    { "sprk_name": "04 - Calculation" }
+  ]
+}

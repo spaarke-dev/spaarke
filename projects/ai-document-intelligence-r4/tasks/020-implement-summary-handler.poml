@@ -1,4 +1,4 @@
-<task id="020" project="ai-document-intelligence-r4">
+<task id="020" project="ai-document-intelligence-r4" status="completed" completed="2026-01-04">
   <metadata>
     <title>Implement SummaryHandler</title>
     <phase>3</phase>

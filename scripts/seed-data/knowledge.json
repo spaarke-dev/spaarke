@@ -1,0 +1,106 @@
+{
+  "description": "Knowledge seed data for AI Document Intelligence R4",
+  "created": "2026-01-04",
+  "entity": "sprk_analysisknowledges",
+
+  "knowledgeTypes": {
+    "01 - Standards": "3885df1c-eae9-f011-8406-7ced8d1dc988",
+    "02 - Regulations": "a544311b-eae9-f011-8406-7c1e520aa4df",
+    "03 - Best Practices": "3985df1c-eae9-f011-8406-7ced8d1dc988",
+    "04 - Templates": "3a85df1c-eae9-f011-8406-7ced8d1dc988",
+    "05 - Taxonomy": "3c85df1c-eae9-f011-8406-7ced8d1dc988"
+  },
+
+  "knowledge": [
+    {
+      "id": "KNW-001",
+      "sprk_name": "Standard Contract Terms",
+      "sprk_description": "Standard contract terms and clauses used as baseline for comparison. Sourced from industry-standard agreements and legal best practices.",
+      "knowledgeType": "01 - Standards",
+      "isInline": false,
+      "ragDeployment": "contract-standards-index",
+      "sprk_content": null
+    },
+    {
+      "id": "KNW-002",
+      "sprk_name": "Regulatory Guidelines",
+      "sprk_description": "Regulatory compliance requirements and guidelines including GDPR, CCPA, SOX, HIPAA, and industry-specific regulations.",
+      "knowledgeType": "02 - Regulations",
+      "isInline": false,
+      "ragDeployment": "regulatory-index",
+      "sprk_content": null
+    },
+    {
+      "id": "KNW-003",
+      "sprk_name": "Best Practices",
+      "sprk_description": "Document review best practices and guidelines for thorough contract analysis.",
+      "knowledgeType": "03 - Best Practices",
+      "isInline": true,
+      "ragDeployment": null,
+      "sprk_content": "## Contract Review Best Practices\n\n### Before Starting Review\n1. **Identify document type** - Determine if contract, amendment, exhibit, or related document\n2. **Note the parties** - Identify all named parties and their roles\n3. **Check effective date** - Note when the agreement takes effect\n4. **Identify term length** - Find duration and renewal provisions\n\n### Key Areas to Review\n1. **Payment Terms**\n   - Amount and currency\n   - Payment schedule\n   - Late payment penalties\n   - Expense reimbursement\n\n2. **Term and Termination**\n   - Contract duration\n   - Auto-renewal provisions\n   - Termination for convenience\n   - Termination for cause\n   - Post-termination obligations\n\n3. **Liability Provisions**\n   - Indemnification scope\n   - Limitation of liability caps\n   - Exclusions from limitations\n   - Insurance requirements\n\n4. **Confidentiality**\n   - Definition of confidential information\n   - Permitted disclosures\n   - Duration of obligations\n   - Return/destruction requirements\n\n5. **Intellectual Property**\n   - Pre-existing IP rights\n   - Work product ownership\n   - License grants\n   - IP indemnification\n\n### Red Flags to Watch For\n- Unlimited liability exposure\n- Broad indemnification obligations\n- Auto-renewal without notice period\n- Unilateral amendment rights\n- Unclear termination provisions\n- Missing confidentiality protections"
+    },
+    {
+      "id": "KNW-004",
+      "sprk_name": "Risk Categories",
+      "sprk_description": "Taxonomy of risk categories used for document risk assessment and classification.",
+      "knowledgeType": "05 - Taxonomy",
+      "isInline": true,
+      "ragDeployment": null,
+      "sprk_content": "{\n  \"riskCategories\": {\n    \"legal\": {\n      \"name\": \"Legal Risk\",\n      \"description\": \"Risks related to legal exposure and compliance\",\n      \"subcategories\": [\n        {\"id\": \"legal-liability\", \"name\": \"Liability Exposure\", \"severity\": \"high\"},\n        {\"id\": \"legal-indemnity\", \"name\": \"Indemnification Obligations\", \"severity\": \"high\"},\n        {\"id\": \"legal-ip\", \"name\": \"IP Infringement Risk\", \"severity\": \"medium\"},\n        {\"id\": \"legal-dispute\", \"name\": \"Dispute Resolution Risk\", \"severity\": \"medium\"},\n        {\"id\": \"legal-jurisdiction\", \"name\": \"Unfavorable Jurisdiction\", \"severity\": \"medium\"}\n      ]\n    },\n    \"financial\": {\n      \"name\": \"Financial Risk\",\n      \"description\": \"Risks with monetary impact\",\n      \"subcategories\": [\n        {\"id\": \"fin-payment\", \"name\": \"Payment Terms Risk\", \"severity\": \"high\"},\n        {\"id\": \"fin-penalty\", \"name\": \"Penalty Exposure\", \"severity\": \"medium\"},\n        {\"id\": \"fin-hidden\", \"name\": \"Hidden Costs\", \"severity\": \"medium\"},\n        {\"id\": \"fin-currency\", \"name\": \"Currency Risk\", \"severity\": \"low\"}\n      ]\n    },\n    \"operational\": {\n      \"name\": \"Operational Risk\",\n      \"description\": \"Risks affecting business operations\",\n      \"subcategories\": [\n        {\"id\": \"ops-performance\", \"name\": \"Performance Standards\", \"severity\": \"medium\"},\n        {\"id\": \"ops-resource\", \"name\": \"Resource Requirements\", \"severity\": \"medium\"},\n        {\"id\": \"ops-change\", \"name\": \"Change Control\", \"severity\": \"low\"},\n        {\"id\": \"ops-dependency\", \"name\": \"Vendor Dependency\", \"severity\": \"medium\"}\n      ]\n    },\n    \"compliance\": {\n      \"name\": \"Compliance Risk\",\n      \"description\": \"Regulatory and policy compliance risks\",\n      \"subcategories\": [\n        {\"id\": \"comp-data\", \"name\": \"Data Protection\", \"severity\": \"high\"},\n        {\"id\": \"comp-audit\", \"name\": \"Audit Requirements\", \"severity\": \"medium\"},\n        {\"id\": \"comp-reporting\", \"name\": \"Reporting Obligations\", \"severity\": \"low\"},\n        {\"id\": \"comp-export\", \"name\": \"Export Controls\", \"severity\": \"medium\"}\n      ]\n    }\n  },\n  \"severityLevels\": [\n    {\"level\": \"critical\", \"score\": 4, \"action\": \"Immediate escalation required\"},\n    {\"level\": \"high\", \"score\": 3, \"action\": \"Senior review required\"},\n    {\"level\": \"medium\", \"score\": 2, \"action\": \"Standard review process\"},\n    {\"level\": \"low\", \"score\": 1, \"action\": \"Note for awareness\"}\n  ]\n}"
+    },
+    {
+      "id": "KNW-005",
+      "sprk_name": "Defined Terms",
+      "sprk_description": "Standard legal definitions and defined terms commonly used in commercial agreements.",
+      "knowledgeType": "01 - Standards",
+      "isInline": true,
+      "ragDeployment": null,
+      "sprk_content": "## Standard Legal Definitions\n\n### General Contract Terms\n\n**Affiliate**: Any entity that directly or indirectly controls, is controlled by, or is under common control with a party, where \"control\" means ownership of 50% or more of voting securities.\n\n**Business Day**: A day other than Saturday, Sunday, or any day on which banks are authorized or required to close in the applicable jurisdiction.\n\n**Confidential Information**: All non-public information disclosed by one party to the other, whether orally, in writing, or by inspection of tangible objects, that is designated as confidential or that reasonably should be understood to be confidential.\n\n**Effective Date**: The date on which this Agreement becomes binding on the parties, typically the last date of signature.\n\n**Force Majeure**: Events beyond the reasonable control of a party, including acts of God, war, terrorism, riots, embargoes, labor disputes, governmental actions, fire, floods, earthquakes, or other natural disasters.\n\n**Intellectual Property Rights**: All patents, copyrights, trademarks, trade secrets, and other proprietary rights worldwide.\n\n**Material Adverse Change**: A change that has a material adverse effect on the business, operations, assets, or financial condition of a party.\n\n**Person**: Any individual, corporation, partnership, limited liability company, trust, or other legal entity.\n\n### Financial Terms\n\n**Gross Revenue**: All revenue from operations before any deductions for costs, expenses, or taxes.\n\n**Net Revenue**: Gross revenue minus returns, allowances, and discounts.\n\n**Pro Rata**: In proportion to ownership or participation percentage.\n\n### Time-Related Terms\n\n**Calendar Days**: Every day including weekends and holidays.\n\n**Notice Period**: The time between giving notice and the effective date of the action being noticed.\n\n**Cure Period**: The time allowed to remedy a breach after receiving notice.\n\n**Term**: The duration of the agreement from Effective Date to expiration or termination."
+    },
+    {
+      "id": "KNW-006",
+      "sprk_name": "NDA Standards",
+      "sprk_description": "Standard terms and benchmarks for Non-Disclosure Agreements including mutual and one-way NDAs.",
+      "knowledgeType": "01 - Standards",
+      "isInline": false,
+      "ragDeployment": "nda-standards-index",
+      "sprk_content": null
+    },
+    {
+      "id": "KNW-007",
+      "sprk_name": "Lease Standards",
+      "sprk_description": "Standard commercial lease terms and market benchmarks for real estate agreements.",
+      "knowledgeType": "01 - Standards",
+      "isInline": false,
+      "ragDeployment": "lease-standards-index",
+      "sprk_content": null
+    },
+    {
+      "id": "KNW-008",
+      "sprk_name": "Employment Standards",
+      "sprk_description": "Standard employment agreement terms including compensation, benefits, and restrictive covenants.",
+      "knowledgeType": "01 - Standards",
+      "isInline": false,
+      "ragDeployment": "employment-standards-index",
+      "sprk_content": null
+    },
+    {
+      "id": "KNW-009",
+      "sprk_name": "SLA Benchmarks",
+      "sprk_description": "Industry-standard Service Level Agreement benchmarks and metrics.",
+      "knowledgeType": "03 - Best Practices",
+      "isInline": true,
+      "ragDeployment": null,
+      "sprk_content": "## Service Level Agreement Benchmarks\n\n### Availability SLAs\n| Tier | Uptime | Downtime/Year | Typical Use |\n|------|--------|---------------|-------------|\n| Standard | 99.0% | 87.6 hours | Non-critical systems |\n| Professional | 99.5% | 43.8 hours | Business applications |\n| Enterprise | 99.9% | 8.76 hours | Mission-critical |\n| Premium | 99.99% | 52.6 minutes | Financial/Healthcare |\n\n### Response Time SLAs\n| Severity | Definition | Target Response | Target Resolution |\n|----------|------------|-----------------|------------------|\n| Critical | System down, no workaround | 15 minutes | 4 hours |\n| High | Major feature unavailable | 1 hour | 8 hours |\n| Medium | Feature degraded, workaround exists | 4 hours | 24 hours |\n| Low | Minor issue, minimal impact | 8 hours | 72 hours |\n\n### Support Coverage\n- **8x5**: Business hours, Monday-Friday\n- **12x5**: Extended hours, Monday-Friday\n- **24x5**: Round-the-clock, Monday-Friday\n- **24x7**: Full coverage including weekends\n- **24x7x365**: Including holidays\n\n### Service Credits (Typical)\n| Uptime Achieved | Credit |\n|-----------------|--------|\n| 99.0% - 99.9% | 10% of monthly fee |\n| 98.0% - 99.0% | 25% of monthly fee |\n| 95.0% - 98.0% | 50% of monthly fee |\n| < 95.0% | 100% of monthly fee |\n\n### Key Metrics to Track\n1. **MTTR** (Mean Time To Repair)\n2. **MTBF** (Mean Time Between Failures)\n3. **RTO** (Recovery Time Objective)\n4. **RPO** (Recovery Point Objective)\n\n### Red Flags in SLAs\n- Exclusions for \"scheduled maintenance\" without limits\n- Credit caps that limit total recovery\n- Measurement periods that hide outages\n- Lack of root cause analysis requirements"
+    },
+    {
+      "id": "KNW-010",
+      "sprk_name": "DD Checklist",
+      "sprk_description": "Due diligence checklist categories for comprehensive contract and document review.",
+      "knowledgeType": "04 - Templates",
+      "isInline": true,
+      "ragDeployment": null,
+      "sprk_content": "## Due Diligence Checklist\n\n### 1. Corporate Structure\n- [ ] Certificate of Incorporation/Formation\n- [ ] Bylaws/Operating Agreement\n- [ ] Good Standing Certificates\n- [ ] Organizational Chart\n- [ ] List of Subsidiaries\n- [ ] Shareholder/Member List\n\n### 2. Material Contracts\n- [ ] Customer Agreements (top 10 by revenue)\n- [ ] Supplier Agreements\n- [ ] Partnership/JV Agreements\n- [ ] Distribution Agreements\n- [ ] License Agreements (in and out)\n- [ ] Service Agreements\n\n### 3. Employment\n- [ ] Executive Employment Agreements\n- [ ] Offer Letters\n- [ ] Employee Handbook\n- [ ] Non-Compete/Non-Solicitation Agreements\n- [ ] Confidentiality Agreements\n- [ ] Benefit Plans\n\n### 4. Intellectual Property\n- [ ] Patent List and Status\n- [ ] Trademark Registrations\n- [ ] Copyright Registrations\n- [ ] Trade Secret Policies\n- [ ] IP Assignment Agreements\n- [ ] Open Source Usage\n\n### 5. Real Estate\n- [ ] Lease Agreements\n- [ ] Property Ownership Documents\n- [ ] Environmental Reports\n- [ ] Zoning Compliance\n\n### 6. Financial\n- [ ] Audited Financial Statements (3 years)\n- [ ] Tax Returns (3 years)\n- [ ] Debt Agreements\n- [ ] Security Agreements\n- [ ] Accounts Receivable Aging\n- [ ] Accounts Payable Aging\n\n### 7. Litigation\n- [ ] Pending Litigation\n- [ ] Threatened Claims\n- [ ] Settlement Agreements\n- [ ] Judgments\n- [ ] Regulatory Investigations\n\n### 8. Insurance\n- [ ] Current Policies\n- [ ] Claims History\n- [ ] Coverage Adequacy Analysis\n\n### 9. Compliance\n- [ ] Regulatory Licenses/Permits\n- [ ] Compliance Certifications\n- [ ] Privacy Policies\n- [ ] Security Assessments\n- [ ] Audit Reports"
+    }
+  ]
+}

@@ -4,6 +4,8 @@
     <phase>1</phase>
     <priority>P0</priority>
     <estimate>2h</estimate>
+    <status>completed</status>
+    <completed-date>2026-01-04</completed-date>
     <tags>dataverse, validation, entity-model</tags>
     <dependencies>none</dependencies>
   </metadata>

@@ -1053,6 +1053,7 @@ if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled"))
     {
         app.MapAnalysisEndpoints();
         app.MapPlaybookEndpoints();
+        app.MapScopeEndpoints();
     }
 
     // RAG endpoints for knowledge base operations (R3)

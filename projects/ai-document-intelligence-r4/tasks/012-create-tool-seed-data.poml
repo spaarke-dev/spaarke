@@ -4,6 +4,8 @@
     <phase>2</phase>
     <priority>P0</priority>
     <estimate>2h</estimate>
+    <status>completed</status>
+    <completed-date>2026-01-04</completed-date>
     <tags>dataverse, seed-data, tools</tags>
     <dependencies>010</dependencies>
   </metadata>

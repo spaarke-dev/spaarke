@@ -1,0 +1,86 @@
+{
+  "description": "Skill seed data for AI Document Intelligence R4",
+  "created": "2026-01-04",
+  "entity": "sprk_analysisskills",
+
+  "skillTypes": {
+    "01 - Document Analysis": "4085df1c-eae9-f011-8406-7ced8d1dc988",
+    "02 - Contract Specific": "ad44311b-eae9-f011-8406-7c1e520aa4df",
+    "03 - Compliance": "af44311b-eae9-f011-8406-7c1e520aa4df",
+    "04 - Risk Analysis": "b044311b-eae9-f011-8406-7c1e520aa4df",
+    "05 - Financial": "4185df1c-eae9-f011-8406-7ced8d1dc988"
+  },
+
+  "skills": [
+    {
+      "id": "SKL-001",
+      "sprk_name": "Contract Analysis",
+      "sprk_description": "Comprehensive contract analysis skill that examines all aspects of a contract including parties, terms, obligations, and key provisions.",
+      "skillType": "01 - Document Analysis",
+      "sprk_promptfragment": "## Contract Analysis Instructions\n\nPerform a comprehensive contract analysis covering:\n\n1. **Party Identification**: Identify all parties to the agreement, including their legal names, roles (buyer/seller, licensor/licensee, etc.), and any defined aliases.\n\n2. **Term Analysis**: Extract the effective date, term duration, renewal provisions, and termination conditions. Note any auto-renewal clauses.\n\n3. **Key Provisions**: Identify and summarize:\n   - Payment terms and amounts\n   - Deliverables and milestones\n   - Representations and warranties\n   - Indemnification obligations\n   - Limitation of liability\n\n4. **Rights and Obligations**: Create a clear matrix of what each party must do and what rights they have.\n\n5. **Critical Dates**: Extract all important dates and deadlines.\n\nFormat your analysis with clear section headers and bullet points."
+    },
+    {
+      "id": "SKL-002",
+      "sprk_name": "Invoice Processing",
+      "sprk_description": "Extract and validate invoice data including line items, amounts, taxes, and payment terms.",
+      "skillType": "05 - Financial",
+      "sprk_promptfragment": "## Invoice Processing Instructions\n\nExtract and validate invoice data systematically:\n\n1. **Header Information**:\n   - Invoice number and date\n   - Vendor name and address\n   - Customer name and address\n   - Purchase order reference (if any)\n\n2. **Line Items**: For each line item, extract:\n   - Description\n   - Quantity\n   - Unit price\n   - Extended amount\n   - Any applicable discounts\n\n3. **Financial Summary**:\n   - Subtotal\n   - Tax amounts (itemized by type)\n   - Shipping/handling charges\n   - Total amount due\n   - Currency\n\n4. **Payment Terms**:\n   - Due date\n   - Payment methods accepted\n   - Early payment discount terms\n   - Late payment penalties\n\n5. **Validation**: Verify math accuracy (quantities × prices = line totals, sum of lines = subtotal, etc.)\n\nPresent findings in a structured format suitable for automated processing."
+    },
+    {
+      "id": "SKL-003",
+      "sprk_name": "NDA Review",
+      "sprk_description": "Specialized skill for analyzing Non-Disclosure Agreements, focusing on scope, term, exclusions, and enforceability.",
+      "skillType": "02 - Contract Specific",
+      "sprk_promptfragment": "## NDA Review Instructions\n\nAnalyze the Non-Disclosure Agreement with focus on:\n\n1. **Parties and Direction**:\n   - Identify disclosing and receiving parties\n   - Determine if mutual or one-way NDA\n\n2. **Definition of Confidential Information**:\n   - Scope of what is covered\n   - Marking requirements\n   - Oral disclosure procedures\n\n3. **Exclusions**: Identify standard carve-outs:\n   - Publicly available information\n   - Prior knowledge\n   - Independent development\n   - Required disclosures (legal/regulatory)\n\n4. **Term and Duration**:\n   - Agreement term\n   - Survival period for confidentiality obligations\n   - Return/destruction requirements\n\n5. **Permitted Use and Sharing**:\n   - Permitted purposes\n   - Who can access the information\n   - Subcontractor provisions\n\n6. **Remedies and Enforcement**:\n   - Injunctive relief provisions\n   - Damages provisions\n   - Indemnification\n\n7. **Red Flags**: Flag any unusual or concerning provisions."
+    },
+    {
+      "id": "SKL-004",
+      "sprk_name": "Lease Review",
+      "sprk_description": "Analyze lease agreements for rent terms, tenant obligations, landlord responsibilities, and key conditions.",
+      "skillType": "02 - Contract Specific",
+      "sprk_promptfragment": "## Lease Review Instructions\n\nAnalyze the lease agreement comprehensively:\n\n1. **Premises and Parties**:\n   - Property address and description\n   - Landlord and tenant legal names\n   - Permitted use of premises\n\n2. **Term and Rent**:\n   - Lease commencement and expiration\n   - Base rent amount and payment schedule\n   - Rent escalation provisions\n   - Security deposit amount and terms\n\n3. **Operating Expenses**:\n   - CAM charges\n   - Utilities responsibility\n   - Insurance requirements\n   - Property tax pass-throughs\n\n4. **Tenant Obligations**:\n   - Maintenance responsibilities\n   - Alterations and improvements\n   - Compliance requirements\n   - Assignment and subletting restrictions\n\n5. **Landlord Obligations**:\n   - Common area maintenance\n   - Structural repairs\n   - HVAC and systems\n\n6. **Key Provisions**:\n   - Renewal options\n   - Right of first refusal\n   - Termination rights\n   - Default and remedies\n\n7. **Financial Impact**: Calculate total lease cost over term."
+    },
+    {
+      "id": "SKL-005",
+      "sprk_name": "Employment Contract",
+      "sprk_description": "Analyze employment agreements including compensation, benefits, restrictions, and termination provisions.",
+      "skillType": "02 - Contract Specific",
+      "sprk_promptfragment": "## Employment Contract Analysis Instructions\n\nAnalyze the employment agreement covering:\n\n1. **Position and Duties**:\n   - Job title and reporting structure\n   - Primary responsibilities\n   - Work location and schedule\n   - Full-time/part-time status\n\n2. **Compensation Package**:\n   - Base salary and payment frequency\n   - Bonus/incentive structure\n   - Equity/stock options\n   - Benefits (health, retirement, PTO)\n\n3. **Term and Termination**:\n   - Employment type (at-will vs. fixed term)\n   - Notice requirements\n   - Termination for cause provisions\n   - Severance terms\n\n4. **Restrictive Covenants**:\n   - Non-compete scope and duration\n   - Non-solicitation provisions\n   - Confidentiality obligations\n   - Intellectual property assignment\n\n5. **Key Protections**:\n   - Change in control provisions\n   - Garden leave provisions\n   - Dispute resolution mechanism\n\n6. **Comparison to Market**: Note any terms that deviate significantly from standard employment agreements."
+    },
+    {
+      "id": "SKL-006",
+      "sprk_name": "SLA Analysis",
+      "sprk_description": "Extract and evaluate Service Level Agreement metrics, commitments, and remedies.",
+      "skillType": "02 - Contract Specific",
+      "sprk_promptfragment": "## SLA Analysis Instructions\n\nAnalyze the Service Level Agreement focusing on:\n\n1. **Service Definitions**:\n   - Services covered\n   - Service hours\n   - Support tiers\n\n2. **Performance Metrics**:\n   - Uptime/availability targets (e.g., 99.9%)\n   - Response time commitments\n   - Resolution time targets\n   - Throughput/capacity metrics\n\n3. **Measurement and Reporting**:\n   - How metrics are measured\n   - Reporting frequency and format\n   - Exclusions from calculations (maintenance windows, force majeure)\n\n4. **Service Credits and Remedies**:\n   - Credit calculation methodology\n   - Credit caps (monthly/annual)\n   - Claim procedures and deadlines\n   - Termination rights for chronic failures\n\n5. **Dependencies and Assumptions**:\n   - Customer responsibilities\n   - Third-party dependencies\n   - Change management process\n\n6. **Benchmark Analysis**: Compare commitments against industry standards for this service type."
+    },
+    {
+      "id": "SKL-007",
+      "sprk_name": "Compliance Check",
+      "sprk_description": "Verify document compliance with regulatory requirements and internal policies.",
+      "skillType": "03 - Compliance",
+      "sprk_promptfragment": "## Compliance Check Instructions\n\nPerform a compliance review covering:\n\n1. **Regulatory Identification**:\n   - Identify applicable regulations based on:\n     - Jurisdiction\n     - Industry\n     - Data types involved\n     - Parties' locations\n\n2. **Standard Clause Review**:\n   - Data protection/privacy provisions\n   - Anti-corruption/bribery clauses\n   - Export control compliance\n   - Sanctions compliance\n\n3. **Required Provisions Check**:\n   - Mandatory clauses for jurisdiction\n   - Industry-specific requirements\n   - Internal policy requirements\n\n4. **Gap Analysis**:\n   - Missing required provisions\n   - Non-compliant language\n   - Recommended modifications\n\n5. **Risk Assessment**:\n   - Compliance risk level (High/Medium/Low)\n   - Potential penalties for non-compliance\n   - Remediation priority\n\nProvide a compliance checklist format with pass/fail/partial indicators."
+    },
+    {
+      "id": "SKL-008",
+      "sprk_name": "Executive Summary",
+      "sprk_description": "Generate a concise, high-level overview of the document suitable for executive review.",
+      "skillType": "01 - Document Analysis",
+      "sprk_promptfragment": "## Executive Summary Instructions\n\nGenerate a brief, executive-level summary:\n\n1. **One-Paragraph Overview** (2-3 sentences):\n   - What is this document?\n   - Who are the parties?\n   - What is the core purpose?\n\n2. **Key Terms** (bullet points):\n   - Duration/term\n   - Financial commitment\n   - Primary obligations\n\n3. **Critical Points** (3-5 bullets):\n   - Most important provisions\n   - Unusual or notable terms\n   - Key dates and deadlines\n\n4. **Risk Snapshot**:\n   - Overall risk level (Low/Medium/High)\n   - Top 2-3 concerns (if any)\n\n5. **Recommended Action**:\n   - Approve as-is\n   - Request modifications (specify)\n   - Requires legal review\n   - Do not proceed\n\nKeep the summary to one page or less. Use plain language accessible to non-legal executives."
+    },
+    {
+      "id": "SKL-009",
+      "sprk_name": "Risk Assessment",
+      "sprk_description": "Identify and categorize risks including legal, financial, operational, and reputational risks.",
+      "skillType": "04 - Risk Analysis",
+      "sprk_promptfragment": "## Risk Assessment Instructions\n\nConduct a comprehensive risk assessment:\n\n1. **Legal Risks**:\n   - Litigation exposure\n   - Regulatory penalties\n   - Indemnification obligations\n   - Jurisdiction concerns\n\n2. **Financial Risks**:\n   - Payment obligations\n   - Uncapped liability\n   - Penalty provisions\n   - Hidden costs\n\n3. **Operational Risks**:\n   - Performance dependencies\n   - Resource requirements\n   - Timeline constraints\n   - Integration challenges\n\n4. **Compliance Risks**:\n   - Regulatory requirements\n   - Industry standards\n   - Internal policies\n\n5. **Reputational Risks**:\n   - Public perception impact\n   - Partner/customer relationships\n   - ESG considerations\n\nFor each risk identified:\n- Severity: Critical / High / Medium / Low\n- Likelihood: Probable / Possible / Unlikely\n- Mitigation: Recommended actions\n- Residual Risk: After mitigation\n\nProvide a risk matrix summary with top 5 risks prioritized."
+    },
+    {
+      "id": "SKL-010",
+      "sprk_name": "Clause Comparison",
+      "sprk_description": "Compare document clauses against standard terms, templates, or industry benchmarks.",
+      "skillType": "01 - Document Analysis",
+      "sprk_promptfragment": "## Clause Comparison Instructions\n\nCompare clauses against standards and benchmarks:\n\n1. **Deviation Analysis**:\n   For each major clause category, compare to standard/template:\n   - Payment terms\n   - Liability limitations\n   - Indemnification\n   - Termination rights\n   - Warranties\n   - IP ownership\n   - Confidentiality\n\n2. **Deviation Classification**:\n   - ✅ Favorable: Better than standard\n   - ⚖️ Neutral: Acceptable deviation\n   - ⚠️ Unfavorable: Worse than standard\n   - 🚨 Critical: Requires negotiation\n\n3. **Missing Clauses**:\n   - Standard provisions not present\n   - Recommended additions\n\n4. **Unusual Provisions**:\n   - Non-standard language\n   - Industry-atypical terms\n   - One-sided provisions\n\n5. **Negotiation Recommendations**:\n   - Priority items to negotiate\n   - Suggested alternative language\n   - Fallback positions\n\nPresent findings in a comparison table format with specific clause references."
+    }
+  ]
+}

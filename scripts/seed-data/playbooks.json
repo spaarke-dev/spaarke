@@ -1,0 +1,169 @@
+{
+  "description": "Playbook seed data for AI Document Intelligence R4",
+  "created": "2026-01-05",
+  "entity": "sprk_analysisplaybooks",
+
+  "note": "MVP Playbooks - Implement first for initial release",
+
+  "playbooks": [
+    {
+      "id": "PB-001",
+      "sprk_name": "Quick Document Review",
+      "sprk_description": "Rapid document triage with classification, entity extraction, and executive summary. Ideal for initial review of any document type to understand key information quickly.",
+      "sprk_ispublic": true,
+      "estimatedTime": "~30 seconds",
+      "complexity": "Low",
+      "scopes": {
+        "skills": ["SKL-008"],
+        "actions": ["ACT-001", "ACT-003", "ACT-004"],
+        "knowledge": ["KNW-005"],
+        "tools": ["TL-001", "TL-003", "TL-004"]
+      },
+      "scopeDescriptions": {
+        "skills": {
+          "SKL-008": "Executive Summary - High-level overview generation"
+        },
+        "actions": {
+          "ACT-001": "Extract Entities - Named entity extraction",
+          "ACT-003": "Classify Document - Document type classification",
+          "ACT-004": "Summarize Content - Content summarization"
+        },
+        "knowledge": {
+          "KNW-005": "Defined Terms - Standard legal definitions"
+        },
+        "tools": {
+          "TL-001": "Entity Extractor - Extract parties, dates, amounts",
+          "TL-003": "Document Classifier - Classify document type",
+          "TL-004": "Summary Generator - Generate concise summary"
+        }
+      }
+    },
+    {
+      "id": "PB-002",
+      "sprk_name": "Full Contract Analysis",
+      "sprk_description": "Comprehensive contract review including clause analysis, risk detection, entity extraction, and comparison against standard terms. Complete analysis for contract review workflows.",
+      "sprk_ispublic": true,
+      "estimatedTime": "~3 minutes",
+      "complexity": "High",
+      "scopes": {
+        "skills": ["SKL-001", "SKL-009", "SKL-010"],
+        "actions": ["ACT-001", "ACT-002", "ACT-003", "ACT-004", "ACT-005", "ACT-006"],
+        "knowledge": ["KNW-001", "KNW-003", "KNW-004"],
+        "tools": ["TL-001", "TL-002", "TL-003", "TL-004", "TL-005", "TL-006"]
+      },
+      "scopeDescriptions": {
+        "skills": {
+          "SKL-001": "Contract Analysis - Comprehensive contract examination",
+          "SKL-009": "Risk Assessment - Risk identification and categorization",
+          "SKL-010": "Clause Comparison - Compare against standards"
+        },
+        "actions": {
+          "ACT-001": "Extract Entities - Named entity extraction",
+          "ACT-002": "Analyze Clauses - Contract clause analysis",
+          "ACT-003": "Classify Document - Document type classification",
+          "ACT-004": "Summarize Content - Content summarization",
+          "ACT-005": "Detect Risks - Risk identification",
+          "ACT-006": "Compare Clauses - Clause comparison against standards"
+        },
+        "knowledge": {
+          "KNW-001": "Standard Contract Terms - Industry-standard contract clauses",
+          "KNW-003": "Best Practices - Contract review best practices",
+          "KNW-004": "Risk Categories - Risk taxonomy for assessment"
+        },
+        "tools": {
+          "TL-001": "Entity Extractor - Extract parties, dates, amounts",
+          "TL-002": "Clause Analyzer - Identify and analyze clauses",
+          "TL-003": "Document Classifier - Classify document type",
+          "TL-004": "Summary Generator - Generate concise summary",
+          "TL-005": "Risk Detector - Identify potential risks",
+          "TL-006": "Clause Comparator - Compare to standard terms"
+        }
+      }
+    },
+    {
+      "id": "PB-010",
+      "sprk_name": "Risk Scan",
+      "sprk_description": "Fast risk identification focused on legal, financial, operational, and compliance risks. Ideal for quick risk assessment before detailed review.",
+      "sprk_ispublic": true,
+      "estimatedTime": "~45 seconds",
+      "complexity": "Low",
+      "scopes": {
+        "skills": ["SKL-009"],
+        "actions": ["ACT-001", "ACT-005"],
+        "knowledge": ["KNW-004"],
+        "tools": ["TL-001", "TL-005"]
+      },
+      "scopeDescriptions": {
+        "skills": {
+          "SKL-009": "Risk Assessment - Risk identification and categorization"
+        },
+        "actions": {
+          "ACT-001": "Extract Entities - Named entity extraction for context",
+          "ACT-005": "Detect Risks - Risk identification"
+        },
+        "knowledge": {
+          "KNW-004": "Risk Categories - Risk taxonomy for assessment"
+        },
+        "tools": {
+          "TL-001": "Entity Extractor - Extract parties, dates, amounts for context",
+          "TL-005": "Risk Detector - Identify potential risks"
+        }
+      }
+    }
+  ],
+
+  "futurePlaybooks": [
+    {
+      "id": "PB-003",
+      "sprk_name": "NDA Review",
+      "sprk_description": "Specialized analysis for Non-Disclosure Agreements",
+      "priority": 2
+    },
+    {
+      "id": "PB-004",
+      "sprk_name": "Lease Review",
+      "sprk_description": "Commercial lease analysis with financial calculations",
+      "priority": 2
+    },
+    {
+      "id": "PB-005",
+      "sprk_name": "Employment Agreement Review",
+      "sprk_description": "Employment contract analysis with compensation review",
+      "priority": 2
+    },
+    {
+      "id": "PB-006",
+      "sprk_name": "Invoice Processing",
+      "sprk_description": "Invoice data extraction and validation",
+      "priority": 3
+    },
+    {
+      "id": "PB-007",
+      "sprk_name": "SLA Analysis",
+      "sprk_description": "Service Level Agreement metric extraction and benchmarking",
+      "priority": 3
+    },
+    {
+      "id": "PB-008",
+      "sprk_name": "Compliance Check",
+      "sprk_description": "Regulatory compliance review",
+      "priority": 3
+    }
+  ],
+
+  "deploymentNotes": {
+    "requirements": [
+      "Seed data for Actions, Tools, Knowledge, and Skills must be deployed first",
+      "Use PlaybookService.CreatePlaybookAsync() to create records",
+      "N:N relationships are created via AssociateRelationshipsAsync()"
+    ],
+    "deployment_order": [
+      "1. Deploy type-lookups.json",
+      "2. Deploy actions.json",
+      "3. Deploy tools.json",
+      "4. Deploy knowledge.json",
+      "5. Deploy skills.json",
+      "6. Deploy playbooks.json (this file)"
+    ]
+  }
+}
