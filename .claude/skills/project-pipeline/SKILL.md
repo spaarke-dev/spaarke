@@ -341,6 +341,34 @@ ADD deployment tasks (per task-create Step 3.6):
   - After each phase that produces deployable artifacts
   - Tag: deploy
 
+ADD UI test definitions for PCF/frontend tasks:
+  - For tasks with tags: pcf, frontend, fluent-ui, e2e-test
+  - Include <ui-tests> section in task POML with:
+    • Test name and URL (environment placeholder if needed)
+    • Step-by-step test actions (navigate, click, verify)
+    • Expected outcomes
+    • ADR-021 dark mode checks (for Fluent UI tasks)
+  - Example UI test structure:
+    <ui-tests>
+      <test name="Component Renders">
+        <url>https://{org}.crm.dynamics.com/main.aspx?...</url>
+        <steps>
+          <step>Navigate to form</step>
+          <step>Verify control is visible</step>
+          <step>Check console for errors</step>
+        </steps>
+        <expected>Control renders without console errors</expected>
+      </test>
+      <test name="Dark Mode Compliance">
+        <steps>
+          <step>Toggle dark mode in settings</step>
+          <step>Verify colors adapt</step>
+        </steps>
+        <expected>All colors use semantic tokens per ADR-021</expected>
+      </test>
+    </ui-tests>
+  - UI tests are executed by task-execute Step 9.7 via ui-test skill
+
 ADD wrap-up task (mandatory per task-create Step 3.7):
   - Final task: 090-project-wrap-up.poml (or next available)
   - Updates README status to Complete
@@ -651,6 +679,7 @@ This skill **orchestrates** by calling component skills:
 - **conflict-check**: **INTEGRATED** at Step 1.5 for PR overlap detection (parallel session awareness)
 - **project-setup**: **CALLED** at Step 2 for artifact generation (README, PLAN, CLAUDE.md, folders)
 - **task-create**: Concepts integrated and called at Step 3 for task decomposition
+- **ui-test**: **TASK GENERATION** - Step 3 creates `<ui-tests>` sections for PCF/frontend tasks; executed by task-execute Step 9.7
 - **task-execute**: **CALLED** at Step 5 if user confirms auto-start
 - **push-to-github**: Concepts used at Step 4 for feature branch and commit
 
@@ -664,9 +693,12 @@ project-pipeline (Tier 2 - Orchestrator)
   ├─→ Step 2: CALLS project-setup (Tier 1 - Component)
   │     └─→ Generates artifacts
   ├─→ Step 3: CALLS task-create (Tier 1 - Component)
-  │     └─→ Generates task files
+  │     ├─→ Generates task files
+  │     └─→ Adds <ui-tests> sections for PCF/frontend tasks
+  ├─→ Step 4: Feature branch creation
   └─→ Step 5: CALLS task-execute (Tier 2 - Orchestrator)
-        └─→ Executes first task
+        ├─→ Executes first task
+        └─→ Step 9.7: CALLS ui-test for PCF/frontend tasks
 
 Result: Full project initialization with human confirmation at each major step
 ```
@@ -692,6 +724,7 @@ Pipeline successful when:
 - [ ] All task .poml files created (Step 3)
 - [ ] TASK-INDEX.md created (Step 3)
 - [ ] Deployment tasks added (if applicable) (Step 3)
+- [ ] UI test definitions added to PCF/frontend tasks (Step 3 - `<ui-tests>` sections)
 - [ ] Wrap-up task added (090-project-wrap-up.poml) (Step 3)
 - [ ] Feature branch created and pushed to remote (Step 4)
 - [ ] Initial commit made with project artifacts (Step 4)

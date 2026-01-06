@@ -81,7 +81,7 @@ When a task has these tags, ALWAYS include these knowledge files:
 
 | Tag | Constraints | Patterns | Additional Files |
 |-----|-------------|----------|------------------|
-| `pcf`, `react`, `fluent-ui`, `frontend` | `.claude/constraints/pcf.md` | `.claude/patterns/pcf/control-initialization.md`, `.claude/patterns/pcf/theme-management.md` | `src/client/pcf/CLAUDE.md`, `docs/guides/PCF-V9-PACKAGING.md` |
+| `pcf`, `react`, `fluent-ui`, `frontend`, `e2e-test` | `.claude/constraints/pcf.md` | `.claude/patterns/pcf/control-initialization.md`, `.claude/patterns/pcf/theme-management.md` | `src/client/pcf/CLAUDE.md`, `docs/guides/PCF-V9-PACKAGING.md`, `.claude/skills/ui-test/SKILL.md` |
 | `bff-api`, `api`, `minimal-api`, `endpoints` | `.claude/constraints/api.md` | `.claude/patterns/api/endpoint-definition.md`, `.claude/patterns/api/endpoint-filters.md` | `src/server/api/CLAUDE.md` (if exists) |
 | `dataverse`, `solution`, `fields`, `plugin` | `.claude/constraints/plugins.md` | `.claude/patterns/dataverse/plugin-structure.md` | `.claude/skills/dataverse-deploy/SKILL.md` |
 | `auth`, `oauth`, `authorization` | `.claude/constraints/auth.md` | `.claude/patterns/auth/obo-flow.md`, `.claude/patterns/auth/oauth-scopes.md` | — |
@@ -184,6 +184,60 @@ EXAMPLE Phase Structure:
   Phase 2: Next feature set...
   ...
   090: Project wrap-up
+```
+
+### Step 3.65: Add UI Test Definitions for PCF/Frontend Tasks (REQUIRED)
+
+```
+FOR each task with tags: pcf, frontend, fluent-ui, e2e-test:
+
+  ADD <ui-tests> section to task POML with:
+    - Test name and description
+    - Target URL (use {org} placeholder for environment)
+    - Step-by-step test actions
+    - Expected outcomes
+    - ADR-021 dark mode checks (for Fluent UI components)
+
+  EXAMPLE <ui-tests> structure:
+    <ui-tests>
+      <test name="Component Renders">
+        <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=account</url>
+        <steps>
+          <step>Navigate to Account form</step>
+          <step>Verify {component-name} control is visible</step>
+          <step>Check console for JavaScript errors</step>
+        </steps>
+        <expected>Control renders without console errors</expected>
+      </test>
+
+      <test name="Dark Mode Compliance (ADR-021)">
+        <steps>
+          <step>Toggle dark mode in D365 settings</step>
+          <step>Verify background colors adapt (no white in dark mode)</step>
+          <step>Verify text colors adapt (no black in dark mode)</step>
+          <step>Verify icons use currentColor</step>
+        </steps>
+        <expected>All colors use Fluent UI v9 semantic tokens per ADR-021</expected>
+      </test>
+
+      <test name="User Interaction">
+        <steps>
+          <step>Click primary action button</step>
+          <step>Verify loading indicator appears</step>
+          <step>Verify response displays correctly</step>
+        </steps>
+        <expected>Interaction completes within 3 seconds</expected>
+      </test>
+    </ui-tests>
+
+  WHY: UI tests are executed by task-execute Step 9.7 via ui-test skill
+       when Claude Code has Chrome integration enabled (--chrome flag)
+
+  REQUIREMENTS:
+    - Tests must be specific to the component being built
+    - Include dark mode test if task involves Fluent UI
+    - Include console error check for all PCF controls
+    - Use {placeholder} syntax for environment-specific values
 ```
 
 ### Step 3.7: Add Mandatory Project Wrap-up Task (REQUIRED)
@@ -440,6 +494,7 @@ Recommended sections:
 - `<tools>` - Available tools for execution
 - `<notes>` - Implementation hints
 - `<execution>` - Reference to task-execute skill and pre-execution protocol
+- `<ui-tests>` - Browser-based UI tests for PCF/frontend tasks (REQUIRED if tags include: pcf, frontend, fluent-ui, e2e-test)
 
 ### Status Values
 - `not-started` - Initial state
@@ -455,8 +510,9 @@ Recommended sections:
 
 ### Related Skills
 - **project-init**: Creates plan.md that this skill consumes
-- **task-execute**: Runs individual tasks (not yet created)
-- **design-to-project**: Orchestrates init → create → execute
+- **task-execute**: Runs individual tasks (calls ui-test in Step 9.7)
+- **ui-test**: Executes browser-based UI tests defined in task `<ui-tests>` sections
+- **project-pipeline**: Orchestrates spec → setup → create → execute
 
 ## Examples
 
@@ -520,3 +576,5 @@ Before completing task-create, verify:
 - [ ] First task(s) have no unmet dependencies
 - [ ] Acceptance criteria are copy/referenced from plan.md
 - [ ] Project CLAUDE.md updated with task summary
+- [ ] PCF/frontend tasks have `<ui-tests>` sections (Step 3.65)
+- [ ] UI tests include dark mode compliance check for Fluent UI tasks (ADR-021)
