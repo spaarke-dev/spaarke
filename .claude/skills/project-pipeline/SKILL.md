@@ -103,6 +103,87 @@ IF validation fails:
 
 ---
 
+### Step 1.5: Overlap Detection (Parallel Sessions)
+
+**Purpose:** Detect potential file conflicts with active PRs before investing time in project setup.
+
+**Action:**
+```
+CHECK for active PRs:
+  gh pr list --state open --json number,title,headRefName,files
+
+IDENTIFY likely files from spec.md:
+  - Parse spec.md for mentioned components:
+    • PCF controls → src/client/pcf/
+    • API endpoints → src/server/api/
+    • Dataverse plugins → src/solutions/
+    • Shared libraries → src/*/shared/
+    • Documentation → docs/, .claude/
+  - List directories/files likely to be modified
+
+COMPARE with active PRs:
+  FOR EACH active PR:
+    overlap = intersection(likely_project_files, pr_files)
+    IF overlap is not empty:
+      ADD to potential_conflicts list
+
+CHECK other worktrees:
+  git worktree list
+  FOR EACH worktree (excluding current):
+    CHECK branch name for active project
+```
+
+**Decision Tree:**
+```
+IF no active PRs with overlapping files:
+  → Continue normally (no warning)
+
+IF overlap detected:
+  ⚠️ WARN user:
+  "Potential file overlap detected with active PRs:
+
+   PR #{number}: {title}
+     Branch: {branch}
+     Overlapping areas:
+       - src/client/pcf/ (both projects touch PCF controls)
+       - .claude/skills/ (both modify skills)
+
+   Recommendations:
+   1. Coordinate scope to avoid same-file edits
+   2. Designate file ownership (Session A owns file X, Session B owns file Y)
+   3. Plan to merge PR #{number} first, then rebase this project
+
+   Proceed anyway? [Y to continue / stop to exit]"
+
+  WAIT for user confirmation before continuing
+```
+
+**Output to User (if overlaps found):**
+```
+⚠️ Potential Overlap Detected
+
+Your project (from spec.md) appears to touch:
+  - src/client/pcf/ (new PCF control)
+  - .claude/skills/ (skill updates)
+
+Active PRs with overlapping files:
+──────────────────────────────────
+PR #98: chore: project planning updates
+  Branch: work/project-planning-and-documentation
+  Overlapping: .claude/skills/
+
+Recommendations:
+1. If PR #98 is close to merge → Wait for it, then start
+2. If both sessions are yours → Coordinate file ownership
+3. If proceeding → Plan to rebase after PR #98 merges
+
+[Y to proceed with awareness / stop to wait]
+```
+
+**Note:** This step is informational—it doesn't block the pipeline. The goal is awareness so you can plan for sequential merges or file ownership.
+
+---
+
 ### Step 2: Comprehensive Resource Discovery & Artifact Generation
 
 **Purpose:** Load ALL implementation context (ADRs, skills, patterns, knowledge docs, code examples) for task creation.
@@ -567,6 +648,7 @@ This skill **orchestrates** by calling component skills:
 
 - **design-to-spec**: **OPTIONAL PREDECESSOR** - Transforms human design docs into AI-optimized spec.md before this skill runs
 - **adr-aware**: Auto-invoked during resource discovery (Step 2) for ADR loading
+- **conflict-check**: **INTEGRATED** at Step 1.5 for PR overlap detection (parallel session awareness)
 - **project-setup**: **CALLED** at Step 2 for artifact generation (README, PLAN, CLAUDE.md, folders)
 - **task-create**: Concepts integrated and called at Step 3 for task decomposition
 - **task-execute**: **CALLED** at Step 5 if user confirms auto-start
@@ -601,6 +683,7 @@ Result: Full project initialization with human confirmation at each major step
 
 Pipeline successful when:
 - [ ] SPEC.md validated (Step 1)
+- [ ] PR overlap check completed (Step 1.5 - informational)
 - [ ] Resources discovered (ADRs, skills, knowledge docs) (Step 2)
 - [ ] README.md created with graduation criteria (Step 2)
 - [ ] PLAN.md created with all template sections and discovered resources (Step 2)

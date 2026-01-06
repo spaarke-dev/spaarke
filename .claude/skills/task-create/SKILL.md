@@ -194,25 +194,39 @@ ALWAYS create a final "Project Wrap-up" task as the LAST task in the project.
 Task ID: Use highest phase number + 90 (e.g., if last phase is 050, wrap-up is 090)
          This ensures wrap-up is always at the end regardless of task additions.
 
-This task is MANDATORY for all projects and must:
-  1. Update README.md:
+This task is MANDATORY for all projects and must include these steps:
+
+  1. Run final quality gates:
+     - /code-review on all project code (identifies remaining issues)
+     - /adr-check on all project code (validates architecture compliance)
+     - Fix any critical issues before proceeding
+
+  2. Run repository cleanup:
+     - /repo-cleanup projects/{project-name} (audits and cleans ephemeral files)
+     - Review cleanup report
+     - Approve removals (notes/debug/, notes/spikes/, notes/drafts/)
+     - Archive handoffs if any (notes/handoffs/ → .archive/)
+
+  3. Update README.md:
      - Set Status to "Complete"
      - Update Last Updated date
      - Set Phase to "Complete" and Progress to "100%"
      - Add Completed Date
      - Check all Graduation Criteria checkboxes
      - Add completion entry to Changelog
-  
-  2. Update plan.md:
+
+  4. Update plan.md:
      - Set Status to "Complete"
      - Update all milestone statuses to ✅
-  
-  3. Document lessons learned:
+
+  5. Document lessons learned:
      - Create notes/lessons-learned.md if notable insights
-  
-  4. Final verification:
+
+  6. Final verification:
      - All task files marked completed in TASK-INDEX.md
      - All documentation is current
+     - No critical code-review issues remaining
+     - Repository cleanup completed
 ```
 
 ### Step 4: Generate Task Files

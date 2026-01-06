@@ -39,6 +39,7 @@
 | [adr-check](adr-check/SKILL.md) | Validate code against Architecture Decision Records | No | `/adr-check`, "check ADRs" |
 | [azure-deploy](azure-deploy/SKILL.md) | Deploy Azure infrastructure, BFF API, and configure App Service | No | "deploy to azure", "deploy api", "azure deployment" |
 | [code-review](code-review/SKILL.md) | Comprehensive code review (security, performance, style) | No | `/code-review`, "review code" |
+| [conflict-check](conflict-check/SKILL.md) | Detect file conflicts between active PRs and current work | No | `/conflict-check`, "check conflicts", "file overlap" |
 | [dataverse-deploy](dataverse-deploy/SKILL.md) | Deploy solutions, PCF controls, web resources to Dataverse | No | "deploy to dataverse", "pac pcf push" |
 | [design-to-spec](design-to-spec/SKILL.md) | Transform human design documents into AI-optimized spec.md | No | `/design-to-spec`, "design to spec" |
 | [pull-from-github](pull-from-github/SKILL.md) | Pull latest changes from GitHub | No | `/pull-from-github`, "pull from github" |
@@ -89,6 +90,7 @@
 - **pull-from-github** - Pull latest changes from GitHub
 - **push-to-github** - Commit changes and push to GitHub
 - **worktree-setup** - Create and manage git worktrees for parallel project development
+- **conflict-check** - Detect file overlap between active PRs (parallel session awareness)
 - **context-handoff** - Save working state before compaction or session end for recovery
 
 ## Skill Flow
@@ -303,6 +305,8 @@ alwaysApply: false  # Only true for universal skills like conventions
 │   ├── SKILL.md
 │   └── references/
 │       └── review-checklist.md
+├── conflict-check/              ← Detect file overlap between active PRs
+│   └── SKILL.md
 ├── dataverse-deploy/             ← Dataverse deployment operations
 │   └── SKILL.md
 ├── design-to-spec/               ← Transform design docs to AI-ready spec.md
@@ -333,4 +337,4 @@ alwaysApply: false  # Only true for universal skills like conventions
 
 ---
 
-*Last updated: January 5, 2026*
+*Last updated: January 6, 2026*

@@ -5,8 +5,8 @@ alwaysApply: false
 
 # repo-cleanup
 
-> **Category**: Quality  
-> **Last Updated**: December 8, 2025
+> **Category**: Quality
+> **Last Updated**: January 6, 2026
 
 ---
 
@@ -447,10 +447,12 @@ Proceed with cleanup? (y/n)
 
 ## Related Skills
 
-- `project-init` - Creates initial project structure (this skill validates it)
-- `design-to-project` - Full project lifecycle (includes cleanup at end)
-- `code-review` - Code quality (this skill focuses on structure/hygiene)
-- `adr-check` - Architecture compliance (complementary)
+- **project-setup** - Creates initial project structure (this skill validates it)
+- **project-pipeline** - Full project lifecycle orchestrator (includes cleanup at end)
+- **design-to-spec** - Transforms design docs to AI-ready spec.md
+- **code-review** - Code quality (this skill focuses on structure/hygiene)
+- **adr-check** - Architecture compliance (complementary)
+- **task-execute** - Calls repo-cleanup in project wrap-up task
 
 ---
 
