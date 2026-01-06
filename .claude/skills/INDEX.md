@@ -1,7 +1,33 @@
 # Skills Index
 
-> **Purpose**: Central registry of Claude Code skills for Spaarke development.
-> **Authoritative Playbook**: [SKILL-INTERACTION-GUIDE.md](SKILL-INTERACTION-GUIDE.md) - Complete AI workflow guide with decision trees and invocation patterns
+> **Purpose**: Central registry of all Claude Code skills — the **single source of truth** for what skills exist, their triggers, and how to create new ones.
+>
+> **Last Updated**: January 5, 2026 (added azure-deploy skill)
+
+---
+
+## How This File Is Used
+
+**This file is actively referenced during Claude Code sessions:**
+
+1. **From root `CLAUDE.md`**: The instruction "check `.claude/skills/INDEX.md` for applicable workflows" directs Claude here before starting project work.
+
+2. **Skill Discovery**: When Claude needs to determine which skill applies to a task, it consults this index to find:
+   - Available skills and their triggers
+   - Which skills are always-apply vs explicit invocation
+   - Skill categories and tiers
+
+3. **Skill Creation**: When adding new skills, this file provides the authoritative template and metadata requirements.
+
+**Related Files**:
+| File | Role | When to Use |
+|------|------|-------------|
+| **This file (INDEX.md)** | Skill registry | Look up what skills exist, their triggers |
+| [SKILL-INTERACTION-GUIDE.md](SKILL-INTERACTION-GUIDE.md) | Interaction playbook | Understand how skills work together, decision trees |
+| `.claude/skills/{name}/SKILL.md` | Individual skill | Execute a specific skill's procedure |
+| Root `CLAUDE.md` | Entry point | References this index in "AI Agent Skills" section |
+
+---
 
 ## Available Skills
 
@@ -11,6 +37,7 @@
 | [ai-procedure-maintenance](ai-procedure-maintenance/SKILL.md) | Maintain AI procedures when adding ADRs, patterns, skills | No | "update AI procedures", "add new ADR" |
 | [script-aware](script-aware/SKILL.md) | Discover and reuse scripts from library before writing new code | **Yes** | Auto-applied |
 | [adr-check](adr-check/SKILL.md) | Validate code against Architecture Decision Records | No | `/adr-check`, "check ADRs" |
+| [azure-deploy](azure-deploy/SKILL.md) | Deploy Azure infrastructure, BFF API, and configure App Service | No | "deploy to azure", "deploy api", "azure deployment" |
 | [code-review](code-review/SKILL.md) | Comprehensive code review (security, performance, style) | No | `/code-review`, "review code" |
 | [dataverse-deploy](dataverse-deploy/SKILL.md) | Deploy solutions, PCF controls, web resources to Dataverse | No | "deploy to dataverse", "pac pcf push" |
 | [design-to-spec](design-to-spec/SKILL.md) | Transform human design documents into AI-optimized spec.md | No | `/design-to-spec`, "design to spec" |
@@ -50,6 +77,9 @@
 
 ### 🔧 Maintenance
 - **ai-procedure-maintenance** - Propagate updates when adding ADRs, constraints, patterns, skills
+
+### ☁️ Azure/Infrastructure
+- **azure-deploy** - Deploy Azure infrastructure, BFF API, App Service configuration
 
 ### ⚙️ Dataverse/Platform
 - **dataverse-deploy** - Deploy solutions, PCF controls, web resources via PAC CLI
@@ -267,6 +297,8 @@ alwaysApply: false  # Only true for universal skills like conventions
 │   ├── SKILL.md
 │   └── references/
 │       └── adr-validation-rules.md
+├── azure-deploy/                ← Azure infrastructure and API deployment
+│   └── SKILL.md
 ├── code-review/
 │   ├── SKILL.md
 │   └── references/
@@ -301,4 +333,4 @@ alwaysApply: false  # Only true for universal skills like conventions
 
 ---
 
-*Last updated: January 4, 2026 (added context-handoff)*
+*Last updated: January 5, 2026*

@@ -1,8 +1,8 @@
 # Dataverse Plugin Constraints
 
-> **Domain**: Dataverse Plugins
+> **Domain**: Dataverse Extensibility
 > **Source ADRs**: ADR-002
-> **Last Updated**: 2025-12-18
+> **Last Updated**: 2026-01-05
 
 ---
 
@@ -16,84 +16,94 @@ Load when:
 
 ---
 
-## MUST Rules
+## Core Principle
 
-### Plugin Design (ADR-002)
+**Dataverse plugins are NOT an execution runtime.**
 
-- ✅ **MUST** keep standard plugins < 200 lines, < 50ms p95
-- ✅ **MUST** limit standard plugins to: validation, denormalization/projection, audit stamping
-- ✅ **MUST** handle orchestration in BFF/BackgroundService workers
-- ✅ **MUST** pass correlation IDs through Custom API Proxy calls
+Plugins exist only to protect data integrity—not to run the system. All orchestration, business logic, integrations, and AI-driven processing belong in APIs and workers.
 
 ---
 
-## MUST NOT Rules
+## MUST NOT Rules (Prohibited)
+
+### In ALL Plugins (ADR-002)
+
+- ❌ **MUST NOT** implement business logic or workflow orchestration
+- ❌ **MUST NOT** make HTTP, Graph, AI, or any remote I/O calls
+- ❌ **MUST NOT** implement multi-entity coordination or side effects
+- ❌ **MUST NOT** use retries, polling, or long-running execution
+- ❌ **MUST NOT** depend on external state or services
+
+**Low-code plugins are treated the same as C# plugins** — no exceptions.
+
+---
+
+## MUST Rules (When Plugins Are Used)
 
 ### Plugin Design (ADR-002)
 
-- ❌ **MUST NOT** make HTTP/Graph calls in standard plugins (ValidationPlugin, ProjectionPlugin)
-- ❌ **MUST NOT** implement business logic in plugins
-- ❌ **MUST NOT** call external services from Custom API Proxy (BFF only)
+- ✅ **MUST** keep plugins < 200 lines and < 50ms p95
+- ✅ **MUST** limit to: validation, invariant enforcement, denormalization/projection, audit stamping
+- ✅ **MUST** defer all side effects to APIs or workers
+- ✅ **MUST** pass correlation IDs through API boundaries
+- ✅ **MUST** require explicit ADR exception approval for any plugin use
+
+---
+
+## Restricted Use (Exception-Only)
+
+Plugins **MAY** be used *only* when ALL of the following are true:
+
+- Execution is synchronous and deterministic
+- Work completes in < 50 ms p95
+- Logic is limited to: validation, invariant enforcement, denormalization/projection, audit stamping
+- No external calls of any kind
+- No orchestration or branching logic
+
+**Use of plugins requires explicit ADR exception approval.**
 
 ---
 
 ## Quick Reference Patterns
 
-### Standard Plugin (Validation/Stamping)
+### Allowed: Validation/Stamping Plugin
 
 ```csharp
-public class DocumentValidationPlugin : IPlugin
+// ValidationPlugin — invariant enforcement only
+public sealed class DocumentValidationPlugin : IPlugin
 {
-    public void Execute(IServiceProvider provider)
+    public void Execute(IServiceProvider serviceProvider)
     {
-        var tracingService = (ITracingService)provider.GetService(typeof(ITracingService));
-        var context = (IPluginExecutionContext)provider.GetService(typeof(IPluginExecutionContext));
-        var target = (Entity)context.InputParameters["Target"];
+        var context = (IPluginExecutionContext)serviceProvider.GetService(typeof(IPluginExecutionContext));
+        var target = context.InputParameters["Target"] as Entity;
 
         // ✅ Validation only
-        if (string.IsNullOrEmpty(target.GetAttributeValue<string>("sprk_name")))
-            throw new InvalidPluginExecutionException("Name required");
+        if (string.IsNullOrWhiteSpace(target.GetAttributeValue<string>("sprk_name")))
+            throw new InvalidPluginExecutionException("Document name is required.");
 
         // ✅ Stamping only
-        target["modifiedby_stamp"] = DateTime.UtcNow;
+        target["sprk_validatedon"] = DateTime.UtcNow;
     }
 }
 ```
 
-**See**: [Plugin Structure Pattern](../patterns/dataverse/plugin-structure.md)
+### Where Business Logic Belongs
 
-### Custom API Proxy (BFF Calls Only)
-
-```csharp
-public class GetPreviewUrlPlugin : BaseProxyPlugin
-{
-    protected override async Task<object> ExecuteAsync(...)
-    {
-        // ✅ BFF call only (no external services)
-        var response = await _httpClient.GetAsync(
-            $"{_bffBaseUrl}/api/preview/{documentId}",
-            correlationId);
-        return MapResponse(response);
-    }
-}
-```
-
-### Plugin Type Decision Matrix
-
-| Plugin Type | Allowed Operations | HTTP Calls |
-|------------|-------------------|------------|
-| ValidationPlugin | Field validation, required checks | ❌ Never |
-| ProjectionPlugin | Denormalization, calculated fields | ❌ Never |
-| AuditPlugin | Timestamp stamping, user stamping | ❌ Never |
-| Custom API Proxy | BFF delegation only | ✅ BFF only |
+| Concern | Required Mechanism |
+|---------|-------------------|
+| Business logic | BFF / Custom API |
+| Orchestration | API + async workers |
+| External services | BackgroundService / Azure Functions |
+| Long-running work | Job contracts + queues (ADR-004) |
+| Observability | Application Insights |
+| Retries & idempotency | Worker infrastructure |
+| Authorization | Endpoint-level filters (ADR-008) |
 
 ---
 
 ## Pattern Files (Complete Examples)
 
-- [Plugin Structure](../patterns/dataverse/plugin-structure.md) - BaseProxyPlugin, service extraction
-- [Entity Operations](../patterns/dataverse/entity-operations.md) - Late-bound CRUD patterns
-- [Web API Client](../patterns/dataverse/web-api-client.md) - BFF-side Dataverse access
+- [Plugin Structure](../patterns/dataverse/plugin-structure.md) - Thin plugin patterns
 
 ---
 
@@ -101,10 +111,11 @@ public class GetPreviewUrlPlugin : BaseProxyPlugin
 
 | ADR | Focus | When to Load |
 |-----|-------|--------------|
-| [ADR-002](../adr/ADR-002-thin-plugins.md) | Thin plugin philosophy | Exception approval, architecture review |
+| [ADR-002](../adr/ADR-002-thin-plugins.md) | Plugins not an execution runtime | Exception approval, architecture review |
+| [ADR-001](../adr/ADR-001-minimal-api.md) | APIs and workers as primary runtime | When deciding where logic belongs |
+| [ADR-004](../adr/ADR-004-job-contract.md) | Async job contracts | When deferring work from plugins |
 
 ---
 
-**Lines**: ~95
+**Lines**: ~100
 **Purpose**: Single-file reference for all Dataverse plugin constraints
-

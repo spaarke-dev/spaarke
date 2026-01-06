@@ -166,15 +166,160 @@ FLAG any missing elements for human input
    - Requirements: {Y} functional, {Z} non-functional
    - Success criteria: {N} criteria identified
 
-⚠️ Missing/Unclear (need your input):
-   - [ ] Out-of-scope not explicitly stated
-   - [ ] No performance requirements specified
-   - [ ] Integration points unclear
-
-Would you like to clarify these now? [Y to clarify / skip to proceed with assumptions]
+⚠️ Gaps identified - proceeding to targeted clarification...
 ```
 
-**Wait for User**: `y` (clarify) | `skip` (proceed with gaps noted)
+---
+
+### Step 2.5: Gap-Targeted Clarification Interview
+
+**Purpose:** Ask **specific, actionable questions** derived from gaps discovered in THIS design document. Each question must directly impact implementation decisions.
+
+**Principle:** Questions are NOT generic checklists. They are intelligent probes based on:
+- Undefined terms found in the design
+- Implicit assumptions that need validation
+- Missing behavior specifications
+- Conflicting or ambiguous requirements
+- Scope boundaries that are unclear
+
+**Action:**
+```
+ANALYZE extracted content for specific gaps:
+
+FOR EACH gap discovered, generate a TARGETED question that:
+  ✅ References the EXACT text or concept that's unclear
+  ✅ Explains WHY the answer matters (implementation impact)
+  ✅ Offers concrete options where applicable
+  ✅ Can be answered in 1-2 sentences
+
+GAP TYPES → QUESTION PATTERNS:
+
+1. UNDEFINED TERMS
+   Gap: Design uses "{term}" without defining it
+   Question: "You mention '{term}' - what's the specific threshold/value?
+             This determines [implementation choice]."
+
+   Example:
+   - Gap: Design says "handle large files"
+   - Question: "What file size is 'large'? >10MB? >100MB?
+               This determines if we need chunked uploads or streaming."
+
+2. IMPLICIT ASSUMPTIONS
+   Gap: Design assumes {behavior} without stating it
+   Question: "The design seems to assume {assumption}. Is this correct?
+             If not, [alternative approach] would be needed."
+
+   Example:
+   - Gap: Design assumes users are authenticated
+   - Question: "Should anonymous users see the document list (read-only)?
+               Currently assuming authenticated-only access."
+
+3. UNSPECIFIED BEHAVIOR
+   Gap: Design mentions {feature} but not how it works
+   Question: "When {specific scenario}, what should happen?
+             Options: [A] {option} or [B] {option}"
+
+   Example:
+   - Gap: "Export to PDF" mentioned but no details
+   - Question: "When exporting to PDF, should it include comments/annotations?
+               This affects the export library choice."
+
+4. MISSING ERROR HANDLING
+   Gap: Happy path only for {feature}
+   Question: "What should happen when {specific failure scenario}?
+             Options: [A] Show error, [B] Retry, [C] Fallback to {alternative}"
+
+   Example:
+   - Gap: Document upload flow, no failure handling
+   - Question: "If upload fails mid-stream (network error), should we:
+               [A] Auto-retry 3x, [B] Save partial and resume, [C] Fail and delete?"
+
+5. CONFLICTING REQUIREMENTS
+   Gap: {Requirement A} conflicts with {Requirement B}
+   Question: "'{Requirement A}' and '{Requirement B}' seem to conflict.
+             Which takes priority? This affects [implementation]."
+
+   Example:
+   - Gap: "Real-time sync" vs "Offline support"
+   - Question: "Real-time sync conflicts with offline-first. Priority?
+               This determines the sync architecture."
+
+6. SCOPE BOUNDARY UNCLEAR
+   Gap: Unclear if {capability} is in/out of scope
+   Question: "Is {specific capability} in scope for this release?
+             The design mentions it but doesn't explicitly include it."
+
+   Example:
+   - Gap: Design mentions "mobile users" but scope is unclear
+   - Question: "Is mobile-responsive UI in scope, or desktop-only?
+               This affects component library choices."
+
+7. MISSING QUANTITATIVE REQUIREMENTS
+   Gap: No numbers for {performance/scale requirement}
+   Question: "What's the expected {metric}? (e.g., concurrent users, data volume)
+             This determines [architectural choice]."
+
+   Example:
+   - Gap: No concurrent user expectations
+   - Question: "Expected concurrent users? <100 (simple), <1000 (caching needed),
+               >1000 (requires scaling strategy)?"
+
+PRESENT questions grouped by impact:
+
+🔴 BLOCKING (must answer before spec):
+   {Questions where wrong assumption = wrong implementation}
+
+🟡 IMPORTANT (should answer, can proceed with noted assumptions):
+   {Questions that affect approach but have reasonable defaults}
+
+FORMAT each question:
+  📍 Context: "{exact quote or reference from design}"
+  ❓ Question: "{specific question}"
+  💡 Impact: "{why this matters for implementation}"
+  🔘 Options: [A] {option} [B] {option} (if applicable)
+```
+
+**Output to User:**
+```
+🎯 Targeted Clarification Questions
+
+Based on gaps in the design document, I need your input on these specific items:
+
+🔴 BLOCKING (need answers to proceed):
+
+1. 📍 Context: "The design mentions 'batch processing for large document sets'"
+   ❓ Question: What defines a 'large' set? 10 docs? 100? 1000?
+   💡 Impact: Determines if we need background job queuing or can process inline.
+   🔘 Options: [A] <50 inline [B] <500 queue [C] >500 chunked batches
+
+2. 📍 Context: "Users can share documents with external parties"
+   ❓ Question: External = any email, or only pre-approved domains?
+   💡 Impact: Affects auth flow and security review requirements.
+
+🟡 IMPORTANT (proceeding with assumptions if not answered):
+
+3. 📍 Context: "Support for common document formats"
+   ❓ Question: Which formats exactly? PDF, DOCX, XLSX, PPTX? Images?
+   💡 Impact: Determines preview/conversion libraries needed.
+   ⚠️ Assuming: PDF, DOCX, XLSX, PPTX only
+
+Please answer the BLOCKING questions. For IMPORTANT, reply with answers or 'ok' to accept assumptions.
+```
+
+**Wait for User**: Answers to blocking questions (required), optional answers to important questions
+
+**Incorporate Answers:**
+```
+FOR EACH answer received:
+  → Update extracted requirements with concrete values
+  → Note source: "Per owner clarification: {answer}"
+  → Remove from gaps list
+  → Add to spec.md requirements section
+
+IF user skips IMPORTANT questions:
+  → Proceed with stated assumptions
+  → Flag assumptions in spec.md "Questions/Clarifications" section
+```
 
 ---
 
@@ -287,11 +432,24 @@ FOLLOW template structure:
 ### External Dependencies
 {APIs, services, approvals needed}
 
-## Questions/Clarifications Needed
+## Owner Clarifications
 
-{Any unresolved items from design doc - KEEP THIS SECTION}
-- [ ] {question}
-- [ ] {question}
+{Answers captured from Step 2.5 interview - CRITICAL for implementation}
+
+| Topic | Question | Answer | Impact |
+|-------|----------|--------|--------|
+| {topic} | {question asked} | {owner's response} | {implementation decision made} |
+
+## Assumptions
+
+{Items where owner did not specify - proceeding with stated assumptions}
+
+- **{topic}**: Assuming {value/behavior} - affects {component/decision}
+
+## Unresolved Questions
+
+{Still blocking or need answers during implementation}
+- [ ] {question} - Blocks: {what this blocks}
 
 ---
 
@@ -444,8 +602,25 @@ The generated spec.md follows this structure (also saved at `docs/ai-knowledge/t
 ### External
 - {External dependency}
 
-## Questions/Clarifications
-- [ ] {Unresolved question}
+## Owner Clarifications
+
+*Answers captured during design-to-spec interview:*
+
+| Topic | Question | Answer | Impact |
+|-------|----------|--------|--------|
+| {topic} | {question asked} | {owner's answer} | {how this affects implementation} |
+
+## Assumptions
+
+*Proceeding with these assumptions (owner did not specify):*
+
+- **{topic}**: Assuming {value/behavior} - will affect {component}
+
+## Unresolved Questions
+
+*Still need answers before implementation:*
+
+- [ ] {Unresolved question} - Blocks: {what this blocks}
 
 ---
 *AI-optimized specification. Original: {filename}*
@@ -514,9 +689,12 @@ design-to-spec (THIS SKILL)
 Skill successful when:
 - [ ] Design document ingested and parsed
 - [ ] Core elements extracted (purpose, scope, requirements, criteria)
+- [ ] **Gap-targeted interview conducted** (specific questions asked for discovered gaps)
+- [ ] **Owner clarifications captured** (answers recorded in spec.md)
+- [ ] **Assumptions documented** (for unanswered questions)
 - [ ] Technical context discovered (ADRs, patterns, file paths)
 - [ ] spec.md generated with all required sections
-- [ ] Unresolved questions clearly flagged
+- [ ] Unresolved questions clearly flagged with blocking impact
 - [ ] User reviewed and approved spec.md
 - [ ] Original design document preserved alongside spec.md
 

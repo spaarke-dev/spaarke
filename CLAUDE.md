@@ -36,7 +36,7 @@ setx CLAUDE_CODE_MAX_OUTPUT_TOKENS "64000"
 ```
 
 **Verifying settings**:
-```bash
+```powershell
 # In new terminal session
 echo $env:MAX_THINKING_TOKENS
 echo $env:CLAUDE_CODE_MAX_OUTPUT_TOKENS
@@ -57,7 +57,7 @@ echo $env:CLAUDE_CODE_MAX_OUTPUT_TOKENS
 - Transforms narrative design → structured spec.md
 - Adds preliminary ADR references (constraints only)
 - Flags ambiguities for clarification
-- **Output**: `projects/{name}/spec.md` (AI-ready specification)
+- **Output**: `projects/{project-name}/spec.md` (AI-ready specification)
 
 **OR manually write** `projects/{project-name}/spec.md` with:
 - Executive Summary, Scope, Requirements, Success Criteria, Technical Approach
@@ -72,13 +72,13 @@ echo $env:CLAUDE_CODE_MAX_OUTPUT_TOKENS
 /project-pipeline projects/{project-name}
 ```
 
-This orchestrates the complete setup:
-1. ✅ Validates spec.md
-2. ✅ **Comprehensive resource discovery** (ADRs, skills, patterns, knowledge docs)
-3. ✅ Generates artifacts (README.md, PLAN.md, CLAUDE.md, folder structure)
-4. ✅ Creates 50-200+ task files with full context
-5. ✅ Creates feature branch and initial commit
-6. ✅ Optionally starts task 001
+This orchestrates the complete setup (internal pipeline steps a-f):
+- a. ✅ Validates spec.md
+- b. ✅ **Comprehensive resource discovery** (ADRs, skills, patterns, knowledge docs)
+- c. ✅ Generates artifacts (README.md, PLAN.md, CLAUDE.md, folder structure)
+- d. ✅ Creates 50-200+ task files with full context
+- e. ✅ Creates feature branch and initial commit
+- f. ✅ Optionally starts task 001
 
 **→ Human-in-loop confirmations after each major step**
 
@@ -90,7 +90,7 @@ This orchestrates the complete setup:
 - Already executing task 001 in same session
 - Continue until task complete
 
-**If resuming in new session or moving to next task**:
+**If resuming in new session or moving to next task** (task 001 is typically auto-started by pipeline step f):
 ```bash
 work on task 002
 # OR
@@ -107,7 +107,7 @@ resume task 005
 
 **Explicit invocation** (alternative):
 ```bash
-/task-execute projects/{name}/tasks/002-*.poml
+/task-execute projects/{project-name}/tasks/002-*.poml
 ```
 
 ---
@@ -118,8 +118,8 @@ These skills are **called BY orchestrators** and should NOT be invoked directly 
 
 | Skill | Purpose | Called By |
 |-------|---------|-----------|
-| `project-setup` | Generate artifacts only (README, PLAN, CLAUDE.md) | `project-pipeline` (Step 2) |
-| `task-create` | Decompose plan.md into task files | `project-pipeline` (Step 3) |
+| `project-setup` | Generate artifacts only (README, PLAN, CLAUDE.md) | `project-pipeline` (pipeline step c) |
+| `task-create` | Decompose plan.md into task files | `project-pipeline` (pipeline step d) |
 | `adr-aware` | Load applicable ADRs based on resource types | Multiple skills (auto) |
 | `script-aware` | Discover and reuse scripts from library | Multiple skills (auto) |
 
@@ -169,9 +169,9 @@ These skills are **called BY orchestrators** and should NOT be invoked directly 
 
 | File | Purpose | Updated By |
 |------|---------|------------|
-| `projects/{name}/current-task.md` | Active task state, completed steps, files modified | `task-execute` skill |
-| `projects/{name}/CLAUDE.md` | Project context, decisions, constraints | Manual or skills |
-| `projects/{name}/tasks/TASK-INDEX.md` | Task status overview | `task-execute` skill |
+| `projects/{project-name}/current-task.md` | Active task state, completed steps, files modified | `task-execute` skill |
+| `projects/{project-name}/CLAUDE.md` | Project context, decisions, constraints | Manual or skills |
+| `projects/{project-name}/tasks/TASK-INDEX.md` | Task status overview | `task-execute` skill |
 
 **Resuming Work in a New Session**:
 
@@ -233,6 +233,7 @@ When these phrases are detected, **STOP** and load the corresponding skill:
 | "create tasks", "decompose plan", "generate tasks" | `task-create` | Load `.claude/skills/task-create/SKILL.md` and follow procedure |
 | "review code", "code review" | `code-review` | Load `.claude/skills/code-review/SKILL.md` and follow checklist |
 | "check ADRs", "validate architecture" | `adr-check` | Load `.claude/skills/adr-check/SKILL.md` and validate |
+| "deploy to azure", "deploy api", "azure deployment", "deploy infrastructure" | `azure-deploy` | Load `.claude/skills/azure-deploy/SKILL.md` and follow procedure |
 | "deploy to dataverse", "pac pcf push", "solution import", "deploy control", "publish customizations" | `dataverse-deploy` | Load `.claude/skills/dataverse-deploy/SKILL.md` and follow procedure |
 | "edit ribbon", "add ribbon button", "ribbon customization", "command bar button" | `ribbon-edit` | Load `.claude/skills/ribbon-edit/SKILL.md` and follow procedure |
 | "pull from github", "update from remote", "sync with github", "git pull", "get latest" | `pull-from-github` | Load `.claude/skills/pull-from-github/SKILL.md` and follow procedure |
@@ -246,12 +247,13 @@ When these phrases are detected, **STOP** and load the corresponding skill:
 
 | Condition | Required Skill |
 |-----------|---------------|
-| `projects/{name}/design.md` (or .docx, .pdf) exists but `spec.md` doesn't | Run `design-to-spec` to transform |
-| `projects/{name}/spec.md` exists but `README.md` doesn't | Run `project-pipeline` (or `project-setup` if user requests minimal) |
-| `projects/{name}/plan.md` exists but `tasks/` is empty | Run `task-create` |
+| `projects/{project-name}/design.md` (or .docx, .pdf) exists but `spec.md` doesn't | Run `design-to-spec` to transform |
+| `projects/{project-name}/spec.md` exists but `README.md` doesn't | Run `project-pipeline` (or `project-setup` if user requests minimal) |
+| `projects/{project-name}/plan.md` exists but `tasks/` is empty | Run `task-create` |
 | Creating API endpoint, PCF control, or plugin | Apply `adr-aware` (always-apply) |
 | Writing any code | Apply `spaarke-conventions` (always-apply) |
 | Running `pac` commands, deploying to Dataverse | Load `dataverse-deploy` skill first |
+| Running `az` commands, deploying to Azure | Load `azure-deploy` skill first |
 | Modifying ribbon XML, `RibbonDiffXml`, or command bar | Load `ribbon-edit` skill first |
 | Resuming work on existing project (has tasks/, CLAUDE.md) | Run `project-continue` to sync and load context |
 
@@ -279,6 +281,7 @@ Use these commands to explicitly invoke skills:
 | `/repo-cleanup` | Repository hygiene audit and ephemeral file cleanup |
 | `/code-review` | Review recent changes |
 | `/adr-check` | Validate ADR compliance |
+| `/azure-deploy` | Deploy Azure infrastructure, BFF API, or configure App Service |
 | `/dataverse-deploy` | Deploy PCF, solutions, or web resources to Dataverse |
 | `/ribbon-edit` | Edit Dataverse ribbon via solution export/import |
 | `/pull-from-github` | Pull latest changes from GitHub |
@@ -334,7 +337,11 @@ docs/
 
 ## Azure Infrastructure Resources
 
-**DO NOT query Azure CLI for resource info** - use these pre-documented references instead.
+**Avoid discovery queries** — resource names and endpoints are pre-documented below.
+**Operational commands are permitted** (deployments, secret management, configuration).
+
+- ❌ Don't run: `az resource list`, `az webapp show`, `az cognitiveservices account show`
+- ✅ Do run: `az webapp deploy`, `az keyvault secret set`, `az deployment group create`
 
 ### Quick Endpoints (Dev Environment)
 
@@ -411,7 +418,7 @@ infrastructure/                # Azure Bicep templates
 
 ## Architecture Decision Records (ADRs)
 
-ADRs are in `/docs/reference/adr/`. The key constraints are summarized here—**reference ADRs only if you need historical context** for why a decision was made.
+ADRs are in `.claude/adr/` (concise) and `docs/adr/` (full). The key constraints are summarized here—**reference ADRs only if you need historical context** for why a decision was made.
 
 | ADR | Summary | Key Constraint |
 |-----|---------|----------------|
@@ -429,7 +436,7 @@ ADRs are in `/docs/reference/adr/`. The key constraints are summarized here—**
 
 ## AI Architecture
 
-AI features are built using the **AI Tool Framework** - see `docs/ai-knowledge/guides/SPAARKE-AI-ARCHITECTURE.md`.
+AI features are built using the **AI Tool Framework** - see `docs/guides/SPAARKE-AI-ARCHITECTURE.md`.
 
 | Component | Purpose |
 |-----------|---------|
@@ -500,43 +507,19 @@ public class ValidationPlugin : IPlugin
 // ❌ DON'T: Implement orchestration logic in plugins
 ```
 
-## Common Tasks
+## Commands
 
-### Building
+| Action | Command |
+|--------|---------|
+| Build all | `dotnet build` |
+| Build API | `dotnet build src/server/api/Sprk.Bff.Api/` |
+| Build PCF | `cd src/client/pcf && npm run build` |
+| Test all | `dotnet test` |
+| Test with coverage | `dotnet test --collect:"XPlat Code Coverage" --settings config/coverlet.runsettings` |
+| Run API | `dotnet run --project src/server/api/Sprk.Bff.Api/` |
+| Format code | `dotnet format` |
 
-```bash
-# Build entire solution
-dotnet build
-
-# Build specific project
-dotnet build src/server/api/Sprk.Bff.Api/
-
-# Build PCF controls
-cd src/client/pcf && npm run build
-```
-
-### Testing
-
-```bash
-# Run all tests
-dotnet test
-
-# Run with coverage
-dotnet test --collect:"XPlat Code Coverage" --settings config/coverlet.runsettings
-
-# Run specific test project
-dotnet test tests/unit/Sprk.Bff.Api.Tests/
-```
-
-### Running Locally
-
-```bash
-# Start API
-dotnet run --project src/server/api/Sprk.Bff.Api/
-
-# API available at: https://localhost:5001
-# Health check: GET /healthz
-```
+**API Endpoints**: `https://localhost:5001` · Health check: `GET /healthz`
 
 ## File Naming Conventions
 
@@ -584,15 +567,7 @@ All coding projects follow this process:
 
 ### 🤖 AI-Assisted Development
 
-**Standard 2-step workflow for new projects:**
-
-1. **Transform design to spec**: `/design-to-spec projects/{name}`
-   - Converts human design docs → AI-optimized `spec.md`
-
-2. **Run project pipeline**: `/project-pipeline projects/{name}`
-   - Validates spec → discovers resources → generates artifacts → creates tasks → ready to execute
-
-See [Project Initialization: Developer Workflow](#-project-initialization-developer-workflow) section above for full details.
+For new projects, use `/design-to-spec` then `/project-pipeline`. See [Project Initialization: Developer Workflow](#-project-initialization-developer-workflow) for the complete workflow.
 
 ### Before Starting Work
 
@@ -601,37 +576,26 @@ See [Project Initialization: Developer Workflow](#-project-initialization-develo
 3. **Check for existing artifacts** - Look for design specs, assessments
 4. **Follow the workflow** - If a design spec exists, run `/design-to-spec` then `/project-pipeline`
 
-### After Completing Work
+### Working Checklist
 
-1. **Run tests** - Ensure all tests pass
-2. **Update task status** - Mark tasks complete in TASK-INDEX.md
-3. **Run `/repo-cleanup`** - Validate repository structure
-4. **Remove ephemeral files** - Clean up notes/debug, notes/spikes, notes/drafts
+**Before making changes:**
+- Check ADRs align with your approach
+- Review `.claude/skills/INDEX.md` for applicable workflows
 
-## When Making Changes
-
-1. **Check ADRs** - Ensure changes align with architectural decisions
-2. **Run tests** - `dotnet test` before committing
-3. **Update docs** - If changing behavior, update relevant documentation
-4. **Small commits** - Prefer focused, atomic commits
+**After completing work:**
+- Run tests (`dotnet test`)
+- Update task status in TASK-INDEX.md
+- Update docs if behavior changed
+- Run `/repo-cleanup` to validate structure
+- Use small, focused commits
 
 ## Module-Specific Instructions
 
 See `CLAUDE.md` files in subdirectories for module-specific guidance:
-- `src/server/api/Spe.Bff.Api/CLAUDE.md` - BFF API specifics
+- `src/server/api/Sprk.Bff.Api/CLAUDE.md` - BFF API specifics
 - `src/client/pcf/CLAUDE.md` - PCF control development
 - `src/server/shared/CLAUDE.md` - Shared .NET libraries
 
-## Quick Reference
-
-| Action | Command |
-|--------|---------|
-| Build all | `dotnet build` |
-| Test all | `dotnet test` |
-| Run API | `dotnet run --project src/server/api/Spe.Bff.Api/` |
-| Build PCF | `cd src/client/pcf && npm run build` |
-| Format code | `dotnet format` |
-
 ---
 
-*Last updated: January 4, 2026*
+*Last updated: January 5, 2026 (added azure-deploy skill)*

@@ -1,23 +1,45 @@
 # Skill Interaction Guide
 
-> **Purpose**: Comprehensive guide to Spaarke skill usage procedures, interaction patterns, and workflows.
+> **Purpose**: Playbook for how skills work together — decision trees, interaction patterns, and detailed workflows.
 >
-> **Audience**: Claude Code (AI agent) and human operators
->
-> **Last Updated**: December 20, 2025
+> **Last Updated**: January 5, 2026
+
+---
+
+## How This File Is Used
+
+**This file is loaded when Claude needs to understand skill composition and workflows:**
+
+1. **Complex Decision Making**: When determining which skill to invoke for a multi-step task, Claude consults the decision trees here.
+
+2. **Skill Orchestration**: When an orchestrator skill (like `project-pipeline`) needs to call component skills, this file defines the interaction patterns.
+
+3. **Workflow Execution**: Detailed step-by-step workflows for common scenarios (new project, task execution, etc.).
+
+**This file is NOT for:**
+- Looking up what skills exist (see [INDEX.md](INDEX.md))
+- Extended context configuration (see root `CLAUDE.md`)
+- Individual skill procedures (see `.claude/skills/{name}/SKILL.md`)
+
+**Related Files**:
+| File | Role | When to Use |
+|------|------|-------------|
+| [INDEX.md](INDEX.md) | Skill registry | Look up what skills exist, their triggers |
+| **This file (GUIDE)** | Interaction playbook | Understand how skills work together |
+| `.claude/skills/{name}/SKILL.md` | Individual skill | Execute a specific skill's procedure |
+| Root `CLAUDE.md` | Entry point | Extended context config, skill trigger phrases |
 
 ---
 
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [Extended Context Configuration](#extended-context-configuration)
-3. [Skill Categories](#skill-categories)
-4. [Primary Workflows](#primary-workflows)
-5. [Skill Interaction Patterns](#skill-interaction-patterns)
-6. [Decision Trees](#decision-trees)
-7. [Invocation Rules](#invocation-rules)
-8. [Common Patterns](#common-patterns)
+2. [Skill Tiers](#skill-tiers)
+3. [Primary Workflows](#primary-workflows)
+4. [Skill Interaction Patterns](#skill-interaction-patterns)
+5. [Decision Trees](#decision-trees)
+6. [Invocation Rules](#invocation-rules)
+7. [Common Patterns](#common-patterns)
 
 ---
 
@@ -64,154 +86,14 @@ Skills are organized in three tiers by complexity and scope:
 |------|------|---------|-------------------|
 | **Tier 1** | Component | project-setup, task-create | ❌ No (pure operations) |
 | **Tier 2** | Orchestrator | project-pipeline, task-execute | ✅ Yes (compose Tier 1) |
-| **Tier 3** | Operational | dataverse-deploy, ribbon-edit | ❌ No (domain-specific) |
+| **Tier 3** | Operational | azure-deploy, dataverse-deploy, ribbon-edit | ❌ No (domain-specific) |
 | **Tier 0** | Always-Apply | adr-aware, spaarke-conventions | N/A (automatic) |
 
 ---
 
-## Extended Context Configuration
-
-### Prerequisites for Project Pipeline Skills
-
-**CRITICAL**: Skills involved in project initialization require extended context settings:
-
-```bash
-MAX_THINKING_TOKENS=50000
-CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000
-```
-
-**Why Extended Context is Required**:
-- **Multi-phase projects**: Projects like AI Document Intelligence R1 have 100+ tasks across 8 phases
-- **Deep resource discovery**: Pipeline loads ADRs, knowledge docs, patterns, and existing code
-- **Context-rich task execution**: Each task includes full project history and applicable constraints
-- **Pipeline orchestration**: `project-pipeline` chains multiple component skills sequentially
-- **Large spec documents**: Design specs are typically 1500-5000 words
-
-**Real-World Example**:
-For the AI Document Intelligence R1 project:
-- spec.md: 2,306 words
-- 4 ADRs loaded (ADR-013, ADR-014, ADR-015, ADR-016)
-- 8 knowledge docs discovered
-- 178 tasks generated with full context
-
-**Setting in Windows**:
-```cmd
-setx MAX_THINKING_TOKENS "50000"
-setx CLAUDE_CODE_MAX_OUTPUT_TOKENS "64000"
-```
-
-**Verification**:
-```powershell
-echo $env:MAX_THINKING_TOKENS
-echo $env:CLAUDE_CODE_MAX_OUTPUT_TOKENS
-# Should output: 50000 and 64000
-```
-
-### Skills Requiring Extended Context
-
-| Skill | Context Need | Reason |
-|-------|--------------|--------|
-| **design-to-spec** | High | Ingests 2000-5000 word design docs, preliminary resource discovery |
-| **project-pipeline** | Critical | Orchestrates multiple skills, comprehensive resource discovery |
-| **project-setup** | Medium | Processes 1500-3000 word specs, generates comprehensive artifacts |
-| **task-create** | Medium | Creates 50-200+ task files with tag-to-knowledge mapping |
-
-**If not set**, pipeline skills may fail or produce incomplete results.
-
----
-
-## Skill Categories
-
-### 1. Project Lifecycle Skills
-
-**Purpose**: Manage project creation, task decomposition, and execution
-
-| Skill | Tier | Purpose | Developer-Facing | AI Internal |
-|-------|------|---------|------------------|-------------|
-| **design-to-spec** | 1 (Component) | Transform human design → AI-optimized spec.md | ✅ Yes | ❌ No |
-| **project-pipeline** | 2 (Orchestrator) | Spec → Ready Tasks (full automation) | ✅ **RECOMMENDED** | ❌ No |
-| **project-setup** | 1 (Component) | Generate artifacts (README, PLAN, CLAUDE.md) | ❌ No | ✅ Yes (called by pipeline) |
-| **task-create** | 1 (Component) | Decompose PLAN.md → task files | ❌ No | ✅ Yes (called by pipeline) |
-| **task-execute** | 2 (Orchestrator) | Execute a single task with full context | ✅ Yes (natural language) | ❌ No |
-| **repo-cleanup** | 3 (Operational) | Validate structure, remove ephemeral files | ✅ Yes (after completion) | ❌ No |
-
-**Developer Workflow** (2 Steps):
-```
-Step 1: design-to-spec (if starting from human design doc)
-         ↓
-Step 2: project-pipeline (full automation: artifacts + tasks + branch)
-         ↓
-Step 3: task-execute (natural language: "work on task 001")
-```
-
-**AI Internal Skills** (called by orchestrators, NOT by developers):
-- `project-setup` - Called by `project-pipeline` Step 2
-- `task-create` - Called by `project-pipeline` Step 3
-
----
-
-### 2. Always-Apply Skills (Tier 0)
-
-**Purpose**: Automatically enforce standards and architecture compliance
-
-| Skill | Applied When | Purpose |
-|-------|--------------|---------|
-| **adr-aware** | Before writing any code | Proactively load relevant ADRs based on resource type |
-| **spaarke-conventions** | During all code writing | Apply naming conventions, patterns, standards |
-
-**Invocation**: Automatic (implicit) - no explicit call needed
-
-**Example Flow**:
-```
-task-execute starts
-  → (implicit) Load adr-aware for API endpoint
-  → (implicit) Apply spaarke-conventions during coding
-  → (explicit) Run code-review after coding
-  → (explicit) Run adr-check for validation
-```
-
----
-
-### 3. Quality & Validation Skills
-
-**Purpose**: Post-hoc validation and quality gates
-
-| Skill | Tier | When Invoked | Purpose |
-|-------|------|--------------|---------|
-| **code-review** | 3 (Operational) | After implementing code in task | Security, performance, style review |
-| **adr-check** | 3 (Operational) | After code changes or on demand | Validate all ADR compliance |
-
-**Invocation**: Explicit call by orchestrator skills (e.g., task-execute) or manual
-
----
-
-### 4. Platform Operations Skills
-
-**Purpose**: Domain-specific operations for Dataverse/Power Platform
-
-| Skill | Tier | When Invoked | Purpose |
-|-------|------|--------------|---------|
-| **dataverse-deploy** | 3 (Operational) | Deploy-tagged tasks or manual | Deploy solutions, PCF, web resources via PAC CLI |
-| **ribbon-edit** | 3 (Operational) | Ribbon customization tasks or manual | Solution export → edit ribbon XML → import |
-
-**Invocation**: Explicit via task tags or manual command
-
----
-
-### 5. Git Operations Skills
-
-**Purpose**: Repository management and GitHub integration
-
-| Skill | Tier | When Invoked | Purpose |
-|-------|------|--------------|---------|
-| **pull-from-github** | 3 (Operational) | Manual or before starting work | Fetch + merge with conflict resolution |
-| **push-to-github** | 3 (Operational) | Manual or after completing work | Commit + push following conventions, create PR |
-
-**Invocation**: Manual only (never auto-invoked by other skills)
-
----
-
 ## Primary Workflows
+
+> **Note**: For the complete list of available skills, their triggers, and categories, see [INDEX.md](INDEX.md).
 
 ### Workflow 1: New Project from Design Document (RECOMMENDED)
 
@@ -436,9 +318,13 @@ Step 9: Update Task Status (task-execute)
   ✅ Output: "Task 001 complete. Next: execute task 002"
 
 Step 10: Special Task Types
-  IF task has tag="deploy":
+  IF task has tag="azure" or "infrastructure":
+    🔧 CALLS: azure-deploy
+      → Follow Azure deployment procedure
+
+  IF task has tag="deploy" or "dataverse":
     🔧 CALLS: dataverse-deploy
-      → Follow deployment procedure
+      → Follow Dataverse deployment procedure
 
   IF task involves ribbon:
     🔧 CALLS: ribbon-edit
@@ -786,6 +672,8 @@ START: I need to work on something
   │   │
   │   └─ NO → Is this a known operation?
   │       │
+  │       ├─ Deploy to Azure → azure-deploy
+  │       │
   │       ├─ Deploy to Dataverse → dataverse-deploy
   │       │
   │       ├─ Edit ribbon → ribbon-edit
@@ -837,8 +725,9 @@ START: I'm about to write code
   └─ Do I need to deploy or do platform operations?
       │
       └─ Explicitly invoke domain skill
-          ├─ /dataverse-deploy
-          └─ /ribbon-edit
+          ├─ /azure-deploy (Azure infrastructure, BFF API)
+          ├─ /dataverse-deploy (Dataverse, PCF, solutions)
+          └─ /ribbon-edit (ribbon customizations)
 ```
 
 ---
@@ -892,8 +781,10 @@ START: I'm about to write code
 **Principle**: Tier 3 (Operational) domain skills should NOT call other skills.
 
 **Examples**:
+- ✅ azure-deploy handles Azure infrastructure independently
 - ✅ dataverse-deploy completes deployment independently
 - ✅ ribbon-edit handles full ribbon edit cycle
+- ❌ azure-deploy should NOT call dataverse-deploy
 - ❌ dataverse-deploy should NOT call push-to-github
 - ❌ ribbon-edit should NOT call code-review
 
@@ -972,7 +863,10 @@ Use task tags to determine which domain skills to invoke:
 task-execute loads task file
   → Read <metadata><tags>
 
-  IF "deploy" in tags:
+  IF "azure" or "infrastructure" in tags:
+    → Call azure-deploy
+
+  IF "deploy" or "dataverse" in tags:
     → Call dataverse-deploy
 
   IF "ribbon" in tags:
@@ -984,45 +878,24 @@ task-execute loads task file
 
 ---
 
-## Summary: Quick Reference
+## Summary
 
-### When Starting a New Project
+### Quick Decision Trees
 
+**Starting a New Project**:
 ```
-Have human design doc? → YES → /design-to-spec projects/{name}
-                              → Then: /project-pipeline projects/{name} ⭐
-
-Have spec.md already?  → YES → /project-pipeline projects/{name} ⭐
-
-Have nothing yet?      → Create design.md or spec.md first
-                         → Option A: /design-to-spec (if design.md)
-                         → Option B: /project-pipeline (if spec.md)
+Have human design doc? → /design-to-spec → /project-pipeline ⭐
+Have spec.md already?  → /project-pipeline ⭐
+Have nothing?          → Create design.md or spec.md first
 ```
 
-### When Executing Tasks
-
+**Executing Tasks**:
 ```
-Have task file? → YES → Natural language: "work on task 002"
-                      → OR explicit: /task-execute projects/{name}/tasks/002-*.poml
-                → NO  → Work directly (always-apply skills active)
+Have task file? → Natural language: "work on task 002"
+No task file?   → Work directly (always-apply skills active)
 ```
 
-### When You Need
-
-| Need | Command | Developer-Facing | AI Internal |
-|------|---------|------------------|-------------|
-| Transform design doc to spec | `/design-to-spec projects/{name}` | ✅ Yes | ❌ No |
-| Full project setup | `/project-pipeline projects/{name}` ⭐ | ✅ Yes | ❌ No |
-| Just artifacts (advanced) | `/project-setup projects/{name}` | ⚠️ Advanced | ✅ Yes (called by pipeline) |
-| Just tasks (advanced) | `/task-create projects/{name}` | ⚠️ Advanced | ✅ Yes (called by pipeline) |
-| Execute a task | `work on task {NNN}` | ✅ Yes | ❌ No |
-| Review code | `/code-review` | ✅ Yes | ❌ No |
-| Check ADRs | `/adr-check` | ✅ Yes | ❌ No |
-| Deploy PCF/solution | `/dataverse-deploy` | ✅ Yes | ❌ No |
-| Edit ribbon | `/ribbon-edit` | ✅ Yes | ❌ No |
-| Pull changes | `/pull-from-github` | ✅ Yes | ❌ No |
-| Push changes | `/push-to-github` | ✅ Yes | ❌ No |
-| Cleanup repo | `/repo-cleanup` | ✅ Yes | ❌ No |
+> **For command reference**: See [INDEX.md](INDEX.md) for the complete list of skills and their triggers.
 
 ### Skill Dependency Chain
 
@@ -1047,7 +920,8 @@ project-pipeline (Developer-Facing)
         └─→ spaarke-conventions (implicit)
         └─→ code-review (after code)
         └─→ adr-check (after code)
-        └─→ dataverse-deploy (if tagged)
+        └─→ azure-deploy (if azure/infrastructure tagged)
+        └─→ dataverse-deploy (if deploy/dataverse tagged)
         └─→ ribbon-edit (if ribbon task)
 
 task-execute (Developer-Facing - Natural Language)
@@ -1068,12 +942,11 @@ task-execute (Developer-Facing - Natural Language)
 
 ---
 
-**Next Steps After Reading This Guide**:
-1. Review individual skill files for detailed procedures
-2. See `.claude/skills/INDEX.md` for complete skill registry
-3. Reference this guide when uncertain about skill interactions
-4. Update this guide when adding new skills or interaction patterns
+**Next Steps**:
+1. **Look up a skill**: See [INDEX.md](INDEX.md) for the complete registry
+2. **Execute a skill**: See `.claude/skills/{name}/SKILL.md` for the procedure
+3. **Understand interactions**: Reference this guide for how skills work together
 
 ---
 
-*This guide is the authoritative source for skill interaction patterns in the Spaarke codebase.*
+*Last updated: January 5, 2026*
