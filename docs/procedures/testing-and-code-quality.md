@@ -765,11 +765,13 @@ claude --chrome
 
 ## Related Documentation
 
+- [CI/CD Workflow Guide](ci-cd-workflow.md) - GitHub Actions, commits, PRs, deployments
 - [Parallel Claude Code Sessions](parallel-claude-sessions.md) - Multi-session workflow
 - [Context Recovery Procedure](context-recovery.md) - Resuming work
-- [code-review Skill](.claude/skills/code-review/SKILL.md) - Full skill documentation
-- [ui-test Skill](.claude/skills/ui-test/SKILL.md) - Browser testing details
-- [repo-cleanup Skill](.claude/skills/repo-cleanup/SKILL.md) - Cleanup procedures
+- [code-review Skill](../../.claude/skills/code-review/SKILL.md) - Full skill documentation
+- [ui-test Skill](../../.claude/skills/ui-test/SKILL.md) - Browser testing details
+- [repo-cleanup Skill](../../.claude/skills/repo-cleanup/SKILL.md) - Cleanup procedures
+- [ci-cd Skill](../../.claude/skills/ci-cd/SKILL.md) - CI/CD pipeline management
 
 ---
 
