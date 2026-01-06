@@ -1,5 +1,4 @@
 using FluentAssertions;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Spaarke.Core.Auth;
 using Spaarke.Core.Auth.Rules;
@@ -10,7 +9,8 @@ namespace Sprk.Bff.Api.Tests;
 
 /// <summary>
 /// Tests for the authorization system using the granular AccessRights model.
-/// These tests verify that authorization rules correctly evaluate user permissions.
+/// These tests verify that OperationAccessRule correctly evaluates user permissions
+/// against operations defined in OperationAccessPolicy.
 /// </summary>
 public class AuthorizationTests
 {
@@ -21,10 +21,10 @@ public class AuthorizationTests
     {
         _testDataSource = new TestAccessDataSource();
         var logger = new TestLogger<AuthorizationService>();
+        // Single rule: OperationAccessRule handles all authorization via OperationAccessPolicy
         var rules = new IAuthorizationRule[]
         {
-            new OperationAccessRule(new TestLogger<OperationAccessRule>()),
-            new TeamMembershipRule()
+            new OperationAccessRule(new TestLogger<OperationAccessRule>())
         };
 
         _authService = new AuthorizationService(_testDataSource, rules, logger);
@@ -33,12 +33,12 @@ public class AuthorizationTests
     [Fact]
     public async Task AuthorizeAsync_WithReadAccess_ShouldAllow()
     {
-        // Arrange
+        // Arrange - use "read_metadata" which requires AccessRights.Read
         var context = new AuthorizationContext
         {
             UserId = "user1",
             ResourceId = "resource1",
-            Operation = "read"
+            Operation = "read_metadata"
         };
 
         _testDataSource.SetUserAccess("user1", "resource1", AccessRights.Read);
@@ -53,12 +53,12 @@ public class AuthorizationTests
     [Fact]
     public async Task AuthorizeAsync_WithNoAccess_ShouldDeny()
     {
-        // Arrange
+        // Arrange - use "read_metadata" which requires AccessRights.Read
         var context = new AuthorizationContext
         {
             UserId = "user1",
             ResourceId = "resource1",
-            Operation = "read"
+            Operation = "read_metadata"
         };
 
         _testDataSource.SetUserAccess("user1", "resource1", AccessRights.None);
@@ -73,12 +73,12 @@ public class AuthorizationTests
     [Fact]
     public async Task AuthorizeAsync_WithCombinedRights_ShouldAllow()
     {
-        // Arrange
+        // Arrange - use "driveitem.update" which requires AccessRights.Write
         var context = new AuthorizationContext
         {
             UserId = "user1",
             ResourceId = "resource1",
-            Operation = "write"
+            Operation = "driveitem.update"
         };
 
         _testDataSource.SetUserAccess("user1", "resource1", AccessRights.Read | AccessRights.Write);
@@ -109,8 +109,8 @@ public class AuthorizationTests
                 UserId = userId,
                 ResourceId = resourceId,
                 AccessRights = rights,
-                TeamMemberships = new[] { "team1" },
-                Roles = new[] { "reader" }
+                TeamMemberships = Array.Empty<string>(),
+                Roles = Array.Empty<string>()
             };
 
             return Task.FromResult(snapshot);

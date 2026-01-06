@@ -41,10 +41,10 @@ public static class SpaarkeCore
             client.Timeout = TimeSpan.FromSeconds(30);
         });
 
-        // Authorization rules (registered in order of execution)
-        // Using granular AccessRights model with OperationAccessRule
-        services.AddScoped<IAuthorizationRule, OperationAccessRule>();  // Primary rule: checks operation-specific permissions
-        services.AddScoped<IAuthorizationRule, TeamMembershipRule>();   // Fallback: team-based access
+        // Authorization rules
+        // Single rule using granular AccessRights model - RetrievePrincipalAccess already
+        // factors in team membership, security roles, and record sharing
+        services.AddScoped<IAuthorizationRule, OperationAccessRule>();
 
         // Request cache for per-request memoization
         services.AddScoped<RequestCache>();

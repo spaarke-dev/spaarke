@@ -76,22 +76,29 @@ var file = await _speFileStore.GetFileAsync(resourceId);
 
 **See**: [Auth Patterns](../patterns/auth/INDEX.md)
 
-### IAuthorizationRule Implementation
+### Authorization Check Pattern
 
 ```csharp
-public class TeamMembershipRule : IAuthorizationRule
+// Use operations from OperationAccessPolicy (not generic "read" or "write")
+var authContext = new AuthorizationContext
 {
-    public int Order => 30;
+    UserId = userId,                    // Azure AD OID (from 'oid' claim)
+    ResourceId = documentId.ToString(), // Dataverse record ID
+    Operation = "read_metadata",        // Must exist in OperationAccessPolicy
+    CorrelationId = httpContext.TraceIdentifier
+};
 
-    public Task<AuthDecision> EvaluateAsync(AuthContext ctx)
-    {
-        if (!ctx.Snapshot.Teams.Contains(ctx.ResourceTeamId))
-            return Task.FromResult(AuthDecision.Deny("sdap.access.deny.team_mismatch"));
+var result = await _authorizationService.AuthorizeAsync(authContext);
 
-        return Task.FromResult(AuthDecision.Continue());
-    }
+if (!result.IsAllowed)
+{
+    return ProblemDetailsHelper.Forbidden(result.ReasonCode);
 }
 ```
+
+**Note**: Single rule model (`OperationAccessRule`) - Dataverse `RetrievePrincipalAccess` handles all permission computation including teams, roles, and sharing.
+
+**See**: [UAC Access Control Pattern](../patterns/auth/uac-access-control.md)
 
 ### Two Seams Only
 

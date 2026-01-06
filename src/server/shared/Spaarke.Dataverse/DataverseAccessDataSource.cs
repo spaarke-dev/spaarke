@@ -75,7 +75,9 @@ public class DataverseAccessDataSource : IAccessDataSource
         ArgumentException.ThrowIfNullOrWhiteSpace(userId, nameof(userId));
         ArgumentException.ThrowIfNullOrWhiteSpace(resourceId, nameof(resourceId));
 
-        _logger.LogInformation("Fetching access data for user {UserId} on resource {ResourceId}", userId, resourceId);
+        _logger.LogInformation(
+            "[UAC-DIAG] GetUserAccessAsync START: AzureAdOid={UserId}, ResourceId={ResourceId}",
+            userId, resourceId);
 
         try
         {
@@ -215,21 +217,34 @@ public class DataverseAccessDataSource : IAccessDataSource
                 }
             };
 
-            _logger.LogDebug("Checking Dataverse access for user {UserId} on resource {ResourceId}", userId, resourceId);
-            _logger.LogDebug("RetrievePrincipalAccess request: Target=sprk_documents({ResourceId}), Principal=systemusers({UserId})", resourceId, userId);
+            _logger.LogInformation(
+                "[UAC-DIAG] RetrievePrincipalAccess: User={UserId}, Resource={ResourceId}, Entity=sprk_documents",
+                userId, resourceId);
 
             var response = await _httpClient.PostAsJsonAsync("RetrievePrincipalAccess", request, ct);
 
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("Failed to retrieve principal access: {StatusCode}", response.StatusCode);
+                // Capture response body for diagnostics
+                var responseBody = await response.Content.ReadAsStringAsync(ct);
+
+                _logger.LogWarning(
+                    "[UAC-DIAG] RetrievePrincipalAccess FAILED: StatusCode={StatusCode}, User={UserId}, Resource={ResourceId}, ResponseBody={ResponseBody}",
+                    response.StatusCode, userId, resourceId, responseBody);
 
                 // 403 or 404 means no access
                 if (response.StatusCode == System.Net.HttpStatusCode.Forbidden ||
                     response.StatusCode == System.Net.HttpStatusCode.NotFound)
                 {
-                    // 403 or 404 means no access - return None instead of explicit Deny
-                    // Granular model doesn't have "Deny", just absence of rights
+                    // Log specific failure reason for diagnostics
+                    var failureReason = response.StatusCode == System.Net.HttpStatusCode.NotFound
+                        ? "Document not found (404) - possible replication lag or invalid ID"
+                        : "Access forbidden (403) - user lacks permission to this record";
+
+                    _logger.LogWarning(
+                        "[UAC-DIAG] Access denied: {FailureReason}, User={UserId}, Resource={ResourceId}",
+                        failureReason, userId, resourceId);
+
                     return new List<PermissionRecord>();
                 }
 
@@ -240,11 +255,18 @@ public class DataverseAccessDataSource : IAccessDataSource
 
             if (result == null)
             {
+                _logger.LogWarning(
+                    "[UAC-DIAG] RetrievePrincipalAccess returned null/empty: User={UserId}, Resource={ResourceId}",
+                    userId, resourceId);
                 return new List<PermissionRecord>();
             }
 
             // Map Dataverse AccessRights string to our granular AccessRights enum
             var accessRights = MapDataverseAccessRights(result.AccessRights);
+
+            _logger.LogInformation(
+                "[UAC-DIAG] RetrievePrincipalAccess SUCCESS: User={UserId}, Resource={ResourceId}, DataverseRights={DataverseRights}, MappedRights={MappedRights}",
+                userId, resourceId, result.AccessRights, accessRights);
 
             return new List<PermissionRecord>
             {
