@@ -44,6 +44,25 @@ echo $env:CLAUDE_CODE_MAX_OUTPUT_TOKENS
 
 **If not set**, the pipeline may fail or produce incomplete results. See root [CLAUDE.md](../../../CLAUDE.md#development-environment) for setup instructions.
 
+### Permission Mode: Plan Mode (RECOMMENDED)
+
+**This skill performs planning and analysis. Use Plan Mode for safe exploration.**
+
+```
+⏸ PLAN MODE RECOMMENDED
+
+Before starting this skill:
+  1. Press Shift+Tab twice to enter Plan Mode
+  2. Look for indicator: "⏸ plan mode on"
+  3. Plan Mode ensures read-only operations during planning
+
+WHY: Steps 1-3 analyze spec.md, discover resources, and generate artifacts.
+     Plan Mode prevents accidental edits during exploration.
+
+WHEN TO SWITCH: After Step 3 completes and you're ready for Step 4 (branch creation),
+                press Shift+Tab to return to Auto-Accept Mode for git operations.
+```
+
 ---
 
 ## Purpose

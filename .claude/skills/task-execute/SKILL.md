@@ -25,6 +25,30 @@ Execute a single POML task file with **mandatory context loading** and **persist
 
 ---
 
+## Permission Mode: Auto-Accept (RECOMMENDED)
+
+**This skill implements code changes. Use Auto-Accept Mode for efficient execution.**
+
+```
+⏵⏵ AUTO-ACCEPT MODE RECOMMENDED
+
+Before starting task implementation:
+  1. Press Shift+Tab to cycle to Auto-Accept Mode
+  2. Look for indicator: "⏵⏵ accept edits on"
+  3. Auto-Accept allows Claude to make changes without confirmation prompts
+
+WHY: Task execution involves writing code, updating files, running commands.
+     Auto-Accept Mode streamlines implementation without interruption.
+
+QUALITY GATES: Step 9.5 runs code-review and adr-check after implementation.
+               These catch issues before task completion.
+
+WHEN TO USE PLAN MODE: If you want to analyze code before changes,
+                       press Shift+Tab twice for Plan Mode during exploration.
+```
+
+---
+
 ## When to Use
 
 - User says "execute task 013" or "work on task 013"
