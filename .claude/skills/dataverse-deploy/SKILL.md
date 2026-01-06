@@ -518,6 +518,70 @@ pac solution check --path Y             # Validate solution before import
 - `ribbon-edit` - Ribbon customizations use solution export/import workflow
 - `spaarke-conventions` - Naming conventions for all Dataverse components
 - `adr-aware` - ADR-006 governs PCF control patterns, ADR-022 governs React version
+- `ci-cd` - CI/CD pipeline status and automated deployment workflows
+
+---
+
+## CI/CD Integration
+
+### Automated Plugin Deployment via GitHub Actions
+
+Plugin deployments can be automated via the `deploy-staging.yml` workflow:
+
+| Workflow | Trigger | What It Deploys |
+|----------|---------|-----------------|
+| `deploy-staging.yml` | Auto (after CI passes on master) or Manual | Dataverse plugins via PAC CLI |
+
+### Workflow Plugin Deployment
+
+The `deploy-plugins` job in `deploy-staging.yml`:
+
+1. Downloads build artifacts from CI
+2. Authenticates with Power Platform using service principal
+3. Deploys plugin assembly via PAC CLI
+
+```yaml
+pac auth create --url $POWER_PLATFORM_URL --applicationId $CLIENT_ID --clientSecret $SECRET
+pac plugin push --path ./artifacts/publish/plugins/Spaarke.Plugins.dll
+```
+
+### When to Use Manual vs Automated
+
+| Scenario | Use |
+|----------|-----|
+| Plugin code changes merged to master | Automated (`deploy-staging.yml`) |
+| PCF control iterative development | Manual (this skill - Quick Dev Deploy) |
+| Production solution release | Manual (this skill - Scenario 1d) |
+| Custom Page updates | Manual (this skill - Scenario 1c) |
+| Emergency hotfix | Manual (this skill) |
+
+### Required Secrets for Automated Deployment
+
+| Secret | Purpose |
+|--------|---------|
+| `POWER_PLATFORM_URL` | Dataverse environment URL |
+| `POWER_PLATFORM_CLIENT_ID` | Service principal app ID |
+| `POWER_PLATFORM_CLIENT_SECRET` | Service principal secret |
+
+### Monitor Automated Deployments
+
+```powershell
+# View staging deployment status
+gh run list --workflow=deploy-staging.yml
+
+# View specific deployment run
+gh run view {run-id}
+
+# Check deploy-plugins job
+gh run view {run-id} --log --job=deploy-plugins
+```
+
+### Manual Trigger of Plugin Deployment
+
+```powershell
+# Trigger staging deployment with plugins
+gh workflow run deploy-staging.yml -f deploy_plugins=true
+```
 
 ## Related ADRs
 

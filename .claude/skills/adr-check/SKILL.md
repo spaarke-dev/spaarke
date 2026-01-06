@@ -190,7 +190,73 @@ Claude scans all source directories, producing a comprehensive report across all
 ## Related Skills
 
 - `code-review` - General code quality review (not architecture-focused)
-- `pr-workflow` - Include ADR check as part of PR creation
+- `push-to-github` - Include ADR check as part of PR creation
+- `ci-cd` - CI pipeline status and ADR validation in CI
+
+---
+
+## CI/CD Integration
+
+### Local vs CI ADR Validation
+
+This skill performs **local** ADR validation. The same checks run in CI via GitHub Actions:
+
+| Location | Tool | When |
+|----------|------|------|
+| Local | This skill (`/adr-check`) | Before commit/push |
+| CI | NetArchTest (`Spaarke.ArchTests`) | On every PR and push to master |
+| Weekly | `adr-audit.yml` workflow | Monday 9 AM UTC |
+
+### CI Pipeline ADR Checks
+
+The `sdap-ci.yml` workflow runs ADR tests in the `code-quality` job:
+
+```yaml
+- name: ADR architecture tests (NetArchTest)
+  run: dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj
+```
+
+**Results appear in two places:**
+1. **PR Comments**: `adr-pr-comment` job posts violations as PR comments
+2. **Test Results**: Uploaded as workflow artifact `adr-test-results`
+
+### Weekly ADR Audit
+
+The `adr-audit.yml` workflow runs weekly and:
+- Creates/updates GitHub issue with `architecture` and `adr-audit` labels
+- Groups violations by ADR number
+- Auto-closes issue when all violations resolved
+- Provides remediation guidance
+
+### Troubleshooting CI ADR Failures
+
+```powershell
+# View PR ADR check status
+gh pr checks | grep -i "code-quality"
+
+# View ADR test results
+gh run view {run-id} --log --job=code-quality
+
+# Download test results artifact
+gh run download {run-id} --name adr-test-results
+
+# Trigger ADR audit manually
+gh workflow run adr-audit.yml
+```
+
+### Local Validation Before Push
+
+**RECOMMENDED**: Run this skill before pushing to catch violations early:
+
+```
+1. Make code changes
+2. Run /adr-check (this skill)
+3. Fix any violations
+4. Run NetArchTest locally for additional validation:
+   dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj
+5. Push changes
+6. CI will re-run same checks
+```
 
 ---
 

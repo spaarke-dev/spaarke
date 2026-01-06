@@ -38,6 +38,7 @@
 | [script-aware](script-aware/SKILL.md) | Discover and reuse scripts from library before writing new code | **Yes** | Auto-applied |
 | [adr-check](adr-check/SKILL.md) | Validate code against Architecture Decision Records | No | `/adr-check`, "check ADRs" |
 | [azure-deploy](azure-deploy/SKILL.md) | Deploy Azure infrastructure, BFF API, and configure App Service | No | "deploy to azure", "deploy api", "azure deployment" |
+| [ci-cd](ci-cd/SKILL.md) | GitHub Actions CI/CD pipeline status and workflow management | No | `/ci-cd`, "check CI", "build status", "workflow failed" |
 | [code-review](code-review/SKILL.md) | Comprehensive code review (security, performance, style) | No | `/code-review`, "review code" |
 | [conflict-check](conflict-check/SKILL.md) | Detect file conflicts between active PRs and current work | No | `/conflict-check`, "check conflicts", "file overlap" |
 | [dataverse-deploy](dataverse-deploy/SKILL.md) | Deploy solutions, PCF controls, web resources to Dataverse | No | "deploy to dataverse", "pac pcf push" |
@@ -91,6 +92,7 @@
 ### 🔄 Operations
 - **pull-from-github** - Pull latest changes from GitHub
 - **push-to-github** - Commit changes and push to GitHub
+- **ci-cd** - GitHub Actions CI/CD pipeline status, troubleshooting, and workflow management
 - **worktree-setup** - Create and manage git worktrees for parallel project development
 - **conflict-check** - Detect file overlap between active PRs (parallel session awareness)
 - **context-handoff** - Save working state before compaction or session end for recovery
@@ -302,6 +304,8 @@ alwaysApply: false  # Only true for universal skills like conventions
 │   └── references/
 │       └── adr-validation-rules.md
 ├── azure-deploy/                ← Azure infrastructure and API deployment
+│   └── SKILL.md
+├── ci-cd/                       ← GitHub Actions CI/CD pipeline management
 │   └── SKILL.md
 ├── code-review/
 │   ├── SKILL.md
