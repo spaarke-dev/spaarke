@@ -1,6 +1,6 @@
 # CLAUDE.md - Spaarke Repository Instructions
 
-> **Last Updated**: January 4, 2026
+> **Last Updated**: January 6, 2026
 >
 > **Purpose**: This file provides repository-wide context and instructions for Claude Code when working in this codebase.
 
@@ -40,6 +40,57 @@ setx CLAUDE_CODE_MAX_OUTPUT_TOKENS "64000"
 # In new terminal session
 echo $env:MAX_THINKING_TOKENS
 echo $env:CLAUDE_CODE_MAX_OUTPUT_TOKENS
+```
+
+### Claude Code Model and Permission Settings
+
+This repository is configured for **Opus 4.5** with **auto-accept edits** via `.claude/settings.json`:
+
+```json
+{
+  "model": "opus",
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": ["Read(**)", "Glob(**)", "Grep(**)", "Skill(*)", "Bash(git:*)", ...]
+  }
+}
+```
+
+**Model Selection**:
+- **Default**: `opus` (Claude Opus 4.5 - claude-opus-4-5-20251101)
+- **Check current**: `/model` or `/status` during session
+- **Override**: `claude --model sonnet` for faster, simpler tasks
+
+**Permission Modes** (cycle with **Shift+Tab**):
+
+| Mode | Indicator | Use Case |
+|------|-----------|----------|
+| **Auto-Accept** | `⏵⏵ accept edits on` | Task implementation (default) |
+| **Plan Mode** | `⏸ plan mode on` | Code analysis, planning, exploration |
+| **Ask Mode** | (none) | Explicit approval for each change |
+
+**Recommended Workflow**:
+
+1. **Planning Phase** (`/project-pipeline`, `/design-to-spec`):
+   - Press **Shift+Tab** twice to enter **Plan Mode**
+   - Claude analyzes, reads, plans without making changes
+   - Review the plan before implementation
+
+2. **Implementation Phase** (task execution):
+   - Press **Shift+Tab** to return to **Auto-Accept Mode**
+   - Claude implements changes automatically
+   - Quality gates (code-review, adr-check) run at Step 9.5
+
+**Starting in Specific Mode**:
+```bash
+# Start in plan mode for analysis
+claude --permission-mode plan
+
+# Start in auto-accept for implementation
+claude --permission-mode acceptEdits
+
+# Use Opus for planning, Sonnet for execution (hybrid)
+claude --model opusplan
 ```
 
 ---
