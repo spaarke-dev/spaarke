@@ -2,7 +2,7 @@
 
 > **Purpose**: Playbook for how skills work together — decision trees, interaction patterns, and detailed workflows.
 >
-> **Last Updated**: January 6, 2026 (added Pattern 6: Conflict Detection for parallel sessions)
+> **Last Updated**: January 6, 2026 (added ui-test skill and Step 9.7 integration)
 
 ---
 
@@ -1029,8 +1029,9 @@ project-pipeline (Developer-Facing)
   └─→ CALLS: task-execute (Developer-Facing, optional auto-start)
         └─→ adr-aware (implicit)
         └─→ spaarke-conventions (implicit)
-        └─→ code-review (after code)
-        └─→ adr-check (after code)
+        └─→ code-review (Step 9.5 - after code)
+        └─→ adr-check (Step 9.5 - after code)
+        └─→ ui-test (Step 9.7 - if pcf/frontend, requires --chrome)
         └─→ azure-deploy (if azure/infrastructure tagged)
         └─→ dataverse-deploy (if deploy/dataverse tagged)
         └─→ ribbon-edit (if ribbon task)

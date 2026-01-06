@@ -50,6 +50,7 @@
 | [spaarke-conventions](spaarke-conventions/SKILL.md) | Coding standards and naming conventions | **Yes** | Auto-applied |
 | [task-create](task-create/SKILL.md) | Decompose plan.md into POML task files | No | `/task-create`, "create tasks" |
 | [task-execute](task-execute/SKILL.md) | Execute POML task with mandatory knowledge loading | No | "execute task", "run task", "work on task" |
+| [ui-test](ui-test/SKILL.md) | Browser-based UI testing for PCF/frontend using Chrome | No | `/ui-test`, "test in browser", "visual test" |
 | [project-continue](project-continue/SKILL.md) | Continue project after PR merge or new session | No | `/project-continue`, "continue project", "resume project" |
 | [context-handoff](context-handoff/SKILL.md) | Save working state before compaction or session end | No | `/checkpoint`, `/context-handoff`, "save progress" |
 | [ribbon-edit](ribbon-edit/SKILL.md) | Edit Dataverse ribbon via solution export/import | No | "edit ribbon", "add ribbon button" |
@@ -74,6 +75,7 @@
 ### ✅ Quality Assurance
 - **code-review** - General code quality review
 - **adr-check** - Architecture compliance validation (post-hoc)
+- **ui-test** - Browser-based UI testing for PCF/frontend (requires Chrome)
 - **repo-cleanup** - Repository structure validation and hygiene
 
 ### 🔧 Maintenance
@@ -329,6 +331,8 @@ alwaysApply: false  # Only true for universal skills like conventions
 ├── task-create/
 │   ├── SKILL.md
 │   └── references/
+├── ui-test/                   ← Browser-based UI testing (Chrome integration)
+│   └── SKILL.md
 ├── worktree-setup/             ← Git worktree management for parallel development
 │   └── SKILL.md
 └── context-handoff/            ← State preservation before compaction
