@@ -326,6 +326,58 @@ az webapp log deployment show --name spe-api-dev-67e2xz --resource-group spe-inf
 |-------|---------|
 | `dataverse-deploy` | Dataverse solutions, PCF controls, web resources |
 | `ribbon-edit` | Ribbon customizations (uses solution export/import) |
+| `ci-cd` | CI/CD pipeline status and automated deployment workflows |
+
+---
+
+## CI/CD Integration
+
+### Automated Deployments via GitHub Actions
+
+This skill documents **manual** Azure deployments. For automated deployments, see the GitHub Actions workflows:
+
+| Workflow | Trigger | What It Deploys |
+|----------|---------|-----------------|
+| `deploy-staging.yml` | Auto (after CI passes on master) | API to staging App Service |
+| `deploy-to-azure.yml` | Manual trigger | Infrastructure (Bicep) + API to production |
+
+### When to Use Manual vs Automated
+
+| Scenario | Use |
+|----------|-----|
+| Regular code deployments | Automated (`deploy-staging.yml` after merge to master) |
+| Production deployment | Automated (`deploy-to-azure.yml` manual trigger) |
+| Emergency hotfix | Manual deployment (this skill) |
+| Infrastructure changes only | Manual deployment (this skill) |
+| Debugging deployment issues | Manual deployment (this skill) |
+
+### Trigger Automated Deployment
+
+```powershell
+# Trigger production deployment manually
+gh workflow run deploy-to-azure.yml
+
+# Monitor deployment progress
+gh run watch
+
+# View deployment status
+gh run list --workflow=deploy-to-azure.yml --limit 5
+```
+
+### Check Deployment Status
+
+```powershell
+# View recent deployments
+gh run list --workflow=deploy-to-azure.yml
+
+# View specific run details
+gh run view {run-id}
+
+# Download deployment artifacts
+gh run download {run-id}
+```
+
+---
 
 ## Related Documentation
 

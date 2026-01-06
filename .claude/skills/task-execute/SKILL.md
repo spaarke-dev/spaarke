@@ -25,6 +25,30 @@ Execute a single POML task file with **mandatory context loading** and **persist
 
 ---
 
+## Permission Mode: Auto-Accept (RECOMMENDED)
+
+**This skill implements code changes. Use Auto-Accept Mode for efficient execution.**
+
+```
+⏵⏵ AUTO-ACCEPT MODE RECOMMENDED
+
+Before starting task implementation:
+  1. Press Shift+Tab to cycle to Auto-Accept Mode
+  2. Look for indicator: "⏵⏵ accept edits on"
+  3. Auto-Accept allows Claude to make changes without confirmation prompts
+
+WHY: Task execution involves writing code, updating files, running commands.
+     Auto-Accept Mode streamlines implementation without interruption.
+
+QUALITY GATES: Step 9.5 runs code-review and adr-check after implementation.
+               These catch issues before task completion.
+
+WHEN TO USE PLAN MODE: If you want to analyze code before changes,
+                       press Shift+Tab twice for Plan Mode during exploration.
+```
+
+---
+
 ## When to Use
 
 - User says "execute task 013" or "work on task 013"
@@ -367,6 +391,124 @@ FOR each <criterion> in <acceptance-criteria>:
     FIX before proceeding
 ```
 
+### Step 9.5: Quality Gates (MANDATORY)
+
+**Purpose**: Run code review and ADR validation after implementation, before marking task complete.
+
+```
+AFTER all implementation steps and acceptance criteria verified:
+
+1. RUN code-review on files modified in this task:
+   → Get list from current-task.md "Files Modified" section
+   → Execute /code-review {file-list}
+
+   IF critical issues found:
+     → LIST critical issues
+     → FIX each issue before proceeding
+     → RE-RUN code-review to verify fixes
+
+   IF warnings found:
+     → REPORT warnings to user
+     → ASK: "Fix warnings now or proceed?"
+     → Address per user preference
+
+2. RUN adr-check on modified files:
+   → Execute /adr-check {file-list}
+
+   IF ADR violations found:
+     → STOP - these MUST be fixed
+     → FIX violations
+     → RE-RUN adr-check to verify
+
+3. VERIFY linting (if applicable):
+   → TypeScript/PCF: npm run lint
+   → C#: dotnet build --warnaserror
+
+   IF lint errors:
+     → FIX before proceeding
+     → RE-RUN lint to verify
+
+SKIP quality gates IF:
+  - Task is documentation-only (no code changes)
+  - Task is configuration-only (no logic changes)
+  - User explicitly requests skip (with documented reason)
+
+UPDATE current-task.md:
+  - Add "Quality Gates" section:
+    - Code Review: ✅ Passed (or issues found/fixed)
+    - ADR Check: ✅ Passed (or violations found/fixed)
+    - Lint: ✅ Passed (or N/A)
+```
+
+### Step 9.7: UI Testing (PCF/Frontend Tasks)
+
+**Purpose**: Run browser-based UI tests for PCF controls and frontend components after deployment.
+
+**Requires**: Claude Code started with `--chrome` flag
+
+```
+CHECK if UI testing applies:
+
+IF ALL conditions met:
+  - Task tags include: pcf, frontend, fluent-ui, e2e-test
+  - Claude Code has Chrome integration (/chrome shows "Connected")
+  - Deployment completed (dataverse-deploy or localhost running)
+  - Task has <ui-tests> section OR UI-related <acceptance-criteria>
+
+THEN:
+  PROMPT: "UI tests defined for this task. Run browser-based testing? [Y/n]"
+
+  IF user confirms:
+    1. LOAD ui-test skill
+    2. EXECUTE tests defined in task POML or acceptance criteria
+    3. VERIFY ADR-021 dark mode compliance (for PCF/Fluent UI)
+    4. CHECK console for runtime errors
+    5. CAPTURE screenshots/GIFs if requested
+    6. REPORT results
+
+  IF user declines:
+    → Document reason in current-task.md
+    → Continue to Step 10
+
+SKIP UI testing IF:
+  - Task is backend-only (no pcf/frontend tags)
+  - Claude Code not started with --chrome
+  - No deployed environment available
+  - User explicitly skips
+
+UPDATE current-task.md:
+  - Add "UI Testing" section:
+    - Status: ✅ Passed / ⚠️ Issues found / ⏭️ Skipped (reason)
+    - Tests run: {count}
+    - Issues: {list if any}
+```
+
+**Test Sources** (checked in order):
+
+1. **Task POML `<ui-tests>` section** - Explicit test definitions
+2. **Task POML `<acceptance-criteria>`** - UI-related criteria
+3. **Project CLAUDE.md** - Environment URLs, navigation paths
+4. **ADR-021** - Dark mode requirements (auto-applied for PCF/Fluent UI)
+
+**Example UI Test in Task POML**:
+```xml
+<ui-tests>
+  <test name="Component Renders">
+    <url>https://org.crm.dynamics.com/main.aspx?...</url>
+    <steps>
+      <step>Verify control is visible</step>
+      <step>Check console for errors</step>
+    </steps>
+  </test>
+  <test name="Dark Mode (ADR-021)">
+    <steps>
+      <step>Toggle dark mode</step>
+      <step>Verify colors adapt</step>
+    </steps>
+  </test>
+</ui-tests>
+```
+
 ### Step 10: Update Task Status (Completion)
 
 ```
@@ -401,6 +543,45 @@ IF task CREATED reusable automation (commands used 3+ times):
 IF task DEPRECATED script functionality:
   UPDATE scripts/README.md to mark as ⚠️ Deprecated
   NOTE replacement approach
+```
+
+### Step 10.6: Conflict Sync Check (Parallel Sessions)
+
+**Purpose**: When running parallel Claude Code sessions, check for potential conflicts before committing.
+
+```
+IF running in a worktree (not main repo):
+
+  1. FETCH latest master
+     git fetch origin master
+
+  2. CHECK for master updates since branch started
+     git log HEAD..origin/master --oneline
+
+  3. IF master has new commits:
+     CHECK which files changed in master:
+       git diff --name-only HEAD origin/master
+
+     COMPARE with files modified in this task:
+       - Files in current-task.md "Files Modified" section
+
+     IF overlap detected:
+       ⚠️ WARN: "Master has changes to files you modified"
+       RECOMMEND: "Rebase before pushing to avoid conflicts"
+
+       SHOW conflict resolution commands:
+         git fetch origin master
+         git rebase origin/master
+         # Resolve any conflicts
+         git push --force-with-lease
+
+  4. IF no overlap OR user chooses to continue:
+     PROCEED with commit and push
+
+REASONING:
+  - Detecting conflicts early (end of task) is easier than at merge time
+  - Smaller rebases = fewer conflicts
+  - Keeps parallel sessions in sync
 ```
 
 ### Step 11: Transition to Next Task
@@ -651,7 +832,10 @@ When task has `deploy` tag:
 - **adr-aware**: Proactive ADR loading (always-apply)
 - **script-aware**: Script library discovery and maintenance (always-apply)
 - **dataverse-deploy**: Deployment operations
-- **code-review**: Post-implementation review
+- **code-review**: Called in Step 9.5 Quality Gates (post-implementation)
+- **adr-check**: Called in Step 9.5 Quality Gates (architecture validation)
+- **ui-test**: Called in Step 9.7 for PCF/frontend browser testing (requires --chrome)
+- **repo-cleanup**: Called in project wrap-up task (Task 090)
 - **project-pipeline**: Initializes current-task.md for projects
 
 ## Related Protocols

@@ -2,7 +2,7 @@
 
 > **Purpose**: Playbook for how skills work together — decision trees, interaction patterns, and detailed workflows.
 >
-> **Last Updated**: January 5, 2026
+> **Last Updated**: January 6, 2026 (added ui-test skill and Step 9.7 integration)
 
 ---
 
@@ -567,11 +567,119 @@ NOTE: This is NEVER automatically called by task-execute or other skills
 - pull-from-github
 - push-to-github
 - repo-cleanup (except in wrap-up task)
+- conflict-check (on-demand overlap detection)
 
 **Rules**:
 - These skills affect repository state globally
 - Require explicit user intent
 - Should NOT be auto-invoked by task execution
+
+---
+
+### Pattern 6: Conflict Detection Pattern (Parallel Sessions)
+
+**Definition**: Proactive detection of file overlap when running multiple Claude Code sessions simultaneously.
+
+**When to Use**:
+- Running 3-5 Claude Code sessions in parallel via git worktrees
+- Before starting a new project (check for overlapping active PRs)
+- Before merging a PR (detect potential conflicts)
+- At end of task (sync check with master)
+
+**Example: Project Planning Overlap Check (project-pipeline Step 1.5)**:
+```
+project-pipeline validates spec.md
+  ↓
+  Step 1.5: Overlap Detection
+    ├─→ Identify likely files from spec.md
+    │   (PCF controls → src/client/pcf/)
+    │   (API endpoints → src/server/api/)
+    ├─→ Check active PRs for overlapping files
+    │   gh pr list --json number,title,files
+    ├─→ Compare file lists
+    ↓
+  IF overlap detected:
+    ⚠️ WARN user:
+      "PR #98 also modifies .claude/skills/"
+      "Recommendation: Coordinate file ownership"
+    ⏸️  Wait for user: 'y' to proceed with awareness
+  ↓
+  Step 2: Continue to resource discovery
+```
+
+**Example: End-of-Task Sync Check (task-execute Step 10.6)**:
+```
+task-execute completes implementation
+  ↓
+  Step 10.6: Conflict Sync Check
+    ├─→ git fetch origin master
+    ├─→ Check for new master commits
+    │   git log HEAD..origin/master --oneline
+    ├─→ Compare master changes with task files
+    ↓
+  IF master changed files you modified:
+    ⚠️ WARN: "Master has changes to files you modified"
+    RECOMMEND: "Rebase before pushing"
+  ↓
+  Step 10.7: Transition to next task
+```
+
+**Example: On-Demand Conflict Check (/conflict-check)**:
+```
+💬 User: "/conflict-check"
+  ↓
+  Claude: Loads conflict-check skill
+    ├─→ Get current branch files
+    │   git diff --name-only origin/master...HEAD
+    ├─→ Get active PR files
+    │   gh pr list --json number,files
+    ├─→ Calculate overlaps
+    ↓
+  IF overlaps found:
+    Output: "⚠️ PR #101 overlaps on: src/client/pcf/"
+    Recommendations:
+      1. Merge PR #101 first
+      2. Designate file ownership
+      3. Frequent rebase pattern
+  ELSE:
+    Output: "✅ No conflicts detected"
+```
+
+**Integration Points**:
+| Skill | When | Purpose |
+|-------|------|---------|
+| project-pipeline | Step 1.5 | Detect overlap before project setup |
+| task-execute | Step 10.6 | End-of-task master sync check |
+| push-to-github | Pre-push | Detect overlap before PR update |
+| conflict-check | On-demand | Manual overlap check anytime |
+
+**Parallel Session Setup** (uses worktree-setup skill):
+```
+Main repo: C:\code_files\spaarke\ [master]
+  ↓
+  git worktree add ../spaarke-wt-feature-a -b feature/feature-a
+  git worktree add ../spaarke-wt-feature-b -b feature/feature-b
+  ↓
+Result:
+  Session 1: C:\code_files\spaarke-wt-feature-a\
+  Session 2: C:\code_files\spaarke-wt-feature-b\
+  (Each VS Code window has isolated branch)
+```
+
+**Merge Order Strategy**:
+```
+Session 1 done → Rebase → Merge PR #101
+  ↓
+Session 2: git fetch && git rebase origin/master
+  ↓
+Session 2 done → Merge PR #102
+```
+
+**Rules**:
+- Overlap detection is informational, not blocking
+- User decides whether to proceed with awareness
+- Coordinate file ownership for same-file work
+- Use sequential merge pattern for conflict-free merges
 
 ---
 
@@ -907,6 +1015,9 @@ design-to-spec (Developer-Facing)
               └─→ Handoff to project-pipeline
 
 project-pipeline (Developer-Facing)
+  ├─→ Step 1.5: conflict-check (overlap detection - informational)
+  │     └─→ Warns about active PRs touching same files
+  │
   ├─→ Comprehensive resource discovery (full ADRs, patterns, code)
   │
   ├─→ CALLS: project-setup (AI Internal)
@@ -918,15 +1029,22 @@ project-pipeline (Developer-Facing)
   └─→ CALLS: task-execute (Developer-Facing, optional auto-start)
         └─→ adr-aware (implicit)
         └─→ spaarke-conventions (implicit)
-        └─→ code-review (after code)
-        └─→ adr-check (after code)
+        └─→ code-review (Step 9.5 - after code)
+        └─→ adr-check (Step 9.5 - after code)
+        └─→ ui-test (Step 9.7 - if pcf/frontend, requires --chrome)
         └─→ azure-deploy (if azure/infrastructure tagged)
         └─→ dataverse-deploy (if deploy/dataverse tagged)
         └─→ ribbon-edit (if ribbon task)
+        └─→ conflict-check (Step 10.6 - sync check, parallel sessions)
 
 task-execute (Developer-Facing - Natural Language)
   💬 Invoked by: "work on task 002" OR "continue with next task"
   └─→ (Same dependencies as above)
+
+worktree-setup (Developer-Facing - Parallel Sessions)
+  💬 Invoked by: "create worktree", "setup worktree for project"
+  └─→ Creates isolated worktree for parallel development
+  └─→ Enables running multiple Claude Code sessions simultaneously
 ```
 
 ### Resource Discovery Levels
@@ -949,4 +1067,4 @@ task-execute (Developer-Facing - Natural Language)
 
 ---
 
-*Last updated: January 5, 2026*
+*Last updated: January 6, 2026*

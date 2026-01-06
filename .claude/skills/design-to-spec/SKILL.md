@@ -36,6 +36,25 @@ echo $env:CLAUDE_CODE_MAX_OUTPUT_TOKENS
 
 If not set, see root [CLAUDE.md](../../../CLAUDE.md#development-environment) for setup instructions.
 
+### Permission Mode: Plan Mode (RECOMMENDED)
+
+**This skill analyzes design documents. Use Plan Mode for safe exploration.**
+
+```
+⏸ PLAN MODE RECOMMENDED
+
+Before starting this skill:
+  1. Press Shift+Tab twice to enter Plan Mode
+  2. Look for indicator: "⏸ plan mode on"
+  3. Plan Mode ensures read-only operations during analysis
+
+WHY: This skill reads and analyzes design documents, discovers ADR constraints,
+     and extracts requirements. Plan Mode prevents accidental edits.
+
+OUTPUT: When analysis is complete, Claude will generate spec.md.
+        Switch to Auto-Accept Mode (Shift+Tab) when ready to write the file.
+```
+
 ---
 
 ## Purpose

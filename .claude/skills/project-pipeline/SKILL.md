@@ -44,6 +44,25 @@ echo $env:CLAUDE_CODE_MAX_OUTPUT_TOKENS
 
 **If not set**, the pipeline may fail or produce incomplete results. See root [CLAUDE.md](../../../CLAUDE.md#development-environment) for setup instructions.
 
+### Permission Mode: Plan Mode (RECOMMENDED)
+
+**This skill performs planning and analysis. Use Plan Mode for safe exploration.**
+
+```
+⏸ PLAN MODE RECOMMENDED
+
+Before starting this skill:
+  1. Press Shift+Tab twice to enter Plan Mode
+  2. Look for indicator: "⏸ plan mode on"
+  3. Plan Mode ensures read-only operations during planning
+
+WHY: Steps 1-3 analyze spec.md, discover resources, and generate artifacts.
+     Plan Mode prevents accidental edits during exploration.
+
+WHEN TO SWITCH: After Step 3 completes and you're ready for Step 4 (branch creation),
+                press Shift+Tab to return to Auto-Accept Mode for git operations.
+```
+
 ---
 
 ## Purpose
@@ -100,6 +119,87 @@ IF validation fails:
 ```
 
 **Wait for User**: `y` (proceed) | `refine {instructions}` | `stop`
+
+---
+
+### Step 1.5: Overlap Detection (Parallel Sessions)
+
+**Purpose:** Detect potential file conflicts with active PRs before investing time in project setup.
+
+**Action:**
+```
+CHECK for active PRs:
+  gh pr list --state open --json number,title,headRefName,files
+
+IDENTIFY likely files from spec.md:
+  - Parse spec.md for mentioned components:
+    • PCF controls → src/client/pcf/
+    • API endpoints → src/server/api/
+    • Dataverse plugins → src/solutions/
+    • Shared libraries → src/*/shared/
+    • Documentation → docs/, .claude/
+  - List directories/files likely to be modified
+
+COMPARE with active PRs:
+  FOR EACH active PR:
+    overlap = intersection(likely_project_files, pr_files)
+    IF overlap is not empty:
+      ADD to potential_conflicts list
+
+CHECK other worktrees:
+  git worktree list
+  FOR EACH worktree (excluding current):
+    CHECK branch name for active project
+```
+
+**Decision Tree:**
+```
+IF no active PRs with overlapping files:
+  → Continue normally (no warning)
+
+IF overlap detected:
+  ⚠️ WARN user:
+  "Potential file overlap detected with active PRs:
+
+   PR #{number}: {title}
+     Branch: {branch}
+     Overlapping areas:
+       - src/client/pcf/ (both projects touch PCF controls)
+       - .claude/skills/ (both modify skills)
+
+   Recommendations:
+   1. Coordinate scope to avoid same-file edits
+   2. Designate file ownership (Session A owns file X, Session B owns file Y)
+   3. Plan to merge PR #{number} first, then rebase this project
+
+   Proceed anyway? [Y to continue / stop to exit]"
+
+  WAIT for user confirmation before continuing
+```
+
+**Output to User (if overlaps found):**
+```
+⚠️ Potential Overlap Detected
+
+Your project (from spec.md) appears to touch:
+  - src/client/pcf/ (new PCF control)
+  - .claude/skills/ (skill updates)
+
+Active PRs with overlapping files:
+──────────────────────────────────
+PR #98: chore: project planning updates
+  Branch: work/project-planning-and-documentation
+  Overlapping: .claude/skills/
+
+Recommendations:
+1. If PR #98 is close to merge → Wait for it, then start
+2. If both sessions are yours → Coordinate file ownership
+3. If proceeding → Plan to rebase after PR #98 merges
+
+[Y to proceed with awareness / stop to wait]
+```
+
+**Note:** This step is informational—it doesn't block the pipeline. The goal is awareness so you can plan for sequential merges or file ownership.
 
 ---
 
@@ -259,6 +359,34 @@ FOR each phase in PLAN.md:
 ADD deployment tasks (per task-create Step 3.6):
   - After each phase that produces deployable artifacts
   - Tag: deploy
+
+ADD UI test definitions for PCF/frontend tasks:
+  - For tasks with tags: pcf, frontend, fluent-ui, e2e-test
+  - Include <ui-tests> section in task POML with:
+    • Test name and URL (environment placeholder if needed)
+    • Step-by-step test actions (navigate, click, verify)
+    • Expected outcomes
+    • ADR-021 dark mode checks (for Fluent UI tasks)
+  - Example UI test structure:
+    <ui-tests>
+      <test name="Component Renders">
+        <url>https://{org}.crm.dynamics.com/main.aspx?...</url>
+        <steps>
+          <step>Navigate to form</step>
+          <step>Verify control is visible</step>
+          <step>Check console for errors</step>
+        </steps>
+        <expected>Control renders without console errors</expected>
+      </test>
+      <test name="Dark Mode Compliance">
+        <steps>
+          <step>Toggle dark mode in settings</step>
+          <step>Verify colors adapt</step>
+        </steps>
+        <expected>All colors use semantic tokens per ADR-021</expected>
+      </test>
+    </ui-tests>
+  - UI tests are executed by task-execute Step 9.7 via ui-test skill
 
 ADD wrap-up task (mandatory per task-create Step 3.7):
   - Final task: 090-project-wrap-up.poml (or next available)
@@ -567,8 +695,10 @@ This skill **orchestrates** by calling component skills:
 
 - **design-to-spec**: **OPTIONAL PREDECESSOR** - Transforms human design docs into AI-optimized spec.md before this skill runs
 - **adr-aware**: Auto-invoked during resource discovery (Step 2) for ADR loading
+- **conflict-check**: **INTEGRATED** at Step 1.5 for PR overlap detection (parallel session awareness)
 - **project-setup**: **CALLED** at Step 2 for artifact generation (README, PLAN, CLAUDE.md, folders)
 - **task-create**: Concepts integrated and called at Step 3 for task decomposition
+- **ui-test**: **TASK GENERATION** - Step 3 creates `<ui-tests>` sections for PCF/frontend tasks; executed by task-execute Step 9.7
 - **task-execute**: **CALLED** at Step 5 if user confirms auto-start
 - **push-to-github**: Concepts used at Step 4 for feature branch and commit
 
@@ -582,9 +712,12 @@ project-pipeline (Tier 2 - Orchestrator)
   ├─→ Step 2: CALLS project-setup (Tier 1 - Component)
   │     └─→ Generates artifacts
   ├─→ Step 3: CALLS task-create (Tier 1 - Component)
-  │     └─→ Generates task files
+  │     ├─→ Generates task files
+  │     └─→ Adds <ui-tests> sections for PCF/frontend tasks
+  ├─→ Step 4: Feature branch creation
   └─→ Step 5: CALLS task-execute (Tier 2 - Orchestrator)
-        └─→ Executes first task
+        ├─→ Executes first task
+        └─→ Step 9.7: CALLS ui-test for PCF/frontend tasks
 
 Result: Full project initialization with human confirmation at each major step
 ```
@@ -601,6 +734,7 @@ Result: Full project initialization with human confirmation at each major step
 
 Pipeline successful when:
 - [ ] SPEC.md validated (Step 1)
+- [ ] PR overlap check completed (Step 1.5 - informational)
 - [ ] Resources discovered (ADRs, skills, knowledge docs) (Step 2)
 - [ ] README.md created with graduation criteria (Step 2)
 - [ ] PLAN.md created with all template sections and discovered resources (Step 2)
@@ -609,6 +743,7 @@ Pipeline successful when:
 - [ ] All task .poml files created (Step 3)
 - [ ] TASK-INDEX.md created (Step 3)
 - [ ] Deployment tasks added (if applicable) (Step 3)
+- [ ] UI test definitions added to PCF/frontend tasks (Step 3 - `<ui-tests>` sections)
 - [ ] Wrap-up task added (090-project-wrap-up.poml) (Step 3)
 - [ ] Feature branch created and pushed to remote (Step 4)
 - [ ] Initial commit made with project artifacts (Step 4)

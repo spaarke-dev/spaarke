@@ -391,13 +391,152 @@ git pull                        ←───────────────
 
 ---
 
+## Parallel Claude Code Sessions
+
+Running multiple Claude Code sessions simultaneously requires careful coordination to avoid merge conflicts.
+
+### Setup for Parallel Sessions
+
+```powershell
+# From main repo, create worktrees for each parallel session
+cd C:\code_files\spaarke
+
+# Session 1: Feature A
+git worktree add ../spaarke-wt-feature-a -b feature/feature-a
+
+# Session 2: Feature B
+git worktree add ../spaarke-wt-feature-b -b feature/feature-b
+
+# Session 3: Feature C
+git worktree add ../spaarke-wt-feature-c -b feature/feature-c
+
+# Result: 4 independent directories
+# C:\code_files\spaarke/              ← Main repo (master)
+# C:\code_files\spaarke-wt-feature-a/ ← Session 1
+# C:\code_files\spaarke-wt-feature-b/ ← Session 2
+# C:\code_files\spaarke-wt-feature-c/ ← Session 3
+```
+
+### Commit → Push → PR → Merge Flow
+
+| Concept | What It Does | When |
+|---------|--------------|------|
+| **Commit** | Save snapshot locally | After each task or logical unit |
+| **Push** | Upload to GitHub | After every commit |
+| **PR** | Proposed merge (reviewable) | Create draft after first push |
+| **Merge** | Actually combine into master | When PR approved |
+
+### Conflict Prevention Rules
+
+| Rule | Description |
+|------|-------------|
+| **Scope isolation** | Each session works on different files/areas |
+| **Frequent commits** | Commit after each task completion |
+| **Push after commit** | Keep remote in sync |
+| **Draft PR early** | Create after first push for visibility |
+| **Rebase before merge** | Always sync with master first |
+| **Sequential merge** | Merge one PR at a time |
+
+### When to Rebase
+
+```
+Another PR merged to master?
+│
+├─ YES → Do I touch the same files?
+│   │
+│   ├─ YES → Rebase NOW
+│   │   git fetch origin master
+│   │   git rebase origin/master
+│   │   git push --force-with-lease
+│   │
+│   └─ NO → Am I almost done?
+│       ├─ YES → Rebase NOW (easier while fresh)
+│       └─ NO → Continue, rebase before PR ready
+│
+└─ NO → Continue working normally
+```
+
+### End-of-Task Workflow
+
+After completing each task:
+
+```powershell
+# 1. Commit changes
+git add .
+git commit -m "feat(scope): description"
+
+# 2. Check for master updates
+git fetch origin master
+git log HEAD..origin/master --oneline
+
+# 3. If master has changes to your files: rebase
+git rebase origin/master
+git push --force-with-lease
+
+# 4. If no conflicts: push normally
+git push origin HEAD
+```
+
+### Conflict Detection Commands
+
+```powershell
+# See what files other PRs are changing
+gh pr list --json number,title,files
+
+# See detailed files for specific PR
+gh pr view 101 --json files --jq '.files[].path'
+
+# Compare your changes with master
+git diff --name-only HEAD origin/master
+
+# Check overlap with another branch
+git diff --name-only HEAD origin/feature/other-project
+```
+
+### Handling Same-File Work
+
+When two sessions MUST touch the same files:
+
+| Strategy | When to Use |
+|----------|-------------|
+| **Sequential** | Safest - Session A merges first, Session B rebases |
+| **File ownership** | Each session owns specific directories |
+| **Frequent sync** | Both work, rebase every 2-3 tasks |
+
+### Full Parallel Timeline Example
+
+```
+TIME    SESSION 1          SESSION 2          MASTER
+────    ─────────          ─────────          ──────
+T1      commit 1           commit 1
+T2      push → PR #101     push → PR #102
+T3      commit 2           commit 2
+T4      push               push
+T5      ✅ DONE            ──working──
+T6      rebase             ──working──
+T7      PR Ready → Merge                      ← PR #101
+T8                         rebase master
+T9                         push --force
+T10                        commit 3
+T11                        push
+T12                        ✅ DONE
+T13                        PR Ready → Merge   ← PR #102
+```
+
+### Run Conflict Check
+
+Use `/conflict-check` skill to detect file overlap with active PRs before starting work or before merging.
+
+---
+
 ## Related Skills
 
 - `project-pipeline` - Run after creating worktree to initialize project
 - `push-to-github` - For pushing worktree changes
 - `pull-from-github` - For syncing worktree across computers
 - `repo-cleanup` - Run before removing worktree to validate state
+- `conflict-check` - Detect file overlap with active PRs
 
 ---
 
-*Last updated: December 25, 2025*
+*Last updated: January 6, 2026*

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://code.claude.com/schemas/settings.json",
+  "model": "opus",
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Read(**)",
+      "Glob(**)",
+      "Grep(**)",
+      "Skill(pull-from-github)",
+      "Skill(pull-from-github:*)",
+      "Skill(push-to-github)",
+      "Skill(push-to-github:*)",
+      "Bash(git fetch:*)",
+      "Bash(git pull:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(gh pr list:*)",
+      "Bash(git push:*)",
+      "Bash(gh pr create:*)",
+      "Bash(wc:*)",
+      "Bash(gh secret set:*)",
+      "Bash(gh secret:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr checks:*)",
+      "Bash(gh run view:*)",
+      "Bash(gh pr merge:*)",
+      "Bash(gh api:*)",
+      "Bash(claude update:*)",
+      "Bash(claude:*)",
+      "Bash(npm view:*)",
+      "Bash(npm install:*)"
+    ]
+  }
+}

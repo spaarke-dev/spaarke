@@ -5,6 +5,8 @@ description: Comprehensive code review covering security, performance, style, an
 alwaysApply: false
 ---
 
+> **Last Updated**: January 6, 2026
+
 ## Purpose
 
 Performs a structured, multi-dimension code review for Spaarke codebase changes. This skill ensures code quality across security, performance, maintainability, and architectural compliance dimensions. Unlike `adr-check` (architecture-only), this is a holistic quality gate.
@@ -290,6 +292,44 @@ Run these commands to fix some issues automatically:
 - Commented-out code
 - Magic numbers without constants
 
+## Integration Points
+
+This skill is called at these points in the development workflow:
+
+### 1. In task-execute (Step 9.5 - Quality Gates)
+
+After code implementation and before task completion:
+```
+AFTER all implementation steps complete:
+  RUN /code-review on files modified in this task
+  IF critical issues found:
+    → Fix issues before marking task complete
+  RUN /adr-check on modified files
+  THEN proceed to task completion
+```
+
+### 2. In push-to-github (Step 1 - Pre-flight)
+
+Before committing changes:
+```
+RUN quality checks (ask user first):
+  → Execute linting on changed files
+  → Execute /code-review on changed files
+  → Execute /adr-check on changed files
+  → Report any issues found
+```
+
+### 3. In project-wrap-up (Task 090)
+
+Final quality validation before project completion:
+```
+RUN /code-review on entire project scope
+RUN /repo-cleanup to audit and clean ephemeral files
+VERIFY all issues addressed before marking project complete
+```
+
+---
+
 ## Resources
 
 ### Reference Files
@@ -302,6 +342,8 @@ Run these commands to fix some issues automatically:
 - **spaarke-conventions**: Detailed coding standards enforcement
 - **task-create**: Include code review as task deliverable
 - **push-to-github**: Linting runs as pre-flight check before commits
+- **task-execute**: Calls code-review in Step 9.5 Quality Gates
+- **repo-cleanup**: Complementary skill for repository hygiene
 
 ## Examples
 

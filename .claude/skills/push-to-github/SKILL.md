@@ -289,7 +289,42 @@ PROVIDE GitHub PR URL:
 SUGGEST PR template content for user to paste
 ```
 
-### Step 8: Summary
+### Step 8: Monitor CI Status
+
+After pushing, the `sdap-ci.yml` workflow runs automatically.
+
+```powershell
+# Check CI status for the PR
+gh pr checks
+
+# Or watch CI progress in real-time
+gh pr checks --watch
+```
+
+**CI Pipeline Jobs** (see `ci-cd` skill for details):
+
+| Job | What It Checks | Blocking? |
+|-----|----------------|-----------|
+| `security-scan` | Trivy vulnerability scan | Yes |
+| `build-test` | Build + unit tests | Yes |
+| `code-quality` | Format, ADR tests, plugin size | Yes |
+| `adr-pr-comment` | Posts ADR violations to PR | No |
+
+```
+WAIT for CI checks:
+  gh pr checks --watch
+
+IF any check fails:
+  → View logs: gh run view {run-id} --log
+  → Fix issues locally
+  → Commit and push again
+  → CI will re-run automatically
+
+IF all checks pass:
+  → Ready for review/merge
+```
+
+### Step 9: Summary
 
 ```
 ✅ PR Workflow Complete
@@ -297,12 +332,13 @@ SUGGEST PR template content for user to paste
 Branch: {branch-name}
 Commit: {short-sha} - {commit message}
 PR: {PR URL or "Create manually at {URL}"}
+CI Status: gh pr checks (run to verify)
 
 Next steps:
-1. Review PR on GitHub
-2. Request reviewers
-3. Address any CI failures
-4. Merge when approved
+1. Monitor CI: gh pr checks --watch
+2. Fix any CI failures
+3. Request reviewers (when CI green)
+4. Merge when approved and CI passes
 ```
 
 ---
@@ -346,6 +382,7 @@ Next steps:
 - `code-review` - Run before committing to catch issues
 - `adr-check` - Validate ADR compliance before committing
 - `spaarke-conventions` - Naming and coding standards
+- `ci-cd` - Monitor CI pipeline status and troubleshoot failures
 
 ---
 
@@ -371,4 +408,7 @@ gh pr create                            # Create PR (if gh installed)
 - For large changesets, suggest breaking into multiple commits
 - Always provide the GitHub compare URL even if `gh` CLI creates the PR
 - Include project/issue references in PR body when context is available
-- After push, remind user to check CI status on GitHub
+- After push, **always run `gh pr checks`** to show CI status
+- If CI fails, use `gh run view {id} --log` to diagnose before suggesting fixes
+- Never suggest merging until all CI checks pass
+- Reference `ci-cd` skill for detailed troubleshooting guidance
