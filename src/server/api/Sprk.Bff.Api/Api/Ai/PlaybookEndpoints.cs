@@ -51,6 +51,15 @@ public static class PlaybookEndpoints
             .ProducesProblem(403)
             .ProducesProblem(404);
 
+        // GET /api/ai/playbooks/by-name/{name} - Get playbook by name
+        group.MapGet("/by-name/{name}", GetPlaybookByName)
+            .WithName("GetPlaybookByName")
+            .WithSummary("Get a playbook by name")
+            .WithDescription("Retrieves playbook details by name. Used by PCF for resolving system playbooks like 'Document Profile'.")
+            .Produces<PlaybookResponse>()
+            .ProducesProblem(401)
+            .ProducesProblem(404);
+
         // GET /api/ai/playbooks - List user's playbooks
         group.MapGet("/", ListUserPlaybooks)
             .WithName("ListUserPlaybooks")
@@ -229,6 +238,39 @@ public static class PlaybookEndpoints
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to get playbook {Id}", id);
+            return Results.Problem(
+                statusCode: 500,
+                title: "Internal Server Error",
+                detail: "Failed to get playbook");
+        }
+    }
+
+    /// <summary>
+    /// Get a playbook by name.
+    /// </summary>
+    private static async Task<IResult> GetPlaybookByName(
+        string name,
+        IPlaybookService playbookService,
+        ILoggerFactory loggerFactory)
+    {
+        var logger = loggerFactory.CreateLogger("PlaybookEndpoints");
+
+        try
+        {
+            var playbook = await playbookService.GetByNameAsync(name);
+            return Results.Ok(playbook);
+        }
+        catch (PlaybookNotFoundException ex)
+        {
+            logger.LogWarning("Playbook not found: {Name}", name);
+            return Results.Problem(
+                statusCode: 404,
+                title: "Playbook Not Found",
+                detail: ex.Message);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to get playbook by name: {Name}", name);
             return Results.Problem(
                 statusCode: 500,
                 title: "Internal Server Error",
