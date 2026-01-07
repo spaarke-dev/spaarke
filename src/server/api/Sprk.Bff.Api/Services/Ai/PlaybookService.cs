@@ -172,7 +172,8 @@ public class PlaybookService : IPlaybookService
     {
         await EnsureAuthenticatedAsync(cancellationToken);
 
-        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_sprk_outputtypeid_value,_ownerid_value,createdon,modifiedon";
+        // NOTE: OutputTypeId field removed - output types are N:N relationship, not lookup
+        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_ownerid_value,createdon,modifiedon";
         var url = $"{EntitySetName}({playbookId})?$select={select}";
 
         var response = await _httpClient.GetAsync(url, cancellationToken);
@@ -285,9 +286,11 @@ public class PlaybookService : IPlaybookService
         {
             filter += $" and contains(sprk_name, '{EscapeODataString(query.NameFilter)}')";
         }
+        // NOTE: OutputTypeId filter removed - output types are N:N relationship, not lookup
+        // Filtering by output type would require a separate N:N query
         if (query.OutputTypeId.HasValue)
         {
-            filter += $" and _sprk_outputtypeid_value eq {query.OutputTypeId.Value}";
+            _logger.LogWarning("OutputTypeId filtering not supported - output types use N:N relationship");
         }
 
         return await ExecuteListQueryAsync(filter, query, pageSize, skip, cancellationToken);
@@ -309,9 +312,11 @@ public class PlaybookService : IPlaybookService
         {
             filter += $" and contains(sprk_name, '{EscapeODataString(query.NameFilter)}')";
         }
+        // NOTE: OutputTypeId filter removed - output types are N:N relationship, not lookup
+        // Filtering by output type would require a separate N:N query
         if (query.OutputTypeId.HasValue)
         {
-            filter += $" and _sprk_outputtypeid_value eq {query.OutputTypeId.Value}";
+            _logger.LogWarning("OutputTypeId filtering not supported - output types use N:N relationship");
         }
 
         return await ExecuteListQueryAsync(filter, query, pageSize, skip, cancellationToken);
@@ -354,7 +359,8 @@ public class PlaybookService : IPlaybookService
         await EnsureAuthenticatedAsync(cancellationToken);
 
         // Query by name - exact match, case-insensitive per Dataverse default
-        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_sprk_outputtypeid_value,_ownerid_value,createdon,modifiedon";
+        // NOTE: OutputTypeId field removed - output types are N:N relationship, not lookup
+        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_ownerid_value,createdon,modifiedon";
         var filter = $"sprk_name eq '{EscapeODataString(name)}'";
         var url = $"{EntitySetName}?$select={select}&$filter={Uri.EscapeDataString(filter)}&$top=1";
 
@@ -437,7 +443,8 @@ public class PlaybookService : IPlaybookService
         var orderBy = GetOrderByClause(query.SortBy, query.SortDescending);
 
         // Get paginated results
-        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_sprk_outputtypeid_value,_ownerid_value,modifiedon";
+        // NOTE: OutputTypeId field removed - output types are N:N relationship, not lookup
+        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_ownerid_value,modifiedon";
         var url = $"{EntitySetName}?$select={select}&$filter={Uri.EscapeDataString(filter)}&$orderby={orderBy}&$top={pageSize}&$skip={skip}";
 
         var response = await _httpClient.GetAsync(url, cancellationToken);
@@ -462,7 +469,8 @@ public class PlaybookService : IPlaybookService
             Id = element.TryGetProperty("sprk_analysisplaybookid", out var idProp) ? idProp.GetGuid() : Guid.Empty,
             Name = element.TryGetProperty("sprk_name", out var nameProp) ? nameProp.GetString() ?? string.Empty : string.Empty,
             Description = element.TryGetProperty("sprk_description", out var descProp) ? descProp.GetString() : null,
-            OutputTypeId = element.TryGetProperty("_sprk_outputtypeid_value", out var outputProp) && outputProp.ValueKind != JsonValueKind.Null ? outputProp.GetGuid() : null,
+            // NOTE: OutputTypeId always null - output types are N:N relationship, not lookup
+            OutputTypeId = null,
             IsPublic = element.TryGetProperty("sprk_ispublic", out var publicProp) && publicProp.GetBoolean(),
             OwnerId = element.TryGetProperty("_ownerid_value", out var ownerProp) ? ownerProp.GetGuid() : Guid.Empty,
             ModifiedOn = element.TryGetProperty("modifiedon", out var modProp) ? modProp.GetDateTime() : DateTime.UtcNow
