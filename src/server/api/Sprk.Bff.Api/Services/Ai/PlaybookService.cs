@@ -56,7 +56,8 @@ public class PlaybookService : IPlaybookService
         var clientSecret = configuration["Dataverse:ClientSecret"]
             ?? throw new InvalidOperationException("Dataverse:ClientSecret configuration is required");
 
-        _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2";
+        // IMPORTANT: BaseAddress must end with trailing slash, otherwise relative URLs replace the last segment
+        _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2/";
         _credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
 
         _httpClient.BaseAddress = new Uri(_apiUrl);
@@ -64,7 +65,8 @@ public class PlaybookService : IPlaybookService
         _httpClient.DefaultRequestHeaders.Add("OData-Version", "4.0");
         _httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-        _logger.LogInformation("Initialized PlaybookService for {ApiUrl}", _apiUrl);
+        _logger.LogInformation("Initialized PlaybookService - DataverseUrl: {DataverseUrl}, Constructed ApiUrl: {ApiUrl}, BaseAddress: {BaseAddress}",
+            dataverseUrl, _apiUrl, _httpClient.BaseAddress);
     }
 
     private async Task EnsureAuthenticatedAsync(CancellationToken cancellationToken = default)
@@ -364,11 +366,15 @@ public class PlaybookService : IPlaybookService
         var filter = $"sprk_name eq '{EscapeODataString(name)}'";
         var url = $"{EntitySetName}?$select={select}&$filter={Uri.EscapeDataString(filter)}&$top=1";
 
-        _logger.LogInformation("[PLAYBOOK] Querying Dataverse for playbook: {Name}, URL: {Url}", name, url);
+        _logger.LogInformation("[PLAYBOOK] Querying Dataverse for playbook: {Name}", name);
+        _logger.LogInformation("[PLAYBOOK] BaseAddress: {BaseAddress}", _httpClient.BaseAddress);
+        _logger.LogInformation("[PLAYBOOK] Relative URL: {RelativeUrl}", url);
+        _logger.LogInformation("[PLAYBOOK] Full URL will be: {FullUrl}", new Uri(_httpClient.BaseAddress!, url));
 
         var response = await _httpClient.GetAsync(url, cancellationToken);
 
-        _logger.LogInformation("[PLAYBOOK] Query response: StatusCode={StatusCode}", response.StatusCode);
+        _logger.LogInformation("[PLAYBOOK] Query response: StatusCode={StatusCode}, ReasonPhrase={ReasonPhrase}",
+            response.StatusCode, response.ReasonPhrase);
 
         response.EnsureSuccessStatusCode();
 
