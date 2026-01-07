@@ -1,11 +1,13 @@
-# Authentication Patterns Index
+# Authentication & Authorization Patterns Index
 
-> **Domain**: OAuth / OBO / MSAL / Token Management
-> **Last Updated**: 2025-12-19
+> **Domain**: OAuth / OBO / MSAL / Token Management / Access Control
+> **Last Updated**: 2026-01-06
 
 ---
 
 ## Available Patterns
+
+### Authentication (Identity)
 
 | Pattern | Purpose | Lines |
 |---------|---------|-------|
@@ -13,6 +15,14 @@
 | [obo-flow.md](obo-flow.md) | On-Behalf-Of token exchange | ~130 |
 | [token-caching.md](token-caching.md) | Server & client token caching | ~120 |
 | [msal-client.md](msal-client.md) | Client-side MSAL patterns | ~125 |
+
+### Authorization (Access Control)
+
+| Pattern | Purpose | Lines |
+|---------|---------|-------|
+| [uac-access-control.md](uac-access-control.md) | UAC permission checking | ~80 |
+
+**Full UAC Reference**: [docs/architecture/uac-access-control.md](../../../docs/architecture/uac-access-control.md)
 
 ---
 
@@ -24,6 +34,8 @@
 | Implement OBO flow | `obo-flow.md` |
 | Add token caching | `token-caching.md` |
 | Build PCF authentication | `msal-client.md` |
+| Implement authorization checks | `uac-access-control.md` |
+| Add new operations to policy | `uac-access-control.md` |
 
 ---
 

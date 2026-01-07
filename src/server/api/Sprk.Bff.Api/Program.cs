@@ -78,6 +78,9 @@ builder.Services.AddHostedService<StartupValidationService>();
 
 // ---- Services Registration ----
 
+// Application Insights telemetry - captures ILogger output
+builder.Services.AddApplicationInsightsTelemetry();
+
 // Cross-cutting concerns
 // builder.Services.AddProblemDetails(); // Requires newer version
 
