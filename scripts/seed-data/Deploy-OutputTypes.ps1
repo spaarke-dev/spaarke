@@ -144,35 +144,12 @@ function New-OutputTypeRecord {
     }
 
     # Create the output type record
+    # NOTE: Entity only supports sprk_name field. Field mapping metadata
+    # (targetEntity, targetField, etc.) is stored in output-types.json for
+    # documentation but not deployed to Dataverse. The backend service
+    # (AiToolService/PlaybookService) handles field mapping logic.
     $record = @{
         "sprk_name" = $OutputType.sprk_name
-        "sprk_description" = $OutputType.sprk_description
-    }
-
-    # Add field mapping properties if they exist
-    if ($OutputType.fieldMapping) {
-        if ($OutputType.fieldMapping.targetEntity) {
-            $record["sprk_targetentity"] = $OutputType.fieldMapping.targetEntity
-        }
-        if ($OutputType.fieldMapping.targetField) {
-            $record["sprk_targetfield"] = $OutputType.fieldMapping.targetField
-        }
-        if ($OutputType.fieldMapping.fieldType) {
-            $record["sprk_fieldtype"] = $OutputType.fieldMapping.fieldType
-        }
-        if ($OutputType.fieldMapping.maxLength) {
-            $record["sprk_maxlength"] = $OutputType.fieldMapping.maxLength
-        }
-    }
-
-    # Add tool reference if it exists
-    if ($OutputType.toolReference) {
-        $record["sprk_toolreference"] = $OutputType.toolReference
-    }
-
-    # Add priority if it exists
-    if ($OutputType.priority) {
-        $record["sprk_priority"] = $OutputType.priority
     }
 
     $uri = "$EnvironmentUrl/api/data/v9.2/sprk_aioutputtypes"
