@@ -270,11 +270,12 @@ public static class PlaybookEndpoints
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to get playbook by name: {Name}", name);
+            logger.LogError(ex, "Failed to get playbook by name: {Name}. Exception: {ExceptionType}, Message: {Message}, StackTrace: {StackTrace}",
+                name, ex.GetType().Name, ex.Message, ex.StackTrace);
             return Results.Problem(
                 statusCode: 500,
                 title: "Internal Server Error",
-                detail: "Failed to get playbook");
+                detail: $"Failed to get playbook: {ex.Message}");
         }
     }
 

@@ -364,7 +364,12 @@ public class PlaybookService : IPlaybookService
         var filter = $"sprk_name eq '{EscapeODataString(name)}'";
         var url = $"{EntitySetName}?$select={select}&$filter={Uri.EscapeDataString(filter)}&$top=1";
 
+        _logger.LogInformation("[PLAYBOOK] Querying Dataverse for playbook: {Name}, URL: {Url}", name, url);
+
         var response = await _httpClient.GetAsync(url, cancellationToken);
+
+        _logger.LogInformation("[PLAYBOOK] Query response: StatusCode={StatusCode}", response.StatusCode);
+
         response.EnsureSuccessStatusCode();
 
         var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(JsonOptions, cancellationToken);
@@ -382,10 +387,19 @@ public class PlaybookService : IPlaybookService
 
         // Load N:N relationships
         var playbookId = entity.Id;
+        _logger.LogInformation("[PLAYBOOK] Loading N:N relationships for playbook ID: {PlaybookId}", playbookId);
+
         var actionIds = await GetRelatedIdsAsync(playbookId, ActionRelationship, "sprk_analysisactions", "sprk_analysisactionid", cancellationToken);
+        _logger.LogInformation("[PLAYBOOK] Loaded {Count} actions", actionIds.Length);
+
         var skillIds = await GetRelatedIdsAsync(playbookId, SkillRelationship, "sprk_analysisskills", "sprk_analysisskillid", cancellationToken);
+        _logger.LogInformation("[PLAYBOOK] Loaded {Count} skills", skillIds.Length);
+
         var knowledgeIds = await GetRelatedIdsAsync(playbookId, KnowledgeRelationship, "sprk_analysisknowledges", "sprk_analysisknowledgeid", cancellationToken);
+        _logger.LogInformation("[PLAYBOOK] Loaded {Count} knowledge sources", knowledgeIds.Length);
+
         var toolIds = await GetRelatedIdsAsync(playbookId, ToolRelationship, "sprk_analysistools", "sprk_analysistoolid", cancellationToken);
+        _logger.LogInformation("[PLAYBOOK] Loaded {Count} tools", toolIds.Length);
 
         var playbook = new PlaybookResponse
         {
