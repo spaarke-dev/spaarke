@@ -19,7 +19,7 @@
     <!-- Azure packages -->
     <PackageReference Include="Azure.AI.DocumentIntelligence" Version="1.0.0" />
     <PackageReference Include="Azure.AI.OpenAI" Version="2.1.0" />
-    <PackageReference Include="Azure.Identity" Version="1.12.0" />
+    <PackageReference Include="Azure.Identity" Version="1.17.1" />
     <PackageReference Include="Azure.Messaging.ServiceBus" Version="7.18.1" />
     <PackageReference Include="Azure.Search.Documents" Version="11.6.0" />
     <PackageReference Include="Azure.Security.KeyVault.Secrets" Version="4.6.0" />
@@ -32,15 +32,15 @@
 
     <!-- Microsoft Graph SDK v5.x (CRITICAL - must be 5.x or higher) -->
     <PackageReference Include="Microsoft.Graph" Version="5.99.0" />
-    <PackageReference Include="Microsoft.Kiota.Abstractions" Version="1.12.0" />
-    <PackageReference Include="Microsoft.Kiota.Authentication.Azure" Version="1.1.7" />
+    <PackageReference Include="Microsoft.Kiota.Abstractions" Version="1.21.1" />
+    <PackageReference Include="Microsoft.Kiota.Authentication.Azure" Version="1.21.1" />
 
     <!-- Microsoft Identity (CRITICAL - must be 3.x or higher) -->
     <!-- Identity.Web 3.8.2+ fixes CVE-2025-32016; requires Identity.Client >= 4.70.0 -->
     <PackageReference Include="Microsoft.Identity.Client" Version="4.79.2" />
-    <PackageReference Include="Microsoft.Identity.Web" Version="3.8.2" />
+    <PackageReference Include="Microsoft.Identity.Web" Version="4.2.0" />
     <PackageReference Include="Microsoft.Identity.Web.MicrosoftGraph" Version="4.2.0" />
-    <PackageReference Include="MimeKit" Version="4.8.0" />
+    <PackageReference Include="MimeKit" Version="4.14.0" />
     <PackageReference Include="MsgReader" Version="5.2.0" />
 
     <!-- Observability -->
