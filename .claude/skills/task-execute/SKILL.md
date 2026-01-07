@@ -61,6 +61,102 @@ WHEN TO USE PLAN MODE: If you want to analyze code before changes,
 
 ## Execution Protocol (MANDATORY STEPS)
 
+### Step 0.5: Determine Required Rigor Level (MANDATORY)
+
+**BEFORE executing any task, determine rigor level using this decision tree:**
+
+```
+┌─ Task has ANY of these characteristics? ─────────────────┐
+│  - Tags include: bff-api, api, pcf, plugin, auth         │
+│  - Will modify code files (.cs, .ts, .tsx)               │
+│  - Has 6+ steps in task definition                       │
+│  - Resuming after compaction/new session                 │
+│  - Task description includes: "implement", "refactor"    │
+│  - Dependencies on 3+ other tasks                        │
+└───────────────────────────────────────────────────────────┘
+         │
+         ├─ YES → **RIGOR LEVEL: FULL** (all protocol steps mandatory)
+         │        Must report after EACH step completion
+         │
+         └─ NO → Check next tier
+                  │
+                  ┌─ Task has ANY of these? ────────────────┐
+                  │  - Tags include: testing, integration-test │
+                  │  - Will create new files                   │
+                  │  - Has constraints or ADRs listed          │
+                  │  - Phase 2.x or higher (integration phase) │
+                  └────────────────────────────────────────────┘
+                           │
+                           ├─ YES → **RIGOR LEVEL: STANDARD**
+                           │        Skip pattern loading, report major steps
+                           │
+                           └─ NO → **RIGOR LEVEL: MINIMAL**
+                                    Documentation/inventory tasks only
+```
+
+#### Rigor Level Protocol Requirements
+
+| Protocol Step | FULL | STANDARD | MINIMAL |
+|--------------|------|----------|---------|
+| Step 0: Context Recovery | ✅ Required | ✅ Required | ✅ Required |
+| Step 1: Load Task File | ✅ Required | ✅ Required | ✅ Required |
+| Step 2: Initialize current-task.md | ✅ Required | ✅ Required | ✅ Required |
+| Step 3: Context Budget Check | ✅ Required | ✅ Required | ✅ Required |
+| Step 4: Load Knowledge Files | ✅ All files | ✅ Explicit only | ⏭️ Skip |
+| Step 4a: Load Constraints by Tag | ✅ Required | ✅ Required | ⏭️ Skip |
+| Step 4b: Load Patterns by Tag | ✅ Required | ⏭️ Skip | ⏭️ Skip |
+| Step 5: Load ADR Constraints | ✅ Required | ✅ If listed | ⏭️ Skip |
+| Step 6: Apply Always-Apply Skills | ✅ Required | ⏭️ Optional | ⏭️ Skip |
+| Step 6.5: Load Script Context | ✅ Required | ✅ If deploy/test | ⏭️ Skip |
+| Step 7: Review CLAUDE.md Files | ✅ Required | ⏭️ Skip | ⏭️ Skip |
+| Step 8: Execute Steps | ✅ Track all | ✅ Track major | ✅ Execute |
+| Step 8.5: Checkpointing | ✅ Every 3 steps | ✅ If >60% context | ⏭️ Skip |
+| Step 9: Verify Acceptance | ✅ Required | ✅ Required | ✅ Required |
+| Step 9.5: Quality Gates | ✅ Required | ⏭️ Skip | ⏭️ Skip |
+| Step 10: Update Task Status | ✅ Required | ✅ Required | ✅ Required |
+| **Reporting Frequency** | After each step | After major steps | Start + end only |
+
+#### MANDATORY RIGOR LEVEL DECLARATION
+
+At task start, Claude Code MUST output:
+
+```
+🔒 RIGOR LEVEL: [FULL | STANDARD | MINIMAL]
+📋 REASON: [Why this level was chosen based on decision tree]
+
+📖 PROTOCOL STEPS TO EXECUTE:
+  [List all steps that will be executed for this rigor level]
+
+Proceeding with Step 0...
+```
+
+This declaration is **non-negotiable** and makes shortcuts visible.
+
+#### User Override
+
+User can override automatic detection:
+- **"Execute with FULL protocol"** → Forces all steps regardless of task type
+- **"Execute with MINIMAL protocol"** → Use carefully, only for documentation
+- **Default:** Auto-detect using decision tree above
+
+#### Audit Trail
+
+Rigor level and reason are logged in current-task.md:
+
+```markdown
+### Task XXX Details
+
+**Rigor Level:** FULL
+**Reason:** Task tags include 'bff-api' (code implementation)
+**Protocol Steps Executed:**
+- [x] Step 0.5: Determined rigor level
+- [x] Step 1: Load Task File
+- [x] Step 2: Initialize current-task.md
+[... etc]
+```
+
+---
+
 ### Step 0: Context Recovery Check
 
 ```

@@ -1,8 +1,8 @@
 # Task Index - AI Summary and Analysis Enhancements
 
 > **Last Updated**: 2026-01-07
-> **Total Tasks**: 27
-> **Status**: In Progress (12/27 completed)
+> **Total Tasks**: 24 (revised after removing backward compatibility)
+> **Status**: ✅ **COMPLETE** (24/24 completed - 100%)
 
 ---
 
@@ -48,27 +48,32 @@
 
 ---
 
-## Phase 2.3: Endpoint Migration (5 tasks)
+## Phase 2.3: Simplified Migration (Revised - No Backward Compatibility)
 
-| # | Task | Status | Dependencies |
-|---|------|--------|--------------|
-| 020 | [Route Document Intelligence Endpoint](020-route-document-intelligence-endpoint.poml) | 🔲 | 017 |
-| 021 | [Implement Request/Response Mapping](021-implement-request-mapping.poml) | 🔲 | 020 |
-| 022 | [Add [Obsolete] Attributes](022-add-obsolete-attributes.poml) | 🔲 | 020 |
-| 023 | [Backward Compatibility Tests](023-backward-compatibility-tests.poml) | 🔲 | 021 |
-| 024 | [Deploy Phase 2.3 and Verify](024-deploy-and-verify.poml) | 🔲 | 023 |
+**Decision:** Removed backward compatibility approach per DECISION-BACKWARD-COMPATIBILITY.md (2026-01-07)
+
+| # | Task | Status | Dependencies | Notes |
+|---|------|--------|--------------|-------|
+| 020 | [Remove DocumentIntelligenceService](020-remove-old-service.poml) | ✅ | 019 | Deleted old service entirely |
+| 021 | [Update PCF to New Unified Endpoint](021-update-pcf-to-new-endpoint.poml) | ✅ | 020 | PCF now calls /api/ai/analysis/execute |
+| 022 | [Identify Forms/Pages Using Control](022-update-forms-and-pages.poml) | ✅ | 021 | Created deployment inventory |
+| 023 | [Integration Tests - New Endpoint Only](023-integration-tests-new-endpoint.poml) | ✅ | 022 | 15 tests covering SSE, playbooks, soft failure |
+| 024 | [Deploy API + PCF Together](024-deploy-api-and-pcf-together.poml) | ✅ | 023 | Deployed to Dev (manual testing pending) |
+
+**Phase 2.4 (Cleanup) removed** - No longer needed since old code deleted immediately
 
 ---
 
-## Phase 2.4: Cleanup (5 tasks)
+## Phase 2.3 (OLD) - Superseded Tasks
 
-| # | Task | Status | Dependencies |
-|---|------|--------|--------------|
-| 030 | [Remove IDocumentIntelligenceService](030-remove-document-intelligence-interface.poml) | 🔲 | 024 |
-| 031 | [Remove DocumentIntelligenceService](031-remove-document-intelligence-service.poml) | 🔲 | 030 |
-| 032 | [Remove AiAuthorizationFilter](032-remove-ai-authorization-filter.poml) | 🔲 | 031 |
-| 033 | [Update DI Registrations](033-update-di-registrations.poml) | 🔲 | 032 |
-| 034 | [Update ADR-013 Documentation](034-update-adr-documentation.poml) | 🔲 | 033 |
+These tasks were superseded by the decision to remove backward compatibility:
+
+| # | OLD Task | Status | Reason Superseded |
+|---|----------|--------|-------------------|
+| ~~020~~ | ~~Route Document Intelligence Endpoint~~ | ❌ Superseded | Old endpoint deleted instead of routed |
+| ~~021~~ | ~~Implement Request/Response Mapping~~ | ❌ Superseded | No mapping needed (old code deleted) |
+| ~~022~~ | ~~Add [Obsolete] Attributes~~ | ❌ Superseded | No deprecation (immediate deletion) |
+| ~~023~~ | ~~Backward Compatibility Tests~~ | ❌ Superseded | No backward compat to test |
 
 ---
 
@@ -76,17 +81,19 @@
 
 | # | Task | Status | Dependencies |
 |---|------|--------|--------------|
-| 090 | [Project Wrap-Up](090-project-wrap-up.poml) | 🔲 | 034 |
+| 090 | [Project Wrap-Up](090-project-wrap-up.poml) | 🔲 | 024 |
 
 ---
 
-## Critical Path
+## Critical Path (Revised)
 
 ```
-001 → 002 → 003 → 007 → 010 → 011/012 → 013 → 014/016 → 017 → 018 → 019 → 020 → 021 → 023 → 024 → 030-034 → 090
+001 → 002 → 003 → 007 → 010 → 011/012 → 013 → 014/016 → 017 → 018 → 019 → 020 → 021 → 022 → 023 → 024 → 090
             ↓
            004/005/006
 ```
+
+**Simplified:** Phase 2.4 (030-034) removed after backward compatibility decision.
 
 ---
 

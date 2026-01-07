@@ -331,6 +331,98 @@ After completing any task:
 
 ---
 
+## Task Execution Rigor Levels
+
+All tasks are executed via `task-execute` skill with one of three rigor levels determined automatically by decision tree.
+
+### Rigor Level Overview
+
+| Level | When Applied | Protocol Steps | Reporting Frequency | Quality Gates |
+|-------|--------------|----------------|---------------------|---------------|
+| **FULL** | Code implementation, architecture changes, post-compaction recovery | All 11 steps mandatory | After each step | ✅ code-review + adr-check |
+| **STANDARD** | Tests, new file creation, tasks with constraints | 8 of 11 steps required | After major steps | ⏭️ Skipped |
+| **MINIMAL** | Documentation, inventory, simple updates | 4 of 11 steps required | Start + completion only | ⏭️ Skipped |
+
+### Automatic Detection (Decision Tree)
+
+**FULL Protocol Required If Task Has ANY:**
+- Tags: `bff-api`, `api`, `pcf`, `plugin`, `auth`
+- Will modify code files (`.cs`, `.ts`, `.tsx`)
+- Has 6+ steps in task definition
+- Resuming after compaction or new session
+- Description includes: "implement", "refactor", "create service"
+- Dependencies on 3+ other tasks
+
+**STANDARD Protocol Required If Task Has ANY:**
+- Tags: `testing`, `integration-test`
+- Will create new files
+- Has explicit `<constraints>` or ADRs listed
+- Phase 2.x or higher (integration/deployment phases)
+
+**MINIMAL Protocol Otherwise:**
+- Documentation tasks
+- Inventory/checklist creation
+- Simple configuration updates
+
+### Mandatory Rigor Level Declaration
+
+**At task start, Claude Code MUST output:**
+
+```
+🔒 RIGOR LEVEL: [FULL | STANDARD | MINIMAL]
+📋 REASON: [Why this level was chosen based on decision tree]
+
+📖 PROTOCOL STEPS TO EXECUTE:
+  ✅ Step 0.5: Determine rigor level
+  ✅ Step 1: Load Task File
+  ✅ Step 2: Initialize current-task.md
+  [... list continues based on rigor level ...]
+
+Proceeding with Step 0...
+```
+
+This declaration is **non-negotiable** and makes protocol shortcuts visible.
+
+### User Override
+
+You can override automatic detection:
+- **"Execute with FULL protocol"** → Forces all steps regardless of task type
+- **"Execute with MINIMAL protocol"** → Use carefully, only for documentation
+- **Default:** Auto-detect using decision tree
+
+### Examples by Task Type
+
+| Task Type | Example | Auto-Detected Level |
+|-----------|---------|-------------------|
+| Implement API endpoint | "Create authorization service" | **FULL** (bff-api tag) |
+| Update PCF component | "Add dark mode to control" | **FULL** (pcf tag, .tsx files) |
+| Write integration tests | "Test Document Profile endpoint" | **STANDARD** (testing tag) |
+| Create deployment checklist | "Identify forms using control" | **MINIMAL** (documentation) |
+| Refactor existing code | "Extract helper method" | **FULL** (code modification) |
+| Update documentation | "Add deployment guide" | **MINIMAL** (docs) |
+
+### Audit Trail in current-task.md
+
+Rigor level and execution are logged for recovery:
+
+```markdown
+### Task XXX Details
+
+**Rigor Level:** FULL
+**Reason:** Task tags include 'bff-api' (code implementation)
+**Protocol Steps Executed:**
+- [x] Step 0.5: Determined rigor level
+- [x] Step 1: Load Task File
+- [x] Step 2: Initialize current-task.md
+- [x] Step 4a: Load Constraints (api.md, testing.md)
+- [x] Step 4b: Load Patterns (endpoint-definition.md)
+[... etc]
+```
+
+**Full Details:** See `.claude/skills/task-execute/SKILL.md` Step 0.5 for complete decision tree and protocol requirements.
+
+---
+
 ## 🛠️ AI Agent Skills (MANDATORY)
 
 **Skills are structured procedures that MUST be followed when triggered.**

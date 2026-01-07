@@ -5,7 +5,7 @@
     <estimate>30 min</estimate>
     <tags>api, cleanup, deprecation</tags>
     <dependencies>020</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -49,4 +49,29 @@
     <criterion>[Obsolete] attributes added</criterion>
     <criterion>Build succeeds with warnings for any remaining usage</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <note date="2026-01-07">
+      Task completed successfully. Added [Obsolete] attributes to both IDocumentIntelligenceService and DocumentIntelligenceService with clear migration guidance.
+
+      Obsolete message: "This service is deprecated and will be removed in Phase 2.4. Use AnalysisOrchestrationService with the 'Document Profile' playbook instead. See DocumentIntelligenceEndpoints for routing example."
+
+      Build verification: 8 warnings detected (expected):
+      1. DocumentIntelligenceEndpoints.cs (lines 90, 213, 247) - 3 warnings
+         - Old endpoint methods still exist but are no longer called (task 020 routed to unified service)
+         - Will be removed in Phase 2.4 tasks 030-031
+
+      2. DocumentAnalysisJobHandler.cs (lines 15, 21) - 2 warnings
+         - Background job handler still uses IDocumentIntelligenceService
+         - Will be updated in Phase 2.4 to use AnalysisOrchestrationService
+
+      3. Program.cs (lines 316-317) - 3 warnings
+         - DI registration for DocumentIntelligenceService and IDocumentIntelligenceService
+         - Will be removed in Phase 2.4 task 033 (Update DI Registrations)
+
+      All warnings are expected and represent code that will be removed in Phase 2.4. The [Obsolete] attributes prevent new code from using these deprecated services while allowing existing code to continue functioning until cleanup.
+
+      Build result: Succeeded with 8 warnings, 0 errors
+    </note>
+  </notes>
 </task>

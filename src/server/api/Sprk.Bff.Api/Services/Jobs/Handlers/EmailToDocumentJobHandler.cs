@@ -235,11 +235,9 @@ public class EmailToDocumentJobHandler : IJobHandler
                     "Updated document {DocumentId} with email metadata for email {EmailId}",
                     documentId, emailId);
 
-                // Enqueue AI analysis job if enabled
-                if (_options.AutoEnqueueAi)
-                {
-                    await EnqueueAiAnalysisJobAsync(documentId, driveId, fileHandle.Id, job.CorrelationId, ct);
-                }
+                // Note: AI analysis is now triggered from PCF on document upload, not as background job
+                // The DocumentIntelligenceService has been removed in favor of the unified AnalysisOrchestrationService
+                // which requires user context (OBO authentication) and cannot run as a background job.
 
                 // Mark as processed
                 await _idempotencyService.MarkEventAsProcessedAsync(
@@ -299,50 +297,6 @@ public class EmailToDocumentJobHandler : IJobHandler
         }
     }
 
-    private async Task EnqueueAiAnalysisJobAsync(
-        Guid documentId,
-        string driveId,
-        string? graphItemId,
-        string correlationId,
-        CancellationToken ct)
-    {
-        try
-        {
-            var payloadJson = JsonSerializer.Serialize(new
-            {
-                DocumentId = documentId,
-                DriveId = driveId,
-                GraphItemId = graphItemId,
-                TriggerSource = "EmailConversion",
-                AutoAnalyze = true
-            });
-
-            var aiJob = new JobContract
-            {
-                JobId = Guid.NewGuid(),
-                JobType = "ai-analyze",  // Existing job type from DocumentAnalysisJobHandler
-                SubjectId = documentId.ToString(),
-                CorrelationId = correlationId,
-                IdempotencyKey = $"analyze:{documentId}",
-                Payload = JsonDocument.Parse(payloadJson),
-                MaxAttempts = 3,
-                CreatedAt = DateTime.UtcNow
-            };
-
-            await _jobSubmissionService.SubmitJobAsync(aiJob, ct);
-
-            _logger.LogInformation(
-                "Enqueued ai-analyze job for document {DocumentId}, JobId {JobId}",
-                documentId, aiJob.JobId);
-        }
-        catch (Exception ex)
-        {
-            // Log but don't fail the main job - AI analysis is optional
-            _logger.LogWarning(ex,
-                "Failed to enqueue AI analysis job for document {DocumentId}",
-                documentId);
-        }
-    }
 
     private static bool IsRetryableException(Exception ex)
     {

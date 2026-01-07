@@ -1,0 +1,106 @@
+<task id="020" project="ai-summary-and-analysis-enhancements">
+  <metadata>
+    <title>Remove DocumentIntelligenceService (Legacy)</title>
+    <phase>2.3</phase>
+    <estimate>1 hour</estimate>
+    <tags>api, cleanup, breaking-change</tags>
+    <dependencies>019</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Delete legacy DocumentIntelligenceService and associated endpoints entirely.</goal>
+
+    <context>
+      Decision: Remove backward compatibility (see DECISION-BACKWARD-COMPATIBILITY.md).
+      Since no production users exist, we can delete the old service and migrate PCF directly to the unified AnalysisOrchestrationService.
+    </context>
+
+    <constraints>
+      - This is a breaking change (no backward compatibility)
+      - PCF must be updated before deployment (Task 021)
+      - Both API and PCF deploy together (Task 024)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-summary-and-analysis-enhancements/DECISION-BACKWARD-COMPATIBILITY.md" reason="Decision rationale" />
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/IDocumentIntelligenceService.cs" reason="Interface to delete" />
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/DocumentIntelligenceService.cs" reason="Service to delete" />
+      <file path="src/server/api/Sprk.Bff.Api/Api/Ai/DocumentIntelligenceEndpoints.cs" reason="Endpoints to delete" />
+      <file path="src/server/api/Sprk.Bff.Api/Program.cs" reason="DI registration to remove" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Delete IDocumentIntelligenceService.cs</step>
+    <step order="2">Delete DocumentIntelligenceService.cs</step>
+    <step order="3">Delete DocumentIntelligenceEndpoints.cs</step>
+    <step order="4">Remove DI registration from Program.cs</step>
+    <step order="5">Update DocumentAnalysisJobHandler to use AnalysisOrchestrationService</step>
+    <step order="6">Delete old test files (DocumentIntelligenceServiceTests.cs, etc.)</step>
+    <step order="7">Delete mapping/compatibility tests added in previous approach</step>
+    <step order="8">Build and verify no compilation errors</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Delete files (rm)</tool>
+    <tool name="Edit">Update Program.cs and DocumentAnalysisJobHandler.cs</tool>
+    <tool name="Bash">Build verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Old service files deleted</output>
+    <output type="code">DI registrations updated</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All legacy service files deleted</criterion>
+    <criterion>DI registrations removed</criterion>
+    <criterion>Build succeeds with 0 errors</criterion>
+    <criterion>Only unified service remains</criterion>
+  </acceptance-criteria>
+</task>
+## Task 020 Completion Notes
+
+**Date Completed:** 2026-01-07
+
+### Files Deleted
+1. src/server/api/Sprk.Bff.Api/Services/Ai/IDocumentIntelligenceService.cs
+2. src/server/api/Sprk.Bff.Api/Services/Ai/DocumentIntelligenceService.cs
+3. src/server/api/Sprk.Bff.Api/Api/Ai/DocumentIntelligenceEndpoints.cs
+4. src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/DocumentAnalysisJobHandler.cs
+5. tests/unit/Sprk.Bff.Api.Tests/Services/Ai/DocumentIntelligenceServiceTests.cs
+6. tests/unit/Sprk.Bff.Api.Tests/Services/Ai/DocumentIntelligenceServiceParsingTests.cs
+7. tests/unit/Sprk.Bff.Api.Tests/Services/Ai/DocumentIntelligenceServiceErrorTests.cs
+8. tests/unit/Sprk.Bff.Api.Tests/Services/Jobs/DocumentAnalysisJobHandlerTests.cs
+9. tests/unit/Sprk.Bff.Api.Tests/Api/Ai/DocumentIntelligenceEndpointsMappingTests.cs
+10. tests/unit/Sprk.Bff.Api.Tests/Api/Ai/BackwardCompatibilityTests.cs
+
+### Files Modified
+1. **src/server/api/Sprk.Bff.Api/Program.cs**
+   - Removed DocumentIntelligenceService DI registration (lines 315-317)
+   - Removed DocumentAnalysisJobHandler registration (lines 461-464)
+   - Removed MapDocumentIntelligenceEndpoints() call (line 1049)
+   - Updated console output message
+
+2. **src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/EmailToDocumentJobHandler.cs**
+   - Removed EnqueueAiAnalysisJobAsync method
+   - Removed call to enqueue AI analysis jobs
+   - Added comment explaining why background AI analysis was removed
+
+### Architectural Changes
+- **Background AI Analysis Removed:** The DocumentAnalysisJobHandler was removed because the new AnalysisOrchestrationService requires HttpContext for OBO authentication, which is not available in background jobs. AI analysis is now triggered from PCF on document upload (user-initiated, not background).
+
+- **No Backward Compatibility:** All legacy DocumentIntelligenceService code has been completely removed. The API now only supports the unified AnalysisOrchestrationService with playbook-based analysis.
+
+### Build Status
+✅ API project builds successfully (0 errors, 0 warnings)
+✅ Unit tests build successfully (0 errors, 0 warnings)
+
+### Next Steps
+- Task 021: Update PCF to use new /api/ai/analysis/execute endpoint
+- Task 022: Identify all forms/pages using UniversalQuickCreate control
+- Task 023: Create integration tests for new endpoint only
+- Task 024: Deploy API + PCF together (coordinated deployment)

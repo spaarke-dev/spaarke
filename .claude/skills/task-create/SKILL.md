@@ -137,6 +137,53 @@ FOR each task identified:
 REFERENCE: See adr-aware skill for full mapping table
 ```
 
+### Step 3.5.5: Determine Task Rigor Level (REQUIRED)
+
+```
+FOR each task identified:
+  DETERMINE rigor level using the same decision tree from task-execute skill:
+
+  RIGOR LEVEL = FULL IF task has ANY of:
+    - Tags include: bff-api, api, pcf, plugin, auth
+    - Will modify code files (.cs, .ts, .tsx) - check <relevant-files>
+    - Has 6+ steps in <steps> section
+    - Task description includes: "implement", "refactor", "create service"
+    - Dependencies on 3+ other tasks
+
+  RIGOR LEVEL = STANDARD IF task has ANY of:
+    - Tags include: testing, integration-test
+    - Will create new files (check <outputs> for new paths)
+    - Has explicit <constraints> or ADRs listed
+    - Phase 2.x or higher (integration/deployment phases)
+
+  RIGOR LEVEL = MINIMAL OTHERWISE:
+    - Documentation tasks
+    - Inventory/checklist creation
+    - Simple configuration updates
+
+  ADD to task <metadata>:
+    <rigor-hint>{FULL | STANDARD | MINIMAL}</rigor-hint>
+    <rigor-reason>{Why this level - reference specific trigger from decision tree}</rigor-reason>
+
+  EXAMPLE rigor hints:
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task tags include 'bff-api' (code implementation)</rigor-reason>
+
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task tags include 'testing', 'integration-test'</rigor-reason>
+
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation task (no code implementation)</rigor-reason>
+
+  PURPOSE:
+    - Makes rigor level explicit in task file (documented, not inferred)
+    - task-execute skill uses this hint but can override based on actual characteristics
+    - User can override by editing task file before execution
+    - Audit trail shows why rigor level was chosen
+
+REFERENCE: See .claude/skills/task-execute/SKILL.md Step 0.5 for full decision tree
+```
+
 ### Step 3.6: Add Deployment Tasks (REQUIRED)
 
 ```
@@ -298,6 +345,8 @@ For each task, create `tasks/{NNN}-{task-slug}.poml` as a **valid XML document**
     <dependencies>{comma-separated task IDs or "none"}</dependencies>
     <blocks>{comma-separated task IDs or "none"}</blocks>
     <tags>{context tags for Claude Code focus - see Standard Tag Vocabulary}</tags>
+    <rigor-hint>{FULL | STANDARD | MINIMAL}</rigor-hint>
+    <rigor-reason>{Why this level - from Step 3.5.5 decision tree}</rigor-reason>
   </metadata>
 
   <prompt>
@@ -412,6 +461,18 @@ Task breakdown:
   ...
   Wrap-up: 1 task (090-project-wrap-up)
   Total: {total} tasks
+
+Rigor level distribution:
+  FULL: {count} tasks (code implementation, architecture changes)
+  STANDARD: {count} tasks (tests, new files, constraints)
+  MINIMAL: {count} tasks (documentation, inventory)
+
+Task list with rigor levels:
+  001 - {title} (FULL - {reason})
+  002 - {title} (STANDARD - {reason})
+  003 - {title} (MINIMAL - {reason})
+  ...
+  090 - Project Wrap-up (FULL - code-review + adr-check + repo-cleanup)
 
 Files created:
   - tasks/TASK-INDEX.md
@@ -578,3 +639,5 @@ Before completing task-create, verify:
 - [ ] Project CLAUDE.md updated with task summary
 - [ ] PCF/frontend tasks have `<ui-tests>` sections (Step 3.65)
 - [ ] UI tests include dark mode compliance check for Fluent UI tasks (ADR-021)
+- [ ] Each task has `<rigor-hint>` and `<rigor-reason>` in metadata (Step 3.5.5)
+- [ ] Rigor levels match task characteristics (FULL for code, STANDARD for tests, MINIMAL for docs)

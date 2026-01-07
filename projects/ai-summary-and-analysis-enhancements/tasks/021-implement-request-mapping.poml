@@ -53,4 +53,20 @@
     <criterion>Mapping is complete and tested</criterion>
     <criterion>Build succeeds</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <note date="2026-01-07">
+      Task completed successfully. Mapping implementation was already in place from task 020, this task focused on documenting, validating, and testing the mapping.
+
+      Key deliverables:
+      - Documented existing request mapping: DocumentAnalysisRequest → AnalysisExecuteRequest (inline in StreamAnalyze)
+      - Documented existing response mapping: AnalysisStreamChunk → AnalysisChunk (via MapToLegacyChunk)
+      - Verified all required fields are mapped correctly
+      - Created DocumentIntelligenceEndpointsMappingTests.cs with 9 comprehensive unit tests
+      - All tests passed: metadata, text chunks, completion, errors, null handling, backward compatibility
+      - Build verified: 0 errors, 0 warnings
+
+      Backward compatibility: Legacy DocumentIntelligence API contract fully preserved. New fields (analysisId, tokenUsage, partialStorage, storageMessage) are intentionally not exposed in legacy response format to maintain compatibility.
+    </note>
+  </notes>
 </task>

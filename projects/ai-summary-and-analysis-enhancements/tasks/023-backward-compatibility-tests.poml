@@ -5,7 +5,7 @@
     <estimate>2-3 hours</estimate>
     <tags>api, testing, compatibility</tags>
     <dependencies>021</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -53,4 +53,52 @@
     <criterion>All tests pass</criterion>
     <criterion>No breaking changes detected</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <note date="2026-01-07">
+      Task completed successfully. Created comprehensive backward compatibility test suite with 16 test cases covering all aspects of the API contract after endpoint migration to unified service (task 020).
+
+      Test file created: tests/unit/Sprk.Bff.Api.Tests/Api/Ai/BackwardCompatibilityTests.cs
+
+      Test categories (16 tests total):
+      1. Request Format Tests (2 tests)
+         - DocumentAnalysisRequest structure unchanged
+         - JSON serialization produces expected format (camelCase)
+
+      2. Response Format Tests (5 tests)
+         - Text chunk format (streaming content)
+         - Completion chunk format (with summary)
+         - Completion with structured result
+         - Error chunk format
+         - JSON serialization for all chunk types
+
+      3. SSE Format Tests (2 tests)
+         - SSE message format ("data: {json}\n\n")
+         - Multiple events can be processed sequentially
+
+      4. Error Handling Tests (3 tests)
+         - Playbook not found error message
+         - Generic error message
+         - Content filter error message
+
+      5. Structured Result Tests (2 tests)
+         - DocumentAnalysisResult structure unchanged
+         - JSON round-trip serialization maintains all fields
+
+      6. Integration-Style Tests (2 tests)
+         - Typical streaming sequence pattern
+         - Error during streaming terminates gracefully
+
+      Test results: All 16 tests passed (0 failures, 0 skipped)
+
+      Backward compatibility verified: No breaking changes detected in:
+      - Request models (DocumentAnalysisRequest)
+      - Response models (AnalysisChunk, DocumentAnalysisResult, ExtractedEntities, EmailMetadata)
+      - SSE streaming format ("data: {json}\n\n")
+      - Error handling patterns
+      - JSON serialization format (camelCase property names)
+
+      Note: Existing test files (DocumentIntelligenceServiceTests.cs, DocumentIntelligenceServiceParsingTests.cs, DocumentIntelligenceServiceErrorTests.cs) generate CS0618 obsolete warnings as expected. These files test the deprecated service implementation directly and will be removed in Phase 2.4 (tasks 030-031).
+    </note>
+  </notes>
 </task>

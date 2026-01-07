@@ -1,0 +1,79 @@
+<task id="022" project="ai-summary-and-analysis-enhancements">
+  <metadata>
+    <title>Identify and Update Forms/Pages Using AI Summary</title>
+    <phase>2.3</phase>
+    <estimate>1 hour</estimate>
+    <tags>dataverse, forms, deployment</tags>
+    <dependencies>021</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <notes>
+    <completion-summary>
+Created comprehensive deployment inventory and rollback procedures:
+- Identified 5 entity forms using the control (Matter, Project, Invoice, Account, Contact)
+- Documented 1 custom page (sprk_universaldocumentupload_page)
+- Documented all control configurations and property bindings
+- Created detailed deployment checklist with pre-flight checks
+- Identified external dependencies (Azure services, Dataverse entities, web resources)
+- Created comprehensive rollback plan with 3 scenarios
+- Created quick-reference rollback guide
+
+Deliverables:
+1. DEPLOYMENT-INVENTORY.md (comprehensive 600+ line guide)
+2. ROLLBACK-QUICKREF.md (emergency procedures)
+
+Key finding: Custom Page update NOT required for this deployment (uses Dataverse Registry version).
+
+Ready for Task 023 (integration tests) and Task 024 (coordinated deployment).
+    </completion-summary>
+    <completed-date>2026-01-07</completed-date>
+  </notes>
+
+  <prompt>
+    <goal>Identify all forms and custom pages using UniversalQuickCreate control and prepare deployment checklist.</goal>
+
+    <context>
+      The updated PCF control (Task 021) needs to be deployed to all forms/pages where it's used.
+      This task creates an inventory and deployment plan.
+    </context>
+
+    <constraints>
+      - Must identify all forms/pages using the control
+      - Must verify control configuration
+      - Must document deployment order
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/skills/dataverse-deploy/SKILL.md" reason="Deployment procedures" />
+      <file path="src/client/pcf/UniversalQuickCreate/README.md" reason="Control documentation" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">List all forms using UniversalQuickCreate control</step>
+    <step order="2">List all custom pages using the control</step>
+    <step order="3">Document control configuration on each form/page</step>
+    <step order="4">Create deployment checklist</step>
+    <step order="5">Identify any external dependencies</step>
+    <step order="6">Create rollback plan</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Query Dataverse for control usage (if possible)</tool>
+    <tool name="Write">Create deployment checklist document</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">Deployment checklist with all forms/pages</output>
+    <output type="file">Rollback procedure document</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All forms/pages identified</criterion>
+    <criterion>Deployment checklist created</criterion>
+    <criterion>Rollback procedure documented</criterion>
+  </acceptance-criteria>
+</task>
