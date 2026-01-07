@@ -21,9 +21,9 @@ public record AnalysisExecuteRequest
     /// <summary>
     /// The analysis action to perform (e.g., Summarize, Review Agreement).
     /// References sprk_analysisaction entity.
+    /// Optional when PlaybookId is provided (uses playbook's default action).
     /// </summary>
-    [Required]
-    public Guid ActionId { get; init; }
+    public Guid? ActionId { get; init; }
 
     /// <summary>
     /// Optional skill IDs to apply (e.g., Concise writing, Legal terminology).

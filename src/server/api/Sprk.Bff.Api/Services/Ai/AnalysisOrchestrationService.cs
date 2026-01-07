@@ -128,18 +128,48 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         // Emit metadata chunk
         yield return AnalysisStreamChunk.Metadata(analysisId, document.Name ?? "Unknown");
 
-        // 3. Resolve scopes (Skills, Knowledge, Tools)
-        var scopes = request.PlaybookId.HasValue
-            ? await _scopeResolver.ResolvePlaybookScopesAsync(request.PlaybookId.Value, cancellationToken)
-            : await _scopeResolver.ResolveScopesAsync(
+        // 3. Resolve scopes (Skills, Knowledge, Tools) and action
+        Guid actionId;
+        ResolvedScopes scopes;
+
+        if (request.PlaybookId.HasValue)
+        {
+            // Using playbook: get playbook details to retrieve actions and scopes
+            var playbook = await _playbookService.GetPlaybookAsync(request.PlaybookId.Value, cancellationToken)
+                ?? throw new KeyNotFoundException($"Playbook {request.PlaybookId.Value} not found");
+
+            scopes = await _scopeResolver.ResolvePlaybookScopesAsync(request.PlaybookId.Value, cancellationToken);
+
+            // Use provided ActionId or fall back to playbook's first action
+            actionId = request.ActionId ?? playbook.ActionIds.FirstOrDefault();
+
+            if (actionId == Guid.Empty)
+            {
+                throw new InvalidOperationException($"Playbook {request.PlaybookId} has no actions configured");
+            }
+        }
+        else
+        {
+            // Not using playbook: require explicit ActionId
+            if (!request.ActionId.HasValue)
+            {
+                throw new ArgumentException("ActionId is required when not using a playbook");
+            }
+
+            actionId = request.ActionId.Value;
+            scopes = await _scopeResolver.ResolveScopesAsync(
                 request.SkillIds ?? [],
                 request.KnowledgeIds ?? [],
                 request.ToolIds ?? [],
                 cancellationToken);
+        }
+
+        // Update analysis record with resolved action ID
+        analysis.ActionId = actionId;
 
         // 4. Get action definition
-        var action = await _scopeResolver.GetActionAsync(request.ActionId, cancellationToken)
-            ?? throw new KeyNotFoundException($"Action {request.ActionId} not found");
+        var action = await _scopeResolver.GetActionAsync(actionId, cancellationToken)
+            ?? throw new KeyNotFoundException($"Action {actionId} not found");
 
         // 5. Extract document text from SPE via TextExtractor (uses OBO auth)
         var documentText = await ExtractDocumentTextAsync(document, httpContext, cancellationToken);
@@ -505,7 +535,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             Id = analysis.Id,
             DocumentId = analysis.DocumentId,
             DocumentName = analysis.DocumentName,
-            Action = new AnalysisActionInfo(analysis.ActionId, analysis.ActionName),
+            Action = new AnalysisActionInfo(analysis.ActionId ?? Guid.Empty, analysis.ActionName),
             Status = analysis.Status,
             WorkingDocument = analysis.WorkingDocument,
             FinalOutput = analysis.FinalOutput,
@@ -1374,7 +1404,7 @@ public record AnalysisInternalModel
     public Guid Id { get; init; }
     public Guid DocumentId { get; init; }
     public string DocumentName { get; init; } = string.Empty;
-    public Guid ActionId { get; init; }
+    public Guid? ActionId { get; set; }  // Nullable and mutable - resolved from playbook if not provided
     public string ActionName { get; init; } = string.Empty;
     public string Status { get; init; } = string.Empty;
     public string? DocumentText { get; init; }  // Extracted document content for context
