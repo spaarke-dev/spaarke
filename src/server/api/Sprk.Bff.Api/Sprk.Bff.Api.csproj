@@ -37,7 +37,7 @@
 
     <!-- Microsoft Identity (CRITICAL - must be 3.x or higher) -->
     <!-- Identity.Web 3.8.2+ fixes CVE-2025-32016; requires Identity.Client >= 4.70.0 -->
-    <PackageReference Include="Microsoft.Identity.Client" Version="4.70.0" />
+    <PackageReference Include="Microsoft.Identity.Client" Version="4.79.2" />
     <PackageReference Include="Microsoft.Identity.Web" Version="3.8.2" />
     <PackageReference Include="Microsoft.Identity.Web.MicrosoftGraph" Version="3.8.2" />
     <PackageReference Include="MimeKit" Version="4.8.0" />
