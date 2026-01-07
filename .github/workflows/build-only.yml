@@ -33,7 +33,7 @@ jobs:
       run: dotnet publish src/api/Spe.Bff.Api/Spe.Bff.Api.csproj -c Release -o ./publish
 
     - name: Upload build artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: spe-api-build
         path: ./publish
