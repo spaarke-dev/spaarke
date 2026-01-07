@@ -2,11 +2,13 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Security.Claims;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Infrastructure.Resilience;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai.Export;
 using Sprk.Bff.Api.Telemetry;
@@ -38,6 +40,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
     private readonly IPlaybookService _playbookService;
     private readonly IToolHandlerRegistry _toolHandlerRegistry;
     private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly IStorageRetryPolicy _storageRetryPolicy;
     private readonly AnalysisOptions _options;
     private readonly ILogger<AnalysisOrchestrationService> _logger;
     private readonly AiTelemetry? _telemetry;
@@ -58,6 +61,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         IPlaybookService playbookService,
         IToolHandlerRegistry toolHandlerRegistry,
         IHttpContextAccessor httpContextAccessor,
+        IStorageRetryPolicy storageRetryPolicy,
         IOptions<AnalysisOptions> options,
         ILogger<AnalysisOrchestrationService> logger,
         AiTelemetry? telemetry = null)
@@ -74,6 +78,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         _playbookService = playbookService;
         _toolHandlerRegistry = toolHandlerRegistry;
         _httpContextAccessor = httpContextAccessor;
+        _storageRetryPolicy = storageRetryPolicy;
         _options = options.Value;
         _logger = logger;
         _telemetry = telemetry;
@@ -1004,6 +1009,129 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         return analysis;
     }
 
+    /// <summary>
+    /// Store Document Profile outputs in Dataverse with dual storage and soft failure handling.
+    /// Stores outputs in both sprk_analysisoutput (always) and sprk_document fields (with retry).
+    /// </summary>
+    /// <param name="analysisId">The analysis ID.</param>
+    /// <param name="documentId">The document ID.</param>
+    /// <param name="playbookName">The playbook name.</param>
+    /// <param name="toolResults">The tool execution results.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Storage result indicating success, partial success, or failure.</returns>
+    private async Task<DocumentProfileResult> StoreDocumentProfileOutputsAsync(
+        Guid analysisId,
+        Guid documentId,
+        string playbookName,
+        Dictionary<string, string?> toolResults,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Step 1: Create analysis record in Dataverse (critical path)
+            _logger.LogInformation(
+                "Creating analysis record for Document Profile: AnalysisId={AnalysisId}, DocumentId={DocumentId}",
+                analysisId, documentId);
+
+            var dataverseAnalysisId = await _dataverseService.CreateAnalysisAsync(
+                documentId,
+                $"Document Profile - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
+                cancellationToken);
+
+            // Step 2: Store outputs in sprk_analysisoutput (critical path)
+            _logger.LogInformation(
+                "Storing {OutputCount} outputs in sprk_analysisoutput for analysis {AnalysisId}",
+                toolResults.Count, dataverseAnalysisId);
+
+            var sortOrder = 0;
+            foreach (var (outputTypeName, value) in toolResults)
+            {
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    _logger.LogDebug("Skipping empty output for type {OutputType}", outputTypeName);
+                    continue;
+                }
+
+                var output = new AnalysisOutputEntity
+                {
+                    Name = outputTypeName,
+                    Value = value,
+                    AnalysisId = dataverseAnalysisId,
+                    OutputTypeId = null, // Output type lookup optional for Phase 1
+                    SortOrder = sortOrder++
+                };
+
+                await _dataverseService.CreateAnalysisOutputAsync(output, cancellationToken);
+                _logger.LogDebug("Stored output {OutputType} in sprk_analysisoutput", outputTypeName);
+            }
+
+            // Step 3: Map outputs to sprk_document fields (optional path, with retry)
+            // Only for Document Profile playbook
+            if (playbookName.Equals("Document Profile", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    _logger.LogInformation(
+                        "Mapping Document Profile outputs to sprk_document fields for document {DocumentId}",
+                        documentId);
+
+                    // Create field mapping using DocumentProfileFieldMapper
+                    var fieldMapping = DocumentProfileFieldMapper.CreateFieldMapping(toolResults);
+
+                    if (fieldMapping.Count == 0)
+                    {
+                        _logger.LogWarning(
+                            "No mappable outputs found for Document Profile. Skipping document field update.");
+                        return DocumentProfileResult.FullSuccess(dataverseAnalysisId);
+                    }
+
+                    // Update document fields with retry policy
+                    await _storageRetryPolicy.ExecuteAsync(async ct =>
+                    {
+                        await _dataverseService.UpdateDocumentFieldsAsync(
+                            documentId.ToString(),
+                            fieldMapping,
+                            ct);
+
+                        _logger.LogInformation(
+                            "Successfully mapped {FieldCount} outputs to sprk_document fields",
+                            fieldMapping.Count);
+
+                    }, cancellationToken);
+
+                    return DocumentProfileResult.FullSuccess(dataverseAnalysisId);
+                }
+                catch (Exception ex)
+                {
+                    // Soft failure: Outputs are preserved in sprk_analysisoutput
+                    // User can still access results via Analysis Workspace
+                    _logger.LogWarning(ex,
+                        "[STORAGE-SOFT-FAIL] Failed to map outputs to sprk_document fields after retries. " +
+                        "Outputs preserved in sprk_analysisoutput for analysis {AnalysisId}",
+                        dataverseAnalysisId);
+
+                    return DocumentProfileResult.PartialSuccess(
+                        dataverseAnalysisId,
+                        "Document Profile completed. Some fields could not be updated. View full results in the Analysis tab.");
+                }
+            }
+
+            // Non-Document-Profile playbooks: full success (only sprk_analysisoutput storage required)
+            return DocumentProfileResult.FullSuccess(dataverseAnalysisId);
+        }
+        catch (Exception ex)
+        {
+            // Complete failure: Could not store outputs at all
+            _logger.LogError(ex,
+                "Failed to store Document Profile outputs for analysis {AnalysisId}",
+                analysisId);
+
+            return DocumentProfileResult.Failure(
+                $"Failed to store analysis outputs: {ex.Message}",
+                analysisId);
+        }
+    }
+
     /// <inheritdoc />
     public async IAsyncEnumerable<AnalysisStreamChunk> ExecutePlaybookAsync(
         PlaybookExecuteRequest request,
@@ -1174,7 +1302,42 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             }
         }
 
-        // 10. Finalize analysis
+        // 10. Store outputs in Dataverse (dual storage for Document Profile)
+        // Collect structured outputs from tools for storage
+        var structuredOutputs = new Dictionary<string, string?>();
+        foreach (var tool in scopes.Tools)
+        {
+            // TODO: Extract outputs from tool results
+            // For now, use placeholder until tool handlers return structured outputs
+            // This will be fully implemented when tool handlers are updated to return output type → value mappings
+        }
+
+        // Store in Dataverse if we have outputs
+        DocumentProfileResult? storageResult = null;
+        if (structuredOutputs.Any())
+        {
+            storageResult = await StoreDocumentProfileOutputsAsync(
+                analysisId,
+                documentId,
+                playbook.Name ?? "Unknown",
+                structuredOutputs,
+                cancellationToken);
+
+            if (!storageResult.Success)
+            {
+                _logger.LogError(
+                    "Failed to store Document Profile outputs: {Message}",
+                    storageResult.Message);
+            }
+            else if (storageResult.PartialStorage)
+            {
+                _logger.LogWarning(
+                    "Document Profile completed with partial storage: {Message}",
+                    storageResult.Message);
+            }
+        }
+
+        // 11. Finalize analysis
         var finalOutput = toolResults.ToString();
         analysis = analysis with
         {
@@ -1192,7 +1355,12 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         _logger.LogInformation("Playbook execution completed: Analysis {AnalysisId}, {ToolCount} tools executed",
             analysisId, scopes.Tools.Length);
 
-        yield return AnalysisStreamChunk.Completed(analysisId, new TokenUsage(totalInputTokens, totalOutputTokens));
+        // Include storage result in completion event for Document Profile
+        yield return AnalysisStreamChunk.Completed(
+            analysisId,
+            new TokenUsage(totalInputTokens, totalOutputTokens),
+            partialStorage: storageResult?.PartialStorage,
+            storageMessage: storageResult?.PartialStorage == true ? storageResult.Message : null);
     }
 }
 

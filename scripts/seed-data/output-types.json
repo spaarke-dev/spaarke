@@ -1,0 +1,98 @@
+{
+  "description": "Output type seed data for Document Profile playbook",
+  "created": "2026-01-07",
+  "entity": "sprk_aioutputtypes",
+  "relatedProject": "ai-summary-and-analysis-enhancements",
+
+  "note": "Output types define the fields populated by Document Profile playbook on document upload",
+
+  "outputTypes": [
+    {
+      "id": "OT-001",
+      "sprk_name": "TL;DR",
+      "sprk_description": "Ultra-concise document summary (1-2 sentences). Provides immediate document insight.",
+      "fieldMapping": {
+        "targetEntity": "sprk_document",
+        "targetField": "sprk_tldr",
+        "fieldType": "Memo",
+        "maxLength": 1000
+      },
+      "toolReference": "TL-004",
+      "priority": 1
+    },
+    {
+      "id": "OT-002",
+      "sprk_name": "Summary",
+      "sprk_description": "Comprehensive document summary (2-4 paragraphs). Captures key points, parties, and obligations.",
+      "fieldMapping": {
+        "targetEntity": "sprk_document",
+        "targetField": "sprk_summary",
+        "fieldType": "Memo",
+        "maxLength": 10000
+      },
+      "toolReference": "TL-004",
+      "priority": 2
+    },
+    {
+      "id": "OT-003",
+      "sprk_name": "Keywords",
+      "sprk_description": "Comma-separated keywords extracted from document. Used for search and categorization.",
+      "fieldMapping": {
+        "targetEntity": "sprk_document",
+        "targetField": "sprk_keywords",
+        "fieldType": "Memo",
+        "maxLength": 2000
+      },
+      "toolReference": "TL-004",
+      "priority": 3
+    },
+    {
+      "id": "OT-004",
+      "sprk_name": "Document Type",
+      "sprk_description": "Classified document type (e.g., Contract, NDA, Invoice, Lease Agreement). Auto-detected from content.",
+      "fieldMapping": {
+        "targetEntity": "sprk_document",
+        "targetField": "sprk_documenttype",
+        "fieldType": "String",
+        "maxLength": 200
+      },
+      "toolReference": "TL-003",
+      "priority": 4
+    },
+    {
+      "id": "OT-005",
+      "sprk_name": "Entities",
+      "sprk_description": "Extracted named entities in JSON format. Includes parties, dates, amounts, and key terms.",
+      "fieldMapping": {
+        "targetEntity": "sprk_document",
+        "targetField": "sprk_entities",
+        "fieldType": "Memo",
+        "maxLength": 50000,
+        "format": "JSON"
+      },
+      "toolReference": "TL-001",
+      "priority": 5
+    }
+  ],
+
+  "playbookAssociations": [
+    {
+      "playbookId": "PB-011",
+      "playbookName": "Document Profile",
+      "outputTypeIds": ["OT-001", "OT-002", "OT-003", "OT-004", "OT-005"]
+    }
+  ],
+
+  "deploymentNotes": {
+    "requirements": [
+      "playbooks.json must be deployed first (PB-011 must exist)",
+      "Create N:N relationship between sprk_analysisplaybook and sprk_aioutputtype if not exists"
+    ],
+    "deployment_order": [
+      "1. Deploy playbooks.json (includes PB-011 Document Profile)",
+      "2. Deploy output-types.json (this file)",
+      "3. Create playbook-outputtype associations"
+    ],
+    "relationshipName": "sprk_playbook_outputtype"
+  }
+}

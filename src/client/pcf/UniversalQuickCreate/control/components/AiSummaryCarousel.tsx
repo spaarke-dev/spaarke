@@ -251,6 +251,9 @@ export const AiSummaryCarousel: React.FC<AiSummaryCarouselProps> = ({
                 tldr={doc.tldr}
                 keywords={doc.keywords}
                 entities={doc.entities}
+                analysisId={doc.analysisId}
+                partialStorage={doc.partialStorage}
+                storageMessage={doc.storageMessage}
                 onRetry={onRetry ? handleRetry : undefined}
                 className={className}
             />
@@ -327,6 +330,9 @@ export const AiSummaryCarousel: React.FC<AiSummaryCarouselProps> = ({
                     tldr={currentDoc.tldr}
                     keywords={currentDoc.keywords}
                     entities={currentDoc.entities}
+                    analysisId={currentDoc.analysisId}
+                    partialStorage={currentDoc.partialStorage}
+                    storageMessage={currentDoc.storageMessage}
                     onRetry={onRetry ? handleRetry : undefined}
                 />
             </div>

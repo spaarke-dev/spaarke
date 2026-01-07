@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.Core;
 using Azure.Identity;
+using Microsoft.Extensions.Caching.Distributed;
 using Sprk.Bff.Api.Models.Ai;
 
 namespace Sprk.Bff.Api.Services.Ai;
@@ -18,6 +19,7 @@ public class PlaybookService : IPlaybookService
     private readonly string _apiUrl;
     private readonly TokenCredential _credential;
     private readonly ILogger<PlaybookService> _logger;
+    private readonly IDistributedCache? _cache;
     private AccessToken? _currentToken;
 
     private const string EntitySetName = "sprk_analysisplaybooks";
@@ -38,10 +40,12 @@ public class PlaybookService : IPlaybookService
     public PlaybookService(
         HttpClient httpClient,
         IConfiguration configuration,
-        ILogger<PlaybookService> logger)
+        ILogger<PlaybookService> logger,
+        IDistributedCache? cache = null)
     {
         _httpClient = httpClient;
         _logger = logger;
+        _cache = cache;
 
         var dataverseUrl = configuration["Dataverse:ServiceUrl"]
             ?? throw new InvalidOperationException("Dataverse:ServiceUrl configuration is required");
@@ -311,6 +315,109 @@ public class PlaybookService : IPlaybookService
         }
 
         return await ExecuteListQueryAsync(filter, query, pageSize, skip, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<PlaybookResponse> GetByNameAsync(
+        string name,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        // Cache key following SDAP naming convention
+        var cacheKey = $"sdap:playbook:name:{name}";
+
+        // Try cache first (if available)
+        if (_cache != null)
+        {
+            var cached = await _cache.GetStringAsync(cacheKey, cancellationToken);
+            if (cached != null)
+            {
+                try
+                {
+                    var cachedPlaybook = JsonSerializer.Deserialize<PlaybookResponse>(cached, JsonOptions);
+                    if (cachedPlaybook != null)
+                    {
+                        _logger.LogDebug("[PLAYBOOK] Cache HIT for playbook name '{Name}'", name);
+                        return cachedPlaybook;
+                    }
+                }
+                catch (JsonException ex)
+                {
+                    _logger.LogWarning(ex, "[PLAYBOOK] Cache deserialization failed for '{Name}'", name);
+                }
+            }
+        }
+
+        _logger.LogDebug("[PLAYBOOK] Cache MISS for playbook name '{Name}', querying Dataverse", name);
+
+        await EnsureAuthenticatedAsync(cancellationToken);
+
+        // Query by name - exact match, case-insensitive per Dataverse default
+        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_sprk_outputtypeid_value,_ownerid_value,createdon,modifiedon";
+        var filter = $"sprk_name eq '{EscapeODataString(name)}'";
+        var url = $"{EntitySetName}?$select={select}&$filter={Uri.EscapeDataString(filter)}&$top=1";
+
+        var response = await _httpClient.GetAsync(url, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(JsonOptions, cancellationToken);
+        if (result?.Value == null || result.Value.Length == 0)
+        {
+            _logger.LogWarning("[PLAYBOOK] Playbook '{Name}' not found in Dataverse", name);
+            throw PlaybookNotFoundException.ByName(name);
+        }
+
+        var entity = JsonSerializer.Deserialize<PlaybookEntity>(result.Value[0].GetRawText(), JsonOptions);
+        if (entity == null)
+        {
+            throw PlaybookNotFoundException.ByName(name);
+        }
+
+        // Load N:N relationships
+        var playbookId = entity.Id;
+        var actionIds = await GetRelatedIdsAsync(playbookId, ActionRelationship, "sprk_analysisactions", "sprk_analysisactionid", cancellationToken);
+        var skillIds = await GetRelatedIdsAsync(playbookId, SkillRelationship, "sprk_analysisskills", "sprk_analysisskillid", cancellationToken);
+        var knowledgeIds = await GetRelatedIdsAsync(playbookId, KnowledgeRelationship, "sprk_analysisknowledges", "sprk_analysisknowledgeid", cancellationToken);
+        var toolIds = await GetRelatedIdsAsync(playbookId, ToolRelationship, "sprk_analysistools", "sprk_analysistoolid", cancellationToken);
+
+        var playbook = new PlaybookResponse
+        {
+            Id = entity.Id,
+            Name = entity.Name ?? string.Empty,
+            Description = entity.Description,
+            OutputTypeId = entity.OutputTypeId,
+            IsPublic = entity.IsPublic ?? false,
+            OwnerId = entity.OwnerId ?? Guid.Empty,
+            ActionIds = actionIds,
+            SkillIds = skillIds,
+            KnowledgeIds = knowledgeIds,
+            ToolIds = toolIds,
+            CreatedOn = entity.CreatedOn ?? DateTime.UtcNow,
+            ModifiedOn = entity.ModifiedOn ?? DateTime.UtcNow
+        };
+
+        // Cache result for 24 hours (playbooks are relatively stable)
+        if (_cache != null)
+        {
+            try
+            {
+                var serialized = JsonSerializer.Serialize(playbook, JsonOptions);
+                var cacheOptions = new DistributedCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(24)
+                };
+                await _cache.SetStringAsync(cacheKey, serialized, cacheOptions, cancellationToken);
+                _logger.LogDebug("[PLAYBOOK] Cached playbook '{Name}' for 24 hours", name);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[PLAYBOOK] Failed to cache playbook '{Name}'", name);
+            }
+        }
+
+        _logger.LogInformation("[PLAYBOOK] Retrieved playbook '{Name}' (ID: {Id})", name, playbook.Id);
+        return playbook;
     }
 
     private async Task<PlaybookListResponse> ExecuteListQueryAsync(

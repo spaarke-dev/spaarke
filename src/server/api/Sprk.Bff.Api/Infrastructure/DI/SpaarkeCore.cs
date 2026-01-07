@@ -7,6 +7,8 @@ using Spaarke.Core.Auth;
 using Spaarke.Core.Auth.Rules;
 using Spaarke.Core.Cache;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Resilience;
+using Sprk.Bff.Api.Services.Ai;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
@@ -19,9 +21,17 @@ public static class SpaarkeCore
         // SDAP Authorization services
         // Register both concrete and interface for compatibility:
         // - Concrete: Used by DocumentAuthorizationFilter and ResourceAccessHandler
-        // - Interface: Used by AiAuthorizationFilter
+        // - Interface: Used by legacy code paths
         services.AddScoped<Spaarke.Core.Auth.AuthorizationService>();
         services.AddScoped<Spaarke.Core.Auth.IAuthorizationService>(sp => sp.GetRequiredService<Spaarke.Core.Auth.AuthorizationService>());
+
+        // AI Authorization service (FullUAC mode)
+        // Used by AiAuthorizationFilter and AnalysisAuthorizationFilter for document access checks
+        services.AddScoped<IAiAuthorizationService, AiAuthorizationService>();
+
+        // Storage retry policy for Dataverse operations
+        // Handles replication lag scenarios with exponential backoff (2s, 4s, 8s)
+        services.AddScoped<IStorageRetryPolicy, StorageRetryPolicy>();
 
         // Register HttpClient for DataverseAccessDataSource (handles its own authentication)
         services.AddHttpClient<IAccessDataSource, DataverseAccessDataSource>((sp, client) =>

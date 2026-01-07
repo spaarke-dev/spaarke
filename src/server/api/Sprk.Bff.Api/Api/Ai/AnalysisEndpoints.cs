@@ -408,6 +408,8 @@ public static class AnalysisEndpoints
 /// <param name="DocumentName">Source document name (set on metadata event).</param>
 /// <param name="TokenUsage">Token usage statistics (set on done event).</param>
 /// <param name="Error">Error message (set on error event).</param>
+/// <param name="PartialStorage">Whether storage partially succeeded (outputs in sprk_analysisoutput but field mapping failed). Set on done event for Document Profile.</param>
+/// <param name="StorageMessage">User-friendly message about storage result. Set when PartialStorage is true.</param>
 public record AnalysisStreamChunk(
     string Type,
     string? Content,
@@ -415,7 +417,9 @@ public record AnalysisStreamChunk(
     Guid? AnalysisId = null,
     string? DocumentName = null,
     TokenUsage? TokenUsage = null,
-    string? Error = null)
+    string? Error = null,
+    bool? PartialStorage = null,
+    string? StorageMessage = null)
 {
     public static AnalysisStreamChunk Metadata(Guid analysisId, string documentName) =>
         new("metadata", null, false, AnalysisId: analysisId, DocumentName: documentName);
@@ -423,8 +427,16 @@ public record AnalysisStreamChunk(
     public static AnalysisStreamChunk TextChunk(string content) =>
         new("chunk", content, false);
 
-    public static AnalysisStreamChunk Completed(Guid analysisId, TokenUsage tokenUsage) =>
-        new("done", null, true, AnalysisId: analysisId, TokenUsage: tokenUsage);
+    public static AnalysisStreamChunk Completed(
+        Guid analysisId,
+        TokenUsage tokenUsage,
+        bool? partialStorage = null,
+        string? storageMessage = null) =>
+        new("done", null, true,
+            AnalysisId: analysisId,
+            TokenUsage: tokenUsage,
+            PartialStorage: partialStorage,
+            StorageMessage: storageMessage);
 
     public static AnalysisStreamChunk FromError(string error) =>
         new("error", null, true, Error: error);

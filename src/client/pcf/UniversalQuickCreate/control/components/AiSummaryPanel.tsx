@@ -17,6 +17,11 @@ import {
     Button,
     Spinner,
     Text,
+    MessageBar,
+    MessageBarBody,
+    MessageBarTitle,
+    MessageBarActions,
+    Link,
     makeStyles,
     mergeClasses,
     tokens
@@ -30,7 +35,8 @@ import {
     PersonRegular,
     MoneyRegular,
     CalendarRegular,
-    DocumentCopyRegular
+    DocumentCopyRegular,
+    DismissRegular
 } from '@fluentui/react-icons';
 import { SummaryStatus, ExtractedEntities } from '../services/useAiSummary';
 
@@ -64,6 +70,15 @@ export interface AiSummaryPanelProps {
 
     /** Extracted entities (available after completion) */
     entities?: ExtractedEntities;
+
+    /** Analysis ID from Dataverse (for linking to Analysis tab) */
+    analysisId?: string;
+
+    /** Whether storage partially succeeded (soft failure) */
+    partialStorage?: boolean;
+
+    /** User-friendly message about storage result */
+    storageMessage?: string;
 
     /** Callback for retry action */
     onRetry?: () => void;
@@ -289,6 +304,10 @@ const useStyles = makeStyles({
         backgroundColor: tokens.colorNeutralBackground3,
         padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}`,
         borderRadius: tokens.borderRadiusSmall
+    },
+    // Warning MessageBar styles
+    warningMessageBar: {
+        marginBottom: tokens.spacingVerticalM
     }
 });
 
@@ -329,11 +348,17 @@ export const AiSummaryPanel: React.FC<AiSummaryPanelProps> = ({
     tldr,
     keywords,
     entities,
+    analysisId,
+    partialStorage,
+    storageMessage,
     onRetry,
     className
 }) => {
     const styles = useStyles();
     const statusConfig = getStatusConfig(status);
+
+    // State for dismissible warning
+    const [warningDismissed, setWarningDismissed] = React.useState(false);
 
     // Parse keywords string into array
     const keywordsList = React.useMemo(() => {
@@ -477,6 +502,65 @@ export const AiSummaryPanel: React.FC<AiSummaryPanelProps> = ({
         );
     };
 
+    /**
+     * Navigate to Analysis tab to view full results
+     */
+    const handleViewInAnalysis = React.useCallback(() => {
+        try {
+            const xrm = (window as unknown as { Xrm?: { Page?: { ui?: { tabs?: { get: (name: string) => { setFocus: () => void } | null } } } } }).Xrm;
+            if (!xrm?.Page?.ui?.tabs) {
+                console.warn('[AiSummaryPanel] Xrm.Page.ui.tabs not available');
+                return;
+            }
+
+            // Navigate to "Tab 3 - Analysis" (sprk_tab_analysis)
+            const analysisTab = xrm.Page.ui.tabs.get('sprk_tab_analysis');
+            if (analysisTab) {
+                analysisTab.setFocus();
+            } else {
+                console.warn('[AiSummaryPanel] Analysis tab not found');
+            }
+        } catch (err) {
+            console.error('[AiSummaryPanel] Failed to navigate to Analysis tab:', err);
+        }
+    }, []);
+
+    /**
+     * Render warning MessageBar for partial storage failures
+     */
+    const renderWarning = () => {
+        // Don't show if not partial storage, or if dismissed
+        if (!partialStorage || warningDismissed) return null;
+
+        const message = storageMessage || 'Document Profile completed. Some fields could not be updated. View full results in the Analysis tab.';
+
+        return (
+            <MessageBar
+                intent="warning"
+                className={styles.warningMessageBar}
+            >
+                <MessageBarBody>
+                    <MessageBarTitle>Partial Success</MessageBarTitle>
+                    {message}{' '}
+                    {analysisId && (
+                        <Link onClick={handleViewInAnalysis}>View in Analysis</Link>
+                    )}
+                </MessageBarBody>
+                <MessageBarActions
+                    containerAction={
+                        <Button
+                            appearance="transparent"
+                            icon={<DismissRegular />}
+                            size="small"
+                            onClick={() => setWarningDismissed(true)}
+                            aria-label="Dismiss warning"
+                        />
+                    }
+                />
+            </MessageBar>
+        );
+    };
+
     // Render content based on status
     const renderContent = () => {
         switch (status) {
@@ -509,25 +593,28 @@ export const AiSummaryPanel: React.FC<AiSummaryPanelProps> = ({
                 );
 
             case 'complete':
-                // Full height scrollable content: TL;DR → Keywords → Summary → Extracted Details
+                // Full height scrollable content: Warning (if partial) → TL;DR → Keywords → Summary → Extracted Details
                 return (
-                    <div className={styles.summaryContainer} role="region" aria-label="Document analysis">
-                        {/* TL;DR bullets */}
-                        {renderTldr()}
-                        {/* Keywords */}
-                        {renderKeywords()}
-                        {/* Summary section */}
-                        {summary && (
-                            <div className={styles.summarySection}>
-                                <span className={styles.sectionHeader}>Summary</span>
-                                <Text className={styles.summaryText}>
-                                    {summary}
-                                </Text>
-                            </div>
-                        )}
-                        {/* Extracted Details (includes Document Type) */}
-                        {renderEntities()}
-                    </div>
+                    <>
+                        {renderWarning()}
+                        <div className={styles.summaryContainer} role="region" aria-label="Document analysis">
+                            {/* TL;DR bullets */}
+                            {renderTldr()}
+                            {/* Keywords */}
+                            {renderKeywords()}
+                            {/* Summary section */}
+                            {summary && (
+                                <div className={styles.summarySection}>
+                                    <span className={styles.sectionHeader}>Summary</span>
+                                    <Text className={styles.summaryText}>
+                                        {summary}
+                                    </Text>
+                                </div>
+                            )}
+                            {/* Extracted Details (includes Document Type) */}
+                            {renderEntities()}
+                        </div>
+                    </>
                 );
 
             case 'error':

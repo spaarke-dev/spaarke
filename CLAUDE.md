@@ -163,6 +163,75 @@ resume task 005
 
 ---
 
+### 🚨 MANDATORY: Task Execution Protocol for Claude Code
+
+**ABSOLUTE RULE**: When executing project tasks, Claude Code MUST invoke the `task-execute` skill. DO NOT read POML files directly and implement manually.
+
+#### Why This Matters
+
+The task-execute skill ensures:
+- ✅ Knowledge files are loaded (ADRs, constraints, patterns)
+- ✅ Context is properly tracked in current-task.md
+- ✅ Proactive checkpointing occurs every 3 steps
+- ✅ Quality gates run (code-review + adr-check) at Step 9.5
+- ✅ Progress is recoverable after compaction
+- ✅ PCF version bumping follows protocol
+- ✅ Deployment follows dataverse-deploy skill
+
+**Bypassing this skill leads to**:
+- ❌ Missing ADR constraints
+- ❌ No checkpointing - lost progress after compaction
+- ❌ Skipped quality gates
+- ❌ Manual errors (forgotten version bumps, etc.)
+
+#### Auto-Detection Rules (Trigger Phrases)
+
+When Claude Code detects these phrases, it MUST invoke task-execute skill:
+
+| User Says | Required Action | Implementation |
+|-----------|-----------------|----------------|
+| "work on task X" | Execute task X | Invoke task-execute with task X POML file |
+| "continue" | Execute next pending task | Check TASK-INDEX.md for next 🔲, invoke task-execute |
+| "continue with task X" | Execute task X | Invoke task-execute with task X POML file |
+| "next task" | Execute next pending task | Check TASK-INDEX.md for next 🔲, invoke task-execute |
+| "keep going" | Execute next pending task | Check TASK-INDEX.md for next 🔲, invoke task-execute |
+| "resume task X" | Execute task X | Invoke task-execute with task X POML file |
+| "pick up where we left off" | Execute task from current-task.md | Load current-task.md, invoke task-execute |
+
+**Example - User says "continue"**:
+1. Read `projects/{project-name}/tasks/TASK-INDEX.md`
+2. Find first task with status 🔲 (pending)
+3. Invoke Skill tool with skill="task-execute" and task file path
+4. Let task-execute orchestrate the full protocol
+
+#### Parallel Task Execution
+
+When tasks can run in parallel (no dependencies between them), each task MUST still use task-execute:
+
+**CORRECT Approach**:
+- Single message with multiple Skill tool invocations
+- Each invocation calls task-execute with a different task file
+- Example: Tasks 020, 021, 022 can run in parallel → Send one message with three Skill tool calls
+
+**INCORRECT Approach**:
+- Reading multiple POML files directly
+- Manually implementing from multiple tasks
+- Bypassing task-execute for "efficiency"
+
+See task-execute SKILL.md Step 8 for the complete execution protocol with checkpointing rules.
+
+#### Enforcement Checklist for Claude Code
+
+Before implementing ANY task:
+- [ ] Did user request task work? (any trigger phrase above)
+- [ ] Did I invoke the task-execute skill?
+- [ ] Did I load the task POML file directly? (❌ WRONG)
+- [ ] Did I implement changes without task-execute? (❌ WRONG)
+
+If you answered "no" to the second question or "yes" to questions 3-4, STOP and invoke task-execute instead.
+
+---
+
 ### ⚠️ Component Skills (AI Internal Use Only)
 
 These skills are **called BY orchestrators** and should NOT be invoked directly by developers:

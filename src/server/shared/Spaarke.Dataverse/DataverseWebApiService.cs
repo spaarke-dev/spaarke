@@ -239,6 +239,101 @@ public class DataverseWebApiService : IDataverseService
         }
     }
 
+    public async Task<Guid> CreateAnalysisAsync(Guid documentId, string? name = null, CancellationToken ct = default)
+    {
+        await EnsureAuthenticatedAsync(ct);
+
+        var payload = new Dictionary<string, object>
+        {
+            ["sprk_name"] = name ?? $"Analysis {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
+            ["sprk_documentid@odata.bind"] = $"/sprk_documents({documentId})",
+            ["statuscode"] = 1 // Active
+        };
+
+        var response = await _httpClient.PostAsJsonAsync("sprk_analysises", payload, ct);
+        response.EnsureSuccessStatusCode();
+
+        var location = response.Headers.Location?.ToString();
+        if (location == null)
+        {
+            throw new InvalidOperationException("Failed to create analysis: No location header returned");
+        }
+
+        // Extract ID from location header (e.g., ".../sprk_analysises(guid)")
+        var match = System.Text.RegularExpressions.Regex.Match(location, @"\(([a-fA-F0-9-]+)\)");
+        if (!match.Success || !Guid.TryParse(match.Groups[1].Value, out var analysisId))
+        {
+            throw new InvalidOperationException($"Failed to parse analysis ID from location: {location}");
+        }
+
+        _logger.LogInformation("[DATAVERSE-API] Created analysis {AnalysisId} for document {DocumentId}", analysisId, documentId);
+        return analysisId;
+    }
+
+    public async Task<Guid> CreateAnalysisOutputAsync(AnalysisOutputEntity output, CancellationToken ct = default)
+    {
+        await EnsureAuthenticatedAsync(ct);
+
+        var payload = new Dictionary<string, object>
+        {
+            ["sprk_name"] = output.Name ?? "Output",
+            ["sprk_value"] = output.Value ?? string.Empty,
+            ["sprk_analysisid@odata.bind"] = $"/sprk_analysises({output.AnalysisId})"
+        };
+
+        if (output.OutputTypeId.HasValue)
+        {
+            payload["sprk_outputtypeid@odata.bind"] = $"/sprk_aioutputtypes({output.OutputTypeId.Value})";
+        }
+
+        if (output.SortOrder.HasValue)
+        {
+            payload["sprk_sortorder"] = output.SortOrder.Value;
+        }
+
+        var response = await _httpClient.PostAsJsonAsync("sprk_analysisoutputs", payload, ct);
+        response.EnsureSuccessStatusCode();
+
+        var location = response.Headers.Location?.ToString();
+        if (location == null)
+        {
+            throw new InvalidOperationException("Failed to create analysis output: No location header returned");
+        }
+
+        var match = System.Text.RegularExpressions.Regex.Match(location, @"\(([a-fA-F0-9-]+)\)");
+        if (!match.Success || !Guid.TryParse(match.Groups[1].Value, out var outputId))
+        {
+            throw new InvalidOperationException($"Failed to parse output ID from location: {location}");
+        }
+
+        _logger.LogDebug("[DATAVERSE-API] Created analysis output {OutputId} for analysis {AnalysisId}", outputId, output.AnalysisId);
+        return outputId;
+    }
+
+    public async Task UpdateDocumentFieldsAsync(string documentId, Dictionary<string, object?> fields, CancellationToken ct = default)
+    {
+        await EnsureAuthenticatedAsync(ct);
+
+        if (!Guid.TryParse(documentId, out var guid))
+        {
+            throw new ArgumentException($"Invalid document ID format: {documentId}", nameof(documentId));
+        }
+
+        var payload = new Dictionary<string, object?>();
+        foreach (var field in fields)
+        {
+            if (field.Value != null)
+            {
+                payload[field.Key] = field.Value;
+            }
+        }
+
+        var response = await _httpClient.PatchAsJsonAsync($"sprk_documents({guid})", payload, ct);
+        response.EnsureSuccessStatusCode();
+
+        _logger.LogInformation("[DATAVERSE-API] Updated document {DocumentId} with {FieldCount} fields", documentId, fields.Count);
+    }
+
     public async Task UpdateDocumentAsync(string id, UpdateDocumentRequest request, CancellationToken ct = default)
     {
         await EnsureAuthenticatedAsync(ct);

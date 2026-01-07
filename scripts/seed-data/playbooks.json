@@ -81,6 +81,47 @@
       }
     },
     {
+      "id": "PB-011",
+      "sprk_name": "Document Profile",
+      "sprk_description": "Auto-generated document profile on upload. Generates TL;DR, summary, keywords, document type classification, and entity extraction for immediate document insight.",
+      "sprk_ispublic": true,
+      "estimatedTime": "~20 seconds",
+      "complexity": "Low",
+      "isSystemPlaybook": true,
+      "triggerContext": "document-upload",
+      "scopes": {
+        "skills": ["SKL-008"],
+        "actions": ["ACT-001", "ACT-003", "ACT-004"],
+        "knowledge": ["KNW-005"],
+        "tools": ["TL-001", "TL-003", "TL-004"]
+      },
+      "scopeDescriptions": {
+        "skills": {
+          "SKL-008": "Executive Summary - High-level overview generation"
+        },
+        "actions": {
+          "ACT-001": "Extract Entities - Named entity extraction (parties, dates, amounts)",
+          "ACT-003": "Classify Document - Document type classification",
+          "ACT-004": "Summarize Content - Generate TL;DR and summary"
+        },
+        "knowledge": {
+          "KNW-005": "Defined Terms - Standard legal definitions"
+        },
+        "tools": {
+          "TL-001": "Entity Extractor - Extract parties, dates, amounts",
+          "TL-003": "Document Classifier - Classify document type",
+          "TL-004": "Summary Generator - Generate TL;DR and summary"
+        }
+      },
+      "outputMapping": {
+        "tldr": "sprk_document.sprk_tldr",
+        "summary": "sprk_document.sprk_summary",
+        "keywords": "sprk_document.sprk_keywords",
+        "documentType": "sprk_document.sprk_documenttype",
+        "entities": "sprk_document.sprk_entities"
+      }
+    },
+    {
       "id": "PB-010",
       "sprk_name": "Risk Scan",
       "sprk_description": "Fast risk identification focused on legal, financial, operational, and compliance risks. Ideal for quick risk assessment before detailed review.",
@@ -163,7 +204,8 @@
       "3. Deploy tools.json",
       "4. Deploy knowledge.json",
       "5. Deploy skills.json",
-      "6. Deploy playbooks.json (this file)"
+      "6. Deploy playbooks.json (this file)",
+      "7. Deploy output-types.json (for Document Profile)"
     ]
   }
 }

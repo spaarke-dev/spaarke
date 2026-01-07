@@ -7,6 +7,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Infrastructure.Resilience;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Export;
@@ -32,6 +33,7 @@ public class AnalysisOrchestrationServiceTests
     private readonly Mock<IPlaybookService> _playbookServiceMock;
     private readonly Mock<IToolHandlerRegistry> _toolHandlerRegistryMock;
     private readonly Mock<IHttpContextAccessor> _httpContextAccessorMock;
+    private readonly Mock<IStorageRetryPolicy> _storageRetryPolicyMock;
     private readonly Mock<ILogger<AnalysisOrchestrationService>> _loggerMock;
     private readonly IOptions<AnalysisOptions> _options;
     private readonly AnalysisOrchestrationService _service;
@@ -50,6 +52,7 @@ public class AnalysisOrchestrationServiceTests
         _playbookServiceMock = new Mock<IPlaybookService>();
         _toolHandlerRegistryMock = new Mock<IToolHandlerRegistry>();
         _httpContextAccessorMock = new Mock<IHttpContextAccessor>();
+        _storageRetryPolicyMock = new Mock<IStorageRetryPolicy>();
         _loggerMock = new Mock<ILogger<AnalysisOrchestrationService>>();
         _mockHttpContext = new DefaultHttpContext();
 
@@ -75,6 +78,7 @@ public class AnalysisOrchestrationServiceTests
             _playbookServiceMock.Object,
             _toolHandlerRegistryMock.Object,
             _httpContextAccessorMock.Object,
+            _storageRetryPolicyMock.Object,
             _options,
             _loggerMock.Object);
     }

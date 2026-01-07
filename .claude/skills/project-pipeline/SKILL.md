@@ -285,6 +285,9 @@ AFTER project-setup completes:
 ENHANCE CLAUDE.md with discovered resources:
     - Populate "Applicable ADRs" section
     - Add resource file paths for quick reference
+    - VERIFY "🚨 MANDATORY: Task Execution Protocol" section exists
+      (should be auto-included from project-setup template)
+    - If missing, add the mandatory task execution protocol section
 ```
 
 **Output to User:**

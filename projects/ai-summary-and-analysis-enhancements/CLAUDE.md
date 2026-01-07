@@ -19,6 +19,51 @@ This project unifies AI Summary (Document Profile) and AI Analysis into a single
 
 ---
 
+## 🚨 MANDATORY: Task Execution Protocol
+
+**ABSOLUTE RULE**: All task work MUST use the `task-execute` skill. DO NOT read POML files directly and implement manually.
+
+### Auto-Detection Rules (Trigger Phrases)
+
+When you detect these phrases from the user, invoke task-execute skill:
+
+| User Says | Required Action |
+|-----------|-----------------|
+| "work on task X" | Execute task X via task-execute |
+| "continue" | Execute next pending task (check TASK-INDEX.md for next 🔲) |
+| "continue with task X" | Execute task X via task-execute |
+| "next task" | Execute next pending task via task-execute |
+| "keep going" | Execute next pending task via task-execute |
+| "resume task X" | Execute task X via task-execute |
+| "pick up where we left off" | Load current-task.md, invoke task-execute |
+
+**Implementation**: When user triggers task work, invoke Skill tool with `skill="task-execute"` and task file path.
+
+### Why This Matters
+
+The task-execute skill ensures:
+- ✅ Knowledge files are loaded (ADRs, constraints, patterns)
+- ✅ Context is properly tracked in current-task.md
+- ✅ Proactive checkpointing occurs every 3 steps
+- ✅ Quality gates run (code-review + adr-check) at Step 9.5
+- ✅ Progress is recoverable after compaction
+
+**Bypassing this skill leads to**:
+- ❌ Missing ADR constraints
+- ❌ No checkpointing - lost progress after compaction
+- ❌ Skipped quality gates
+
+### Parallel Task Execution
+
+When tasks can run in parallel (no dependencies), each task MUST still use task-execute:
+- Send one message with multiple Skill tool invocations
+- Each invocation calls task-execute with a different task file
+- Example: Tasks 020, 021, 022 in parallel → Three separate task-execute calls in one message
+
+See [task-execute SKILL.md](../../.claude/skills/task-execute/SKILL.md) for complete protocol.
+
+---
+
 ## Applicable ADRs
 
 | ADR | Why Applicable |

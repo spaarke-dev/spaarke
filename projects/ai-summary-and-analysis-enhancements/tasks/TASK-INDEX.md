@@ -1,8 +1,8 @@
 # Task Index - AI Summary and Analysis Enhancements
 
-> **Last Updated**: 2026-01-06
+> **Last Updated**: 2026-01-07
 > **Total Tasks**: 27
-> **Status**: Ready for Execution
+> **Status**: In Progress (12/27 completed)
 
 ---
 
@@ -21,13 +21,13 @@
 
 | # | Task | Status | Dependencies |
 |---|------|--------|--------------|
-| 001 | [Create IAiAuthorizationService Interface](001-create-authorization-interface.poml) | 🔲 | none |
-| 002 | [Implement AiAuthorizationService with FullUAC](002-implement-authorization-service.poml) | 🔲 | 001 |
-| 003 | [Add Polly Retry Policy for Storage](003-add-retry-policy.poml) | 🔲 | 002 |
-| 004 | [Update AnalysisAuthorizationFilter](004-update-analysis-authorization-filter.poml) | 🔲 | 002 |
-| 005 | [Update AiAuthorizationFilter](005-update-ai-authorization-filter.poml) | 🔲 | 002 |
-| 006 | [Unit Tests for Authorization Service](006-unit-tests-authorization.poml) | 🔲 | 002 |
-| 007 | [Integration Tests for Retry Scenarios](007-integration-tests-retry.poml) | 🔲 | 003 |
+| 001 | [Create IAiAuthorizationService Interface](001-create-authorization-interface.poml) | ✅ | none |
+| 002 | [Implement AiAuthorizationService with FullUAC](002-implement-authorization-service.poml) | ✅ | 001 |
+| 003 | [Add Polly Retry Policy for Storage](003-add-retry-policy.poml) | ✅ | 002 |
+| 004 | [Update AnalysisAuthorizationFilter](004-update-analysis-authorization-filter.poml) | ✅ | 002 |
+| 005 | [Update AiAuthorizationFilter](005-update-ai-authorization-filter.poml) | ✅ | 002 |
+| 006 | [Unit Tests for Authorization Service](006-unit-tests-authorization.poml) | ✅ | 002 |
+| 007 | [Integration Tests for Retry Scenarios](007-integration-tests-retry.poml) | ✅ | 003 |
 
 ---
 
@@ -35,16 +35,16 @@
 
 | # | Task | Status | Dependencies |
 |---|------|--------|--------------|
-| 010 | [Create Document Profile Playbook Seed Data](010-create-document-profile-playbook.poml) | 🔲 | 007 |
-| 011 | [Create Output Type Seed Data](011-create-output-type-seed-data.poml) | 🔲 | 010 |
-| 012 | [Implement Playbook Lookup by Name](012-implement-playbook-lookup.poml) | 🔲 | 010 |
-| 013 | [Implement Dual Storage](013-implement-dual-storage.poml) | 🔲 | 012 |
-| 014 | [Implement Field Mapping Logic](014-implement-field-mapping.poml) | 🔲 | 013 |
-| 015 | [Create DocumentProfileResult Model](015-create-document-profile-result.poml) | 🔲 | none |
-| 016 | [Implement Soft Failure Handling](016-implement-soft-failure.poml) | 🔲 | 013, 015 |
-| 017 | [Integration Tests for Document Profile](017-integration-tests-document-profile.poml) | 🔲 | 016 |
-| 018 | [Update SSE Response Format for Partial Storage](018-update-sse-response-format.poml) | 🔲 | 016 |
-| 019 | [Update PCF to Handle Soft Failure](019-update-pcf-soft-failure-handling.poml) | 🔲 | 018 |
+| 010 | [Create Document Profile Playbook Seed Data](010-create-document-profile-playbook.poml) | ✅ | 007 |
+| 011 | [Create Output Type Seed Data](011-create-output-type-seed-data.poml) | ✅ | 010 |
+| 012 | [Implement Playbook Lookup by Name](012-implement-playbook-lookup.poml) | ✅ | 010 |
+| 013 | [Implement Dual Storage](013-implement-dual-storage.poml) | ✅ | 012 |
+| 014 | [Implement Field Mapping Logic](014-implement-field-mapping.poml) | ✅ | 013 |
+| 015 | [Create DocumentProfileResult Model](015-create-document-profile-result.poml) | ✅ | none |
+| 016 | [Implement Soft Failure Handling](016-implement-soft-failure.poml) | ✅ | 013, 015 |
+| 017 | [Integration Tests for Document Profile](017-integration-tests-document-profile.poml) | ✅ | 016 |
+| 018 | [Update SSE Response Format for Partial Storage](018-update-sse-response-format.poml) | ✅ | 016 |
+| 019 | [Update PCF to Handle Soft Failure](019-update-pcf-soft-failure-handling.poml) | ✅ | 018 |
 
 ---
 

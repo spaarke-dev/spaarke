@@ -76,6 +76,12 @@ export interface DocumentSummaryState {
     documentType?: string;
     /** Whether structured parsing was successful */
     parsedSuccessfully?: boolean;
+    /** Analysis ID from Dataverse (available after completion) */
+    analysisId?: string;
+    /** Whether storage partially succeeded (outputs saved but field mapping failed) */
+    partialStorage?: boolean;
+    /** User-friendly message about storage result */
+    storageMessage?: string;
 }
 
 /**
@@ -177,6 +183,12 @@ interface SseChunk {
     result?: DocumentAnalysisResult;
     /** Error message (for type="error") */
     error?: string;
+    /** Analysis ID from Dataverse */
+    analysisId?: string;
+    /** Whether storage partially succeeded (soft failure) */
+    partialStorage?: boolean;
+    /** User-friendly message about storage result */
+    storageMessage?: string;
 }
 
 /**
@@ -345,6 +357,17 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
                                     }
                                 }
 
+                                // Add storage result metadata (soft failure handling)
+                                if (chunk.analysisId) {
+                                    updates.analysisId = chunk.analysisId;
+                                }
+                                if (chunk.partialStorage !== undefined) {
+                                    updates.partialStorage = chunk.partialStorage;
+                                }
+                                if (chunk.storageMessage) {
+                                    updates.storageMessage = chunk.storageMessage;
+                                }
+
                                 // Legacy callback for backward compatibility
                                 if (onSummaryComplete && updates.summary) {
                                     onSummaryComplete(documentId, updates.summary);
@@ -416,7 +439,10 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
             keywords: undefined,
             entities: undefined,
             documentType: undefined,
-            parsedSuccessfully: undefined
+            parsedSuccessfully: undefined,
+            analysisId: undefined,
+            partialStorage: undefined,
+            storageMessage: undefined
         }));
 
         setDocuments(prev => [...prev, ...newStates]);
@@ -454,7 +480,10 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
             keywords: undefined,
             entities: undefined,
             documentType: undefined,
-            parsedSuccessfully: undefined
+            parsedSuccessfully: undefined,
+            analysisId: undefined,
+            partialStorage: undefined,
+            storageMessage: undefined
         });
 
         // Add back to queue

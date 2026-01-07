@@ -1,8 +1,7 @@
 using System.Security.Claims;
-using System.Text.Json;
-using Spaarke.Core.Auth;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Services.Ai;
 
 namespace Sprk.Bff.Api.Api.Filters;
 
@@ -20,7 +19,7 @@ public static class AiAuthorizationFilterExtensions
     {
         return builder.AddEndpointFilter(async (context, next) =>
         {
-            var authService = context.HttpContext.RequestServices.GetRequiredService<IAuthorizationService>();
+            var authService = context.HttpContext.RequestServices.GetRequiredService<IAiAuthorizationService>();
             var logger = context.HttpContext.RequestServices.GetService<ILogger<AiAuthorizationFilter>>();
             var filter = new AiAuthorizationFilter(authService, logger);
             return await filter.InvokeAsync(context, next);
@@ -35,13 +34,14 @@ public static class AiAuthorizationFilterExtensions
 /// </summary>
 /// <remarks>
 /// Follows ADR-008: Use endpoint filters for resource-level authorization.
+/// Uses IAiAuthorizationService for FullUAC authorization via RetrievePrincipalAccess.
 /// </remarks>
 public class AiAuthorizationFilter : IEndpointFilter
 {
-    private readonly IAuthorizationService _authorizationService;
+    private readonly IAiAuthorizationService _authorizationService;
     private readonly ILogger<AiAuthorizationFilter>? _logger;
 
-    public AiAuthorizationFilter(IAuthorizationService authorizationService, ILogger<AiAuthorizationFilter>? logger = null)
+    public AiAuthorizationFilter(IAiAuthorizationService authorizationService, ILogger<AiAuthorizationFilter>? logger = null)
     {
         _authorizationService = authorizationService ?? throw new ArgumentNullException(nameof(authorizationService));
         _logger = logger;
@@ -50,13 +50,15 @@ public class AiAuthorizationFilter : IEndpointFilter
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {
         var httpContext = context.HttpContext;
+        var user = httpContext.User;
 
         // Extract Azure AD Object ID from claims.
         // DataverseAccessDataSource requires the 'oid' claim to lookup user in Dataverse.
         // Fallback chain matches other authorization filters in the codebase.
-        var userId = httpContext.User.FindFirst("oid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-            ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var userId = user.FindFirst("oid")?.Value
+            ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+            ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
         if (string.IsNullOrEmpty(userId))
         {
             return Results.Problem(
@@ -77,15 +79,42 @@ public class AiAuthorizationFilter : IEndpointFilter
                 type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
         }
 
-        // Phase 1 Scaffolding: Skip SPE/UAC authorization, rely on Dataverse security.
-        // Users accessing the Document Upload form already have Dataverse access to the document.
-        // This matches AnalysisAuthorizationFilter behavior for consistency.
-        // TODO Phase 2: Look up sprk_document.sprk_graphitemid and authorize via RetrievePrincipalAccess.
-        _logger?.LogDebug(
-            "AI document-intelligence authorization: User {UserId} accessing {Count} document(s) (Phase 1: skipping UAC check)",
-            userId, documentIds.Count);
+        try
+        {
+            var result = await _authorizationService.AuthorizeAsync(
+                user,
+                documentIds,
+                httpContext.RequestAborted);
 
-        return await next(context);
+            if (!result.Success)
+            {
+                _logger?.LogWarning(
+                    "[AI-AUTH-FILTER] Document access DENIED: DocumentCount={Count}, Reason={Reason}",
+                    documentIds.Count,
+                    result.Reason);
+
+                return Results.Problem(
+                    statusCode: 403,
+                    title: "Forbidden",
+                    detail: result.Reason ?? "Access denied to one or more documents",
+                    type: "https://tools.ietf.org/html/rfc7231#section-6.5.3");
+            }
+
+            _logger?.LogDebug(
+                "[AI-AUTH-FILTER] Document access GRANTED: DocumentCount={Count}",
+                documentIds.Count);
+
+            return await next(context);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "[AI-AUTH-FILTER] Authorization check failed with exception");
+            return Results.Problem(
+                statusCode: 500,
+                title: "Internal Server Error",
+                detail: "Authorization check failed",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.6.1");
+        }
     }
 
     /// <summary>

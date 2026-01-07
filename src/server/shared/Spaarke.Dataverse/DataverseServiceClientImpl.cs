@@ -152,6 +152,60 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         };
     }
 
+    public async Task<Guid> CreateAnalysisAsync(Guid documentId, string? name = null, CancellationToken ct = default)
+    {
+        var analysis = new Entity("sprk_analysis")
+        {
+            ["sprk_name"] = name ?? $"Analysis {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
+            ["sprk_documentid"] = new EntityReference("sprk_document", documentId),
+            ["statuscode"] = new OptionSetValue(1) // Active
+        };
+
+        var analysisId = await _serviceClient.CreateAsync(analysis, ct);
+        _logger.LogInformation("[DATAVERSE] Created analysis {AnalysisId} for document {DocumentId}", analysisId, documentId);
+        return analysisId;
+    }
+
+    public async Task<Guid> CreateAnalysisOutputAsync(AnalysisOutputEntity output, CancellationToken ct = default)
+    {
+        var entity = new Entity("sprk_analysisoutput")
+        {
+            ["sprk_name"] = output.Name ?? "Output",
+            ["sprk_value"] = output.Value,
+            ["sprk_analysisid"] = new EntityReference("sprk_analysis", output.AnalysisId)
+        };
+
+        if (output.OutputTypeId.HasValue)
+        {
+            entity["sprk_outputtypeid"] = new EntityReference("sprk_aioutputtype", output.OutputTypeId.Value);
+        }
+
+        if (output.SortOrder.HasValue)
+        {
+            entity["sprk_sortorder"] = output.SortOrder.Value;
+        }
+
+        var outputId = await _serviceClient.CreateAsync(entity, ct);
+        _logger.LogDebug("[DATAVERSE] Created analysis output {OutputId} for analysis {AnalysisId}", outputId, output.AnalysisId);
+        return outputId;
+    }
+
+    public async Task UpdateDocumentFieldsAsync(string documentId, Dictionary<string, object?> fields, CancellationToken ct = default)
+    {
+        var document = new Entity("sprk_document", Guid.Parse(documentId));
+
+        foreach (var field in fields)
+        {
+            if (field.Value != null)
+            {
+                document[field.Key] = field.Value;
+            }
+        }
+
+        await _serviceClient.UpdateAsync(document, ct);
+        _logger.LogInformation("[DATAVERSE] Updated document {DocumentId} with {FieldCount} fields", documentId, fields.Count);
+    }
+
     public async Task UpdateDocumentAsync(string id, UpdateDocumentRequest request, CancellationToken ct = default)
     {
         var document = new Entity("sprk_document", Guid.Parse(id));
