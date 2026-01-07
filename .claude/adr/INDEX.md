@@ -51,7 +51,10 @@ Load concise ADRs proactively when creating new components:
 - Working with auth → Load ADR-004, ADR-016
 - Working with SPE → Load ADR-007, ADR-019
 - Working with UI/UX → Load ADR-021, ADR-022
+
 - Creating dialogs → Load ADR-021, ADR-023
+
+
 
 Full ADRs in `docs/adr/` should be loaded only when:
 - Need historical context
