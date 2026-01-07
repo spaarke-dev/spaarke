@@ -9,7 +9,7 @@ alwaysApply: false
 # Worktree Setup
 
 > **Category**: Operations
-> **Last Updated**: December 2025
+> **Last Updated**: January 2026
 
 ---
 
@@ -30,7 +30,9 @@ Manage git worktrees for parallel project development. Worktrees allow multiple 
 - Starting a new project that needs isolation
 - Setting up existing project on a new computer
 - Cleaning up completed project worktrees
-- **Trigger phrases**: "create worktree", "setup worktree", "new project worktree", "worktree for project"
+- **Reusing an existing worktree** for a new project (after PR merge)
+- Resetting a worktree to start fresh
+- **Trigger phrases**: "create worktree", "setup worktree", "new project worktree", "worktree for project", "reuse worktree", "reset worktree"
 
 ---
 
@@ -348,6 +350,195 @@ Remote branch still exists (delete via GitHub PR or manually):
 
 ---
 
+### Workflow E: Reuse Existing Worktree for New Project
+
+**When**: A worktree exists from a completed/merged project and you want to reuse it for new work
+
+#### Step 1: List Available Worktrees
+
+```powershell
+cd C:\code_files\spaarke
+git worktree list
+```
+
+**ASK user:**
+```
+Which worktree do you want to reuse?
+(e.g., spaarke-wt-email-automation)
+```
+
+Store as: `{old-worktree-name}`
+
+#### Step 2: Check Worktree Status
+
+```powershell
+cd C:\code_files\{old-worktree-name}
+
+# Get current branch name
+git branch --show-current
+
+# Check for uncommitted changes
+git status --short
+
+# Check if current branch is merged to master
+cd C:\code_files\spaarke
+git fetch origin
+git branch --merged origin/master | grep "$(cd C:\code_files\{old-worktree-name} && git branch --show-current)"
+```
+
+**Decision tree:**
+```
+IF uncommitted changes exist:
+  → WARN: "Worktree has uncommitted changes"
+  → ASK: "Discard changes? (y/n)"
+  → If no: STOP
+  → If yes: Continue (will reset in Step 5)
+
+IF branch NOT merged to master:
+  → WARN: "Branch {branch} is NOT merged to master"
+  → ASK: "Proceed anyway? You will lose unmerged commits. (y/n)"
+  → If no: STOP
+```
+
+#### Step 3: Get New Project Name
+
+**ASK user:**
+```
+What is the new project name? (use kebab-case, e.g., "playbook-builder")
+```
+
+Store as: `{new-project-name}`
+
+#### Step 4: Sync Master
+
+```powershell
+cd C:\code_files\spaarke
+git fetch origin master:master
+```
+
+#### Step 5: Create New Branch in Worktree
+
+```powershell
+cd C:\code_files\{old-worktree-name}
+
+# Discard any local changes
+git reset --hard
+
+# Checkout new branch based on latest master
+git checkout -b work/{new-project-name} origin/master
+```
+
+**Expected output:**
+```
+Switched to a new branch 'work/{new-project-name}'
+```
+
+#### Step 6: Delete Old Local Branch (Optional Cleanup)
+
+```powershell
+# From main repo, delete old merged branch
+cd C:\code_files\spaarke
+git branch -d work/{old-project-name}
+```
+
+**Note:** Skip if the old branch isn't merged or you want to keep it.
+
+#### Step 7: Rename Worktree Folder (Optional)
+
+If you want the folder name to match the new project:
+
+```powershell
+# This requires removing and re-adding the worktree
+cd C:\code_files\spaarke
+
+# Remove worktree reference (keeps the branch)
+git worktree remove ../{old-worktree-name}
+
+# Re-add with new folder name
+git worktree add ../spaarke-wt-{new-project-name} work/{new-project-name}
+```
+
+**Decision tree:**
+```
+ASK: "Rename worktree folder to match new project? (y/n)"
+
+IF yes:
+  → Execute rename steps above
+  → New location: C:\code_files\spaarke-wt-{new-project-name}
+
+IF no:
+  → Keep existing folder name
+  → Folder stays at: C:\code_files\{old-worktree-name}
+```
+
+#### Step 8: Provide Next Steps
+
+**Output to user:**
+```
+✅ Worktree reused successfully!
+
+📁 Location: C:\code_files\{final-worktree-folder}
+🌿 New Branch: work/{new-project-name}
+♻️ Old Branch: work/{old-project-name} (deleted/kept)
+
+Next steps:
+1. Open in VS Code:
+   code -n C:\code_files\{final-worktree-folder}
+
+2. After making changes, push branch to GitHub:
+   git add .
+   git commit -m "Initial project setup"
+   git push -u origin work/{new-project-name}
+
+3. To start project pipeline:
+   /project-pipeline projects/{new-project-name}
+```
+
+---
+
+### Workflow F: Quick Reset Worktree to Master
+
+**When**: You want to quickly reset a worktree to start fresh without changing branch names
+
+#### Step 1: Navigate to Worktree
+
+```powershell
+cd C:\code_files\{worktree-name}
+```
+
+#### Step 2: Reset to Latest Master
+
+```powershell
+# Fetch latest
+git fetch origin master
+
+# Hard reset to master (DESTROYS local changes and commits)
+git reset --hard origin/master
+```
+
+**⚠️ WARNING:** This destroys all uncommitted changes and unpushed commits!
+
+#### Step 3: Confirm
+
+```powershell
+git log -1 --oneline
+# Should show latest master commit
+```
+
+**Output to user:**
+```
+✅ Worktree reset to master!
+
+📁 Location: C:\code_files\{worktree-name}
+🌿 Branch: {branch-name} (now at master's HEAD)
+📝 Latest commit: {commit hash} {message}
+
+The branch still has its original name but now contains master's code.
+To rename: git branch -m work/{new-name}
+```
+
+---
+
 ## Multi-Computer Workflow Summary
 
 ```
@@ -539,4 +730,4 @@ Use `/conflict-check` skill to detect file overlap with active PRs before starti
 
 ---
 
-*Last updated: January 6, 2026*
+*Last updated: January 2026*
