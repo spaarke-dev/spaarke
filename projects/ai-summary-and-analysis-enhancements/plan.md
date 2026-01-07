@@ -51,9 +51,9 @@
 
 ---
 
-### Phase 2.2: Add Document Profile Playbook Support (8 tasks)
+### Phase 2.2: Add Document Profile Playbook Support (10 tasks)
 
-**Objective**: Enable AnalysisOrchestrationService to handle Document Profile execution.
+**Objective**: Enable AnalysisOrchestrationService to handle Document Profile execution, including PCF updates for soft failure handling.
 
 **Deliverables**:
 1. "Document Profile" playbook seed data (Dataverse)
@@ -64,12 +64,15 @@
 6. `DocumentProfileResult` model
 7. Soft failure handling
 8. Integration tests for Document Profile flow
+9. **SSE response format update** (add partialStorage flag)
+10. **PCF updates** (display warning on soft failure)
 
 **Dependencies**: Phase 2.1 (authorization service)
 
 **Risks**:
 - Entity relationship complexity → Use existing schema
 - Field mapping correctness → Add validation
+- PCF UI changes → Test dark mode compliance (ADR-021)
 
 ---
 
@@ -130,7 +133,9 @@ ai-summary-and-analysis-enhancements/
 │   ├── 014 Implement field mapping logic
 │   ├── 015 Create DocumentProfileResult model
 │   ├── 016 Implement soft failure handling
-│   └── 017 Integration tests for Document Profile
+│   ├── 017 Integration tests for Document Profile
+│   ├── 018 Update SSE response format (partialStorage flag)
+│   └── 019 Update PCF for soft failure warning
 │
 ├── Phase 2.3: Endpoint Migration
 │   ├── 020 Route document-intelligence to unified service

@@ -1,7 +1,7 @@
 # Task Index - AI Summary and Analysis Enhancements
 
 > **Last Updated**: 2026-01-06
-> **Total Tasks**: 25
+> **Total Tasks**: 27
 > **Status**: Ready for Execution
 
 ---
@@ -31,7 +31,7 @@
 
 ---
 
-## Phase 2.2: Document Profile Playbook Support (8 tasks)
+## Phase 2.2: Document Profile Playbook Support (10 tasks)
 
 | # | Task | Status | Dependencies |
 |---|------|--------|--------------|
@@ -43,6 +43,8 @@
 | 015 | [Create DocumentProfileResult Model](015-create-document-profile-result.poml) | 🔲 | none |
 | 016 | [Implement Soft Failure Handling](016-implement-soft-failure.poml) | 🔲 | 013, 015 |
 | 017 | [Integration Tests for Document Profile](017-integration-tests-document-profile.poml) | 🔲 | 016 |
+| 018 | [Update SSE Response Format for Partial Storage](018-update-sse-response-format.poml) | 🔲 | 016 |
+| 019 | [Update PCF to Handle Soft Failure](019-update-pcf-soft-failure-handling.poml) | 🔲 | 018 |
 
 ---
 
@@ -81,7 +83,7 @@
 ## Critical Path
 
 ```
-001 → 002 → 003 → 007 → 010 → 011/012 → 013 → 014/016 → 017 → 020 → 021 → 023 → 024 → 030-034 → 090
+001 → 002 → 003 → 007 → 010 → 011/012 → 013 → 014/016 → 017 → 018 → 019 → 020 → 021 → 023 → 024 → 030-034 → 090
             ↓
            004/005/006
 ```
@@ -95,6 +97,7 @@
 | 002 | FullUAC performance | Profile, add metrics |
 | 003 | Retry timing | Test actual lag scenarios |
 | 013 | Data consistency | Transactional approach |
+| 019 | PCF UI changes | Test dark mode, dismissible warning |
 | 020 | Breaking changes | Extensive backward compat tests |
 
 ---
@@ -104,8 +107,8 @@
 | Phase | Tasks | Focus |
 |-------|-------|-------|
 | 2.1 | 7 | Authorization unification |
-| 2.2 | 8 | Document Profile support |
+| 2.2 | 10 | Document Profile support + PCF updates |
 | 2.3 | 5 | Endpoint migration |
 | 2.4 | 5 | Code cleanup |
 | Wrap-up | 1 | Project closure |
-| **Total** | **26** | |
+| **Total** | **28** | |

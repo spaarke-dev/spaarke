@@ -1,0 +1,59 @@
+<task id="018" project="ai-summary-and-analysis-enhancements">
+  <metadata>
+    <title>Update SSE Response Format for Partial Storage</title>
+    <phase>2.2</phase>
+    <estimate>1 hour</estimate>
+    <tags>api, sse, response</tags>
+    <dependencies>016</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Update the SSE "complete" event to include partialStorage flag for PCF to detect soft failures.</goal>
+
+    <context>
+      When storage retries are exhausted, the PCF needs to know so it can display a warning message. The streaming response needs to include this information in the "complete" event.
+    </context>
+
+    <constraints>
+      - Backward compatible - add new field, don't remove existing
+      - Add "partialStorage" boolean to complete event result
+      - Add "storageMessage" string for user-friendly message
+      - Existing PCF that doesn't check this field will continue to work
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/client/pcf/UniversalQuickCreate/control/services/useAiSummary.ts" reason="PCF consumer of SSE" />
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs" reason="SSE producer" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Identify where SSE "complete" event is created in service</step>
+    <step order="2">Add partialStorage boolean to result object</step>
+    <step order="3">Add storageMessage string to result object</step>
+    <step order="4">Set values based on DocumentProfileResult from soft failure handling</step>
+    <step order="5">Update any DTOs/models used for SSE serialization</step>
+    <step order="6">Verify existing fields still present (backward compatibility)</step>
+    <step order="7">Verify build succeeds</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Review SSE response code</tool>
+    <tool name="Edit">Update response format</tool>
+    <tool name="Bash">Build verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">Updated SSE response with partialStorage flag</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>partialStorage flag added to complete event</criterion>
+    <criterion>storageMessage added for user display</criterion>
+    <criterion>Backward compatible with existing consumers</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

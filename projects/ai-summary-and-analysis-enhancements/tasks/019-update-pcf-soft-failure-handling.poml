@@ -1,0 +1,90 @@
+<task id="019" project="ai-summary-and-analysis-enhancements">
+  <metadata>
+    <title>Update PCF to Handle Soft Failure and Display Warning</title>
+    <phase>2.2</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>pcf, frontend, fluent-ui, adr-021</tags>
+    <dependencies>018</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Update the File Upload PCF (Tab 2 - AI Summary) to handle partial storage failures and display a warning message.</goal>
+
+    <context>
+      When the API returns partialStorage=true, the PCF should:
+      1. Still show the summary results (they succeeded)
+      2. Display a warning banner with the storageMessage
+      3. Optionally provide a link to view full results in Analysis tab
+    </context>
+
+    <constraints>
+      - Follow ADR-021 (Fluent UI v9)
+      - Use MessageBar component for warning
+      - Don't block the user - just inform them
+      - Warning should be dismissible
+      - Handle case where partialStorage is undefined (backward compatibility)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-021-fluent-design-system.md" reason="Fluent UI patterns" />
+      <file path="src/client/pcf/UniversalQuickCreate/control/services/useAiSummary.ts" reason="Hook to update" />
+      <file path="src/client/pcf/UniversalQuickCreate/control/components/AiSummaryPanel.tsx" reason="UI to update" />
+      <file path="src/client/pcf/CLAUDE.md" reason="PCF development patterns" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Update DocumentSummaryState interface to include partialStorage and storageMessage</step>
+    <step order="2">Update useAiSummary hook to parse partialStorage from complete event</step>
+    <step order="3">Update AiSummaryPanel to display MessageBar when partialStorage=true</step>
+    <step order="4">Use Fluent v9 MessageBar with intent="warning"</step>
+    <step order="5">Make warning dismissible</step>
+    <step order="6">Add "View in Analysis" link if analysis ID is available</step>
+    <step order="7">Test with mock partial storage response</step>
+    <step order="8">Verify dark mode compliance (ADR-021)</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Review PCF components</tool>
+    <tool name="Edit">Update components</tool>
+    <tool name="Bash">Build PCF</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/client/pcf/UniversalQuickCreate/control/services/useAiSummary.ts (modified)</output>
+    <output type="file">src/client/pcf/UniversalQuickCreate/control/components/AiSummaryPanel.tsx (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>PCF parses partialStorage flag from SSE response</criterion>
+    <criterion>Warning MessageBar displays on partial storage</criterion>
+    <criterion>Warning is dismissible</criterion>
+    <criterion>Dark mode compliant (ADR-021)</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Partial Storage Warning Displays">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid=...&pagetype=entityrecord&etn=sprk_document</url>
+      <steps>
+        <step>Upload a document to trigger AI Summary</step>
+        <step>Mock or simulate partial storage failure</step>
+        <step>Verify warning MessageBar appears</step>
+        <step>Verify summary results still display</step>
+        <step>Dismiss warning and verify it disappears</step>
+      </steps>
+      <expected>Warning displays but doesn't block user from seeing results</expected>
+    </test>
+    <test name="Dark Mode Compliance">
+      <steps>
+        <step>Enable dark mode in Dynamics 365 settings</step>
+        <step>Trigger AI Summary with partial storage</step>
+        <step>Verify MessageBar colors adapt correctly</step>
+      </steps>
+      <expected>Warning uses semantic tokens, no hard-coded colors per ADR-021</expected>
+    </test>
+  </ui-tests>
+</task>
