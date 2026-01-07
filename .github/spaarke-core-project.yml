@@ -31,7 +31,6 @@ fields:
   - name: Assignee
     dataType: USER
     options:
-      - "ralph.schroeder@spaarke.com"
       - "admin-dev@spaarke.com"
 
   - name: Start Date
