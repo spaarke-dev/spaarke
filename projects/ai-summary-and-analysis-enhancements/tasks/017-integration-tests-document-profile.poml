@@ -1,0 +1,55 @@
+<task id="017" project="ai-summary-and-analysis-enhancements">
+  <metadata>
+    <title>Integration Tests for Document Profile Flow</title>
+    <phase>2.2</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>api, testing, integration</tags>
+    <dependencies>016</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create integration tests for the complete Document Profile execution flow.</goal>
+
+    <context>
+      Integration tests should verify the full flow: AI execution -> dual storage -> result handling.
+    </context>
+
+    <constraints>
+      - Test successful Document Profile execution
+      - Test soft failure scenario
+      - Test field mapping correctness
+      - Verify outputs in both storage locations
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs" reason="Service to test" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create DocumentProfileIntegrationTests.cs</step>
+    <step order="2">Test successful execution - verify both storage locations</step>
+    <step order="3">Test with mock Dataverse errors - verify retry and soft failure</step>
+    <step order="4">Test field mapping for each output type</step>
+    <step order="5">Test result model has correct values</step>
+    <step order="6">Run tests and verify all pass</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create test file</tool>
+    <tool name="Bash">Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">tests/Sprk.Bff.Api.Tests/Integration/DocumentProfileIntegrationTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Integration tests cover full flow</criterion>
+    <criterion>All tests pass</criterion>
+    <criterion>Both storage locations verified</criterion>
+  </acceptance-criteria>
+</task>

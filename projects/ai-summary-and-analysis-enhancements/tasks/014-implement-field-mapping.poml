@@ -1,0 +1,56 @@
+<task id="014" project="ai-summary-and-analysis-enhancements">
+  <metadata>
+    <title>Implement Field Mapping Logic</title>
+    <phase>2.2</phase>
+    <estimate>1-2 hours</estimate>
+    <tags>api, storage, mapping</tags>
+    <dependencies>013</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Implement field mapping logic to map output types to sprk_document fields.</goal>
+
+    <context>
+      Each output type has a FieldMapping property that defines which sprk_document field it should update (e.g., "sprk_tldr", "sprk_summary").
+    </context>
+
+    <constraints>
+      - Read field mapping from output type metadata
+      - Validate field exists before attempting update
+      - Handle JSON serialization for Entities output type
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-summary-and-analysis-enhancements/spec.md" reason="Field mapping requirements" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create FieldMapper class or extension method</step>
+    <step order="2">Implement mapping from output type name to field name</step>
+    <step order="3">Handle text types (TL;DR, Summary, Keywords, Document Type)</step>
+    <step order="4">Handle JSON type (Entities - serialize to JSON string)</step>
+    <step order="5">Add validation for field existence</step>
+    <step order="6">Add unit tests for field mapping</step>
+    <step order="7">Verify build succeeds</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create mapper</tool>
+    <tool name="Bash">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">Field mapping implementation</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Field mapping works for all 5 output types</criterion>
+    <criterion>JSON serialization works for Entities</criterion>
+    <criterion>Unit tests pass</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

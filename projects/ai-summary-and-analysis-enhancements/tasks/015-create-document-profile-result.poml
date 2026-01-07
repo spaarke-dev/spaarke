@@ -1,0 +1,54 @@
+<task id="015" project="ai-summary-and-analysis-enhancements">
+  <metadata>
+    <title>Create DocumentProfileResult Model</title>
+    <phase>2.2</phase>
+    <estimate>30 min</estimate>
+    <tags>api, model</tags>
+    <dependencies>none</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create DocumentProfileResult model for Document Profile execution results.</goal>
+
+    <context>
+      The result model needs to convey success/partial success/failure states with appropriate messages.
+    </context>
+
+    <constraints>
+      - Include Success, PartialStorage, Message, AnalysisId properties
+      - Use record type for immutability
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-summary-and-analysis-enhancements/spec.md" reason="Result model requirements" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create DocumentProfileResult.cs in Models/Ai/</step>
+    <step order="2">Add Success property (bool)</step>
+    <step order="3">Add PartialStorage property (bool) - true if outputs stored but field mapping failed</step>
+    <step order="4">Add Message property (string) - user-friendly message</step>
+    <step order="5">Add AnalysisId property (Guid) - for navigation to full results</step>
+    <step order="6">Add XML documentation</step>
+    <step order="7">Verify build succeeds</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create model file</tool>
+    <tool name="Bash">Build verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Models/Ai/DocumentProfileResult.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>DocumentProfileResult.cs exists with all properties</criterion>
+    <criterion>Uses record type</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

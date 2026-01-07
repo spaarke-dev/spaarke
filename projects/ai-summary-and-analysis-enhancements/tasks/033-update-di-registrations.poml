@@ -1,0 +1,58 @@
+<task id="033" project="ai-summary-and-analysis-enhancements">
+  <metadata>
+    <title>Update DI Registrations</title>
+    <phase>2.4</phase>
+    <estimate>30 min</estimate>
+    <tags>cleanup, di, adr-010</tags>
+    <dependencies>032</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Update DI registrations to remove deprecated services and add new unified services.</goal>
+
+    <context>
+      SpaarkeCore.cs needs to be updated to reflect the new service architecture.
+    </context>
+
+    <constraints>
+      - Follow ADR-010 (DI minimalism)
+      - Remove registrations for deprecated services
+      - Add registration for IAiAuthorizationService
+      - Keep total registrations minimal
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-010-di-minimalism.md" reason="DI patterns" />
+      <file path="src/server/api/Sprk.Bff.Api/Infrastructure/DI/SpaarkeCore.cs" reason="DI configuration" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read SpaarkeCore.cs to find existing AI service registrations</step>
+    <step order="2">Remove IDocumentIntelligenceService registration</step>
+    <step order="3">Remove DocumentIntelligenceService registration</step>
+    <step order="4">Add IAiAuthorizationService/AiAuthorizationService registration</step>
+    <step order="5">Verify total registrations <= 15 (ADR-010)</step>
+    <step order="6">Verify build succeeds</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Review DI config</tool>
+    <tool name="Edit">Update registrations</tool>
+    <tool name="Bash">Build verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Infrastructure/DI/SpaarkeCore.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Deprecated service registrations removed</criterion>
+    <criterion>New service registration added</criterion>
+    <criterion>Total registrations <= 15</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

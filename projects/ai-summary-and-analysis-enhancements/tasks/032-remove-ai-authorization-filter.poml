@@ -1,0 +1,53 @@
+<task id="032" project="ai-summary-and-analysis-enhancements">
+  <metadata>
+    <title>Remove AiAuthorizationFilter (if duplicate)</title>
+    <phase>2.4</phase>
+    <estimate>30 min</estimate>
+    <tags>cleanup, removal</tags>
+    <dependencies>031</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Remove the duplicate AiAuthorizationFilter if it was merged into a unified filter.</goal>
+
+    <context>
+      If authorization was unified into a single filter, the duplicate can be removed. If both filters are still needed, update them to use the unified service.
+    </context>
+
+    <constraints>
+      - Verify which filter(s) are still needed
+      - Only remove if truly redundant
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/server/api/Sprk.Bff.Api/Api/Filters/AiAuthorizationFilter.cs" reason="Filter to potentially remove" />
+      <file path="src/server/api/Sprk.Bff.Api/Api/Filters/AnalysisAuthorizationFilter.cs" reason="Related filter" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Evaluate if both filters are still needed or can be unified</step>
+    <step order="2">If redundant: search for usages and update to use remaining filter</step>
+    <step order="3">If redundant: delete AiAuthorizationFilter.cs</step>
+    <step order="4">If both needed: ensure both use unified IAiAuthorizationService</step>
+    <step order="5">Verify build succeeds</step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">Search for usages</tool>
+    <tool name="Bash">Delete file if redundant</tool>
+    <tool name="Bash">Build verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">Filter cleanup completed</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Filter structure finalized (unified or both updated)</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

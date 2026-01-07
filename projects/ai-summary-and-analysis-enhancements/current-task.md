@@ -1,6 +1,6 @@
 # Current Task State - AI Summary and Analysis Enhancements
 
-> **Last Updated**: 2026-01-06 (by context-handoff)
+> **Last Updated**: 2026-01-06 (by project-pipeline)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -9,75 +9,48 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Project Initialization |
-| **Step** | Completed: Research design spec created |
-| **Status** | completed |
-| **Next Action** | Run `/project-pipeline` to generate plan.md and task files |
+| **Task** | none |
+| **Step** | Project initialized, ready for task 001 |
+| **Status** | not-started |
+| **Next Action** | Execute task 001 (Create IAiAuthorizationService interface) |
 
 ### Files Created This Session
-- `projects/ai-summary-and-analysis-enhancements/spec.md` - Research design specification
-- `projects/ai-summary-and-analysis-enhancements/current-task.md` - This file
+- `projects/ai-summary-and-analysis-enhancements/README.md` - Project overview
+- `projects/ai-summary-and-analysis-enhancements/plan.md` - Implementation plan
+- `projects/ai-summary-and-analysis-enhancements/CLAUDE.md` - AI context
+- `projects/ai-summary-and-analysis-enhancements/tasks/*.poml` - Task files
 
 ### Critical Context
-The 403 error on AI Summary was fixed with Phase 1 scaffolding (PR #102). This project will:
-1. Properly fix the authorization timing issue
-2. Unify AI Summary and AI Analysis into single service
-3. Use Playbook/Output Scopes for configurable summary outputs
+Document Profile is NOT a special case—it's just another Playbook execution with:
+- Different trigger (auto on upload)
+- Different UI context (File Upload Tab 2)
+- Additional storage (maps to sprk_document fields)
 
 ---
 
 ## Full State (Detailed)
 
-### Background
+### Project Summary
 
-**Original Issue**: 403 Forbidden on AI Summary during document upload.
-
-**Root Cause**:
-- `AiAuthorizationFilter` did full UAC check via `RetrievePrincipalAccess`
-- For newly-created documents, this failed (404 from replication lag)
-- `AnalysisAuthorizationFilter` used Phase 1 scaffolding (skip UAC)
-- Inconsistency between the two filters caused the failure
-
-**Workaround Applied** (PR #102):
-- Updated `AiAuthorizationFilter` to skip UAC (match `AnalysisAuthorizationFilter`)
-- Added diagnostic logging with `[UAC-DIAG]` prefix
-- Removed legacy authorization rules (TeamMembershipRule, ExplicitGrantRule, ExplicitDenyRule)
-
-### Project Goals
-
-1. **Fix Authorization Properly**:
-   - Create unified `IAiAuthorizationService`
-   - Add timing fix (retry with backoff for new documents)
-   - Single authorization approach for both AI services
-
-2. **Unify AI Services**:
-   - Consolidate `DocumentIntelligenceService` into `AnalysisOrchestrationService`
-   - Add "Simple Mode" for auto-summary (no chat, auto-persist)
-   - Keep backward compatibility with existing endpoint
-
-3. **Output Scope Configuration**:
-   - Define output scopes (TL;DR, Summary, Keywords, Entities)
-   - Configure which outputs to generate per playbook
-   - Auto-persist to `sprk_document` fields
-
-### Key Files
-
-| File | Purpose |
-|------|---------|
-| `IAnalysisOrchestrationService.cs` | Unified AI service interface (exists) |
-| `AnalysisOrchestrationService.cs` | Unified AI service (to be extended) |
-| `IDocumentIntelligenceService.cs` | To be deprecated |
-| `DocumentIntelligenceService.cs` | To be merged/deprecated |
-| `AiAuthorizationFilter.cs` | To be unified with `AnalysisAuthorizationFilter` |
+Unify AI Summary (Document Profile) and AI Analysis into single orchestration service with FullUAC authorization.
 
 ### Implementation Phases
 
 | Phase | Description | Status |
 |-------|-------------|--------|
-| 2.1 | Unify Authorization | pending |
-| 2.2 | Add Simple Mode to Analysis | pending |
-| 2.3 | Migrate AI Summary Endpoint | pending |
-| 2.4 | Cleanup (remove deprecated code) | pending |
+| 2.1 | Unify Authorization (FullUAC + retry) | not-started |
+| 2.2 | Document Profile Playbook Support | not-started |
+| 2.3 | Migrate AI Summary Endpoint | not-started |
+| 2.4 | Cleanup (immediately after deployment) | not-started |
+
+### Key Decisions (Owner Clarifications 2026-01-06)
+
+1. **Terminology**: "Document Profile" (not "Auto-Summary" or "Simple Mode")
+2. **Authorization**: FullUAC mode (security requirement)
+3. **Retry**: Storage operations only, 3x with exponential backoff
+4. **Failure**: Soft failure - outputs preserved in sprk_analysisoutput
+5. **Entities**: Use existing (sprk_analysisplaybook, sprk_aioutputtype, sprk_analysisoutput)
+6. **Cleanup**: Immediately after deployment verified
 
 ---
 
@@ -85,9 +58,8 @@ The 403 error on AI Summary was fixed with Phase 1 scaffolding (PR #102). This p
 
 ### 2026-01-06 Session
 - Investigated 403 error on AI Summary
-- Found root cause: authorization filter inconsistency + timing issue
-- Applied Phase 1 scaffolding workaround
-- Added diagnostic logging
-- Created PR #102
-- Created ENH-013 analysis document
-- Created project spec.md at `projects/ai-summary-and-analysis-enhancements/`
+- Applied Phase 1 scaffolding workaround (PR #102)
+- Created spec.md with detailed design
+- Conducted owner interview - captured 7 key decisions
+- Updated spec.md with Document Profile terminology
+- Ran project-pipeline to generate artifacts and tasks

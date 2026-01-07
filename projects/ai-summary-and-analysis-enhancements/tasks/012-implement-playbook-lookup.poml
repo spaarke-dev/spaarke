@@ -1,0 +1,57 @@
+<task id="012" project="ai-summary-and-analysis-enhancements">
+  <metadata>
+    <title>Implement Playbook Lookup by Name</title>
+    <phase>2.2</phase>
+    <estimate>1-2 hours</estimate>
+    <tags>api, service, playbook</tags>
+    <dependencies>010</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Add GetByNameAsync method to playbook service for looking up playbooks by name.</goal>
+
+    <context>
+      Document Profile execution needs to look up the playbook by name ("Document Profile") rather than by ID. This keeps the code flexible - playbook can be reconfigured in Dataverse UI.
+    </context>
+
+    <constraints>
+      - Add method to existing playbook service (or create if doesn't exist)
+      - Cache playbook lookup for performance
+      - Handle case where playbook not found gracefully
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/" reason="Existing AI services" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Identify or create IPlaybookService interface</step>
+    <step order="2">Add GetByNameAsync(string name, CancellationToken ct) method</step>
+    <step order="3">Implement Dataverse query by sprk_name field</step>
+    <step order="4">Add caching (per ADR-009/014)</step>
+    <step order="5">Handle playbook not found - throw descriptive exception</step>
+    <step order="6">Add unit tests</step>
+    <step order="7">Verify build succeeds</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Review existing services</tool>
+    <tool name="Edit">Add/modify service</tool>
+    <tool name="Bash">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">Playbook service with GetByNameAsync method</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>GetByNameAsync method exists</criterion>
+    <criterion>Returns playbook when found</criterion>
+    <criterion>Throws exception when not found</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

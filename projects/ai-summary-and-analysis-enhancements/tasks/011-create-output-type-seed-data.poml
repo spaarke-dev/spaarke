@@ -1,0 +1,55 @@
+<task id="011" project="ai-summary-and-analysis-enhancements">
+  <metadata>
+    <title>Create Output Type Seed Data</title>
+    <phase>2.2</phase>
+    <estimate>1-2 hours</estimate>
+    <tags>dataverse, seed-data, output-types</tags>
+    <dependencies>010</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create seed data for Document Profile output types (TL;DR, Summary, Keywords, etc.).</goal>
+
+    <context>
+      Output types define what outputs are generated and how they map to sprk_document fields.
+    </context>
+
+    <constraints>
+      - Use existing sprk_aioutputtype entity
+      - Create 5 output types: TL;DR, Summary, Keywords, Document Type, Entities
+      - Include field mapping metadata for each type
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-summary-and-analysis-enhancements/spec.md" reason="Output type definitions" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create seed data for TL;DR output type (maps to sprk_document.sprk_tldr)</step>
+    <step order="2">Create seed data for Summary output type (maps to sprk_document.sprk_summary)</step>
+    <step order="3">Create seed data for Keywords output type (maps to sprk_document.sprk_keywords)</step>
+    <step order="4">Create seed data for Document Type output type (maps to sprk_document.sprk_documenttype)</step>
+    <step order="5">Create seed data for Entities output type (maps to sprk_document.sprk_entities)</step>
+    <step order="6">Associate all output types with Document Profile playbook</step>
+    <step order="7">Verify output types exist in Dataverse</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create seed data</tool>
+    <tool name="Bash">Deploy to Dataverse</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">Seed data for 5 output types</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>5 output types created in Dataverse</criterion>
+    <criterion>Each output type has field mapping metadata</criterion>
+    <criterion>Output types associated with Document Profile playbook</criterion>
+  </acceptance-criteria>
+</task>

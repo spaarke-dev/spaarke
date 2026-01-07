@@ -1,0 +1,52 @@
+<task id="022" project="ai-summary-and-analysis-enhancements">
+  <metadata>
+    <title>Add [Obsolete] Attributes to Deprecated Services</title>
+    <phase>2.3</phase>
+    <estimate>30 min</estimate>
+    <tags>api, cleanup, deprecation</tags>
+    <dependencies>020</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Mark deprecated services with [Obsolete] attribute as preparation for cleanup.</goal>
+
+    <context>
+      Before removing services in Phase 2.4, mark them as obsolete to generate compiler warnings if any code still references them.
+    </context>
+
+    <constraints>
+      - Add [Obsolete] with descriptive message
+      - Include guidance on what to use instead
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/IDocumentIntelligenceService.cs" reason="Interface to mark" />
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/DocumentIntelligenceService.cs" reason="Service to mark" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add [Obsolete] to IDocumentIntelligenceService</step>
+    <step order="2">Add [Obsolete] to DocumentIntelligenceService</step>
+    <step order="3">Include message: "Use IAiAnalysisService with Document Profile playbook instead"</step>
+    <step order="4">Build and verify warnings appear for any remaining usage</step>
+    <step order="5">Document any remaining usages that need updating</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">Add attributes</tool>
+    <tool name="Bash">Build verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">Updated service files with [Obsolete] attributes</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>[Obsolete] attributes added</criterion>
+    <criterion>Build succeeds with warnings for any remaining usage</criterion>
+  </acceptance-criteria>
+</task>

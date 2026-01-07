@@ -1,0 +1,58 @@
+<task id="024" project="ai-summary-and-analysis-enhancements">
+  <metadata>
+    <title>Deploy Phase 2.3 and Verify</title>
+    <phase>2.3</phase>
+    <estimate>1-2 hours</estimate>
+    <tags>deploy, verification</tags>
+    <dependencies>023</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Deploy the migrated endpoint to staging and verify it works correctly.</goal>
+
+    <context>
+      Before cleanup (Phase 2.4), the migration must be deployed and verified working in a real environment.
+    </context>
+
+    <constraints>
+      - Deploy to staging first
+      - Verify with actual document upload
+      - Check Application Insights for errors
+      - Get sign-off before Phase 2.4
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/skills/azure-deploy/SKILL.md" reason="Deployment procedure" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Build release: dotnet publish -c Release</step>
+    <step order="2">Deploy to staging App Service</step>
+    <step order="3">Verify health check passes</step>
+    <step order="4">Test document upload in staging environment</step>
+    <step order="5">Verify Document Profile outputs appear correctly</step>
+    <step order="6">Check Application Insights for errors</step>
+    <step order="7">Document verification results</step>
+    <step order="8">Get sign-off for Phase 2.4</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Build and deploy</tool>
+    <tool name="Bash">curl health check</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">Deployment verification report</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Deployed to staging successfully</criterion>
+    <criterion>Document upload works with new service</criterion>
+    <criterion>No errors in Application Insights</criterion>
+    <criterion>Sign-off received for cleanup phase</criterion>
+  </acceptance-criteria>
+</task>

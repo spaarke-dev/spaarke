@@ -1,0 +1,55 @@
+<task id="010" project="ai-summary-and-analysis-enhancements">
+  <metadata>
+    <title>Create Document Profile Playbook Seed Data</title>
+    <phase>2.2</phase>
+    <estimate>1-2 hours</estimate>
+    <tags>dataverse, seed-data, playbook</tags>
+    <dependencies>007</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create the "Document Profile" playbook record in Dataverse with output type associations.</goal>
+
+    <context>
+      The Document Profile playbook defines what outputs are generated when a document is uploaded. It uses existing entities (sprk_analysisplaybook, sprk_aioutputtype).
+    </context>
+
+    <constraints>
+      - Use existing sprk_analysisplaybook entity
+      - Playbook name must be exactly "Document Profile"
+      - Set IsPublic = true
+      - Associate with output types (created in task 011)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-summary-and-analysis-enhancements/spec.md" reason="Playbook definition" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create seed data migration or script for Document Profile playbook</step>
+    <step order="2">Set Name = "Document Profile"</step>
+    <step order="3">Set Description = "Auto-generated document profile on upload"</step>
+    <step order="4">Set IsPublic = true</step>
+    <step order="5">Document the playbook ID for reference</step>
+    <step order="6">Verify playbook exists in Dataverse after deployment</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create seed data</tool>
+    <tool name="Bash">Deploy to Dataverse</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">Seed data script or migration for Document Profile playbook</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Document Profile playbook exists in Dataverse</criterion>
+    <criterion>Name is exactly "Document Profile"</criterion>
+    <criterion>IsPublic = true</criterion>
+  </acceptance-criteria>
+</task>

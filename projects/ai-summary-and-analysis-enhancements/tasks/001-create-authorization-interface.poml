@@ -1,0 +1,66 @@
+<task id="001" project="ai-summary-and-analysis-enhancements">
+  <metadata>
+    <title>Create IAiAuthorizationService Interface</title>
+    <phase>2.1</phase>
+    <estimate>1-2 hours</estimate>
+    <tags>api, authorization, interface, adr-008, adr-013</tags>
+    <dependencies>none</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create the IAiAuthorizationService interface that will unify AI authorization across all endpoints.</goal>
+
+    <context>
+      Currently there are two authorization filters (AiAuthorizationFilter and AnalysisAuthorizationFilter) with different behaviors. This interface will provide a unified authorization contract for both.
+
+      Key design decisions:
+      - Use FullUAC mode (security requirement)
+      - Support non-Dataverse contexts (Office.js, web apps)
+      - Return structured result (not just bool) for error messaging
+    </context>
+
+    <constraints>
+      - Follow ADR-008 (endpoint filters pattern)
+      - Follow ADR-013 (AI architecture)
+      - Interface should be simple - single AuthorizeAsync method
+      - Return AuthorizationResult with Success, Reason, and DocumentIds
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-008-endpoint-filters.md" reason="Authorization filter patterns" />
+      <file path=".claude/adr/ADR-013-ai-architecture.md" reason="AI architecture constraints" />
+      <file path="src/server/api/Sprk.Bff.Api/Api/Filters/AiAuthorizationFilter.cs" reason="Existing filter to unify" />
+      <file path="src/server/api/Sprk.Bff.Api/Api/Filters/AnalysisAuthorizationFilter.cs" reason="Existing filter to unify" />
+      <file path="docs/architecture/uac-access-control.md" reason="UAC architecture reference" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing AiAuthorizationFilter and AnalysisAuthorizationFilter to understand current patterns</step>
+    <step order="2">Create IAiAuthorizationService.cs in src/server/api/Sprk.Bff.Api/Services/Ai/</step>
+    <step order="3">Define AuthorizationResult record with Success, Reason, and AuthorizedDocumentIds properties</step>
+    <step order="4">Define AuthorizeAsync method signature with ClaimsPrincipal, documentIds, and CancellationToken</step>
+    <step order="5">Add XML documentation explaining the FullUAC mode and retry responsibilities</step>
+    <step order="6">Verify build succeeds</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Review existing filters</tool>
+    <tool name="Write">Create interface file</tool>
+    <tool name="Bash">Build verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Ai/IAiAuthorizationService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>IAiAuthorizationService.cs exists with AuthorizeAsync method</criterion>
+    <criterion>AuthorizationResult record defined with Success, Reason, AuthorizedDocumentIds</criterion>
+    <criterion>XML documentation present</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

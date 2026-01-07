@@ -1,0 +1,57 @@
+<task id="006" project="ai-summary-and-analysis-enhancements">
+  <metadata>
+    <title>Unit Tests for Authorization Service</title>
+    <phase>2.1</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>api, testing, authorization</tags>
+    <dependencies>002</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create comprehensive unit tests for AiAuthorizationService.</goal>
+
+    <context>
+      Unit tests should cover all authorization scenarios including success, failure, edge cases, and error handling.
+    </context>
+
+    <constraints>
+      - Use xUnit and Moq (existing test patterns)
+      - Test both success and failure paths
+      - Test edge cases (empty document IDs, null user)
+      - Achieve >= 80% coverage on AiAuthorizationService
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/AiAuthorizationService.cs" reason="Service to test" />
+      <file path="tests/" reason="Existing test patterns" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create AiAuthorizationServiceTests.cs in appropriate test project</step>
+    <step order="2">Test successful authorization with valid user and documents</step>
+    <step order="3">Test authorization failure (insufficient permissions)</step>
+    <step order="4">Test with empty document ID list</step>
+    <step order="5">Test with null/unauthenticated user</step>
+    <step order="6">Test logging is called appropriately</step>
+    <step order="7">Run tests and verify all pass</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create test file</tool>
+    <tool name="Bash">Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">tests/Sprk.Bff.Api.Tests/Services/Ai/AiAuthorizationServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Test file created with comprehensive test cases</criterion>
+    <criterion>All tests pass</criterion>
+    <criterion>>= 80% coverage on AiAuthorizationService</criterion>
+  </acceptance-criteria>
+</task>
