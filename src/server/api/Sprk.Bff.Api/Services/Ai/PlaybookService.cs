@@ -53,8 +53,8 @@ public class PlaybookService : IPlaybookService
             ?? throw new InvalidOperationException("TENANT_ID configuration is required");
         var clientId = configuration["API_APP_ID"]
             ?? throw new InvalidOperationException("API_APP_ID configuration is required");
-        var clientSecret = configuration["Dataverse:ClientSecret"]
-            ?? throw new InvalidOperationException("Dataverse:ClientSecret configuration is required");
+        var clientSecret = configuration["API_CLIENT_SECRET"] // Same app registration as Graph and DataverseAccessDataSource
+            ?? throw new InvalidOperationException("API_CLIENT_SECRET configuration is required");
 
         // IMPORTANT: BaseAddress must end with trailing slash, otherwise relative URLs replace the last segment
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2/";

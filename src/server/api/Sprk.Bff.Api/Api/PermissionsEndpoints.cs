@@ -72,7 +72,8 @@ public static class PermissionsEndpoints
         try
         {
             // Query Dataverse for user's access rights
-            var snapshot = await accessDataSource.GetUserAccessAsync(userId, documentId, ct);
+            // Note: This endpoint uses service principal auth (no user token OBO)
+            var snapshot = await accessDataSource.GetUserAccessAsync(userId, documentId, userAccessToken: null, ct);
 
             // Convert AccessRights to DocumentCapabilities
             var capabilities = MapToDocumentCapabilities(snapshot);
@@ -154,7 +155,8 @@ public static class PermissionsEndpoints
         {
             try
             {
-                var snapshot = await accessDataSource.GetUserAccessAsync(userId, documentId, ct);
+                // Note: This endpoint uses service principal auth (no user token OBO)
+                var snapshot = await accessDataSource.GetUserAccessAsync(userId, documentId, userAccessToken: null, ct);
                 var capabilities = MapToDocumentCapabilities(snapshot);
                 permissions.Add(capabilities);
                 successCount++;

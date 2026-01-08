@@ -84,6 +84,7 @@ public class AiAuthorizationFilter : IEndpointFilter
             var result = await _authorizationService.AuthorizeAsync(
                 user,
                 documentIds,
+                httpContext,
                 httpContext.RequestAborted);
 
             if (!result.Success)

@@ -43,7 +43,13 @@ public class AuthorizationService : IAuthorizationService
                 context.UserId, context.ResourceId, context.Operation);
 
             // Fetch user access snapshot from Dataverse
-            var accessSnapshot = await _accessDataSource.GetUserAccessAsync(context.UserId, context.ResourceId, ct);
+            // Note: SDAP authorization uses service principal auth (no user token available)
+            // For AI authorization with OBO, see AiAuthorizationService
+            var accessSnapshot = await _accessDataSource.GetUserAccessAsync(
+                context.UserId,
+                context.ResourceId,
+                userAccessToken: null, // Service principal auth
+                ct);
 
             activity.SetTag("accessRights", accessSnapshot.AccessRights.ToString());
             activity.SetTag("teamCount", accessSnapshot.TeamMemberships.Count());
