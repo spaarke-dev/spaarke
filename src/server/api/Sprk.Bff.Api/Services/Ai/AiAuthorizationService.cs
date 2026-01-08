@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Microsoft.Extensions.Logging;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Auth;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -46,10 +47,12 @@ public class AiAuthorizationService : IAiAuthorizationService
     public async Task<AuthorizationResult> AuthorizeAsync(
         ClaimsPrincipal user,
         IReadOnlyList<Guid> documentIds,
+        HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(user);
         ArgumentNullException.ThrowIfNull(documentIds);
+        ArgumentNullException.ThrowIfNull(httpContext);
 
         if (documentIds.Count == 0)
         {
@@ -68,6 +71,19 @@ public class AiAuthorizationService : IAiAuthorizationService
             return AuthorizationResult.Denied("User identity not found in claims");
         }
 
+        // Extract user's bearer token for OBO authentication
+        string? userAccessToken = null;
+        try
+        {
+            userAccessToken = TokenHelper.ExtractBearerToken(httpContext);
+            _logger.LogDebug("[AI-AUTH] Extracted user bearer token for OBO authentication");
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogError(ex, "[AI-AUTH] Failed to extract bearer token from request");
+            return AuthorizationResult.Denied("Missing or invalid authorization token");
+        }
+
         _logger.LogInformation(
             "[AI-AUTH] Authorization START: UserId={UserId}, DocumentCount={DocumentCount}, " +
             "DocumentIds=[{DocumentIds}]",
@@ -83,7 +99,7 @@ public class AiAuthorizationService : IAiAuthorizationService
         // Note: For better performance with many documents, consider Task.WhenAll with throttling
         foreach (var documentId in documentIds)
         {
-            var (isAuthorized, reason) = await CheckDocumentAccessAsync(userId, documentId, cancellationToken);
+            var (isAuthorized, reason) = await CheckDocumentAccessAsync(userId, documentId, userAccessToken, cancellationToken);
 
             if (isAuthorized)
             {
@@ -147,6 +163,7 @@ public class AiAuthorizationService : IAiAuthorizationService
     private async Task<(bool IsAuthorized, string? Reason)> CheckDocumentAccessAsync(
         string userId,
         Guid documentId,
+        string? userAccessToken,
         CancellationToken cancellationToken)
     {
         try
@@ -159,6 +176,7 @@ public class AiAuthorizationService : IAiAuthorizationService
             var accessSnapshot = await _accessDataSource.GetUserAccessAsync(
                 userId,
                 documentId.ToString(),
+                userAccessToken,
                 cancellationToken);
 
             // AI operations require at least Read access

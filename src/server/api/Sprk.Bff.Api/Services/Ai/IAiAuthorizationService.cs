@@ -74,15 +74,21 @@ public interface IAiAuthorizationService
     /// </summary>
     /// <param name="user">The claims principal representing the current user.</param>
     /// <param name="documentIds">The Dataverse document IDs (sprk_document.sprk_documentid) to authorize.</param>
+    /// <param name="httpContext">HTTP context containing user's bearer token for OBO authentication.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>
     /// An <see cref="AuthorizationResult"/> indicating success or failure.
     /// When partially successful, contains the subset of authorized document IDs.
     /// </returns>
-    /// <exception cref="ArgumentNullException">When user or documentIds is null.</exception>
+    /// <exception cref="ArgumentNullException">When user, documentIds, or httpContext is null.</exception>
     /// <exception cref="ArgumentException">When documentIds is empty.</exception>
+    /// <remarks>
+    /// The httpContext is required to extract the user's bearer token for On-Behalf-Of (OBO) authentication.
+    /// This ensures permission checks are performed as the user, not as the service principal.
+    /// </remarks>
     Task<AuthorizationResult> AuthorizeAsync(
         ClaimsPrincipal user,
         IReadOnlyList<Guid> documentIds,
+        HttpContext httpContext,
         CancellationToken cancellationToken = default);
 }

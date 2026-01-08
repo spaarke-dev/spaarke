@@ -345,6 +345,262 @@ curl https://spe-api-dev-67e2xz.azurewebsites.net/healthz
 
 ---
 
+## Authorization Service Pattern (AI Analysis)
+
+**Purpose**: Validate user has Read access to documents before executing AI analysis.
+
+### IAiAuthorizationService Interface
+
+```csharp
+// IAiAuthorizationService.cs
+public interface IAiAuthorizationService
+{
+    /// <summary>
+    /// Validates user has Read access to specified documents.
+    /// </summary>
+    /// <param name="user">ClaimsPrincipal with user identity</param>
+    /// <param name="documentIds">Documents to authorize</param>
+    /// <param name="httpContext">Required for OBO token extraction</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>AuthorizationResult with success status and authorized document IDs</returns>
+    Task<AuthorizationResult> AuthorizeAsync(
+        ClaimsPrincipal user,
+        IReadOnlyList<Guid> documentIds,
+        HttpContext httpContext,  // Required for OBO authentication
+        CancellationToken cancellationToken = default);
+}
+
+public record AuthorizationResult(
+    bool Success,
+    string? Reason,
+    IReadOnlyList<Guid> AuthorizedDocumentIds);
+```
+
+### AiAuthorizationService Implementation
+
+```csharp
+// AiAuthorizationService.cs
+public class AiAuthorizationService : IAiAuthorizationService
+{
+    private readonly IAccessDataSource _accessDataSource;
+    private readonly ILogger<AiAuthorizationService> _logger;
+
+    public async Task<AuthorizationResult> AuthorizeAsync(
+        ClaimsPrincipal user,
+        IReadOnlyList<Guid> documentIds,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        // Extract user's bearer token for OBO authentication
+        string? userAccessToken = null;
+        try
+        {
+            userAccessToken = TokenHelper.ExtractBearerToken(httpContext);
+            _logger.LogDebug("[AI-AUTH] Extracted user bearer token for OBO");
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogError(ex, "[AI-AUTH] Failed to extract bearer token");
+            return AuthorizationResult.Denied("Missing or invalid authorization token");
+        }
+
+        // Query authorization via Dataverse (uses OBO)
+        var result = await _accessDataSource.GetUserAccessAsync(
+            user,
+            documentIds,
+            userAccessToken,  // Pass token for OBO exchange
+            cancellationToken);
+
+        if (!result.Success)
+        {
+            _logger.LogWarning(
+                "[AI-AUTH] Authorization DENIED: {Reason}",
+                result.Reason);
+            return AuthorizationResult.Denied(result.Reason);
+        }
+
+        _logger.LogInformation(
+            "[AI-AUTH] Authorization GRANTED: {Count} documents",
+            result.AuthorizedDocumentIds.Count);
+
+        return result;
+    }
+}
+```
+
+### AnalysisAuthorizationFilter (Endpoint Filter)
+
+**Pattern**: Use endpoint filters for resource-level authorization (ADR-008).
+
+```csharp
+// AnalysisAuthorizationFilter.cs
+public class AnalysisAuthorizationFilter : IEndpointFilter
+{
+    private readonly IAiAuthorizationService _authorizationService;
+    private readonly ILogger<AnalysisAuthorizationFilter> _logger;
+
+    public async ValueTask<object?> InvokeAsync(
+        EndpointFilterInvocationContext context,
+        EndpointFilterDelegate next)
+    {
+        var httpContext = context.HttpContext;
+        var user = httpContext.User;
+
+        // Verify user identity claims
+        var userId = user.FindFirst("oid")?.Value;
+        if (string.IsNullOrEmpty(userId))
+        {
+            return Results.Problem(
+                statusCode: 401,
+                title: "Unauthorized",
+                detail: "User identity not found");
+        }
+
+        // Extract document IDs from request
+        var documentIds = ExtractDocumentIds(context);
+        if (documentIds.Count == 0)
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Bad Request",
+                detail: "No document identifier found in request");
+        }
+
+        // Authorize via AiAuthorizationService
+        var result = await _authorizationService.AuthorizeAsync(
+            user,
+            documentIds,
+            context.HttpContext,  // Pass HttpContext for OBO token extraction
+            context.HttpContext.RequestAborted);
+
+        if (!result.Success)
+        {
+            _logger.LogWarning(
+                "[ANALYSIS-AUTH] Document access DENIED: {Reason}",
+                result.Reason);
+
+            return Results.Problem(
+                statusCode: 403,
+                title: "Forbidden",
+                detail: result.Reason ?? "Access denied to one or more documents");
+        }
+
+        _logger.LogDebug(
+            "[ANALYSIS-AUTH] Document access GRANTED: {Count} documents",
+            documentIds.Count);
+
+        return await next(context);
+    }
+}
+```
+
+### TokenHelper Pattern
+
+```csharp
+// TokenHelper.cs
+public static class TokenHelper
+{
+    /// <summary>
+    /// Extracts bearer token from Authorization header.
+    /// </summary>
+    public static string ExtractBearerToken(HttpContext httpContext)
+    {
+        var authHeader = httpContext.Request.Headers["Authorization"].ToString();
+
+        if (string.IsNullOrEmpty(authHeader) || !authHeader.StartsWith("Bearer "))
+        {
+            throw new UnauthorizedAccessException("Missing or invalid Authorization header");
+        }
+
+        return authHeader["Bearer ".Length..].Trim();
+    }
+}
+```
+
+### Using Authorization Filter in Endpoints
+
+```csharp
+// AnalysisEndpoints.cs
+public static void MapAnalysisEndpoints(this IEndpointRouteBuilder app)
+{
+    app.MapPost("/api/ai/analysis/execute",
+        async (AnalysisExecuteRequest request,
+               HttpContext httpContext,
+               IAnalysisOrchestrationService orchestrationService,
+               CancellationToken ct) =>
+    {
+        // Authorization already performed by filter
+        // HttpContext available for OBO operations (file download)
+
+        await foreach (var chunk in orchestrationService.ExecutePlaybookAsync(
+            request,
+            httpContext,  // Pass for OBO
+            ct))
+        {
+            // Stream analysis results
+            yield return chunk;
+        }
+    })
+    .AddEndpointFilter<AnalysisAuthorizationFilter>();  // ← Apply filter
+}
+```
+
+### Authorization Flow Diagram
+
+```
+PCF Control
+    │
+    ├─→ Acquires token (MSAL.js)
+    │   Scope: api://1e40baad-.../user_impersonation
+    │
+    ├─→ POST /api/ai/analysis/execute
+    │   Headers: Authorization: Bearer {user_bff_token}
+    │   Body: { documentIds: [...], playbookId: "..." }
+    │
+BFF API
+    │
+    ├─→ AnalysisAuthorizationFilter.InvokeAsync()
+    │   ├─→ Extract document IDs from request
+    │   ├─→ Extract user's oid claim
+    │   ├─→ Call IAiAuthorizationService.AuthorizeAsync()
+    │   │
+    │   └─→ AiAuthorizationService
+    │       ├─→ TokenHelper.ExtractBearerToken(httpContext)
+    │       ├─→ IAccessDataSource.GetUserAccessAsync(user, documentIds, userToken, ct)
+    │       │
+    │       └─→ DataverseAccessDataSource
+    │           ├─→ MSAL OBO: User token → Dataverse token
+    │           ├─→ Set OBO token on HttpClient headers
+    │           ├─→ GET /systemusers?$filter=azureactivedirectoryobjectid eq '{oid}'
+    │           ├─→ GET /sprk_documents({id})?$select=sprk_documentid (for each doc)
+    │           └─→ Return AuthorizationResult
+    │
+    ├─→ If authorized: Proceed to AnalysisOrchestrationService
+    ├─→ If denied: Return 403 Forbidden
+    │
+AnalysisOrchestrationService
+    │
+    └─→ Execute AI analysis with user context (file download, processing)
+```
+
+### Key Patterns
+
+| Pattern | Purpose |
+|---------|---------|
+| **HttpContext propagation** | Pass `HttpContext` through call chain for OBO token extraction |
+| **TokenHelper.ExtractBearerToken** | Centralized token extraction from Authorization header |
+| **Endpoint filters** | Apply authorization at endpoint level (ADR-008 compliance) |
+| **Fail-closed security** | Return `AccessRights.None` on authorization errors |
+| **Structured logging** | Use `[AI-AUTH]`, `[UAC-DIAG]` prefixes for traceability |
+
+### Related Documentation
+
+- **Auth Patterns**: `docs/architecture/sdap-auth-patterns.md` (Pattern 5: OBO for Dataverse)
+- **Azure Resources**: `docs/architecture/auth-azure-resources.md` (OBO Token Exchange section)
+- **Architecture Changes**: `projects/ai-summary-and-analysis-enhancements/ARCHITECTURE-CHANGES.md` (OBO bugs fixed)
+
+---
+
 ## Common Mistakes
 
 | Mistake | Error | Fix |

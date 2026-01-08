@@ -139,6 +139,7 @@ public class AnalysisAuthorizationFilter : IEndpointFilter
             var result = await _authorizationService.AuthorizeAsync(
                 user,
                 documentIds,
+                context.HttpContext,
                 context.HttpContext.RequestAborted);
 
             if (!result.Success)

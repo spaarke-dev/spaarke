@@ -100,7 +100,267 @@ public interface IDocumentIntelligenceService
 }
 ```
 
-### 3. Dual Storage with Soft Failure Handling
+### 3. OBO Authentication Implementation for Dataverse
+
+**Critical Security Fix:** Implemented proper On-Behalf-Of (OBO) token exchange for Dataverse authorization checks.
+
+**Problem Context:**
+Initial implementation of FullUAC authorization was failing with 403 Forbidden errors despite users having System Administrator privileges. Investigation revealed two critical bugs in the OBO authentication flow.
+
+#### Bug #1: Missing HttpClient Authorization Header
+
+**Symptom:**
+```
+[UAC-DIAG] Failed to lookup Dataverse user: Unauthorized
+```
+
+**Root Cause:**
+`DataverseAccessDataSource` was obtaining OBO token from MSAL but never setting it on HttpClient headers. The flow was:
+1. Get OBO token via `GetDataverseTokenViaOBOAsync()`
+2. Call `LookupDataverseUserIdAsync()` which uses `_httpClient.GetAsync()`
+3. HttpClient still had old service principal token (or no token)
+4. Result: 401 Unauthorized from Dataverse API
+
+**Fix (DataverseAccessDataSource.cs:161-165):**
+```csharp
+if (!string.IsNullOrEmpty(userAccessToken))
+{
+    _logger.LogDebug("[UAC-DIAG] Using OBO authentication for user context");
+    dataverseToken = await GetDataverseTokenViaOBOAsync(userAccessToken, ct);
+
+    // CRITICAL: Set the OBO token on HttpClient headers for all subsequent API calls
+    _httpClient.DefaultRequestHeaders.Authorization =
+        new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", dataverseToken);
+
+    _logger.LogDebug("[UAC-DIAG] Set OBO token on HttpClient authorization header");
+}
+```
+
+#### Bug #2: RetrievePrincipalAccess Unavailable with OBO Tokens
+
+**Symptom (after fix #1):**
+```
+[UAC-DIAG] RetrievePrincipalAccess FAILED: StatusCode=NotFound
+Resource not found for the segment 'RetrievePrincipalAccess'
+Error code: 0x80060888
+```
+
+**Root Cause:**
+The `RetrievePrincipalAccess` Dataverse action returned 404 when called with delegated (OBO) tokens. This action appears to only be available with application-level permissions, not user-delegated permissions.
+
+**Fix: Direct Query Authorization Pattern (DataverseAccessDataSource.cs:285-368):**
+
+Replaced `RetrievePrincipalAccess` with direct document query approach:
+
+```csharp
+/// <summary>
+/// Checks user's access to a specific resource using Dataverse's built-in security.
+/// Uses a direct query approach: If the user can retrieve the record, they have Read access.
+/// This works with OBO (delegated) tokens where RetrievePrincipalAccess may not be available.
+/// </summary>
+private async Task<List<PermissionRecord>> QueryUserPermissionsAsync(
+    string userId,
+    string resourceId,
+    string dataverseToken,
+    CancellationToken ct)
+{
+    // APPROACH: Query the document directly using the OBO token.
+    // If the query succeeds, the user has at least Read access (Dataverse enforces this).
+    // If it fails with 403/404, they don't have access.
+
+    var url = $"sprk_documents({resourceId})?$select=sprk_documentid";
+
+    using var requestMessage = new HttpRequestMessage(HttpMethod.Get, url)
+    {
+        Headers = { Authorization = new AuthenticationHeaderValue("Bearer", dataverseToken) }
+    };
+
+    var response = await _httpClient.SendAsync(requestMessage, ct);
+
+    if (!response.IsSuccessStatusCode)
+    {
+        // 403 or 404 means no access
+        _logger.LogWarning(
+            "[UAC-DIAG] Direct query DENIED for user {UserId} on document {DocumentId}: {Status}",
+            userId, resourceId, response.StatusCode);
+        return new List<PermissionRecord>();
+    }
+
+    // Success! User has Read access
+    _logger.LogDebug(
+        "[UAC-DIAG] Direct query GRANTED for user {UserId} on document {DocumentId}",
+        userId, resourceId);
+
+    return new List<PermissionRecord>
+    {
+        new PermissionRecord(userId, resourceId, AccessRights.Read)
+    };
+}
+```
+
+**Benefits of Direct Query Pattern:**
+- ✅ Works with OBO (delegated) tokens
+- ✅ Leverages Dataverse's native row-level security
+- ✅ Simpler implementation (no complex RetrievePrincipalAccess payload)
+- ✅ More efficient (single GET vs POST with complex payload)
+- ✅ Easier to debug (standard HTTP status codes)
+
+**Trade-offs:**
+- ❌ Can only detect Read access (not Write, Delete, etc.)
+- ✅ This is acceptable for AI analysis (only needs Read)
+
+#### Complete OBO Authorization Flow
+
+```
+1. User clicks "AI Summary" in PCF control
+   ↓
+2. PCF sends POST /api/ai/analysis/execute
+   Headers: Authorization: Bearer {user_graph_token}
+   ↓
+3. AnalysisAuthorizationFilter extracts bearer token
+   TokenHelper.ExtractBearerToken(httpContext)
+   ↓
+4. AiAuthorizationService orchestrates authorization
+   authService.AuthorizeAsync(user, documentIds, httpContext, ct)
+   ↓
+5. DataverseAccessDataSource performs OBO exchange
+   a. Extract user token from HttpContext
+   b. MSAL OBO: User Graph token → Dataverse token
+      ConfidentialClientApplicationBuilder
+        .AcquireTokenOnBehalfOf(scopes, new UserAssertion(userToken))
+   c. Set OBO token on HttpClient.DefaultRequestHeaders.Authorization
+   ↓
+6. Lookup Dataverse user by Azure AD OID
+   GET /api/data/v9.2/systemusers?$filter=azureactivedirectoryobjectid eq '{oid}'
+   (Uses OBO token set in step 5c)
+   ↓
+7. Check document access via direct query
+   GET /api/data/v9.2/sprk_documents({id})?$select=sprk_documentid
+   (Uses OBO token set in step 5c)
+   ↓
+8. If GET succeeds (200 OK) → User has Read access
+   If GET fails (403/404) → User doesn't have access
+   ↓
+9. Return AuthorizationResult
+   Success: true/false
+   AuthorizedDocumentIds: Guid[]
+   ↓
+10. If authorized → Proceed with AI analysis
+    If denied → Return 403 Forbidden to PCF
+```
+
+#### Configuration Requirements
+
+**Azure AD App Registration (BFF API):**
+- App ID: `1e40baad-e065-4aea-a8d4-4b7ab273458c`
+- Tenant: `a221a95e-6abc-4434-aecc-e48338a1b2f2`
+
+**Required API Permissions:**
+```
+Microsoft Graph:
+  - Files.Read.All (delegated) - For SPE file download via OBO
+  - User.Read (delegated) - For user profile
+
+Dynamics CRM (Dataverse):
+  - user_impersonation (delegated) - For OBO token exchange
+```
+
+**Client Secret:**
+- Created: 2025-12-18
+- Expires: 2027-12-18
+- First 6 chars: `l8b8Q~J`
+- Configuration key: `API_CLIENT_SECRET`
+- Used by: GraphClientFactory, DataverseAccessDataSource, PlaybookService
+
+**Storage Locations:**
+```
+Local Development:
+  - User Secrets: dotnet user-secrets set "API_CLIENT_SECRET" "{secret}"
+  - appsettings.Development.json.local (gitignored)
+
+Azure App Service (Dev):
+  - App Settings > Configuration > Application settings
+  - Key: API_CLIENT_SECRET
+  - Value: [hidden]
+
+Production (Future):
+  - Azure Key Vault
+  - App Settings reference: @Microsoft.KeyVault(SecretUri=...)
+```
+
+#### Code Changes Required
+
+**1. IAiAuthorizationService Interface (IAiAuthorizationService.cs:50-52)**
+```csharp
+Task<AuthorizationResult> AuthorizeAsync(
+    ClaimsPrincipal user,
+    IReadOnlyList<Guid> documentIds,
+    HttpContext httpContext,  // NEW: Required for OBO token extraction
+    CancellationToken cancellationToken = default);
+```
+
+**2. AiAuthorizationService Implementation (AiAuthorizationService.cs:74-84)**
+```csharp
+// Extract user's bearer token for OBO authentication
+string? userAccessToken = null;
+try
+{
+    userAccessToken = TokenHelper.ExtractBearerToken(httpContext);
+    _logger.LogDebug("[AI-AUTH] Extracted user bearer token for OBO authentication");
+}
+catch (UnauthorizedAccessException ex)
+{
+    _logger.LogError(ex, "[AI-AUTH] Failed to extract bearer token from request");
+    return AuthorizationResult.Denied("Missing or invalid authorization token");
+}
+```
+
+**3. AnalysisAuthorizationFilter Update (AnalysisAuthorizationFilter.cs:139-143)**
+```csharp
+var result = await _authorizationService.AuthorizeAsync(
+    user,
+    documentIds,
+    context.HttpContext,  // NEW: Pass HttpContext for token extraction
+    context.HttpContext.RequestAborted);
+```
+
+#### Verification
+
+**Application Insights Queries:**
+
+Successful OBO flow:
+```kusto
+traces
+| where message contains "UAC-DIAG"
+| where timestamp > ago(1h)
+| project timestamp, message
+| order by timestamp desc
+```
+
+Expected log sequence:
+```
+[UAC-DIAG] Using OBO authentication for user context
+[UAC-DIAG] Set OBO token on HttpClient authorization header
+[UAC-DIAG] Dataverse user lookup successful: {systemuserid}
+[UAC-DIAG] Direct query GRANTED for user {userId} on document {documentId}
+```
+
+Failed authorization:
+```kusto
+traces
+| where message contains "AI-AUTH"
+| where message contains "DENIED"
+| project timestamp, message, severityLevel
+```
+
+#### Related Documentation
+
+- **Full OBO Pattern**: `.claude/patterns/auth/obo-flow.md` (updated with Dataverse pattern)
+- **Azure Resources**: `docs/architecture/auth-azure-resources.md` (includes secret lifecycle)
+- **Auth Patterns**: `docs/architecture/sdap-auth-patterns.md` (Dataverse OBO section)
+- **API Patterns**: `docs/architecture/sdap-bff-api-patterns.md` (Authorization service patterns)
+
+### 4. Dual Storage with Soft Failure Handling
 
 **Pattern:** Store analysis results in **two locations** with graceful degradation.
 

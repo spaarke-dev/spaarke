@@ -5,6 +5,7 @@ using Azure.Core;
 using Azure.Identity;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Identity.Client;
 
 namespace Spaarke.Dataverse;
 
@@ -18,7 +19,9 @@ public class DataverseAccessDataSource : IAccessDataSource
     private readonly ILogger<DataverseAccessDataSource> _logger;
     private readonly HttpClient _httpClient;
     private readonly TokenCredential _credential;
+    private readonly IConfidentialClientApplication? _cca;
     private readonly string _apiUrl;
+    private readonly string _dataverseScope;
     private AccessToken? _currentToken;
 
     public DataverseAccessDataSource(
@@ -34,55 +37,140 @@ public class DataverseAccessDataSource : IAccessDataSource
         var dataverseUrl = configuration["Dataverse:ServiceUrl"];
         var tenantId = configuration["TENANT_ID"];
         var clientId = configuration["API_APP_ID"];
-        var clientSecret = configuration["Dataverse:ClientSecret"];
+        var clientSecret = configuration["API_CLIENT_SECRET"]; // Same app registration as Graph
 
         if (string.IsNullOrEmpty(dataverseUrl))
             throw new InvalidOperationException("Dataverse:ServiceUrl configuration is required");
 
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2";
+        _dataverseScope = $"{dataverseUrl.TrimEnd('/')}/.default";
 
         // Use managed identity if no client secret, otherwise use client credentials
         if (!string.IsNullOrEmpty(clientSecret) && !string.IsNullOrEmpty(tenantId) && !string.IsNullOrEmpty(clientId))
         {
             _credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
-            _logger.LogInformation("DataverseAccessDataSource using ClientSecretCredential");
+            _logger.LogInformation("DataverseAccessDataSource using ClientSecretCredential for service principal auth");
+
+            // Initialize MSAL for OBO token exchange
+            _cca = ConfidentialClientApplicationBuilder
+                .Create(clientId)
+                .WithAuthority($"https://login.microsoftonline.com/{tenantId}")
+                .WithClientSecret(clientSecret)
+                .Build();
+
+            _logger.LogInformation("DataverseAccessDataSource initialized with OBO support");
         }
         else
         {
             _credential = new DefaultAzureCredential();
-            _logger.LogInformation("DataverseAccessDataSource using DefaultAzureCredential (managed identity)");
+            _cca = null; // No OBO support with managed identity
+            _logger.LogInformation("DataverseAccessDataSource using DefaultAzureCredential (managed identity) - OBO not available");
         }
     }
 
+    /// <summary>
+    /// Ensures the HttpClient has a valid authentication token.
+    /// Uses service principal (app-only) authentication.
+    /// </summary>
     private async Task EnsureAuthenticatedAsync(CancellationToken ct = default)
     {
         if (_currentToken == null || _currentToken.Value.ExpiresOn <= DateTimeOffset.UtcNow.AddMinutes(5))
         {
-            var scope = $"{_apiUrl.Replace("/api/data/v9.2", "")}/.default";
             _currentToken = await _credential.GetTokenAsync(
-                new TokenRequestContext(new[] { scope }),
+                new TokenRequestContext(new[] { _dataverseScope }),
                 ct);
 
             _httpClient.DefaultRequestHeaders.Authorization =
                 new AuthenticationHeaderValue("Bearer", _currentToken.Value.Token);
 
-            _logger.LogDebug("DataverseAccessDataSource: Refreshed Dataverse access token");
+            _logger.LogDebug("DataverseAccessDataSource: Refreshed service principal access token");
         }
     }
 
-    public async Task<AccessSnapshot> GetUserAccessAsync(string userId, string resourceId, CancellationToken ct = default)
+    /// <summary>
+    /// Performs On-Behalf-Of token exchange to get Dataverse token for the user.
+    /// </summary>
+    /// <param name="userAccessToken">User's bearer token from Authorization header</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Dataverse access token for the user</returns>
+    private async Task<string> GetDataverseTokenViaOBOAsync(string userAccessToken, CancellationToken ct = default)
+    {
+        if (_cca == null)
+        {
+            throw new InvalidOperationException(
+                "OBO authentication requires client credentials to be configured. " +
+                "Ensure TENANT_ID, API_APP_ID, and API_CLIENT_SECRET are set.");
+        }
+
+        _logger.LogDebug("Performing OBO token exchange for Dataverse access");
+
+        try
+        {
+            var result = await _cca.AcquireTokenOnBehalfOf(
+                new[] { _dataverseScope },
+                new UserAssertion(userAccessToken))
+                .ExecuteAsync(ct);
+
+            _logger.LogInformation("OBO token exchange successful for Dataverse. Scopes: {Scopes}",
+                string.Join(", ", result.Scopes));
+
+            return result.AccessToken;
+        }
+        catch (MsalUiRequiredException ex)
+        {
+            _logger.LogError(ex, "OBO failed - MSAL UI required. ErrorCode: {ErrorCode}", ex.ErrorCode);
+            throw;
+        }
+        catch (MsalServiceException ex)
+        {
+            _logger.LogError(ex, "OBO failed - MSAL service exception. ErrorCode: {ErrorCode}, StatusCode: {StatusCode}",
+                ex.ErrorCode, ex.StatusCode);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "OBO failed - unexpected exception");
+            throw;
+        }
+    }
+
+    public async Task<AccessSnapshot> GetUserAccessAsync(
+        string userId,
+        string resourceId,
+        string? userAccessToken = null,
+        CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(userId, nameof(userId));
         ArgumentException.ThrowIfNullOrWhiteSpace(resourceId, nameof(resourceId));
 
         _logger.LogInformation(
-            "[UAC-DIAG] GetUserAccessAsync START: AzureAdOid={UserId}, ResourceId={ResourceId}",
-            userId, resourceId);
+            "[UAC-DIAG] GetUserAccessAsync START: AzureAdOid={UserId}, ResourceId={ResourceId}, UsingOBO={UsingOBO}",
+            userId, resourceId, !string.IsNullOrEmpty(userAccessToken));
 
         try
         {
-            // Ensure we have a valid access token for Dataverse
-            await EnsureAuthenticatedAsync(ct);
+            // Determine which authentication mode to use
+            string dataverseToken;
+
+            if (!string.IsNullOrEmpty(userAccessToken))
+            {
+                // Use OBO to call Dataverse as the user
+                _logger.LogDebug("[UAC-DIAG] Using OBO authentication for user context");
+                dataverseToken = await GetDataverseTokenViaOBOAsync(userAccessToken, ct);
+
+                // CRITICAL: Set the OBO token on HttpClient headers for all subsequent API calls
+                _httpClient.DefaultRequestHeaders.Authorization =
+                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", dataverseToken);
+
+                _logger.LogDebug("[UAC-DIAG] Set OBO token on HttpClient authorization header");
+            }
+            else
+            {
+                // Use service principal (app-only) authentication
+                _logger.LogDebug("[UAC-DIAG] Using service principal authentication");
+                await EnsureAuthenticatedAsync(ct);
+                dataverseToken = _currentToken!.Value.Token;
+            }
 
             // Map Azure AD Object ID to Dataverse systemuserid
             var dataverseUserId = await LookupDataverseUserIdAsync(userId, ct);
@@ -103,7 +191,7 @@ public class DataverseAccessDataSource : IAccessDataSource
             _logger.LogDebug("Mapped Azure AD OID {AzureAdOid} to Dataverse systemuserid {DataverseUserId}", userId, dataverseUserId);
 
             // Query user permissions from Dataverse using the Dataverse user ID
-            var permissions = await QueryUserPermissionsAsync(dataverseUserId, resourceId, ct);
+            var permissions = await QueryUserPermissionsAsync(dataverseUserId, resourceId, dataverseToken, ct);
 
             // Query team memberships using Dataverse user ID
             var teams = await QueryUserTeamMembershipsAsync(dataverseUserId, ct);
@@ -196,32 +284,40 @@ public class DataverseAccessDataSource : IAccessDataSource
 
     /// <summary>
     /// Checks user's access to a specific resource using Dataverse's built-in security.
-    /// Uses RetrievePrincipalAccess to get native Dataverse permissions.
+    /// Uses a direct query approach: If the user can retrieve the record, they have Read access.
+    /// This works with OBO (delegated) tokens where RetrievePrincipalAccess may not be available.
     /// </summary>
-    private async Task<List<PermissionRecord>> QueryUserPermissionsAsync(string userId, string resourceId, CancellationToken ct)
+    /// <param name="userId">Dataverse systemuserid</param>
+    /// <param name="resourceId">Document resource ID</param>
+    /// <param name="dataverseToken">Dataverse access token (from OBO or service principal)</param>
+    /// <param name="ct">Cancellation token</param>
+    private async Task<List<PermissionRecord>> QueryUserPermissionsAsync(
+        string userId,
+        string resourceId,
+        string dataverseToken,
+        CancellationToken ct)
     {
         try
         {
-            // Use Dataverse's RetrievePrincipalAccess function to check native permissions
-            // This respects Business Units, Security Roles, Teams, and Record Sharing
-            // Format: POST /api/data/v9.2/RetrievePrincipalAccess with @odata.id references
-            var request = new Dictionary<string, object>
-            {
-                ["Target"] = new Dictionary<string, string>
-                {
-                    ["@odata.id"] = $"sprk_documents({resourceId})"
-                },
-                ["Principal"] = new Dictionary<string, string>
-                {
-                    ["@odata.id"] = $"systemusers({userId})"
-                }
-            };
+            // APPROACH: Query the document directly using the OBO token.
+            // If the query succeeds, the user has at least Read access (Dataverse enforces this).
+            // If it fails with 403/404, they don't have access.
+            // This is simpler and works with delegated tokens where RetrievePrincipalAccess may fail.
 
             _logger.LogInformation(
-                "[UAC-DIAG] RetrievePrincipalAccess: User={UserId}, Resource={ResourceId}, Entity=sprk_documents",
+                "[UAC-DIAG] Checking document access via direct query: User={UserId}, Resource={ResourceId}",
                 userId, resourceId);
 
-            var response = await _httpClient.PostAsJsonAsync("RetrievePrincipalAccess", request, ct);
+            // Query the document - just retrieve the ID to minimize data transfer
+            var url = $"sprk_documents({resourceId})?$select=sprk_documentid";
+
+            // Create request message with the OBO token
+            using var requestMessage = new HttpRequestMessage(HttpMethod.Get, url)
+            {
+                Headers = { Authorization = new AuthenticationHeaderValue("Bearer", dataverseToken) }
+            };
+
+            var response = await _httpClient.SendAsync(requestMessage, ct);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -229,7 +325,7 @@ public class DataverseAccessDataSource : IAccessDataSource
                 var responseBody = await response.Content.ReadAsStringAsync(ct);
 
                 _logger.LogWarning(
-                    "[UAC-DIAG] RetrievePrincipalAccess FAILED: StatusCode={StatusCode}, User={UserId}, Resource={ResourceId}, ResponseBody={ResponseBody}",
+                    "[UAC-DIAG] Document query FAILED: StatusCode={StatusCode}, User={UserId}, Resource={ResourceId}, ResponseBody={ResponseBody}",
                     response.StatusCode, userId, resourceId, responseBody);
 
                 // 403 or 404 means no access
@@ -248,29 +344,20 @@ public class DataverseAccessDataSource : IAccessDataSource
                     return new List<PermissionRecord>();
                 }
 
+                // Other errors - log and return empty (fail-closed)
                 return new List<PermissionRecord>();
             }
 
-            var result = await response.Content.ReadFromJsonAsync<PrincipalAccessResponse>(ct);
-
-            if (result == null)
-            {
-                _logger.LogWarning(
-                    "[UAC-DIAG] RetrievePrincipalAccess returned null/empty: User={UserId}, Resource={ResourceId}",
-                    userId, resourceId);
-                return new List<PermissionRecord>();
-            }
-
-            // Map Dataverse AccessRights string to our granular AccessRights enum
-            var accessRights = MapDataverseAccessRights(result.AccessRights);
-
+            // Success! The user can retrieve the document, so they have at least Read access.
+            // For AI operations, Read access is sufficient.
             _logger.LogInformation(
-                "[UAC-DIAG] RetrievePrincipalAccess SUCCESS: User={UserId}, Resource={ResourceId}, DataverseRights={DataverseRights}, MappedRights={MappedRights}",
-                userId, resourceId, result.AccessRights, accessRights);
+                "[UAC-DIAG] Document query SUCCESS: User={UserId}, Resource={ResourceId}, GrantedAccess=Read",
+                userId, resourceId);
 
             return new List<PermissionRecord>
             {
-                new PermissionRecord(userId, resourceId, accessRights)
+                // Grant Read access - if user needs Write/Delete/etc., Dataverse will enforce that separately
+                new PermissionRecord(userId, resourceId, AccessRights.Read)
             };
         }
         catch (Exception ex)
