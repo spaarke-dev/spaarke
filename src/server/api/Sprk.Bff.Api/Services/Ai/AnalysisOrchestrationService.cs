@@ -1265,6 +1265,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         var toolResults = new StringBuilder();
         var totalInputTokens = 0;
         var totalOutputTokens = 0;
+        var executedToolResults = new List<ToolResult>(); // Collect tool results for output extraction
 
         foreach (var tool in scopes.Tools)
         {
@@ -1319,6 +1320,9 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
 
                 totalInputTokens += toolResult.Execution.InputTokens.GetValueOrDefault();
                 totalOutputTokens += toolResult.Execution.OutputTokens.GetValueOrDefault();
+
+                // Collect successful tool results for output extraction
+                executedToolResults.Add(toolResult);
             }
             else if (toolResult != null)
             {
@@ -1333,14 +1337,163 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         }
 
         // 10. Store outputs in Dataverse (dual storage for Document Profile)
-        // Collect structured outputs from tools for storage
+        // Extract structured outputs from tool results for Document Profile storage
         var structuredOutputs = new Dictionary<string, string?>();
-        foreach (var tool in scopes.Tools)
+
+        // Map output keys from tool results to output type names expected by DocumentProfileFieldMapper
+        // These keys match the playbook outputMapping configuration
+        var outputKeyToTypeName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            // TODO: Extract outputs from tool results
-            // For now, use placeholder until tool handlers return structured outputs
-            // This will be fully implemented when tool handlers are updated to return output type → value mappings
+            ["tldr"] = "TL;DR",
+            ["summary"] = "Summary",
+            ["keywords"] = "Keywords",
+            ["documentType"] = "Document Type",
+            ["entities"] = "Entities"
+        };
+
+        _logger.LogInformation(
+            "Extracting structured outputs from {ToolCount} tool results for Document Profile storage",
+            executedToolResults.Count);
+
+        // Extract outputs from collected tool results
+        foreach (var toolResult in executedToolResults)
+        {
+            if (toolResult.Data is null)
+            {
+                _logger.LogDebug("Tool {ToolName} has no structured data", toolResult.ToolName);
+                continue;
+            }
+
+            _logger.LogDebug(
+                "Extracting outputs from tool {ToolName} with data: {Data}",
+                toolResult.ToolName,
+                toolResult.Data.Value.GetRawText());
+
+            // Parse the Data JSON and extract outputs based on tool handler type
+            try
+            {
+                using var dataDoc = JsonDocument.Parse(toolResult.Data.Value.GetRawText());
+                var root = dataDoc.RootElement;
+
+                // Map tool result structures to output type names based on handler ID
+                // EntityExtractorHandler → Entities output
+                if (toolResult.HandlerId.Equals("EntityExtractorHandler", StringComparison.OrdinalIgnoreCase))
+                {
+                    // EntityExtractionResult has "entities" array property
+                    if (root.TryGetProperty("entities", out var entitiesValue) ||
+                        root.TryGetProperty("Entities", out entitiesValue))
+                    {
+                        // Serialize entities array as JSON for storage
+                        var entitiesJson = JsonSerializer.Serialize(entitiesValue);
+                        structuredOutputs["Entities"] = entitiesJson;
+
+                        _logger.LogDebug(
+                            "Extracted Entities output from EntityExtractorHandler: {Length} characters",
+                            entitiesJson.Length);
+                    }
+                }
+                // SummaryHandler → TL;DR, Summary, Keywords outputs
+                else if (toolResult.HandlerId.Equals("SummaryHandler", StringComparison.OrdinalIgnoreCase))
+                {
+                    // SummaryResult has "fullText" property containing the complete summary
+                    if (root.TryGetProperty("fullText", out var fullTextValue) ||
+                        root.TryGetProperty("FullText", out fullTextValue))
+                    {
+                        var summaryText = fullTextValue.GetString();
+                        if (!string.IsNullOrWhiteSpace(summaryText))
+                        {
+                            // Extract TL;DR (first paragraph or first 1-2 sentences)
+                            var tldr = ExtractTldr(summaryText);
+                            if (!string.IsNullOrWhiteSpace(tldr))
+                            {
+                                structuredOutputs["TL;DR"] = tldr;
+                                _logger.LogDebug("Extracted TL;DR output: {Length} characters", tldr.Length);
+                            }
+
+                            // Use full summary text for Summary output
+                            structuredOutputs["Summary"] = summaryText;
+                            _logger.LogDebug("Extracted Summary output: {Length} characters", summaryText.Length);
+
+                            // Extract keywords from sections if available
+                            if (root.TryGetProperty("sections", out var sectionsValue) ||
+                                root.TryGetProperty("Sections", out sectionsValue))
+                            {
+                                var keywords = ExtractKeywordsFromSections(sectionsValue);
+                                if (!string.IsNullOrWhiteSpace(keywords))
+                                {
+                                    structuredOutputs["Keywords"] = keywords;
+                                    _logger.LogDebug("Extracted Keywords output: {Length} characters", keywords.Length);
+                                }
+                            }
+                        }
+                    }
+                }
+                // DocumentClassifierHandler → Document Type output
+                else if (toolResult.HandlerId.Equals("DocumentClassifierHandler", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Look for "documentType" or "classification" property
+                    if (root.TryGetProperty("documentType", out var docTypeValue) ||
+                        root.TryGetProperty("DocumentType", out docTypeValue) ||
+                        root.TryGetProperty("classification", out docTypeValue))
+                    {
+                        var docType = docTypeValue.ValueKind == JsonValueKind.String
+                            ? docTypeValue.GetString()
+                            : docTypeValue.ToString();
+
+                        if (!string.IsNullOrWhiteSpace(docType))
+                        {
+                            structuredOutputs["Document Type"] = docType;
+                            _logger.LogDebug("Extracted Document Type output: {DocumentType}", docType);
+                        }
+                    }
+                }
+                // Generic fallback: Try to find output keys directly in the data
+                else
+                {
+                    foreach (var (outputKey, outputTypeName) in outputKeyToTypeName)
+                    {
+                        if (root.TryGetProperty(outputKey, out var outputValue))
+                        {
+                            string? outputText = null;
+
+                            if (outputValue.ValueKind == JsonValueKind.String)
+                            {
+                                outputText = outputValue.GetString();
+                            }
+                            else if (outputValue.ValueKind == JsonValueKind.Array ||
+                                     outputValue.ValueKind == JsonValueKind.Object)
+                            {
+                                outputText = JsonSerializer.Serialize(outputValue);
+                            }
+                            else
+                            {
+                                outputText = outputValue.ToString();
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(outputText))
+                            {
+                                structuredOutputs[outputTypeName] = outputText;
+                                _logger.LogDebug(
+                                    "Extracted output: {OutputType} = {Length} characters",
+                                    outputTypeName,
+                                    outputText.Length);
+                            }
+                        }
+                    }
+                }
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogWarning(ex,
+                    "Failed to parse tool data for {ToolName}. Skipping output extraction.",
+                    toolResult.ToolName);
+            }
         }
+
+        _logger.LogInformation(
+            "Extracted {OutputCount} structured outputs for Document Profile storage: {OutputTypes}",
+            structuredOutputs.Count,
+            string.Join(", ", structuredOutputs.Keys));
 
         // Store in Dataverse if we have outputs
         DocumentProfileResult? storageResult = null;
@@ -1391,6 +1544,120 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             new TokenUsage(totalInputTokens, totalOutputTokens),
             partialStorage: storageResult?.PartialStorage,
             storageMessage: storageResult?.PartialStorage == true ? storageResult.Message : null);
+    }
+
+    /// <summary>
+    /// Extract TL;DR (ultra-concise summary) from full summary text.
+    /// Takes the first 1-2 sentences or first paragraph.
+    /// </summary>
+    private static string ExtractTldr(string summaryText)
+    {
+        if (string.IsNullOrWhiteSpace(summaryText))
+            return string.Empty;
+
+        // Try to find an "Executive Summary" section
+        var execSummaryMatch = System.Text.RegularExpressions.Regex.Match(
+            summaryText,
+            @"(?:##?\s*(?:Executive\s+)?Summary[\s:]*\n)(.*?)(?=\n##|\z)",
+            System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        string textToExtract;
+        if (execSummaryMatch.Success && execSummaryMatch.Groups[1].Value.Trim().Length > 0)
+        {
+            textToExtract = execSummaryMatch.Groups[1].Value.Trim();
+        }
+        else
+        {
+            // No executive summary section - use first paragraph
+            var firstParagraph = summaryText.Split(new[] { "\n\n", "\r\n\r\n" }, StringSplitOptions.RemoveEmptyEntries)
+                .FirstOrDefault()?.Trim();
+            textToExtract = firstParagraph ?? summaryText;
+        }
+
+        // Extract first 1-2 sentences (up to 200 chars for brevity)
+        var sentences = System.Text.RegularExpressions.Regex.Split(textToExtract, @"(?<=[.!?])\s+");
+        var tldr = new StringBuilder();
+        var charCount = 0;
+
+        foreach (var sentence in sentences.Take(2))
+        {
+            if (charCount + sentence.Length > 200 && tldr.Length > 0)
+                break;
+
+            tldr.Append(sentence);
+            if (!sentence.EndsWith(" "))
+                tldr.Append(" ");
+            charCount += sentence.Length;
+        }
+
+        return tldr.ToString().Trim();
+    }
+
+    /// <summary>
+    /// Extract keywords from summary sections.
+    /// Looks for "Key Terms" or similar sections and extracts terms.
+    /// </summary>
+    private static string ExtractKeywordsFromSections(JsonElement sectionsElement)
+    {
+        if (sectionsElement.ValueKind != JsonValueKind.Object)
+            return string.Empty;
+
+        // Try to find "Key Terms" section
+        if (sectionsElement.TryGetProperty("Key Terms", out var keyTermsSection) ||
+            sectionsElement.TryGetProperty("key_terms", out keyTermsSection))
+        {
+            var keyTermsText = keyTermsSection.GetString();
+            if (!string.IsNullOrWhiteSpace(keyTermsText))
+            {
+                // Extract terms from bullet points
+                var terms = System.Text.RegularExpressions.Regex.Matches(
+                    keyTermsText,
+                    @"^[\s-•*]+(.+?)(?::|$)",
+                    System.Text.RegularExpressions.RegexOptions.Multiline);
+
+                if (terms.Count > 0)
+                {
+                    var keywords = terms.Cast<System.Text.RegularExpressions.Match>()
+                        .Select(m => m.Groups[1].Value.Trim())
+                        .Where(t => !string.IsNullOrWhiteSpace(t))
+                        .Take(20); // Limit to 20 keywords
+
+                    return string.Join(", ", keywords);
+                }
+            }
+        }
+
+        // Fallback: Extract first few words from notable sections
+        var allSections = new List<string>();
+        foreach (var property in sectionsElement.EnumerateObject())
+        {
+            if (property.Value.ValueKind == JsonValueKind.String)
+            {
+                var sectionText = property.Value.GetString();
+                if (!string.IsNullOrWhiteSpace(sectionText) && sectionText.Length > 20)
+                {
+                    allSections.Add(sectionText);
+                }
+            }
+        }
+
+        if (allSections.Count > 0)
+        {
+            // Extract important-looking words (capitalized, longer than 4 chars)
+            var combinedText = string.Join(" ", allSections);
+            var words = System.Text.RegularExpressions.Regex.Matches(
+                combinedText,
+                @"\b[A-Z][a-z]{4,}\b");
+
+            var keywords = words.Cast<System.Text.RegularExpressions.Match>()
+                .Select(m => m.Value)
+                .Distinct()
+                .Take(15);
+
+            return string.Join(", ", keywords);
+        }
+
+        return string.Empty;
     }
 }
 
