@@ -133,6 +133,7 @@ public class AnalysisAuthorizationFilterTests
             .Setup(x => x.AuthorizeAsync(
                 It.IsAny<ClaimsPrincipal>(),
                 It.Is<IReadOnlyList<Guid>>(ids => ids.Contains(documentId)),
+                It.IsAny<HttpContext>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(AllowedResult(documentId));
 
@@ -144,6 +145,7 @@ public class AnalysisAuthorizationFilterTests
         _authServiceMock.Verify(x => x.AuthorizeAsync(
             It.IsAny<ClaimsPrincipal>(),
             It.IsAny<IReadOnlyList<Guid>>(),
+            It.IsAny<HttpContext>(),
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -160,6 +162,7 @@ public class AnalysisAuthorizationFilterTests
             .Setup(x => x.AuthorizeAsync(
                 It.IsAny<ClaimsPrincipal>(),
                 It.IsAny<IReadOnlyList<Guid>>(),
+                It.IsAny<HttpContext>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(DeniedResult());
 
@@ -203,6 +206,7 @@ public class AnalysisAuthorizationFilterTests
             .Setup(x => x.AuthorizeAsync(
                 It.IsAny<ClaimsPrincipal>(),
                 It.IsAny<IReadOnlyList<Guid>>(),
+                It.IsAny<HttpContext>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(AllowedResult(docId1, docId2));
 
@@ -214,6 +218,7 @@ public class AnalysisAuthorizationFilterTests
         _authServiceMock.Verify(x => x.AuthorizeAsync(
             It.IsAny<ClaimsPrincipal>(),
             It.Is<IReadOnlyList<Guid>>(ids => ids.Count == 2),
+            It.IsAny<HttpContext>(),
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -232,6 +237,7 @@ public class AnalysisAuthorizationFilterTests
             .Setup(x => x.AuthorizeAsync(
                 It.IsAny<ClaimsPrincipal>(),
                 It.IsAny<IReadOnlyList<Guid>>(),
+                It.IsAny<HttpContext>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(AuthorizationResult.Partial(new[] { docId1 }, "Access denied to some documents"));
 
@@ -257,6 +263,7 @@ public class AnalysisAuthorizationFilterTests
             .Setup(x => x.AuthorizeAsync(
                 It.IsAny<ClaimsPrincipal>(),
                 It.IsAny<IReadOnlyList<Guid>>(),
+                It.IsAny<HttpContext>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(AllowedResult(documentId));
 
@@ -269,6 +276,7 @@ public class AnalysisAuthorizationFilterTests
         _authServiceMock.Verify(x => x.AuthorizeAsync(
             It.IsAny<ClaimsPrincipal>(),
             It.Is<IReadOnlyList<Guid>>(ids => ids.Count == 1),
+            It.IsAny<HttpContext>(),
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -284,6 +292,7 @@ public class AnalysisAuthorizationFilterTests
             .Setup(x => x.AuthorizeAsync(
                 It.IsAny<ClaimsPrincipal>(),
                 It.Is<IReadOnlyList<Guid>>(ids => ids.Contains(documentId)),
+                It.IsAny<HttpContext>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(AllowedResult(documentId));
 
@@ -395,6 +404,7 @@ public class AnalysisAuthorizationFilterTests
             .Setup(x => x.AuthorizeAsync(
                 It.IsAny<ClaimsPrincipal>(),
                 It.IsAny<IReadOnlyList<Guid>>(),
+                It.IsAny<HttpContext>(),
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Database error"));
 

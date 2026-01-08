@@ -52,6 +52,13 @@ public class AiAuthorizationServiceTests
         return new ClaimsPrincipal(new ClaimsIdentity());
     }
 
+    private static Microsoft.AspNetCore.Http.HttpContext CreateMockHttpContext()
+    {
+        var context = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        context.Request.Headers["Authorization"] = "Bearer mock-token";
+        return context;
+    }
+
     private static AccessSnapshot CreateAccessSnapshot(
         string userId,
         string resourceId,
@@ -101,11 +108,11 @@ public class AiAuthorizationServiceTests
         var user = CreateUser(userId);
 
         _accessDataSourceMock
-            .Setup(x => x.GetUserAccessAsync(userId, documentId.ToString(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetUserAccessAsync(userId, documentId.ToString(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateAccessSnapshot(userId, documentId.ToString(), AccessRights.Read));
 
         // Act
-        var result = await _service.AuthorizeAsync(user, new[] { documentId });
+        var result = await _service.AuthorizeAsync(user, new[] { documentId }, CreateMockHttpContext());
 
         // Assert
         result.Success.Should().BeTrue();
@@ -124,12 +131,12 @@ public class AiAuthorizationServiceTests
         var user = CreateUser(userId);
 
         _accessDataSourceMock
-            .Setup(x => x.GetUserAccessAsync(userId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetUserAccessAsync(userId, It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string uid, string rid, CancellationToken _) =>
                 CreateAccessSnapshot(uid, rid, AccessRights.Read));
 
         // Act
-        var result = await _service.AuthorizeAsync(user, new[] { docId1, docId2, docId3 });
+        var result = await _service.AuthorizeAsync(user, new[] { docId1, docId2, docId3 }, CreateMockHttpContext());
 
         // Assert
         result.Success.Should().BeTrue();
@@ -146,11 +153,11 @@ public class AiAuthorizationServiceTests
         var user = CreateUser(userId);
 
         _accessDataSourceMock
-            .Setup(x => x.GetUserAccessAsync(userId, documentId.ToString(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetUserAccessAsync(userId, documentId.ToString(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateAccessSnapshot(userId, documentId.ToString(), AccessRights.Read | AccessRights.Write));
 
         // Act
-        var result = await _service.AuthorizeAsync(user, new[] { documentId });
+        var result = await _service.AuthorizeAsync(user, new[] { documentId }, CreateMockHttpContext());
 
         // Assert
         result.Success.Should().BeTrue();
@@ -165,11 +172,11 @@ public class AiAuthorizationServiceTests
         var user = CreateUserWithNameIdentifier(userId);
 
         _accessDataSourceMock
-            .Setup(x => x.GetUserAccessAsync(userId, documentId.ToString(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetUserAccessAsync(userId, documentId.ToString(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateAccessSnapshot(userId, documentId.ToString(), AccessRights.Read));
 
         // Act
-        var result = await _service.AuthorizeAsync(user, new[] { documentId });
+        var result = await _service.AuthorizeAsync(user, new[] { documentId }, CreateMockHttpContext());
 
         // Assert
         result.Success.Should().BeTrue();
@@ -187,7 +194,7 @@ public class AiAuthorizationServiceTests
         var user = CreateAnonymousUser();
 
         // Act
-        var result = await _service.AuthorizeAsync(user, new[] { documentId });
+        var result = await _service.AuthorizeAsync(user, new[] { documentId }, CreateMockHttpContext());
 
         // Assert
         result.Success.Should().BeFalse();
@@ -204,11 +211,11 @@ public class AiAuthorizationServiceTests
         var user = CreateUser(userId);
 
         _accessDataSourceMock
-            .Setup(x => x.GetUserAccessAsync(userId, documentId.ToString(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetUserAccessAsync(userId, documentId.ToString(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateAccessSnapshot(userId, documentId.ToString(), AccessRights.None));
 
         // Act
-        var result = await _service.AuthorizeAsync(user, new[] { documentId });
+        var result = await _service.AuthorizeAsync(user, new[] { documentId }, CreateMockHttpContext());
 
         // Assert
         result.Success.Should().BeFalse();
@@ -225,11 +232,11 @@ public class AiAuthorizationServiceTests
         var user = CreateUser(userId);
 
         _accessDataSourceMock
-            .Setup(x => x.GetUserAccessAsync(userId, documentId.ToString(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetUserAccessAsync(userId, documentId.ToString(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateAccessSnapshot(userId, documentId.ToString(), AccessRights.Write));
 
         // Act
-        var result = await _service.AuthorizeAsync(user, new[] { documentId });
+        var result = await _service.AuthorizeAsync(user, new[] { documentId }, CreateMockHttpContext());
 
         // Assert
         result.Success.Should().BeFalse();
@@ -246,12 +253,12 @@ public class AiAuthorizationServiceTests
         var user = CreateUser(userId);
 
         _accessDataSourceMock
-            .Setup(x => x.GetUserAccessAsync(userId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetUserAccessAsync(userId, It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string uid, string rid, CancellationToken _) =>
                 CreateAccessSnapshot(uid, rid, AccessRights.None));
 
         // Act
-        var result = await _service.AuthorizeAsync(user, new[] { docId1, docId2 });
+        var result = await _service.AuthorizeAsync(user, new[] { docId1, docId2 }, CreateMockHttpContext());
 
         // Assert
         result.Success.Should().BeFalse();
@@ -272,15 +279,15 @@ public class AiAuthorizationServiceTests
         var user = CreateUser(userId);
 
         _accessDataSourceMock
-            .Setup(x => x.GetUserAccessAsync(userId, authorizedDocId.ToString(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetUserAccessAsync(userId, authorizedDocId.ToString(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateAccessSnapshot(userId, authorizedDocId.ToString(), AccessRights.Read));
 
         _accessDataSourceMock
-            .Setup(x => x.GetUserAccessAsync(userId, deniedDocId.ToString(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetUserAccessAsync(userId, deniedDocId.ToString(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateAccessSnapshot(userId, deniedDocId.ToString(), AccessRights.None));
 
         // Act
-        var result = await _service.AuthorizeAsync(user, new[] { authorizedDocId, deniedDocId });
+        var result = await _service.AuthorizeAsync(user, new[] { authorizedDocId, deniedDocId }, CreateMockHttpContext());
 
         // Assert
         result.Success.Should().BeFalse();
@@ -300,20 +307,20 @@ public class AiAuthorizationServiceTests
         var user = CreateUser(userId);
 
         _accessDataSourceMock
-            .Setup(x => x.GetUserAccessAsync(userId, docId1.ToString(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetUserAccessAsync(userId, docId1.ToString(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateAccessSnapshot(userId, docId1.ToString(), AccessRights.Read));
         _accessDataSourceMock
-            .Setup(x => x.GetUserAccessAsync(userId, docId2.ToString(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetUserAccessAsync(userId, docId2.ToString(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateAccessSnapshot(userId, docId2.ToString(), AccessRights.None));
         _accessDataSourceMock
-            .Setup(x => x.GetUserAccessAsync(userId, docId3.ToString(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetUserAccessAsync(userId, docId3.ToString(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateAccessSnapshot(userId, docId3.ToString(), AccessRights.Read | AccessRights.Write));
         _accessDataSourceMock
-            .Setup(x => x.GetUserAccessAsync(userId, docId4.ToString(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetUserAccessAsync(userId, docId4.ToString(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateAccessSnapshot(userId, docId4.ToString(), AccessRights.Write));
 
         // Act
-        var result = await _service.AuthorizeAsync(user, new[] { docId1, docId2, docId3, docId4 });
+        var result = await _service.AuthorizeAsync(user, new[] { docId1, docId2, docId3, docId4 }, CreateMockHttpContext());
 
         // Assert
         result.Success.Should().BeFalse();
@@ -337,11 +344,11 @@ public class AiAuthorizationServiceTests
         var user = CreateUser(userId);
 
         _accessDataSourceMock
-            .Setup(x => x.GetUserAccessAsync(userId, documentId.ToString(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetUserAccessAsync(userId, documentId.ToString(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Database connection failed"));
 
         // Act
-        var result = await _service.AuthorizeAsync(user, new[] { documentId });
+        var result = await _service.AuthorizeAsync(user, new[] { documentId }, CreateMockHttpContext());
 
         // Assert - Fail-closed security: errors result in denial
         result.Success.Should().BeFalse();
@@ -358,15 +365,15 @@ public class AiAuthorizationServiceTests
         var user = CreateUser(userId);
 
         _accessDataSourceMock
-            .Setup(x => x.GetUserAccessAsync(userId, successDocId.ToString(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetUserAccessAsync(userId, successDocId.ToString(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateAccessSnapshot(userId, successDocId.ToString(), AccessRights.Read));
 
         _accessDataSourceMock
-            .Setup(x => x.GetUserAccessAsync(userId, failDocId.ToString(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetUserAccessAsync(userId, failDocId.ToString(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Document not found"));
 
         // Act
-        var result = await _service.AuthorizeAsync(user, new[] { successDocId, failDocId });
+        var result = await _service.AuthorizeAsync(user, new[] { successDocId, failDocId }, CreateMockHttpContext());
 
         // Assert - Failed document should be denied, successful one should be authorized
         result.Success.Should().BeFalse();
@@ -384,7 +391,7 @@ public class AiAuthorizationServiceTests
         var documentId = Guid.NewGuid();
 
         // Act & Assert
-        var act = () => _service.AuthorizeAsync(null!, new[] { documentId });
+        var act = () => _service.AuthorizeAsync(null!, new[] { documentId }, CreateMockHttpContext());
         await act.Should().ThrowAsync<ArgumentNullException>()
             .WithParameterName("user");
     }
@@ -396,7 +403,7 @@ public class AiAuthorizationServiceTests
         var user = CreateUser();
 
         // Act & Assert
-        var act = () => _service.AuthorizeAsync(user, null!);
+        var act = () => _service.AuthorizeAsync(user, null!, CreateMockHttpContext());
         await act.Should().ThrowAsync<ArgumentNullException>()
             .WithParameterName("documentIds");
     }
@@ -408,7 +415,7 @@ public class AiAuthorizationServiceTests
         var user = CreateUser();
 
         // Act & Assert
-        var act = () => _service.AuthorizeAsync(user, Array.Empty<Guid>());
+        var act = () => _service.AuthorizeAsync(user, Array.Empty<Guid>(), CreateMockHttpContext());
         await act.Should().ThrowAsync<ArgumentException>()
             .WithParameterName("documentIds");
     }
@@ -426,11 +433,11 @@ public class AiAuthorizationServiceTests
         var user = CreateUser(userId);
 
         _accessDataSourceMock
-            .Setup(x => x.GetUserAccessAsync(userId, documentId.ToString(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetUserAccessAsync(userId, documentId.ToString(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new OperationCanceledException());
 
         // Act
-        var result = await _service.AuthorizeAsync(user, new[] { documentId });
+        var result = await _service.AuthorizeAsync(user, new[] { documentId }, CreateMockHttpContext());
 
         // Assert - fail-closed: exception causes denied result, not propagation
         result.Success.Should().BeFalse();
@@ -455,16 +462,16 @@ public class AiAuthorizationServiceTests
         var user = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
 
         _accessDataSourceMock
-            .Setup(x => x.GetUserAccessAsync(userId, documentId.ToString(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetUserAccessAsync(userId, documentId.ToString(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateAccessSnapshot(userId, documentId.ToString(), AccessRights.Read));
 
         // Act
-        var result = await _service.AuthorizeAsync(user, new[] { documentId });
+        var result = await _service.AuthorizeAsync(user, new[] { documentId }, CreateMockHttpContext());
 
         // Assert
         result.Success.Should().BeTrue();
         _accessDataSourceMock.Verify(
-            x => x.GetUserAccessAsync(userId, documentId.ToString(), It.IsAny<CancellationToken>()),
+            x => x.GetUserAccessAsync(userId, documentId.ToString(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -481,11 +488,11 @@ public class AiAuthorizationServiceTests
         var user = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
 
         _accessDataSourceMock
-            .Setup(x => x.GetUserAccessAsync(userId, documentId.ToString(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetUserAccessAsync(userId, documentId.ToString(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateAccessSnapshot(userId, documentId.ToString(), AccessRights.Read));
 
         // Act
-        var result = await _service.AuthorizeAsync(user, new[] { documentId });
+        var result = await _service.AuthorizeAsync(user, new[] { documentId }, CreateMockHttpContext());
 
         // Assert
         result.Success.Should().BeTrue();

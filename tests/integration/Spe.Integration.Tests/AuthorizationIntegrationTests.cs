@@ -280,7 +280,7 @@ internal class MockAccessDataSource : IAccessDataSource
         _expectedUserId = expectedUserId;
     }
 
-    public Task<AccessSnapshot> GetUserAccessAsync(string userId, string resourceId, CancellationToken ct = default)
+    public Task<AccessSnapshot> GetUserAccessAsync(string userId, string resourceId, string? userAccessToken = null, CancellationToken ct = default)
     {
         // If expectedUserId is set, validate it matches
         if (_expectedUserId != null && userId != _expectedUserId)
