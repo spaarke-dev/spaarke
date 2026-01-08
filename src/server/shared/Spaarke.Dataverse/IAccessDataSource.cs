@@ -1,8 +1,33 @@
 namespace Spaarke.Dataverse;
 
+/// <summary>
+/// Data source for querying user access permissions.
+/// Abstraction over authorization backends (Dataverse, SPE, Azure AD, etc.).
+/// </summary>
 public interface IAccessDataSource
 {
-    Task<AccessSnapshot> GetUserAccessAsync(string userId, string resourceId, CancellationToken ct = default);
+    /// <summary>
+    /// Gets user access permissions for a specific resource.
+    /// </summary>
+    /// <param name="userId">Azure AD Object ID (oid claim) of the user</param>
+    /// <param name="resourceId">ID of the resource (e.g., document GUID)</param>
+    /// <param name="userAccessToken">Optional user bearer token for OBO authentication. If null, uses service principal (app-only) authentication.</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>AccessSnapshot with user's permissions</returns>
+    /// <remarks>
+    /// When userAccessToken is provided, the implementation should use On-Behalf-Of (OBO) flow
+    /// to call the authorization backend as the user. This ensures permissions reflect the actual
+    /// user's access, not the service principal's access.
+    ///
+    /// When userAccessToken is null, the implementation should use service principal (app-only)
+    /// authentication. This is appropriate for background jobs, admin operations, or scenarios
+    /// where no user context is available.
+    /// </remarks>
+    Task<AccessSnapshot> GetUserAccessAsync(
+        string userId,
+        string resourceId,
+        string? userAccessToken = null,
+        CancellationToken ct = default);
 }
 
 /// <summary>

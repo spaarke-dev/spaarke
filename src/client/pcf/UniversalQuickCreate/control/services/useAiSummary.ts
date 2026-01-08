@@ -76,6 +76,12 @@ export interface DocumentSummaryState {
     documentType?: string;
     /** Whether structured parsing was successful */
     parsedSuccessfully?: boolean;
+    /** Analysis ID from Dataverse (available after completion) */
+    analysisId?: string;
+    /** Whether storage partially succeeded (outputs saved but field mapping failed) */
+    partialStorage?: boolean;
+    /** User-friendly message about storage result */
+    storageMessage?: string;
 }
 
 /**
@@ -177,6 +183,12 @@ interface SseChunk {
     result?: DocumentAnalysisResult;
     /** Error message (for type="error") */
     error?: string;
+    /** Analysis ID from Dataverse */
+    analysisId?: string;
+    /** Whether storage partially succeeded (soft failure) */
+    partialStorage?: boolean;
+    /** User-friendly message about storage result */
+    storageMessage?: string;
 }
 
 /**
@@ -257,31 +269,66 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
         updateDocument(documentId, { status: 'streaming', summary: '', error: undefined });
 
         let accumulatedSummary = '';
-        // Updated endpoint: /api/ai/document-intelligence/analyze
-        const streamUrl = `${apiBaseUrl}/ai/document-intelligence/analyze`;
-        console.log('[useAiSummary] Fetching:', streamUrl);
+
+        // Helper function to get token headers
+        const getAuthHeaders = async (): Promise<Record<string, string>> => {
+            if (!getToken) return {};
+            try {
+                const token = await getToken();
+                console.log('[useAiSummary] Token acquired successfully');
+                return { 'Authorization': `Bearer ${token}` };
+            } catch (tokenError) {
+                console.error('[useAiSummary] Failed to acquire token:', tokenError);
+                throw new Error('Failed to acquire authentication token');
+            }
+        };
 
         try {
-            // Acquire token dynamically before each request
-            let token: string | undefined;
-            if (getToken) {
-                try {
-                    token = await getToken();
-                    console.log('[useAiSummary] Token acquired successfully');
-                } catch (tokenError) {
-                    console.error('[useAiSummary] Failed to acquire token:', tokenError);
-                    throw new Error('Failed to acquire authentication token');
+            // Step 1: Resolve Document Profile playbook
+            let playbookId: string;
+            try {
+                const playbookUrl = `${apiBaseUrl}/ai/playbooks/by-name/Document%20Profile`;
+                const authHeaders = await getAuthHeaders();
+                const playbookResponse = await fetch(playbookUrl, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json',
+                        ...authHeaders
+                    },
+                    signal: abortController.signal
+                });
+
+                if (!playbookResponse.ok) {
+                    throw new Error(`Failed to resolve playbook: HTTP ${playbookResponse.status}`);
                 }
+
+                const playbook = await playbookResponse.json();
+                playbookId = playbook.playbookId || playbook.id;
+                console.log('[useAiSummary] Resolved Document Profile playbook:', playbookId);
+            } catch (playbookError) {
+                console.error('[useAiSummary] Failed to resolve playbook:', playbookError);
+                throw new Error('Failed to resolve Document Profile playbook');
             }
+
+            // Step 2: Execute analysis with new unified endpoint
+            const streamUrl = `${apiBaseUrl}/ai/analysis/execute`;
+            console.log('[useAiSummary] Fetching:', streamUrl);
+
+            const authHeaders = await getAuthHeaders();
 
             const response = await fetch(streamUrl, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Accept': 'text/event-stream',
-                    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+                    ...authHeaders
                 },
-                body: JSON.stringify({ documentId, driveId, itemId }),
+                body: JSON.stringify({
+                    documentIds: [documentId],  // Array for multi-document support
+                    playbookId: playbookId,
+                    actionId: null,  // Use playbook's default action
+                    additionalContext: null
+                }),
                 signal: abortController.signal
             });
 
@@ -323,26 +370,33 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
                                 throw new Error(chunk.error || 'Unknown error');
                             }
 
-                            // Handle complete event with structured result
-                            if (chunk.type === 'complete' || chunk.done) {
-                                const result = chunk.result;
+                            // Handle metadata event (analysisId, documentName)
+                            if (chunk.type === 'metadata') {
+                                if (chunk.analysisId) {
+                                    updateDocument(documentId, { analysisId: chunk.analysisId });
+                                    console.log('[useAiSummary] Analysis ID:', chunk.analysisId);
+                                }
+                                continue;
+                            }
+
+                            // Handle done event (analysis complete)
+                            if (chunk.type === 'done' || chunk.done) {
                                 const updates: Partial<DocumentSummaryState> = {
                                     status: 'complete',
-                                    summary: result?.summary || chunk.summary || accumulatedSummary
+                                    summary: accumulatedSummary
                                 };
 
-                                // Add structured data if available
-                                if (result) {
-                                    updates.tldr = result.tldr;
-                                    updates.keywords = result.keywords;
-                                    updates.entities = result.entities;
-                                    updates.documentType = result.entities?.documentType;
-                                    updates.parsedSuccessfully = result.parsedSuccessfully;
+                                // Add analysis metadata
+                                if (chunk.analysisId) {
+                                    updates.analysisId = chunk.analysisId;
+                                }
 
-                                    // Call new analysis complete callback
-                                    if (onAnalysisComplete) {
-                                        onAnalysisComplete(documentId, result);
-                                    }
+                                // Add storage result metadata (soft failure handling)
+                                if (chunk.partialStorage !== undefined) {
+                                    updates.partialStorage = chunk.partialStorage;
+                                }
+                                if (chunk.storageMessage) {
+                                    updates.storageMessage = chunk.storageMessage;
                                 }
 
                                 // Legacy callback for backward compatibility
@@ -352,11 +406,16 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
 
                                 updateDocument(documentId, updates);
                                 activeStreamsRef.current.delete(documentId);
+                                console.log('[useAiSummary] Analysis complete:', {
+                                    analysisId: chunk.analysisId,
+                                    partialStorage: chunk.partialStorage,
+                                    storageMessage: chunk.storageMessage
+                                });
                                 return;
                             }
 
-                            // Handle streaming text content
-                            if (chunk.type === 'text' || chunk.content) {
+                            // Handle streaming text content (type="chunk")
+                            if (chunk.type === 'chunk' || chunk.content) {
                                 accumulatedSummary += chunk.content || '';
                                 updateDocument(documentId, { summary: accumulatedSummary });
                             }
@@ -416,7 +475,10 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
             keywords: undefined,
             entities: undefined,
             documentType: undefined,
-            parsedSuccessfully: undefined
+            parsedSuccessfully: undefined,
+            analysisId: undefined,
+            partialStorage: undefined,
+            storageMessage: undefined
         }));
 
         setDocuments(prev => [...prev, ...newStates]);
@@ -454,7 +516,10 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
             keywords: undefined,
             entities: undefined,
             documentType: undefined,
-            parsedSuccessfully: undefined
+            parsedSuccessfully: undefined,
+            analysisId: undefined,
+            partialStorage: undefined,
+            storageMessage: undefined
         });
 
         // Add back to queue
@@ -464,55 +529,15 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
 
     /**
      * Enqueue incomplete summaries for background processing
+     * @deprecated Background AI analysis has been removed. AI analysis now requires user context (OBO authentication).
+     * This method is a no-op and exists only for backward compatibility.
      */
     const enqueueIncomplete = useCallback(async () => {
-        const incompleteIds = documents
-            .filter(d => d.status !== 'complete' && d.status !== 'skipped' && d.status !== 'not-supported')
-            .map(d => d.documentId);
-
-        if (incompleteIds.length === 0) return;
-
-        // Get document details
-        const incompleteDocuments = incompleteIds
-            .map(id => documentMapRef.current.get(id))
-            .filter((doc): doc is SummaryDocument => doc !== undefined);
-
-        if (incompleteDocuments.length === 0) return;
-
-        try {
-            // Acquire token dynamically
-            let token: string | undefined;
-            if (getToken) {
-                try {
-                    token = await getToken();
-                } catch (tokenError) {
-                    console.error('[useAiSummary] Failed to acquire token for enqueue:', tokenError);
-                }
-            }
-
-            // Updated endpoint: /api/ai/document-intelligence/enqueue-batch
-            const response = await fetch(`${apiBaseUrl}/ai/document-intelligence/enqueue-batch`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-                },
-                body: JSON.stringify({
-                    documents: incompleteDocuments.map(doc => ({
-                        documentId: doc.documentId,
-                        driveId: doc.driveId,
-                        itemId: doc.itemId
-                    }))
-                })
-            });
-
-            if (!response.ok) {
-                console.error('Failed to enqueue incomplete summaries');
-            }
-        } catch (error) {
-            console.error('Error enqueueing incomplete summaries:', error);
-        }
-    }, [documents, apiBaseUrl, getToken]);
+        console.warn('[useAiSummary] enqueueIncomplete is deprecated. Background AI analysis has been removed. Users must trigger analysis manually.');
+        // No-op: Background job processing has been removed per ARCHITECTURE-CHANGES.md
+        // The DocumentIntelligenceService and enqueue-batch endpoint no longer exist
+        // AI analysis now requires user context (OBO authentication) and cannot run as background job
+    }, []);
 
     /**
      * Clear all documents

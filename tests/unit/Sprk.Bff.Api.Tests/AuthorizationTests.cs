@@ -99,7 +99,7 @@ public class AuthorizationTests
             _userAccess[$"{userId}:{resourceId}"] = rights;
         }
 
-        public Task<AccessSnapshot> GetUserAccessAsync(string userId, string resourceId, CancellationToken ct = default)
+        public Task<AccessSnapshot> GetUserAccessAsync(string userId, string resourceId, string? userAccessToken = null, CancellationToken ct = default)
         {
             var key = $"{userId}:{resourceId}";
             var rights = _userAccess.TryGetValue(key, out var value) ? value : AccessRights.None;

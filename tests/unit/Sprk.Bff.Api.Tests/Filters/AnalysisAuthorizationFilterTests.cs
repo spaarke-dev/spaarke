@@ -4,10 +4,11 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.Logging;
 using Moq;
-using Spaarke.Core.Auth;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Services.Ai;
 using Xunit;
+using AuthorizationResult = Sprk.Bff.Api.Services.Ai.AuthorizationResult;
 
 namespace Sprk.Bff.Api.Tests.Filters;
 
@@ -16,31 +17,23 @@ namespace Sprk.Bff.Api.Tests.Filters;
 /// </summary>
 public class AnalysisAuthorizationFilterTests
 {
-    private readonly Mock<IAuthorizationService> _authServiceMock;
+    private readonly Mock<IAiAuthorizationService> _authServiceMock;
     private readonly Mock<ILogger<AnalysisAuthorizationFilter>> _loggerMock;
 
     public AnalysisAuthorizationFilterTests()
     {
-        _authServiceMock = new Mock<IAuthorizationService>(MockBehavior.Strict);
+        _authServiceMock = new Mock<IAiAuthorizationService>();
         _loggerMock = new Mock<ILogger<AnalysisAuthorizationFilter>>();
     }
 
     private AnalysisAuthorizationFilter CreateFilter(AuthorizationMode mode) =>
         new(_authServiceMock.Object, _loggerMock.Object, mode);
 
-    private static AuthorizationResult AllowedResult() => new()
-    {
-        IsAllowed = true,
-        ReasonCode = "ALLOWED",
-        RuleName = "TestRule"
-    };
+    private static AuthorizationResult AllowedResult(params Guid[] documentIds) =>
+        AuthorizationResult.Authorized(documentIds.Length > 0 ? documentIds : new[] { Guid.NewGuid() });
 
-    private static AuthorizationResult DeniedResult(string reasonCode = "NO_ACCESS") => new()
-    {
-        IsAllowed = false,
-        ReasonCode = reasonCode,
-        RuleName = "TestRule"
-    };
+    private static AuthorizationResult DeniedResult(string reason = "NO_ACCESS") =>
+        AuthorizationResult.Denied(reason);
 
     private static ClaimsPrincipal CreateUser(string userId = "user-123")
     {
@@ -137,17 +130,23 @@ public class AnalysisAuthorizationFilterTests
         var context = CreateContext(CreateUser(), arguments: request);
 
         _authServiceMock
-            .Setup(x => x.AuthorizeAsync(It.Is<AuthorizationContext>(c =>
-                c.ResourceId == documentId.ToString() &&
-                c.Operation == "read"), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AllowedResult());
+            .Setup(x => x.AuthorizeAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.Is<IReadOnlyList<Guid>>(ids => ids.Contains(documentId)),
+                It.IsAny<HttpContext>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AllowedResult(documentId));
 
         // Act
         var result = await filter.InvokeAsync(context.Object, NextDelegate);
 
         // Assert
         result.Should().BeOfType<Ok<string>>();
-        _authServiceMock.Verify(x => x.AuthorizeAsync(It.IsAny<AuthorizationContext>(), It.IsAny<CancellationToken>()), Times.Once);
+        _authServiceMock.Verify(x => x.AuthorizeAsync(
+            It.IsAny<ClaimsPrincipal>(),
+            It.IsAny<IReadOnlyList<Guid>>(),
+            It.IsAny<HttpContext>(),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -160,7 +159,11 @@ public class AnalysisAuthorizationFilterTests
         var context = CreateContext(CreateUser(), arguments: request);
 
         _authServiceMock
-            .Setup(x => x.AuthorizeAsync(It.IsAny<AuthorizationContext>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.AuthorizeAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.IsAny<IReadOnlyList<Guid>>(),
+                It.IsAny<HttpContext>(),
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(DeniedResult());
 
         // Act
@@ -200,19 +203,27 @@ public class AnalysisAuthorizationFilterTests
         var context = CreateContext(CreateUser(), arguments: request);
 
         _authServiceMock
-            .Setup(x => x.AuthorizeAsync(It.IsAny<AuthorizationContext>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AllowedResult());
+            .Setup(x => x.AuthorizeAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.IsAny<IReadOnlyList<Guid>>(),
+                It.IsAny<HttpContext>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AllowedResult(docId1, docId2));
 
         // Act
         var result = await filter.InvokeAsync(context.Object, NextDelegate);
 
         // Assert
         result.Should().BeOfType<Ok<string>>();
-        _authServiceMock.Verify(x => x.AuthorizeAsync(It.IsAny<AuthorizationContext>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+        _authServiceMock.Verify(x => x.AuthorizeAsync(
+            It.IsAny<ClaimsPrincipal>(),
+            It.Is<IReadOnlyList<Guid>>(ids => ids.Count == 2),
+            It.IsAny<HttpContext>(),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task DocumentAccess_MultipleDocumentsPartialAccess_Returns403OnFirst()
+    public async Task DocumentAccess_MultipleDocumentsPartialAccess_Returns403()
     {
         // Arrange
         var filter = CreateFilter(AuthorizationMode.DocumentAccess);
@@ -221,10 +232,14 @@ public class AnalysisAuthorizationFilterTests
         var request = new AnalysisExecuteRequest { DocumentIds = [docId1, docId2], ActionId = Guid.NewGuid() };
         var context = CreateContext(CreateUser(), arguments: request);
 
+        // Partial authorization - only docId1 is authorized
         _authServiceMock
-            .SetupSequence(x => x.AuthorizeAsync(It.IsAny<AuthorizationContext>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AllowedResult())
-            .ReturnsAsync(DeniedResult());
+            .Setup(x => x.AuthorizeAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.IsAny<IReadOnlyList<Guid>>(),
+                It.IsAny<HttpContext>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AuthorizationResult.Partial(new[] { docId1 }, "Access denied to some documents"));
 
         // Act
         var result = await filter.InvokeAsync(context.Object, NextDelegate);
@@ -236,7 +251,7 @@ public class AnalysisAuthorizationFilterTests
     }
 
     [Fact]
-    public async Task DocumentAccess_DuplicateDocuments_ChecksOnce()
+    public async Task DocumentAccess_DuplicateDocuments_DeduplicatesBeforeCheck()
     {
         // Arrange
         var filter = CreateFilter(AuthorizationMode.DocumentAccess);
@@ -245,15 +260,24 @@ public class AnalysisAuthorizationFilterTests
         var context = CreateContext(CreateUser(), arguments: request);
 
         _authServiceMock
-            .Setup(x => x.AuthorizeAsync(It.IsAny<AuthorizationContext>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AllowedResult());
+            .Setup(x => x.AuthorizeAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.IsAny<IReadOnlyList<Guid>>(),
+                It.IsAny<HttpContext>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AllowedResult(documentId));
 
         // Act
         var result = await filter.InvokeAsync(context.Object, NextDelegate);
 
         // Assert
         result.Should().BeOfType<Ok<string>>();
-        _authServiceMock.Verify(x => x.AuthorizeAsync(It.IsAny<AuthorizationContext>(), It.IsAny<CancellationToken>()), Times.Once);
+        // Service is called with deduplicated list (1 document instead of 2)
+        _authServiceMock.Verify(x => x.AuthorizeAsync(
+            It.IsAny<ClaimsPrincipal>(),
+            It.Is<IReadOnlyList<Guid>>(ids => ids.Count == 1),
+            It.IsAny<HttpContext>(),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -265,9 +289,12 @@ public class AnalysisAuthorizationFilterTests
         var context = CreateContext(CreateUser(), arguments: documentId);
 
         _authServiceMock
-            .Setup(x => x.AuthorizeAsync(It.Is<AuthorizationContext>(c =>
-                c.ResourceId == documentId.ToString()), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AllowedResult());
+            .Setup(x => x.AuthorizeAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.Is<IReadOnlyList<Guid>>(ids => ids.Contains(documentId)),
+                It.IsAny<HttpContext>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AllowedResult(documentId));
 
         // Act
         var result = await filter.InvokeAsync(context.Object, NextDelegate);
@@ -374,7 +401,11 @@ public class AnalysisAuthorizationFilterTests
         var context = CreateContext(CreateUser(), arguments: request);
 
         _authServiceMock
-            .Setup(x => x.AuthorizeAsync(It.IsAny<AuthorizationContext>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.AuthorizeAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.IsAny<IReadOnlyList<Guid>>(),
+                It.IsAny<HttpContext>(),
+                It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Database error"));
 
         // Act

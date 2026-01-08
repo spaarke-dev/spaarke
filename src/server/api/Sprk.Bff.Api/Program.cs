@@ -312,10 +312,7 @@ if (documentIntelligenceEnabled)
     builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.IOpenAiClient>(sp => sp.GetRequiredService<Sprk.Bff.Api.Services.Ai.OpenAiClient>());
     builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.TextExtractorService>();
     builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.ITextExtractor>(sp => sp.GetRequiredService<Sprk.Bff.Api.Services.Ai.TextExtractorService>());
-    // Scoped: DocumentIntelligenceService depends on SpeFileStore (scoped) for file downloads
-    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.DocumentIntelligenceService>();
-    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IDocumentIntelligenceService>(sp => sp.GetRequiredService<Sprk.Bff.Api.Services.Ai.DocumentIntelligenceService>());
-    Console.WriteLine("✓ Document Intelligence services enabled (model: {0})", builder.Configuration["DocumentIntelligence:SummarizeModel"] ?? "gpt-4o-mini");
+    Console.WriteLine("✓ Document Intelligence services enabled");
 }
 else
 {
@@ -461,10 +458,7 @@ builder.Services.AddSingleton<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>()
 // Register job handlers
 builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.DocumentProcessingJobHandler>();
 builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.EmailToDocumentJobHandler>();
-if (documentIntelligenceEnabled)
-{
-    builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.DocumentAnalysisJobHandler>();
-}
+// DocumentAnalysisJobHandler removed - background AI analysis is now triggered from PCF (requires user context)
 
 // Configure Service Bus job processing
 var serviceBusConnectionString = builder.Configuration.GetConnectionString("ServiceBus");
@@ -1046,22 +1040,17 @@ app.MapDocumentOperationsEndpoints();
 // Email-to-document conversion endpoints (Email-to-Document Automation project)
 app.MapEmailEndpoints();
 
-// Document Intelligence endpoints (only if enabled)
-if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled"))
+// Analysis endpoints (if enabled)
+if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
+    app.Configuration.GetValue<bool>("Analysis:Enabled", true))
 {
-    app.MapDocumentIntelligenceEndpoints();
-
-    // Analysis endpoints (requires Document Intelligence)
-    if (app.Configuration.GetValue<bool>("Analysis:Enabled", true))
-    {
-        app.MapAnalysisEndpoints();
-        app.MapPlaybookEndpoints();
-        app.MapScopeEndpoints();
-    }
-
-    // RAG endpoints for knowledge base operations (R3)
-    app.MapRagEndpoints();
+    app.MapAnalysisEndpoints();
+    app.MapPlaybookEndpoints();
+    app.MapScopeEndpoints();
 }
+
+// RAG endpoints for knowledge base operations (R3)
+app.MapRagEndpoints();
 
 // Resilience monitoring endpoints (circuit breaker status)
 app.MapResilienceEndpoints();

@@ -2,11 +2,13 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Security.Claims;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Infrastructure.Resilience;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai.Export;
 using Sprk.Bff.Api.Telemetry;
@@ -38,6 +40,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
     private readonly IPlaybookService _playbookService;
     private readonly IToolHandlerRegistry _toolHandlerRegistry;
     private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly IStorageRetryPolicy _storageRetryPolicy;
     private readonly AnalysisOptions _options;
     private readonly ILogger<AnalysisOrchestrationService> _logger;
     private readonly AiTelemetry? _telemetry;
@@ -58,6 +61,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         IPlaybookService playbookService,
         IToolHandlerRegistry toolHandlerRegistry,
         IHttpContextAccessor httpContextAccessor,
+        IStorageRetryPolicy storageRetryPolicy,
         IOptions<AnalysisOptions> options,
         ILogger<AnalysisOrchestrationService> logger,
         AiTelemetry? telemetry = null)
@@ -74,6 +78,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         _playbookService = playbookService;
         _toolHandlerRegistry = toolHandlerRegistry;
         _httpContextAccessor = httpContextAccessor;
+        _storageRetryPolicy = storageRetryPolicy;
         _options = options.Value;
         _logger = logger;
         _telemetry = telemetry;
@@ -123,18 +128,48 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         // Emit metadata chunk
         yield return AnalysisStreamChunk.Metadata(analysisId, document.Name ?? "Unknown");
 
-        // 3. Resolve scopes (Skills, Knowledge, Tools)
-        var scopes = request.PlaybookId.HasValue
-            ? await _scopeResolver.ResolvePlaybookScopesAsync(request.PlaybookId.Value, cancellationToken)
-            : await _scopeResolver.ResolveScopesAsync(
+        // 3. Resolve scopes (Skills, Knowledge, Tools) and action
+        Guid actionId;
+        ResolvedScopes scopes;
+
+        if (request.PlaybookId.HasValue)
+        {
+            // Using playbook: get playbook details to retrieve actions and scopes
+            var playbook = await _playbookService.GetPlaybookAsync(request.PlaybookId.Value, cancellationToken)
+                ?? throw new KeyNotFoundException($"Playbook {request.PlaybookId.Value} not found");
+
+            scopes = await _scopeResolver.ResolvePlaybookScopesAsync(request.PlaybookId.Value, cancellationToken);
+
+            // Use provided ActionId or fall back to playbook's first action
+            actionId = request.ActionId ?? playbook.ActionIds.FirstOrDefault();
+
+            if (actionId == Guid.Empty)
+            {
+                throw new InvalidOperationException($"Playbook {request.PlaybookId} has no actions configured");
+            }
+        }
+        else
+        {
+            // Not using playbook: require explicit ActionId
+            if (!request.ActionId.HasValue)
+            {
+                throw new ArgumentException("ActionId is required when not using a playbook");
+            }
+
+            actionId = request.ActionId.Value;
+            scopes = await _scopeResolver.ResolveScopesAsync(
                 request.SkillIds ?? [],
                 request.KnowledgeIds ?? [],
                 request.ToolIds ?? [],
                 cancellationToken);
+        }
+
+        // Update analysis record with resolved action ID
+        analysis.ActionId = actionId;
 
         // 4. Get action definition
-        var action = await _scopeResolver.GetActionAsync(request.ActionId, cancellationToken)
-            ?? throw new KeyNotFoundException($"Action {request.ActionId} not found");
+        var action = await _scopeResolver.GetActionAsync(actionId, cancellationToken)
+            ?? throw new KeyNotFoundException($"Action {actionId} not found");
 
         // 5. Extract document text from SPE via TextExtractor (uses OBO auth)
         var documentText = await ExtractDocumentTextAsync(document, httpContext, cancellationToken);
@@ -500,7 +535,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             Id = analysis.Id,
             DocumentId = analysis.DocumentId,
             DocumentName = analysis.DocumentName,
-            Action = new AnalysisActionInfo(analysis.ActionId, analysis.ActionName),
+            Action = new AnalysisActionInfo(analysis.ActionId ?? Guid.Empty, analysis.ActionName),
             Status = analysis.Status,
             WorkingDocument = analysis.WorkingDocument,
             FinalOutput = analysis.FinalOutput,
@@ -1004,6 +1039,129 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         return analysis;
     }
 
+    /// <summary>
+    /// Store Document Profile outputs in Dataverse with dual storage and soft failure handling.
+    /// Stores outputs in both sprk_analysisoutput (always) and sprk_document fields (with retry).
+    /// </summary>
+    /// <param name="analysisId">The analysis ID.</param>
+    /// <param name="documentId">The document ID.</param>
+    /// <param name="playbookName">The playbook name.</param>
+    /// <param name="toolResults">The tool execution results.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Storage result indicating success, partial success, or failure.</returns>
+    private async Task<DocumentProfileResult> StoreDocumentProfileOutputsAsync(
+        Guid analysisId,
+        Guid documentId,
+        string playbookName,
+        Dictionary<string, string?> toolResults,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Step 1: Create analysis record in Dataverse (critical path)
+            _logger.LogInformation(
+                "Creating analysis record for Document Profile: AnalysisId={AnalysisId}, DocumentId={DocumentId}",
+                analysisId, documentId);
+
+            var dataverseAnalysisId = await _dataverseService.CreateAnalysisAsync(
+                documentId,
+                $"Document Profile - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
+                cancellationToken);
+
+            // Step 2: Store outputs in sprk_analysisoutput (critical path)
+            _logger.LogInformation(
+                "Storing {OutputCount} outputs in sprk_analysisoutput for analysis {AnalysisId}",
+                toolResults.Count, dataverseAnalysisId);
+
+            var sortOrder = 0;
+            foreach (var (outputTypeName, value) in toolResults)
+            {
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    _logger.LogDebug("Skipping empty output for type {OutputType}", outputTypeName);
+                    continue;
+                }
+
+                var output = new AnalysisOutputEntity
+                {
+                    Name = outputTypeName,
+                    Value = value,
+                    AnalysisId = dataverseAnalysisId,
+                    OutputTypeId = null, // Output type lookup optional for Phase 1
+                    SortOrder = sortOrder++
+                };
+
+                await _dataverseService.CreateAnalysisOutputAsync(output, cancellationToken);
+                _logger.LogDebug("Stored output {OutputType} in sprk_analysisoutput", outputTypeName);
+            }
+
+            // Step 3: Map outputs to sprk_document fields (optional path, with retry)
+            // Only for Document Profile playbook
+            if (playbookName.Equals("Document Profile", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    _logger.LogInformation(
+                        "Mapping Document Profile outputs to sprk_document fields for document {DocumentId}",
+                        documentId);
+
+                    // Create field mapping using DocumentProfileFieldMapper
+                    var fieldMapping = DocumentProfileFieldMapper.CreateFieldMapping(toolResults);
+
+                    if (fieldMapping.Count == 0)
+                    {
+                        _logger.LogWarning(
+                            "No mappable outputs found for Document Profile. Skipping document field update.");
+                        return DocumentProfileResult.FullSuccess(dataverseAnalysisId);
+                    }
+
+                    // Update document fields with retry policy
+                    await _storageRetryPolicy.ExecuteAsync(async ct =>
+                    {
+                        await _dataverseService.UpdateDocumentFieldsAsync(
+                            documentId.ToString(),
+                            fieldMapping,
+                            ct);
+
+                        _logger.LogInformation(
+                            "Successfully mapped {FieldCount} outputs to sprk_document fields",
+                            fieldMapping.Count);
+
+                    }, cancellationToken);
+
+                    return DocumentProfileResult.FullSuccess(dataverseAnalysisId);
+                }
+                catch (Exception ex)
+                {
+                    // Soft failure: Outputs are preserved in sprk_analysisoutput
+                    // User can still access results via Analysis Workspace
+                    _logger.LogWarning(ex,
+                        "[STORAGE-SOFT-FAIL] Failed to map outputs to sprk_document fields after retries. " +
+                        "Outputs preserved in sprk_analysisoutput for analysis {AnalysisId}",
+                        dataverseAnalysisId);
+
+                    return DocumentProfileResult.PartialSuccess(
+                        dataverseAnalysisId,
+                        "Document Profile completed. Some fields could not be updated. View full results in the Analysis tab.");
+                }
+            }
+
+            // Non-Document-Profile playbooks: full success (only sprk_analysisoutput storage required)
+            return DocumentProfileResult.FullSuccess(dataverseAnalysisId);
+        }
+        catch (Exception ex)
+        {
+            // Complete failure: Could not store outputs at all
+            _logger.LogError(ex,
+                "Failed to store Document Profile outputs for analysis {AnalysisId}",
+                analysisId);
+
+            return DocumentProfileResult.Failure(
+                $"Failed to store analysis outputs: {ex.Message}",
+                analysisId);
+        }
+    }
+
     /// <inheritdoc />
     public async IAsyncEnumerable<AnalysisStreamChunk> ExecutePlaybookAsync(
         PlaybookExecuteRequest request,
@@ -1107,6 +1265,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         var toolResults = new StringBuilder();
         var totalInputTokens = 0;
         var totalOutputTokens = 0;
+        var executedToolResults = new List<ToolResult>(); // Collect tool results for output extraction
 
         foreach (var tool in scopes.Tools)
         {
@@ -1161,6 +1320,9 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
 
                 totalInputTokens += toolResult.Execution.InputTokens.GetValueOrDefault();
                 totalOutputTokens += toolResult.Execution.OutputTokens.GetValueOrDefault();
+
+                // Collect successful tool results for output extraction
+                executedToolResults.Add(toolResult);
             }
             else if (toolResult != null)
             {
@@ -1174,7 +1336,191 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             }
         }
 
-        // 10. Finalize analysis
+        // 10. Store outputs in Dataverse (dual storage for Document Profile)
+        // Extract structured outputs from tool results for Document Profile storage
+        var structuredOutputs = new Dictionary<string, string?>();
+
+        // Map output keys from tool results to output type names expected by DocumentProfileFieldMapper
+        // These keys match the playbook outputMapping configuration
+        var outputKeyToTypeName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["tldr"] = "TL;DR",
+            ["summary"] = "Summary",
+            ["keywords"] = "Keywords",
+            ["documentType"] = "Document Type",
+            ["entities"] = "Entities"
+        };
+
+        _logger.LogInformation(
+            "Extracting structured outputs from {ToolCount} tool results for Document Profile storage",
+            executedToolResults.Count);
+
+        // Extract outputs from collected tool results
+        foreach (var toolResult in executedToolResults)
+        {
+            if (toolResult.Data is null)
+            {
+                _logger.LogDebug("Tool {ToolName} has no structured data", toolResult.ToolName);
+                continue;
+            }
+
+            _logger.LogDebug(
+                "Extracting outputs from tool {ToolName} with data: {Data}",
+                toolResult.ToolName,
+                toolResult.Data.Value.GetRawText());
+
+            // Parse the Data JSON and extract outputs based on tool handler type
+            try
+            {
+                using var dataDoc = JsonDocument.Parse(toolResult.Data.Value.GetRawText());
+                var root = dataDoc.RootElement;
+
+                // Map tool result structures to output type names based on handler ID
+                // EntityExtractorHandler → Entities output
+                if (toolResult.HandlerId.Equals("EntityExtractorHandler", StringComparison.OrdinalIgnoreCase))
+                {
+                    // EntityExtractionResult has "entities" array property
+                    if (root.TryGetProperty("entities", out var entitiesValue) ||
+                        root.TryGetProperty("Entities", out entitiesValue))
+                    {
+                        // Serialize entities array as JSON for storage
+                        var entitiesJson = JsonSerializer.Serialize(entitiesValue);
+                        structuredOutputs["Entities"] = entitiesJson;
+
+                        _logger.LogDebug(
+                            "Extracted Entities output from EntityExtractorHandler: {Length} characters",
+                            entitiesJson.Length);
+                    }
+                }
+                // SummaryHandler → TL;DR, Summary, Keywords outputs
+                else if (toolResult.HandlerId.Equals("SummaryHandler", StringComparison.OrdinalIgnoreCase))
+                {
+                    // SummaryResult has "fullText" property containing the complete summary
+                    if (root.TryGetProperty("fullText", out var fullTextValue) ||
+                        root.TryGetProperty("FullText", out fullTextValue))
+                    {
+                        var summaryText = fullTextValue.GetString();
+                        if (!string.IsNullOrWhiteSpace(summaryText))
+                        {
+                            // Extract TL;DR (first paragraph or first 1-2 sentences)
+                            var tldr = ExtractTldr(summaryText);
+                            if (!string.IsNullOrWhiteSpace(tldr))
+                            {
+                                structuredOutputs["TL;DR"] = tldr;
+                                _logger.LogDebug("Extracted TL;DR output: {Length} characters", tldr.Length);
+                            }
+
+                            // Use full summary text for Summary output
+                            structuredOutputs["Summary"] = summaryText;
+                            _logger.LogDebug("Extracted Summary output: {Length} characters", summaryText.Length);
+
+                            // Extract keywords from sections if available
+                            if (root.TryGetProperty("sections", out var sectionsValue) ||
+                                root.TryGetProperty("Sections", out sectionsValue))
+                            {
+                                var keywords = ExtractKeywordsFromSections(sectionsValue);
+                                if (!string.IsNullOrWhiteSpace(keywords))
+                                {
+                                    structuredOutputs["Keywords"] = keywords;
+                                    _logger.LogDebug("Extracted Keywords output: {Length} characters", keywords.Length);
+                                }
+                            }
+                        }
+                    }
+                }
+                // DocumentClassifierHandler → Document Type output
+                else if (toolResult.HandlerId.Equals("DocumentClassifierHandler", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Look for "documentType" or "classification" property
+                    if (root.TryGetProperty("documentType", out var docTypeValue) ||
+                        root.TryGetProperty("DocumentType", out docTypeValue) ||
+                        root.TryGetProperty("classification", out docTypeValue))
+                    {
+                        var docType = docTypeValue.ValueKind == JsonValueKind.String
+                            ? docTypeValue.GetString()
+                            : docTypeValue.ToString();
+
+                        if (!string.IsNullOrWhiteSpace(docType))
+                        {
+                            structuredOutputs["Document Type"] = docType;
+                            _logger.LogDebug("Extracted Document Type output: {DocumentType}", docType);
+                        }
+                    }
+                }
+                // Generic fallback: Try to find output keys directly in the data
+                else
+                {
+                    foreach (var (outputKey, outputTypeName) in outputKeyToTypeName)
+                    {
+                        if (root.TryGetProperty(outputKey, out var outputValue))
+                        {
+                            string? outputText = null;
+
+                            if (outputValue.ValueKind == JsonValueKind.String)
+                            {
+                                outputText = outputValue.GetString();
+                            }
+                            else if (outputValue.ValueKind == JsonValueKind.Array ||
+                                     outputValue.ValueKind == JsonValueKind.Object)
+                            {
+                                outputText = JsonSerializer.Serialize(outputValue);
+                            }
+                            else
+                            {
+                                outputText = outputValue.ToString();
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(outputText))
+                            {
+                                structuredOutputs[outputTypeName] = outputText;
+                                _logger.LogDebug(
+                                    "Extracted output: {OutputType} = {Length} characters",
+                                    outputTypeName,
+                                    outputText.Length);
+                            }
+                        }
+                    }
+                }
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogWarning(ex,
+                    "Failed to parse tool data for {ToolName}. Skipping output extraction.",
+                    toolResult.ToolName);
+            }
+        }
+
+        _logger.LogInformation(
+            "Extracted {OutputCount} structured outputs for Document Profile storage: {OutputTypes}",
+            structuredOutputs.Count,
+            string.Join(", ", structuredOutputs.Keys));
+
+        // Store in Dataverse if we have outputs
+        DocumentProfileResult? storageResult = null;
+        if (structuredOutputs.Any())
+        {
+            storageResult = await StoreDocumentProfileOutputsAsync(
+                analysisId,
+                documentId,
+                playbook.Name ?? "Unknown",
+                structuredOutputs,
+                cancellationToken);
+
+            if (!storageResult.Success)
+            {
+                _logger.LogError(
+                    "Failed to store Document Profile outputs: {Message}",
+                    storageResult.Message);
+            }
+            else if (storageResult.PartialStorage)
+            {
+                _logger.LogWarning(
+                    "Document Profile completed with partial storage: {Message}",
+                    storageResult.Message);
+            }
+        }
+
+        // 11. Finalize analysis
         var finalOutput = toolResults.ToString();
         analysis = analysis with
         {
@@ -1192,7 +1538,126 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         _logger.LogInformation("Playbook execution completed: Analysis {AnalysisId}, {ToolCount} tools executed",
             analysisId, scopes.Tools.Length);
 
-        yield return AnalysisStreamChunk.Completed(analysisId, new TokenUsage(totalInputTokens, totalOutputTokens));
+        // Include storage result in completion event for Document Profile
+        yield return AnalysisStreamChunk.Completed(
+            analysisId,
+            new TokenUsage(totalInputTokens, totalOutputTokens),
+            partialStorage: storageResult?.PartialStorage,
+            storageMessage: storageResult?.PartialStorage == true ? storageResult.Message : null);
+    }
+
+    /// <summary>
+    /// Extract TL;DR (ultra-concise summary) from full summary text.
+    /// Takes the first 1-2 sentences or first paragraph.
+    /// </summary>
+    private static string ExtractTldr(string summaryText)
+    {
+        if (string.IsNullOrWhiteSpace(summaryText))
+            return string.Empty;
+
+        // Try to find an "Executive Summary" section
+        var execSummaryMatch = System.Text.RegularExpressions.Regex.Match(
+            summaryText,
+            @"(?:##?\s*(?:Executive\s+)?Summary[\s:]*\n)(.*?)(?=\n##|\z)",
+            System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        string textToExtract;
+        if (execSummaryMatch.Success && execSummaryMatch.Groups[1].Value.Trim().Length > 0)
+        {
+            textToExtract = execSummaryMatch.Groups[1].Value.Trim();
+        }
+        else
+        {
+            // No executive summary section - use first paragraph
+            var firstParagraph = summaryText.Split(new[] { "\n\n", "\r\n\r\n" }, StringSplitOptions.RemoveEmptyEntries)
+                .FirstOrDefault()?.Trim();
+            textToExtract = firstParagraph ?? summaryText;
+        }
+
+        // Extract first 1-2 sentences (up to 200 chars for brevity)
+        var sentences = System.Text.RegularExpressions.Regex.Split(textToExtract, @"(?<=[.!?])\s+");
+        var tldr = new StringBuilder();
+        var charCount = 0;
+
+        foreach (var sentence in sentences.Take(2))
+        {
+            if (charCount + sentence.Length > 200 && tldr.Length > 0)
+                break;
+
+            tldr.Append(sentence);
+            if (!sentence.EndsWith(" "))
+                tldr.Append(" ");
+            charCount += sentence.Length;
+        }
+
+        return tldr.ToString().Trim();
+    }
+
+    /// <summary>
+    /// Extract keywords from summary sections.
+    /// Looks for "Key Terms" or similar sections and extracts terms.
+    /// </summary>
+    private static string ExtractKeywordsFromSections(JsonElement sectionsElement)
+    {
+        if (sectionsElement.ValueKind != JsonValueKind.Object)
+            return string.Empty;
+
+        // Try to find "Key Terms" section
+        if (sectionsElement.TryGetProperty("Key Terms", out var keyTermsSection) ||
+            sectionsElement.TryGetProperty("key_terms", out keyTermsSection))
+        {
+            var keyTermsText = keyTermsSection.GetString();
+            if (!string.IsNullOrWhiteSpace(keyTermsText))
+            {
+                // Extract terms from bullet points
+                var terms = System.Text.RegularExpressions.Regex.Matches(
+                    keyTermsText,
+                    @"^[\s-•*]+(.+?)(?::|$)",
+                    System.Text.RegularExpressions.RegexOptions.Multiline);
+
+                if (terms.Count > 0)
+                {
+                    var keywords = terms.Cast<System.Text.RegularExpressions.Match>()
+                        .Select(m => m.Groups[1].Value.Trim())
+                        .Where(t => !string.IsNullOrWhiteSpace(t))
+                        .Take(20); // Limit to 20 keywords
+
+                    return string.Join(", ", keywords);
+                }
+            }
+        }
+
+        // Fallback: Extract first few words from notable sections
+        var allSections = new List<string>();
+        foreach (var property in sectionsElement.EnumerateObject())
+        {
+            if (property.Value.ValueKind == JsonValueKind.String)
+            {
+                var sectionText = property.Value.GetString();
+                if (!string.IsNullOrWhiteSpace(sectionText) && sectionText.Length > 20)
+                {
+                    allSections.Add(sectionText);
+                }
+            }
+        }
+
+        if (allSections.Count > 0)
+        {
+            // Extract important-looking words (capitalized, longer than 4 chars)
+            var combinedText = string.Join(" ", allSections);
+            var words = System.Text.RegularExpressions.Regex.Matches(
+                combinedText,
+                @"\b[A-Z][a-z]{4,}\b");
+
+            var keywords = words.Cast<System.Text.RegularExpressions.Match>()
+                .Select(m => m.Value)
+                .Distinct()
+                .Take(15);
+
+            return string.Join(", ", keywords);
+        }
+
+        return string.Empty;
     }
 }
 
@@ -1206,7 +1671,7 @@ public record AnalysisInternalModel
     public Guid Id { get; init; }
     public Guid DocumentId { get; init; }
     public string DocumentName { get; init; } = string.Empty;
-    public Guid ActionId { get; init; }
+    public Guid? ActionId { get; set; }  // Nullable and mutable - resolved from playbook if not provided
     public string ActionName { get; init; } = string.Empty;
     public string Status { get; init; } = string.Empty;
     public string? DocumentText { get; init; }  // Extracted document content for context

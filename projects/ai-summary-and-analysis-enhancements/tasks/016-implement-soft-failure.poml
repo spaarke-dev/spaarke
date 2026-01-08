@@ -1,0 +1,59 @@
+<task id="016" project="ai-summary-and-analysis-enhancements">
+  <metadata>
+    <title>Implement Soft Failure Handling</title>
+    <phase>2.2</phase>
+    <estimate>1-2 hours</estimate>
+    <tags>api, error-handling, resilience</tags>
+    <dependencies>013, 015</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Implement soft failure handling for Document Profile when storage retries are exhausted.</goal>
+
+    <context>
+      After 3 retries, if storage still fails:
+      - AI outputs are preserved in sprk_analysisoutput
+      - Only field mapping to sprk_document may have failed
+      - User sees friendly message pointing to Analysis tab
+    </context>
+
+    <constraints>
+      - Return partial success (Success=true, PartialStorage=true)
+      - Include AnalysisId so user can navigate to full results
+      - Message: "Document Profile completed. Some fields could not be updated. View full results in the Analysis tab."
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-summary-and-analysis-enhancements/spec.md" reason="Soft failure requirements" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add try/catch around document field mapping (not sprk_analysisoutput)</step>
+    <step order="2">Catch exception after retries exhausted</step>
+    <step order="3">Log warning with [STORAGE-SOFT-FAIL] prefix</step>
+    <step order="4">Return DocumentProfileResult with PartialStorage=true</step>
+    <step order="5">Set user-friendly message</step>
+    <step order="6">Add unit tests for soft failure path</step>
+    <step order="7">Verify build succeeds</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">Modify service</tool>
+    <tool name="Bash">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">Soft failure handling in AnalysisOrchestrationService</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Soft failure returns partial success</criterion>
+    <criterion>User message is friendly and actionable</criterion>
+    <criterion>AnalysisId included for navigation</criterion>
+    <criterion>Unit tests pass</criterion>
+  </acceptance-criteria>
+</task>

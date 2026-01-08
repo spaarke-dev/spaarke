@@ -1,0 +1,53 @@
+<task id="030" project="ai-summary-and-analysis-enhancements">
+  <metadata>
+    <title>Remove IDocumentIntelligenceService Interface</title>
+    <phase>2.4</phase>
+    <estimate>30 min</estimate>
+    <tags>cleanup, removal</tags>
+    <dependencies>024</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Remove the deprecated IDocumentIntelligenceService interface.</goal>
+
+    <context>
+      After deployment is verified, the deprecated interface can be removed. This is part of immediate cleanup - no waiting period.
+    </context>
+
+    <constraints>
+      - Only proceed after task 024 (deployment verified)
+      - Ensure no remaining usages before deletion
+      - Update any imports/usings that reference it
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/IDocumentIntelligenceService.cs" reason="File to remove" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Search codebase for remaining usages of IDocumentIntelligenceService</step>
+    <step order="2">Update any remaining usages to use unified service</step>
+    <step order="3">Delete IDocumentIntelligenceService.cs</step>
+    <step order="4">Verify build succeeds</step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">Search for usages</tool>
+    <tool name="Bash">Delete file</tool>
+    <tool name="Bash">Build verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">IDocumentIntelligenceService.cs removed</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>File deleted</criterion>
+    <criterion>No remaining usages</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

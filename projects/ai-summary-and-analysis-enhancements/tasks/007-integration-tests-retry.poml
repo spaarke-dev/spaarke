@@ -1,0 +1,56 @@
+<task id="007" project="ai-summary-and-analysis-enhancements">
+  <metadata>
+    <title>Integration Tests for Retry Scenarios</title>
+    <phase>2.1</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>api, testing, resilience, integration</tags>
+    <dependencies>003</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create integration tests for storage retry scenarios.</goal>
+
+    <context>
+      Integration tests should verify the retry policy works correctly with simulated Dataverse errors.
+    </context>
+
+    <constraints>
+      - Test retry behavior with 404 errors
+      - Test retry behavior with 503 errors
+      - Verify exponential backoff timing
+      - Test exhausted retries scenario
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/server/api/Sprk.Bff.Api/Infrastructure/Resilience/StorageRetryPolicy.cs" reason="Policy to test" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create StorageRetryPolicyTests.cs</step>
+    <step order="2">Test successful operation (no retry needed)</step>
+    <step order="3">Test retry on 404 - success after 1 retry</step>
+    <step order="4">Test retry on 503 - success after 2 retries</step>
+    <step order="5">Test exhausted retries - verify exception thrown after 3 retries</step>
+    <step order="6">Verify retry delays are approximately exponential</step>
+    <step order="7">Run tests and verify all pass</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create test file</tool>
+    <tool name="Bash">Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">tests/Sprk.Bff.Api.Tests/Infrastructure/Resilience/StorageRetryPolicyTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Test file created with retry scenarios</criterion>
+    <criterion>All tests pass</criterion>
+    <criterion>Retry behavior verified for 404 and 503 errors</criterion>
+  </acceptance-criteria>
+</task>

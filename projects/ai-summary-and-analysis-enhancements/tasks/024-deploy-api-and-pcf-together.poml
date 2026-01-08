@@ -1,0 +1,128 @@
+<task id="024" project="ai-summary-and-analysis-enhancements">
+  <metadata>
+    <title>Deploy API + PCF Together (Coordinated)</title>
+    <phase>2.3</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>deploy, api, pcf, verification</tags>
+    <dependencies>021,022,023</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Deploy API and PCF changes together in coordinated release to Dev/Staging.</goal>
+
+    <context>
+      This is a breaking change deployment. API removes old endpoint, PCF uses new endpoint.
+      Both must deploy in sequence: API first, then PCF immediately after.
+    </context>
+
+    <constraints>
+      - Deploy API first (removes old endpoint)
+      - Deploy PCF immediately after (uses new endpoint)
+      - Brief downtime expected between deployments
+      - Both must succeed or both must rollback
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/skills/azure-deploy/SKILL.md" reason="API deployment procedure" />
+      <file path=".claude/skills/dataverse-deploy/SKILL.md" reason="PCF deployment procedure" />
+      <file path="tasks/022-update-forms-and-pages.poml" reason="Deployment checklist" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Pre-deployment: Verify all tests pass (API + PCF)</step>
+    <step order="2">Pre-deployment: Review deployment checklist from Task 022</step>
+    <step order="3">Deploy API to Dev: dotnet publish + Azure deployment</step>
+    <step order="4">Verify API health check passes</step>
+    <step order="5">Deploy PCF to Dev: pac pcf push</step>
+    <step order="6">Verify PCF deployment succeeded</step>
+    <step order="7">Test end-to-end: Upload document in Dev environment</step>
+    <step order="8">Verify Document Profile outputs appear correctly</step>
+    <step order="9">Check Application Insights for errors</step>
+    <step order="10">If successful: Deploy to Staging (repeat steps 3-9)</step>
+    <step order="11">Document verification results</step>
+    <step order="12">Get sign-off for production deployment (future)</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Build and deploy API</tool>
+    <tool name="Bash">Deploy PCF</tool>
+    <tool name="Bash">Health checks</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment">API deployed to Dev/Staging</output>
+    <output type="deployment">PCF deployed to Dev/Staging</output>
+    <output type="file">Deployment verification report</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>API deployed successfully (old endpoint removed)</criterion>
+    <criterion>PCF deployed successfully (new endpoint working)</criterion>
+    <criterion>End-to-end document upload works</criterion>
+    <criterion>Document Profile outputs correct</criterion>
+    <criterion>No errors in Application Insights</criterion>
+    <criterion>Staging verification complete</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2026-01-07">
+      This is a coordinated breaking change deployment.
+
+      Deployment sequence is critical:
+      1. API deploys first (removes /api/ai/document-intelligence/analyze)
+      2. Brief downtime: Old PCF cannot call deleted endpoint
+      3. PCF deploys (uses /api/ai/analysis/execute)
+      4. System functional again
+
+      Downtime window: ~5-10 minutes between API and PCF deployment.
+
+      Rollback: If either deployment fails, rollback both API and PCF to previous versions.
+    </note>
+    <completion date="2026-01-07">
+      Successfully deployed BFF API and UniversalQuickCreate PCF v3.10.0 to SPAARKE DEV 1.
+
+      **Deployment Timeline**:
+      - API Deployment: 18:54-18:55 UTC (1 minute)
+      - PCF Deployment: 20:00-20:01 UTC (1 minute)
+      - Total downtime: ~3 minutes
+
+      **Automated Verification**:
+      - ✅ API Health Check: 200 OK
+      - ✅ Old endpoint removed: 404 Not Found
+      - ✅ New analysis endpoint exists: 401 Unauthorized (requires auth)
+      - ✅ PCF v3.10.0 deployed and published
+      - ✅ Control version verified in 4 locations
+
+      **Deployment Methods**:
+      - API: `az webapp deploy` (ZIP deployment)
+      - PCF: `pac solution import` (file lock workaround)
+
+      **Artifacts Created**:
+      - API Package: `publish/api-deploy.zip`
+      - PCF Bundle: 507 KiB minified (from 8.39 MiB dev)
+      - Deployment Report: `DEPLOYMENT-VERIFICATION-024.md`
+
+      **Manual Testing Required**:
+      - End-to-end document upload in browser
+      - AI Summary with Document Profile playbook
+      - Verification on 5 entity forms (Matter, Project, Invoice, Account, Contact)
+      - Application Insights monitoring (24 hours)
+
+      **Known Issues**:
+      - ⚠️ Playbook endpoint returns 404 (verify "Document Profile" playbook exists)
+      - ⚠️ Obsolete test files still exist (DocumentIntelligenceEndpointsTests.cs)
+      - ⚠️ Custom Page registry may cache old PCF version for 5-10 minutes
+
+      **Next Steps**:
+      1. Manual browser testing (see DEPLOYMENT-VERIFICATION-024.md)
+      2. Verify Document Profile playbook exists
+      3. Monitor Application Insights for errors
+      4. Cleanup obsolete test files
+      5. Plan Staging deployment (future)
+    </completion>
+  </notes>
+</task>

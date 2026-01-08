@@ -1,0 +1,59 @@
+<task id="005" project="ai-summary-and-analysis-enhancements">
+  <metadata>
+    <title>Update AiAuthorizationFilter to Use Unified Service</title>
+    <phase>2.1</phase>
+    <estimate>1-2 hours</estimate>
+    <tags>api, authorization, filter, adr-008</tags>
+    <dependencies>002</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Update AiAuthorizationFilter to use the unified IAiAuthorizationService.</goal>
+
+    <context>
+      The AiAuthorizationFilter currently has Phase 1 scaffolding that skips UAC. It needs to delegate to the unified IAiAuthorizationService which implements proper FullUAC.
+    </context>
+
+    <constraints>
+      - Follow ADR-008 (endpoint filters)
+      - Inject IAiAuthorizationService via constructor
+      - Remove Phase 1 scaffolding comments
+      - Preserve diagnostic logging
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-008-endpoint-filters.md" reason="Filter patterns" />
+      <file path="src/server/api/Sprk.Bff.Api/Api/Filters/AiAuthorizationFilter.cs" reason="Filter to update" />
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/IAiAuthorizationService.cs" reason="Service to use" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read current AiAuthorizationFilter implementation</step>
+    <step order="2">Add IAiAuthorizationService constructor parameter</step>
+    <step order="3">Replace Phase 1 scaffolding with call to IAiAuthorizationService.AuthorizeAsync</step>
+    <step order="4">Handle AuthorizationResult - return Forbid with reason on failure</step>
+    <step order="5">Remove Phase 1 scaffolding comments</step>
+    <step order="6">Verify build succeeds</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Review existing filter</tool>
+    <tool name="Edit">Update filter</tool>
+    <tool name="Bash">Build verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Api/Filters/AiAuthorizationFilter.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Filter uses IAiAuthorizationService</criterion>
+    <criterion>Phase 1 scaffolding removed</criterion>
+    <criterion>Returns appropriate error on authorization failure</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

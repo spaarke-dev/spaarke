@@ -163,6 +163,75 @@ resume task 005
 
 ---
 
+### 🚨 MANDATORY: Task Execution Protocol for Claude Code
+
+**ABSOLUTE RULE**: When executing project tasks, Claude Code MUST invoke the `task-execute` skill. DO NOT read POML files directly and implement manually.
+
+#### Why This Matters
+
+The task-execute skill ensures:
+- ✅ Knowledge files are loaded (ADRs, constraints, patterns)
+- ✅ Context is properly tracked in current-task.md
+- ✅ Proactive checkpointing occurs every 3 steps
+- ✅ Quality gates run (code-review + adr-check) at Step 9.5
+- ✅ Progress is recoverable after compaction
+- ✅ PCF version bumping follows protocol
+- ✅ Deployment follows dataverse-deploy skill
+
+**Bypassing this skill leads to**:
+- ❌ Missing ADR constraints
+- ❌ No checkpointing - lost progress after compaction
+- ❌ Skipped quality gates
+- ❌ Manual errors (forgotten version bumps, etc.)
+
+#### Auto-Detection Rules (Trigger Phrases)
+
+When Claude Code detects these phrases, it MUST invoke task-execute skill:
+
+| User Says | Required Action | Implementation |
+|-----------|-----------------|----------------|
+| "work on task X" | Execute task X | Invoke task-execute with task X POML file |
+| "continue" | Execute next pending task | Check TASK-INDEX.md for next 🔲, invoke task-execute |
+| "continue with task X" | Execute task X | Invoke task-execute with task X POML file |
+| "next task" | Execute next pending task | Check TASK-INDEX.md for next 🔲, invoke task-execute |
+| "keep going" | Execute next pending task | Check TASK-INDEX.md for next 🔲, invoke task-execute |
+| "resume task X" | Execute task X | Invoke task-execute with task X POML file |
+| "pick up where we left off" | Execute task from current-task.md | Load current-task.md, invoke task-execute |
+
+**Example - User says "continue"**:
+1. Read `projects/{project-name}/tasks/TASK-INDEX.md`
+2. Find first task with status 🔲 (pending)
+3. Invoke Skill tool with skill="task-execute" and task file path
+4. Let task-execute orchestrate the full protocol
+
+#### Parallel Task Execution
+
+When tasks can run in parallel (no dependencies between them), each task MUST still use task-execute:
+
+**CORRECT Approach**:
+- Single message with multiple Skill tool invocations
+- Each invocation calls task-execute with a different task file
+- Example: Tasks 020, 021, 022 can run in parallel → Send one message with three Skill tool calls
+
+**INCORRECT Approach**:
+- Reading multiple POML files directly
+- Manually implementing from multiple tasks
+- Bypassing task-execute for "efficiency"
+
+See task-execute SKILL.md Step 8 for the complete execution protocol with checkpointing rules.
+
+#### Enforcement Checklist for Claude Code
+
+Before implementing ANY task:
+- [ ] Did user request task work? (any trigger phrase above)
+- [ ] Did I invoke the task-execute skill?
+- [ ] Did I load the task POML file directly? (❌ WRONG)
+- [ ] Did I implement changes without task-execute? (❌ WRONG)
+
+If you answered "no" to the second question or "yes" to questions 3-4, STOP and invoke task-execute instead.
+
+---
+
 ### ⚠️ Component Skills (AI Internal Use Only)
 
 These skills are **called BY orchestrators** and should NOT be invoked directly by developers:
@@ -259,6 +328,98 @@ After completing any task:
 **Important**: `current-task.md` tracks only the **active task**, not history. Task history is preserved in TASK-INDEX.md and individual .poml files.
 
 **Full protocols**: `.claude/protocols/` (AIP-001, AIP-002, AIP-003)
+
+---
+
+## Task Execution Rigor Levels
+
+All tasks are executed via `task-execute` skill with one of three rigor levels determined automatically by decision tree.
+
+### Rigor Level Overview
+
+| Level | When Applied | Protocol Steps | Reporting Frequency | Quality Gates |
+|-------|--------------|----------------|---------------------|---------------|
+| **FULL** | Code implementation, architecture changes, post-compaction recovery | All 11 steps mandatory | After each step | ✅ code-review + adr-check |
+| **STANDARD** | Tests, new file creation, tasks with constraints | 8 of 11 steps required | After major steps | ⏭️ Skipped |
+| **MINIMAL** | Documentation, inventory, simple updates | 4 of 11 steps required | Start + completion only | ⏭️ Skipped |
+
+### Automatic Detection (Decision Tree)
+
+**FULL Protocol Required If Task Has ANY:**
+- Tags: `bff-api`, `api`, `pcf`, `plugin`, `auth`
+- Will modify code files (`.cs`, `.ts`, `.tsx`)
+- Has 6+ steps in task definition
+- Resuming after compaction or new session
+- Description includes: "implement", "refactor", "create service"
+- Dependencies on 3+ other tasks
+
+**STANDARD Protocol Required If Task Has ANY:**
+- Tags: `testing`, `integration-test`
+- Will create new files
+- Has explicit `<constraints>` or ADRs listed
+- Phase 2.x or higher (integration/deployment phases)
+
+**MINIMAL Protocol Otherwise:**
+- Documentation tasks
+- Inventory/checklist creation
+- Simple configuration updates
+
+### Mandatory Rigor Level Declaration
+
+**At task start, Claude Code MUST output:**
+
+```
+🔒 RIGOR LEVEL: [FULL | STANDARD | MINIMAL]
+📋 REASON: [Why this level was chosen based on decision tree]
+
+📖 PROTOCOL STEPS TO EXECUTE:
+  ✅ Step 0.5: Determine rigor level
+  ✅ Step 1: Load Task File
+  ✅ Step 2: Initialize current-task.md
+  [... list continues based on rigor level ...]
+
+Proceeding with Step 0...
+```
+
+This declaration is **non-negotiable** and makes protocol shortcuts visible.
+
+### User Override
+
+You can override automatic detection:
+- **"Execute with FULL protocol"** → Forces all steps regardless of task type
+- **"Execute with MINIMAL protocol"** → Use carefully, only for documentation
+- **Default:** Auto-detect using decision tree
+
+### Examples by Task Type
+
+| Task Type | Example | Auto-Detected Level |
+|-----------|---------|-------------------|
+| Implement API endpoint | "Create authorization service" | **FULL** (bff-api tag) |
+| Update PCF component | "Add dark mode to control" | **FULL** (pcf tag, .tsx files) |
+| Write integration tests | "Test Document Profile endpoint" | **STANDARD** (testing tag) |
+| Create deployment checklist | "Identify forms using control" | **MINIMAL** (documentation) |
+| Refactor existing code | "Extract helper method" | **FULL** (code modification) |
+| Update documentation | "Add deployment guide" | **MINIMAL** (docs) |
+
+### Audit Trail in current-task.md
+
+Rigor level and execution are logged for recovery:
+
+```markdown
+### Task XXX Details
+
+**Rigor Level:** FULL
+**Reason:** Task tags include 'bff-api' (code implementation)
+**Protocol Steps Executed:**
+- [x] Step 0.5: Determined rigor level
+- [x] Step 1: Load Task File
+- [x] Step 2: Initialize current-task.md
+- [x] Step 4a: Load Constraints (api.md, testing.md)
+- [x] Step 4b: Load Patterns (endpoint-definition.md)
+[... etc]
+```
+
+**Full Details:** See `.claude/skills/task-execute/SKILL.md` Step 0.5 for complete decision tree and protocol requirements.
 
 ---
 

@@ -88,4 +88,19 @@ public interface IPlaybookService
     Task<PlaybookListResponse> ListPublicPlaybooksAsync(
         PlaybookQueryParameters query,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Get a playbook by name.
+    /// </summary>
+    /// <remarks>
+    /// Used for system playbooks like "Document Profile" where lookup by name is more
+    /// flexible than hardcoded IDs. Results are cached for performance.
+    /// </remarks>
+    /// <param name="name">Exact playbook name to look up.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Playbook response.</returns>
+    /// <exception cref="PlaybookNotFoundException">Thrown when playbook with specified name is not found.</exception>
+    Task<PlaybookResponse> GetByNameAsync(
+        string name,
+        CancellationToken cancellationToken = default);
 }

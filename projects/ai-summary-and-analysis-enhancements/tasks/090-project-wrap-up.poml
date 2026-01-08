@@ -1,0 +1,61 @@
+<task id="090" project="ai-summary-and-analysis-enhancements">
+  <metadata>
+    <title>Project Wrap-Up</title>
+    <phase>wrap-up</phase>
+    <estimate>1-2 hours</estimate>
+    <tags>wrap-up, documentation</tags>
+    <dependencies>034</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Complete project wrap-up activities including documentation, cleanup, and archival.</goal>
+
+    <context>
+      All implementation phases are complete. Final wrap-up ensures project is properly closed out.
+    </context>
+
+    <constraints>
+      - Update README status to Complete
+      - Create lessons-learned.md
+      - Run /repo-cleanup
+      - Archive project
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-summary-and-analysis-enhancements/README.md" reason="Status to update" />
+      <file path=".claude/skills/repo-cleanup/SKILL.md" reason="Cleanup procedure" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Update README.md status from "In Progress" to "Complete"</step>
+    <step order="2">Mark all graduation criteria as complete</step>
+    <step order="3">Create lessons-learned.md with insights from implementation</step>
+    <step order="4">Run /repo-cleanup to validate structure</step>
+    <step order="5">Remove ephemeral files (notes/, temp files)</step>
+    <step order="6">Update TASK-INDEX.md with final status</step>
+    <step order="7">Create final PR summary</step>
+    <step order="8">Archive project (move to completed/ if applicable)</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">Update README</tool>
+    <tool name="Write">Create lessons-learned</tool>
+    <tool name="Skill">repo-cleanup</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">README.md updated to Complete</output>
+    <output type="file">lessons-learned.md created</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>README status is Complete</criterion>
+    <criterion>All graduation criteria marked complete</criterion>
+    <criterion>lessons-learned.md exists</criterion>
+    <criterion>Repo structure validated</criterion>
+  </acceptance-criteria>
+</task>

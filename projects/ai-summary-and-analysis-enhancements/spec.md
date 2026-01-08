@@ -1,7 +1,8 @@
 # AI Summary and Analysis Enhancements
 
-> **Status**: Research & Design
+> **Status**: Ready for Implementation
 > **Created**: 2026-01-06
+> **Updated**: 2026-01-06 (Owner clarifications added)
 > **Related PR**: #102 (authorization fix)
 > **Related Enhancement**: ENH-013
 
@@ -15,7 +16,9 @@ This project addresses two interconnected issues:
 
 2. **Service Duplication**: Two separate AI services exist (`DocumentIntelligenceService` and `AnalysisOrchestrationService`) with overlapping functionality, creating code duplication and maintenance burden.
 
-**Goal**: Unify AI Summary and AI Analysis into a single orchestration service, with proper authorization, using Playbook/Output scopes for flexible output configuration.
+**Goal**: Unify AI Summary (now called **Document Profile**) and AI Analysis into a single orchestration service, with proper FullUAC authorization, using the existing Playbook/Output scope entities for flexible output configuration.
+
+**Key Insight**: Document Profile is NOT a special case—it's just another Playbook execution with a different trigger point (auto on upload) and UI context (File Upload PCF Tab 2).
 
 ---
 
@@ -123,7 +126,7 @@ return await next(context);
 
 ### 2.1 Unified Architecture
 
-**Concept**: Summary is just a "simple playbook" with auto-persist to Document record.
+**Concept**: Document Profile is just another Playbook execution—same underlying system as Analysis Builder.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -135,96 +138,97 @@ return await next(context);
 │  │  (Unified AI execution engine)                                │  │
 │  ├───────────────────────────────────────────────────────────────┤  │
 │  │                                                                │  │
-│  │  ┌─────────────────┐  ┌─────────────────┐  ┌───────────────┐  │  │
-│  │  │ Simple Mode     │  │ Standard Mode   │  │ Playbook Mode │  │  │
-│  │  │ (Auto-Summary)  │  │ (Interactive)   │  │ (Configured)  │  │  │
-│  │  ├─────────────────┤  ├─────────────────┤  ├───────────────┤  │  │
-│  │  │ • No chat       │  │ • Chat enabled  │  │ • Full config │  │  │
-│  │  │ • Fixed output  │  │ • Save/export   │  │ • Tools       │  │  │
-│  │  │ • Auto-persist  │  │ • User-driven   │  │ • Skills      │  │  │
-│  │  │   to Document   │  │   persist       │  │ • Knowledge   │  │  │
-│  │  └────────┬────────┘  └────────┬────────┘  └───────┬───────┘  │  │
-│  │           │                    │                    │          │  │
-│  │           └────────────────────┼────────────────────┘          │  │
-│  │                                │                               │  │
-│  │                    ┌───────────▼───────────┐                   │  │
-│  │                    │   Shared Components   │                   │  │
-│  │                    ├───────────────────────┤                   │  │
-│  │                    │ • ITextExtractor      │                   │  │
-│  │                    │ • IOpenAiClient       │                   │  │
-│  │                    │ • SSE Streaming       │                   │  │
-│  │                    │ • Entity Extraction   │                   │  │
-│  │                    │ • UAC Authorization   │                   │  │
-│  │                    └───────────────────────┘                   │  │
-│  │                                                                │  │
+│  │  ┌─────────────────────────┐  ┌─────────────────────────────┐ │  │
+│  │  │   Document Profile      │  │   Analysis Workspace        │ │  │
+│  │  │   (Auto on Upload)      │  │   (User-Initiated)          │ │  │
+│  │  ├─────────────────────────┤  ├─────────────────────────────┤ │  │
+│  │  │ • Auto-trigger          │  │ • User clicks "Analyze"     │ │  │
+│  │  │ • Tab 2 in File Upload  │  │ • Full workspace UI         │ │  │
+│  │  │ • Code refs playbook    │  │ • User picks playbook       │ │  │
+│  │  │   by name               │  │ • Chat continuation         │ │  │
+│  │  │ • Dual storage:         │  │ • Save/export options       │ │  │
+│  │  │   analysisoutput +      │  │                             │ │  │
+│  │  │   document fields       │  │                             │ │  │
+│  │  └───────────┬─────────────┘  └──────────────┬──────────────┘ │  │
+│  │              │                               │                │  │
+│  │              └───────────────┬───────────────┘                │  │
+│  │                              │                                │  │
+│  │                  ┌───────────▼───────────┐                    │  │
+│  │                  │   Shared Components   │                    │  │
+│  │                  ├───────────────────────┤                    │  │
+│  │                  │ • ITextExtractor      │                    │  │
+│  │                  │ • IOpenAiClient       │                    │  │
+│  │                  │ • SSE Streaming       │                    │  │
+│  │                  │ • Entity Extraction   │                    │  │
+│  │                  │ • FullUAC Auth        │                    │  │
+│  │                  │ • Storage w/ Retry    │                    │  │
+│  │                  └───────────────────────┘                    │  │
+│  │                                                               │  │
 │  └───────────────────────────────────────────────────────────────┘  │
 │                                                                      │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-### 2.2 Summary as Simple Playbook
+### 2.2 Document Profile as Standard Playbook
 
-**Key Insight**: Summary outputs (TL;DR, Keywords, Entities, Summary) can be configured as Output Scopes on a playbook.
+**Key Insight**: Document Profile is just another Playbook/Analysis—the same underlying system as Analysis Builder → Analysis Workspace. The only differences are:
 
-**"Auto-Summary" Playbook Configuration**:
+| Aspect | Analysis Builder | Document Profile |
+|--------|------------------|------------------|
+| **Trigger** | User clicks "Analyze" | Auto on file upload |
+| **Playbook Selection** | User picks in UI | Code references "Document Profile" playbook by name |
+| **UI Context** | Analysis Workspace (full) | File Upload PCF - Tab 2 |
+| **Output Storage** | `sprk_analysis` + `sprk_analysisoutput` | Same + ALSO maps to `sprk_document` fields |
+
+**"Document Profile" Playbook** (configurable in Dataverse UI):
 
 ```yaml
-Name: Auto-Summary
-Trigger: Automatic (on document upload)
-Mode: Simple (no chat, auto-persist)
+Name: Document Profile
+Description: Auto-generated document summary on upload
+Is Public: true
 
-Output Scopes:
-  - TlDr:
-      Type: text[]
-      MaxItems: 3
-      PersistTo: sprk_document.sprk_tldr
-  - Summary:
-      Type: text
-      MaxLength: 2000
-      PersistTo: sprk_document.sprk_summary
-  - Keywords:
-      Type: text
-      Format: comma-separated
-      PersistTo: sprk_document.sprk_keywords
-  - Entities:
-      Type: structured
-      Schema: { organizations: [], people: [], dates: [], monetaryAmounts: [] }
-      PersistTo: sprk_document.sprk_entities (JSON)
+Output Types (via sprk_aioutputtype):
+  - TL;DR (maps to sprk_document.sprk_tldr)
+  - Summary (maps to sprk_document.sprk_summary)
+  - Keywords (maps to sprk_document.sprk_keywords)
+  - Document Type (maps to sprk_document.sprk_documenttype)
+  - Entities (JSON - maps to sprk_document.sprk_entities)
+```
 
-Prompt: (existing StructuredAnalysisPromptTemplate)
+**Code Reference Pattern**:
+```csharp
+// Code looks up playbook by name - configurable in UI
+var playbook = await _playbookService.GetByNameAsync("Document Profile", ct);
 ```
 
 **Benefits**:
-1. **Configurable outputs** - Add new output types without code changes
-2. **Flexible persistence** - Choose which fields to update
-3. **Consistent execution** - Same pipeline as interactive analysis
-4. **Unified authorization** - Single authorization service
+1. **Configurable outputs** - Modify playbook and output types in Dataverse UI
+2. **No special code path** - Uses same `AnalysisOrchestrationService` pipeline
+3. **Dual storage** - Outputs in `sprk_analysisoutput` AND mapped to `sprk_document` fields
+4. **Unified authorization** - Single FullUAC authorization service
 
 ### 2.3 Authorization Model
 
-**Streaming (User Context)**:
-```
-User Request → OBO Token → Graph API → SPE Access
-                   ↓
-              User's own permissions enforced by MSAL/Graph
-```
-*No additional UAC needed - user can only access what Graph allows.*
+**Critical Clarification**: The AI process runs on SPE file content—it does NOT require Document ID. Document ID is only needed for **storage** (creating `sprk_analysis`, updating `sprk_document`).
 
-**Background Jobs (App-Only)**:
 ```
-Job Enqueue → Capture user context → Validate UAC → Store auth context
-                                          ↓
-                                     User has access?
-                                          │
-                              ┌───────────┴───────────┐
-                              ↓                       ↓
-                         Yes: Proceed            No: Reject
-                              ↓
-                         Job Execute → App Token → Graph API
-                                                      ↓
-                                               Access as app
+┌─────────────────────────────────────────────────────────────────────┐
+│                        AI Execution Flow                            │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  1. SPE File Content (via OBO)    ← AI runs here, no Document ID   │
+│           ↓                                                         │
+│  2. AI Pipeline (OpenAI)          ← Generates outputs              │
+│           ↓                                                         │
+│  3. Storage (needs Document ID)   ← UAC + retry logic here         │
+│      • Create sprk_analysis                                         │
+│      • Create sprk_analysisoutput                                   │
+│      • Update sprk_document fields (Document Profile only)          │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
 ```
-*UAC check at enqueue time prevents unauthorized background processing.*
+
+**Authorization Strategy**: Use **FullUAC** mode (security requirement). UAC is also needed for non-Dataverse contexts (Office.js add-ins, web applications).
 
 **Unified Authorization Service**:
 
@@ -233,39 +237,34 @@ public interface IAiAuthorizationService
 {
     /// <summary>
     /// Authorize AI operation for current user context.
+    /// Uses FullUAC mode with retry for eventual consistency.
     /// </summary>
     Task<AuthorizationResult> AuthorizeAsync(
         ClaimsPrincipal user,
         IEnumerable<Guid> documentIds,
-        AuthorizationMode mode,
         CancellationToken cancellationToken);
 }
-
-public enum AuthorizationMode
-{
-    /// <summary>Phase 1: Skip checks, rely on Dataverse security.</summary>
-    SkipAuth,
-
-    /// <summary>Check Dataverse RetrievePrincipalAccess for each document.</summary>
-    DataverseAccess,
-
-    /// <summary>Full UAC check with retry for eventual consistency.</summary>
-    FullUac
-}
 ```
 
-**Timing Issue Fix** (for Full UAC mode):
+**Timing Issue Fix** (applies to storage step only):
+
+The retry logic handles Dataverse replication lag for newly-created documents:
 
 ```csharp
-// Option 1: Retry with exponential backoff
+// Retry with exponential backoff for storage operations
 var policy = Policy
     .Handle<DocumentNotFoundException>()
+    .Or<DataverseException>(ex => ex.StatusCode == 404)
     .WaitAndRetryAsync(3, attempt => TimeSpan.FromSeconds(Math.Pow(2, attempt)));
 
-// Option 2: Delay before first check
-await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
-var result = await CheckAccessAsync(documentId);
+await policy.ExecuteAsync(async () =>
+{
+    // UAC check + storage to Dataverse
+    await StoreAnalysisResultsAsync(documentId, outputs, ct);
+});
 ```
+
+**Note**: If performance issues arise with FullUAC, revisit authorization mode selection.
 
 ---
 
@@ -273,28 +272,28 @@ var result = await CheckAccessAsync(documentId);
 
 ### Phase 2.1: Unify Authorization
 
-**Scope**: Create unified authorization service used by both endpoints.
+**Scope**: Create unified authorization service with FullUAC mode.
 
 | Task | Description |
 |------|-------------|
-| Create `IAiAuthorizationService` | Interface with configurable modes |
-| Create `AiAuthorizationService` | Implementation with SkipAuth, DataverseAccess, FullUac modes |
+| Create `IAiAuthorizationService` | Interface for unified authorization |
+| Create `AiAuthorizationService` | Implementation with FullUAC mode |
 | Update `AnalysisAuthorizationFilter` | Use `IAiAuthorizationService` |
 | Update `AiAuthorizationFilter` | Use `IAiAuthorizationService` |
-| Add timing fix | Retry logic for newly-created documents |
-| Add tests | Unit tests for all authorization modes |
+| Add storage retry logic | Exponential backoff for Dataverse operations |
+| Add tests | Unit tests for authorization and retry |
 
-### Phase 2.2: Add Simple Mode to Analysis
+### Phase 2.2: Add Document Profile Playbook Support
 
-**Scope**: Enable `AnalysisOrchestrationService` to handle summary-style requests.
+**Scope**: Enable `AnalysisOrchestrationService` to handle Document Profile execution.
 
 | Task | Description |
 |------|-------------|
-| Add `SimpleMode` property to `AnalysisExecuteRequest` | Flag for auto-persist behavior |
-| Create "Auto-Summary" playbook seed data | Dataverse record with output scopes |
-| Implement output scope persistence | Update `sprk_document` fields based on scope config |
-| Add endpoint for simple mode | `/api/ai/analysis/simple` or use existing with flag |
-| Add tests | Integration tests for simple mode flow |
+| Create "Document Profile" playbook seed data | Dataverse record with output types |
+| Implement playbook lookup by name | `GetByNameAsync("Document Profile")` |
+| Implement dual storage | `sprk_analysisoutput` + `sprk_document` field mapping |
+| Add failure handling | Retry 3x with exponential backoff, then soft failure |
+| Add tests | Integration tests for Document Profile flow |
 
 ### Phase 2.3: Migrate AI Summary Endpoint
 
@@ -303,14 +302,14 @@ var result = await CheckAccessAsync(documentId);
 | Task | Description |
 |------|-------------|
 | Keep `/api/ai/document-intelligence/analyze` | Backward compatibility |
-| Route internally to `AnalysisOrchestrationService` | With `SimpleMode = true` |
+| Route internally to `AnalysisOrchestrationService` | With playbook="Document Profile" |
 | Update PCF control | Use unified endpoint (optional) |
 | Deprecate `DocumentIntelligenceService` | Add `[Obsolete]` attribute |
 | Add tests | Verify backward compatibility |
 
-### Phase 2.4: Cleanup
+### Phase 2.4: Cleanup (Immediately After Deployment)
 
-**Scope**: Remove deprecated code.
+**Scope**: Remove deprecated code immediately after full solution is deployed and working.
 
 | Task | Description |
 |------|-------------|
@@ -320,69 +319,127 @@ var result = await CheckAccessAsync(documentId);
 | Update DI registrations | Remove old services |
 | Update documentation | Reflect new architecture |
 
+**Timing**: Cleanup happens immediately after Phase 2.3 deployment is verified working—no waiting period.
+
 ---
 
-## Part 4: Output Scopes Design
+## Part 4: Output Types Design (Using Existing Entities)
 
-### 4.1 Schema
+### 4.1 Existing Dataverse Schema
+
+**Use existing entities** (no new entities needed):
+
+| Entity | Logical Name | Purpose |
+|--------|--------------|---------|
+| Analysis Playbook | `sprk_analysisplaybook` | Playbook definitions (incl. "Document Profile") |
+| AI Output Type | `sprk_aioutputtype` | Output type definitions (TL;DR, Summary, etc.) |
+| Analysis Output | `sprk_analysisoutput` | Actual output values per analysis |
+| Analysis | `sprk_analysis` | Analysis session record |
+| Document | `sprk_document` | Document record (target for field mapping) |
+
+### 4.2 Entity Relationships
+
+```
+sprk_analysisplaybook (e.g., "Document Profile")
+       │
+       │ 1:N
+       ▼
+sprk_aioutputtype (e.g., "TL;DR", "Summary", "Keywords")
+       │
+       │ (referenced by)
+       ▼
+sprk_analysisoutput (actual values per execution)
+       │
+       │ N:1
+       ▼
+sprk_analysis (execution session)
+       │
+       │ N:1
+       ▼
+sprk_document (source document, also receives field mapping)
+```
+
+### 4.3 Document Profile Output Types (Seed Data)
+
+Configure via Dataverse UI on the "Document Profile" playbook:
+
+| Output Type Name | Data Type | Maps to Document Field |
+|------------------|-----------|------------------------|
+| TL;DR | Text (multi-line) | `sprk_document.sprk_tldr` |
+| Summary | Text (multi-line) | `sprk_document.sprk_summary` |
+| Keywords | Text | `sprk_document.sprk_keywords` |
+| Document Type | Text | `sprk_document.sprk_documenttype` |
+| Entities | Text (JSON) | `sprk_document.sprk_entities` |
+
+### 4.4 Field Mapping Logic
+
+For Document Profile playbook only, output values are stored in TWO places:
+1. **Standard**: `sprk_analysisoutput` records (linked to `sprk_analysis`)
+2. **Additional**: Mapped to `sprk_document` fields (for quick access in Document views)
 
 ```csharp
-/// <summary>
-/// Output scope configuration for analysis results.
-/// Defines what output to generate and where to persist it.
-/// </summary>
-public record OutputScope
+// After AI execution completes
+foreach (var output in analysisOutputs)
 {
-    /// <summary>Unique identifier for this scope.</summary>
-    public required Guid Id { get; init; }
+    // 1. Standard storage
+    await CreateAnalysisOutputAsync(analysisId, output);
 
-    /// <summary>Display name (e.g., "TL;DR", "Keywords").</summary>
-    public required string Name { get; init; }
-
-    /// <summary>Output type: text, text[], structured.</summary>
-    public required OutputType Type { get; init; }
-
-    /// <summary>For text arrays, max items.</summary>
-    public int? MaxItems { get; init; }
-
-    /// <summary>For text, max characters.</summary>
-    public int? MaxLength { get; init; }
-
-    /// <summary>For structured, JSON schema.</summary>
-    public string? Schema { get; init; }
-
-    /// <summary>Target field for persistence (e.g., "sprk_document.sprk_summary").</summary>
-    public string? PersistTo { get; init; }
-
-    /// <summary>Prompt fragment for this output.</summary>
-    public string? PromptFragment { get; init; }
-}
-
-public enum OutputType
-{
-    Text,
-    TextArray,
-    Structured
+    // 2. If Document Profile playbook, also map to document fields
+    if (playbook.Name == "Document Profile" && output.Type.FieldMapping != null)
+    {
+        await UpdateDocumentFieldAsync(documentId, output.Type.FieldMapping, output.Value);
+    }
 }
 ```
 
-### 4.2 Dataverse Model
+### 4.5 Failure Handling
 
-**Existing entities to modify**:
-- `sprk_playbook` - Add relationship to Output Scopes
+**Retry Strategy** (for storage operations only):
 
-**New entity**:
-- `sprk_outputscope` - Output scope definitions
+```csharp
+// Retry 3x with exponential backoff for Dataverse storage
+var policy = Policy
+    .Handle<DataverseException>(ex => ex.StatusCode == 404 || ex.StatusCode == 503)
+    .Or<DocumentNotFoundException>()
+    .WaitAndRetryAsync(
+        retryCount: 3,
+        sleepDurationProvider: attempt => TimeSpan.FromSeconds(Math.Pow(2, attempt)),
+        onRetry: (ex, delay, attempt, ctx) =>
+        {
+            _logger.LogWarning("Storage retry {Attempt}/3 after {Delay}s: {Error}",
+                attempt, delay.TotalSeconds, ex.Message);
+        });
 
-### 4.3 Default Output Scopes (Seed Data)
+await policy.ExecuteAsync(async () =>
+{
+    await StoreAnalysisResultsAsync(documentId, outputs, ct);
+});
+```
 
-| Name | Type | MaxItems | PersistTo |
-|------|------|----------|-----------|
-| TL;DR | TextArray | 3 | sprk_document.sprk_tldr |
-| Summary | Text | 2000 | sprk_document.sprk_summary |
-| Keywords | Text | - | sprk_document.sprk_keywords |
-| Document Type | Text | - | sprk_document.sprk_documenttype |
-| Entities | Structured | - | sprk_document.sprk_entities |
+**Soft Failure** (after 3 retries):
+
+If storage fails after 3 retries, the AI outputs are **NOT lost**:
+1. Outputs are already stored in `sprk_analysisoutput` (linked to `sprk_analysis`)
+2. Only the field mapping to `sprk_document` may have failed
+3. User sees: **"Document Profile completed. Some fields could not be updated. View full results in the Analysis tab."**
+4. User can still access outputs via Analysis Workspace
+
+```csharp
+// Soft failure handling
+catch (Exception ex) when (retriesExhausted)
+{
+    _logger.LogWarning("Storage failed after retries. Analysis {AnalysisId} outputs preserved.", analysisId);
+
+    // Return partial success
+    return new DocumentProfileResult
+    {
+        Success = true,  // AI completed successfully
+        PartialStorage = true,
+        Message = "Document Profile completed. Some fields could not be updated. View full results in the Analysis tab.",
+        AnalysisId = analysisId  // User can navigate to full results
+    };
+}
+```
 
 ---
 
@@ -418,13 +475,12 @@ public enum OutputType
 - `src/server/api/Sprk.Bff.Api/Api/Filters/AnalysisAuthorizationFilter.cs`
 - `src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs`
 - `src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs`
-- `src/server/api/Sprk.Bff.Api/Models/Ai/AnalysisExecuteRequest.cs`
 - `src/server/api/Sprk.Bff.Api/Infrastructure/DI/SpaarkeCore.cs`
 
 ### New
 - `src/server/api/Sprk.Bff.Api/Services/Ai/IAiAuthorizationService.cs`
 - `src/server/api/Sprk.Bff.Api/Services/Ai/AiAuthorizationService.cs`
-- `src/server/api/Sprk.Bff.Api/Models/Ai/OutputScope.cs`
+- `src/server/api/Sprk.Bff.Api/Models/Ai/DocumentProfileResult.cs`
 
 ### Deleted (Phase 2.4)
 - `src/server/api/Sprk.Bff.Api/Services/Ai/IDocumentIntelligenceService.cs`
@@ -442,9 +498,63 @@ public enum OutputType
 
 ---
 
+## Part 9: Owner Clarifications (2026-01-06)
+
+The following decisions were made during spec review with the product owner:
+
+### Q1: Terminology
+**Decision**: Rename "Auto-Summary" to **"Document Profile Playbook"** for consistency with Playbook/Analysis terminology.
+
+### Q2: Authorization Mode
+**Decision**: Use **FullUAC** mode (security requirement). UAC is needed for:
+- Security enforcement on AI operations
+- Non-Dataverse contexts (Office.js add-ins, web applications)
+- Future background job security
+
+**Note**: If performance issues arise, revisit authorization mode selection.
+
+### Q3: Timing Fix Scope
+**Decision**: Retry logic applies to **storage operations only**, not AI execution:
+- AI runs on SPE file content (no Document ID needed)
+- Document ID only needed for storage step
+- Exponential backoff: 2s → 4s → 8s (3 retries)
+
+### Q4: Failure Behavior
+**Decision**: After 3 retries, use **soft failure**:
+- AI outputs are preserved in `sprk_analysisoutput`
+- User sees: "Document Profile completed. Some fields could not be updated. View full results in the Analysis tab."
+- User can access outputs via Analysis Workspace
+
+### Q5: Playbook Reference
+**Decision**: Code references "Document Profile" playbook **by name**:
+- Lookup: `GetByNameAsync("Document Profile")`
+- Configurable in Dataverse UI (can change output types, prompts)
+- No hard-coded playbook IDs
+
+### Q6: Existing Entities
+**Decision**: Use **existing entities** (no new schema):
+- `sprk_analysisplaybook` - Playbook definitions
+- `sprk_aioutputtype` - Output type definitions
+- `sprk_analysisoutput` - Output values
+
+### Q7: Cleanup Timing
+**Decision**: Cleanup happens **immediately** after deployment is verified working:
+- No waiting period or deprecation window
+- Remove deprecated services as soon as unified solution is deployed and tested
+
+### Key Architectural Insight
+**Document Profile is NOT a special case**—it's just another Playbook execution with:
+- Different trigger point (auto on upload vs. user-initiated)
+- Different UI context (File Upload PCF Tab 2 vs. Analysis Workspace)
+- Additional storage (also maps to `sprk_document` fields)
+
+The AI process runs on SPE file content and does not require Document ID. Document ID is only needed for storage operations.
+
+---
+
 ## Next Steps
 
-1. **Review this spec** with stakeholder
+1. ~~**Review this spec** with stakeholder~~ ✅ Done (2026-01-06)
 2. **Create project artifacts** via `/project-pipeline`
 3. **Generate task files** for each phase
 4. **Begin Phase 2.1** (Unify Authorization)

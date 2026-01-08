@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.Core;
 using Azure.Identity;
+using Microsoft.Extensions.Caching.Distributed;
 using Sprk.Bff.Api.Models.Ai;
 
 namespace Sprk.Bff.Api.Services.Ai;
@@ -18,6 +19,7 @@ public class PlaybookService : IPlaybookService
     private readonly string _apiUrl;
     private readonly TokenCredential _credential;
     private readonly ILogger<PlaybookService> _logger;
+    private readonly IDistributedCache? _cache;
     private AccessToken? _currentToken;
 
     private const string EntitySetName = "sprk_analysisplaybooks";
@@ -38,10 +40,12 @@ public class PlaybookService : IPlaybookService
     public PlaybookService(
         HttpClient httpClient,
         IConfiguration configuration,
-        ILogger<PlaybookService> logger)
+        ILogger<PlaybookService> logger,
+        IDistributedCache? cache = null)
     {
         _httpClient = httpClient;
         _logger = logger;
+        _cache = cache;
 
         var dataverseUrl = configuration["Dataverse:ServiceUrl"]
             ?? throw new InvalidOperationException("Dataverse:ServiceUrl configuration is required");
@@ -49,10 +53,11 @@ public class PlaybookService : IPlaybookService
             ?? throw new InvalidOperationException("TENANT_ID configuration is required");
         var clientId = configuration["API_APP_ID"]
             ?? throw new InvalidOperationException("API_APP_ID configuration is required");
-        var clientSecret = configuration["Dataverse:ClientSecret"]
-            ?? throw new InvalidOperationException("Dataverse:ClientSecret configuration is required");
+        var clientSecret = configuration["API_CLIENT_SECRET"] // Same app registration as Graph and DataverseAccessDataSource
+            ?? throw new InvalidOperationException("API_CLIENT_SECRET configuration is required");
 
-        _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2";
+        // IMPORTANT: BaseAddress must end with trailing slash, otherwise relative URLs replace the last segment
+        _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2/";
         _credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
 
         _httpClient.BaseAddress = new Uri(_apiUrl);
@@ -60,7 +65,8 @@ public class PlaybookService : IPlaybookService
         _httpClient.DefaultRequestHeaders.Add("OData-Version", "4.0");
         _httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-        _logger.LogInformation("Initialized PlaybookService for {ApiUrl}", _apiUrl);
+        _logger.LogInformation("Initialized PlaybookService - DataverseUrl: {DataverseUrl}, Constructed ApiUrl: {ApiUrl}, BaseAddress: {BaseAddress}",
+            dataverseUrl, _apiUrl, _httpClient.BaseAddress);
     }
 
     private async Task EnsureAuthenticatedAsync(CancellationToken cancellationToken = default)
@@ -168,7 +174,8 @@ public class PlaybookService : IPlaybookService
     {
         await EnsureAuthenticatedAsync(cancellationToken);
 
-        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_sprk_outputtypeid_value,_ownerid_value,createdon,modifiedon";
+        // NOTE: OutputTypeId field removed - output types are N:N relationship, not lookup
+        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_ownerid_value,createdon,modifiedon";
         var url = $"{EntitySetName}({playbookId})?$select={select}";
 
         var response = await _httpClient.GetAsync(url, cancellationToken);
@@ -281,9 +288,11 @@ public class PlaybookService : IPlaybookService
         {
             filter += $" and contains(sprk_name, '{EscapeODataString(query.NameFilter)}')";
         }
+        // NOTE: OutputTypeId filter removed - output types are N:N relationship, not lookup
+        // Filtering by output type would require a separate N:N query
         if (query.OutputTypeId.HasValue)
         {
-            filter += $" and _sprk_outputtypeid_value eq {query.OutputTypeId.Value}";
+            _logger.LogWarning("OutputTypeId filtering not supported - output types use N:N relationship");
         }
 
         return await ExecuteListQueryAsync(filter, query, pageSize, skip, cancellationToken);
@@ -305,12 +314,136 @@ public class PlaybookService : IPlaybookService
         {
             filter += $" and contains(sprk_name, '{EscapeODataString(query.NameFilter)}')";
         }
+        // NOTE: OutputTypeId filter removed - output types are N:N relationship, not lookup
+        // Filtering by output type would require a separate N:N query
         if (query.OutputTypeId.HasValue)
         {
-            filter += $" and _sprk_outputtypeid_value eq {query.OutputTypeId.Value}";
+            _logger.LogWarning("OutputTypeId filtering not supported - output types use N:N relationship");
         }
 
         return await ExecuteListQueryAsync(filter, query, pageSize, skip, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<PlaybookResponse> GetByNameAsync(
+        string name,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        // Cache key following SDAP naming convention
+        var cacheKey = $"sdap:playbook:name:{name}";
+
+        // Try cache first (if available)
+        if (_cache != null)
+        {
+            var cached = await _cache.GetStringAsync(cacheKey, cancellationToken);
+            if (cached != null)
+            {
+                try
+                {
+                    var cachedPlaybook = JsonSerializer.Deserialize<PlaybookResponse>(cached, JsonOptions);
+                    if (cachedPlaybook != null)
+                    {
+                        _logger.LogDebug("[PLAYBOOK] Cache HIT for playbook name '{Name}'", name);
+                        return cachedPlaybook;
+                    }
+                }
+                catch (JsonException ex)
+                {
+                    _logger.LogWarning(ex, "[PLAYBOOK] Cache deserialization failed for '{Name}'", name);
+                }
+            }
+        }
+
+        _logger.LogDebug("[PLAYBOOK] Cache MISS for playbook name '{Name}', querying Dataverse", name);
+
+        await EnsureAuthenticatedAsync(cancellationToken);
+
+        // Query by name - exact match, case-insensitive per Dataverse default
+        // NOTE: OutputTypeId field removed - output types are N:N relationship, not lookup
+        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_ownerid_value,createdon,modifiedon";
+        var filter = $"sprk_name eq '{EscapeODataString(name)}'";
+        var url = $"{EntitySetName}?$select={select}&$filter={Uri.EscapeDataString(filter)}&$top=1";
+
+        _logger.LogInformation("[PLAYBOOK] Querying Dataverse for playbook: {Name}", name);
+        _logger.LogInformation("[PLAYBOOK] BaseAddress: {BaseAddress}", _httpClient.BaseAddress);
+        _logger.LogInformation("[PLAYBOOK] Relative URL: {RelativeUrl}", url);
+        _logger.LogInformation("[PLAYBOOK] Full URL will be: {FullUrl}", new Uri(_httpClient.BaseAddress!, url));
+
+        var response = await _httpClient.GetAsync(url, cancellationToken);
+
+        _logger.LogInformation("[PLAYBOOK] Query response: StatusCode={StatusCode}, ReasonPhrase={ReasonPhrase}",
+            response.StatusCode, response.ReasonPhrase);
+
+        response.EnsureSuccessStatusCode();
+
+        var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(JsonOptions, cancellationToken);
+        if (result?.Value == null || result.Value.Length == 0)
+        {
+            _logger.LogWarning("[PLAYBOOK] Playbook '{Name}' not found in Dataverse", name);
+            throw PlaybookNotFoundException.ByName(name);
+        }
+
+        var entity = JsonSerializer.Deserialize<PlaybookEntity>(result.Value[0].GetRawText(), JsonOptions);
+        if (entity == null)
+        {
+            throw PlaybookNotFoundException.ByName(name);
+        }
+
+        // Load N:N relationships
+        var playbookId = entity.Id;
+        _logger.LogInformation("[PLAYBOOK] Loading N:N relationships for playbook ID: {PlaybookId}", playbookId);
+
+        var actionIds = await GetRelatedIdsAsync(playbookId, ActionRelationship, "sprk_analysisactions", "sprk_analysisactionid", cancellationToken);
+        _logger.LogInformation("[PLAYBOOK] Loaded {Count} actions", actionIds.Length);
+
+        var skillIds = await GetRelatedIdsAsync(playbookId, SkillRelationship, "sprk_analysisskills", "sprk_analysisskillid", cancellationToken);
+        _logger.LogInformation("[PLAYBOOK] Loaded {Count} skills", skillIds.Length);
+
+        var knowledgeIds = await GetRelatedIdsAsync(playbookId, KnowledgeRelationship, "sprk_analysisknowledges", "sprk_analysisknowledgeid", cancellationToken);
+        _logger.LogInformation("[PLAYBOOK] Loaded {Count} knowledge sources", knowledgeIds.Length);
+
+        var toolIds = await GetRelatedIdsAsync(playbookId, ToolRelationship, "sprk_analysistools", "sprk_analysistoolid", cancellationToken);
+        _logger.LogInformation("[PLAYBOOK] Loaded {Count} tools", toolIds.Length);
+
+        var playbook = new PlaybookResponse
+        {
+            Id = entity.Id,
+            Name = entity.Name ?? string.Empty,
+            Description = entity.Description,
+            OutputTypeId = entity.OutputTypeId,
+            IsPublic = entity.IsPublic ?? false,
+            OwnerId = entity.OwnerId ?? Guid.Empty,
+            ActionIds = actionIds,
+            SkillIds = skillIds,
+            KnowledgeIds = knowledgeIds,
+            ToolIds = toolIds,
+            CreatedOn = entity.CreatedOn ?? DateTime.UtcNow,
+            ModifiedOn = entity.ModifiedOn ?? DateTime.UtcNow
+        };
+
+        // Cache result for 24 hours (playbooks are relatively stable)
+        if (_cache != null)
+        {
+            try
+            {
+                var serialized = JsonSerializer.Serialize(playbook, JsonOptions);
+                var cacheOptions = new DistributedCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(24)
+                };
+                await _cache.SetStringAsync(cacheKey, serialized, cacheOptions, cancellationToken);
+                _logger.LogDebug("[PLAYBOOK] Cached playbook '{Name}' for 24 hours", name);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[PLAYBOOK] Failed to cache playbook '{Name}'", name);
+            }
+        }
+
+        _logger.LogInformation("[PLAYBOOK] Retrieved playbook '{Name}' (ID: {Id})", name, playbook.Id);
+        return playbook;
     }
 
     private async Task<PlaybookListResponse> ExecuteListQueryAsync(
@@ -330,7 +463,8 @@ public class PlaybookService : IPlaybookService
         var orderBy = GetOrderByClause(query.SortBy, query.SortDescending);
 
         // Get paginated results
-        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_sprk_outputtypeid_value,_ownerid_value,modifiedon";
+        // NOTE: OutputTypeId field removed - output types are N:N relationship, not lookup
+        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_ownerid_value,modifiedon";
         var url = $"{EntitySetName}?$select={select}&$filter={Uri.EscapeDataString(filter)}&$orderby={orderBy}&$top={pageSize}&$skip={skip}";
 
         var response = await _httpClient.GetAsync(url, cancellationToken);
@@ -355,7 +489,8 @@ public class PlaybookService : IPlaybookService
             Id = element.TryGetProperty("sprk_analysisplaybookid", out var idProp) ? idProp.GetGuid() : Guid.Empty,
             Name = element.TryGetProperty("sprk_name", out var nameProp) ? nameProp.GetString() ?? string.Empty : string.Empty,
             Description = element.TryGetProperty("sprk_description", out var descProp) ? descProp.GetString() : null,
-            OutputTypeId = element.TryGetProperty("_sprk_outputtypeid_value", out var outputProp) && outputProp.ValueKind != JsonValueKind.Null ? outputProp.GetGuid() : null,
+            // NOTE: OutputTypeId always null - output types are N:N relationship, not lookup
+            OutputTypeId = null,
             IsPublic = element.TryGetProperty("sprk_ispublic", out var publicProp) && publicProp.GetBoolean(),
             OwnerId = element.TryGetProperty("_ownerid_value", out var ownerProp) ? ownerProp.GetGuid() : Guid.Empty,
             ModifiedOn = element.TryGetProperty("modifiedon", out var modProp) ? modProp.GetDateTime() : DateTime.UtcNow

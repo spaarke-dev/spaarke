@@ -1,0 +1,76 @@
+<task id="021" project="ai-summary-and-analysis-enhancements">
+  <metadata>
+    <title>Update PCF to Use New Unified Endpoint</title>
+    <phase>2.3</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>pcf, api, breaking-change</tags>
+    <dependencies>020</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Update UniversalQuickCreate PCF control to use the new /api/ai/analysis/execute endpoint.</goal>
+
+    <context>
+      The PCF currently calls /api/ai/document-intelligence/analyze (deleted in Task 020).
+      Update to use /api/ai/analysis/execute with the new request/response format.
+    </context>
+
+    <constraints>
+      - Must update endpoint URL
+      - Must update request format (single doc → array + playbook)
+      - Must handle new response format (AnalysisStreamChunk)
+      - Must bump PCF version (ADR-006)
+      - No backward compatibility needed
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/client/pcf/UniversalQuickCreate/control/services/useAiSummary.ts" reason="API call location" />
+      <file path="src/client/pcf/UniversalQuickCreate/control/components/AiSummaryPanel.tsx" reason="Response handling" />
+      <file path="src/client/pcf/UniversalQuickCreate/ControlManifest.Input.xml" reason="Version bump" />
+      <file path="src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs" reason="New endpoint reference" />
+      <file path="src/server/api/Sprk.Bff.Api/Models/Ai/AnalysisStreamChunk.cs" reason="New response model" />
+    </files>
+    <patterns>
+      <pattern path=".claude/patterns/pcf/control-initialization.md" reason="PCF patterns" />
+    </patterns>
+    <constraints>
+      <constraint source="ADR-006" reason="PCF over webresources" />
+      <constraint source="ADR-021" reason="Fluent UI v9 design system" />
+    </constraints>
+  </knowledge>
+
+  <steps>
+    <step order="1">Update useAiSummary.ts: Change endpoint URL to /api/ai/analysis/execute</step>
+    <step order="2">Update request format: Add documentIds array, playbookId, actionId</step>
+    <step order="3">Resolve playbook: Call /api/ai/playbooks/by-name/Document%20Profile to get ID</step>
+    <step order="4">Update response parsing: Handle AnalysisStreamChunk instead of AnalysisChunk</step>
+    <step order="5">Parse new fields: analysisId, tokenUsage, partialStorage, storageMessage</step>
+    <step order="6">Update AiSummaryPanel.tsx: Display new fields if needed</step>
+    <step order="7">Bump version in 4 locations (ControlManifest, Solution, extracted manifest, UI footer)</step>
+    <step order="8">Build PCF: npm run build</step>
+    <step order="9">Test locally against new API endpoint</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Review existing PCF code</tool>
+    <tool name="Edit">Update TypeScript files</tool>
+    <tool name="Edit">Bump version numbers</tool>
+    <tool name="Bash">Build PCF</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Updated PCF control using new endpoint</output>
+    <output type="version">Version bumped in all 4 locations</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Endpoint URL updated to /api/ai/analysis/execute</criterion>
+    <criterion>Request format matches AnalysisExecuteRequest</criterion>
+    <criterion>Response parsing handles AnalysisStreamChunk</criterion>
+    <criterion>Version bumped correctly</criterion>
+    <criterion>PCF build succeeds</criterion>
+  </acceptance-criteria>
+</task>

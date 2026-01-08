@@ -4,40 +4,33 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.Logging;
 using Moq;
-using Spaarke.Core.Auth;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Services.Ai;
 using Xunit;
+using AuthorizationResult = Sprk.Bff.Api.Services.Ai.AuthorizationResult;
 
 namespace Sprk.Bff.Api.Tests.Filters;
 
 public class AiAuthorizationFilterTests
 {
-    private readonly Mock<IAuthorizationService> _authServiceMock;
+    private readonly Mock<IAiAuthorizationService> _authServiceMock;
     private readonly Mock<ILogger<AiAuthorizationFilter>> _loggerMock;
     private readonly AiAuthorizationFilter _filter;
 
     public AiAuthorizationFilterTests()
     {
-        _authServiceMock = new Mock<IAuthorizationService>(MockBehavior.Strict);
+        _authServiceMock = new Mock<IAiAuthorizationService>();
         _loggerMock = new Mock<ILogger<AiAuthorizationFilter>>();
 
         _filter = new AiAuthorizationFilter(_authServiceMock.Object, _loggerMock.Object);
     }
 
-    private static AuthorizationResult AllowedResult() => new()
-    {
-        IsAllowed = true,
-        ReasonCode = "ALLOWED",
-        RuleName = "TestRule"
-    };
+    private static AuthorizationResult AllowedResult(params Guid[] documentIds) =>
+        AuthorizationResult.Authorized(documentIds.Length > 0 ? documentIds : new[] { Guid.NewGuid() });
 
-    private static AuthorizationResult DeniedResult(string reasonCode = "NO_ACCESS") => new()
-    {
-        IsAllowed = false,
-        ReasonCode = reasonCode,
-        RuleName = "TestRule"
-    };
+    private static AuthorizationResult DeniedResult(string reason = "NO_ACCESS") =>
+        AuthorizationResult.Denied(reason);
 
     private static ClaimsPrincipal CreateUser(string userId = "user-123")
     {
@@ -104,17 +97,23 @@ public class AiAuthorizationFilterTests
         var context = CreateContext(CreateUser(), request);
 
         _authServiceMock
-            .Setup(x => x.AuthorizeAsync(It.Is<AuthorizationContext>(c =>
-                c.ResourceId == documentId.ToString() &&
-                c.Operation == "read"), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AllowedResult());
+            .Setup(x => x.AuthorizeAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.Is<IReadOnlyList<Guid>>(ids => ids.Contains(documentId)),
+                It.IsAny<HttpContext>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AllowedResult(documentId));
 
         // Act
         var result = await _filter.InvokeAsync(context.Object, NextDelegate);
 
         // Assert
         result.Should().BeOfType<Ok<string>>();
-        _authServiceMock.Verify(x => x.AuthorizeAsync(It.IsAny<AuthorizationContext>(), It.IsAny<CancellationToken>()), Times.Once);
+        _authServiceMock.Verify(x => x.AuthorizeAsync(
+            It.IsAny<ClaimsPrincipal>(),
+            It.IsAny<IReadOnlyList<Guid>>(),
+            It.IsAny<HttpContext>(),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -126,7 +125,11 @@ public class AiAuthorizationFilterTests
         var context = CreateContext(CreateUser(), request);
 
         _authServiceMock
-            .Setup(x => x.AuthorizeAsync(It.IsAny<AuthorizationContext>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.AuthorizeAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.IsAny<IReadOnlyList<Guid>>(),
+                It.IsAny<HttpContext>(),
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(DeniedResult());
 
         // Act
@@ -171,15 +174,23 @@ public class AiAuthorizationFilterTests
         var context = CreateContext(CreateUser(), requests);
 
         _authServiceMock
-            .Setup(x => x.AuthorizeAsync(It.IsAny<AuthorizationContext>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AllowedResult());
+            .Setup(x => x.AuthorizeAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.IsAny<IReadOnlyList<Guid>>(),
+                It.IsAny<HttpContext>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AllowedResult(docId1, docId2));
 
         // Act
         var result = await _filter.InvokeAsync(context.Object, NextDelegate);
 
         // Assert
         result.Should().BeOfType<Ok<string>>();
-        _authServiceMock.Verify(x => x.AuthorizeAsync(It.IsAny<AuthorizationContext>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+        _authServiceMock.Verify(x => x.AuthorizeAsync(
+            It.IsAny<ClaimsPrincipal>(),
+            It.Is<IReadOnlyList<Guid>>(ids => ids.Count == 2),
+            It.IsAny<HttpContext>(),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -195,11 +206,14 @@ public class AiAuthorizationFilterTests
         };
         var context = CreateContext(CreateUser(), requests);
 
-        // First doc is allowed, second is not
+        // Partial authorization - only docId1 is authorized
         _authServiceMock
-            .SetupSequence(x => x.AuthorizeAsync(It.IsAny<AuthorizationContext>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AllowedResult())
-            .ReturnsAsync(DeniedResult());
+            .Setup(x => x.AuthorizeAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.IsAny<IReadOnlyList<Guid>>(),
+                It.IsAny<HttpContext>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AuthorizationResult.Partial(new[] { docId1 }, "Access denied to some documents"));
 
         // Act
         var result = await _filter.InvokeAsync(context.Object, NextDelegate);
@@ -211,7 +225,7 @@ public class AiAuthorizationFilterTests
     }
 
     [Fact]
-    public async Task InvokeAsync_BatchWithDuplicateDocuments_ChecksOnce()
+    public async Task InvokeAsync_BatchWithDuplicateDocuments_DeduplicatesBeforeCheck()
     {
         // Arrange
         var docId = Guid.NewGuid();
@@ -223,16 +237,24 @@ public class AiAuthorizationFilterTests
         var context = CreateContext(CreateUser(), requests);
 
         _authServiceMock
-            .Setup(x => x.AuthorizeAsync(It.IsAny<AuthorizationContext>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AllowedResult());
+            .Setup(x => x.AuthorizeAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.IsAny<IReadOnlyList<Guid>>(),
+                It.IsAny<HttpContext>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AllowedResult(docId));
 
         // Act
         var result = await _filter.InvokeAsync(context.Object, NextDelegate);
 
         // Assert
         result.Should().BeOfType<Ok<string>>();
-        // Should only check once due to Distinct()
-        _authServiceMock.Verify(x => x.AuthorizeAsync(It.IsAny<AuthorizationContext>(), It.IsAny<CancellationToken>()), Times.Once);
+        // Should only have 1 document due to Distinct()
+        _authServiceMock.Verify(x => x.AuthorizeAsync(
+            It.IsAny<ClaimsPrincipal>(),
+            It.Is<IReadOnlyList<Guid>>(ids => ids.Count == 1),
+            It.IsAny<HttpContext>(),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     #endregion
@@ -248,7 +270,11 @@ public class AiAuthorizationFilterTests
         var context = CreateContext(CreateUser(), request);
 
         _authServiceMock
-            .Setup(x => x.AuthorizeAsync(It.IsAny<AuthorizationContext>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.AuthorizeAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.IsAny<IReadOnlyList<Guid>>(),
+                It.IsAny<HttpContext>(),
+                It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Database error"));
 
         // Act
@@ -272,9 +298,12 @@ public class AiAuthorizationFilterTests
         var context = CreateContext(CreateUser(), documentId);
 
         _authServiceMock
-            .Setup(x => x.AuthorizeAsync(It.Is<AuthorizationContext>(c =>
-                c.ResourceId == documentId.ToString()), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AllowedResult());
+            .Setup(x => x.AuthorizeAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.Is<IReadOnlyList<Guid>>(ids => ids.Contains(documentId)),
+                It.IsAny<HttpContext>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AllowedResult(documentId));
 
         // Act
         var result = await _filter.InvokeAsync(context.Object, NextDelegate);

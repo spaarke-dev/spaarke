@@ -1,0 +1,72 @@
+<task id="021" project="ai-summary-and-analysis-enhancements">
+  <metadata>
+    <title>Implement Request/Response Mapping for Backward Compatibility</title>
+    <phase>2.3</phase>
+    <estimate>1-2 hours</estimate>
+    <tags>api, mapping, compatibility</tags>
+    <dependencies>020</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Implement request/response mapping to ensure existing consumers are not affected.</goal>
+
+    <context>
+      The existing DocumentIntelligence API contract must be preserved exactly. Any differences between old and new request/response formats need mapping.
+    </context>
+
+    <constraints>
+      - No breaking changes to API contract
+      - Map old request format to new analysis request
+      - Map new response format to expected old format
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/server/api/Sprk.Bff.Api/Api/Ai/DocumentIntelligenceEndpoints.cs" reason="API contract" />
+      <file path="src/server/api/Sprk.Bff.Api/Models/Ai/" reason="Request/response models" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Document current request/response format</step>
+    <step order="2">Identify differences from analysis request format</step>
+    <step order="3">Create mapping extension methods if needed</step>
+    <step order="4">Ensure all fields are mapped correctly</step>
+    <step order="5">Add unit tests for mapping</step>
+    <step order="6">Verify build succeeds</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Review models</tool>
+    <tool name="Write">Create mapping</tool>
+    <tool name="Bash">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">Request/response mapping implementation</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>API contract unchanged</criterion>
+    <criterion>Mapping is complete and tested</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2026-01-07">
+      Task completed successfully. Mapping implementation was already in place from task 020, this task focused on documenting, validating, and testing the mapping.
+
+      Key deliverables:
+      - Documented existing request mapping: DocumentAnalysisRequest → AnalysisExecuteRequest (inline in StreamAnalyze)
+      - Documented existing response mapping: AnalysisStreamChunk → AnalysisChunk (via MapToLegacyChunk)
+      - Verified all required fields are mapped correctly
+      - Created DocumentIntelligenceEndpointsMappingTests.cs with 9 comprehensive unit tests
+      - All tests passed: metadata, text chunks, completion, errors, null handling, backward compatibility
+      - Build verified: 0 errors, 0 warnings
+
+      Backward compatibility: Legacy DocumentIntelligence API contract fully preserved. New fields (analysisId, tokenUsage, partialStorage, storageMessage) are intentionally not exposed in legacy response format to maintain compatibility.
+    </note>
+  </notes>
+</task>

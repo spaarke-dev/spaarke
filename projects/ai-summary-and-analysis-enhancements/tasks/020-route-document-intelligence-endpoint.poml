@@ -1,0 +1,76 @@
+<task id="020" project="ai-summary-and-analysis-enhancements">
+  <metadata>
+    <title>Route Document Intelligence Endpoint to Unified Service</title>
+    <phase>2.3</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>api, endpoint, migration</tags>
+    <dependencies>017</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Route the existing /api/ai/document-intelligence/analyze endpoint to the unified AnalysisOrchestrationService.</goal>
+
+    <context>
+      The existing endpoint needs to be preserved for backward compatibility, but internally route to the unified service with playbook="Document Profile".
+    </context>
+
+    <constraints>
+      - Keep same endpoint URL and contract
+      - Route internally to AnalysisOrchestrationService
+      - Use "Document Profile" playbook
+      - Maintain streaming SSE response
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/server/api/Sprk.Bff.Api/Api/Ai/DocumentIntelligenceEndpoints.cs" reason="Endpoint to modify" />
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs" reason="Target service" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read DocumentIntelligenceEndpoints.cs to understand current contract</step>
+    <step order="2">Modify endpoint to call AnalysisOrchestrationService instead of DocumentIntelligenceService</step>
+    <step order="3">Add playbook lookup: GetByNameAsync("Document Profile")</step>
+    <step order="4">Map existing request parameters to analysis request</step>
+    <step order="5">Ensure SSE streaming response is preserved</step>
+    <step order="6">Add logging to indicate migration path</step>
+    <step order="7">Verify build succeeds</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Review endpoint</tool>
+    <tool name="Edit">Modify endpoint</tool>
+    <tool name="Bash">Build verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Api/Ai/DocumentIntelligenceEndpoints.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Endpoint routes to unified service</criterion>
+    <criterion>Uses Document Profile playbook</criterion>
+    <criterion>SSE streaming preserved</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2026-01-07">
+      Task completed successfully. Modified DocumentIntelligenceEndpoints.cs to route /api/ai/document-intelligence/analyze to AnalysisOrchestrationService.ExecuteAnalysisAsync with "Document Profile" playbook.
+
+      Key changes:
+      - StreamAnalyze method now uses IAnalysisOrchestrationService and IPlaybookService (removed IDocumentIntelligenceService and IDataverseService)
+      - Added GetByNameAsync("Document Profile") to resolve playbook
+      - Map DocumentAnalysisRequest → AnalysisExecuteRequest with playbook ID and first action ID
+      - Added MapToLegacyChunk helper to convert AnalysisStreamChunk → AnalysisChunk for backward compatibility
+      - SSE headers and streaming pattern preserved (text/event-stream, await foreach)
+      - Added [MIGRATION] logging prefix for visibility
+      - Build verified: 0 errors, 0 warnings
+
+      Backward compatibility maintained: Legacy /analyze endpoint still works, now routes through unified service.
+    </note>
+  </notes>
+</task>

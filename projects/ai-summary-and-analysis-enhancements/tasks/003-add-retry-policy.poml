@@ -1,0 +1,63 @@
+<task id="003" project="ai-summary-and-analysis-enhancements">
+  <metadata>
+    <title>Add Polly Retry Policy for Storage Operations</title>
+    <phase>2.1</phase>
+    <estimate>1-2 hours</estimate>
+    <tags>api, resilience, polly, storage</tags>
+    <dependencies>002</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Add Polly retry policy for Dataverse storage operations to handle replication lag.</goal>
+
+    <context>
+      When documents are newly created, Dataverse replication lag can cause 404 errors. The retry policy handles this by retrying storage operations with exponential backoff.
+
+      Key insight: AI execution does NOT need Document ID - only storage does. So retry applies to storage only.
+    </context>
+
+    <constraints>
+      - Retry 3 times with exponential backoff: 2s, 4s, 8s
+      - Handle 404 (NotFound) and 503 (ServiceUnavailable) errors
+      - Log each retry attempt with [STORAGE-RETRY] prefix
+      - Do NOT apply retry to AI execution - only to Dataverse storage
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-summary-and-analysis-enhancements/spec.md" reason="Retry requirements" />
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs" reason="Service to add retry to" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add Microsoft.Extensions.Http.Polly package if not present</step>
+    <step order="2">Create StorageRetryPolicy helper class or extension method</step>
+    <step order="3">Configure policy: 3 retries, exponential backoff (2^attempt seconds)</step>
+    <step order="4">Handle DataverseException with StatusCode 404 or 503</step>
+    <step order="5">Add logging on each retry with [STORAGE-RETRY] prefix</step>
+    <step order="6">Create unit tests for retry policy</step>
+    <step order="7">Verify build succeeds</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Add NuGet package</tool>
+    <tool name="Write">Create retry policy</tool>
+    <tool name="Bash">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Infrastructure/Resilience/StorageRetryPolicy.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Polly package added if needed</criterion>
+    <criterion>StorageRetryPolicy configured with 3 retries</criterion>
+    <criterion>Exponential backoff: 2s, 4s, 8s</criterion>
+    <criterion>Handles 404 and 503 errors</criterion>
+    <criterion>Logging on each retry</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

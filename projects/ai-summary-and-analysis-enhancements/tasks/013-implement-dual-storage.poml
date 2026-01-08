@@ -1,0 +1,60 @@
+<task id="013" project="ai-summary-and-analysis-enhancements">
+  <metadata>
+    <title>Implement Dual Storage (analysisoutput + document)</title>
+    <phase>2.2</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>api, storage, dataverse</tags>
+    <dependencies>012</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Implement dual storage for Document Profile outputs - store in both sprk_analysisoutput AND map to sprk_document fields.</goal>
+
+    <context>
+      Document Profile outputs need to be stored in two places:
+      1. Standard: sprk_analysisoutput records (for Analysis Workspace access)
+      2. Additional: Mapped to sprk_document fields (for quick access in Document views)
+    </context>
+
+    <constraints>
+      - Use retry policy from task 003 for Dataverse operations
+      - Only map to document fields for Document Profile playbook
+      - Handle partial failures gracefully (soft failure)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-summary-and-analysis-enhancements/spec.md" reason="Dual storage requirements" />
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs" reason="Service to modify" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create StoreAnalysisOutputAsync method for sprk_analysisoutput</step>
+    <step order="2">Create UpdateDocumentFieldAsync method for sprk_document field mapping</step>
+    <step order="3">Add logic to check if playbook is Document Profile</step>
+    <step order="4">If Document Profile, call both storage methods</step>
+    <step order="5">Wrap storage in retry policy</step>
+    <step order="6">Add logging for storage operations</step>
+    <step order="7">Verify build succeeds</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Review existing storage code</tool>
+    <tool name="Edit">Modify service</tool>
+    <tool name="Bash">Build verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Outputs stored in sprk_analysisoutput</criterion>
+    <criterion>Document Profile outputs also mapped to sprk_document fields</criterion>
+    <criterion>Retry policy applied to storage operations</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>

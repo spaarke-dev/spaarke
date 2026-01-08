@@ -1,0 +1,57 @@
+<task id="034" project="ai-summary-and-analysis-enhancements">
+  <metadata>
+    <title>Update ADR-013 Documentation</title>
+    <phase>2.4</phase>
+    <estimate>1 hour</estimate>
+    <tags>documentation, adr</tags>
+    <dependencies>033</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Update ADR-013 to reflect the new unified architecture.</goal>
+
+    <context>
+      ADR-013 (AI Architecture) needs to be updated to document the unified service approach and removal of DocumentIntelligenceService.
+    </context>
+
+    <constraints>
+      - Update both concise (.claude/adr/) and full (docs/adr/) versions
+      - Document Document Profile as part of Playbook system
+      - Remove references to DocumentIntelligenceService
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-013-ai-architecture.md" reason="Concise ADR to update" />
+      <file path="docs/adr/ADR-013-ai-architecture.md" reason="Full ADR to update" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read current ADR-013 content</step>
+    <step order="2">Update Architecture Overview to remove DocumentIntelligenceService</step>
+    <step order="3">Add Document Profile as standard Playbook pattern</step>
+    <step order="4">Update endpoint patterns section</step>
+    <step order="5">Document unified authorization approach</step>
+    <step order="6">Update "Last Updated" date</step>
+    <step order="7">Verify documentation consistency</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Review existing ADR</tool>
+    <tool name="Edit">Update ADR</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">.claude/adr/ADR-013-ai-architecture.md (modified)</output>
+    <output type="file">docs/adr/ADR-013-ai-architecture.md (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>ADR reflects new architecture</criterion>
+    <criterion>DocumentIntelligenceService references removed</criterion>
+    <criterion>Document Profile documented</criterion>
+  </acceptance-criteria>
+</task>

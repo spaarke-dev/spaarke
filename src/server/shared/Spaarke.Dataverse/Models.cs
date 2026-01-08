@@ -161,6 +161,22 @@ public class DocumentEntity
     public DocumentStatus Status { get; set; }
     public DateTime CreatedOn { get; set; }
     public DateTime ModifiedOn { get; set; }
+
+    // Document Profile fields (populated by AI)
+    /// <summary>TL;DR summary (1-2 sentences). Maps to sprk_tldr.</summary>
+    public string? Tldr { get; set; }
+
+    /// <summary>Full summary (2-4 paragraphs). Maps to sprk_summary.</summary>
+    public string? Summary { get; set; }
+
+    /// <summary>Comma-separated keywords. Maps to sprk_keywords.</summary>
+    public string? Keywords { get; set; }
+
+    /// <summary>Document type classification (e.g., Contract, NDA, Invoice). Maps to sprk_documenttype.</summary>
+    public string? DocumentType { get; set; }
+
+    /// <summary>Extracted entities in JSON format (parties, dates, amounts). Maps to sprk_entities.</summary>
+    public string? Entities { get; set; }
 }
 
 /// <summary>
@@ -239,4 +255,32 @@ public class AnalysisActionEntity
     public string? Description { get; set; }
     public string? SystemPrompt { get; set; }
     public int SortOrder { get; set; }
+}
+
+/// <summary>
+/// Analysis Output entity model (sprk_analysisoutput).
+/// Stores individual output values from analysis execution.
+/// </summary>
+public class AnalysisOutputEntity
+{
+    /// <summary>Analysis Output ID (sprk_analysisoutputid)</summary>
+    public Guid Id { get; set; }
+
+    /// <summary>Output name for display</summary>
+    public string? Name { get; set; }
+
+    /// <summary>The actual output value/content</summary>
+    public string? Value { get; set; }
+
+    /// <summary>Parent analysis ID (lookup to sprk_analysis)</summary>
+    public Guid AnalysisId { get; set; }
+
+    /// <summary>Output type ID (lookup to sprk_aioutputtype)</summary>
+    public Guid? OutputTypeId { get; set; }
+
+    /// <summary>Sequence order for display</summary>
+    public int? SortOrder { get; set; }
+
+    /// <summary>Created date/time</summary>
+    public DateTime CreatedOn { get; set; }
 }

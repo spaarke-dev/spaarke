@@ -1,7 +1,7 @@
 using System.Security.Claims;
-using Spaarke.Core.Auth;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Services.Ai;
 
 namespace Sprk.Bff.Api.Api.Filters;
 
@@ -19,7 +19,7 @@ public static class AnalysisAuthorizationFilterExtensions
     {
         return builder.AddEndpointFilter(async (context, next) =>
         {
-            var authService = context.HttpContext.RequestServices.GetRequiredService<IAuthorizationService>();
+            var authService = context.HttpContext.RequestServices.GetRequiredService<IAiAuthorizationService>();
             var logger = context.HttpContext.RequestServices.GetService<ILogger<AnalysisAuthorizationFilter>>();
             var filter = new AnalysisAuthorizationFilter(authService, logger, AuthorizationMode.DocumentAccess);
             return await filter.InvokeAsync(context, next);
@@ -35,7 +35,7 @@ public static class AnalysisAuthorizationFilterExtensions
     {
         return builder.AddEndpointFilter(async (context, next) =>
         {
-            var authService = context.HttpContext.RequestServices.GetRequiredService<IAuthorizationService>();
+            var authService = context.HttpContext.RequestServices.GetRequiredService<IAiAuthorizationService>();
             var logger = context.HttpContext.RequestServices.GetService<ILogger<AnalysisAuthorizationFilter>>();
             var filter = new AnalysisAuthorizationFilter(authService, logger, AuthorizationMode.AnalysisAccess);
             return await filter.InvokeAsync(context, next);
@@ -65,15 +65,17 @@ public enum AuthorizationMode
 /// Authorization strategy:
 /// - /execute: User must have read access to all documentIds in request
 /// - /{analysisId}/*: User must own the analysis or have access to its source document
+///
+/// Uses IAiAuthorizationService for FullUAC authorization via RetrievePrincipalAccess.
 /// </remarks>
 public class AnalysisAuthorizationFilter : IEndpointFilter
 {
-    private readonly IAuthorizationService _authorizationService;
+    private readonly IAiAuthorizationService _authorizationService;
     private readonly ILogger<AnalysisAuthorizationFilter>? _logger;
     private readonly AuthorizationMode _mode;
 
     public AnalysisAuthorizationFilter(
-        IAuthorizationService authorizationService,
+        IAiAuthorizationService authorizationService,
         ILogger<AnalysisAuthorizationFilter>? logger,
         AuthorizationMode mode)
     {
@@ -85,9 +87,13 @@ public class AnalysisAuthorizationFilter : IEndpointFilter
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {
         var httpContext = context.HttpContext;
+        var user = httpContext.User;
 
-        // Extract user ID from claims
-        var userId = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        // Verify user has identity claims
+        var userId = user.FindFirst("oid")?.Value
+            ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+            ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
         if (string.IsNullOrEmpty(userId))
         {
             return Results.Problem(
@@ -99,8 +105,8 @@ public class AnalysisAuthorizationFilter : IEndpointFilter
 
         return _mode switch
         {
-            AuthorizationMode.DocumentAccess => await AuthorizeDocumentAccessAsync(context, userId, next),
-            AuthorizationMode.AnalysisAccess => await AuthorizeAnalysisAccessAsync(context, userId, next),
+            AuthorizationMode.DocumentAccess => await AuthorizeDocumentAccessAsync(context, user, next),
+            AuthorizationMode.AnalysisAccess => await AuthorizeAnalysisAccessAsync(context, user, next),
             _ => await next(context)
         };
     }
@@ -110,19 +116,13 @@ public class AnalysisAuthorizationFilter : IEndpointFilter
     /// Used for /execute endpoint.
     /// </summary>
     /// <remarks>
-    /// Phase 1 Scaffolding: Skip SPE authorization, rely on Dataverse security.
-    /// The request contains Dataverse document IDs (sprk_document.sprk_documentid),
-    /// but the authorization service expects SPE resource IDs (driveItemId).
-    ///
-    /// Phase 2: Look up sprk_document record to get sprk_graphitemid, then authorize.
+    /// Uses FullUAC authorization via IAiAuthorizationService.
     /// </remarks>
     private async ValueTask<object?> AuthorizeDocumentAccessAsync(
         EndpointFilterInvocationContext context,
-        string userId,
+        ClaimsPrincipal user,
         EndpointFilterDelegate next)
     {
-        var httpContext = context.HttpContext;
-
         // Extract document IDs from request arguments
         var documentIds = ExtractDocumentIds(context);
         if (documentIds.Count == 0)
@@ -134,14 +134,43 @@ public class AnalysisAuthorizationFilter : IEndpointFilter
                 type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
         }
 
-        // Phase 1 Scaffolding: Skip SPE authorization, rely on Dataverse security.
-        // Users accessing the Analysis form already have Dataverse access to the document.
-        // TODO Phase 2: Look up sprk_document.sprk_graphitemid and authorize via SPE.
-        _logger?.LogDebug(
-            "Analysis execute authorization: User {UserId} accessing {Count} document(s) (Phase 1: skipping SPE lookup)",
-            userId, documentIds.Count);
+        try
+        {
+            var result = await _authorizationService.AuthorizeAsync(
+                user,
+                documentIds,
+                context.HttpContext,
+                context.HttpContext.RequestAborted);
 
-        return await next(context);
+            if (!result.Success)
+            {
+                _logger?.LogWarning(
+                    "[ANALYSIS-AUTH] Document access DENIED: DocumentCount={Count}, Reason={Reason}",
+                    documentIds.Count,
+                    result.Reason);
+
+                return Results.Problem(
+                    statusCode: 403,
+                    title: "Forbidden",
+                    detail: result.Reason ?? "Access denied to one or more documents",
+                    type: "https://tools.ietf.org/html/rfc7231#section-6.5.3");
+            }
+
+            _logger?.LogDebug(
+                "[ANALYSIS-AUTH] Document access GRANTED: DocumentCount={Count}",
+                documentIds.Count);
+
+            return await next(context);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "[ANALYSIS-AUTH] Authorization check failed with exception");
+            return Results.Problem(
+                statusCode: 500,
+                title: "Internal Server Error",
+                detail: "Authorization check failed",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.6.1");
+        }
     }
 
     /// <summary>
@@ -149,12 +178,13 @@ public class AnalysisAuthorizationFilter : IEndpointFilter
     /// Used for /continue, /save, /export, GET endpoints.
     /// </summary>
     /// <remarks>
-    /// Phase 1: Uses in-memory analysis store, so we skip authorization.
-    /// Phase 2: Will validate user owns the analysis or has access to source document.
+    /// For analysis record access, we need to look up the associated document
+    /// and authorize access to that document. This is a placeholder until
+    /// Dataverse integration provides document lookup for analysis records.
     /// </remarks>
     private async ValueTask<object?> AuthorizeAnalysisAccessAsync(
         EndpointFilterInvocationContext context,
-        string userId,
+        ClaimsPrincipal user,
         EndpointFilterDelegate next)
     {
         var httpContext = context.HttpContext;
@@ -170,24 +200,13 @@ public class AnalysisAuthorizationFilter : IEndpointFilter
                 type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
         }
 
-        // Phase 1 Scaffolding: Skip Dataverse lookup, allow access
-        // In Phase 2, this will:
-        // 1. Look up sprk_analysis record
-        // 2. Check if ownerid matches userId
-        // 3. If not owner, check if user has access to source document
+        // TODO: Look up sprk_analysisoutput to find associated document ID
+        // For now, analysis records are tied to in-memory state and don't have
+        // persistent Dataverse storage. When sprk_analysisoutput storage is implemented,
+        // we'll look up the document ID and authorize via IAiAuthorizationService.
         _logger?.LogDebug(
-            "Analysis record authorization: User {UserId} accessing analysis {AnalysisId} (Phase 1: skipping Dataverse lookup)",
-            userId, analysisId);
-
-        // TODO Task 032: Implement full authorization when Dataverse integration is complete
-        // var analysis = await _dataverseService.GetAnalysisAsync(analysisId);
-        // if (analysis.OwnerId != userId)
-        // {
-        //     // Check document access as fallback
-        //     var authContext = new AuthorizationContext { UserId = userId, ResourceId = analysis.DocumentId, Operation = "read" };
-        //     var result = await _authorizationService.AuthorizeAsync(authContext);
-        //     if (!result.IsAllowed) return ProblemDetailsHelper.Forbidden(result.ReasonCode);
-        // }
+            "[ANALYSIS-AUTH] Analysis record access: AnalysisId={AnalysisId} (document lookup pending)",
+            analysisId);
 
         return await next(context);
     }

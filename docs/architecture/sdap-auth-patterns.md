@@ -229,6 +229,299 @@ public async Task<Stream> DownloadFileAsUserAsync(
 
 ---
 
+## Pattern 5: OBO for Dataverse Authorization Checks
+
+**When**: AI analysis service needs to verify user has Read access to documents in Dataverse
+
+**Critical**: FullUAC authorization mode validates user permissions by executing Dataverse queries **as the user**, not as the service principal. This requires OBO token exchange for Dataverse.
+
+### The Problem: Service Principal vs User Permissions
+
+```
+❌ Service Principal (App-Only):
+   - Uses ClientSecret authentication
+   - Executes as Application User with System Administrator role
+   - ALWAYS sees ALL documents (bypasses row-level security)
+   - Cannot validate user's actual permissions
+
+✅ OBO (Delegated User):
+   - Exchanges user's BFF token for Dataverse token
+   - Executes as the actual user
+   - Row-level security ENFORCED
+   - Queries fail with 403 if user lacks access
+```
+
+### OBO Flow for Dataverse Authorization
+
+**Code Location**: `src/server/shared/Spaarke.Dataverse/DataverseAccessDataSource.cs`
+
+```csharp
+public async Task<AuthorizationResult> GetUserAccessAsync(
+    ClaimsPrincipal user,
+    IReadOnlyList<Guid> resourceIds,
+    string? userAccessToken,  // User's BFF token
+    CancellationToken ct = default)
+{
+    if (!string.IsNullOrEmpty(userAccessToken))
+    {
+        // Step 1: Exchange user BFF token for Dataverse token via MSAL OBO
+        var dataverseToken = await GetDataverseTokenViaOBOAsync(userAccessToken, ct);
+
+        // Step 2: CRITICAL - Set OBO token on HttpClient for all subsequent requests
+        _httpClient.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", dataverseToken);
+
+        // Step 3: Lookup Dataverse user by Azure AD OID
+        var userOid = user.FindFirst("oid")?.Value;
+        var systemUserId = await LookupDataverseUserIdAsync(userOid, ct);
+
+        // Step 4: Check document access using direct query pattern
+        foreach (var resourceId in resourceIds)
+        {
+            var permissions = await QueryUserPermissionsAsync(
+                systemUserId,
+                resourceId.ToString(),
+                dataverseToken,
+                ct);
+
+            // If query succeeds → User has Read access
+            // If query fails (403/404) → User doesn't have access
+        }
+    }
+}
+```
+
+### MSAL OBO Exchange Implementation
+
+```csharp
+private async Task<string> GetDataverseTokenViaOBOAsync(
+    string userAccessToken,
+    CancellationToken ct)
+{
+    // Build confidential client application
+    var app = ConfidentialClientApplicationBuilder
+        .Create(_dataverseOptions.ClientId)  // 1e40baad-e065-4aea-a8d4-4b7ab273458c
+        .WithClientSecret(_dataverseOptions.ClientSecret)  // l8b8Q~J...
+        .WithAuthority(_dataverseOptions.Authority)  // https://login.microsoftonline.com/{tenant}
+        .Build();
+
+    // Acquire Dataverse token on behalf of user
+    var result = await app.AcquireTokenOnBehalfOf(
+        scopes: new[] { $"{_dataverseOptions.ServiceUrl}/.default" },
+        userAssertion: new UserAssertion(userAccessToken))
+        .ExecuteAsync(ct);
+
+    return result.AccessToken;
+}
+```
+
+### Critical Bug #1: Missing HttpClient Authorization Header
+
+**Symptom**:
+```
+[UAC-DIAG] Failed to lookup Dataverse user: Unauthorized
+```
+
+**Root Cause**: OBO token was obtained but never set on HttpClient headers, so subsequent API calls used the old service principal token (or no token).
+
+**Fix**:
+```csharp
+// BEFORE (Bug):
+var dataverseToken = await GetDataverseTokenViaOBOAsync(userAccessToken, ct);
+// HttpClient still has old token!
+var response = await _httpClient.GetAsync(url);  // Returns 401
+
+// AFTER (Fixed):
+var dataverseToken = await GetDataverseTokenViaOBOAsync(userAccessToken, ct);
+_httpClient.DefaultRequestHeaders.Authorization =
+    new AuthenticationHeaderValue("Bearer", dataverseToken);  // ✅ Set OBO token
+var response = await _httpClient.GetAsync(url);  // Now works!
+```
+
+### Critical Bug #2: RetrievePrincipalAccess Not Available with OBO Tokens
+
+**Symptom** (after fix #1):
+```
+[UAC-DIAG] RetrievePrincipalAccess FAILED: StatusCode=NotFound
+Resource not found for the segment 'RetrievePrincipalAccess'
+Error code: 0x80060888
+```
+
+**Root Cause**: The `RetrievePrincipalAccess` Dataverse action doesn't work with OBO (delegated) tokens, only with application tokens.
+
+**Fix: Direct Query Authorization Pattern**
+
+Instead of calling `RetrievePrincipalAccess`, query the document directly:
+
+```csharp
+// BEFORE (Doesn't work with OBO):
+// POST /api/data/v9.2/RetrievePrincipalAccess
+// Body: { Target: {...}, Principal: {...} }
+// Result: 404 Not Found
+
+// AFTER (Works with OBO):
+private async Task<List<PermissionRecord>> QueryUserPermissionsAsync(
+    string userId,
+    string resourceId,
+    string dataverseToken,
+    CancellationToken ct)
+{
+    // Query document directly using OBO token
+    var url = $"sprk_documents({resourceId})?$select=sprk_documentid";
+
+    using var requestMessage = new HttpRequestMessage(HttpMethod.Get, url)
+    {
+        Headers = { Authorization = new AuthenticationHeaderValue("Bearer", dataverseToken) }
+    };
+
+    var response = await _httpClient.SendAsync(requestMessage, ct);
+
+    if (response.IsSuccessStatusCode)
+    {
+        // Success → User has Read access (Dataverse enforced row-level security)
+        return new List<PermissionRecord>
+        {
+            new PermissionRecord(userId, resourceId, AccessRights.Read)
+        };
+    }
+    else
+    {
+        // 403 or 404 → User doesn't have access
+        return new List<PermissionRecord>();
+    }
+}
+```
+
+**Benefits of Direct Query Pattern**:
+- ✅ Works with OBO (delegated) tokens
+- ✅ Leverages Dataverse's native row-level security
+- ✅ Simpler implementation (no complex payload)
+- ✅ Standard HTTP status codes (easier to debug)
+
+**Trade-off**: Can only detect Read access (not Write, Delete, etc.) - This is acceptable for AI analysis which only needs Read.
+
+### Complete Authorization Flow
+
+```
+1. User clicks "AI Summary" in PCF
+   ↓
+2. PCF acquires token (MSAL.js)
+   Scope: api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation
+   ↓
+3. PCF calls POST /api/ai/analysis/execute
+   Headers: Authorization: Bearer {user_bff_token}
+   ↓
+4. AnalysisAuthorizationFilter extracts bearer token
+   TokenHelper.ExtractBearerToken(httpContext)
+   ↓
+5. AiAuthorizationService orchestrates authorization
+   authService.AuthorizeAsync(user, documentIds, httpContext, ct)
+   ↓
+6. DataverseAccessDataSource performs OBO exchange
+   a. MSAL: User BFF token → Dataverse token
+   b. Set OBO token on HttpClient.DefaultRequestHeaders.Authorization
+   ↓
+7. Lookup Dataverse user
+   GET /systemusers?$filter=azureactivedirectoryobjectid eq '{oid}'
+   (Uses OBO token)
+   ↓
+8. Check document access
+   GET /sprk_documents({id})?$select=sprk_documentid
+   (Uses OBO token, enforces user's permissions)
+   ↓
+9. If GET succeeds (200 OK) → User has access
+   If GET fails (403/404) → User doesn't have access
+   ↓
+10. Return AuthorizationResult to endpoint
+    Proceed with AI analysis or return 403
+```
+
+### Configuration Requirements
+
+**BFF API App Registration** (`1e40baad-e065-4aea-a8d4-4b7ab273458c`):
+
+```
+API Permissions (Delegated):
+  ✅ Dynamics CRM → user_impersonation
+
+Exposed API:
+  ✅ api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation
+
+Known Client Applications:
+  ✅ ["5175798e-f23e-41c3-b09b-7a90b9218189"]  (PCF app)
+
+Client Secret:
+  ✅ Created: 2025-12-18
+  ✅ Expires: 2027-12-18
+  ✅ Config key: API_CLIENT_SECRET
+```
+
+### Debugging OBO Authorization
+
+**Application Insights Query**:
+```kusto
+traces
+| where message contains "UAC-DIAG"
+| where timestamp > ago(1h)
+| project timestamp, message
+| order by timestamp desc
+```
+
+**Expected log sequence** (successful OBO):
+```
+[UAC-DIAG] Using OBO authentication for user context
+[UAC-DIAG] Set OBO token on HttpClient authorization header
+[UAC-DIAG] Dataverse user lookup successful: {systemuserid}
+[UAC-DIAG] Direct query GRANTED for user {userId} on document {documentId}
+```
+
+**Common OBO Errors**:
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| `AADSTS65001: The user or administrator has not consented` | Missing `user_impersonation` permission | Add Dynamics CRM delegated permission to BFF app |
+| `401 Unauthorized` after OBO exchange | Token not set on HttpClient | Ensure `_httpClient.DefaultRequestHeaders.Authorization` is set with OBO token |
+| `404 RetrievePrincipalAccess not found` | Using wrong API with OBO token | Use direct query pattern (`GET /sprk_documents({id})`) instead |
+
+### Code Changes for OBO Authorization
+
+**1. IAiAuthorizationService Interface** - Add HttpContext parameter:
+```csharp
+Task<AuthorizationResult> AuthorizeAsync(
+    ClaimsPrincipal user,
+    IReadOnlyList<Guid> documentIds,
+    HttpContext httpContext,  // NEW: Required for OBO token extraction
+    CancellationToken cancellationToken = default);
+```
+
+**2. AnalysisAuthorizationFilter** - Pass HttpContext:
+```csharp
+var result = await _authorizationService.AuthorizeAsync(
+    user,
+    documentIds,
+    context.HttpContext,  // NEW: Pass HttpContext
+    context.HttpContext.RequestAborted);
+```
+
+**3. AiAuthorizationService** - Extract user token:
+```csharp
+string? userAccessToken = TokenHelper.ExtractBearerToken(httpContext);
+
+var result = await _accessDataSource.GetUserAccessAsync(
+    user,
+    documentIds,
+    userAccessToken,  // NEW: Pass to data source for OBO
+    cancellationToken);
+```
+
+### Related Documentation
+
+- **Azure Resources**: `docs/architecture/auth-azure-resources.md` (OBO Token Exchange section)
+- **Architecture Changes**: `projects/ai-summary-and-analysis-enhancements/ARCHITECTURE-CHANGES.md` (section 3)
+- **BFF API Patterns**: `docs/architecture/sdap-bff-api-patterns.md` (Authorization service patterns)
+
+---
+
 ## Token Scopes Reference
 
 | Token For | Scope | Pattern |
@@ -236,7 +529,8 @@ public async Task<Stream> DownloadFileAsUserAsync(
 | BFF API (from PCF) | `api://1e40baad-.../user_impersonation` | MSAL.js |
 | Graph API (from BFF) | `https://graph.microsoft.com/.default` | OBO |
 | Graph API for AI Analysis | `https://graph.microsoft.com/.default` | OBO (via HttpContext) |
-| Dataverse (from BFF) | `https://{org}.crm.dynamics.com/.default` | ClientCredentials |
+| Dataverse (from BFF, metadata queries) | `https://{org}.crm.dynamics.com/.default` | ClientCredentials |
+| Dataverse (from BFF, authorization checks) | `https://{org}.crm.dynamics.com/.default` | OBO (via HttpContext) |
 
 ---
 

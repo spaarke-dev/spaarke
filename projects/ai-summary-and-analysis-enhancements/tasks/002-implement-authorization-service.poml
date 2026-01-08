@@ -1,0 +1,71 @@
+<task id="002" project="ai-summary-and-analysis-enhancements">
+  <metadata>
+    <title>Implement AiAuthorizationService with FullUAC</title>
+    <phase>2.1</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>api, authorization, implementation, adr-008, adr-013</tags>
+    <dependencies>001</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Implement AiAuthorizationService with FullUAC mode for AI endpoint authorization.</goal>
+
+    <context>
+      This service implements the IAiAuthorizationService interface with FullUAC mode. It will be used by both authorization filters to provide unified authorization behavior.
+
+      Key requirements:
+      - Use FullUAC mode (call RetrievePrincipalAccess)
+      - Log authorization decisions for debugging
+      - Return structured result with reason on failure
+    </context>
+
+    <constraints>
+      - Follow ADR-008 (endpoint filters)
+      - Follow ADR-013 (AI architecture)
+      - Follow ADR-010 (DI minimalism - use concrete types)
+      - Include diagnostic logging with [AI-AUTH] prefix
+      - Do NOT add retry logic here (that's task 003 for storage)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-008-endpoint-filters.md" reason="Authorization patterns" />
+      <file path=".claude/adr/ADR-010-di-minimalism.md" reason="DI registration patterns" />
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/IAiAuthorizationService.cs" reason="Interface to implement" />
+      <file path="src/server/shared/Spaarke.Core/Authorization/DataverseAccessDataSource.cs" reason="UAC implementation reference" />
+      <file path="docs/architecture/uac-access-control.md" reason="UAC architecture" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read IAiAuthorizationService.cs to understand interface contract</step>
+    <step order="2">Review DataverseAccessDataSource for UAC implementation patterns</step>
+    <step order="3">Create AiAuthorizationService.cs in src/server/api/Sprk.Bff.Api/Services/Ai/</step>
+    <step order="4">Implement constructor with ILogger and IDataverseAccessDataSource dependencies</step>
+    <step order="5">Implement AuthorizeAsync with FullUAC check (RetrievePrincipalAccess)</step>
+    <step order="6">Add diagnostic logging with [AI-AUTH] prefix for each authorization decision</step>
+    <step order="7">Handle edge cases: empty documentIds, null user</step>
+    <step order="8">Add XML documentation</step>
+    <step order="9">Verify build succeeds</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Review existing UAC code</tool>
+    <tool name="Write">Create service file</tool>
+    <tool name="Bash">Build verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Ai/AiAuthorizationService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>AiAuthorizationService.cs exists and implements IAiAuthorizationService</criterion>
+    <criterion>Uses FullUAC mode (RetrievePrincipalAccess)</criterion>
+    <criterion>Includes diagnostic logging with [AI-AUTH] prefix</criterion>
+    <criterion>Handles edge cases (empty ids, null user)</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>
