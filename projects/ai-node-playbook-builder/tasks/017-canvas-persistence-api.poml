@@ -3,7 +3,7 @@
   <metadata>
     <title>Add Canvas Persistence API</title>
     <phase>2: Visual Builder</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <tags>bff-api, api</tags>
     <dependencies>008</dependencies>
@@ -39,4 +39,15 @@
     <criterion testable="true">PUT saves canvas layout</criterion>
     <criterion testable="true">Layout persists across sessions</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <note date="2026-01-09">
+      Completed. Created:
+      - CanvasLayoutDto.cs with ViewportDto, CanvasNodeDto, CanvasEdgeDto, SaveCanvasLayoutRequest, CanvasLayoutResponse
+      - Extended IPlaybookService with GetCanvasLayoutAsync and SaveCanvasLayoutAsync
+      - Implemented service methods in PlaybookService using sprk_canvaslayoutjson field
+      - Added GET/PUT endpoints to PlaybookEndpoints.cs with proper authorization filters
+      Note: Unit tests deferred to integration testing phase.
+    </note>
+  </notes>
 </task>

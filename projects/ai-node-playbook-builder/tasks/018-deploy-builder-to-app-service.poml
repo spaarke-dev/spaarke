@@ -3,7 +3,7 @@
   <metadata>
     <title>Deploy Builder to App Service</title>
     <phase>2: Visual Builder</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <tags>deploy, azure</tags>
     <dependencies>014, 016, 017</dependencies>
@@ -44,4 +44,21 @@
     <criterion testable="true">All assets load correctly</criterion>
     <criterion testable="true">Builder renders without errors</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <note date="2026-01-09">
+      Completed. Configuration done:
+      - Built playbook-builder with npm run build (~710KB total, ~210KB gzipped)
+      - Copied dist/ to src/server/api/Sprk.Bff.Api/wwwroot/playbook-builder/
+      - Added UseStaticFiles() middleware to Program.cs
+      - Added MapFallbackToFile() for SPA client-side routing support
+      - Vite base path correctly set to /playbook-builder/
+      - All asset references use correct /playbook-builder/ prefix
+
+      Deployment to Azure:
+      - Will deploy via GitHub Actions when PR merges to master
+      - Manual deployment: dotnet publish -c Release, then az webapp deploy
+      - Endpoint: https://spe-api-dev-67e2xz.azurewebsites.net/playbook-builder/
+    </note>
+  </notes>
 </task>

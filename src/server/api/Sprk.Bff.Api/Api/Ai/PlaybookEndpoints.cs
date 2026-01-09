@@ -111,6 +111,29 @@ public static class PlaybookEndpoints
             .ProducesProblem(403)
             .ProducesProblem(404);
 
+        // GET /api/ai/playbooks/{id}/canvas - Get canvas layout
+        group.MapGet("/{id:guid}/canvas", GetCanvasLayout)
+            .AddPlaybookAccessAuthorizationFilter()
+            .WithName("GetCanvasLayout")
+            .WithSummary("Get canvas layout for playbook builder")
+            .WithDescription("Returns the visual canvas layout (node positions, edges, viewport) for the playbook builder.")
+            .Produces<CanvasLayoutResponse>()
+            .ProducesProblem(401)
+            .ProducesProblem(403)
+            .ProducesProblem(404);
+
+        // PUT /api/ai/playbooks/{id}/canvas - Save canvas layout
+        group.MapPut("/{id:guid}/canvas", SaveCanvasLayout)
+            .AddPlaybookOwnerAuthorizationFilter()
+            .WithName("SaveCanvasLayout")
+            .WithSummary("Save canvas layout for playbook builder")
+            .WithDescription("Saves the visual canvas layout (node positions, edges, viewport). User must own the playbook.")
+            .Produces<CanvasLayoutResponse>()
+            .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(403)
+            .ProducesProblem(404);
+
         return app;
     }
 
@@ -495,6 +518,71 @@ public static class PlaybookEndpoints
                 statusCode: 500,
                 title: "Internal Server Error",
                 detail: "Failed to get sharing info");
+        }
+    }
+
+    /// <summary>
+    /// Get canvas layout for a playbook.
+    /// </summary>
+    private static async Task<IResult> GetCanvasLayout(
+        Guid id,
+        IPlaybookService playbookService,
+        ILoggerFactory loggerFactory)
+    {
+        var logger = loggerFactory.CreateLogger("PlaybookEndpoints");
+
+        try
+        {
+            var result = await playbookService.GetCanvasLayoutAsync(id);
+            if (result == null)
+            {
+                return Results.NotFound();
+            }
+
+            return Results.Ok(result);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to get canvas layout for playbook {PlaybookId}", id);
+            return Results.Problem(
+                statusCode: 500,
+                title: "Internal Server Error",
+                detail: "Failed to get canvas layout");
+        }
+    }
+
+    /// <summary>
+    /// Save canvas layout for a playbook.
+    /// </summary>
+    private static async Task<IResult> SaveCanvasLayout(
+        Guid id,
+        SaveCanvasLayoutRequest request,
+        IPlaybookService playbookService,
+        ILoggerFactory loggerFactory)
+    {
+        var logger = loggerFactory.CreateLogger("PlaybookEndpoints");
+
+        if (request.Layout == null)
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Bad Request",
+                detail: "Layout is required");
+        }
+
+        try
+        {
+            var result = await playbookService.SaveCanvasLayoutAsync(id, request.Layout);
+            logger.LogInformation("Saved canvas layout for playbook {PlaybookId}", id);
+            return Results.Ok(result);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to save canvas layout for playbook {PlaybookId}", id);
+            return Results.Problem(
+                statusCode: 500,
+                title: "Internal Server Error",
+                detail: "Failed to save canvas layout");
         }
     }
 }

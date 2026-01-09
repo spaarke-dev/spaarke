@@ -103,4 +103,26 @@ public interface IPlaybookService
     Task<PlaybookResponse> GetByNameAsync(
         string name,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Get canvas layout for a playbook.
+    /// </summary>
+    /// <param name="playbookId">Playbook ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Canvas layout response with layout data, or null layout if not set.</returns>
+    Task<CanvasLayoutResponse?> GetCanvasLayoutAsync(
+        Guid playbookId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Save canvas layout for a playbook.
+    /// </summary>
+    /// <param name="playbookId">Playbook ID.</param>
+    /// <param name="layout">Canvas layout to save.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Updated canvas layout response.</returns>
+    Task<CanvasLayoutResponse> SaveCanvasLayoutAsync(
+        Guid playbookId,
+        CanvasLayoutDto layout,
+        CancellationToken cancellationToken = default);
 }
