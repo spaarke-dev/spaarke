@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Create NodeService</title>
+    <phase>1: Foundation</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <tags>bff-api, service</tags>
+    <dependencies>002</dependencies>
+    <blocks>004, 005</blocks>
+  </metadata>
+
+  <prompt>
+    Create the NodeService for managing playbook nodes. Implement CRUD operations
+    for nodes, including creating, updating, deleting, and reordering nodes within
+    a playbook. Follow existing service patterns in the codebase.
+  </prompt>
+
+  <role>Senior .NET developer with Minimal API expertise</role>
+
+  <goal>
+    INodeService and NodeService implemented with full CRUD operations for
+    playbook nodes, following ADR-010 DI minimalism patterns.
+  </goal>
+
+  <context>
+    <background>
+      Nodes are the atomic units of execution in the new playbook system.
+      Each node contains an action, optional scopes (skills, knowledge, tool),
+      and configuration for execution order and dependencies.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookService.cs</file>
+      <file>projects/ai-node-playbook-builder/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API patterns</constraint>
+    <constraint source="ADR-010">Register concrete, not interface unless seam needed</constraint>
+    <constraint source="ADR-010">Keep DI registrations minimal</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+    </files>
+    <patterns>
+      <pattern name="Service Pattern">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookService.cs</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing PlaybookService for service patterns</step>
+    <step order="2">Create INodeService interface with CRUD methods</step>
+    <step order="3">Create NodeService implementation</step>
+    <step order="4">Implement GetNodesAsync(playbookId)</step>
+    <step order="5">Implement GetNodeAsync(nodeId)</step>
+    <step order="6">Implement CreateNodeAsync(playbookId, request)</step>
+    <step order="7">Implement UpdateNodeAsync(nodeId, request)</step>
+    <step order="8">Implement DeleteNodeAsync(nodeId)</step>
+    <step order="9">Implement ReorderNodesAsync(playbookId, nodeIds)</step>
+    <step order="10">Implement UpdateNodeScopesAsync(nodeId, scopes)</step>
+    <step order="11">Create DTOs: PlaybookNodeDto, CreateNodeRequest, UpdateNodeRequest</step>
+    <step order="12">Register service in DI</step>
+    <step order="13">Write unit tests</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing code patterns</tool>
+    <tool name="Write">Create service files</tool>
+    <tool name="Bash">Run dotnet build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/INodeService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/NodeService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/PlaybookNodeDto.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Services/NodeServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All CRUD methods implemented and compile</criterion>
+    <criterion testable="true">Unit tests pass for all methods</criterion>
+    <criterion testable="true">Service registered in DI correctly</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Follow PlaybookService as the canonical service pattern.
+    This service will be consumed by NodeEndpoints in task 008.
+  </notes>
+</task>

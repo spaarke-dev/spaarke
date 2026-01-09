@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Implement Dataverse Schema</title>
+    <phase>1: Foundation</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <tags>dataverse, schema</tags>
+    <dependencies>001</dependencies>
+    <blocks>003</blocks>
+  </metadata>
+
+  <prompt>
+    Implement the Dataverse schema designed in task 001. Create solution XML files
+    for new entities, update existing entities, create relationships, and define
+    choice option sets. Prepare the solution for import to dev environment.
+  </prompt>
+
+  <role>Spaarke AI Developer Agent with Dataverse solution expertise</role>
+
+  <goal>
+    Dataverse solution files created and ready for import, containing all new
+    entities, extended entities, relationships, and choice values.
+  </goal>
+
+  <context>
+    <background>
+      The schema design from task 001 must be implemented as Dataverse solution
+      components that can be imported to the dev environment.
+    </background>
+    <relevant-files>
+      <file>projects/ai-node-playbook-builder/notes/schema-design.md</file>
+      <file>src/solutions/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-022">Use unmanaged solutions only</constraint>
+    <constraint source="project">Follow existing solution structure patterns</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-node-playbook-builder/notes/schema-design.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/constraints/plugins.md</file>
+    </files>
+    <patterns>
+      <pattern name="Solution Structure">src/solutions/</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read schema design from task 001 output</step>
+    <step order="2">Identify existing solution structure in src/solutions/</step>
+    <step order="3">Create or update solution files for sprk_analysisplaybook extensions</step>
+    <step order="4">Create solution files for sprk_playbooknode entity</step>
+    <step order="5">Create N:N relationship definitions</step>
+    <step order="6">Create sprk_aimodeldeployment entity</step>
+    <step order="7">Create sprk_deliverytemplate entity</step>
+    <step order="8">Create sprk_playbookrun entity</step>
+    <step order="9">Create sprk_playbooknoderun entity</step>
+    <step order="10">Create choice option set definitions</step>
+    <step order="11">Validate solution structure</step>
+    <step order="12">Document import instructions</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read schema design and existing solutions</tool>
+    <tool name="Write">Create solution files</tool>
+    <tool name="Bash">Run pac commands if needed</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/ (updated)</output>
+    <output type="docs">projects/ai-node-playbook-builder/notes/schema-import-instructions.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Solution files validate without errors</criterion>
+    <criterion testable="true">All entities from schema design are represented</criterion>
+    <criterion testable="true">Import instructions documented</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task creates the solution artifacts but does NOT import them yet.
+    Import happens in task 009 (Phase 1 deployment).
+  </notes>
+</task>

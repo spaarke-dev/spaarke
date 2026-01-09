@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="037" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Add Template Library UI</title>
+    <phase>4: Advanced Features</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <tags>frontend, react</tags>
+    <dependencies>036</dependencies>
+    <blocks>039</blocks>
+  </metadata>
+  <prompt>Add template library UI for browsing and cloning playbook templates.</prompt>
+  <role>Senior frontend developer</role>
+  <goal>Template library shows available templates with clone action.</goal>
+  <steps>
+    <step order="1">Create TemplateLibrary component</step>
+    <step order="2">Fetch templates from API</step>
+    <step order="3">Display template cards with description</step>
+    <step order="4">Add Clone button on each card</step>
+    <step order="5">Navigate to cloned playbook after clone</step>
+    <step order="6">Add template library access from toolbar</step>
+  </steps>
+  <outputs>
+    <output type="code">src/client/playbook-builder/src/components/Templates/TemplateLibrary.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Templates displayed in grid</criterion>
+    <criterion testable="true">Clone creates new playbook</criterion>
+  </acceptance-criteria>
+</task>

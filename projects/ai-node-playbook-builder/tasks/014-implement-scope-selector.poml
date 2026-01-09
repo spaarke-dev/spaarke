@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Implement Scope Selector</title>
+    <phase>2: Visual Builder</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <tags>frontend, react</tags>
+    <dependencies>013</dependencies>
+    <blocks>018</blocks>
+  </metadata>
+
+  <prompt>
+    Implement the scope selector component within the properties panel for selecting
+    skills, knowledge, and tool for a node. Filter options based on action type
+    compatibility.
+  </prompt>
+
+  <role>Senior frontend developer</role>
+
+  <goal>Scope selector component filtering options by action type compatibility.</goal>
+
+  <context>
+    <background>
+      Each node can have skills (multiple), knowledge (multiple), and tool (single).
+      The available options should be filtered based on what the action type allows.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="project">Single tool per node</constraint>
+    <constraint source="project">Multiple skills and knowledge allowed</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">Create ScopeSelector component</step>
+    <step order="2">Fetch available skills from API</step>
+    <step order="3">Fetch available knowledge from API</step>
+    <step order="4">Fetch available tools from API</step>
+    <step order="5">Filter based on action.allowsSkills, allowsTools, allowsKnowledge</step>
+    <step order="6">Create SkillsMultiSelect component</step>
+    <step order="7">Create KnowledgeMultiSelect component</step>
+    <step order="8">Create ToolDropdown component (single select)</step>
+    <step order="9">Wire selections to node update</step>
+    <step order="10">Show/hide sections based on action compatibility</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/playbook-builder/src/components/Properties/ScopeSelector.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Skills multiselect works</criterion>
+    <criterion testable="true">Knowledge multiselect works</criterion>
+    <criterion testable="true">Tool single-select works</criterion>
+    <criterion testable="true">Options filtered by action compatibility</criterion>
+  </acceptance-criteria>
+</task>

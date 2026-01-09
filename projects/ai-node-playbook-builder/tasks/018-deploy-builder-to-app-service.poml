@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="018" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Deploy Builder to App Service</title>
+    <phase>2: Visual Builder</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <tags>deploy, azure</tags>
+    <dependencies>014, 016, 017</dependencies>
+    <blocks>019</blocks>
+  </metadata>
+
+  <prompt>
+    Build the playbook builder React app and deploy to Azure App Service wwwroot.
+    Configure static file serving and verify builder loads at /playbook-builder/.
+  </prompt>
+
+  <role>DevOps engineer</role>
+
+  <goal>Builder app deployed and accessible at /playbook-builder/ on App Service.</goal>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run npm run build in playbook-builder</step>
+    <step order="2">Verify dist/ contains built files</step>
+    <step order="3">Copy dist/ to wwwroot/playbook-builder/</step>
+    <step order="4">Configure static file middleware in Program.cs</step>
+    <step order="5">Deploy API to App Service</step>
+    <step order="6">Verify /playbook-builder/ loads</step>
+    <step order="7">Test builder functionality</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/wwwroot/playbook-builder/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Builder accessible at /playbook-builder/</criterion>
+    <criterion testable="true">All assets load correctly</criterion>
+    <criterion testable="true">Builder renders without errors</criterion>
+  </acceptance-criteria>
+</task>

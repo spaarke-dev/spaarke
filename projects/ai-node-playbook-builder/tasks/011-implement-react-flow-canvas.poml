@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Implement React Flow Canvas</title>
+    <phase>2: Visual Builder</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <tags>frontend, react-flow</tags>
+    <dependencies>010</dependencies>
+    <blocks>012</blocks>
+  </metadata>
+
+  <prompt>
+    Implement the React Flow canvas component with node and edge management,
+    drag-and-drop support, and basic controls (zoom, pan, minimap).
+  </prompt>
+
+  <role>Senior frontend developer with React Flow expertise</role>
+
+  <goal>
+    Canvas component implemented with React Flow, supporting node placement,
+    edge connections, and viewport controls.
+  </goal>
+
+  <context>
+    <background>
+      The canvas is the central component of the visual builder. It uses
+      React Flow to render nodes and edges, supporting drag-and-drop from
+      the palette and connection between nodes.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Support dark mode via Fluent UI theme</constraint>
+    <constraint source="project">Edges represent data flow between nodes</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-node-playbook-builder/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create Canvas/ component directory</step>
+    <step order="2">Create Canvas.tsx with ReactFlow component</step>
+    <step order="3">Configure viewport controls (zoom, pan)</step>
+    <step order="4">Add MiniMap component</step>
+    <step order="5">Add Controls component</step>
+    <step order="6">Create useCanvasStore Zustand store</step>
+    <step order="7">Implement onNodesChange handler</step>
+    <step order="8">Implement onEdgesChange handler</step>
+    <step order="9">Implement onConnect for edge creation</step>
+    <step order="10">Style canvas background for light/dark mode</step>
+    <step order="11">Add drop handler for palette drag-and-drop</step>
+    <step order="12">Test with sample nodes and edges</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create component files</tool>
+    <tool name="Bash">Run dev server</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/playbook-builder/src/components/Canvas/Canvas.tsx</output>
+    <output type="code">src/client/playbook-builder/src/components/Canvas/index.ts</output>
+    <output type="code">src/client/playbook-builder/src/stores/canvasStore.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Canvas renders with React Flow</criterion>
+    <criterion testable="true">Nodes can be placed and moved</criterion>
+    <criterion testable="true">Edges can be created between nodes</criterion>
+    <criterion testable="true">Zoom and pan controls work</criterion>
+    <criterion testable="true">MiniMap shows overview</criterion>
+  </acceptance-criteria>
+</task>

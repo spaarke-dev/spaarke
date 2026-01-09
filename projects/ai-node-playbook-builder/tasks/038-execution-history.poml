@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="038" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Implement Execution History</title>
+    <phase>4: Advanced Features</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <tags>bff-api, feature</tags>
+    <dependencies>029</dependencies>
+    <blocks>039</blocks>
+  </metadata>
+  <prompt>Implement execution history listing and run details API.</prompt>
+  <role>Senior .NET developer</role>
+  <goal>Execution history API returns past runs with metrics.</goal>
+  <steps>
+    <step order="1">Create GET /api/ai/playbooks/{id}/runs endpoint</step>
+    <step order="2">Return list of PlaybookRun records</step>
+    <step order="3">Include status, duration, token counts</step>
+    <step order="4">Add run details with node-level metrics</step>
+    <step order="5">Write tests</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookRunEndpoints.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/PlaybookRunHistoryDto.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">History lists past runs</criterion>
+    <criterion testable="true">Run details include node metrics</criterion>
+  </acceptance-criteria>
+</task>

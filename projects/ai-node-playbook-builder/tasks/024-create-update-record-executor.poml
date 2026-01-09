@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Create UpdateRecordNodeExecutor</title>
+    <phase>3: Parallel Execution + Delivery</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <tags>bff-api, executor</tags>
+    <dependencies>021</dependencies>
+    <blocks>028</blocks>
+  </metadata>
+  <prompt>Create UpdateRecordNodeExecutor for updating Dataverse records with AI output values.</prompt>
+  <role>Senior .NET developer</role>
+  <goal>UpdateRecordNodeExecutor updates Dataverse records with template-rendered field values.</goal>
+  <steps>
+    <step order="1">Create UpdateRecordNodeExecutor class</step>
+    <step order="2">Read record config from node configJson</step>
+    <step order="3">Get entity name, record ID, field mappings</step>
+    <step order="4">Render field values using TemplateEngine</step>
+    <step order="5">Update record via Dataverse SDK</step>
+    <step order="6">Return NodeOutput</step>
+    <step order="7">Write unit tests</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/UpdateRecordNodeExecutor.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Record updated in Dataverse</criterion>
+    <criterion testable="true">Template values resolved</criterion>
+  </acceptance-criteria>
+</task>
