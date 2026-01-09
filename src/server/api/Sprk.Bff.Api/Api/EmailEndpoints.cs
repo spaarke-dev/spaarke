@@ -55,6 +55,14 @@ public static class EmailEndpoints
             .Produces<EmailDocumentStatusResponse>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
 
+        // GET /api/v1/emails/{emailId}/association-preview - Preview automatic associations
+        group.MapGet("/{emailId:guid}/association-preview", GetAssociationPreviewAsync)
+            .WithName("GetEmailAssociationPreview")
+            .WithDescription("Preview automatic associations for an email before saving, showing all detected signals and confidence scores")
+            .Produces<AssociationSignalsResponse>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
+
         // POST /api/v1/emails/webhook-trigger - Dataverse webhook receiver (AllowAnonymous with secret validation)
         app.MapPost("/api/v1/emails/webhook-trigger", HandleWebhookTriggerAsync)
             .AllowAnonymous()
@@ -563,6 +571,40 @@ public static class EmailEndpoints
             return Results.Problem(
                 title: "Internal Server Error",
                 detail: "Failed to check document status",
+                statusCode: StatusCodes.Status500InternalServerError);
+        }
+    }
+
+    /// <summary>
+    /// Preview automatic associations for an email before saving.
+    /// Returns all detected signals with confidence scores and the recommended association.
+    /// </summary>
+    private static async Task<IResult> GetAssociationPreviewAsync(
+        Guid emailId,
+        IEmailAssociationService associationService,
+        ILogger<Program> logger,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            logger.LogDebug("Getting association preview for email {EmailId}", emailId);
+
+            var signals = await associationService.GetAssociationSignalsAsync(emailId, cancellationToken);
+
+            logger.LogInformation(
+                "Association preview for email {EmailId}: {SignalCount} signals, recommended={HasRecommendation}",
+                emailId,
+                signals.Signals.Count,
+                signals.RecommendedAssociation != null);
+
+            return Results.Ok(signals);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error getting association preview for email {EmailId}", emailId);
+            return Results.Problem(
+                title: "Internal Server Error",
+                detail: "Failed to get association preview",
                 statusCode: StatusCodes.Status500InternalServerError);
         }
     }

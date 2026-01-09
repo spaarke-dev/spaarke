@@ -445,6 +445,14 @@ builder.Services.AddScoped<Sprk.Bff.Api.Services.Email.IEmailFilterService,
 // Email rule seed service - seeds default exclusion rules to Dataverse
 builder.Services.AddScoped<Sprk.Bff.Api.Services.Email.EmailRuleSeedService>();
 
+// Email association service - determines Matter/Account/Contact associations with confidence scoring
+builder.Services.AddScoped<Sprk.Bff.Api.Services.Email.IEmailAssociationService,
+    Sprk.Bff.Api.Services.Email.EmailAssociationService>();
+
+// Email attachment processor - creates separate document records for email attachments
+builder.Services.AddScoped<Sprk.Bff.Api.Services.Email.IEmailAttachmentProcessor,
+    Sprk.Bff.Api.Services.Email.EmailAttachmentProcessor>();
+
 // HttpClient for email polling backup service (Dataverse queries)
 builder.Services.AddHttpClient("DataversePolling")
     .ConfigureHttpClient(client =>
