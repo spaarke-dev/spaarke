@@ -1,33 +1,43 @@
 # Current Task State
 
 > **Purpose**: Context recovery after compaction or new session
-> **Updated**: 2026-01-08
+> **Updated**: 2026-01-09
 
 ---
 
 ## Active Task
 
-**Task ID**: none
-**Status**: waiting for first task
-**Started**: -
+**Task ID**: 005
+**Task File**: tasks/005-create-executiongraph.poml
+**Title**: Create ExecutionGraph
+**Phase**: 1: Foundation
+**Status**: not-started
+**Started**: —
+
+**Rigor Level**: TBD (will be determined at task start)
+**Reason**: —
 
 ---
 
 ## Quick Recovery
 
-**Last checkpoint**: Project initialized
-**Next action**: Execute task 001
+| Field | Value |
+|-------|-------|
+| **Task** | 005 - Create ExecutionGraph |
+| **Step** | Not started |
+| **Status** | not-started |
+| **Next Action** | Begin Step 1 of task 005 |
 
 **To resume**:
 ```
-work on task 001
+work on task 005
 ```
 
 ---
 
 ## Completed Steps
 
-*No steps completed yet - project just initialized*
+*None yet*
 
 ---
 
@@ -46,6 +56,35 @@ work on task 001
 ## Blocked Items
 
 *None*
+
+---
+
+## Knowledge Files Loaded
+
+*None yet*
+
+## Applicable ADRs
+
+*None yet*
+
+---
+
+## Session Notes
+
+### Previous Tasks Completed
+- **Task 001**: Design Dataverse Schema ✅
+  - Output: notes/schema-design.md (450+ lines)
+- **Task 002**: Implement Dataverse Schema ✅
+  - Output: notes/schema-import-instructions.md (500+ lines)
+- **Task 003**: Create NodeService ✅
+  - Output: INodeService.cs, NodeService.cs, PlaybookNodeDto.cs
+  - Tests: NodeServiceTests.cs (32 tests)
+  - DI registered in Program.cs
+- **Task 004**: Extend ScopeResolverService ✅
+  - Output: IScopeResolverService.cs, ScopeResolverService.cs (modified)
+  - Added ResolveNodeScopesAsync method for node-level scope resolution
+  - Tests: ScopeResolverServiceTests.cs (3 new tests)
+  - Phase 1 stub returning empty scopes (Dataverse in Task 032)
 
 ---
 

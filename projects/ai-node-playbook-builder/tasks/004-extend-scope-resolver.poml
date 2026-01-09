@@ -3,7 +3,7 @@
   <metadata>
     <title>Extend ScopeResolverService</title>
     <phase>1: Foundation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <tags>bff-api, service</tags>
     <dependencies>003</dependencies>
@@ -80,4 +80,11 @@
     <criterion testable="true">Existing ResolvePlaybookScopesAsync still works</criterion>
     <criterion testable="true">Unit tests pass</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-01-09. Added ResolveNodeScopesAsync method to IScopeResolverService
+    interface and ScopeResolverService implementation. Phase 1 scaffolding returns
+    empty scopes (actual Dataverse N:N relationship queries in Task 032). Added 3
+    unit tests verifying Phase 1 stub behavior, valid return types, and logging.
+  </notes>
 </task>

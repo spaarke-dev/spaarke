@@ -31,6 +31,18 @@ public interface IScopeResolverService
         CancellationToken cancellationToken);
 
     /// <summary>
+    /// Load scopes from a PlaybookNode configuration.
+    /// Resolves node-level N:N relationships for skills and knowledge,
+    /// plus the single tool lookup.
+    /// </summary>
+    /// <param name="nodeId">PlaybookNode entity ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Resolved scopes from node relationships and tool lookup.</returns>
+    Task<ResolvedScopes> ResolveNodeScopesAsync(
+        Guid nodeId,
+        CancellationToken cancellationToken);
+
+    /// <summary>
     /// Get action definition by ID.
     /// </summary>
     /// <param name="actionId">Action entity ID.</param>
