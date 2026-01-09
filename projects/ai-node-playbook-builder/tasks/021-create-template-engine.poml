@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Create TemplateEngine</title>
+    <phase>3: Parallel Execution + Delivery</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <tags>bff-api, service</tags>
+    <dependencies>020</dependencies>
+    <blocks>022, 023, 024, 025</blocks>
+  </metadata>
+  <prompt>Create ITemplateEngine using Handlebars.NET for variable substitution in prompts and delivery templates.</prompt>
+  <role>Senior .NET developer</role>
+  <goal>Template engine implemented using Handlebars.NET for {{variable}} substitution.</goal>
+  <constraints>
+    <constraint source="project">Use Handlebars.NET (logic-less, secure)</constraint>
+  </constraints>
+  <steps>
+    <step order="1">Add Handlebars.NET NuGet package</step>
+    <step order="2">Create ITemplateEngine interface</step>
+    <step order="3">Create TemplateEngine implementation</step>
+    <step order="4">Implement Render(template, variables)</step>
+    <step order="5">Handle nested object access ({{node1.output.parties}})</step>
+    <step order="6">Write unit tests</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ITemplateEngine.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/TemplateEngine.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Simple variable substitution works</criterion>
+    <criterion testable="true">Nested object access works</criterion>
+    <criterion testable="true">Missing variables handled gracefully</criterion>
+  </acceptance-criteria>
+</task>

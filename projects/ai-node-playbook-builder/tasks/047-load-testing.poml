@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="047" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Load Testing</title>
+    <phase>5: Production Hardening</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <tags>testing, performance</tags>
+    <dependencies>046</dependencies>
+    <blocks>048</blocks>
+  </metadata>
+  <prompt>Perform load testing to verify system handles concurrent executions.</prompt>
+  <role>Performance engineer</role>
+  <goal>System handles concurrent playbook executions without degradation.</goal>
+  <steps>
+    <step order="1">Create load test playbook</step>
+    <step order="2">Configure concurrent execution scenarios</step>
+    <step order="3">Run load tests</step>
+    <step order="4">Monitor resource usage</step>
+    <step order="5">Identify and fix bottlenecks</step>
+    <step order="6">Document results</step>
+  </steps>
+  <outputs>
+    <output type="docs">projects/ai-node-playbook-builder/notes/load-test-results.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Handles 10 concurrent executions</criterion>
+    <criterion testable="true">Response times remain acceptable</criterion>
+    <criterion testable="true">No errors under load</criterion>
+  </acceptance-criteria>
+</task>

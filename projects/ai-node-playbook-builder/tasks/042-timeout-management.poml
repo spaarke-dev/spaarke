@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Add Timeout Management</title>
+    <phase>5: Production Hardening</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <tags>bff-api, resilience</tags>
+    <dependencies>041</dependencies>
+    <blocks>043</blocks>
+  </metadata>
+  <prompt>Implement per-node timeout configuration and handling.</prompt>
+  <role>Senior .NET developer</role>
+  <goal>Node execution times out after configured duration.</goal>
+  <steps>
+    <step order="1">Read timeout from node.timeoutSeconds</step>
+    <step order="2">Create CancellationTokenSource with timeout</step>
+    <step order="3">Pass token to executor</step>
+    <step order="4">Handle OperationCanceledException</step>
+    <step order="5">Mark node as timed out in run record</step>
+    <step order="6">Write tests</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs (modified)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Timeout applied per node</criterion>
+    <criterion testable="true">Timeout generates proper error</criterion>
+  </acceptance-criteria>
+</task>

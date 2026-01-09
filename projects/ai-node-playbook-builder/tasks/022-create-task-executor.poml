@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Create CreateTaskNodeExecutor</title>
+    <phase>3: Parallel Execution + Delivery</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <tags>bff-api, executor</tags>
+    <dependencies>021</dependencies>
+    <blocks>028</blocks>
+  </metadata>
+  <prompt>Create the CreateTaskNodeExecutor for creating Dataverse task records from playbook execution.</prompt>
+  <role>Senior .NET developer</role>
+  <goal>CreateTaskNodeExecutor creates Dataverse tasks with template-rendered fields.</goal>
+  <steps>
+    <step order="1">Create CreateTaskNodeExecutor class</step>
+    <step order="2">Implement ExecuteAsync</step>
+    <step order="3">Read task config from node configJson</step>
+    <step order="4">Render template fields using TemplateEngine</step>
+    <step order="5">Create task via Dataverse SDK</step>
+    <step order="6">Return NodeOutput with task ID</step>
+    <step order="7">Register in NodeExecutorRegistry</step>
+    <step order="8">Write unit tests</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/CreateTaskNodeExecutor.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Executor creates Dataverse task</criterion>
+    <criterion testable="true">Template variables resolved in task fields</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Create PCF Host Control</title>
+    <phase>2: Visual Builder</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <tags>pcf, fluent-ui</tags>
+    <dependencies>010</dependencies>
+    <blocks>016</blocks>
+  </metadata>
+
+  <prompt>
+    Create the PlaybookBuilderHost PCF control that embeds the React 18 builder
+    app in an iframe. Use React 16 APIs per ADR-022. Handle token passing and
+    dirty state.
+  </prompt>
+
+  <role>PCF developer with React 16 expertise</role>
+
+  <goal>PCF control implemented with iframe embedding and host communication setup.</goal>
+
+  <context>
+    <background>
+      The PCF control is hosted in Dataverse model-driven app forms. It uses
+      React 16 APIs (ReactDOM.render, not createRoot) and embeds the React 18
+      builder in an iframe to isolate the React version.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-022">Use React 16 APIs (ReactDOM.render)</constraint>
+    <constraint source="ADR-022">Declare platform libraries in manifest</constraint>
+    <constraint source="ADR-022">Use devDependencies for React types</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="PCF Control">src/client/pcf/</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create PlaybookBuilderHost/ directory in src/client/pcf/</step>
+    <step order="2">Create ControlManifest.Input.xml with platform libraries</step>
+    <step order="3">Create featureconfig.json for React externalization</step>
+    <step order="4">Create index.ts with PCF lifecycle methods</step>
+    <step order="5">Implement init() with container setup</step>
+    <step order="6">Implement updateView() with ReactDOM.render</step>
+    <step order="7">Implement destroy() with unmountComponentAtNode</step>
+    <step order="8">Create PlaybookBuilderHost.tsx component</step>
+    <step order="9">Add iframe element pointing to /playbook-builder/</step>
+    <step order="10">Setup postMessage listener</step>
+    <step order="11">Pass playbook data to iframe via INIT message</step>
+    <step order="12">Build and verify bundle size</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/pcf/PlaybookBuilderHost/ControlManifest.Input.xml</output>
+    <output type="code">src/client/pcf/PlaybookBuilderHost/index.ts</output>
+    <output type="code">src/client/pcf/PlaybookBuilderHost/PlaybookBuilderHost.tsx</output>
+    <output type="code">src/client/pcf/PlaybookBuilderHost/featureconfig.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">PCF builds without bundling React</criterion>
+    <criterion testable="true">Bundle size under 1MB</criterion>
+    <criterion testable="true">Iframe renders builder app</criterion>
+    <criterion testable="true">Uses ReactDOM.render not createRoot</criterion>
+  </acceptance-criteria>
+</task>

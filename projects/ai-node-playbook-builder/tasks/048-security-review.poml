@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="048" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Security Review</title>
+    <phase>5: Production Hardening</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <tags>security, review</tags>
+    <dependencies>047</dependencies>
+    <blocks>049</blocks>
+  </metadata>
+  <prompt>Perform security review of all new endpoints and services.</prompt>
+  <role>Security engineer</role>
+  <goal>No security vulnerabilities in new code.</goal>
+  <steps>
+    <step order="1">Review authorization on all endpoints</step>
+    <step order="2">Verify input validation</step>
+    <step order="3">Check for injection vulnerabilities</step>
+    <step order="4">Review template engine security</step>
+    <step order="5">Verify OBO token handling</step>
+    <step order="6">Document findings and fixes</step>
+  </steps>
+  <outputs>
+    <output type="docs">projects/ai-node-playbook-builder/notes/security-review.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">All endpoints authorized</criterion>
+    <criterion testable="true">No injection vulnerabilities</criterion>
+    <criterion testable="true">Template engine secure</criterion>
+  </acceptance-criteria>
+</task>

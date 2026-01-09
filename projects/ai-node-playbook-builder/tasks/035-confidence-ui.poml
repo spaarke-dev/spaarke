@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Add Confidence UI Display</title>
+    <phase>4: Advanced Features</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <tags>frontend, react</tags>
+    <dependencies>034</dependencies>
+    <blocks>039</blocks>
+  </metadata>
+  <prompt>Display confidence badges in execution results and output viewer.</prompt>
+  <role>Senior frontend developer</role>
+  <goal>Confidence scores displayed with color-coded badges.</goal>
+  <steps>
+    <step order="1">Create ConfidenceBadge component</step>
+    <step order="2">Color: green >=0.9, yellow 0.7-0.9, red less than 0.7</step>
+    <step order="3">Show on node output in results panel</step>
+    <step order="4">Show per-field confidence in details</step>
+    <step order="5">Add tooltip with explanation</step>
+  </steps>
+  <outputs>
+    <output type="code">src/client/playbook-builder/src/components/Results/ConfidenceBadge.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Badges show correct colors</criterion>
+    <criterion testable="true">Confidence visible in results</criterion>
+  </acceptance-criteria>
+</task>

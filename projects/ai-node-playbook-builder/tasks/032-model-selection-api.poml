@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Implement Model Selection API</title>
+    <phase>4: Advanced Features</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <tags>bff-api, api</tags>
+    <dependencies>029</dependencies>
+    <blocks>033</blocks>
+  </metadata>
+  <prompt>Implement API endpoint for listing AI model deployments and per-node model selection.</prompt>
+  <role>Senior .NET developer</role>
+  <goal>Model deployments API returns available models for node configuration.</goal>
+  <steps>
+    <step order="1">Create GET /api/ai/model-deployments endpoint</step>
+    <step order="2">Query sprk_aimodeldeployment from Dataverse</step>
+    <step order="3">Return list with id, name, capability, contextWindow</step>
+    <step order="4">Update node executor to use modelDeploymentId override</step>
+    <step order="5">Write tests</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/ModelEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/ModelDeploymentDto.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">API returns model deployments</criterion>
+    <criterion testable="true">Node uses selected model</criterion>
+  </acceptance-criteria>
+</task>

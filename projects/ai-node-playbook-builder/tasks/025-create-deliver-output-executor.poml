@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Create DeliverOutputNodeExecutor</title>
+    <phase>3: Parallel Execution + Delivery</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <tags>bff-api, executor</tags>
+    <dependencies>021</dependencies>
+    <blocks>026</blocks>
+  </metadata>
+  <prompt>Create DeliverOutputNodeExecutor for rendering final delivery outputs (Word docs, emails) using templates.</prompt>
+  <role>Senior .NET developer</role>
+  <goal>DeliverOutputNodeExecutor renders delivery outputs using configured templates.</goal>
+  <steps>
+    <step order="1">Create DeliverOutputNodeExecutor class</step>
+    <step order="2">Read delivery config from node configJson</step>
+    <step order="3">Get delivery template reference</step>
+    <step order="4">Aggregate all node outputs as variables</step>
+    <step order="5">Determine delivery type (Word, Email, Teams)</step>
+    <step order="6">Delegate to appropriate delivery handler</step>
+    <step order="7">Return NodeOutput with delivery result</step>
+    <step order="8">Write unit tests</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/DeliverOutputNodeExecutor.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Delivery executor invokes correct handler</criterion>
+    <criterion testable="true">All node outputs available as variables</criterion>
+  </acceptance-criteria>
+</task>

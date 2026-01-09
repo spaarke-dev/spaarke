@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Implement Parallel Execution</title>
+    <phase>3: Parallel Execution + Delivery</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <tags>bff-api, orchestration</tags>
+    <dependencies>019</dependencies>
+    <blocks>021</blocks>
+  </metadata>
+  <prompt>Upgrade PlaybookOrchestrationService to execute independent nodes in parallel while respecting maxParallelNodes throttling and rate limits.</prompt>
+  <role>Senior .NET developer with async/concurrency expertise</role>
+  <goal>Parallel node execution implemented with throttling and rate limit handling.</goal>
+  <constraints>
+    <constraint source="project">Respect maxParallelNodes setting per playbook</constraint>
+    <constraint source="ADR-016">Handle Azure OpenAI rate limits with backoff</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>.claude/patterns/api/resilience.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Update ExecuteAsync to use batches from ExecutionGraph</step>
+    <step order="2">Implement parallel execution within batch using Task.WhenAll</step>
+    <step order="3">Add SemaphoreSlim for maxParallelNodes throttling</step>
+    <step order="4">Track rate limit headers from Azure OpenAI</step>
+    <step order="5">Implement exponential backoff on 429 responses</step>
+    <step order="6">Write unit tests for parallel scenarios</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs (modified)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Independent nodes execute in parallel</criterion>
+    <criterion testable="true">maxParallelNodes throttling works</criterion>
+    <criterion testable="true">Rate limit backoff implemented</criterion>
+  </acceptance-criteria>
+</task>

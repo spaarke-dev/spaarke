@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="039" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Phase 4 Tests and Deployment</title>
+    <phase>4: Advanced Features</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <tags>testing, deploy</tags>
+    <dependencies>031, 033, 035, 037, 038</dependencies>
+    <blocks>040</blocks>
+  </metadata>
+  <prompt>Complete Phase 4 testing and deployment of advanced features.</prompt>
+  <role>Spaarke AI Developer Agent</role>
+  <goal>Phase 4 deployed with all advanced features working.</goal>
+  <steps>
+    <step order="1">Run all unit tests</step>
+    <step order="2">Test condition branching E2E</step>
+    <step order="3">Test model selection</step>
+    <step order="4">Test confidence display</step>
+    <step order="5">Test template clone flow</step>
+    <step order="6">Test execution history</step>
+    <step order="7">Deploy to dev</step>
+    <step order="8">Verify all features</step>
+  </steps>
+  <outputs>
+    <output type="docs">projects/ai-node-playbook-builder/notes/phase4-deployment-notes.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">All tests pass</criterion>
+    <criterion testable="true">Features work in dev environment</criterion>
+  </acceptance-criteria>
+</task>

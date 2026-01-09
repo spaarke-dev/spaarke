@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="049" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Phase 5 Final Deployment</title>
+    <phase>5: Production Hardening</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <tags>deploy</tags>
+    <dependencies>044, 048</dependencies>
+    <blocks>090</blocks>
+  </metadata>
+  <prompt>Complete Phase 5 deployment and verify production readiness.</prompt>
+  <role>DevOps engineer</role>
+  <goal>System production-ready with all hardening complete.</goal>
+  <steps>
+    <step order="1">Run all tests</step>
+    <step order="2">Deploy to dev</step>
+    <step order="3">Verify all hardening features</step>
+    <step order="4">Test cancellation flow</step>
+    <step order="5">Verify logging in App Insights</step>
+    <step order="6">Confirm performance targets met</step>
+    <step order="7">Sign off on security review</step>
+  </steps>
+  <outputs>
+    <output type="docs">projects/ai-node-playbook-builder/notes/phase5-deployment-notes.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">All tests pass</criterion>
+    <criterion testable="true">Performance targets met</criterion>
+    <criterion testable="true">Security review passed</criterion>
+  </acceptance-criteria>
+</task>

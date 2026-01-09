@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Add Model Selection UI</title>
+    <phase>4: Advanced Features</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <tags>frontend, react</tags>
+    <dependencies>032</dependencies>
+    <blocks>039</blocks>
+  </metadata>
+  <prompt>Add AI model selection dropdown to node properties for AI action types.</prompt>
+  <role>Senior frontend developer</role>
+  <goal>Model selection dropdown in properties panel for AI nodes.</goal>
+  <steps>
+    <step order="1">Fetch model deployments from API</step>
+    <step order="2">Add ModelSelector component</step>
+    <step order="3">Show only for AI action types</step>
+    <step order="4">Display model name and capability</step>
+    <step order="5">Save selection to node</step>
+  </steps>
+  <outputs>
+    <output type="code">src/client/playbook-builder/src/components/Properties/ModelSelector.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Models load from API</criterion>
+    <criterion testable="true">Selection saves to node</criterion>
+    <criterion testable="true">Only shown for AI nodes</criterion>
+  </acceptance-criteria>
+</task>
