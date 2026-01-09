@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>033</id>
+    <title>Integrate AI processing enqueue</title>
+    <phase>4</phase>
+    <status>not-started</status>
+    <estimate>2h</estimate>
+    <tags>bff-api, ai, azure-openai</tags>
+    <dependencies>012, 030</dependencies>
+  </metadata>
+
+  <description>
+    Integrate email document creation with the existing AI Document Intelligence pipeline.
+    When an email document is created, automatically enqueue it for AI summarization
+    if AutoEnqueueAi is enabled in configuration.
+  </description>
+
+  <knowledge>
+    <files>
+      <file>projects/email-to-document-automation/SPEC.md</file>
+      <file>docs/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-013-ai-tool-framework.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-013">Use existing Document Intelligence pipeline</constraint>
+    <constraint source="project">Respect AutoEnqueueAi configuration setting</constraint>
+    <constraint source="project">Use existing ai-document-processing job type</constraint>
+  </constraints>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/EmailToDocumentJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/DocumentIntelligenceService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/EmailProcessingOptions.cs</file>
+    </relevant-files>
+  </context>
+
+  <steps>
+    <step id="1">Review existing AI Document Intelligence enqueue pattern</step>
+    <step id="2">Add AI enqueue logic to EmailToDocumentJobHandler</step>
+    <step id="3">Check AutoEnqueueAi configuration before enqueueing</step>
+    <step id="4">Use existing job type "ai-document-processing"</step>
+    <step id="5">Add telemetry for AI enqueue events</step>
+    <step id="6">Test email document triggers AI processing</step>
+    <step id="7">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Email documents auto-enqueued for AI processing when enabled</criterion>
+    <criterion>AutoEnqueueAi=false skips AI processing</criterion>
+    <criterion>Uses existing ai-document-processing job type</criterion>
+    <criterion>AI summary generated for email documents</criterion>
+    <criterion>Telemetry tracks AI enqueue events</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reuse existing IDocumentIntelligenceService - do not create new AI service.
+    AI processing extracts text from .eml and generates summary.
+  </notes>
+</task>

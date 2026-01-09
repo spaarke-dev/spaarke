@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>041</id>
+    <title>Create GET /api/emails/batch-process/{jobId}/status</title>
+    <phase>5</phase>
+    <status>not-started</status>
+    <estimate>2h</estimate>
+    <tags>bff-api, api, endpoints</tags>
+    <dependencies>040</dependencies>
+  </metadata>
+
+  <description>
+    Create endpoint to query batch processing job status. Returns progress percentage,
+    processed/total counts, error count, and estimated time remaining.
+  </description>
+
+  <knowledge>
+    <files>
+      <file>projects/email-to-document-automation/SPEC.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="project">Status must be persisted, not derived from Dataverse queries</constraint>
+    <constraint source="ADR-008">Use endpoint filters for admin authorization</constraint>
+  </constraints>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/EmailEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Email/BatchStatusResponse.cs</file>
+    </relevant-files>
+  </context>
+
+  <steps>
+    <step id="1">Create BatchStatusResponse model</step>
+    <step id="2">Add GET /api/v1/emails/admin/batch-process/{jobId}/status route</step>
+    <step id="3">Query job status from persistent store</step>
+    <step id="4">Calculate progress percentage</step>
+    <step id="5">Include processed/total/error counts</step>
+    <step id="6">Include estimated time remaining (if in progress)</step>
+    <step id="7">Return 404 if job ID not found</step>
+    <step id="8">Add admin authorization filter</step>
+    <step id="9">Add unit tests</step>
+    <step id="10">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Endpoint returns current job status</criterion>
+    <criterion>Status includes: pending, in_progress, completed, failed</criterion>
+    <criterion>Progress shows processed/total counts</criterion>
+    <criterion>Error count and sample errors included</criterion>
+    <criterion>404 returned for unknown job ID</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Status polling enables UI progress display.
+    Consider adding SignalR for real-time updates in future.
+  </notes>
+</task>

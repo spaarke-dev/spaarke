@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>022</id>
+    <title>Implement IEmailAttachmentProcessor</title>
+    <phase>3</phase>
+    <status>not-started</status>
+    <estimate>4h</estimate>
+    <tags>bff-api, services</tags>
+    <dependencies>012</dependencies>
+  </metadata>
+
+  <description>
+    Implement IEmailAttachmentProcessor to extract email attachments and create
+    separate sprk_document records for each meaningful attachment. Includes filtering
+    to exclude signature images, logos, and small spacer images.
+  </description>
+
+  <knowledge>
+    <files>
+      <file>projects/email-to-document-automation/SPEC.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/adr/ADR-007-spefilestore-facade.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-007">Use SpeFileStore for file uploads</constraint>
+    <constraint source="project">Exclude small images less than 5KB</constraint>
+    <constraint source="project">Filter signature images by filename pattern</constraint>
+  </constraints>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Email/IEmailAttachmentProcessor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Email/EmailAttachmentProcessor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs</file>
+    </relevant-files>
+  </context>
+
+  <steps>
+    <step id="1">Create IEmailAttachmentProcessor interface</step>
+    <step id="2">Implement attachment extraction from email MIME parts</step>
+    <step id="3">Add filtering for signature images (pattern matching)</step>
+    <step id="4">Add filtering for small images (MinImageSizeKB threshold)</step>
+    <step id="5">Create sprk_document records for each attachment</step>
+    <step id="6">Upload attachment files to SPE via SpeFileStore</step>
+    <step id="7">Set sprk_parentemaildocumentid relationship</step>
+    <step id="8">Add unit tests for filtering logic</step>
+    <step id="9">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Attachments extracted from email MIME structure</criterion>
+    <criterion>Signature images filtered by pattern (image###.png, logo*.png, etc.)</criterion>
+    <criterion>Small images filtered by size threshold (default 5KB)</criterion>
+    <criterion>Each attachment creates separate sprk_document record</criterion>
+    <criterion>Parent-child relationship set via sprk_parentemaildocumentid</criterion>
+    <criterion>Attachment files uploaded to SPE</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    See EmailProcessingOptions.SignatureImagePatterns for configurable patterns.
+    Attachments inherit association from parent email document.
+  </notes>
+</task>

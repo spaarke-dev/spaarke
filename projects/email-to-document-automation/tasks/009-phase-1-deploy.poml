@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>009</id>
+    <title>Phase 1 Deploy - Core Conversion Infrastructure</title>
+    <phase>1</phase>
+    <status>completed</status>
+    <estimate>2h</estimate>
+    <tags>deploy, bff-api, dataverse, validation</tags>
+    <dependencies>001, 002, 003, 004, 005, 006</dependencies>
+  </metadata>
+
+  <description>
+    Deploy Phase 1 implementation to the dev environment. This includes:
+    - sprk_document entity extensions (email fields)
+    - sprk_emailprocessingrule entity
+    - Alternate key for idempotency
+    - IEmailToEmlConverter service
+    - POST /api/emails/convert-to-document endpoint
+  </description>
+
+  <knowledge>
+    <files>
+      <file>projects/email-to-document-automation/SPEC.md</file>
+      <file>projects/email-to-document-automation/CLAUDE.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API + BackgroundService pattern</constraint>
+    <constraint source="ADR-004">Standard JobContract schema for background jobs</constraint>
+    <constraint source="ADR-007">SpeFileStore facade for all SPE operations</constraint>
+  </constraints>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Email/EmailToEmlConverter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/EmailEndpoints.cs</file>
+      <file>src/solutions/SpaarkeCore/</file>
+    </relevant-files>
+  </context>
+
+  <steps>
+    <step id="1">Verify all Phase 1 code builds successfully (dotnet build)</step>
+    <step id="2">Run unit tests to ensure no regressions (dotnet test)</step>
+    <step id="3">Deploy Dataverse solution with entity changes</step>
+    <step id="4">Verify BFF API endpoints are accessible</step>
+    <step id="5">Test manual email conversion endpoint</step>
+    <step id="6">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Solution builds without errors</criterion>
+    <criterion>All unit tests pass</criterion>
+    <criterion>sprk_document entity has email fields in Dataverse</criterion>
+    <criterion>sprk_emailprocessingrule entity exists in Dataverse</criterion>
+    <criterion>POST /api/emails/convert-to-document endpoint responds</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Completed as part of PR #95 merge to master.
+  </notes>
+</task>
