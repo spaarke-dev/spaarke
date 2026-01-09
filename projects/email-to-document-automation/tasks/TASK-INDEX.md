@@ -51,12 +51,12 @@
 
 | ID | Task | Status | Est. | Dependencies |
 |----|------|--------|------|--------------|
-| 020 | Implement IEmailAssociationService | 🔲 | 6h | 012 |
-| 021 | Add tracking token matching | 🔲 | 2h | 020 |
-| 022 | Implement IEmailAttachmentProcessor | 🔲 | 4h | 012 |
-| 023 | Create GET /api/emails/association-preview endpoint | 🔲 | 3h | 020 |
-| 024 | Unit tests for association methods | 🔲 | 3h | 020, 021 |
-| **029** | **Phase 3 Deploy** | 🔲 | 2h | 020-024 |
+| 020 | Implement IEmailAssociationService | ✅ | 6h | 012 |
+| 021 | Add tracking token matching | ✅ | 2h | 020 |
+| 022 | Implement IEmailAttachmentProcessor | ✅ | 4h | 012 |
+| 023 | Create GET /api/emails/association-preview endpoint | ✅ | 3h | 020 |
+| 024 | Unit tests for association methods | ✅ | 3h | 020, 021 |
+| **029** | **Phase 3 Deploy** | ✅ | 2h | 020-024 |
 
 ---
 
