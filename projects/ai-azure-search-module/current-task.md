@@ -13,22 +13,21 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 007 - Unit tests for VisualizationService |
-| **Step** | 0 of X: Not started |
-| **Status** | not-started |
-| **Next Action** | Begin Task 007 - unit tests for VisualizationService |
+| **Task** | 010 - Scaffold DocumentRelationshipViewer PCF |
+| **Step** | Not started |
+| **Status** | pending |
+| **Next Action** | Begin Phase 2: PCF Control Development |
 
 ### Files Modified This Session
 <!-- Only files touched in CURRENT session, not all time -->
-- `src/server/api/Sprk.Bff.Api/Services/Ai/Visualization/VisualizationService.cs` - Created - Service implementation
-- `src/server/api/Sprk.Bff.Api/Program.cs` - Modified - Added DI registration + endpoint + backfill service
-- `src/server/api/Sprk.Bff.Api/Api/Filters/VisualizationAuthorizationFilter.cs` - Created - Authorization filter
-- `src/server/api/Sprk.Bff.Api/Api/Ai/VisualizationEndpoints.cs` - Created - API endpoint
-- `src/server/api/Sprk.Bff.Api/Services/Jobs/DocumentVectorBackfillService.cs` - Created - Backfill service
+- `src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj` - Modified - Added explicit Kiota package references
+- `projects/ai-azure-search-module/tasks/008-deploy-phase1-api.poml` - Modified - Updated status to completed
+- `projects/ai-azure-search-module/tasks/TASK-INDEX.md` - Modified - Marked Phase 1 complete
+- `projects/ai-azure-search-module/notes/008-deployment-log.md` - Modified - Documented successful deployment
 
 ### Critical Context
 <!-- 1-3 sentences of essential context for continuation -->
-Task 006 completed. DocumentVectorBackfillService created for backfilling documentVector via average pooling. Phase 1 progress: 6/8 complete. Ready for Task 007 (Unit tests).
+**Phase 1 is COMPLETE (8/8 tasks).** All visualization backend code deployed and operational. API endpoint: https://spe-api-dev-67e2xz.azurewebsites.net. Next: Phase 2 starts with Task 010 (PCF control scaffolding).
 
 ---
 
@@ -36,14 +35,14 @@ Task 006 completed. DocumentVectorBackfillService created for backfilling docume
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | 007 |
-| **Task File** | tasks/007-unit-tests.poml |
-| **Title** | Unit tests for VisualizationService |
-| **Phase** | 1: Core Infrastructure |
-| **Status** | not-started |
+| **Task ID** | 010 |
+| **Task File** | tasks/010-scaffold-pcf.poml |
+| **Title** | Scaffold DocumentRelationshipViewer PCF |
+| **Phase** | 2: PCF Control Development |
+| **Status** | pending |
 | **Started** | — |
-| **Rigor Level** | TBD |
-| **Rigor Reason** | TBD |
+| **Rigor Level** | FULL |
+| **Rigor Reason** | PCF control implementation |
 
 ---
 
@@ -54,43 +53,25 @@ Task 006 completed. DocumentVectorBackfillService created for backfilling docume
 <!-- Updated by task-execute after each step completion -->
 <!-- Format: - [x] Step N: {description} ({YYYY-MM-DD HH:MM}) -->
 
-*No steps completed yet - task 006 just finished*
+*Task 010 not yet started. Reset from Task 008 completion.*
 
 ### Current Step
 
-Not started.
+Waiting to begin Task 010 - Scaffold DocumentRelationshipViewer PCF
 
 ### Files Modified (All Task)
 
 <!-- Track all files created or modified during this task -->
 <!-- Format: - `path/to/file` - {Created|Modified} - {brief purpose} -->
 
-*No files modified yet*
+*Reset for new task*
 
 ### Decisions Made
 
 <!-- Log implementation decisions for context recovery -->
 <!-- Format: - {YYYY-MM-DD}: {Decision} — Reason: {why} -->
 
-*No decisions recorded yet*
-
----
-
-## Next Action
-
-**Next Step**: Begin Task 007
-
-**Pre-conditions**:
-- Task 003 completed (VisualizationService implemented)
-
-**Key Context**:
-- Write unit tests for VisualizationService
-- Mock Azure AI Search client and KnowledgeDeploymentService
-- Test GetRelatedDocumentsAsync with various scenarios
-
-**Expected Output**:
-- Test file: tests/Sprk.Bff.Api.Tests/Services/Ai/Visualization/VisualizationServiceTests.cs
-- All tests passing
+*Reset for new task*
 
 ---
 
@@ -98,7 +79,25 @@ Not started.
 
 <!-- List anything preventing progress -->
 
-**Status**: None - Dependency (003) is complete
+**Status**: None
+
+No blockers. Phase 1 complete, ready for Phase 2.
+
+---
+
+## Next Action
+
+**Begin Phase 2: PCF Control Development**
+
+To start Task 010:
+- Say "work on task 010" or "continue"
+- This will scaffold the DocumentRelationshipViewer PCF control
+
+**Phase 2 Overview** (10 tasks):
+- Task 010: Scaffold PCF control
+- Tasks 011-016: Implement React Flow, components, and UI
+- Tasks 017-018: Component and integration tests
+- Task 019: Deploy PCF to Dataverse
 
 ---
 
@@ -109,7 +108,7 @@ Not started.
 
 ### Current Session
 - Started: 2026-01-09
-- Focus: Phase 1 Core Infrastructure implementation
+- Focus: Task 008 deployment completion (Phase 1 wrap-up)
 
 ### Key Learnings
 <!-- Gotchas, warnings, or important discoveries -->
@@ -125,12 +124,17 @@ Not started.
 - Task 006: BackgroundService pattern with configuration options (DocumentVectorBackfillOptions)
 - Task 006: SearchAsync returns Response<SearchResults<T>> - use .Value for typed access or implicit conversion
 - Task 006: Average pooling with L2 normalization for document embeddings
+- Task 007: Use `SearchModelFactory.SearchResult<T>` for mocking Azure Search responses
+- Task 007: VisualizationDocument accessible via InternalsVisibleTo
+- Task 008: Kiota package versions must be consistent - transitives can conflict with direct refs
+- Task 008: When updating Kiota packages, add explicit refs for ALL Kiota packages (Abstractions, Authentication.Azure, Http.HttpClientLibrary, Serialization.*)
+- Task 008: Dataverse__ClientSecret config must be set in App Service for options validation
 
 ### Handoff Notes
 <!-- Used when context budget is high or session ending -->
 <!-- Another Claude instance should be able to continue from these notes -->
 
-*No handoff notes*
+**Phase 1 is COMPLETE (8/8 tasks).** Visualization backend deployed and operational at https://spe-api-dev-67e2xz.azurewebsites.net. Visualization endpoint: `/api/ai/visualization/related/{documentId}`. Ready for Phase 2 (PCF development) starting with Task 010.
 
 ---
 
@@ -152,7 +156,8 @@ Not started.
 
 ### Knowledge Files Loaded
 <!-- From task knowledge section -->
-*None yet - will be populated when task executes*
+- `.claude/skills/azure-deploy/SKILL.md`
+- `docs/architecture/auth-azure-resources.md`
 
 ---
 
