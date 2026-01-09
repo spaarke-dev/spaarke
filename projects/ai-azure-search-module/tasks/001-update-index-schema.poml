@@ -3,7 +3,7 @@
   <metadata>
     <title>Update Azure AI Search index schema</title>
     <phase>1: Core Infrastructure</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>003, 006</blocks>
@@ -98,6 +98,20 @@
     The index likely already has a contentVector field - use the same configuration pattern.
     Schema updates on Azure AI Search can be done without reindexing if adding new fields.
   </notes>
+
+  <completion>
+    <completed-date>2026-01-09</completed-date>
+    <summary>
+      Added documentVector field to spaarke-knowledge-index with 1536 dimensions and knowledge-vector-profile.
+      Schema update applied via Azure AI Search REST API and verified.
+    </summary>
+    <files-modified>
+      <file>infrastructure/ai-search/spaarke-knowledge-index.json</file>
+    </files-modified>
+    <docs-created>
+      <file>projects/ai-azure-search-module/notes/001-schema-update.md</file>
+    </docs-created>
+  </completion>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
