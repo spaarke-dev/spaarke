@@ -25,11 +25,11 @@
 | 002 | Implement Dataverse Schema | :white_check_mark: | 001 | dataverse, schema |
 | 003 | Create NodeService | :white_check_mark: | 002 | bff-api, service |
 | 004 | Extend ScopeResolverService | :white_check_mark: | 003 | bff-api, service |
-| 005 | Create ExecutionGraph | :white_large_square: | 003 | bff-api, orchestration |
-| 006 | Create AiAnalysisNodeExecutor | :white_large_square: | 004, 005 | bff-api, executor |
-| 007 | Create PlaybookOrchestrationService | :white_large_square: | 006 | bff-api, orchestration |
-| 008 | Create Node API Endpoints | :white_large_square: | 007 | bff-api, api |
-| 009 | Phase 1 Tests and Deployment | :white_large_square: | 008 | testing, deploy |
+| 005 | Create ExecutionGraph | :white_check_mark: | 003 | bff-api, orchestration |
+| 006 | Create AiAnalysisNodeExecutor | :white_check_mark: | 004, 005 | bff-api, executor |
+| 007 | Create PlaybookOrchestrationService | :white_check_mark: | 006 | bff-api, orchestration |
+| 008 | Create Node API Endpoints | :white_check_mark: | 007 | bff-api, api |
+| 009 | Phase 1 Tests and Deployment | :white_check_mark: | 008 | testing, deploy |
 
 ---
 

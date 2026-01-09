@@ -3,7 +3,7 @@
   <metadata>
     <title>Create ExecutionGraph</title>
     <phase>1: Foundation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <tags>bff-api, orchestration</tags>
     <dependencies>003</dependencies>
@@ -79,5 +79,13 @@
   <notes>
     Kahn's algorithm is preferred for topological sort as it naturally
     detects cycles (queue empties before all nodes processed).
+
+    Completed 2026-01-09. ExecutionGraph class implemented with:
+    - Kahn's algorithm for topological sort
+    - Cycle detection throws InvalidOperationException with details
+    - GetExecutionBatches() groups nodes by dependency level for parallel execution
+    - Disabled nodes (IsActive=false) filtered during construction
+    - GetDependencies/GetDependents helper methods
+    - 28 unit tests covering all acceptance criteria
   </notes>
 </task>

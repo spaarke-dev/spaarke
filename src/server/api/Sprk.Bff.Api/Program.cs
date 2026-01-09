@@ -351,6 +351,12 @@ if (analysisEnabled && documentIntelligenceEnabled)
     // Node Service - CRUD operations for playbook nodes (ai-node-playbook-builder project)
     builder.Services.AddHttpClient<Sprk.Bff.Api.Services.Ai.INodeService, Sprk.Bff.Api.Services.Ai.NodeService>();
 
+    // Node Executor Registry - manages node type executors (ai-node-playbook-builder project)
+    builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutorRegistry, Sprk.Bff.Api.Services.Ai.Nodes.NodeExecutorRegistry>();
+
+    // Playbook Orchestration Service - multi-node playbook execution (ai-node-playbook-builder project)
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IPlaybookOrchestrationService, Sprk.Bff.Api.Services.Ai.PlaybookOrchestrationService>();
+
     // Playbook Sharing Service - team/organization sharing for playbooks (R3 Phase 3 Task 023)
     builder.Services.AddHttpClient<Sprk.Bff.Api.Services.Ai.IPlaybookSharingService, Sprk.Bff.Api.Services.Ai.PlaybookSharingService>();
 
@@ -1081,6 +1087,8 @@ if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
     app.MapAnalysisEndpoints();
     app.MapPlaybookEndpoints();
     app.MapScopeEndpoints();
+    app.MapNodeEndpoints();
+    app.MapPlaybookRunEndpoints();
 }
 
 // RAG endpoints for knowledge base operations (R3)

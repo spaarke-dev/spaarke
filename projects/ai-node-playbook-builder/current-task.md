@@ -7,15 +7,15 @@
 
 ## Active Task
 
-**Task ID**: 005
-**Task File**: tasks/005-create-executiongraph.poml
-**Title**: Create ExecutionGraph
-**Phase**: 1: Foundation
+**Task ID**: 010
+**Task File**: tasks/010-setup-builder-react-app.poml
+**Title**: Setup Builder React App
+**Phase**: 2: Visual Builder
 **Status**: not-started
 **Started**: —
 
-**Rigor Level**: TBD (will be determined at task start)
-**Reason**: —
+**Rigor Level**: FULL
+**Reason**: Frontend/React implementation task
 
 ---
 
@@ -23,68 +23,64 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 005 - Create ExecutionGraph |
+| **Task** | 010 - Setup Builder React App |
 | **Step** | Not started |
 | **Status** | not-started |
-| **Next Action** | Begin Step 1 of task 005 |
+| **Next Action** | Begin Phase 2 - Visual Builder implementation |
 
 **To resume**:
 ```
-work on task 005
+work on task 010
 ```
 
 ---
 
 ## Completed Steps
 
-*None yet*
+(None yet - task not started)
 
 ---
 
 ## Files Modified This Session
 
-*None yet*
+(None yet)
 
 ---
 
 ## Key Decisions Made
 
-*None yet*
+(None yet)
 
 ---
 
 ## Blocked Items
 
-*None*
+(None)
 
 ---
 
 ## Knowledge Files Loaded
 
-*None yet*
+(To be loaded when task starts)
 
 ## Applicable ADRs
 
-*None yet*
+(To be determined from task tags)
 
 ---
 
 ## Session Notes
 
-### Previous Tasks Completed
-- **Task 001**: Design Dataverse Schema ✅
-  - Output: notes/schema-design.md (450+ lines)
-- **Task 002**: Implement Dataverse Schema ✅
-  - Output: notes/schema-import-instructions.md (500+ lines)
-- **Task 003**: Create NodeService ✅
-  - Output: INodeService.cs, NodeService.cs, PlaybookNodeDto.cs
-  - Tests: NodeServiceTests.cs (32 tests)
-  - DI registered in Program.cs
-- **Task 004**: Extend ScopeResolverService ✅
-  - Output: IScopeResolverService.cs, ScopeResolverService.cs (modified)
-  - Added ResolveNodeScopesAsync method for node-level scope resolution
-  - Tests: ScopeResolverServiceTests.cs (3 new tests)
-  - Phase 1 stub returning empty scopes (Dataverse in Task 032)
+### Phase 1 Complete ✅
+All Phase 1 tasks (001-009) completed:
+- Dataverse schema fully deployed via Web API
+- BFF API deployed with all new endpoints
+- Ready for Phase 2: Visual Builder
+
+### Phase 2 Preview
+Task 010 starts the Visual Builder implementation:
+- Setup React app for node-based playbook builder
+- Depends on Phase 1 completion
 
 ---
 

@@ -138,9 +138,15 @@ public record PlaybookValidationResult
     public string[] Errors { get; init; } = [];
 
     /// <summary>
+    /// Validation warnings (non-blocking).
+    /// </summary>
+    public string[] Warnings { get; init; } = [];
+
+    /// <summary>
     /// Create a successful validation result.
     /// </summary>
-    public static PlaybookValidationResult Success() => new() { IsValid = true };
+    public static PlaybookValidationResult Success(string[]? warnings = null) =>
+        new() { IsValid = true, Warnings = warnings ?? [] };
 
     /// <summary>
     /// Create a failed validation result with errors.

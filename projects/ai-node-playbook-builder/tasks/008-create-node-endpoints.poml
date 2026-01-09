@@ -3,7 +3,7 @@
   <metadata>
     <title>Create Node API Endpoints</title>
     <phase>1: Foundation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <tags>bff-api, api</tags>
     <dependencies>007</dependencies>
@@ -100,5 +100,14 @@
   <notes>
     Follow existing PlaybookEndpoints pattern exactly for consistency.
     SSE streaming follows AnalysisEndpoints pattern with proper headers.
+
+    Completed 2026-01-09. Implemented node and playbook execution endpoints:
+    - NodeEndpoints.cs: ListNodes, CreateNode, GetNode, UpdateNode, DeleteNode, ReorderNodes, UpdateNodeScopes
+    - PlaybookRunEndpoints.cs: ValidatePlaybook, ExecutePlaybook (SSE), GetRunStatus, StreamRunStatus (SSE), CancelRun
+    - All endpoints use PlaybookAuthorizationFilter (owner-only for writes, access-based for reads)
+    - SSE streaming uses Channel-based pattern for yielding events from try/catch blocks
+    - Registered IPlaybookOrchestrationService and INodeExecutorRegistry in Program.cs
+    - Updated CustomWebAppFactory with comprehensive test configuration
+    - Test assertions pass (cleanup failures are pre-existing infrastructure issue with DocumentEventProcessor)
   </notes>
 </task>
