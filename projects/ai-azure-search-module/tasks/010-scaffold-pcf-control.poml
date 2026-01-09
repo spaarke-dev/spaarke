@@ -3,7 +3,7 @@
   <metadata>
     <title>Scaffold DocumentRelationshipViewer PCF control</title>
     <phase>2: PCF Control Development</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>011</blocks>
@@ -101,4 +101,17 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    <note date="2026-01-09">
+      Task completed successfully. Created DocumentRelationshipViewer PCF control with:
+      - Platform libraries: React 16.14.0, Fluent 9.46.2 (externalized)
+      - ReactControl interface (returns React elements from updateView)
+      - FluentProvider wrapper with theme resolution for dark mode (ADR-021)
+      - makeStyles with design tokens (no hard-coded colors)
+      - featureconfig.json with pcfReactPlatformLibraries: on
+      - Control builds successfully (845 KB bundle)
+      - Test harness renders placeholder content
+    </note>
+  </notes>
 </task>

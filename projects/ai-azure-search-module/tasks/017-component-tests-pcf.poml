@@ -3,7 +3,7 @@
   <metadata>
     <title>Component tests for PCF control</title>
     <phase>2: PCF Control Development</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>016</dependencies>
     <blocks>019</blocks>
@@ -71,4 +71,22 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    <note date="2026-01-09">
+      Task completed successfully. Implemented comprehensive component tests:
+      - Set up Jest 29 with ts-jest and jsdom environment
+      - Added @testing-library/react v12.1.5 (React 16 compatible)
+      - Added @testing-library/jest-dom for DOM matchers
+      - Created jest.config.js with TypeScript support
+      - Created jest.setup.ts with global Xrm mock for Dataverse navigation
+      - DocumentNode.test.tsx: 15 tests (source/related rendering, similarity badges, file types, sizes)
+      - ControlPanel.test.tsx: 18 tests (slider interactions, checkbox filtering, active filters badge)
+      - NodeActionBar.test.tsx: 20 tests (Xrm.Navigation.openForm mock, window.open mock, callbacks)
+      - DocumentGraph.test.tsx: 21 tests (React Flow mocked to avoid memory issues)
+      - Total: 74 tests, all passing
+      - Mocked react-flow-renderer for lightweight testing
+      - Tests cover user interactions, rendering, prop handling
+    </note>
+  </notes>
 </task>

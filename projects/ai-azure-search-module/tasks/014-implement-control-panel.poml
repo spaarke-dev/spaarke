@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement control panel with filters</title>
     <phase>2: PCF Control Development</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>012, 013</dependencies>
     <blocks>016</blocks>
@@ -76,4 +76,19 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    <note date="2026-01-09">
+      Task completed successfully. Implemented ControlPanel component:
+      - Created ControlPanel.tsx with Fluent UI v9 Slider and Checkbox components
+      - Similarity threshold: Slider 50-95%, step 5, default 65%
+      - Depth limit: Slider 1-3, step 1, default 1
+      - Max nodes per level: Slider 10-50, step 5, default 25
+      - Document type filters: Checkboxes for PDF, DOCX, XLSX, PPTX, TXT, Other
+      - Exported FilterSettings interface and DEFAULT_FILTER_SETTINGS for parent component use
+      - Active filters badge shows count of non-default settings
+      - All styling uses Fluent tokens for dark mode support (ADR-021)
+      - Build succeeded without errors
+    </note>
+  </notes>
 </task>

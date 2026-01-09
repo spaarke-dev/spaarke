@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement full-screen modal wrapper</title>
     <phase>2: PCF Control Development</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>014, 015</dependencies>
     <blocks>017, 018</blocks>
@@ -90,4 +90,25 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    <note date="2026-01-09">
+      Task completed successfully. Implemented RelationshipViewerModal component:
+      - Created RelationshipViewerModal.tsx with full-screen modal layout
+      - Overlay with z-index: 10000 for Dataverse form compatibility
+      - Header with DocumentFlowchart icon, title, source document subtitle, close button
+      - Left sidebar (300px) containing ControlPanel for filters
+      - Main canvas area with DocumentGraph and NodeActionBar overlay
+      - Footer with node/edge stats and version number
+      - Escape key handler to close modal
+      - Click-outside-to-close on overlay
+      - Prevents body scroll when modal is open
+      - Container dimensions tracked with ResizeObserver pattern
+      - FilterSettings state management with callback to parent
+      - SelectedNode state for showing/hiding NodeActionBar
+      - All styling uses Fluent UI v9 tokens (ADR-021 compliant)
+      - Build succeeded without errors (bundle: 2.15 MiB)
+      - Component ready for integration with ribbon trigger (Task 020+)
+    </note>
+  </notes>
 </task>

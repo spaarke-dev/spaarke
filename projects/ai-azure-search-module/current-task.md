@@ -13,21 +13,24 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 010 - Scaffold DocumentRelationshipViewer PCF |
+| **Task** | 018 - Integration tests with Azure AI Search |
 | **Step** | Not started |
-| **Status** | pending |
-| **Next Action** | Begin Phase 2: PCF Control Development |
+| **Status** | not-started |
+| **Next Action** | Create integration tests for visualization API endpoints |
 
 ### Files Modified This Session
 <!-- Only files touched in CURRENT session, not all time -->
-- `src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj` - Modified - Added explicit Kiota package references
-- `projects/ai-azure-search-module/tasks/008-deploy-phase1-api.poml` - Modified - Updated status to completed
-- `projects/ai-azure-search-module/tasks/TASK-INDEX.md` - Modified - Marked Phase 1 complete
-- `projects/ai-azure-search-module/notes/008-deployment-log.md` - Modified - Documented successful deployment
+- `src/client/pcf/DocumentRelationshipViewer/package.json` - Modified - Added Jest and React Testing Library dependencies
+- `src/client/pcf/DocumentRelationshipViewer/jest.config.js` - Created - Jest configuration
+- `src/client/pcf/DocumentRelationshipViewer/jest.setup.ts` - Created - Global mocks for Xrm.Navigation
+- `src/client/pcf/DocumentRelationshipViewer/DocumentRelationshipViewer/__tests__/DocumentNode.test.tsx` - Created - 15 tests
+- `src/client/pcf/DocumentRelationshipViewer/DocumentRelationshipViewer/__tests__/ControlPanel.test.tsx` - Created - 18 tests
+- `src/client/pcf/DocumentRelationshipViewer/DocumentRelationshipViewer/__tests__/NodeActionBar.test.tsx` - Created - 20 tests
+- `src/client/pcf/DocumentRelationshipViewer/DocumentRelationshipViewer/__tests__/DocumentGraph.test.tsx` - Created - 21 tests
 
 ### Critical Context
 <!-- 1-3 sentences of essential context for continuation -->
-**Phase 1 is COMPLETE (8/8 tasks).** All visualization backend code deployed and operational. API endpoint: https://spe-api-dev-67e2xz.azurewebsites.net. Next: Phase 2 starts with Task 010 (PCF control scaffolding).
+**Phase 2 IN PROGRESS (8/10 tasks).** Task 017 complete - 74 component tests passing with Jest + React Testing Library. Tests cover DocumentNode, ControlPanel, NodeActionBar, DocumentGraph. Xrm.Navigation mocked for Dataverse navigation testing. Next: Task 018 (integration tests) verifies API connectivity.
 
 ---
 
@@ -35,14 +38,14 @@
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | 010 |
-| **Task File** | tasks/010-scaffold-pcf.poml |
-| **Title** | Scaffold DocumentRelationshipViewer PCF |
+| **Task ID** | 018 |
+| **Task File** | tasks/018-integration-tests-api.poml |
+| **Title** | Integration tests with Azure AI Search |
 | **Phase** | 2: PCF Control Development |
-| **Status** | pending |
+| **Status** | not-started |
 | **Started** | — |
-| **Rigor Level** | FULL |
-| **Rigor Reason** | PCF control implementation |
+| **Rigor Level** | STANDARD |
+| **Rigor Reason** | Testing task - STANDARD rigor |
 
 ---
 
@@ -53,25 +56,26 @@
 <!-- Updated by task-execute after each step completion -->
 <!-- Format: - [x] Step N: {description} ({YYYY-MM-DD HH:MM}) -->
 
-*Task 010 not yet started. Reset from Task 008 completion.*
+*Task 018 not started yet*
+*Previous task completed Task 017 (Component tests for PCF control)*
 
 ### Current Step
 
-Waiting to begin Task 010 - Scaffold DocumentRelationshipViewer PCF
+Waiting to start Task 018
 
 ### Files Modified (All Task)
 
 <!-- Track all files created or modified during this task -->
 <!-- Format: - `path/to/file` - {Created|Modified} - {brief purpose} -->
 
-*Reset for new task*
+*None yet - Task 018 not started*
 
 ### Decisions Made
 
 <!-- Log implementation decisions for context recovery -->
 <!-- Format: - {YYYY-MM-DD}: {Decision} — Reason: {why} -->
 
-*Reset for new task*
+*None yet*
 
 ---
 
@@ -87,17 +91,23 @@ No blockers. Phase 1 complete, ready for Phase 2.
 
 ## Next Action
 
-**Begin Phase 2: PCF Control Development**
+**Continue Phase 2: PCF Control Development**
 
-To start Task 010:
-- Say "work on task 010" or "continue"
-- This will scaffold the DocumentRelationshipViewer PCF control
+To start Task 018:
+- Say "work on task 018" or "continue"
+- This will create integration tests for the visualization API endpoints
 
-**Phase 2 Overview** (10 tasks):
-- Task 010: Scaffold PCF control
-- Tasks 011-016: Implement React Flow, components, and UI
-- Tasks 017-018: Component and integration tests
-- Task 019: Deploy PCF to Dataverse
+**Phase 2 Progress** (8/10 tasks):
+- Task 010: ✅ Scaffold PCF control - COMPLETE
+- Task 011: ✅ Integrate React Flow with d3-force - COMPLETE
+- Task 012: ✅ Implement DocumentNode component - COMPLETE
+- Task 013: ✅ Implement DocumentEdge component - COMPLETE
+- Task 014: ✅ Implement control panel - COMPLETE
+- Task 015: ✅ Implement node action bar - COMPLETE
+- Task 016: ✅ Implement full-screen modal - COMPLETE
+- Task 017: ✅ Component tests for PCF control - COMPLETE
+- Task 018: 🔲 Integration tests with Azure AI Search - NEXT
+- Task 019: 🔲 Deploy Phase 2 PCF
 
 ---
 
@@ -108,7 +118,7 @@ To start Task 010:
 
 ### Current Session
 - Started: 2026-01-09
-- Focus: Task 008 deployment completion (Phase 1 wrap-up)
+- Focus: Tasks 012-016 completion (DocumentNode, DocumentEdge, ControlPanel, NodeActionBar, RelationshipViewerModal)
 
 ### Key Learnings
 <!-- Gotchas, warnings, or important discoveries -->
@@ -129,12 +139,38 @@ To start Task 010:
 - Task 008: Kiota package versions must be consistent - transitives can conflict with direct refs
 - Task 008: When updating Kiota packages, add explicit refs for ALL Kiota packages (Abstractions, Authentication.Azure, Http.HttpClientLibrary, Serialization.*)
 - Task 008: Dataverse__ClientSecret config must be set in App Service for options validation
+- Task 010: PCF with platform libraries - use ReactControl interface, returns React elements from updateView()
+- Task 010: featureconfig.json with pcfReactPlatformLibraries: on enables React/Fluent externalization
+- Task 010: Empty dependencies in package.json - React/Fluent in devDependencies only per ADR-022
+- Task 010: FluentProvider wrapper at component root for theme resolution (ADR-021)
+- Task 010: Use nullish coalescing (??) not logical or (||) to satisfy ESLint rules
+- Task 011: @xyflow/react requires React 17+ - use react-flow-renderer v10.3.17 for React 16 compatibility
+- Task 011: d3-force simulation: forceLink with distance = 200 * (1 - similarity), forceManyBody strength=-300
+- Task 011: forceCollide prevents node overlap with configurable radius (default 50)
+- Task 011: useForceLayout hook runs simulation on mount and when nodes/edges change
+- Task 011: Fix source node at center (fx/fy) while letting others float
+- Task 011: Bundle size increases to 1.4 MiB with react-flow-renderer + d3-force bundled
+- Task 012: Handle component className prop not supported in react-flow-renderer v10 - use inline styles instead
+- Task 012: makeStyles border* properties not valid - use shorthand 'border' instead of borderColor/Width/Style
+- Task 013: react-flow-renderer v10 lacks BaseEdge and EdgeLabelRenderer - use path + foreignObject instead
+- Task 013: getBezierPath returns string (not tuple) in v10, use getEdgeCenter for label positioning
+- Task 015: Xrm.Navigation.openForm for opening Dataverse records - requires global type declaration
+- Task 015: window.open with noopener,noreferrer for secure external navigation to SharePoint
+- Task 015: NodeActionBar can be conditionally rendered based on selected node state
+- Task 016: Full-screen modal requires z-index 10000+ for Dataverse form compatibility
+- Task 016: Use setTimeout to get container dimensions after modal opens (DOM needs to be ready)
+- Task 016: Custom modal overlay with click-outside-to-close is simpler than Fluent Dialog for full-screen
+- Task 017: @testing-library/react v12.1.5 required for React 16 compatibility (v13+ requires React 18)
+- Task 017: Jest 29 with ts-jest works well for TypeScript PCF projects
+- Task 017: Mock react-flow-renderer entirely to avoid memory issues during testing (heavy bundle)
+- Task 017: Global Xrm mock in jest.setup.ts enables Dataverse navigation testing
+- Task 017: identity-obj-proxy handles CSS module mocking for makeStyles
 
 ### Handoff Notes
 <!-- Used when context budget is high or session ending -->
 <!-- Another Claude instance should be able to continue from these notes -->
 
-**Phase 1 is COMPLETE (8/8 tasks).** Visualization backend deployed and operational at https://spe-api-dev-67e2xz.azurewebsites.net. Visualization endpoint: `/api/ai/visualization/related/{documentId}`. Ready for Phase 2 (PCF development) starting with Task 010.
+**Phase 2 is IN PROGRESS (8/10 tasks).** Tasks 010-017 complete. Key components: DocumentNode.tsx, DocumentEdge.tsx, ControlPanel.tsx, NodeActionBar.tsx, RelationshipViewerModal.tsx. All use Fluent v9 tokens (ADR-021). Bundle: 2.15 MiB. Task 017 added 74 component tests with Jest + React Testing Library. Next: Task 018 (integration tests) verifies API connectivity, then Task 019 (deployment).
 
 ---
 

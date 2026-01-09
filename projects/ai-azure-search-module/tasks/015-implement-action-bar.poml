@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement node action bar</title>
     <phase>2: PCF Control Development</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>012</dependencies>
     <blocks>016</blocks>
@@ -77,4 +77,22 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    <note date="2026-01-09">
+      Task completed successfully. Implemented NodeActionBar component:
+      - Created NodeActionBar.tsx with Fluent UI v9 Card and Button components
+      - Open Document Record: uses Xrm.Navigation.openForm with sprk_document entity
+      - View in SharePoint: uses window.open with fileUrl (new tab, noopener)
+      - Expand: callback to parent for loading next level of related documents
+      - Header shows document name, parent entity name, and "Source Document" label
+      - Close button with Dismiss icon and tooltip
+      - All buttons have Fluent UI Tooltip descriptions
+      - Expand button hidden for source node (cannot expand source)
+      - Global Xrm type declaration for Dataverse runtime
+      - Fallback URL construction for testing outside Dataverse
+      - Build succeeded without errors
+      - Component ready for integration in Task 016 (full-screen modal)
+    </note>
+  </notes>
 </task>

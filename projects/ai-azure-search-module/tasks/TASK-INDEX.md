@@ -11,7 +11,7 @@
 | Phase | Status | Progress |
 |-------|--------|----------|
 | Phase 1: Core Infrastructure | Complete | 8/8 |
-| Phase 2: PCF Control Development | Not Started | 0/10 |
+| Phase 2: PCF Control Development | In Progress | 8/10 |
 | Phase 3: Integration & Ribbon | Not Started | 0/5 |
 | Phase 4: Polish & Documentation | Not Started | 0/4 |
 | Wrap-up | Not Started | 0/1 |
@@ -30,14 +30,14 @@
 | 006 | Backfill existing documents | 1 | ✅ | 001 | STANDARD |
 | 007 | Unit tests for VisualizationService | 1 | ✅ | 003 | STANDARD |
 | 008 | Deploy Phase 1 API | 1 | ✅ | 005, 007 | STANDARD |
-| 010 | Scaffold DocumentRelationshipViewer PCF | 2 | 🔲 | none | FULL |
-| 011 | Integrate React Flow with d3-force | 2 | 🔲 | 010 | FULL |
-| 012 | Implement DocumentNode component | 2 | 🔲 | 011 | FULL |
-| 013 | Implement DocumentEdge component | 2 | 🔲 | 011 | FULL |
-| 014 | Implement control panel | 2 | 🔲 | 012, 013 | FULL |
-| 015 | Implement node action bar | 2 | 🔲 | 012 | FULL |
-| 016 | Implement full-screen modal | 2 | 🔲 | 014, 015 | FULL |
-| 017 | Component tests for PCF control | 2 | 🔲 | 016 | STANDARD |
+| 010 | Scaffold DocumentRelationshipViewer PCF | 2 | ✅ | none | FULL |
+| 011 | Integrate React Flow with d3-force | 2 | ✅ | 010 | FULL |
+| 012 | Implement DocumentNode component | 2 | ✅ | 011 | FULL |
+| 013 | Implement DocumentEdge component | 2 | ✅ | 011 | FULL |
+| 014 | Implement control panel | 2 | ✅ | 012, 013 | FULL |
+| 015 | Implement node action bar | 2 | ✅ | 012 | FULL |
+| 016 | Implement full-screen modal | 2 | ✅ | 014, 015 | FULL |
+| 017 | Component tests for PCF control | 2 | ✅ | 016 | STANDARD |
 | 018 | Integration tests with Azure AI Search | 2 | 🔲 | 005, 016 | STANDARD |
 | 019 | Deploy Phase 2 PCF | 2 | 🔲 | 017, 018 | STANDARD |
 | 020 | Register PCF on sprk_document form | 3 | 🔲 | 019 | FULL |
@@ -150,6 +150,56 @@
 - Kiota package mismatch resolved by adding explicit package references
 - API deployed to: https://spe-api-dev-67e2xz.azurewebsites.net
 - Visualization endpoint live: /api/ai/visualization/related/{documentId}
+
+**Phase 2 Started (2026-01-09):**
+- Task 010: Scaffolded DocumentRelationshipViewer PCF control
+- Platform libraries: React 16.14.0, Fluent 9.46.2 (externalized per ADR-022)
+- Control uses ReactControl interface (returns React elements from updateView)
+- FluentProvider wrapper with theme resolution for dark mode support (ADR-021)
+- Task 011: Integrated react-flow-renderer v10 (React 16 compatible) + d3-force
+- useForceLayout hook calculates positions: edge distance = 200 * (1 - similarity)
+- DocumentGraph component with Background, Controls, MiniMap
+- Sample data generates 8 nodes with varying similarity for testing
+- Bundle size: 1.4 MiB (includes react-flow-renderer + d3-force)
+- Task 012: Implemented DocumentNode component with Fluent UI v9 Card
+- File type icons (PDF, DOCX, images, etc.) using @fluentui/react-icons
+- Source node: filled brand background with "Source Document" badge
+- Related nodes: outline style with similarity badge (color-coded)
+- Task 013: Implemented DocumentEdge component with similarity-based styling
+- High similarity (≥90%): thick green edge with green label
+- Medium similarity (≥75%): medium blue edge with brand label
+- Low similarity (≥65%): thin yellow edge with warning label
+- Very low (<65%): thin dashed gray edge with subtle label
+- Bundle size: 2.15 MiB (includes react-flow-renderer + d3-force + icons)
+- Task 014: Implemented ControlPanel component with Fluent UI v9
+- Similarity threshold slider (50-95%, step 5, default 65%)
+- Depth limit slider (1-3 levels, default 1)
+- Max nodes per level slider (10-50, step 5, default 25)
+- Document type filter checkboxes (PDF, DOCX, XLSX, PPTX, TXT, Other)
+- Active filters badge shows count of non-default settings
+- All controls use Fluent tokens for dark mode support
+- Task 015: Implemented NodeActionBar component with Fluent UI v9
+- Open Document Record button (Xrm.Navigation.openForm)
+- View in SharePoint button (window.open with fileUrl)
+- Expand button (callback to load next level)
+- Header shows document name and parent entity
+- Expand hidden for source nodes (cannot expand source)
+- Task 016: Implemented RelationshipViewerModal full-screen modal
+- Overlay with z-index: 10000 for Dataverse form compatibility
+- Header with title, subtitle (source document name), close button
+- Left sidebar (300px) with ControlPanel
+- Main canvas with DocumentGraph and NodeActionBar overlay
+- Footer with stats (nodes/edges) and version
+- Escape key and click-outside-to-close handlers
+- Task 017: Implemented comprehensive component tests with Jest and React Testing Library
+- Added @testing-library/react v12.1.5 (React 16 compatible)
+- Jest 29 with ts-jest and jsdom environment
+- DocumentNode.test.tsx: 15 tests (source/related rendering, similarity, file types)
+- ControlPanel.test.tsx: 18 tests (sliders, checkboxes, active filters badge)
+- NodeActionBar.test.tsx: 20 tests (Xrm.Navigation mocks, window.open, callbacks)
+- DocumentGraph.test.tsx: 21 tests (React Flow mocked for performance)
+- Global Xrm mock in jest.setup.ts for Dataverse navigation testing
+- All 74 tests pass, covering key user interactions and rendering
 
 **No Current Blockers.**
 
