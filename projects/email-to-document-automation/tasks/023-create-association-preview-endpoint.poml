@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>023</id>
+    <title>Create GET /api/emails/association-preview endpoint</title>
+    <phase>3</phase>
+    <status>not-started</status>
+    <estimate>3h</estimate>
+    <tags>bff-api, api, endpoints</tags>
+    <dependencies>020</dependencies>
+  </metadata>
+
+  <description>
+    Create endpoint to preview automatic email associations before saving.
+    Returns all association signals, confidence scores, and alternative matches
+    so users can confirm or override automatic linking.
+  </description>
+
+  <knowledge>
+    <files>
+      <file>projects/email-to-document-automation/SPEC.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/adr/ADR-008-endpoint-authorization-filters.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-008">Use endpoint filters for authorization</constraint>
+    <constraint source="project">Return all signals with confidence scores</constraint>
+  </constraints>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/EmailEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Email/IEmailAssociationService.cs</file>
+    </relevant-files>
+  </context>
+
+  <steps>
+    <step id="1">Add GET /api/v1/emails/{emailId}/association-preview route</step>
+    <step id="2">Create AssociationPreviewResponse model</step>
+    <step id="3">Call IEmailAssociationService to get all signals</step>
+    <step id="4">Return recommended association with confidence</step>
+    <step id="5">Return alternative matches with scores</step>
+    <step id="6">Return association method breakdown</step>
+    <step id="7">Add authorization filter for email access</step>
+    <step id="8">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Endpoint returns 200 with preview data</criterion>
+    <criterion>Response includes recommended association with confidence score</criterion>
+    <criterion>Response includes alternative matches</criterion>
+    <criterion>Response includes all signal sources used</criterion>
+    <criterion>Unauthorized users receive 403</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Preview endpoint enables user confirmation before automatic association.
+    Low-confidence associations (below threshold) should be flagged for review.
+  </notes>
+</task>

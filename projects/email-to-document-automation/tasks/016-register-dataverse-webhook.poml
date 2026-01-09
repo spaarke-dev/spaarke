@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>016</id>
+    <title>Register Dataverse webhook (Service Endpoint + Step)</title>
+    <phase>2</phase>
+    <status>completed</status>
+    <estimate>2h</estimate>
+    <tags>dataverse, webhook, configuration</tags>
+    <dependencies>010</dependencies>
+  </metadata>
+
+  <description>
+    Configure Dataverse Service Endpoint and Webhook Step to trigger the
+    /api/v1/emails/webhook-trigger endpoint when new email activities are created.
+    Includes HMAC-SHA256 signature validation setup.
+  </description>
+
+  <knowledge>
+    <files>
+      <file>projects/email-to-document-automation/SPEC.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="project">Webhook secret must match Key Vault Email-WebhookSecret</constraint>
+    <constraint source="project">Register on email entity Create message</constraint>
+  </constraints>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/EmailEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/EmailProcessingOptions.cs</file>
+    </relevant-files>
+  </context>
+
+  <steps>
+    <step id="1">Create Service Endpoint in Dataverse for webhook URL</step>
+    <step id="2">Configure HMAC-SHA256 authentication with shared secret</step>
+    <step id="3">Register Webhook Step on email entity Create message</step>
+    <step id="4">Configure filtering attributes (if needed)</step>
+    <step id="5">Test webhook fires on email creation</step>
+    <step id="6">Document webhook configuration in deployment notes</step>
+    <step id="7">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Service Endpoint registered in Dataverse</criterion>
+    <criterion>Webhook Step triggers on email Create</criterion>
+    <criterion>Webhook signature validated by BFF API</criterion>
+    <criterion>Invalid signatures rejected with 401</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Completed as part of Phase 2 implementation.
+    Webhook configuration documented in README.md deployment notes.
+  </notes>
+</task>

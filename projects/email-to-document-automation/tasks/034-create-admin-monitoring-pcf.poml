@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>034</id>
+    <title>Create admin monitoring PCF control</title>
+    <phase>4</phase>
+    <status>not-started</status>
+    <estimate>6h</estimate>
+    <tags>pcf, react, fluent-ui, frontend</tags>
+    <dependencies>015</dependencies>
+  </metadata>
+
+  <description>
+    Create a PCF control for administrators to monitor email processing statistics.
+    Display metrics from Application Insights including processing rates, error rates,
+    filter rule hits, and job queue depth.
+  </description>
+
+  <knowledge>
+    <files>
+      <file>projects/email-to-document-automation/SPEC.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-V9-PACKAGING.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-v9-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-006">PCF over webresources</constraint>
+    <constraint source="ADR-021">Use Fluent UI v9 exclusively</constraint>
+    <constraint source="ADR-022">React 16 APIs only</constraint>
+    <constraint source="project">Dark mode support required</constraint>
+  </constraints>
+
+  <context>
+    <relevant-files>
+      <file>src/client/pcf/EmailProcessingMonitor/</file>
+      <file>src/server/api/Sprk.Bff.Api/Telemetry/EmailTelemetry.cs</file>
+    </relevant-files>
+  </context>
+
+  <steps>
+    <step id="1">Create EmailProcessingMonitor PCF control scaffold</step>
+    <step id="2">Implement React component with Fluent UI v9</step>
+    <step id="3">Create BFF API endpoint for aggregated metrics</step>
+    <step id="4">Display processing statistics (daily/weekly/monthly)</step>
+    <step id="5">Display error rate and recent failures</step>
+    <step id="6">Display filter rule hit counts</step>
+    <step id="7">Add refresh functionality</step>
+    <step id="8">Implement dark mode theming</step>
+    <step id="9">Update version in 4 locations per PCF-V9-PACKAGING.md</step>
+    <step id="10">Build and test locally</step>
+    <step id="11">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>PCF control renders in Dataverse model-driven app</criterion>
+    <criterion>Shows email processing statistics</criterion>
+    <criterion>Shows error rates and recent failures</criterion>
+    <criterion>Supports light and dark themes</criterion>
+    <criterion>Uses Fluent UI v9 components exclusively</criterion>
+    <criterion>Version displayed in control footer</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Follow PCF-V9-PACKAGING.md for version bumping in 4 locations.
+    Admin custom page will embed this control.
+  </notes>
+</task>

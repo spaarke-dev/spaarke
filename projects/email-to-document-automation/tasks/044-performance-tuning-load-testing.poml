@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>044</id>
+    <title>Performance tuning and load testing</title>
+    <phase>5</phase>
+    <status>not-started</status>
+    <estimate>4h</estimate>
+    <tags>testing, bff-api, azure</tags>
+    <dependencies>All</dependencies>
+  </metadata>
+
+  <description>
+    Conduct performance tuning and load testing to verify the system meets NFR targets.
+    Test with 1,000 emails for background processing and 10,000 emails for batch processing.
+    Tune MaxConcurrentEmails, PrefetchCount, and other settings as needed.
+  </description>
+
+  <knowledge>
+    <files>
+      <file>projects/email-to-document-automation/SPEC.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="NFR">95% of emails processed within 2 minutes</constraint>
+    <constraint source="NFR">API response times less than 2s (P95)</constraint>
+    <constraint source="NFR">Batch processing: 100 emails/minute</constraint>
+  </constraints>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/EmailProcessingOptions.cs</file>
+      <file>tests/load/</file>
+    </relevant-files>
+  </context>
+
+  <steps>
+    <step id="1">Create load test scripts for background processing</step>
+    <step id="2">Create load test scripts for batch processing</step>
+    <step id="3">Run baseline tests with default settings</step>
+    <step id="4">Test with 1,000 emails (background processing)</step>
+    <step id="5">Test with 10,000 emails (batch processing)</step>
+    <step id="6">Identify bottlenecks from Application Insights</step>
+    <step id="7">Tune MaxConcurrentEmails setting</step>
+    <step id="8">Tune Service Bus PrefetchCount</step>
+    <step id="9">Tune Redis cache settings if needed</step>
+    <step id="10">Re-run tests and verify NFR targets met</step>
+    <step id="11">Document final configuration settings</step>
+    <step id="12">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>1,000 emails processed via background service successfully</criterion>
+    <criterion>95% of emails processed within 2 minutes</criterion>
+    <criterion>Batch processing achieves 100 emails/minute</criterion>
+    <criterion>10,000 email batch completes successfully</criterion>
+    <criterion>No memory leaks or resource exhaustion</criterion>
+    <criterion>Load test results documented</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use Azure Load Testing or k6 for load tests.
+    Monitor Application Insights during tests for bottleneck identification.
+  </notes>
+</task>

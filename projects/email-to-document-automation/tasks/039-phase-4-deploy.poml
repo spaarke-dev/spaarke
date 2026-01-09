@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>039</id>
+    <title>Phase 4 Deploy - UI Integration & AI Processing</title>
+    <phase>4</phase>
+    <status>not-started</status>
+    <estimate>2h</estimate>
+    <tags>deploy, dataverse, pcf, validation</tags>
+    <dependencies>030, 031, 032, 033, 034</dependencies>
+  </metadata>
+
+  <description>
+    Deploy Phase 4 implementation to the dev environment. This includes:
+    - TextExtractorService .eml support
+    - Email form ribbon button
+    - sprk_emailactions.js web resource
+    - AI processing integration
+    - Admin monitoring PCF control
+  </description>
+
+  <knowledge>
+    <files>
+      <file>projects/email-to-document-automation/SPEC.md</file>
+      <file>projects/email-to-document-automation/CLAUDE.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/guides/PCF-V9-PACKAGING.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-006">Deploy PCF controls via pac pcf push or solution import</constraint>
+    <constraint source="project">Ribbon customization must be in solution</constraint>
+  </constraints>
+
+  <context>
+    <relevant-files>
+      <file>src/client/pcf/EmailProcessingMonitor/</file>
+      <file>src/client/webresources/sprk_emailactions.ts</file>
+      <file>src/solutions/SpaarkeCore/</file>
+    </relevant-files>
+  </context>
+
+  <steps>
+    <step id="1">Verify all Phase 4 code builds successfully</step>
+    <step id="2">Build PCF control (npm run build)</step>
+    <step id="3">Deploy PCF control to Dataverse (pac pcf push)</step>
+    <step id="4">Deploy Dataverse solution with ribbon and web resource</step>
+    <step id="5">Test ribbon button on Email form</step>
+    <step id="6">Test manual email conversion via button</step>
+    <step id="7">Verify AI processing triggers for new emails</step>
+    <step id="8">Test admin monitoring control</step>
+    <step id="9">Create PR for Phase 4 changes</step>
+    <step id="10">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Ribbon button visible on completed Email forms</criterion>
+    <criterion>Manual conversion completes in less than 10 seconds</criterion>
+    <criterion>AI summary generated for email documents</criterion>
+    <criterion>Admin monitoring control displays statistics</criterion>
+    <criterion>All deployments successful</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Phase 4 completes user-facing features.
+    After this phase, users can manually save emails and admins can monitor processing.
+  </notes>
+</task>

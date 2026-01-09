@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>049</id>
+    <title>Phase 5 Deploy - Batch Processing & Production</title>
+    <phase>5</phase>
+    <status>not-started</status>
+    <estimate>2h</estimate>
+    <tags>deploy, bff-api, azure, validation</tags>
+    <dependencies>040, 041, 042, 043, 044</dependencies>
+  </metadata>
+
+  <description>
+    Deploy Phase 5 implementation to production. This includes:
+    - Batch processing endpoints
+    - Job status tracking
+    - DLQ handling and re-drive tooling
+    - Performance-tuned configuration
+    - Production monitoring and alerts
+  </description>
+
+  <knowledge>
+    <files>
+      <file>projects/email-to-document-automation/SPEC.md</file>
+      <file>projects/email-to-document-automation/CLAUDE.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="project">All NFR targets must be verified before production</constraint>
+    <constraint source="project">DLQ alerts must be configured</constraint>
+    <constraint source="project">Production runbook must be complete</constraint>
+  </constraints>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/</file>
+      <file>infrastructure/</file>
+    </relevant-files>
+  </context>
+
+  <steps>
+    <step id="1">Verify all Phase 5 code builds successfully</step>
+    <step id="2">Run all unit and integration tests</step>
+    <step id="3">Verify load test results meet NFR targets</step>
+    <step id="4">Deploy BFF API to production Azure App Service</step>
+    <step id="5">Configure production environment variables</step>
+    <step id="6">Configure Azure alerts for DLQ depth</step>
+    <step id="7">Configure Application Insights dashboards</step>
+    <step id="8">Verify batch endpoints accessible</step>
+    <step id="9">Run smoke tests in production</step>
+    <step id="10">Create production runbook</step>
+    <step id="11">Create training materials</step>
+    <step id="12">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>All code deployed to production</criterion>
+    <criterion>Batch processing endpoints operational</criterion>
+    <criterion>DLQ alerts configured and tested</criterion>
+    <criterion>Application Insights dashboards created</criterion>
+    <criterion>Production runbook complete</criterion>
+    <criterion>Training materials available</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Phase 5 completes the project.
+    After this phase, run project wrap-up task (090).
+  </notes>
+</task>

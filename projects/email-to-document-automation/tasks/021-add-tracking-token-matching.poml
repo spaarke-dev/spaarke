@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>021</id>
+    <title>Add tracking token matching</title>
+    <phase>3</phase>
+    <status>not-started</status>
+    <estimate>2h</estimate>
+    <tags>bff-api, services</tags>
+    <dependencies>020</dependencies>
+  </metadata>
+
+  <description>
+    Implement tracking token matching in IEmailAssociationService. Extract Matter/Project
+    tracking tokens from email subject lines and headers. This is the highest-confidence
+    association method (0.95) per SPEC.md.
+  </description>
+
+  <knowledge>
+    <files>
+      <file>projects/email-to-document-automation/SPEC.md</file>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="project">Tracking token matching must be highest priority method</constraint>
+    <constraint source="project">Confidence score 0.95 for tracking token matches</constraint>
+  </constraints>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Email/EmailAssociationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Email/IEmailAssociationService.cs</file>
+    </relevant-files>
+  </context>
+
+  <steps>
+    <step id="1">Implement tracking token extraction from subject line</step>
+    <step id="2">Implement tracking token extraction from email headers</step>
+    <step id="3">Query Dataverse for Matter/Project by tracking token</step>
+    <step id="4">Return association result with 0.95 confidence</step>
+    <step id="5">Add unit tests for tracking token patterns</step>
+    <step id="6">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Tracking tokens extracted from subject line patterns</criterion>
+    <criterion>Tracking tokens extracted from X-MS-Exchange headers</criterion>
+    <criterion>Matching Matter/Project returned with 0.95 confidence</criterion>
+    <criterion>No match returns null, not error</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Tracking token format typically: [sprk-XXXXX] or similar patterns.
+    See SPEC.md Appendix B for association algorithm details.
+  </notes>
+</task>

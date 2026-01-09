@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>040</id>
+    <title>Implement POST /api/emails/batch-process endpoint</title>
+    <phase>5</phase>
+    <status>not-started</status>
+    <estimate>3h</estimate>
+    <tags>bff-api, api, endpoints</tags>
+    <dependencies>012</dependencies>
+  </metadata>
+
+  <description>
+    Create admin endpoint for batch processing historical emails. Accepts date range
+    and filter criteria, returns 202 Accepted with job ID for status tracking.
+    Does not process synchronously - enqueues batch job for background processing.
+  </description>
+
+  <knowledge>
+    <files>
+      <file>projects/email-to-document-automation/SPEC.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/adr/ADR-004-async-job-contract.md</file>
+      <file>.claude/adr/ADR-008-endpoint-authorization-filters.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-004">Use standard JobContract schema</constraint>
+    <constraint source="ADR-008">Use endpoint filters for admin authorization</constraint>
+    <constraint source="project">Return 202 Accepted, not 200 OK</constraint>
+    <constraint source="project">Do not process synchronously</constraint>
+  </constraints>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/EmailEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Email/BatchProcessRequest.cs</file>
+    </relevant-files>
+  </context>
+
+  <steps>
+    <step id="1">Create BatchProcessRequest model with date range and filters</step>
+    <step id="2">Create BatchProcessResponse model with jobId</step>
+    <step id="3">Add POST /api/v1/emails/admin/batch-process route</step>
+    <step id="4">Validate request parameters</step>
+    <step id="5">Generate unique batch job ID</step>
+    <step id="6">Enqueue BatchProcessEmailsJob to Service Bus</step>
+    <step id="7">Return 202 Accepted with job ID and status URL</step>
+    <step id="8">Add admin authorization filter</step>
+    <step id="9">Add unit tests</step>
+    <step id="10">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Endpoint returns 202 Accepted with job ID</criterion>
+    <criterion>Job ID can be used to query status</criterion>
+    <criterion>Processing happens asynchronously in background</criterion>
+    <criterion>Date range and filter criteria validated</criterion>
+    <criterion>Admin authorization required</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Batch processing for migrating historical emails or re-processing after rule changes.
+    Target: 100 emails/minute throughput.
+  </notes>
+</task>

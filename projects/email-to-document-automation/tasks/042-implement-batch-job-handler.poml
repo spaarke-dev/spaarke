@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>042</id>
+    <title>Implement BatchProcessEmailsJob handler</title>
+    <phase>5</phase>
+    <status>not-started</status>
+    <estimate>3h</estimate>
+    <tags>bff-api, worker, job, background</tags>
+    <dependencies>040</dependencies>
+  </metadata>
+
+  <description>
+    Create job handler for batch email processing. Queries emails matching criteria,
+    processes them in batches with bounded concurrency, and updates job status
+    as progress is made.
+  </description>
+
+  <knowledge>
+    <files>
+      <file>projects/email-to-document-automation/SPEC.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>.claude/adr/ADR-004-async-job-contract.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-001">Use BackgroundService pattern</constraint>
+    <constraint source="ADR-004">Implement IJobHandler interface</constraint>
+    <constraint source="project">Bounded concurrency to respect throttling</constraint>
+    <constraint source="project">Update job status as progress is made</constraint>
+  </constraints>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/BatchProcessEmailsJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/EmailToDocumentJobHandler.cs</file>
+    </relevant-files>
+  </context>
+
+  <steps>
+    <step id="1">Create BatchProcessEmailsJobHandler implementing IJobHandler</step>
+    <step id="2">Query emails from Dataverse matching batch criteria</step>
+    <step id="3">Process emails in batches (configurable batch size)</step>
+    <step id="4">Implement bounded concurrency (MaxConcurrentEmails setting)</step>
+    <step id="5">Update job status after each batch completes</step>
+    <step id="6">Track success/failure counts</step>
+    <step id="7">Handle partial failures gracefully</step>
+    <step id="8">Set final job status on completion</step>
+    <step id="9">Add telemetry for batch processing metrics</step>
+    <step id="10">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Handler processes all matching emails</criterion>
+    <criterion>Bounded concurrency prevents throttling</criterion>
+    <criterion>Job status updated during processing</criterion>
+    <criterion>Partial failures don't stop entire batch</criterion>
+    <criterion>Final status reflects success/failure counts</criterion>
+    <criterion>Target throughput: 100 emails/minute</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reuse EmailToDocumentJobHandler logic for individual email processing.
+    Batch size and concurrency configurable in EmailProcessingOptions.
+  </notes>
+</task>
