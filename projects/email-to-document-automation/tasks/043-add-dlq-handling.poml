@@ -4,7 +4,7 @@
     <id>043</id>
     <title>Add DLQ handling and re-drive tooling</title>
     <phase>5</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimate>3h</estimate>
     <tags>bff-api, worker, azure</tags>
     <dependencies>042</dependencies>
@@ -60,5 +60,16 @@
   <notes>
     DLQ contains messages that failed max retry attempts.
     Re-drive should only be done after root cause is fixed.
+
+    Completion Notes (2026-01-09):
+    - Created DlqModels.cs with DlqSummary, DlqMessage, DlqJobInfo, DlqListResponse, RedriveRequest, RedriveResponse
+    - Created DeadLetterQueueService for Service Bus DLQ operations
+    - Added DLQ telemetry methods (RecordDlqListOperation, RecordDlqRedriveOperation)
+    - Registered DeadLetterQueueService in WorkersModule.cs
+    - Added GET /api/v1/emails/admin/dlq endpoint (list messages with pagination)
+    - Added GET /api/v1/emails/admin/dlq/{sequenceNumber} endpoint (get specific message)
+    - Added POST /api/v1/emails/admin/dlq/redrive endpoint (re-drive messages)
+    - Re-drive resets attempt count and preserves original job metadata
+    - Azure alerts for DLQ depth to be configured in Azure Portal (not code)
   </notes>
 </task>

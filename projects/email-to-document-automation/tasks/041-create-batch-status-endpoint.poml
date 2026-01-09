@@ -4,7 +4,7 @@
     <id>041</id>
     <title>Create GET /api/emails/batch-process/{jobId}/status</title>
     <phase>5</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimate>2h</estimate>
     <tags>bff-api, api, endpoints</tags>
     <dependencies>040</dependencies>

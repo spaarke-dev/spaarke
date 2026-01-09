@@ -4,7 +4,7 @@
     <id>042</id>
     <title>Implement BatchProcessEmailsJob handler</title>
     <phase>5</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimate>3h</estimate>
     <tags>bff-api, worker, job, background</tags>
     <dependencies>040</dependencies>
