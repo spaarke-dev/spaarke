@@ -55,7 +55,7 @@ public class ProcessAttachmentsRequest
     /// <summary>
     /// The attachments to process.
     /// </summary>
-    public IReadOnlyList<EmailAttachment> Attachments { get; init; } = [];
+    public IReadOnlyList<EmailAttachmentDto> Attachments { get; init; } = [];
 
     /// <summary>
     /// Whether to queue documents for AI processing after creation.
@@ -74,9 +74,10 @@ public class ProcessAttachmentsRequest
 }
 
 /// <summary>
-/// Represents a single email attachment.
+/// Represents a single email attachment data transfer object.
+/// Named EmailAttachmentDto to avoid conflict with Models.Ai.EmailAttachment (AI text extraction metadata).
 /// </summary>
-public class EmailAttachment
+public class EmailAttachmentDto
 {
     /// <summary>
     /// Original filename of the attachment.

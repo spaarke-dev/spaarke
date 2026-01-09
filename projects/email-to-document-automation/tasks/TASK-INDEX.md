@@ -1,8 +1,8 @@
 # Task Index - Email-to-Document Automation
 
 > **Project**: Email-to-Document Automation
-> **Last Updated**: 2025-01-09
-> **Total Tasks**: 34
+> **Last Updated**: 2026-01-09
+> **Total Tasks**: 34 (33 active, 1 N/A)
 
 ---
 
@@ -64,12 +64,18 @@
 
 | ID | Task | Status | Est. | Dependencies |
 |----|------|--------|------|--------------|
-| 030 | Extend TextExtractorService for .eml | 🔲 | 2h | 004 |
-| 031 | Create Email form ribbon button | 🔲 | 4h | 005 |
-| 032 | Implement sprk_emailactions.js web resource | 🔲 | 3h | 031 |
-| 033 | Integrate AI processing enqueue | 🔲 | 2h | 012, 030 |
-| 034 | Create admin monitoring PCF control | 🔲 | 6h | 015 |
-| **039** | **Phase 4 Deploy** | 🔲 | 2h | 030-034 |
+| 030 | Extend TextExtractorService for .eml | ✅ | 2h | 004 |
+| 031 | Create Email form ribbon button | ✅ | 4h | 005 |
+| 032 | Implement sprk_emailactions.js web resource | ✅ | 3h | 031 |
+| 033 | Integrate AI processing enqueue | 🚫 | 2h | 012, 030 |
+| 034 | Create admin monitoring PCF control | ✅ | 6h | 015 |
+| **039** | **Phase 4 Deploy** | ✅ | 2h | 031-034 |
+
+> **Note - Task 030**: TextExtractorService already has full .eml/.msg support via AI R3 (lines 99-228). No changes needed.
+
+> **Note - Task 033**: Architecture changed - AI analysis now triggered from PCF (requires OBO auth), not background jobs. See EmailToDocumentJobHandler.cs:238-241.
+
+> **Note - Task 039**: All Phase 4 deployments complete. EmailProcessingMonitor PCF required adding NuGet package for .NET Framework 4.6.2 reference assemblies, inline SVG icons to reduce bundle size (from 9.9 MiB to 2.06 MiB), and React 16 API compatibility.
 
 ---
 

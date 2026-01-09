@@ -426,8 +426,12 @@ else
 // ============================================================================
 // EMAIL-TO-DOCUMENT CONVERSION SERVICES (Email-to-Document Automation project)
 // ============================================================================
-// Email telemetry - OpenTelemetry-compatible metrics for email processing
-builder.Services.AddSingleton<Sprk.Bff.Api.Telemetry.EmailTelemetry>();
+// Email processing stats service - in-memory stats readable via API (admin monitoring PCF)
+builder.Services.AddSingleton<Sprk.Bff.Api.Services.Email.EmailProcessingStatsService>();
+
+// Email telemetry - OpenTelemetry-compatible metrics for email processing (delegates to stats service)
+builder.Services.AddSingleton<Sprk.Bff.Api.Telemetry.EmailTelemetry>(sp =>
+    new Sprk.Bff.Api.Telemetry.EmailTelemetry(sp.GetService<Sprk.Bff.Api.Services.Email.EmailProcessingStatsService>()));
 
 // Register Email Processing configuration
 builder.Services.Configure<Sprk.Bff.Api.Configuration.EmailProcessingOptions>(

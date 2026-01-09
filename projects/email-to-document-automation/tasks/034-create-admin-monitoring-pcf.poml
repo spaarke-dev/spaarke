@@ -4,7 +4,7 @@
     <id>034</id>
     <title>Create admin monitoring PCF control</title>
     <phase>4</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimate>6h</estimate>
     <tags>pcf, react, fluent-ui, frontend</tags>
     <dependencies>015</dependencies>

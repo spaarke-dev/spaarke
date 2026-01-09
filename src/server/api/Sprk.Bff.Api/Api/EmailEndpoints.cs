@@ -100,6 +100,15 @@ public static class EmailEndpoints
             .Produces(StatusCodes.Status204NoContent)
             .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
 
+        // GET /api/admin/email-processing/stats - Get processing statistics for admin monitoring
+        app.MapGet("/api/admin/email-processing/stats", GetProcessingStatsAsync)
+            .RequireAuthorization()
+            .WithName("GetEmailProcessingStats")
+            .WithTags("Email Admin")
+            .WithDescription("Get email processing statistics for admin monitoring PCF control")
+            .Produces<EmailProcessingStatsResponse>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
+
         return app;
     }
 
@@ -773,6 +782,29 @@ public static class EmailEndpoints
             logger.LogError(ex, "Error refreshing email processing rules cache");
             return Results.Problem(
                 title: "Cache Refresh Failed",
+                detail: ex.Message,
+                statusCode: StatusCodes.Status500InternalServerError);
+        }
+    }
+
+    /// <summary>
+    /// Get email processing statistics for admin monitoring.
+    /// Returns in-memory stats since service startup.
+    /// </summary>
+    private static IResult GetProcessingStatsAsync(
+        EmailProcessingStatsService statsService,
+        ILogger<Program> logger)
+    {
+        try
+        {
+            var stats = statsService.GetStats();
+            return Results.Ok(stats);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error retrieving email processing statistics");
+            return Results.Problem(
+                title: "Failed to Retrieve Statistics",
                 detail: ex.Message,
                 statusCode: StatusCodes.Status500InternalServerError);
         }

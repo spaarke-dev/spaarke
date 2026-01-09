@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<manifest>
+  <control namespace="Spaarke" constructor="EmailProcessingMonitor" version="1.0.0" display-name-key="EmailProcessingMonitor" description-key="Admin monitoring control for email-to-document processing statistics" control-type="standard">
+    <external-service-usage enabled="true">
+      <domain>*.azurewebsites.net</domain>
+      <domain>login.microsoftonline.com</domain>
+    </external-service-usage>
+
+    <!-- BFF API URL -->
+    <property name="bffApiUrl" display-name-key="BFF API URL" description-key="URL of the BFF API" of-type="SingleLine.Text" usage="input" required="true" default-value="https://spe-api-dev-67e2xz.azurewebsites.net" />
+
+    <!-- Azure AD App Registration IDs -->
+    <property name="tenantId" display-name-key="Tenant ID" description-key="Azure AD Tenant ID" of-type="SingleLine.Text" usage="input" required="true" />
+    <property name="clientAppId" display-name-key="Client App ID" description-key="Client Azure AD Application ID (PCF control app registration)" of-type="SingleLine.Text" usage="input" required="true" />
+    <property name="bffAppId" display-name-key="BFF App ID" description-key="BFF API Azure AD Application ID (for scope)" of-type="SingleLine.Text" usage="input" required="true" />
+
+    <!-- Control height configuration -->
+    <property name="controlHeight" display-name-key="Control Height" description-key="Height of the control in pixels" of-type="Whole.None" usage="input" required="false" default-value="400" />
+
+    <!-- Auto-refresh interval -->
+    <property name="refreshIntervalSeconds" display-name-key="Refresh Interval" description-key="Auto-refresh interval in seconds (0 to disable)" of-type="Whole.None" usage="input" required="false" default-value="30" />
+
+    <resources>
+      <code path="index.ts" order="1"/>
+      <platform-library name="React" version="16.14.0" />
+      <platform-library name="Fluent" version="9.46.2" />
+      <css path="css/EmailProcessingMonitor.css" order="1"/>
+      <resx path="strings/EmailProcessingMonitor.1033.resx" version="1.0.0" />
+    </resources>
+  </control>
+</manifest>
