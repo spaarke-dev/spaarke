@@ -209,7 +209,7 @@ public class EmailAttachmentProcessor : IEmailAttachmentProcessor
 
     private async Task<AttachmentDocumentRecord?> ProcessSingleAttachmentAsync(
         ProcessAttachmentsRequest request,
-        EmailAttachment attachment,
+        EmailAttachmentDto attachment,
         CancellationToken cancellationToken)
     {
         _logger.LogDebug(

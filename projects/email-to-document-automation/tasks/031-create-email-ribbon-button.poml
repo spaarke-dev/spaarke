@@ -4,7 +4,7 @@
     <id>031</id>
     <title>Create Email form ribbon button</title>
     <phase>4</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimate>4h</estimate>
     <tags>dataverse, ribbon, frontend</tags>
     <dependencies>005</dependencies>
