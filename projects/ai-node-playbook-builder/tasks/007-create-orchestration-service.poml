@@ -3,7 +3,7 @@
   <metadata>
     <title>Create PlaybookOrchestrationService</title>
     <phase>1: Foundation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <tags>bff-api, orchestration</tags>
     <dependencies>006</dependencies>
@@ -96,5 +96,17 @@
   <notes>
     Phase 1 implements sequential execution only. Parallel execution is Phase 3.
     Document text extraction should be shared across all nodes (extract once).
+
+    Completed 2026-01-09. Implemented playbook orchestration service:
+    - IPlaybookOrchestrationService interface with ExecuteAsync, ValidateAsync, GetRunStatusAsync, CancelAsync
+    - PlaybookRunContext for shared state across nodes with thread-safe output storage
+    - PlaybookOrchestrationService with mode detection (nodes.Length == 0 → Legacy, else NodeBased)
+    - Legacy mode delegates to IAnalysisOrchestrationService.ExecutePlaybookAsync
+    - NodeBased mode uses ExecutionGraph for topological sorting, executes nodes sequentially
+    - SSE streaming via IAsyncEnumerable with PlaybookStreamEvent types
+    - Channel-based pattern for yielding events from try/catch blocks
+    - In-memory run tracking with ConcurrentDictionary (Phase 2 adds Dataverse persistence)
+    - 20 unit tests covering mode detection, legacy delegation, node execution, validation, error handling
+    - Consolidated PlaybookValidationResult to Models.Ai namespace (removed duplicate)
   </notes>
 </task>
