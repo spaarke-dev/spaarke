@@ -935,6 +935,13 @@ app.UseCors();
 app.UseMiddleware<Sprk.Bff.Api.Api.SecurityHeadersMiddleware>();
 
 // ============================================================================
+// STATIC FILES - Serve playbook-builder SPA from wwwroot
+// ============================================================================
+// Serves static files from wwwroot/ directory. The playbook-builder React app
+// is deployed to wwwroot/playbook-builder/ and accessed at /playbook-builder/
+app.UseStaticFiles();
+
+// ============================================================================
 // GLOBAL EXCEPTION HANDLER - RFC 7807 Problem Details
 // ============================================================================
 // Catches all unhandled exceptions and converts them to structured Problem Details JSON
@@ -1096,6 +1103,13 @@ app.MapRagEndpoints();
 
 // Visualization endpoints for document relationship discovery
 app.MapVisualizationEndpoints();
+
+// ============================================================================
+// PLAYBOOK BUILDER SPA FALLBACK - Client-side routing support
+// ============================================================================
+// Catch-all for /playbook-builder/* routes that don't match static files
+// Returns index.html to allow React Router to handle client-side navigation
+app.MapFallbackToFile("/playbook-builder/{**path}", "playbook-builder/index.html");
 
 // Resilience monitoring endpoints (circuit breaker status)
 app.MapResilienceEndpoints();

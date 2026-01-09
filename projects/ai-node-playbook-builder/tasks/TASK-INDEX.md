@@ -37,15 +37,15 @@
 
 | Task | Title | Status | Depends | Tags |
 |------|-------|--------|---------|------|
-| 010 | Setup Builder React App | :white_large_square: | 009 | frontend, react |
-| 011 | Implement React Flow Canvas | :white_large_square: | 010 | frontend, react-flow |
-| 012 | Create Custom Node Components | :white_large_square: | 011 | frontend, react |
-| 013 | Create Properties Panel | :white_large_square: | 012 | frontend, react |
-| 014 | Implement Scope Selector | :white_large_square: | 013 | frontend, react |
-| 015 | Create PCF Host Control | :white_large_square: | 010 | pcf, fluent-ui |
-| 016 | Implement Host-Builder Communication | :white_large_square: | 015 | pcf, frontend |
-| 017 | Add Canvas Persistence API | :white_large_square: | 008 | bff-api, api |
-| 018 | Deploy Builder to App Service | :white_large_square: | 014, 016, 017 | deploy, azure |
+| 010 | Setup Builder React App | :white_check_mark: | 009 | frontend, react |
+| 011 | Implement React Flow Canvas | :white_check_mark: | 010 | frontend, react-flow |
+| 012 | Create Custom Node Components | :white_check_mark: | 011 | frontend, react |
+| 013 | Create Properties Panel | :white_check_mark: | 012 | frontend, react |
+| 014 | Implement Scope Selector | :white_check_mark: | 013 | frontend, react |
+| 015 | Create PCF Host Control | :white_check_mark: | 010 | pcf, fluent-ui |
+| 016 | Implement Host-Builder Communication | :white_check_mark: | 015 | pcf, frontend |
+| 017 | Add Canvas Persistence API | :white_check_mark: | 008 | bff-api, api |
+| 018 | Deploy Builder to App Service | :white_check_mark: | 014, 016, 017 | deploy, azure |
 | 019 | Phase 2 Tests and PCF Deployment | :white_large_square: | 018 | testing, deploy, pcf |
 
 ---

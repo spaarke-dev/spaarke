@@ -3,7 +3,7 @@
   <metadata>
     <title>Create PCF Host Control</title>
     <phase>2: Visual Builder</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <tags>pcf, fluent-ui</tags>
     <dependencies>010</dependencies>

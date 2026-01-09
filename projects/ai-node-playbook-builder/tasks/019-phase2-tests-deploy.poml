@@ -3,7 +3,7 @@
   <metadata>
     <title>Phase 2 Tests and PCF Deployment</title>
     <phase>2: Visual Builder</phase>
-    <status>not-started</status>
+    <status>in-progress</status>
     <estimated-hours>4</estimated-hours>
     <tags>testing, deploy, pcf</tags>
     <dependencies>018</dependencies>
@@ -48,4 +48,24 @@
     <criterion testable="true">Nodes can be created and configured</criterion>
     <criterion testable="true">Save persists playbook changes</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <note date="2026-01-09">
+      PCF Deployment Complete:
+      - Built PlaybookBuilderHost PCF control (~30KB bundle.js)
+      - Created solution package with pac solution init + add-reference
+      - Disabled ManagePackageVersionsCentrally in .cdsproj and .pcfproj
+      - Successfully imported Solution.zip to spaarkedev1 environment
+      - Created deployment notes at notes/phase2-deployment-notes.md
+
+      Form Configuration Pending:
+      - Requires manual configuration in Power Apps maker portal
+      - Add PlaybookBuilderHost control to sprk_aiplaybook form
+      - Bind to sprk_canvaslayoutjson field
+      - Set builderBaseUrl to https://spe-api-dev-67e2xz.azurewebsites.net/playbook-builder/
+
+      Testing Blocked:
+      - Steps 4-9 require form configuration to be completed first
+    </note>
+  </notes>
 </task>
