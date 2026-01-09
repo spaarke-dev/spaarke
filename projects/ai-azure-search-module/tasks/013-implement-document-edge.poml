@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="ai-azure-search-module">
+  <metadata>
+    <title>Implement DocumentEdge component</title>
+    <phase>2: PCF Control Development</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>011</dependencies>
+    <blocks>014</blocks>
+    <tags>pcf, react, fluent-ui, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>UI component implementation - code implementation</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create the DocumentEdge component with styling based on similarity score.
+    Higher similarity = thicker/green edge, lower similarity = thinner/gray dashed edge.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in React Flow edge customization.
+  </role>
+
+  <goal>
+    DocumentEdge component with visual encoding of similarity strength.
+  </goal>
+
+  <context>
+    <background>
+      Edge styling communicates relationship strength at a glance.
+      90-100% = thick green, 75-89% = medium blue, 65-74% = thin gray dashed.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent UI v9 color tokens where applicable</constraint>
+    <constraint source="project">Edge styles per spec: thick/green, medium/blue, thin/dashed</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>projects/ai-azure-search-module/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create DocumentEdge.tsx component</step>
+    <step order="2">Extend React Flow EdgeProps</step>
+    <step order="3">Implement getSimilarityStyle function</step>
+    <step order="4">Apply stroke width and color based on similarity</step>
+    <step order="5">Add dashed style for lower similarity</step>
+    <step order="6">Register custom edge type with React Flow</step>
+    <step order="7">Test with sample edges of varying similarity</step>
+    <step order="8">npm run build</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/DocumentRelationshipViewer/components/DocumentEdge.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Edge style varies based on similarity score</criterion>
+    <criterion testable="true">High similarity = thick green edge</criterion>
+    <criterion testable="true">Low similarity = thin dashed gray edge</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

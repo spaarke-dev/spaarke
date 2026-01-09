@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="ai-azure-search-module">
+  <metadata>
+    <title>Scaffold DocumentRelationshipViewer PCF control</title>
+    <phase>2: PCF Control Development</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>011</blocks>
+    <tags>pcf, react, typescript, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>PCF control creation - code implementation</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Scaffold a new PCF virtual control called DocumentRelationshipViewer using pac pcf init.
+    Configure for React with platform libraries, set up Fluent UI v9, and verify basic render.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in PCF control development with React and Fluent UI v9.
+    Follow ADRs strictly.
+  </role>
+
+  <goal>
+    Working PCF control scaffold that renders a placeholder in the Dataverse test harness.
+  </goal>
+
+  <context>
+    <background>
+      This control will display an interactive graph visualization of related documents.
+      It must use React 16 APIs per ADR-022 and Fluent UI v9 per ADR-021.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">Use PCF for all new UI components</constraint>
+    <constraint source="ADR-021">Use Fluent UI v9 exclusively, support dark mode</constraint>
+    <constraint source="ADR-022">Use React 16 APIs (ReactDOM.render), declare platform-library</constraint>
+    <constraint source="project">Control type: virtual (React-based)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-V9-PACKAGING.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Navigate to src/client/pcf/</step>
+    <step order="2">Run pac pcf init --namespace Spaarke.Controls --name DocumentRelationshipViewer --template field --framework react</step>
+    <step order="3">Update ControlManifest.Input.xml with platform-library declarations for React and Fluent</step>
+    <step order="4">Configure package.json with devDependencies (React 16 types, Fluent UI v9)</step>
+    <step order="5">Create featureconfig.json with pcfReactPlatformLibraries: on</step>
+    <step order="6">Update index.ts to use React 16 render pattern (not createRoot)</step>
+    <step order="7">Create basic React component with FluentProvider wrapper</step>
+    <step order="8">Run npm install and npm run build</step>
+    <step order="9">Test in PCF test harness</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Package management and build</tool>
+    <tool name="pac">Power Platform CLI</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/DocumentRelationshipViewer/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">PCF control builds without errors</criterion>
+    <criterion testable="true">Control renders in test harness</criterion>
+    <criterion testable="true">Platform-library declarations present in manifest</criterion>
+    <criterion testable="true">Uses React 16 render pattern</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Control Renders in Harness">
+      <url>http://localhost:8181/</url>
+      <steps>
+        <step>Open PCF test harness</step>
+        <step>Verify control renders without errors</step>
+        <step>Check console for JavaScript errors</step>
+      </steps>
+      <expected>Control renders placeholder content without console errors</expected>
+    </test>
+  </ui-tests>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

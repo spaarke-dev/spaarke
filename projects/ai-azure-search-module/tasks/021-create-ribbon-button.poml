@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="ai-azure-search-module">
+  <metadata>
+    <title>Create ribbon button command handler</title>
+    <phase>3: Integration and Ribbon</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>022</blocks>
+    <tags>dataverse, ribbon, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Ribbon customization affecting user interface - code implementation</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create the "Find Related" ribbon button on sprk_document form with a JavaScript command handler.
+    The handler should invoke the PCF control's modal - keep JavaScript minimal (invocation only).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse ribbon customization.
+  </role>
+
+  <goal>
+    Ribbon button that opens the document relationship visualization modal.
+  </goal>
+
+  <context>
+    <background>
+      Per ADR-006, ribbon scripts should be minimal (invocation only, no business logic).
+      The script just triggers the PCF control to open its modal.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">Keep ribbon JavaScript minimal - invocation only</constraint>
+    <constraint source="ADR-006">No business logic in ribbon scripts</constraint>
+    <constraint source="project">Button should be visible on sprk_document form</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+      <file>scripts/Export-EntityRibbon.ps1</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Export sprk_document ribbon using Export-EntityRibbon.ps1</step>
+    <step order="2">Create minimal JavaScript webresource for ribbon handler</step>
+    <step order="3">Implement openFindRelated function that invokes PCF modal</step>
+    <step order="4">Add ribbon button definition to RibbonDiffXml</step>
+    <step order="5">Set button icon (16x16 and 32x32 SVG)</step>
+    <step order="6">Import modified ribbon solution</step>
+    <step order="7">Publish customizations</step>
+    <step order="8">Verify button appears on form</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/webresources/sprk_findrelated.js</output>
+    <output type="config">sprk_document ribbon customization</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">"Find Related" button visible on sprk_document ribbon</criterion>
+    <criterion testable="true">Button click triggers JavaScript handler</criterion>
+    <criterion testable="true">JavaScript is minimal (under 20 lines)</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

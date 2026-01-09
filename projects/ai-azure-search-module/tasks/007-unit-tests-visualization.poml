@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="007" project="ai-azure-search-module">
+  <metadata>
+    <title>Unit tests for VisualizationService</title>
+    <phase>1: Core Infrastructure</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>003</dependencies>
+    <blocks>008</blocks>
+    <tags>testing, unit-test, bff-api</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task - STANDARD rigor</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Write comprehensive unit tests for VisualizationService covering graph building,
+    similarity scoring, depth limiting, and error handling with mocked dependencies.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in xUnit testing and mocking with NSubstitute/Moq.
+  </role>
+
+  <goal>
+    Unit tests for VisualizationService with 80%+ coverage of core logic.
+  </goal>
+
+  <context>
+    <background>
+      Tests should mock IRagService, IEmbeddingCache, IDataverseClient to isolate service logic.
+      Focus on graph building correctness, edge creation, and option handling.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use existing test patterns in tests/ directory</constraint>
+    <constraint source="project">Mock all external dependencies</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create VisualizationServiceTests.cs in tests project</step>
+    <step order="2">Test GetRelatedDocumentsAsync returns valid graph</step>
+    <step order="3">Test depth limiting respects max depth option</step>
+    <step order="4">Test node capping respects limit option</step>
+    <step order="5">Test similarity threshold filtering</step>
+    <step order="6">Test document type filtering</step>
+    <step order="7">Test edge creation with shared keywords</step>
+    <step order="8">Test error handling when source document not found</step>
+    <step order="9">Run tests and verify all pass</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Run dotnet test</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Services/Ai/Visualization/VisualizationServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All unit tests pass</criterion>
+    <criterion testable="true">Tests cover graph building, depth limiting, node capping</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

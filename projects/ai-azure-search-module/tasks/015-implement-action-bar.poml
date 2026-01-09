@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="ai-azure-search-module">
+  <metadata>
+    <title>Implement node action bar</title>
+    <phase>2: PCF Control Development</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>012</dependencies>
+    <blocks>016</blocks>
+    <tags>pcf, react, fluent-ui, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>UI component with navigation actions - code implementation</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create the node action bar that appears when a node is selected, with buttons for
+    Open Document Record, View File in SharePoint, and Expand (load next level).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Fluent UI v9 and Dataverse navigation APIs.
+  </role>
+
+  <goal>
+    Action bar component with working navigation actions for selected nodes.
+  </goal>
+
+  <context>
+    <background>
+      When user clicks a node, action bar appears with navigation options.
+      Open Document uses Xrm.Navigation.openForm, View File opens fileUrl in new tab.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent UI v9 Button components</constraint>
+    <constraint source="project">Reuse existing Xrm.Navigation patterns</constraint>
+    <constraint source="project">Open file in new browser tab</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>projects/ai-azure-search-module/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create NodeActionBar.tsx component</step>
+    <step order="2">Add Open Document Record button with document icon</step>
+    <step order="3">Add View File in SharePoint button with file icon</step>
+    <step order="4">Add Expand button with expand icon</step>
+    <step order="5">Implement openDocumentRecord using Xrm.Navigation.openForm</step>
+    <step order="6">Implement viewFile using window.open with fileUrl</step>
+    <step order="7">Implement expand callback to load next level</step>
+    <step order="8">Show parent entity name in header</step>
+    <step order="9">npm run build</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/DocumentRelationshipViewer/components/NodeActionBar.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Action bar appears when node is selected</criterion>
+    <criterion testable="true">Open Document Record button triggers Xrm.Navigation</criterion>
+    <criterion testable="true">View File button opens fileUrl in new tab</criterion>
+    <criterion testable="true">Expand button triggers expansion callback</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

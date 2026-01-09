@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="ai-azure-search-module">
+  <metadata>
+    <title>Update Azure AI Search index schema</title>
+    <phase>1: Core Infrastructure</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>003, 006</blocks>
+    <tags>azure-ai, azure-search, infrastructure</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Infrastructure change affecting Azure AI Search index schema</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Add a documentVector field to the Azure AI Search index schema to store document-level embeddings.
+    This field will enable efficient vector similarity search at the document level (not chunk level).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Azure AI Search, vector search configuration, and index schema management.
+    Follow ADRs strictly.
+  </role>
+
+  <goal>
+    Azure AI Search index has a new documentVector field (1536 dimensions) configured for HNSW vector search,
+    ready to store document-level embeddings.
+  </goal>
+
+  <context>
+    <background>
+      The existing spaarke-knowledge-index has chunk-level embeddings (contentVector) but the visualization
+      feature needs document-level similarity search. Adding a dedicated documentVector field provides optimal
+      query performance compared to aggregating chunk embeddings at query time.
+    </background>
+    <relevant-files>
+      <file>infrastructure/ai-foundry/README.md</file>
+      <file>docs/architecture/auth-AI-azure-resources.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Extend existing R3 infrastructure, do not create separate services</constraint>
+    <constraint source="project">Use same vector profile as contentVector (HNSW, 1536 dimensions, cosine)</constraint>
+    <constraint source="project">Field must be searchable for vector queries</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>docs/architecture/auth-AI-azure-resources.md</file>
+    </files>
+    <patterns>
+      <pattern name="Azure AI Search configuration" location="docs/guides/RAG-CONFIGURATION.md">
+        Reference for existing index configuration and vector search settings
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing Azure AI Search index schema in docs/guides/RAG-CONFIGURATION.md</step>
+    <step order="2">Identify the index name and current vector profile settings</step>
+    <step order="3">Create or update index schema definition to add documentVector field:
+      - Field name: documentVector
+      - Type: Collection(Edm.Single)
+      - Dimensions: 1536
+      - Vector search profile: same as contentVector (knowledge-vector-profile)
+      - Searchable: true for vector search</step>
+    <step order="4">Apply schema update to Azure AI Search index (dev environment)</step>
+    <step order="5">Verify field exists and is queryable via Azure portal or REST API</step>
+    <step order="6">Document schema change in project notes</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI for index operations</tool>
+    <tool name="curl">REST API calls to Azure AI Search</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">Azure AI Search index schema with documentVector field</output>
+    <output type="docs">projects/ai-azure-search-module/notes/001-schema-update.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given the Azure AI Search index, when querying the schema, then documentVector field exists with 1536 dimensions.
+    </criterion>
+    <criterion testable="true">
+      Given a test document, when storing a 1536-dimension vector in documentVector, then the operation succeeds.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Azure AI Search index: spaarke-search-dev (see docs/architecture/auth-AI-azure-resources.md)
+    The index likely already has a contentVector field - use the same configuration pattern.
+    Schema updates on Azure AI Search can be done without reindexing if adding new fields.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

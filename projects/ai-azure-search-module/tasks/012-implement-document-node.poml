@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="ai-azure-search-module">
+  <metadata>
+    <title>Implement DocumentNode component</title>
+    <phase>2: PCF Control Development</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>011</dependencies>
+    <blocks>014, 015</blocks>
+    <tags>pcf, react, fluent-ui, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Fluent UI component implementation - code implementation</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create the DocumentNode component using Fluent UI v9 Card, displaying document name, type,
+    similarity badge, and supporting both source and related node styling with dark mode support.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Fluent UI v9 and React components.
+    Follow ADR-021 strictly for theming.
+  </role>
+
+  <goal>
+    DocumentNode component that renders document info with proper styling for source vs related nodes.
+  </goal>
+
+  <context>
+    <background>
+      Nodes show document name, type, and similarity score. Source node is highlighted.
+      Must use Fluent UI v9 tokens for all colors to support dark mode.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent UI v9 exclusively, use design tokens for colors</constraint>
+    <constraint source="ADR-021">Support light, dark, and high-contrast modes</constraint>
+    <constraint source="project">Node types: source (filled), related (outline)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>projects/ai-azure-search-module/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create DocumentNode.tsx component</step>
+    <step order="2">Use Fluent UI v9 Card component as base</step>
+    <step order="3">Display document name in CardHeader</step>
+    <step order="4">Display document type in Caption</step>
+    <step order="5">Add similarity Badge with color based on score</step>
+    <step order="6">Use makeStyles with Fluent tokens for styling</step>
+    <step order="7">Differentiate source vs related node appearance</step>
+    <step order="8">Test in light and dark modes</step>
+    <step order="9">npm run build</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/DocumentRelationshipViewer/components/DocumentNode.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Component renders document info correctly</criterion>
+    <criterion testable="true">Uses only Fluent UI v9 tokens for colors</criterion>
+    <criterion testable="true">Source node has filled appearance, related has outline</criterion>
+    <criterion testable="true">Dark mode renders correctly</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in test harness</step>
+        <step>Verify background colors adapt (no white in dark mode)</step>
+        <step>Verify text colors adapt (no black in dark mode)</step>
+        <step>Verify Badge colors use semantic tokens</step>
+      </steps>
+      <expected>All colors use Fluent UI v9 semantic tokens per ADR-021</expected>
+    </test>
+  </ui-tests>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

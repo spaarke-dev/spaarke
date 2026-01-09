@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="ai-azure-search-module">
+  <metadata>
+    <title>Implement modal dialog launcher</title>
+    <phase>3: Integration and Ribbon</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>021</dependencies>
+    <blocks>023</blocks>
+    <tags>pcf, dataverse, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Integration between ribbon and PCF - code implementation</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Wire up the ribbon button handler to open the PCF control's full-screen modal,
+    passing the current document ID from the form context.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in PCF and Dataverse form integration.
+  </role>
+
+  <goal>
+    Ribbon button click opens visualization modal with current document context.
+  </goal>
+
+  <context>
+    <background>
+      The ribbon handler needs to communicate with the PCF control to open its modal.
+      Must pass document ID and any required context from the form.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="project">Pass document GUID to PCF control</constraint>
+    <constraint source="project">Modal should load data for current document</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Update PCF control to expose openModal method or property</step>
+    <step order="2">Update ribbon handler to get document ID from primaryControl</step>
+    <step order="3">Call PCF control's openModal with document ID</step>
+    <step order="4">PCF control fetches data and opens modal</step>
+    <step order="5">Test end-to-end flow</step>
+    <step order="6">npm run build and redeploy PCF if needed</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF</tool>
+    <tool name="pac">Deploy</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/DocumentRelationshipViewer/ (updated)</output>
+    <output type="code">src/solutions/webresources/sprk_findrelated.js (updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Ribbon button click opens modal</criterion>
+    <criterion testable="true">Modal loads data for current document</criterion>
+    <criterion testable="true">Graph displays related documents</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="End-to-End Modal Launch">
+      <url>https://{org}.crm.dynamics.com/main.aspx?pagetype=entityrecord&amp;etn=sprk_document</url>
+      <steps>
+        <step>Navigate to sprk_document record</step>
+        <step>Click "Find Related" ribbon button</step>
+        <step>Verify modal opens with graph</step>
+        <step>Verify graph shows related documents</step>
+      </steps>
+      <expected>Modal opens with document relationship graph</expected>
+    </test>
+  </ui-tests>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

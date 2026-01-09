@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="018" project="ai-azure-search-module">
+  <metadata>
+    <title>Integration tests with Azure AI Search</title>
+    <phase>2: PCF Control Development</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>005, 016</dependencies>
+    <blocks>019</blocks>
+    <tags>testing, integration-test, azure-ai, bff-api</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Integration testing task - STANDARD rigor</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Write integration tests that hit the actual visualization API endpoint against Azure AI Search
+    dev environment. Verify vector search works and returns valid graph responses.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in integration testing with Azure services.
+  </role>
+
+  <goal>
+    Integration tests verifying end-to-end flow from API to Azure AI Search.
+  </goal>
+
+  <context>
+    <background>
+      Per owner clarification, integration tests should run against Azure AI Search dev environment.
+      Tests verify the full pipeline: API → Service → Azure AI Search → Response.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use dev environment credentials</constraint>
+    <constraint source="project">Tests should be idempotent and not modify data</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+      <file>docs/architecture/auth-AI-azure-resources.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create integration test project or use existing</step>
+    <step order="2">Configure test settings for dev environment</step>
+    <step order="3">Write test for GET /api/ai/visualization/related/{documentId}</step>
+    <step order="4">Verify response structure matches DocumentGraphResponse</step>
+    <step order="5">Test with different threshold, limit, depth parameters</step>
+    <step order="6">Test error cases (invalid documentId)</step>
+    <step order="7">Run integration tests</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/Sprk.Bff.Api.IntegrationTests/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Integration tests pass against dev environment</criterion>
+    <criterion testable="true">API returns valid graph response</criterion>
+    <criterion testable="true">Vector search results reflect actual similarity</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

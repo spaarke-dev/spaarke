@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="ai-azure-search-module">
+  <metadata>
+    <title>Implement control panel with filters</title>
+    <phase>2: PCF Control Development</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>012, 013</dependencies>
+    <blocks>016</blocks>
+    <tags>pcf, react, fluent-ui, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>UI component with user controls - code implementation</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create the control panel with similarity threshold slider, depth limit slider, max nodes slider,
+    and document type filter checkboxes. Changes should trigger graph updates in real-time.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Fluent UI v9 form controls.
+  </role>
+
+  <goal>
+    Control panel component with all filter options that update graph when changed.
+  </goal>
+
+  <context>
+    <background>
+      Users need to adjust visualization parameters: similarity threshold (50-95%, default 65%),
+      depth (1-3, default 1), max nodes per level (10-50, default 25), and document type filters.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent UI v9 Slider and Checkbox components</constraint>
+    <constraint source="project">Changes trigger real-time graph updates</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>projects/ai-azure-search-module/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create ControlPanel.tsx component</step>
+    <step order="2">Add Slider for similarity threshold (50-95%, step 5, default 65)</step>
+    <step order="3">Add Slider for depth limit (1-3, default 1)</step>
+    <step order="4">Add Slider for max nodes per level (10-50, default 25)</step>
+    <step order="5">Add Checkbox group for document type filters</step>
+    <step order="6">Implement onChange callbacks for each control</step>
+    <step order="7">Use Fluent UI v9 tokens for styling</step>
+    <step order="8">Test filter changes update parent state</step>
+    <step order="9">npm run build</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/DocumentRelationshipViewer/components/ControlPanel.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All sliders render with correct ranges and defaults</criterion>
+    <criterion testable="true">Filter changes trigger callback to parent</criterion>
+    <criterion testable="true">Dark mode renders correctly</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="ai-azure-search-module">
+  <metadata>
+    <title>Create IVisualizationService interface</title>
+    <phase>1: Core Infrastructure</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>003</blocks>
+    <tags>bff-api, api, interfaces</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creating new API service interface - code implementation</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create the IVisualizationService interface that defines the contract for document relationship visualization.
+    Include methods for getting related documents and the graph data model types.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in C# interface design and ASP.NET Core Minimal APIs.
+    Follow ADRs strictly.
+  </role>
+
+  <goal>
+    IVisualizationService interface defined with GetRelatedDocumentsAsync method and supporting DTOs
+    (DocumentGraphResponse, DocumentNode, DocumentEdge, GraphMetadata, VisualizationOptions).
+  </goal>
+
+  <context>
+    <background>
+      The visualization service will query Azure AI Search for semantically similar documents and return
+      graph data (nodes + edges) suitable for rendering in a React Flow canvas.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/</file>
+      <file>projects/ai-azure-search-module/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API patterns</constraint>
+    <constraint source="ADR-010">Follow DI minimalism - concrete types unless seam required</constraint>
+    <constraint source="ADR-013">Extend BFF API, no separate microservice</constraint>
+    <constraint source="project">Response structure per spec.md Section 4.5 (Graph Data Model)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>projects/ai-azure-search-module/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review spec.md Section 4.5 for exact graph data model structure</step>
+    <step order="2">Create DTOs: DocumentGraphResponse, DocumentNode, DocumentEdge, GraphMetadata</step>
+    <step order="3">Create VisualizationOptions record with threshold, limit, depth, filters</step>
+    <step order="4">Create IVisualizationService interface with GetRelatedDocumentsAsync method</step>
+    <step order="5">Place files in src/server/api/Sprk.Bff.Api/Services/Ai/Visualization/</step>
+    <step order="6">Verify code compiles without errors</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET project</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Visualization/IVisualizationService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Visualization/VisualizationModels.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">IVisualizationService interface exists with GetRelatedDocumentsAsync method</criterion>
+    <criterion testable="true">All DTOs match spec.md Section 4.5 structure</criterion>
+    <criterion testable="true">Solution builds without errors</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

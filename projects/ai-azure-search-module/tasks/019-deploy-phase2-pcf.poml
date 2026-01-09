@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="019" project="ai-azure-search-module">
+  <metadata>
+    <title>Deploy Phase 2 PCF to Dataverse</title>
+    <phase>2: PCF Control Development</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>017, 018</dependencies>
+    <blocks>020</blocks>
+    <tags>deploy, dataverse, pcf</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task - STANDARD rigor</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Deploy the DocumentRelationshipViewer PCF control to Dataverse dev environment using pac pcf push.
+    Verify control is available for form configuration.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in PCF deployment and Dataverse solutions.
+  </role>
+
+  <goal>
+    PCF control deployed and available in Dataverse dev environment.
+  </goal>
+
+  <context>
+    <background>
+      Before ribbon integration, the PCF control must be deployed to Dataverse
+      so it can be registered on the sprk_document form.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-022">Deploy as unmanaged solution</constraint>
+    <constraint source="project">Follow PCF-V9-PACKAGING.md version bumping</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/guides/PCF-V9-PACKAGING.md</file>
+      <file>scripts/Deploy-PCFWebResources.ps1</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Update version in 4 locations per PCF-V9-PACKAGING.md</step>
+    <step order="2">Build PCF control in Release mode</step>
+    <step order="3">Run pac pcf push to deploy to dev environment</step>
+    <step order="4">Verify control appears in Dataverse solution</step>
+    <step order="5">Test control is available for form configuration</step>
+    <step order="6">Document deployment in notes</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF</tool>
+    <tool name="pac">Power Platform CLI for deployment</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-azure-search-module/notes/019-deployment-log.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">PCF control deployed to Dataverse</criterion>
+    <criterion testable="true">Control available in solution explorer</criterion>
+    <criterion testable="true">Control can be added to forms</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

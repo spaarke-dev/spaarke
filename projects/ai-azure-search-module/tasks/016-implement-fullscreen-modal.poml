@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="ai-azure-search-module">
+  <metadata>
+    <title>Implement full-screen modal wrapper</title>
+    <phase>2: PCF Control Development</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>014, 015</dependencies>
+    <blocks>017, 018</blocks>
+    <tags>pcf, react, fluent-ui, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modal wrapper with complex layout - code implementation</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create the full-screen modal that contains the graph canvas, control panel, and action bar.
+    Handle modal open/close, keyboard navigation, and proper z-index layering.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Fluent UI v9 Dialog and modal patterns.
+  </role>
+
+  <goal>
+    Full-screen modal with header (title + close), control panel (left), canvas (center), action bar (bottom).
+  </goal>
+
+  <context>
+    <background>
+      The modal provides maximum canvas area for complex graphs. Design per spec Section 4.2.
+      Must handle z-index properly in Dataverse form context.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent UI v9 Dialog component as base</constraint>
+    <constraint source="project">Full-screen modal with close button</constraint>
+    <constraint source="project">Handle Escape key to close</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/dialog-patterns.md</file>
+      <file>projects/ai-azure-search-module/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create RelationshipViewerModal.tsx component</step>
+    <step order="2">Use Fluent UI v9 Dialog with full-screen styling</step>
+    <step order="3">Add header with title and close button</step>
+    <step order="4">Layout: control panel (left sidebar), canvas (main area)</step>
+    <step order="5">Add action bar at bottom when node selected</step>
+    <step order="6">Handle Escape key to close modal</step>
+    <step order="7">Manage z-index for Dataverse compatibility</step>
+    <step order="8">Wire up all child components</step>
+    <step order="9">npm run build</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/DocumentRelationshipViewer/components/RelationshipViewerModal.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Modal opens in full-screen</criterion>
+    <criterion testable="true">Close button and Escape key close modal</criterion>
+    <criterion testable="true">Layout matches spec (control panel left, canvas center)</criterion>
+    <criterion testable="true">Dark mode renders correctly</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Modal Opens and Closes">
+      <steps>
+        <step>Trigger modal open</step>
+        <step>Verify full-screen modal appears</step>
+        <step>Press Escape key</step>
+        <step>Verify modal closes</step>
+      </steps>
+      <expected>Modal opens/closes without errors</expected>
+    </test>
+  </ui-tests>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
