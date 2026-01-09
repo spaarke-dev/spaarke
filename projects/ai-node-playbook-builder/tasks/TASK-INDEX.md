@@ -21,10 +21,10 @@
 
 | Task | Title | Status | Depends | Tags |
 |------|-------|--------|---------|------|
-| 001 | Design Dataverse Schema | :white_large_square: | none | dataverse, schema |
-| 002 | Implement Dataverse Schema | :white_large_square: | 001 | dataverse, schema |
-| 003 | Create NodeService | :white_large_square: | 002 | bff-api, service |
-| 004 | Extend ScopeResolverService | :white_large_square: | 003 | bff-api, service |
+| 001 | Design Dataverse Schema | :white_check_mark: | none | dataverse, schema |
+| 002 | Implement Dataverse Schema | :white_check_mark: | 001 | dataverse, schema |
+| 003 | Create NodeService | :white_check_mark: | 002 | bff-api, service |
+| 004 | Extend ScopeResolverService | :white_check_mark: | 003 | bff-api, service |
 | 005 | Create ExecutionGraph | :white_large_square: | 003 | bff-api, orchestration |
 | 006 | Create AiAnalysisNodeExecutor | :white_large_square: | 004, 005 | bff-api, executor |
 | 007 | Create PlaybookOrchestrationService | :white_large_square: | 006 | bff-api, orchestration |

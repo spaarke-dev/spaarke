@@ -160,6 +160,23 @@ public class ScopeResolverService : IScopeResolverService
     }
 
     /// <inheritdoc />
+    public Task<ResolvedScopes> ResolveNodeScopesAsync(
+        Guid nodeId,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogDebug("Resolving scopes from node {NodeId}", nodeId);
+
+        // Phase 1: Node scope resolution not yet implemented
+        // In Task 032, this will:
+        // 1. Query sprk_playbooknode_skill N:N relationship for skills
+        // 2. Query sprk_playbooknode_knowledge N:N relationship for knowledge
+        // 3. Query sprk_toolid lookup for the single tool
+        _logger.LogWarning("Node scope resolution not yet implemented, returning empty scopes");
+
+        return Task.FromResult(new ResolvedScopes([], [], []));
+    }
+
+    /// <inheritdoc />
     public async Task<AnalysisAction?> GetActionAsync(
         Guid actionId,
         CancellationToken cancellationToken)

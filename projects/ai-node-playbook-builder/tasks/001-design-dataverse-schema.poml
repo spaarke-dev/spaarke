@@ -3,7 +3,7 @@
   <metadata>
     <title>Design Dataverse Schema</title>
     <phase>1: Foundation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <tags>dataverse, schema</tags>
     <dependencies>none</dependencies>
@@ -82,5 +82,12 @@
   <notes>
     Reference design.md Section 4 (Dataverse Schema) for complete field definitions.
     Pay attention to the ActionType choice values in Section 3.5.
+
+    COMPLETION NOTES (2026-01-09):
+    - Created notes/schema-design.md with 450+ lines
+    - Documented 8 entities (3 extended, 5 new)
+    - All 10 choice option sets defined with exact values from design
+    - N:N relationships documented for skills and knowledge on nodes
+    - Included index recommendations and backward compatibility notes
   </notes>
 </task>

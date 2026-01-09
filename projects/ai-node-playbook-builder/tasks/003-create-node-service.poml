@@ -3,7 +3,7 @@
   <metadata>
     <title>Create NodeService</title>
     <phase>1: Foundation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <tags>bff-api, service</tags>
     <dependencies>002</dependencies>
@@ -90,4 +90,27 @@
     Follow PlaybookService as the canonical service pattern.
     This service will be consumed by NodeEndpoints in task 008.
   </notes>
+
+  <completion>
+    <date>2026-01-09</date>
+    <summary>
+      Created NodeService with full CRUD operations for playbook nodes.
+      - INodeService interface with 8 methods
+      - NodeService implementation using HttpClient + TokenCredential
+      - PlaybookNodeDto.cs with DTOs (PlaybookNodeDto, CreateNodeRequest, UpdateNodeRequest, NodeScopesRequest, NodeValidationResult)
+      - N:N relationship management for skills and knowledge
+      - DI registered in Program.cs using AddHttpClient pattern
+      - 32 unit tests in NodeServiceTests.cs
+      All acceptance criteria met: CRUD compiles, tests pass, DI registered.
+    </summary>
+    <files-created>
+      - src/server/api/Sprk.Bff.Api/Services/Ai/INodeService.cs
+      - src/server/api/Sprk.Bff.Api/Services/Ai/NodeService.cs
+      - src/server/api/Sprk.Bff.Api/Models/Ai/PlaybookNodeDto.cs
+      - tests/unit/Sprk.Bff.Api.Tests/Services/Ai/NodeServiceTests.cs
+    </files-created>
+    <files-modified>
+      - src/server/api/Sprk.Bff.Api/Program.cs (DI registration)
+    </files-modified>
+  </completion>
 </task>

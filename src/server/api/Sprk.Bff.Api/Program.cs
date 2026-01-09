@@ -348,6 +348,9 @@ if (analysisEnabled && documentIntelligenceEnabled)
     // Playbook Service - CRUD operations for analysis playbooks (R3 Phase 3)
     builder.Services.AddHttpClient<Sprk.Bff.Api.Services.Ai.IPlaybookService, Sprk.Bff.Api.Services.Ai.PlaybookService>();
 
+    // Node Service - CRUD operations for playbook nodes (ai-node-playbook-builder project)
+    builder.Services.AddHttpClient<Sprk.Bff.Api.Services.Ai.INodeService, Sprk.Bff.Api.Services.Ai.NodeService>();
+
     // Playbook Sharing Service - team/organization sharing for playbooks (R3 Phase 3 Task 023)
     builder.Services.AddHttpClient<Sprk.Bff.Api.Services.Ai.IPlaybookSharingService, Sprk.Bff.Api.Services.Ai.PlaybookSharingService>();
 
