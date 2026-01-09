@@ -4,7 +4,7 @@
     <id>029</id>
     <title>Phase 3 Deploy - Association & Attachments</title>
     <phase>3</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimate>2h</estimate>
     <tags>deploy, bff-api, validation, testing</tags>
     <dependencies>020, 021, 022, 023, 024</dependencies>
