@@ -1,7 +1,7 @@
 # Task Index - Email-to-Document Automation
 
 > **Project**: Email-to-Document Automation
-> **Last Updated**: 2025-12-29
+> **Last Updated**: 2025-01-09
 > **Total Tasks**: 25
 
 ---
@@ -43,7 +43,7 @@
 | 014 | Seed default exclusion rules | ✅ | 2h | 002, 013 |
 | 015 | Add Application Insights custom events | ✅ | 2h | 012 |
 | 016 | Register Dataverse webhook (Service Endpoint + Step) | ✅ | 2h | 010 |
-| **019** | **Phase 2 Deploy** | 🔲 | 2h | 010-016 |
+| **019** | **Phase 2 Deploy** | ✅ | 2h | 010-016 |
 
 ---
 

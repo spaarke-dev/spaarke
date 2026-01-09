@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>019</id>
+    <title>Phase 2 Deploy - Hybrid Trigger & Filtering</title>
+    <phase>2</phase>
+    <status>completed</status>
+    <estimate>2h</estimate>
+    <tags>deploy, bff-api, validation, testing</tags>
+    <dependencies>010, 011, 012, 013, 014, 015, 016</dependencies>
+  </metadata>
+
+  <description>
+    Deploy Phase 2 implementation to the dev environment. This includes:
+    - Webhook endpoint for Dataverse triggers
+    - Polling backup service for reliability
+    - Email-to-document job handler
+    - Email filter service with rules engine
+    - Default exclusion rules seeding
+    - Application Insights telemetry
+    - Dataverse webhook registration verification
+  </description>
+
+  <knowledge>
+    <files>
+      <file>projects/email-to-document-automation/SPEC.md</file>
+      <file>projects/email-to-document-automation/CLAUDE.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API + BackgroundService pattern</constraint>
+    <constraint source="ADR-004">Standard JobContract schema for background jobs</constraint>
+    <constraint source="ADR-007">SpeFileStore facade for all SPE operations</constraint>
+    <constraint source="ADR-009">Redis caching for filter rules</constraint>
+  </constraints>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/EmailEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/EmailPollingBackupService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/EmailToDocumentJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Email/EmailFilterService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Email/EmailRuleSeedService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Telemetry/EmailTelemetry.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/EmailProcessingOptions.cs</file>
+    </relevant-files>
+  </context>
+
+  <steps>
+    <step id="1">Verify all Phase 2 code builds successfully (dotnet build)</step>
+    <step id="2">Run unit tests to ensure no regressions (dotnet test)</step>
+    <step id="3">Verify DI registrations are in place for new services</step>
+    <step id="4">Verify Email configuration section in appsettings</step>
+    <step id="5">Verify endpoint routes are registered in Program.cs</step>
+    <step id="6">Create PR for Phase 2 if not already merged</step>
+    <step id="7">Document deployment notes for Dataverse webhook configuration</step>
+    <step id="8">Update TASK-INDEX.md to mark task 019 complete</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Solution builds without errors</criterion>
+    <criterion>All unit tests pass</criterion>
+    <criterion>Email endpoints accessible at /api/v1/emails/*</criterion>
+    <criterion>Webhook endpoint accessible at /api/v1/emails/webhook-trigger</criterion>
+    <criterion>EmailPollingBackupService registered as hosted service</criterion>
+    <criterion>EmailToDocumentJobHandler registered with job processor</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Phase 2 code review completed - code is production-ready.
+    ADR compliance verified during code review.
+
+    Completed 2025-01-09:
+    - Build verified (0 errors, 0 warnings)
+    - 86/86 email-specific tests pass
+    - DI registrations confirmed in Program.cs
+    - Email configuration section added to appsettings.template.json
+    - Endpoint routes verified (webhook, manual save, admin endpoints)
+    - PR #95 was already merged to master
+    - Deployment notes added to README.md
+    - TASK-INDEX.md updated
+  </notes>
+</task>
