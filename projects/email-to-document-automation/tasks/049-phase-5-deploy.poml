@@ -4,7 +4,7 @@
     <id>049</id>
     <title>Phase 5 Deploy - Batch Processing & Production</title>
     <phase>5</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimate>2h</estimate>
     <tags>deploy, bff-api, azure, validation</tags>
     <dependencies>040, 041, 042, 043, 044</dependencies>

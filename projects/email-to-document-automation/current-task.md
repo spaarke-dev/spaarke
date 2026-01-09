@@ -9,11 +9,11 @@
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | 030 |
-| **Task File** | tasks/030-extend-text-extractor-for-eml.poml |
-| **Title** | Extend TextExtractorService for .eml |
-| **Phase** | 4 |
-| **Status** | not-started |
+| **Task ID** | none |
+| **Task File** | - |
+| **Title** | Project Complete |
+| **Phase** | - |
+| **Status** | none |
 | **Started** | - |
 
 ---
@@ -21,81 +21,62 @@
 ## Progress
 
 ### Current Step
-Ready to begin Task 030 - Extend TextExtractorService for .eml
+Project complete - all 33 tasks finished.
 
 ### Next Action
-Begin Phase 4: UI Integration & AI Processing
+Project complete. Run `/repo-cleanup` if desired.
 
 ### Completed Steps
-(cleared for next task)
+All 5 phases complete:
+- Phase 1: Core Conversion Infrastructure (Tasks 001-009)
+- Phase 2: Hybrid Trigger & Filtering (Tasks 010-019)
+- Phase 3: Association & Attachments (Tasks 020-029)
+- Phase 4: UI Integration & AI Processing (Tasks 030-039)
+- Phase 5: Batch Processing & Production (Tasks 040-049)
+- Wrap-up: Project wrap-up (Task 090)
 
 ### Files Modified
-(cleared for next task)
+See lessons-learned.md for full summary.
 
 ### Decisions Made
-(cleared for next task)
+See lessons-learned.md for full summary.
 
 ---
 
-## Previous Task Completion
+## Project Completion Summary
 
-### Task 029 - Phase 3 Deploy (COMPLETED)
-- Build succeeded (0 errors, 0 warnings)
-- All 209 email-related unit tests passing
-- DI registrations verified for EmailAssociationService and EmailAttachmentProcessor
-- Committed and pushed to PR #104
-- Phase 3: Association & Attachments complete
+### Task 090 - Project wrap-up and documentation (COMPLETED)
+- README.md: Status marked complete, all phases checked
+- PLAN.md: Status marked complete with completion summary
+- lessons-learned.md: Created with project retrospective
+- WEBHOOK-REGISTRATION.md: Moved from notes/ to docs/
+- TASK-INDEX.md: All 33 active tasks marked complete
 
-### Task 024 - Unit tests for association methods (COMPLETED)
-- Added 32 new tests to EmailAssociationServiceTests.cs
-- Tests cover: confidence scoring, signal ordering, recommendation selection
-- Tests cover: DTOs structure, enum values, edge cases
-- Total: 67 association service tests + 56 attachment tests = 144 email service tests
-- All tests passing
-
-### Task 023 - Create GET /api/emails/association-preview endpoint (COMPLETED)
-- Added GET /api/v1/emails/{emailId}/association-preview route
-- Uses IEmailAssociationService.GetAssociationSignalsAsync
-- Returns AssociationSignalsResponse with all signals, confidence scores, recommended association
-- Build succeeded (0 errors, 0 warnings)
-
-### Task 022 - Implement IEmailAttachmentProcessor (COMPLETED)
-- Created interface and implementation with filtering logic
-- 56 unit tests passing for filtering
-
-### Task 021 - Add tracking token matching (COMPLETED)
-- Enhanced tracking token extraction with 5 regex patterns
-- 35 unit tests for pattern matching
-
-### Task 020 - Implement IEmailAssociationService (COMPLETED)
-- Full service with 6 association methods and confidence scoring
+### Final Statistics
+- **Total Tasks**: 34 (33 completed, 1 N/A)
+- **Task 033**: Cancelled - architecture changed (AI now triggered from PCF)
+- **Unit Tests**: 1132+ passing
+- **Documentation**: RUNBOOK.md, ADMIN-GUIDE.md, DEPLOYMENT-CHECKLIST.md, lessons-learned.md
 
 ---
 
 ## Context Loaded
 
 ### Knowledge Files Loaded
-- SPEC.md
-- IDataverseService.cs
-- .claude/constraints/api.md
-- .claude/constraints/testing.md
+(None - project complete)
 
 ### Applicable ADRs
-- ADR-001: Minimal API patterns
-- ADR-008: Endpoint authorization filters
+(None - project complete)
 
 ### Constraints Loaded
-- Use IDataverseService for Dataverse operations
-- Confidence scores 0.0-1.0
+(None - project complete)
 
 ---
 
 ## Session Notes
 
 ### Key Learnings
-- Tests should focus on unit testing logic patterns, not integration with external services
-- MockHttpMessageHandler pattern useful for controlled HTTP testing
-- Service methods requiring auth tokens need different testing strategies
+See lessons-learned.md for comprehensive retrospective.
 
 ### Handoff Notes
-Tasks 020-024 complete. Phase 3 implementation complete. Only Task 029 (deploy) remains.
+Project complete. All deliverables in place. Ready for production deployment per DEPLOYMENT-CHECKLIST.md.

@@ -4,7 +4,7 @@
     <id>040</id>
     <title>Implement POST /api/emails/batch-process endpoint</title>
     <phase>5</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimate>3h</estimate>
     <tags>bff-api, api, endpoints</tags>
     <dependencies>012</dependencies>

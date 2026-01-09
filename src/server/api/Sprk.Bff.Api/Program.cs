@@ -473,6 +473,9 @@ builder.Services.AddSingleton<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>()
 // Register job handlers
 builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.DocumentProcessingJobHandler>();
 builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.EmailToDocumentJobHandler>();
+builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.BatchProcessEmailsJobHandler>();
+// Also register EmailToDocumentJobHandler as concrete type for BatchProcessEmailsJobHandler dependency
+builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.Handlers.EmailToDocumentJobHandler>();
 // DocumentAnalysisJobHandler removed - background AI analysis is now triggered from PCF (requires user context)
 
 // Configure Service Bus job processing
