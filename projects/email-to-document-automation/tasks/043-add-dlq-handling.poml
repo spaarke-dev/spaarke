@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>043</id>
+    <title>Add DLQ handling and re-drive tooling</title>
+    <phase>5</phase>
+    <status>completed</status>
+    <estimate>3h</estimate>
+    <tags>bff-api, worker, azure</tags>
+    <dependencies>042</dependencies>
+  </metadata>
+
+  <description>
+    Implement Dead Letter Queue (DLQ) handling for failed email processing jobs.
+    Add admin tooling to view DLQ messages, analyze failures, and re-drive
+    messages back to the main queue after fixes.
+  </description>
+
+  <knowledge>
+    <files>
+      <file>projects/email-to-document-automation/SPEC.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/adr/ADR-004-async-job-contract.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="project">DLQ depth alerts must be configured</constraint>
+    <constraint source="project">Re-drive requires admin authorization</constraint>
+  </constraints>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/EmailEndpoints.cs</file>
+    </relevant-files>
+  </context>
+
+  <steps>
+    <step id="1">Add DLQ monitoring endpoint GET /api/v1/emails/admin/dlq</step>
+    <step id="2">Implement DLQ message listing with pagination</step>
+    <step id="3">Add endpoint to view individual DLQ message details</step>
+    <step id="4">Implement re-drive endpoint POST /api/v1/emails/admin/dlq/{messageId}/redrive</step>
+    <step id="5">Add bulk re-drive endpoint for multiple messages</step>
+    <step id="6">Configure Azure alerts for DLQ depth thresholds</step>
+    <step id="7">Add telemetry for DLQ events</step>
+    <step id="8">Document DLQ handling procedures</step>
+    <step id="9">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>DLQ messages visible via admin endpoint</criterion>
+    <criterion>Individual messages can be inspected</criterion>
+    <criterion>Messages can be re-driven to main queue</criterion>
+    <criterion>Bulk re-drive supported</criterion>
+    <criterion>Azure alerts configured for DLQ depth</criterion>
+    <criterion>DLQ handling documented in runbook</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    DLQ contains messages that failed max retry attempts.
+    Re-drive should only be done after root cause is fixed.
+
+    Completion Notes (2026-01-09):
+    - Created DlqModels.cs with DlqSummary, DlqMessage, DlqJobInfo, DlqListResponse, RedriveRequest, RedriveResponse
+    - Created DeadLetterQueueService for Service Bus DLQ operations
+    - Added DLQ telemetry methods (RecordDlqListOperation, RecordDlqRedriveOperation)
+    - Registered DeadLetterQueueService in WorkersModule.cs
+    - Added GET /api/v1/emails/admin/dlq endpoint (list messages with pagination)
+    - Added GET /api/v1/emails/admin/dlq/{sequenceNumber} endpoint (get specific message)
+    - Added POST /api/v1/emails/admin/dlq/redrive endpoint (re-drive messages)
+    - Re-drive resets attempt count and preserves original job metadata
+    - Azure alerts for DLQ depth to be configured in Azure Portal (not code)
+  </notes>
+</task>

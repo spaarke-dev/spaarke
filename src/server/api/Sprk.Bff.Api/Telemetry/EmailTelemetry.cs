@@ -1,11 +1,14 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using Sprk.Bff.Api.Services.Email;
 
 namespace Sprk.Bff.Api.Telemetry;
 
 /// <summary>
 /// Metrics and tracing for email-to-document processing (OpenTelemetry-compatible).
 /// Tracks: conversion requests, webhook triggers, filter evaluations, job processing.
+///
+/// Also delegates to EmailProcessingStatsService for in-memory stats readable via API.
 ///
 /// Usage:
 /// - Meter name: "Sprk.Bff.Api.Email" for OpenTelemetry configuration
@@ -20,6 +23,7 @@ namespace Sprk.Bff.Api.Telemetry;
 public class EmailTelemetry : IDisposable
 {
     private readonly Meter _meter;
+    private readonly EmailProcessingStatsService? _statsService;
 
     // Conversion metrics
     private readonly Counter<long> _conversionRequests;
@@ -54,14 +58,21 @@ public class EmailTelemetry : IDisposable
     private readonly Histogram<long> _emlFileSize;
     private readonly Counter<long> _attachmentsProcessed;
 
+    // DLQ metrics
+    private readonly Counter<long> _dlqListOperations;
+    private readonly Counter<long> _dlqRedriveAttempts;
+    private readonly Counter<long> _dlqRedriveSuccesses;
+    private readonly Counter<long> _dlqRedriveFailures;
+
     // Meter name for OpenTelemetry
     private const string MeterName = "Sprk.Bff.Api.Email";
 
     // Static ActivitySource for distributed tracing
     public static readonly ActivitySource ActivitySource = new(MeterName, "1.0.0");
 
-    public EmailTelemetry()
+    public EmailTelemetry(EmailProcessingStatsService? statsService = null)
     {
+        _statsService = statsService;
         _meter = new Meter(MeterName, "1.0.0");
 
         // ═══════════════════════════════════════════════════════════════════════════
@@ -186,6 +197,29 @@ public class EmailTelemetry : IDisposable
             name: "email.attachments.processed",
             unit: "{attachment}",
             description: "Total attachments processed");
+
+        // ═══════════════════════════════════════════════════════════════════════════
+        // DLQ Metrics
+        // ═══════════════════════════════════════════════════════════════════════════
+        _dlqListOperations = _meter.CreateCounter<long>(
+            name: "email.dlq.list_operations",
+            unit: "{operation}",
+            description: "Total DLQ list/peek operations");
+
+        _dlqRedriveAttempts = _meter.CreateCounter<long>(
+            name: "email.dlq.redrive_attempts",
+            unit: "{attempt}",
+            description: "Total DLQ re-drive attempts");
+
+        _dlqRedriveSuccesses = _meter.CreateCounter<long>(
+            name: "email.dlq.redrive_successes",
+            unit: "{message}",
+            description: "Messages successfully re-driven from DLQ");
+
+        _dlqRedriveFailures = _meter.CreateCounter<long>(
+            name: "email.dlq.redrive_failures",
+            unit: "{message}",
+            description: "Failed DLQ re-drive operations");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -198,6 +232,7 @@ public class EmailTelemetry : IDisposable
     public Stopwatch RecordConversionStart(string trigger = "manual")
     {
         _conversionRequests.Add(1, new KeyValuePair<string, object?>("email.trigger", trigger));
+        _statsService?.RecordConversionRequest();
         return Stopwatch.StartNew();
     }
 
@@ -221,15 +256,18 @@ public class EmailTelemetry : IDisposable
 
         _conversionSuccesses.Add(1, tags);
         _conversionDuration.Record(durationMs, tags);
+        _statsService?.RecordConversionSuccess(durationMs);
 
         if (emlSizeBytes.HasValue)
         {
             _emlFileSize.Record(emlSizeBytes.Value, tags);
+            _statsService?.RecordEmlFileSize(emlSizeBytes.Value);
         }
 
         if (attachmentCount > 0)
         {
             _attachmentsProcessed.Add(attachmentCount, tags);
+            _statsService?.RecordAttachmentsProcessed(attachmentCount);
         }
     }
 
@@ -250,6 +288,7 @@ public class EmailTelemetry : IDisposable
 
         _conversionFailures.Add(1, tags);
         _conversionDuration.Record(durationMs, tags);
+        _statsService?.RecordConversionFailure(durationMs);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -262,6 +301,7 @@ public class EmailTelemetry : IDisposable
     public Stopwatch RecordWebhookReceived()
     {
         _webhookReceived.Add(1);
+        _statsService?.RecordWebhookReceived();
         return Stopwatch.StartNew();
     }
 
@@ -271,9 +311,11 @@ public class EmailTelemetry : IDisposable
     public void RecordWebhookEnqueued(Stopwatch stopwatch, Guid emailId)
     {
         stopwatch.Stop();
+        var durationMs = stopwatch.Elapsed.TotalMilliseconds;
         _webhookEnqueued.Add(1);
-        _webhookDuration.Record(stopwatch.Elapsed.TotalMilliseconds,
+        _webhookDuration.Record(durationMs,
             new KeyValuePair<string, object?>("email.status", "enqueued"));
+        _statsService?.RecordWebhookEnqueued(durationMs);
     }
 
     /// <summary>
@@ -282,10 +324,12 @@ public class EmailTelemetry : IDisposable
     public void RecordWebhookRejected(Stopwatch stopwatch, string reason)
     {
         stopwatch.Stop();
+        var durationMs = stopwatch.Elapsed.TotalMilliseconds;
         _webhookRejected.Add(1, new KeyValuePair<string, object?>("email.rejection_reason", reason));
-        _webhookDuration.Record(stopwatch.Elapsed.TotalMilliseconds,
+        _webhookDuration.Record(durationMs,
             new KeyValuePair<string, object?>("email.status", "rejected"),
             new KeyValuePair<string, object?>("email.rejection_reason", reason));
+        _statsService?.RecordWebhookRejected(durationMs);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -300,6 +344,7 @@ public class EmailTelemetry : IDisposable
         _pollingRuns.Add(1);
         _pollingEmailsFound.Add(emailsFound);
         _pollingEmailsEnqueued.Add(emailsEnqueued);
+        _statsService?.RecordPollingRun(emailsFound, emailsEnqueued);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -332,6 +377,8 @@ public class EmailTelemetry : IDisposable
             _filterDefaultAction.Add(1,
                 new KeyValuePair<string, object?>("email.filter.action", actionStr));
         }
+
+        _statsService?.RecordFilterEvaluation(ruleMatched);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -344,6 +391,7 @@ public class EmailTelemetry : IDisposable
     public Stopwatch RecordJobStart()
     {
         _jobsProcessed.Add(1);
+        _statsService?.RecordJobProcessed();
         return Stopwatch.StartNew();
     }
 
@@ -353,18 +401,22 @@ public class EmailTelemetry : IDisposable
     public void RecordJobSuccess(Stopwatch stopwatch, long? emlSizeBytes = null, int attachmentCount = 0)
     {
         stopwatch.Stop();
+        var durationMs = stopwatch.Elapsed.TotalMilliseconds;
         _jobsSucceeded.Add(1);
-        _jobDuration.Record(stopwatch.Elapsed.TotalMilliseconds,
+        _jobDuration.Record(durationMs,
             new KeyValuePair<string, object?>("email.status", "success"));
+        _statsService?.RecordJobSuccess(durationMs);
 
         if (emlSizeBytes.HasValue)
         {
             _emlFileSize.Record(emlSizeBytes.Value);
+            _statsService?.RecordEmlFileSize(emlSizeBytes.Value);
         }
 
         if (attachmentCount > 0)
         {
             _attachmentsProcessed.Add(attachmentCount);
+            _statsService?.RecordAttachmentsProcessed(attachmentCount);
         }
     }
 
@@ -374,10 +426,12 @@ public class EmailTelemetry : IDisposable
     public void RecordJobFailure(Stopwatch stopwatch, string errorCode)
     {
         stopwatch.Stop();
+        var durationMs = stopwatch.Elapsed.TotalMilliseconds;
         _jobsFailed.Add(1, new KeyValuePair<string, object?>("email.error_code", errorCode));
-        _jobDuration.Record(stopwatch.Elapsed.TotalMilliseconds,
+        _jobDuration.Record(durationMs,
             new KeyValuePair<string, object?>("email.status", "failed"),
             new KeyValuePair<string, object?>("email.error_code", errorCode));
+        _statsService?.RecordJobFailure(durationMs);
     }
 
     /// <summary>
@@ -386,6 +440,82 @@ public class EmailTelemetry : IDisposable
     public void RecordJobSkippedDuplicate()
     {
         _jobsSkippedDuplicate.Add(1);
+        _statsService?.RecordJobSkippedDuplicate();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Batch Processing Methods
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Record batch job submission.
+    /// </summary>
+    public void RecordBatchJobSubmitted(DateTime startDate, DateTime endDate, int maxEmails)
+    {
+        // Using job processed counter with batch tag
+        _jobsProcessed.Add(1,
+            new KeyValuePair<string, object?>("email.job_type", "batch"),
+            new KeyValuePair<string, object?>("email.batch.max_emails", maxEmails));
+    }
+
+    /// <summary>
+    /// Record batch job completion with detailed metrics.
+    /// </summary>
+    public void RecordBatchJobCompleted(int processedCount, int errorCount, int skippedCount, TimeSpan duration)
+    {
+        var tags = new TagList
+        {
+            { "email.job_type", "batch" },
+            { "email.status", errorCount == 0 ? "success" : (processedCount == 0 ? "failed" : "partial") }
+        };
+
+        _jobDuration.Record(duration.TotalMilliseconds, tags);
+
+        if (processedCount > 0)
+        {
+            _jobsSucceeded.Add(processedCount, new KeyValuePair<string, object?>("email.job_type", "batch"));
+        }
+
+        if (errorCount > 0)
+        {
+            _jobsFailed.Add(errorCount, new KeyValuePair<string, object?>("email.job_type", "batch"));
+        }
+
+        if (skippedCount > 0)
+        {
+            _jobsSkippedDuplicate.Add(skippedCount, new KeyValuePair<string, object?>("email.job_type", "batch"));
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // DLQ Methods
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Record a DLQ list/peek operation.
+    /// </summary>
+    public void RecordDlqListOperation(int messagesReturned)
+    {
+        _dlqListOperations.Add(1,
+            new KeyValuePair<string, object?>("email.dlq.messages_returned", messagesReturned));
+    }
+
+    /// <summary>
+    /// Record a DLQ re-drive operation.
+    /// </summary>
+    public void RecordDlqRedriveOperation(int successCount, int failureCount)
+    {
+        _dlqRedriveAttempts.Add(1);
+
+        if (successCount > 0)
+        {
+            _dlqRedriveSuccesses.Add(successCount);
+        }
+
+        if (failureCount > 0)
+        {
+            _dlqRedriveFailures.Add(failureCount);
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>024</id>
+    <title>Unit tests for association methods</title>
+    <phase>3</phase>
+    <status>not-started</status>
+    <estimate>3h</estimate>
+    <tags>testing, unit-test, bff-api</tags>
+    <dependencies>020, 021</dependencies>
+  </metadata>
+
+  <description>
+    Create comprehensive unit tests for all 6 email association methods in
+    IEmailAssociationService. Test confidence scoring, signal prioritization,
+    and edge cases for each method.
+  </description>
+
+  <knowledge>
+    <files>
+      <file>projects/email-to-document-automation/SPEC.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="project">80% code coverage target</constraint>
+    <constraint source="project">Test all 6 association methods</constraint>
+  </constraints>
+
+  <context>
+    <relevant-files>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Email/EmailAssociationServiceTests.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Email/EmailAssociationService.cs</file>
+    </relevant-files>
+  </context>
+
+  <steps>
+    <step id="1">Create EmailAssociationServiceTests class</step>
+    <step id="2">Test tracking token matching (highest priority)</step>
+    <step id="3">Test conversation threading association</step>
+    <step id="4">Test sender/recipient domain matching</step>
+    <step id="5">Test regarding object lookup</step>
+    <step id="6">Test subject line keyword matching</step>
+    <step id="7">Test contact/account email address matching</step>
+    <step id="8">Test confidence score calculation</step>
+    <step id="9">Test signal prioritization logic</step>
+    <step id="10">Run tests and verify coverage</step>
+    <step id="11">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>All 6 association methods have dedicated test coverage</criterion>
+    <criterion>Confidence scoring tested with boundary values</criterion>
+    <criterion>Edge cases tested (no matches, multiple matches, tie-breaking)</criterion>
+    <criterion>Mocks properly isolate Dataverse dependencies</criterion>
+    <criterion>Code coverage meets 80% target for association service</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Association methods per SPEC.md:
+    1. Tracking token matching (0.95)
+    2. Conversation threading (0.85)
+    3. Sender/recipient domain (0.70)
+    4. Regarding object (0.90)
+    5. Subject keyword matching (0.60)
+    6. Contact/account email (0.75)
+  </notes>
+</task>

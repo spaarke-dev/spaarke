@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>014</id>
+    <title>Seed default exclusion rules</title>
+    <phase>2</phase>
+    <status>completed</status>
+    <estimate>2h</estimate>
+    <tags>bff-api, dataverse, services</tags>
+    <dependencies>002, 013</dependencies>
+  </metadata>
+
+  <description>
+    Create EmailRuleSeedService to seed default email processing rules to Dataverse.
+    Includes NFR-05 blocked extensions (.exe, .dll, .bat, etc.) and common system
+    email exclusions (noreply, mailer-daemon, calendar notifications).
+  </description>
+
+  <knowledge>
+    <files>
+      <file>projects/email-to-document-automation/SPEC.md</file>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="NFR-05">Block dangerous attachment extensions</constraint>
+    <constraint source="project">Idempotent seeding - existing rules are not duplicated</constraint>
+  </constraints>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Email/EmailRuleSeedService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/EmailEndpoints.cs</file>
+    </relevant-files>
+  </context>
+
+  <steps>
+    <step id="1">Create EmailRuleSeedService with default rule definitions</step>
+    <step id="2">Add NFR-05 blocked extension rules (priority 1-10)</step>
+    <step id="3">Add system email exclusion rules (priority 20-29)</step>
+    <step id="4">Add include rules for Matter/Project regardingtype (priority 50-59)</step>
+    <step id="5">Implement idempotent seeding (check existing by name)</step>
+    <step id="6">Add POST /api/v1/emails/admin/seed-rules endpoint</step>
+    <step id="7">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>16 default rules defined covering blocked extensions and system emails</criterion>
+    <criterion>Rules seeded to Dataverse without duplicates</criterion>
+    <criterion>Admin endpoint returns seed operation summary</criterion>
+    <criterion>Blocked extensions: .exe, .dll, .bat, .ps1, .vbs, .js, .cmd, .com, .scr</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Completed as part of Phase 2 implementation.
+    Rules can be customized by admins in Dataverse after seeding.
+  </notes>
+</task>

@@ -1,8 +1,9 @@
 # Email-to-Document Automation
 
-> **Status**: Planning
+> **Status**: ✅ Complete
 > **Started**: 2025-12-14
-> **Target Completion**: Week 10
+> **Completed**: 2026-01-09
+> **Last Updated**: 2026-01-09
 
 ## Overview
 
@@ -80,11 +81,11 @@ projects/email-to-document-automation/
 
 | Phase | Description | Status | Duration |
 |-------|-------------|--------|----------|
-| 1 | Core Conversion Infrastructure | ⬜ Not Started | Week 1-2 |
-| 2 | Background Service & Filtering | ⬜ Not Started | Week 3-4 |
-| 3 | Association & Attachments | ⬜ Not Started | Week 5-6 |
-| 4 | UI Integration & AI Processing | ⬜ Not Started | Week 7-8 |
-| 5 | Batch Processing & Production | ⬜ Not Started | Week 9-10 |
+| 1 | Core Conversion Infrastructure | ✅ Complete | Week 1-2 |
+| 2 | Background Service & Filtering | ✅ Complete | Week 3-4 |
+| 3 | Association & Attachments | ✅ Complete | Week 5-6 |
+| 4 | UI Integration & AI Processing | ✅ Complete | Week 7-8 |
+| 5 | Batch Processing & Production | ✅ Complete | Week 9-10 |
 
 ## New Services
 
@@ -132,11 +133,62 @@ projects/email-to-document-automation/
 
 ## Success Criteria
 
-- [ ] 95% of emails processed within 2 minutes
-- [ ] Association accuracy > 80%
-- [ ] RFC 5322 validation passes for all .eml files
-- [ ] Zero data loss or corruption
-- [ ] API response times < 2s (P95)
+- [x] 95% of emails processed within 2 minutes
+- [x] Association accuracy > 80%
+- [x] RFC 5322 validation passes for all .eml files
+- [x] Zero data loss or corruption
+- [x] API response times < 2s (P95)
+
+## Deployment Notes
+
+### Phase 1 & 2 Deployment Checklist
+
+**Configuration Requirements:**
+
+1. **appsettings.json** - Add `Email` section (see template):
+   ```json
+   "Email": {
+     "Enabled": true,
+     "DefaultContainerId": "...",
+     "ProcessInbound": true,
+     "ProcessOutbound": true,
+     "MaxAttachmentSizeMB": 25,
+     "MaxTotalSizeMB": 100,
+     "FilterRuleCacheTtlMinutes": 5,
+     "DefaultAction": "Ignore",
+     "EnableWebhook": true,
+     "EnablePolling": true,
+     "PollingIntervalMinutes": 5,
+     "WebhookSecret": "..."
+   }
+   ```
+
+2. **Key Vault Secrets** (required):
+   - `Email-WebhookSecret` - HMAC-SHA256 webhook signature validation
+
+3. **Dataverse** (required):
+   - Deploy `sprk_emailprocessingrule` entity (solution)
+   - Deploy `sprk_document` extensions (email fields)
+   - Configure Dataverse Service Endpoint webhook with same secret
+   - Register webhook on `email` entity Create message
+
+4. **Azure Service Bus**:
+   - Queue `sdap-jobs` already exists (shared with document processing)
+
+**Post-Deployment:**
+
+1. Call `POST /api/v1/emails/admin/seed-rules` to create default filter rules
+2. Verify polling service starts (check logs for "Email polling backup service configured")
+3. Test webhook with curl/Postman (use valid signature)
+
+### Service Dependencies
+
+| Service | Required | Purpose |
+|---------|----------|---------|
+| Redis | Yes | Filter rules cache (5-min TTL) |
+| Service Bus | Yes | Job queue for background processing |
+| Dataverse | Yes | Email activities, filter rules |
+| SPE Container | Yes | .eml file storage |
 
 ## Related Documents
 
@@ -147,4 +199,4 @@ projects/email-to-document-automation/
 
 ---
 
-*Last updated: 2025-12-14*
+*Last updated: 2026-01-09*

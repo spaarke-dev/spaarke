@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="EmailProcessingMonitor" xml:space="preserve">
+    <value>Email Processing Monitor</value>
+    <comment>Display name for the control</comment>
+  </data>
+  <data name="EmailProcessingMonitor_desc" xml:space="preserve">
+    <value>Admin monitoring control for email-to-document processing statistics</value>
+    <comment>Description of the control</comment>
+  </data>
+  <data name="BFF API URL" xml:space="preserve">
+    <value>BFF API URL</value>
+    <comment>BFF API base URL property display name</comment>
+  </data>
+  <data name="BFF API URL_desc" xml:space="preserve">
+    <value>URL of the BFF API</value>
+    <comment>BFF API base URL property description</comment>
+  </data>
+  <data name="Tenant ID" xml:space="preserve">
+    <value>Tenant ID</value>
+    <comment>Azure AD Tenant ID property display name</comment>
+  </data>
+  <data name="Tenant ID_desc" xml:space="preserve">
+    <value>Azure AD Tenant ID</value>
+    <comment>Azure AD Tenant ID property description</comment>
+  </data>
+  <data name="Client App ID" xml:space="preserve">
+    <value>Client App ID</value>
+    <comment>Client App ID property display name</comment>
+  </data>
+  <data name="Client App ID_desc" xml:space="preserve">
+    <value>Client Azure AD Application ID (PCF control app registration)</value>
+    <comment>Client App ID property description</comment>
+  </data>
+  <data name="BFF App ID" xml:space="preserve">
+    <value>BFF App ID</value>
+    <comment>BFF App ID property display name</comment>
+  </data>
+  <data name="BFF App ID_desc" xml:space="preserve">
+    <value>BFF API Azure AD Application ID (for scope)</value>
+    <comment>BFF App ID property description</comment>
+  </data>
+  <data name="Control Height" xml:space="preserve">
+    <value>Control Height</value>
+    <comment>Control height property display name</comment>
+  </data>
+  <data name="Control Height_desc" xml:space="preserve">
+    <value>Height of the control in pixels</value>
+    <comment>Control height property description</comment>
+  </data>
+  <data name="Refresh Interval" xml:space="preserve">
+    <value>Refresh Interval</value>
+    <comment>Auto-refresh interval property display name</comment>
+  </data>
+  <data name="Refresh Interval_desc" xml:space="preserve">
+    <value>Auto-refresh interval in seconds (0 to disable)</value>
+    <comment>Auto-refresh interval property description</comment>
+  </data>
+</root>

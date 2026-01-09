@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>013</id>
+    <title>Create IEmailFilterService with rules engine</title>
+    <phase>2</phase>
+    <status>completed</status>
+    <estimate>4h</estimate>
+    <tags>bff-api, services, cache, redis</tags>
+    <dependencies>002</dependencies>
+  </metadata>
+
+  <description>
+    Implement IEmailFilterService that evaluates email processing rules from Dataverse.
+    Rules are cached in Redis with configurable TTL (default 5 minutes per NFR-06).
+    Supports Include, Exclude, and Route rule types with priority ordering.
+  </description>
+
+  <knowledge>
+    <files>
+      <file>projects/email-to-document-automation/SPEC.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/adr/ADR-009-redis-first-caching.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-009">Redis-first caching for filter rules</constraint>
+    <constraint source="NFR-06">5-minute cache TTL for filter rules</constraint>
+    <constraint source="project">Regex timeout (1 sec) for ReDoS protection</constraint>
+  </constraints>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Email/IEmailFilterService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Email/EmailFilterService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Email/EmailFilterModels.cs</file>
+    </relevant-files>
+  </context>
+
+  <steps>
+    <step id="1">Create IEmailFilterService interface with EvaluateAsync and RefreshRulesAsync</step>
+    <step id="2">Implement EmailFilterService with Dataverse rule loading</step>
+    <step id="3">Add Redis caching with configurable TTL</step>
+    <step id="4">Implement regex matching with timeout protection</step>
+    <step id="5">Create EmailFilterContext and EmailFilterResult models</step>
+    <step id="6">Add unit tests for rule evaluation</step>
+    <step id="7">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Filter rules loaded from Dataverse sprk_emailprocessingrule entity</criterion>
+    <criterion>Rules cached in Redis with 5-minute TTL</criterion>
+    <criterion>Rules evaluated in priority order (lowest first)</criterion>
+    <criterion>Regex patterns have 1-second timeout</criterion>
+    <criterion>Default action applied when no rules match</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Completed as part of Phase 2 implementation.
+    Service supports target fields: subject, from, to, cc, body, attachmentname, regardingtype.
+  </notes>
+</task>

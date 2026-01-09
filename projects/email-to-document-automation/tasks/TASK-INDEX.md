@@ -1,8 +1,9 @@
 # Task Index - Email-to-Document Automation
 
 > **Project**: Email-to-Document Automation
-> **Last Updated**: 2025-12-29
-> **Total Tasks**: 25
+> **Status**: ✅ Complete
+> **Last Updated**: 2026-01-09
+> **Total Tasks**: 34 (33 completed, 1 N/A)
 
 ---
 
@@ -43,7 +44,7 @@
 | 014 | Seed default exclusion rules | ✅ | 2h | 002, 013 |
 | 015 | Add Application Insights custom events | ✅ | 2h | 012 |
 | 016 | Register Dataverse webhook (Service Endpoint + Step) | ✅ | 2h | 010 |
-| **019** | **Phase 2 Deploy** | 🔲 | 2h | 010-016 |
+| **019** | **Phase 2 Deploy** | ✅ | 2h | 010-016 |
 
 ---
 
@@ -51,12 +52,12 @@
 
 | ID | Task | Status | Est. | Dependencies |
 |----|------|--------|------|--------------|
-| 020 | Implement IEmailAssociationService | 🔲 | 6h | 012 |
-| 021 | Add tracking token matching | 🔲 | 2h | 020 |
-| 022 | Implement IEmailAttachmentProcessor | 🔲 | 4h | 012 |
-| 023 | Create GET /api/emails/association-preview endpoint | 🔲 | 3h | 020 |
-| 024 | Unit tests for association methods | 🔲 | 3h | 020, 021 |
-| **029** | **Phase 3 Deploy** | 🔲 | 2h | 020-024 |
+| 020 | Implement IEmailAssociationService | ✅ | 6h | 012 |
+| 021 | Add tracking token matching | ✅ | 2h | 020 |
+| 022 | Implement IEmailAttachmentProcessor | ✅ | 4h | 012 |
+| 023 | Create GET /api/emails/association-preview endpoint | ✅ | 3h | 020 |
+| 024 | Unit tests for association methods | ✅ | 3h | 020, 021 |
+| **029** | **Phase 3 Deploy** | ✅ | 2h | 020-024 |
 
 ---
 
@@ -64,12 +65,18 @@
 
 | ID | Task | Status | Est. | Dependencies |
 |----|------|--------|------|--------------|
-| 030 | Extend TextExtractorService for .eml | 🔲 | 2h | 004 |
-| 031 | Create Email form ribbon button | 🔲 | 4h | 005 |
-| 032 | Implement sprk_emailactions.js web resource | 🔲 | 3h | 031 |
-| 033 | Integrate AI processing enqueue | 🔲 | 2h | 012, 030 |
-| 034 | Create admin monitoring PCF control | 🔲 | 6h | 015 |
-| **039** | **Phase 4 Deploy** | 🔲 | 2h | 030-034 |
+| 030 | Extend TextExtractorService for .eml | ✅ | 2h | 004 |
+| 031 | Create Email form ribbon button | ✅ | 4h | 005 |
+| 032 | Implement sprk_emailactions.js web resource | ✅ | 3h | 031 |
+| 033 | Integrate AI processing enqueue | 🚫 | 2h | 012, 030 |
+| 034 | Create admin monitoring PCF control | ✅ | 6h | 015 |
+| **039** | **Phase 4 Deploy** | ✅ | 2h | 031-034 |
+
+> **Note - Task 030**: TextExtractorService already has full .eml/.msg support via AI R3 (lines 99-228). No changes needed.
+
+> **Note - Task 033**: Architecture changed - AI analysis now triggered from PCF (requires OBO auth), not background jobs. See EmailToDocumentJobHandler.cs:238-241.
+
+> **Note - Task 039**: All Phase 4 deployments complete. EmailProcessingMonitor PCF required adding NuGet package for .NET Framework 4.6.2 reference assemblies, inline SVG icons to reduce bundle size (from 9.9 MiB to 2.06 MiB), and React 16 API compatibility.
 
 ---
 
@@ -77,12 +84,18 @@
 
 | ID | Task | Status | Est. | Dependencies |
 |----|------|--------|------|--------------|
-| 040 | Implement POST /api/emails/batch-process endpoint | 🔲 | 3h | 012 |
-| 041 | Create GET /api/emails/batch-process/{jobId}/status | 🔲 | 2h | 040 |
-| 042 | Implement BatchProcessEmailsJob handler | 🔲 | 3h | 040 |
-| 043 | Add DLQ handling and re-drive tooling | 🔲 | 3h | 042 |
-| 044 | Performance tuning and load testing | 🔲 | 4h | All |
-| **049** | **Phase 5 Deploy** | 🔲 | 2h | 040-044 |
+| 040 | Implement POST /api/emails/batch-process endpoint | ✅ | 3h | 012 |
+| 041 | Create GET /api/emails/batch-process/{jobId}/status | ✅ | 2h | 040 |
+| 042 | Implement BatchProcessEmailsJob handler | ✅ | 3h | 040 |
+| 043 | Add DLQ handling and re-drive tooling | ✅ | 3h | 042 |
+| 044 | Performance tuning and load testing | ✅ | 4h | All |
+| **049** | **Phase 5 Deploy** | ✅ | 2h | 040-044 |
+
+> **Note - Task 049**: Phase 5 deployment complete. Created production documentation:
+> - RUNBOOK.md: Operational procedures for monitoring, troubleshooting, and administration
+> - ADMIN-GUIDE.md: Administrator training materials
+> - DEPLOYMENT-CHECKLIST.md: Pre/post deployment verification checklist
+> - tests/load/: k6 load testing scripts for batch and webhook processing
 
 ---
 
@@ -90,7 +103,13 @@
 
 | ID | Task | Status | Est. | Dependencies |
 |----|------|--------|------|--------------|
-| 090 | Project wrap-up and documentation | 🔲 | 3h | All phases |
+| 090 | Project wrap-up and documentation | ✅ | 3h | All phases |
+
+> **Note - Task 090**: Project wrap-up complete. All documentation updated:
+> - README.md: Status marked complete, all phases checked
+> - PLAN.md: Status marked complete with completion summary
+> - lessons-learned.md: Created with project retrospective
+> - WEBHOOK-REGISTRATION.md: Moved from notes/ to docs/ for preservation
 
 ---
 

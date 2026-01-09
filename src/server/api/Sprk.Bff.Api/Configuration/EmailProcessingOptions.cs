@@ -124,6 +124,19 @@ public class EmailProcessingOptions
     public string? WebhookSecret { get; set; }
 
     /// <summary>
+    /// Maximum concurrent emails to process in a batch job.
+    /// Controls bounded concurrency to prevent throttling.
+    /// Default: 5
+    /// </summary>
+    public int BatchMaxConcurrency { get; set; } = 5;
+
+    /// <summary>
+    /// Batch size for batch processing - how many emails to fetch per query.
+    /// Default: 50
+    /// </summary>
+    public int BatchProcessingBatchSize { get; set; } = 50;
+
+    /// <summary>
     /// Computed max attachment size in bytes.
     /// </summary>
     public long MaxAttachmentSizeBytes => MaxAttachmentSizeMB * 1024L * 1024L;
