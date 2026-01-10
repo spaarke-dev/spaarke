@@ -371,7 +371,7 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
 
       {/* Footer with version */}
       <div className={styles.footer}>
-        <Text size={100}>v1.1.0</Text>
+        <Text size={100}>v1.2.0</Text>
       </div>
     </div>
   );
