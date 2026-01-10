@@ -158,10 +158,9 @@ export class PlaybookBuilderHost
     try {
       this.context = context;
 
-      logInfo('UpdateView - Re-rendering', {
-        playbookId: context.parameters.playbookId?.raw,
-        hasCanvasJson: !!context.parameters.canvasJson?.raw,
-      });
+      // Debug: Log context.mode structure to understand what's available
+      logInfo('UpdateView - context.mode keys', Object.keys(context.mode));
+      logInfo('UpdateView - context.mode', context.mode);
 
       this.renderReactTree(context);
     } catch (error) {
@@ -208,10 +207,33 @@ export class PlaybookBuilderHost
     }
 
     try {
-      // Get the record ID from form context (not from bound property)
-      // contextInfo.entityId is the GUID of the current record
+      // Try multiple methods to get the record ID
+      // Method 1: contextInfo.entityId (standard for model-driven apps)
       const contextInfo = (context.mode as unknown as { contextInfo?: { entityId?: string; entityTypeName?: string } }).contextInfo;
-      const playbookId = contextInfo?.entityId || context.parameters.playbookId?.raw || '';
+
+      // Method 2: Extract from URL (fallback for model-driven apps)
+      let urlRecordId = '';
+      try {
+        const url = window.location.href;
+        // Model-driven app URL pattern: ...&id={guid}&...
+        const idMatch = url.match(/[?&]id=([^&]+)/i);
+        if (idMatch) {
+          urlRecordId = decodeURIComponent(idMatch[1]);
+        }
+      } catch { /* URL parsing error */ }
+
+      // Method 3: Input parameter (manual binding - fallback)
+      const paramId = context.parameters.playbookId?.raw || '';
+
+      // Use first available ID
+      const playbookId = contextInfo?.entityId || urlRecordId || paramId;
+
+      logInfo('Record ID resolution', {
+        contextInfoEntityId: contextInfo?.entityId,
+        urlRecordId,
+        paramId,
+        resolved: playbookId
+      });
 
       // Get other input parameters
       const playbookName = context.parameters.playbookName?.raw || '';
