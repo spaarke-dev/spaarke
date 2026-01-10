@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="ai-azure-search-module">
+  <metadata>
+    <title>Implement export functionality</title>
+    <phase>4: Polish and Documentation</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>024</dependencies>
+    <blocks>031</blocks>
+    <tags>pcf, frontend, export</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation affecting user-facing feature</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Add export capability to the visualization control.
+    Users should be able to export the relationship graph as PNG or SVG for reports and presentations.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in React Flow and image export.
+  </role>
+
+  <goal>
+    Users can export visualization as image file for external use.
+  </goal>
+
+  <context>
+    <background>
+      Export functionality allows users to capture the current graph state for documentation,
+      presentations, or sharing with stakeholders who don't have Dataverse access.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent UI v9 for export button styling</constraint>
+    <constraint source="ADR-022">React 16 APIs only</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>docs/ai-knowledge/guides/PCF-V9-PACKAGING.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add html-to-image or similar library for graph export</step>
+    <step order="2">Create ExportButton component with dropdown (PNG/SVG options)</step>
+    <step order="3">Implement exportToPng function using React Flow's getNodes/getEdges</step>
+    <step order="4">Implement exportToSvg function</step>
+    <step order="5">Add export button to control panel</step>
+    <step order="6">Test export with various graph sizes</step>
+    <step order="7">npm run build to verify bundle</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Package management and build</tool>
+    <tool name="vscode">Code editing</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/DocumentRelationshipViewer/components/ExportButton.tsx</output>
+    <output type="code">src/client/pcf/DocumentRelationshipViewer/utils/exportGraph.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Export to PNG generates valid image file</criterion>
+    <criterion testable="true">Export to SVG generates valid vector file</criterion>
+    <criterion testable="true">Exported image includes all visible nodes and edges</criterion>
+    <criterion testable="true">Export button follows Fluent UI v9 design</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

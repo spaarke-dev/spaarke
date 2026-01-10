@@ -1,14 +1,14 @@
 # SDAP Troubleshooting Guide
 
 > **Source**: SDAP-ARCHITECTURE-GUIDE.md (Critical Issues & Resolutions section)
-> **Last Updated**: December 3, 2025
+> **Last Updated**: January 9, 2026
 > **Applies To**: Debugging SDAP issues, error resolution
 
 ---
 
 ## TL;DR
 
-Five documented issues: (1) AADSTS500011 - missing app user, (2) Wrong OAuth scope format, (3) Double `/api` path, (4) Wrong relationship name, (5) ManagedIdentity failure. Most issues are auth/config related.
+Six documented issues: (1) AADSTS500011 - missing app user, (2) Wrong OAuth scope format, (3) Double `/api` path, (4) Wrong relationship name, (5) ManagedIdentity failure, (6) Kiota assembly binding error. Most issues are auth/config related.
 
 ---
 
@@ -229,10 +229,56 @@ pac admin list-service-principals --environment https://spaarkedev1.crm.dynamics
 |---------|--------------|-------------|
 | 401 on all BFF calls | Token expired or wrong scope | Browser console for MSAL errors |
 | 500 with AADSTS500011 | Missing Application User | Power Platform Admin Center |
+| 500 with Kiota.Abstractions | Kiota package version mismatch | Check csproj for all Kiota refs |
 | 404 on NavMap | Wrong relationship name or double `/api` | EntityDocumentConfig.ts |
 | 400 on record create | Navigation property case mismatch | NavMap response in browser |
 | Upload works, record fails | Lookup binding wrong | Payload in browser Network tab |
 | Preview iframe blank | Preview URL wrong or CORS | Check iframe src in Elements tab |
+
+---
+
+## Issue 6: Kiota Assembly Binding Error
+
+### Symptom
+```
+FileNotFoundException: Could not load file or assembly 'Microsoft.Kiota.Abstractions, Version=1.17.1.0'
+```
+API returns 500 on `/healthz` after deployment.
+
+### Root Cause
+Microsoft.Graph SDK pulls transitive Kiota package dependencies at older versions than direct references. When direct refs are updated (e.g., 1.21.1), the transitive deps stay at older versions (e.g., 1.17.1), causing assembly binding conflicts.
+
+**Typical mismatch:**
+| Package | Direct Ref | Transitive (from Graph) |
+|---------|------------|-------------------------|
+| Microsoft.Kiota.Abstractions | 1.21.1 | — |
+| Microsoft.Kiota.Http.HttpClientLibrary | — | 1.17.1 ❌ |
+| Microsoft.Kiota.Serialization.* | — | 1.17.1 ❌ |
+
+### Resolution
+
+**Add explicit package references** to `Sprk.Bff.Api.csproj` for ALL Kiota packages:
+
+```xml
+<!-- Kiota packages - all must be same version -->
+<PackageReference Include="Microsoft.Kiota.Abstractions" Version="1.21.1" />
+<PackageReference Include="Microsoft.Kiota.Authentication.Azure" Version="1.21.1" />
+<PackageReference Include="Microsoft.Kiota.Http.HttpClientLibrary" Version="1.21.1" />
+<PackageReference Include="Microsoft.Kiota.Serialization.Form" Version="1.21.1" />
+<PackageReference Include="Microsoft.Kiota.Serialization.Json" Version="1.21.1" />
+<PackageReference Include="Microsoft.Kiota.Serialization.Multipart" Version="1.21.1" />
+<PackageReference Include="Microsoft.Kiota.Serialization.Text" Version="1.21.1" />
+```
+
+**Then rebuild and redeploy:**
+```bash
+dotnet build src/server/api/Sprk.Bff.Api -c Release
+dotnet publish src/server/api/Sprk.Bff.Api -c Release -o ./publish
+# Deploy to Azure...
+```
+
+### Prevention
+When updating ANY Kiota package, update ALL Kiota packages to the same version.
 
 ---
 

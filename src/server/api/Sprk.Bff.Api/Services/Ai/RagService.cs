@@ -271,6 +271,15 @@ public class RagService : IRagService
             document.ContentVector = embedding;
         }
 
+        // For single-chunk documents, documentVector equals contentVector.
+        // For multi-chunk documents indexed individually, use IndexDocumentsBatchAsync to compute documentVector
+        // by averaging all chunk contentVectors, or run DocumentVectorBackfillService afterward.
+        if (document.DocumentVector.Length == 0 && document.ContentVector.Length > 0 && document.ChunkCount == 1)
+        {
+            document.DocumentVector = document.ContentVector;
+            _logger.LogDebug("Set documentVector = contentVector for single-chunk document {DocumentId}", document.DocumentId);
+        }
+
         // Ensure timestamps are set
         var now = DateTimeOffset.UtcNow;
         if (document.CreatedAt == default)
@@ -335,6 +344,36 @@ public class RagService : IRagService
             for (int i = 0; i < documentsNeedingEmbeddings.Count; i++)
             {
                 documentsNeedingEmbeddings[i].ContentVector = embeddings[i];
+            }
+        }
+
+        // Compute documentVector for each unique document by averaging chunk contentVectors.
+        // This enables document similarity visualization for the AI Azure Search Module.
+        var documentGroups = documentList
+            .GroupBy(d => d.DocumentId)
+            .Where(g => !string.IsNullOrEmpty(g.Key));
+
+        foreach (var group in documentGroups)
+        {
+            var chunkVectors = group
+                .Select(d => d.ContentVector)
+                .Where(v => v.Length > 0)
+                .ToList();
+
+            if (chunkVectors.Count > 0)
+            {
+                var documentVector = ComputeDocumentVector(chunkVectors);
+                if (documentVector.Length > 0)
+                {
+                    foreach (var doc in group)
+                    {
+                        doc.DocumentVector = documentVector;
+                    }
+
+                    _logger.LogDebug(
+                        "Computed documentVector for {DocumentId} from {ChunkCount} chunks",
+                        group.Key, chunkVectors.Count);
+                }
             }
         }
 
@@ -615,6 +654,68 @@ public class RagService : IRagService
     {
         // Escape single quotes for OData filter expressions
         return value.Replace("'", "''");
+    }
+
+    /// <summary>
+    /// Compute document-level embedding by averaging chunk contentVectors with L2 normalization.
+    /// This enables document similarity visualization per the AI Azure Search Module design.
+    /// </summary>
+    /// <param name="chunkVectors">Content vectors from all chunks of a document.</param>
+    /// <returns>Normalized averaged document vector, or empty if no valid vectors.</returns>
+    private static ReadOnlyMemory<float> ComputeDocumentVector(IReadOnlyList<ReadOnlyMemory<float>> chunkVectors)
+    {
+        if (chunkVectors.Count == 0)
+        {
+            return ReadOnlyMemory<float>.Empty;
+        }
+
+        // Filter valid vectors (non-empty with correct dimensions)
+        var validVectors = chunkVectors.Where(v => v.Length == VectorDimensions).ToList();
+        if (validVectors.Count == 0)
+        {
+            return ReadOnlyMemory<float>.Empty;
+        }
+
+        // Single vector - return as-is (already normalized by OpenAI)
+        if (validVectors.Count == 1)
+        {
+            return validVectors[0];
+        }
+
+        // Compute average of all chunk vectors
+        var result = new float[VectorDimensions];
+        foreach (var vector in validVectors)
+        {
+            var span = vector.Span;
+            for (int i = 0; i < VectorDimensions; i++)
+            {
+                result[i] += span[i];
+            }
+        }
+
+        var count = validVectors.Count;
+        for (int i = 0; i < VectorDimensions; i++)
+        {
+            result[i] /= count;
+        }
+
+        // L2 normalization for cosine similarity
+        var magnitude = 0f;
+        for (int i = 0; i < VectorDimensions; i++)
+        {
+            magnitude += result[i] * result[i];
+        }
+        magnitude = MathF.Sqrt(magnitude);
+
+        if (magnitude > 0)
+        {
+            for (int i = 0; i < VectorDimensions; i++)
+            {
+                result[i] /= magnitude;
+            }
+        }
+
+        return result;
     }
 
     #endregion

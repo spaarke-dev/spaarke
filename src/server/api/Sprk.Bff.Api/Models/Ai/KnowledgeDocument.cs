@@ -107,6 +107,14 @@ public class KnowledgeDocument
     public ReadOnlyMemory<float> ContentVector { get; set; }
 
     /// <summary>
+    /// Document-level vector embedding computed as the normalized average of all chunk contentVectors.
+    /// Used for document similarity visualization. Computed automatically during batch indexing.
+    /// </summary>
+    [VectorSearchField(VectorSearchDimensions = 1536, VectorSearchProfileName = "knowledge-vector-profile")]
+    [JsonPropertyName("documentVector")]
+    public ReadOnlyMemory<float> DocumentVector { get; set; }
+
+    /// <summary>
     /// JSON metadata for extensibility.
     /// </summary>
     [SimpleField]

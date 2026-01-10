@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="ai-azure-search-module">
+  <metadata>
+    <title>Create VisualizationAuthorizationFilter</title>
+    <phase>1: Core Infrastructure</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>005</blocks>
+    <tags>bff-api, api, auth, authorization</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Security-sensitive authorization filter - code implementation</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create an endpoint filter that verifies the user has access to the source document before
+    returning related documents. This prevents unauthorized access to document relationships.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core endpoint filters and authorization.
+    Follow ADRs strictly. Security-conscious.
+  </role>
+
+  <goal>
+    VisualizationAuthorizationFilter that checks document access via Dataverse security before proceeding.
+  </goal>
+
+  <context>
+    <background>
+      Per ADR-008, resource-based authorization must use endpoint filters, not global middleware.
+      The filter extracts documentId from route, verifies user access via existing auth service.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008">Use endpoint filters for resource authorization, not global middleware</constraint>
+    <constraint source="ADR-003">Verify Dataverse permissions for document access</constraint>
+    <constraint source="project">Return 403 Forbidden if user cannot access source document</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing endpoint filter patterns in codebase</step>
+    <step order="2">Create VisualizationAuthorizationFilter implementing IEndpointFilter</step>
+    <step order="3">Extract documentId from route arguments</step>
+    <step order="4">Call authorization service to verify document access</step>
+    <step order="5">Return Results.Forbid() if unauthorized</step>
+    <step order="6">Call next(context) if authorized</step>
+    <step order="7">Verify code compiles</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET project</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/Filters/VisualizationAuthorizationFilter.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Filter implements IEndpointFilter</criterion>
+    <criterion testable="true">Filter extracts documentId from route</criterion>
+    <criterion testable="true">Filter returns 403 when user lacks document access</criterion>
+    <criterion testable="true">Solution builds without errors</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

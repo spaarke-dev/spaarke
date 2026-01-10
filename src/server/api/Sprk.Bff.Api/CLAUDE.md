@@ -1,6 +1,6 @@
 # CLAUDE.md - Sprk.Bff.Api Module
 
-> **Last Updated**: December 4, 2025
+> **Last Updated**: January 9, 2026
 >
 > **Purpose**: Module-specific instructions for the Spaarke BFF (Backend-for-Frontend) API.
 
@@ -196,6 +196,47 @@ catch (Exception ex)
 | Return `ProblemDetails` for errors | Return raw exception messages |
 | Log with structured properties | Use string interpolation in logs |
 | Keep endpoints thin (delegate to services) | Put business logic in endpoints |
+
+---
+
+## Package Management
+
+### Microsoft.Graph and Kiota Packages
+
+The BFF API uses Microsoft.Graph SDK which depends on Kiota packages. **All Kiota packages must be the same version** to avoid assembly binding errors at runtime.
+
+#### Required Packages (must be same version)
+
+```xml
+<!-- Microsoft Graph SDK -->
+<PackageReference Include="Microsoft.Graph" Version="5.99.0" />
+
+<!-- Kiota packages - ALL must match -->
+<PackageReference Include="Microsoft.Kiota.Abstractions" Version="1.21.1" />
+<PackageReference Include="Microsoft.Kiota.Authentication.Azure" Version="1.21.1" />
+<PackageReference Include="Microsoft.Kiota.Http.HttpClientLibrary" Version="1.21.1" />
+<PackageReference Include="Microsoft.Kiota.Serialization.Form" Version="1.21.1" />
+<PackageReference Include="Microsoft.Kiota.Serialization.Json" Version="1.21.1" />
+<PackageReference Include="Microsoft.Kiota.Serialization.Multipart" Version="1.21.1" />
+<PackageReference Include="Microsoft.Kiota.Serialization.Text" Version="1.21.1" />
+```
+
+#### Why This Matters
+
+Microsoft.Graph pulls Kiota packages as transitive dependencies. If you only update direct refs (Abstractions, Authentication.Azure), the transitive packages stay at older versions, causing:
+
+```
+FileNotFoundException: Could not load file or assembly
+'Microsoft.Kiota.Abstractions, Version=1.17.1.0'
+```
+
+#### When Updating Kiota
+
+1. Update **ALL** Kiota package references to the same version
+2. Verify with `dotnet list package --include-transitive | grep -i kiota`
+3. Build and test locally before deploying
+
+See [sdap-troubleshooting.md](../../../../docs/architecture/sdap-troubleshooting.md#issue-6-kiota-assembly-binding-error) for full troubleshooting details.
 
 ---
 

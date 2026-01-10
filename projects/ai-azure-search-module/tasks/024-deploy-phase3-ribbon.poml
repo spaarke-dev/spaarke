@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="ai-azure-search-module">
+  <metadata>
+    <title>Deploy Phase 3 ribbon customization</title>
+    <phase>3: Integration and Ribbon</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>023</dependencies>
+    <blocks>030, 031</blocks>
+    <tags>deploy, dataverse, ribbon</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task - STANDARD rigor</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Final deployment of ribbon customization and any PCF updates. Verify everything works together.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer.
+  </role>
+
+  <goal>
+    Complete feature deployed and functional in dev environment.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Export final solution with all customizations</step>
+    <step order="2">Import solution to dev environment (if not already)</step>
+    <step order="3">Publish all customizations</step>
+    <step order="4">Verify ribbon button and modal work</step>
+    <step order="5">Document deployment</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-azure-search-module/notes/024-final-deployment.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Feature fully functional in dev environment</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

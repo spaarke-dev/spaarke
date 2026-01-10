@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="008" project="ai-azure-search-module">
+  <metadata>
+    <title>Deploy Phase 1 API to Azure</title>
+    <phase>1: Core Infrastructure</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>005, 007</dependencies>
+    <blocks>none</blocks>
+    <tags>deploy, azure, bff-api</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task - STANDARD rigor</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Deploy the BFF API with new visualization endpoints to Azure App Service (dev environment).
+    Verify endpoint is accessible and returns expected responses.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Azure deployments and App Service configuration.
+  </role>
+
+  <goal>
+    Visualization API endpoint deployed and accessible at spe-api-dev-67e2xz.azurewebsites.net.
+  </goal>
+
+  <context>
+    <background>
+      The BFF API needs to be deployed with the new visualization service and endpoints
+      before the PCF control can consume it.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="project">Deploy to dev environment only</constraint>
+    <constraint source="project">Verify endpoint health after deployment</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Build API project in Release configuration</step>
+    <step order="2">Run all tests to verify no regressions</step>
+    <step order="3">Deploy to Azure App Service (dev)</step>
+    <step order="4">Verify /healthz endpoint returns healthy</step>
+    <step order="5">Test visualization endpoint with sample request</step>
+    <step order="6">Document deployment in notes</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and publish</tool>
+    <tool name="az">Azure CLI for deployment</tool>
+    <tool name="curl">Test endpoints</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-azure-search-module/notes/008-deployment-log.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">API deployed successfully to dev environment</criterion>
+    <criterion testable="true">/healthz returns 200 OK</criterion>
+    <criterion testable="true">Visualization endpoint responds to test request</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+
+  <notes>
+    <note date="2026-01-09">
+      TASK COMPLETED - Phase 1 API deployed successfully.
+
+      Issues resolved:
+      1. Kiota package mismatch: Added explicit package references for 5 Kiota packages to align to 1.21.1
+      2. Missing configuration: Added Dataverse__ClientSecret to App Service settings
+
+      All steps completed:
+      - Build API in Release configuration: SUCCESS
+      - Run tests: 53 AI service tests passed
+      - Deploy to Azure App Service: SUCCESS
+      - Verify /healthz endpoint: SUCCESS (200 OK - "Healthy")
+      - Test visualization endpoint: SUCCESS (401 - requires auth, as expected)
+      - Deployment documented in notes/008-deployment-log.md
+
+      Phase 1 complete. All 8 tasks (001-008) finished.
+    </note>
+  </notes>
+</task>

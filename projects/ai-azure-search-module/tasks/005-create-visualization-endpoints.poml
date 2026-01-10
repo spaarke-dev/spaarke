@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="ai-azure-search-module">
+  <metadata>
+    <title>Create VisualizationEndpoints</title>
+    <phase>1: Core Infrastructure</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>003, 004</dependencies>
+    <blocks>008, 018</blocks>
+    <tags>bff-api, api, minimal-api, endpoints</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>API endpoint implementation - code implementation</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create the VisualizationEndpoints class with GET /api/ai/visualization/related/{documentId} endpoint.
+    Apply authorization filter and rate limiting. Return graph data for document relationships.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs.
+    Follow ADRs strictly.
+  </role>
+
+  <goal>
+    Working API endpoint that accepts documentId and options, returns DocumentGraphResponse.
+  </goal>
+
+  <context>
+    <background>
+      This endpoint is the primary interface for the PCF control to fetch related documents.
+      It must handle query parameters for threshold, limit, depth, and filtering options.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API MapGroup pattern</constraint>
+    <constraint source="ADR-008">Apply VisualizationAuthorizationFilter via AddEndpointFilter</constraint>
+    <constraint source="ADR-016">Apply ai-standard rate limit policy</constraint>
+    <constraint source="ADR-019">Use ProblemDetails for error responses</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create VisualizationEndpoints static class</step>
+    <step order="2">Create MapVisualizationEndpoints extension method</step>
+    <step order="3">Create route group /api/ai/visualization with RequireAuthorization()</step>
+    <step order="4">Implement GET /related/{documentId} endpoint</step>
+    <step order="5">Bind query parameters: threshold, limit, depth, includeKeywords, documentTypes</step>
+    <step order="6">Apply VisualizationAuthorizationFilter</step>
+    <step order="7">Apply rate limit policy</step>
+    <step order="8">Call IVisualizationService.GetRelatedDocumentsAsync</step>
+    <step order="9">Return DocumentGraphResponse as JSON</step>
+    <step order="10">Register endpoints in Program.cs</step>
+    <step order="11">Verify code compiles</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET project</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/VisualizationEndpoints.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Endpoint responds to GET /api/ai/visualization/related/{documentId}</criterion>
+    <criterion testable="true">Endpoint applies authorization filter</criterion>
+    <criterion testable="true">Endpoint returns DocumentGraphResponse JSON</criterion>
+    <criterion testable="true">Solution builds without errors</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

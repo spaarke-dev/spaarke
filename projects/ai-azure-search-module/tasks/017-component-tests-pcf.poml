@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="017" project="ai-azure-search-module">
+  <metadata>
+    <title>Component tests for PCF control</title>
+    <phase>2: PCF Control Development</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>016</dependencies>
+    <blocks>019</blocks>
+    <tags>testing, pcf, react, frontend</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task - STANDARD rigor</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Write component tests using React Testing Library for DocumentNode, ControlPanel,
+    NodeActionBar, and the overall DocumentGraph component.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in React Testing Library and Jest.
+  </role>
+
+  <goal>
+    Component tests covering key user interactions and rendering.
+  </goal>
+
+  <context>
+    <background>
+      Tests should verify component rendering, user interactions (click, slider change),
+      and proper prop handling. Mock API calls and Xrm navigation.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use React Testing Library</constraint>
+    <constraint source="project">Mock external dependencies (Xrm, fetch)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Set up Jest and React Testing Library in PCF project</step>
+    <step order="2">Create DocumentNode.test.tsx</step>
+    <step order="3">Create ControlPanel.test.tsx with slider interaction tests</step>
+    <step order="4">Create NodeActionBar.test.tsx with button click tests</step>
+    <step order="5">Create DocumentGraph.test.tsx with integration tests</step>
+    <step order="6">Mock Xrm.Navigation for action bar tests</step>
+    <step order="7">Run npm test and verify all pass</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">src/client/pcf/DocumentRelationshipViewer/__tests__/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All component tests pass</criterion>
+    <criterion testable="true">Tests cover user interactions</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+
+  <notes>
+    <note date="2026-01-09">
+      Task completed successfully. Implemented comprehensive component tests:
+      - Set up Jest 29 with ts-jest and jsdom environment
+      - Added @testing-library/react v12.1.5 (React 16 compatible)
+      - Added @testing-library/jest-dom for DOM matchers
+      - Created jest.config.js with TypeScript support
+      - Created jest.setup.ts with global Xrm mock for Dataverse navigation
+      - DocumentNode.test.tsx: 15 tests (source/related rendering, similarity badges, file types, sizes)
+      - ControlPanel.test.tsx: 18 tests (slider interactions, checkbox filtering, active filters badge)
+      - NodeActionBar.test.tsx: 20 tests (Xrm.Navigation.openForm mock, window.open mock, callbacks)
+      - DocumentGraph.test.tsx: 21 tests (React Flow mocked to avoid memory issues)
+      - Total: 74 tests, all passing
+      - Mocked react-flow-renderer for lightweight testing
+      - Tests cover user interactions, rendering, prop handling
+    </note>
+  </notes>
+</task>

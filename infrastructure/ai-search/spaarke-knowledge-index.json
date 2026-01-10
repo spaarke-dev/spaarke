@@ -112,6 +112,16 @@
       "vectorSearchProfile": "knowledge-vector-profile"
     },
     {
+      "name": "documentVector",
+      "type": "Collection(Edm.Single)",
+      "searchable": true,
+      "filterable": false,
+      "sortable": false,
+      "facetable": false,
+      "dimensions": 1536,
+      "vectorSearchProfile": "knowledge-vector-profile"
+    },
+    {
       "name": "metadata",
       "type": "Edm.String",
       "searchable": false,

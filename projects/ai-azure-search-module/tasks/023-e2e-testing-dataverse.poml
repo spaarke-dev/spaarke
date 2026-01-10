@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="ai-azure-search-module">
+  <metadata>
+    <title>End-to-end testing in Dataverse</title>
+    <phase>3: Integration and Ribbon</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>022</dependencies>
+    <blocks>024</blocks>
+    <tags>testing, e2e-test, dataverse, pcf</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>E2E testing task - STANDARD rigor</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Perform comprehensive end-to-end testing of the visualization feature in Dataverse environment.
+    Test ribbon button, modal, filters, node actions, and dark mode.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse testing.
+  </role>
+
+  <goal>
+    All user flows verified working in Dataverse environment.
+  </goal>
+
+  <context>
+    <background>
+      E2E tests verify the complete integration: form → ribbon → PCF → API → Azure AI Search → response → graph.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="project">Test in dev environment</constraint>
+    <constraint source="ADR-021">Verify dark mode works</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Test ribbon button appears on sprk_document form</step>
+    <step order="2">Test button click opens modal</step>
+    <step order="3">Test graph loads with related documents</step>
+    <step order="4">Test similarity threshold slider updates graph</step>
+    <step order="5">Test depth slider updates graph</step>
+    <step order="6">Test document type filters work</step>
+    <step order="7">Test node click shows action bar</step>
+    <step order="8">Test Open Document Record navigates correctly</step>
+    <step order="9">Test View File opens in new tab</step>
+    <step order="10">Test Expand loads next level</step>
+    <step order="11">Test dark mode (toggle and verify colors)</step>
+    <step order="12">Document test results</step>
+    <step order="13">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="browser">Manual testing</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-azure-search-module/notes/023-e2e-test-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All E2E test cases pass</criterion>
+    <criterion testable="true">Dark mode renders correctly</criterion>
+    <criterion testable="true">All navigation actions work</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Full E2E Flow">
+      <url>https://{org}.crm.dynamics.com/main.aspx?pagetype=entityrecord&amp;etn=sprk_document</url>
+      <steps>
+        <step>Open document record with known related documents</step>
+        <step>Click Find Related button</step>
+        <step>Verify graph loads</step>
+        <step>Adjust similarity threshold</step>
+        <step>Click a related node</step>
+        <step>Click Open Document Record</step>
+      </steps>
+      <expected>Complete flow works without errors</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in D365 settings</step>
+        <step>Open visualization modal</step>
+        <step>Verify all colors adapt</step>
+      </steps>
+      <expected>All colors use Fluent UI v9 semantic tokens</expected>
+    </test>
+  </ui-tests>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

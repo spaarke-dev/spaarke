@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="ai-azure-search-module">
+  <metadata>
+    <title>Implement VisualizationService</title>
+    <phase>1: Core Infrastructure</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>001, 002</dependencies>
+    <blocks>005, 007</blocks>
+    <tags>bff-api, api, ai, azure-openai, services</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Core service implementation with AI integration - code implementation</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement the VisualizationService that retrieves document embeddings, performs vector similarity search,
+    and builds graph response with nodes and edges representing document relationships.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Azure AI Search, Azure OpenAI embeddings, and graph data structures.
+    Follow ADRs strictly.
+  </role>
+
+  <goal>
+    Working VisualizationService that queries Azure AI Search for similar documents and returns
+    DocumentGraphResponse with properly structured nodes and edges.
+  </goal>
+
+  <context>
+    <background>
+      The service orchestrates: 1) Get source document embedding (from cache or generate),
+      2) Vector search for similar documents, 3) Build graph response with metadata.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Visualization/IVisualizationService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-009">Use Redis caching for embeddings (IEmbeddingCache)</constraint>
+    <constraint source="ADR-013">Use existing IRagService for vector search</constraint>
+    <constraint source="project">Filter by tenantId for multi-tenant isolation</constraint>
+    <constraint source="project">Support depth limiting and node capping per spec</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/patterns/caching/distributed-cache.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing IRagService and IEmbeddingCache interfaces</step>
+    <step order="2">Create VisualizationService class implementing IVisualizationService</step>
+    <step order="3">Inject dependencies: IRagService, IEmbeddingCache, IDataverseClient, ILogger</step>
+    <step order="4">Implement GetOrCreateEmbeddingAsync for source document</step>
+    <step order="5">Implement vector search using IRagService with tenantId filter</step>
+    <step order="6">Implement BuildGraphResponse to create nodes and edges from search results</step>
+    <step order="7">Handle depth limiting and node capping per options</step>
+    <step order="8">Extract shared keywords for edges (from extract fields)</step>
+    <step order="9">Include parent entity info in node data</step>
+    <step order="10">Register service in DI container</step>
+    <step order="11">Verify code compiles</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET project</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Visualization/VisualizationService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">VisualizationService implements IVisualizationService</criterion>
+    <criterion testable="true">Service uses IRagService for vector search</criterion>
+    <criterion testable="true">Service applies tenantId filter to all queries</criterion>
+    <criterion testable="true">Graph response includes nodes with similarity scores</criterion>
+    <criterion testable="true">Solution builds without errors</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
