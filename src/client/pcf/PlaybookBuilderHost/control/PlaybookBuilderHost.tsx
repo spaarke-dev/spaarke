@@ -102,6 +102,7 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     width: '100%',
     height: '100%',
+    minHeight: '800px', // Match PCF container minHeight - needed because height:100% doesn't work with parent minHeight
     overflow: 'hidden',
   },
   toolbar: {
@@ -203,9 +204,16 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
   // Handle messages from iframe
   const handleMessage = React.useCallback(
     (event: MessageEvent<BuilderToHostMessage>) => {
-      // Validate message origin (in production, check against known origins)
-      // For now, accept messages from same origin or localhost
-      const allowedOrigins = [window.location.origin, 'http://localhost:5173'];
+      // Validate message origin - allow messages from the builder iframe
+      // The builderBaseUrl determines the expected origin
+      const builderUrl = new URL(builderBaseUrl, window.location.origin);
+      const allowedOrigins = [
+        window.location.origin,
+        builderUrl.origin,
+        'http://localhost:5173',
+        'http://localhost:3001',
+        'https://spe-api-dev-67e2xz.azurewebsites.net', // Azure App Service
+      ];
       if (!allowedOrigins.includes(event.origin)) {
         console.warn('[PlaybookBuilderHost] Ignoring message from unknown origin:', event.origin);
         return;
@@ -371,7 +379,7 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
 
       {/* Footer with version */}
       <div className={styles.footer}>
-        <Text size={100}>v1.2.0</Text>
+        <Text size={100}>v1.2.4</Text>
       </div>
     </div>
   );

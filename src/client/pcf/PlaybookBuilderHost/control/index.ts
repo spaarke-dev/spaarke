@@ -133,12 +133,15 @@ export class PlaybookBuilderHost
       context.mode.trackContainerResize(true);
 
       // Set container styles
+      // Note: Dataverse form sections don't have explicit height, so we need min-height
+      // to ensure the control has usable canvas space
       this.container.style.display = 'flex';
       this.container.style.flexDirection = 'column';
       this.container.style.boxSizing = 'border-box';
       this.container.style.overflow = 'hidden';
       this.container.style.width = '100%';
       this.container.style.height = '100%';
+      this.container.style.minHeight = '800px'; // Ensure usable canvas height
 
       // Set up theme
       this.currentTheme = getResolvedTheme();
