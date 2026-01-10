@@ -3,7 +3,7 @@
   <metadata>
     <title>Register PCF on sprk_document form</title>
     <phase>3: Integration and Ribbon</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>019</dependencies>
     <blocks>021</blocks>
@@ -70,4 +70,21 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    <completed-date>2026-01-09</completed-date>
+    <summary>
+      Registered DocumentRelationshipViewer PCF control on sprk_document main form.
+      Control added to "Search" tab as virtual control with bound documentId property.
+      Configured tenant ID and API base URL as static values.
+      Control renders with "Document Relationships" header and version v1.0.1 in footer.
+      Placeholder message displayed when no document context is available.
+    </summary>
+    <configuration>
+      - Location: sprk_document main form, Search tab
+      - Binding: documentId bound to table column (sprk_document primary key)
+      - Static values: tenantId, apiBaseUrl configured for dev environment
+      - Control type: Virtual (PCF)
+    </configuration>
+  </notes>
 </task>

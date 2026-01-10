@@ -31,6 +31,8 @@ export interface DocumentNodeData {
     fileUrl?: string;
     /** Shared keywords with connected documents */
     sharedKeywords?: string[];
+    /** Compact mode - show icon only (set by DocumentGraph) */
+    compactMode?: boolean;
 }
 
 /**

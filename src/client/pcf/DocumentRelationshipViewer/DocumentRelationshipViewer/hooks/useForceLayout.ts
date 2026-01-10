@@ -25,13 +25,13 @@ import type {
     ForceLayoutOptions,
 } from "../types/graph";
 
-// Default layout options
+// Default layout options - tuned for better distribution
 const DEFAULT_OPTIONS: Required<ForceLayoutOptions> = {
-    distanceMultiplier: 200,
-    collisionRadius: 50,
+    distanceMultiplier: 400,   // Longer edges for more spread
+    collisionRadius: 100,      // Larger collision radius to prevent overlap
     centerX: 0,
     centerY: 0,
-    chargeStrength: -300,
+    chargeStrength: -1000,     // Strong repulsion for better distribution
 };
 
 /**
@@ -94,17 +94,38 @@ export function useForceLayout(
 
         setIsSimulating(true);
 
-        // Create force nodes from input
-        const forceNodes: ForceNode[] = nodes.map((node) => ({
-            id: node.id,
-            isSource: node.data.isSource,
-            // Initialize source node at center, others randomly
-            x: node.data.isSource ? opts.centerX : undefined,
-            y: node.data.isSource ? opts.centerY : undefined,
-            // Fix source node at center
-            fx: node.data.isSource ? opts.centerX : null,
-            fy: node.data.isSource ? opts.centerY : null,
-        }));
+        // Create force nodes from input with radial initial positioning
+        const nonSourceNodes = nodes.filter((n) => !n.data.isSource);
+        const numNonSource = nonSourceNodes.length;
+
+        const forceNodes: ForceNode[] = nodes.map((node, _index) => {
+            if (node.data.isSource) {
+                // Source node at center, fixed position
+                return {
+                    id: node.id,
+                    isSource: true,
+                    x: opts.centerX,
+                    y: opts.centerY,
+                    fx: opts.centerX,
+                    fy: opts.centerY,
+                };
+            }
+
+            // Calculate radial position for non-source nodes
+            const nodeIndex = nonSourceNodes.findIndex((n) => n.id === node.id);
+            const angle = (2 * Math.PI * nodeIndex) / numNonSource - Math.PI / 2;
+            const radius = 150; // Initial radius for radial placement
+
+            return {
+                id: node.id,
+                isSource: false,
+                // Start in radial pattern around center
+                x: opts.centerX + radius * Math.cos(angle),
+                y: opts.centerY + radius * Math.sin(angle),
+                fx: null,
+                fy: null,
+            };
+        });
 
         // Create force links with distance based on similarity
         // Distance = distanceMultiplier * (1 - similarity)

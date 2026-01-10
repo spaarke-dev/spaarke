@@ -172,7 +172,7 @@ const useStyles = makeStyles({
 });
 
 // Control version - must match ControlManifest.Input.xml
-const CONTROL_VERSION = "1.0.0";
+const CONTROL_VERSION = "1.0.16";
 
 /**
  * RelationshipViewerModal - Full-screen modal for document relationship visualization

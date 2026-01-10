@@ -85,8 +85,8 @@ const getSimilarityColor = (
  */
 const useStyles = makeStyles({
     nodeContainer: {
-        minWidth: "180px",
-        maxWidth: "220px",
+        minWidth: "100px",
+        maxWidth: "130px",
     },
     sourceCard: {
         backgroundColor: tokens.colorBrandBackground,
@@ -101,6 +101,32 @@ const useStyles = makeStyles({
         border: `1px solid ${tokens.colorNeutralStroke1}`,
         boxShadow: tokens.shadow4,
     },
+    // Compact mode styles - icon only
+    compactContainer: {
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        cursor: "pointer",
+    },
+    compactIcon: {
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: "40px",
+        height: "40px",
+        borderRadius: "50%",
+        boxShadow: tokens.shadow4,
+    },
+    compactSourceIcon: {
+        backgroundColor: tokens.colorBrandBackground,
+        border: `2px solid ${tokens.colorBrandStroke1}`,
+        color: tokens.colorNeutralForegroundOnBrand,
+    },
+    compactRelatedIcon: {
+        backgroundColor: tokens.colorNeutralBackground1,
+        border: `1px solid ${tokens.colorNeutralStroke1}`,
+        color: tokens.colorNeutralForeground1,
+    },
     cardHeader: {
         paddingBottom: tokens.spacingVerticalXS,
     },
@@ -108,9 +134,9 @@ const useStyles = makeStyles({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        width: "32px",
-        height: "32px",
-        borderRadius: tokens.borderRadiusMedium,
+        width: "20px",
+        height: "20px",
+        borderRadius: tokens.borderRadiusSmall,
         backgroundColor: tokens.colorNeutralBackground3,
     },
     sourceIcon: {
@@ -126,7 +152,8 @@ const useStyles = makeStyles({
         overflow: "hidden",
         textOverflow: "ellipsis",
         whiteSpace: "nowrap",
-        maxWidth: "140px",
+        maxWidth: "80px",
+        fontSize: tokens.fontSizeBase100,
     },
     caption: {
         display: "flex",
@@ -164,18 +191,58 @@ export const DocumentNode: React.FC<NodeProps<DocumentNodeData>> = ({
     const isSource = data.isSource ?? false;
     const similarity = data.similarity ?? 0;
     const fileType = data.fileType ?? "unknown";
+    const compactMode = data.compactMode ?? false;
 
+    // Compact mode: icon-only display for fieldBound mode
+    if (compactMode) {
+        return (
+            <>
+                <Handle
+                    type="target"
+                    position={Position.Top}
+                    style={{
+                        width: "6px",
+                        height: "6px",
+                        background: tokens.colorBrandBackground,
+                        border: `1px solid ${tokens.colorNeutralBackground1}`,
+                    }}
+                />
+                <div
+                    className={mergeClasses(
+                        styles.compactContainer,
+                        styles.compactIcon,
+                        isSource ? styles.compactSourceIcon : styles.compactRelatedIcon
+                    )}
+                    title={`${data.name}${similarity > 0 ? ` (${Math.round(similarity * 100)}%)` : ""}`}
+                >
+                    {getFileTypeIcon(fileType)}
+                </div>
+                <Handle
+                    type="source"
+                    position={Position.Bottom}
+                    style={{
+                        width: "6px",
+                        height: "6px",
+                        background: tokens.colorBrandBackground,
+                        border: `1px solid ${tokens.colorNeutralBackground1}`,
+                    }}
+                />
+            </>
+        );
+    }
+
+    // Full mode: card display with details
     return (
         <>
-            {/* Input handle (top) - for incoming edges */}
+            {/* Handle positioned on left side for radial layout */}
             <Handle
                 type="target"
-                position={Position.Top}
+                position={Position.Left}
                 style={{
-                    width: "8px",
-                    height: "8px",
+                    width: "6px",
+                    height: "6px",
                     background: tokens.colorBrandBackground,
-                    border: `2px solid ${tokens.colorNeutralBackground1}`,
+                    border: `1px solid ${tokens.colorNeutralBackground1}`,
                 }}
             />
 
@@ -249,15 +316,15 @@ export const DocumentNode: React.FC<NodeProps<DocumentNodeData>> = ({
                 )}
             </Card>
 
-            {/* Output handle (bottom) - for outgoing edges */}
+            {/* Output handle on right side for radial layout */}
             <Handle
                 type="source"
-                position={Position.Bottom}
+                position={Position.Right}
                 style={{
-                    width: "8px",
-                    height: "8px",
+                    width: "6px",
+                    height: "6px",
                     background: tokens.colorBrandBackground,
-                    border: `2px solid ${tokens.colorNeutralBackground1}`,
+                    border: `1px solid ${tokens.colorNeutralBackground1}`,
                 }}
             />
         </>

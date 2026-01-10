@@ -23,8 +23,8 @@ jest.mock('react-flow-renderer', () => ({
     Background: () => <div data-testid="background" />,
     Controls: () => <div data-testid="controls" />,
     MiniMap: () => <div data-testid="minimap" />,
-    useNodesState: jest.fn((initial) => [initial, jest.fn(), jest.fn()]),
-    useEdgesState: jest.fn((initial) => [initial, jest.fn(), jest.fn()]),
+    useNodesState: jest.fn((initial: unknown[]) => [initial, jest.fn(), jest.fn()]),
+    useEdgesState: jest.fn((initial: unknown[]) => [initial, jest.fn(), jest.fn()]),
     BackgroundVariant: { Dots: 'dots' },
 }));
 

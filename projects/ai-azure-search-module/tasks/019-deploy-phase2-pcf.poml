@@ -3,7 +3,7 @@
   <metadata>
     <title>Deploy Phase 2 PCF to Dataverse</title>
     <phase>2: PCF Control Development</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>017, 018</dependencies>
     <blocks>020</blocks>
@@ -73,4 +73,17 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    <note date="2026-01-09">
+      Task completed successfully. Deployed DocumentRelationshipViewer PCF v1.0.1 to Dataverse:
+      - Updated version in 3 locations: ControlManifest.Input.xml, DocumentRelationshipViewer.tsx, package.json
+      - Fixed ESLint errors in test files (unsafe any assignments)
+      - Build succeeded: bundle.js 2.15 MiB (React/Fluent externalized as platform libraries)
+      - Deployed using pac pcf push --publisher-prefix sprk
+      - Control available in PowerAppsToolsTemp_sprk solution on spaarkedev1.crm.dynamics.com
+      - Control namespace: Spaarke.Controls.DocumentRelationshipViewer
+      - Phase 2 complete (10/10 tasks). Ready for Phase 3: Integration &amp; Ribbon.
+    </note>
+  </notes>
 </task>

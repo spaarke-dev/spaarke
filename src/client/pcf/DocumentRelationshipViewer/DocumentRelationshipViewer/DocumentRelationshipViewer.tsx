@@ -16,7 +16,7 @@ import { DocumentGraph } from "./components/DocumentGraph";
 import type { DocumentNode, DocumentEdge } from "./types/graph";
 
 // Control version - must match ControlManifest.Input.xml
-const CONTROL_VERSION = "1.0.0";
+const CONTROL_VERSION = "1.0.16";
 
 /**
  * Props for the DocumentRelationshipViewer component
@@ -32,13 +32,17 @@ export interface IDocumentRelationshipViewerProps {
 
 /**
  * Styles using Fluent UI design tokens (ADR-021 compliant)
+ * Uses calc(100vh - 180px) pattern like AnalysisWorkspace to fill section
  */
 const useStyles = makeStyles({
     container: {
         display: "flex",
         flexDirection: "column",
-        height: "100%",
-        minHeight: "400px",
+        // Fill available vertical space like AnalysisWorkspace pattern
+        height: "calc(100vh - 180px)",
+        minHeight: "500px",
+        // Use viewport width minus form sidebar/chrome (~320px for nav + paddings)
+        width: "calc(100vw - 320px)",
         backgroundColor: tokens.colorNeutralBackground1,
         color: tokens.colorNeutralForeground1,
     },
@@ -49,11 +53,18 @@ const useStyles = makeStyles({
         padding: tokens.spacingVerticalM,
         borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
     },
+    headerTitle: {
+        flex: 1,
+        display: "flex",
+        alignItems: "center",
+        gap: tokens.spacingHorizontalS,
+    },
     graphContainer: {
         flex: 1,
         display: "flex",
         position: "relative",
-        minHeight: "300px",
+        minHeight: 0, // Important for flex sizing
+        width: "100%", // Ensure full horizontal width
     },
     placeholder: {
         display: "flex",
@@ -66,13 +77,17 @@ const useStyles = makeStyles({
         height: "100%",
     },
     footer: {
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
         padding: tokens.spacingVerticalS,
+        paddingLeft: tokens.spacingHorizontalM,
         paddingRight: tokens.spacingHorizontalM,
-        textAlign: "right",
         borderTop: `1px solid ${tokens.colorNeutralStroke1}`,
+        fontSize: tokens.fontSizeBase200,
+        color: tokens.colorNeutralForeground3,
     },
     versionText: {
-        fontSize: tokens.fontSizeBase200,
         color: tokens.colorNeutralForeground4,
     },
     errorContainer: {
@@ -182,6 +197,9 @@ function generateSampleData(sourceDocumentId: string): { nodes: DocumentNode[]; 
  * This control displays a force-directed graph showing document relationships
  * based on vector similarity from Azure AI Search.
  *
+ * Layout: Fills the section it's placed in (like AnalysisWorkspace pattern).
+ * Place this control in a dedicated tab or section for best results.
+ *
  * Follows:
  * - ADR-006: PCF for all custom UI
  * - ADR-021: Fluent UI v9 with dark mode support
@@ -197,7 +215,11 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
     const darkMode = isDarkMode(context);
 
     // Get input parameters
-    const documentId = context.parameters.documentId?.raw ?? "";
+    // Primary approach: Get document ID from form context (current record's ID)
+    // Fallback: Use bound property if explicitly provided
+    const contextEntityId = (context.mode as ComponentFramework.Mode & { contextInfo?: { entityId?: string } })?.contextInfo?.entityId;
+    const boundDocumentId = context.parameters.documentId?.raw;
+    const documentId = contextEntityId ?? boundDocumentId ?? "";
     const apiBaseUrl = context.parameters.apiBaseUrl?.raw ?? "https://spe-api-dev-67e2xz.azurewebsites.net";
 
     // State for loading and error
@@ -213,22 +235,35 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
 
     // Get container dimensions for layout
     const containerRef = React.useRef<HTMLDivElement>(null);
-    const [dimensions, setDimensions] = React.useState({ width: 800, height: 600 });
+    const [dimensions, setDimensions] = React.useState<{ width: number; height: number } | null>(null);
 
     // Update dimensions on resize
     React.useEffect(() => {
         const updateDimensions = () => {
             if (containerRef.current) {
-                setDimensions({
-                    width: containerRef.current.clientWidth,
-                    height: containerRef.current.clientHeight,
-                });
+                const newWidth = containerRef.current.clientWidth;
+                const newHeight = containerRef.current.clientHeight;
+                // Only update if we have valid dimensions
+                if (newWidth > 0 && newHeight > 0) {
+                    setDimensions({
+                        width: newWidth,
+                        height: newHeight,
+                    });
+                }
             }
         };
 
+        // Initial update after a small delay to ensure DOM is ready
+        const timeoutId = setTimeout(updateDimensions, 50);
+
+        // Also try immediately
         updateDimensions();
+
         window.addEventListener("resize", updateDimensions);
-        return () => window.removeEventListener("resize", updateDimensions);
+        return () => {
+            clearTimeout(timeoutId);
+            window.removeEventListener("resize", updateDimensions);
+        };
     }, []);
 
     // Load graph data when documentId changes
@@ -258,24 +293,28 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
 
     // Check if we should show the placeholder
     const showPlaceholder = !documentId || documentId.trim() === "";
+    // Check if we have measured dimensions
+    const hasDimensions = dimensions !== null && dimensions.width > 0 && dimensions.height > 0;
 
     return (
         <FluentProvider theme={theme}>
             <div className={styles.container}>
                 {/* Header */}
                 <div className={styles.header}>
-                    <DocumentFlowchart24Regular />
-                    <Text weight="semibold" size={400}>
-                        Document Relationships
-                    </Text>
-                    {selectedNodeId && (
-                        <Text size={200} style={{ marginLeft: "auto", color: tokens.colorNeutralForeground3 }}>
-                            Selected: {selectedNodeId}
+                    <div className={styles.headerTitle}>
+                        <DocumentFlowchart24Regular />
+                        <Text weight="semibold" size={400}>
+                            Document Relationships
                         </Text>
-                    )}
+                        {selectedNodeId && (
+                            <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
+                                Selected: {selectedNodeId}
+                            </Text>
+                        )}
+                    </div>
                 </div>
 
-                {/* Graph Container */}
+                {/* Graph Container - fills available space */}
                 <div className={styles.graphContainer} ref={containerRef}>
                     {isLoading ? (
                         <div className={styles.placeholder}>
@@ -297,6 +336,10 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
                                 Graph visualization will appear here
                             </Text>
                         </div>
+                    ) : !hasDimensions ? (
+                        <div className={styles.placeholder}>
+                            <Spinner size="medium" label="Initializing..." />
+                        </div>
                     ) : (
                         <DocumentGraph
                             nodes={graphData.nodes}
@@ -305,12 +348,20 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
                             onNodeSelect={handleNodeSelect}
                             width={dimensions.width}
                             height={dimensions.height}
+                            showMinimap={false}
+                            compactMode={false}
                         />
                     )}
                 </div>
 
-                {/* Footer with version (ADR-021, PCF-V9-PACKAGING.md requirement) */}
+                {/* Footer with stats and version */}
                 <div className={styles.footer}>
+                    <span>
+                        {graphData.nodes.length > 0
+                            ? `${graphData.nodes.length} documents · ${graphData.edges.length} relationships`
+                            : "No data loaded"
+                        }
+                    </span>
                     <span className={styles.versionText}>
                         v{CONTROL_VERSION}
                     </span>

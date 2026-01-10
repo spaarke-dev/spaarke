@@ -58,6 +58,10 @@ export interface DocumentGraphProps {
     width?: number;
     /** Container height */
     height?: number;
+    /** Whether to show minimap (default: false) */
+    showMinimap?: boolean;
+    /** Compact mode for icon-only display in fieldBound mode */
+    compactMode?: boolean;
 }
 
 /**
@@ -122,12 +126,15 @@ export const DocumentGraph: React.FC<DocumentGraphProps> = ({
     layoutOptions,
     width,
     height,
+    showMinimap = false,
+    compactMode = false,
 }) => {
     const styles = useStyles();
 
-    // Calculate center position
-    const centerX = (width ?? 800) / 2;
-    const centerY = (height ?? 600) / 2;
+    // Use (0,0) as center - React Flow's fitView will handle viewport positioning
+    // Using container center caused issues with large viewport widths
+    const centerX = 0;
+    const centerY = 0;
 
     // Use force layout hook to calculate positions
     const { layoutNodes, layoutEdges, isSimulating } = useForceLayout(
@@ -140,14 +147,24 @@ export const DocumentGraph: React.FC<DocumentGraphProps> = ({
         }
     );
 
-    // React Flow state
-    const [nodes, setNodes, onNodesChange] = useNodesState(layoutNodes);
+    // React Flow state - add compactMode to node data
+    const nodesWithCompactMode = React.useMemo(() => {
+        return layoutNodes.map((node) => ({
+            ...node,
+            data: {
+                ...node.data,
+                compactMode,
+            },
+        }));
+    }, [layoutNodes, compactMode]);
+
+    const [nodes, setNodes, onNodesChange] = useNodesState(nodesWithCompactMode);
     const [edges, setEdges, onEdgesChange] = useEdgesState(layoutEdges);
 
-    // Update nodes when layout changes
+    // Update nodes when layout changes or compact mode changes
     React.useEffect(() => {
-        setNodes(layoutNodes);
-    }, [layoutNodes, setNodes]);
+        setNodes(nodesWithCompactMode);
+    }, [nodesWithCompactMode, setNodes]);
 
     // Update edges when layout changes
     React.useEffect(() => {
@@ -210,6 +227,7 @@ export const DocumentGraph: React.FC<DocumentGraphProps> = ({
                 maxZoom={2}
                 connectOnClick={false}
                 attributionPosition="bottom-left"
+                style={{ width: "100%", height: "100%" }}
             >
                 <Background
                     variant={BackgroundVariant.Dots}
@@ -222,19 +240,21 @@ export const DocumentGraph: React.FC<DocumentGraphProps> = ({
                     showFitView
                     showInteractive={false}
                 />
-                <MiniMap
-                    nodeColor={(node: Node<DocumentNodeData>) => {
-                        return node.data?.isSource
-                            ? tokens.colorBrandBackground
-                            : tokens.colorNeutralBackground3;
-                    }}
-                    maskColor={isDarkMode ? "rgba(0,0,0,0.7)" : "rgba(255,255,255,0.7)"}
-                    style={{
-                        backgroundColor: isDarkMode
-                            ? tokens.colorNeutralBackground2
-                            : tokens.colorNeutralBackground1,
-                    }}
-                />
+                {showMinimap && (
+                    <MiniMap
+                        nodeColor={(node: Node<DocumentNodeData>) => {
+                            return node.data?.isSource
+                                ? tokens.colorBrandBackground
+                                : tokens.colorNeutralBackground3;
+                        }}
+                        maskColor={isDarkMode ? "rgba(0,0,0,0.7)" : "rgba(255,255,255,0.7)"}
+                        style={{
+                            backgroundColor: isDarkMode
+                                ? tokens.colorNeutralBackground2
+                                : tokens.colorNeutralBackground1,
+                        }}
+                    />
+                )}
             </ReactFlow>
         </div>
     );

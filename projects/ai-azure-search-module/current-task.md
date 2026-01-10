@@ -13,24 +13,18 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 018 - Integration tests with Azure AI Search |
+| **Task** | 021 - Create ribbon button command |
 | **Step** | Not started |
 | **Status** | not-started |
-| **Next Action** | Create integration tests for visualization API endpoints |
+| **Next Action** | Create ribbon button to launch DocumentRelationshipViewer modal |
 
 ### Files Modified This Session
 <!-- Only files touched in CURRENT session, not all time -->
-- `src/client/pcf/DocumentRelationshipViewer/package.json` - Modified - Added Jest and React Testing Library dependencies
-- `src/client/pcf/DocumentRelationshipViewer/jest.config.js` - Created - Jest configuration
-- `src/client/pcf/DocumentRelationshipViewer/jest.setup.ts` - Created - Global mocks for Xrm.Navigation
-- `src/client/pcf/DocumentRelationshipViewer/DocumentRelationshipViewer/__tests__/DocumentNode.test.tsx` - Created - 15 tests
-- `src/client/pcf/DocumentRelationshipViewer/DocumentRelationshipViewer/__tests__/ControlPanel.test.tsx` - Created - 18 tests
-- `src/client/pcf/DocumentRelationshipViewer/DocumentRelationshipViewer/__tests__/NodeActionBar.test.tsx` - Created - 20 tests
-- `src/client/pcf/DocumentRelationshipViewer/DocumentRelationshipViewer/__tests__/DocumentGraph.test.tsx` - Created - 21 tests
+*None yet - Task 021 not started*
 
 ### Critical Context
 <!-- 1-3 sentences of essential context for continuation -->
-**Phase 2 IN PROGRESS (8/10 tasks).** Task 017 complete - 74 component tests passing with Jest + React Testing Library. Tests cover DocumentNode, ControlPanel, NodeActionBar, DocumentGraph. Xrm.Navigation mocked for Dataverse navigation testing. Next: Task 018 (integration tests) verifies API connectivity.
+**Phase 3 Started (1/5 tasks).** Task 020 complete - PCF registered on sprk_document form (Search tab). Control renders with header, placeholder, and v1.0.1 footer. Next: Task 021 - Create ribbon button command to launch the modal dialog.
 
 ---
 
@@ -38,14 +32,14 @@
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | 018 |
-| **Task File** | tasks/018-integration-tests-api.poml |
-| **Title** | Integration tests with Azure AI Search |
-| **Phase** | 2: PCF Control Development |
+| **Task ID** | 021 |
+| **Task File** | tasks/021-create-ribbon-button.poml |
+| **Title** | Create ribbon button command |
+| **Phase** | 3: Integration & Ribbon |
 | **Status** | not-started |
 | **Started** | — |
-| **Rigor Level** | STANDARD |
-| **Rigor Reason** | Testing task - STANDARD rigor |
+| **Rigor Level** | FULL |
+| **Rigor Reason** | Ribbon customization requires careful XML editing |
 
 ---
 
@@ -56,19 +50,19 @@
 <!-- Updated by task-execute after each step completion -->
 <!-- Format: - [x] Step N: {description} ({YYYY-MM-DD HH:MM}) -->
 
-*Task 018 not started yet*
-*Previous task completed Task 017 (Component tests for PCF control)*
+*Task 021 not started yet*
+*Previous: Task 020 (Register PCF on form) completed - PCF on sprk_document Search tab*
 
 ### Current Step
 
-Waiting to start Task 018
+Waiting to start Task 021
 
 ### Files Modified (All Task)
 
 <!-- Track all files created or modified during this task -->
 <!-- Format: - `path/to/file` - {Created|Modified} - {brief purpose} -->
 
-*None yet - Task 018 not started*
+*None yet - Task 021 not started*
 
 ### Decisions Made
 
@@ -91,23 +85,21 @@ No blockers. Phase 1 complete, ready for Phase 2.
 
 ## Next Action
 
-**Continue Phase 2: PCF Control Development**
+**Continue Phase 3: Integration & Ribbon**
 
-To start Task 018:
-- Say "work on task 018" or "continue"
-- This will create integration tests for the visualization API endpoints
+To start Task 021:
+- Say "work on task 021" or "continue"
+- This will create a ribbon button to launch the visualization modal
 
-**Phase 2 Progress** (8/10 tasks):
-- Task 010: ✅ Scaffold PCF control - COMPLETE
-- Task 011: ✅ Integrate React Flow with d3-force - COMPLETE
-- Task 012: ✅ Implement DocumentNode component - COMPLETE
-- Task 013: ✅ Implement DocumentEdge component - COMPLETE
-- Task 014: ✅ Implement control panel - COMPLETE
-- Task 015: ✅ Implement node action bar - COMPLETE
-- Task 016: ✅ Implement full-screen modal - COMPLETE
-- Task 017: ✅ Component tests for PCF control - COMPLETE
-- Task 018: 🔲 Integration tests with Azure AI Search - NEXT
-- Task 019: 🔲 Deploy Phase 2 PCF
+**Phase 2 Complete** (10/10 tasks):
+- All Phase 2 tasks ✅
+
+**Phase 3 Progress** (1/5 tasks):
+- Task 020: ✅ Register PCF on sprk_document form - DONE
+- Task 021: 🔲 Create ribbon button command - NEXT
+- Task 022: 🔲 Implement modal dialog launcher
+- Task 023: 🔲 End-to-end testing in Dataverse
+- Task 024: 🔲 Deploy Phase 3 ribbon
 
 ---
 
@@ -165,12 +157,19 @@ To start Task 018:
 - Task 017: Mock react-flow-renderer entirely to avoid memory issues during testing (heavy bundle)
 - Task 017: Global Xrm mock in jest.setup.ts enables Dataverse navigation testing
 - Task 017: identity-obj-proxy handles CSS module mocking for makeStyles
+- Task 019: pac pcf push creates PowerAppsToolsTemp_sprk temporary solution - for dev testing only
+- Task 019: Need to disable Directory.Packages.props before pac pcf push (CPM conflict)
+- Task 019: Control deployed at Spaarke.Controls.DocumentRelationshipViewer namespace
+- Task 020: PCF registration on form is UI-based task in Power Apps Maker portal
+- Task 020: Virtual control type allows PCF to bind to entity primary key
+- Task 020: Static values for tenantId and apiBaseUrl configured in control properties
+- Task 020: Control renders placeholder when document context not available
 
 ### Handoff Notes
 <!-- Used when context budget is high or session ending -->
 <!-- Another Claude instance should be able to continue from these notes -->
 
-**Phase 2 is IN PROGRESS (8/10 tasks).** Tasks 010-017 complete. Key components: DocumentNode.tsx, DocumentEdge.tsx, ControlPanel.tsx, NodeActionBar.tsx, RelationshipViewerModal.tsx. All use Fluent v9 tokens (ADR-021). Bundle: 2.15 MiB. Task 017 added 74 component tests with Jest + React Testing Library. Next: Task 018 (integration tests) verifies API connectivity, then Task 019 (deployment).
+**Phase 3 STARTED (1/5 tasks).** Task 020 complete - PCF registered on sprk_document form (Search tab). Control bound to documentId, tenantId, apiBaseUrl configured. Renders with "Document Relationships" header, placeholder message, and v1.0.1 footer. Next: Task 021 - Create ribbon button command that will launch the visualization modal.
 
 ---
 

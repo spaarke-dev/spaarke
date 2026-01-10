@@ -183,7 +183,7 @@ describe('ControlPanel', () => {
 
             expect(onSettingsChange).toHaveBeenCalledWith(
                 expect.objectContaining({
-                    documentTypes: expect.not.arrayContaining(['pdf']),
+                    documentTypes: expect.not.arrayContaining(['pdf']) as unknown,
                 })
             );
         });
@@ -201,7 +201,7 @@ describe('ControlPanel', () => {
 
             expect(onSettingsChange).toHaveBeenCalledWith(
                 expect.objectContaining({
-                    documentTypes: expect.arrayContaining(['pdf']),
+                    documentTypes: expect.arrayContaining(['pdf']) as unknown,
                 })
             );
         });
