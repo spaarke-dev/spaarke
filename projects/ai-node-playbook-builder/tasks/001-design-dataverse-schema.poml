@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Design Dataverse Schema</title>
+    <phase>1: Foundation</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <tags>dataverse, schema</tags>
+    <dependencies>none</dependencies>
+    <blocks>002</blocks>
+  </metadata>
+
+  <prompt>
+    Design the complete Dataverse schema for the node-based playbook system.
+    Create detailed entity definitions, field specifications, and relationship mappings
+    based on the design document. Output a schema specification document.
+  </prompt>
+
+  <role>Spaarke AI Developer Agent with Dataverse expertise</role>
+
+  <goal>
+    Produce a detailed schema specification document that defines all new entities,
+    extended entities, fields, relationships, and choice values required for the
+    node-based playbook system.
+  </goal>
+
+  <context>
+    <background>
+      The node-based playbook system requires new Dataverse entities for nodes,
+      runs, model deployments, and delivery templates. Existing entities need
+      extension with new fields for mode selection and canvas layout.
+    </background>
+    <relevant-files>
+      <file>projects/ai-node-playbook-builder/design.md</file>
+      <file>projects/ai-node-playbook-builder/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use sprk_ prefix for all custom fields</constraint>
+    <constraint source="project">Follow existing naming conventions from design.md</constraint>
+    <constraint source="project">Include choice value mappings for action types</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-node-playbook-builder/design.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read design.md sections 4.1-4.8 for schema requirements</step>
+    <step order="2">Document extended entity: sprk_analysisplaybook with new fields</step>
+    <step order="3">Document new entity: sprk_playbooknode with all fields</step>
+    <step order="4">Document N:N relationships for node scopes</step>
+    <step order="5">Document extended entities: sprk_analysisaction, sprk_analysistool</step>
+    <step order="6">Document new entity: sprk_aimodeldeployment</step>
+    <step order="7">Document new entity: sprk_deliverytemplate</step>
+    <step order="8">Document new entity: sprk_playbookrun</step>
+    <step order="9">Document new entity: sprk_playbooknoderun</step>
+    <step order="10">Define all choice option sets with values</step>
+    <step order="11">Create schema specification in notes/schema-design.md</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read design document</tool>
+    <tool name="Write">Create schema specification</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-node-playbook-builder/notes/schema-design.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Schema document includes all 6 new/extended entities from design</criterion>
+    <criterion testable="true">All fields have type, required, and description specified</criterion>
+    <criterion testable="true">Choice values match design.md exactly</criterion>
+    <criterion testable="true">N:N relationships are documented</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference design.md Section 4 (Dataverse Schema) for complete field definitions.
+    Pay attention to the ActionType choice values in Section 3.5.
+
+    COMPLETION NOTES (2026-01-09):
+    - Created notes/schema-design.md with 450+ lines
+    - Documented 8 entities (3 extended, 5 new)
+    - All 10 choice option sets defined with exact values from design
+    - N:N relationships documented for skills and knowledge on nodes
+    - Included index recommendations and backward compatibility notes
+  </notes>
+</task>

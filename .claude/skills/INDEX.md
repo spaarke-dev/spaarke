@@ -2,7 +2,7 @@
 
 > **Purpose**: Central registry of all Claude Code skills — the **single source of truth** for what skills exist, their triggers, and how to create new ones.
 >
-> **Last Updated**: January 6, 2026 (added ci-cd skill for GitHub Actions workflow integration)
+> **Last Updated**: January 9, 2026 (added dataverse-create-schema skill for Dataverse Web API schema creation)
 
 ---
 
@@ -41,6 +41,7 @@
 | [ci-cd](ci-cd/SKILL.md) | GitHub Actions CI/CD pipeline status and workflow management | No | `/ci-cd`, "check CI", "build status", "workflow failed" |
 | [code-review](code-review/SKILL.md) | Comprehensive code review (security, performance, style) | No | `/code-review`, "review code" |
 | [conflict-check](conflict-check/SKILL.md) | Detect file conflicts between active PRs and current work | No | `/conflict-check`, "check conflicts", "file overlap" |
+| [dataverse-create-schema](dataverse-create-schema/SKILL.md) | Create/update Dataverse entities, attributes, relationships via Web API | No | "create entity", "add column", "dataverse schema" |
 | [dataverse-deploy](dataverse-deploy/SKILL.md) | Deploy solutions, PCF controls, web resources to Dataverse | No | "deploy to dataverse", "pac pcf push" |
 | [design-to-spec](design-to-spec/SKILL.md) | Transform human design documents into AI-optimized spec.md | No | `/design-to-spec`, "design to spec" |
 | [pull-from-github](pull-from-github/SKILL.md) | Pull latest changes from GitHub | No | `/pull-from-github`, "pull from github" |
@@ -86,6 +87,7 @@
 - **azure-deploy** - Deploy Azure infrastructure, BFF API, App Service configuration
 
 ### ⚙️ Dataverse/Platform
+- **dataverse-create-schema** - Create/update Dataverse entities, attributes, relationships via Web API
 - **dataverse-deploy** - Deploy solutions, PCF controls, web resources via PAC CLI
 - **ribbon-edit** - Automate ribbon customization via solution export/import
 

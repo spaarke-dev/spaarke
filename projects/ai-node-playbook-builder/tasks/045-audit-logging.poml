@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="045" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Implement Audit Logging</title>
+    <phase>5: Production Hardening</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <tags>bff-api, logging</tags>
+    <dependencies>040</dependencies>
+    <blocks>046</blocks>
+  </metadata>
+  <prompt>Implement structured audit logging for playbook operations.</prompt>
+  <role>Senior .NET developer</role>
+  <goal>All operations logged with structured properties for monitoring.</goal>
+  <steps>
+    <step order="1">Add structured logging to orchestration service</step>
+    <step order="2">Log run start, node start, node complete, run complete</step>
+    <step order="3">Include correlation IDs</step>
+    <step order="4">Log token usage metrics</step>
+    <step order="5">Log errors with stack traces</step>
+    <step order="6">Verify logs appear in Application Insights</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs (modified)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Operations logged with structured data</criterion>
+    <criterion testable="true">Correlation IDs consistent</criterion>
+    <criterion testable="true">Logs visible in App Insights</criterion>
+  </acceptance-criteria>
+</task>

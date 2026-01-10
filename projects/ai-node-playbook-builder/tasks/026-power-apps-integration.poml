@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="026" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Implement Power Apps Integration</title>
+    <phase>3: Parallel Execution + Delivery</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <tags>bff-api, integration</tags>
+    <dependencies>025</dependencies>
+    <blocks>028</blocks>
+  </metadata>
+  <prompt>Integrate with Power Apps Word and Email templates for document generation and email delivery.</prompt>
+  <role>Senior developer with Power Platform expertise</role>
+  <goal>Power Apps template integration working for Word docs and emails.</goal>
+  <steps>
+    <step order="1">Research Power Apps Word template API</step>
+    <step order="2">Create WordTemplateService for document generation</step>
+    <step order="3">Create EmailTemplateService for email rendering</step>
+    <step order="4">Integrate with DeliverOutputNodeExecutor</step>
+    <step order="5">Map AI outputs to template placeholders</step>
+    <step order="6">Write integration tests</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Delivery/WordTemplateService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Delivery/EmailTemplateService.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Word documents generated from templates</criterion>
+    <criterion testable="true">Emails rendered from templates</criterion>
+    <criterion testable="true">AI output variables mapped correctly</criterion>
+  </acceptance-criteria>
+</task>

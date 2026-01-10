@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Implement Cancellation Support</title>
+    <phase>5: Production Hardening</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <tags>bff-api, feature</tags>
+    <dependencies>042</dependencies>
+    <blocks>044</blocks>
+  </metadata>
+  <prompt>Implement playbook execution cancellation via API.</prompt>
+  <role>Senior .NET developer</role>
+  <goal>Running playbook can be cancelled via API call.</goal>
+  <steps>
+    <step order="1">Create POST /api/ai/playbooks/runs/{runId}/cancel endpoint</step>
+    <step order="2">Store CancellationTokenSource per run</step>
+    <step order="3">Cancel token on API call</step>
+    <step order="4">Propagate cancellation to executors</step>
+    <step order="5">Update run status to Cancelled</step>
+    <step order="6">Clean up in-progress nodes</step>
+    <step order="7">Write tests</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookRunEndpoints.cs (modified)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Cancel endpoint works</criterion>
+    <criterion testable="true">Running nodes stop</criterion>
+    <criterion testable="true">Run status updated to Cancelled</criterion>
+  </acceptance-criteria>
+</task>

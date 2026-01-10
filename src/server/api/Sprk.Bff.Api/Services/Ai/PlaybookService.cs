@@ -517,6 +517,93 @@ public class PlaybookService : IPlaybookService
         return value.Replace("'", "''");
     }
 
+    /// <inheritdoc />
+    public async Task<CanvasLayoutResponse?> GetCanvasLayoutAsync(
+        Guid playbookId,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureAuthenticatedAsync(cancellationToken);
+
+        var url = $"{EntitySetName}({playbookId})?$select=sprk_canvaslayoutjson,modifiedon";
+        var response = await _httpClient.GetAsync(url, cancellationToken);
+
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+        response.EnsureSuccessStatusCode();
+
+        var content = await response.Content.ReadAsStringAsync(cancellationToken);
+        using var doc = JsonDocument.Parse(content);
+        var root = doc.RootElement;
+
+        CanvasLayoutDto? layout = null;
+        if (root.TryGetProperty("sprk_canvaslayoutjson", out var layoutProp) &&
+            layoutProp.ValueKind != JsonValueKind.Null)
+        {
+            var layoutJson = layoutProp.GetString();
+            if (!string.IsNullOrEmpty(layoutJson))
+            {
+                try
+                {
+                    layout = JsonSerializer.Deserialize<CanvasLayoutDto>(layoutJson, JsonOptions);
+                }
+                catch (JsonException ex)
+                {
+                    _logger.LogWarning(ex, "Failed to deserialize canvas layout for playbook {PlaybookId}", playbookId);
+                }
+            }
+        }
+
+        DateTime? modifiedOn = null;
+        if (root.TryGetProperty("modifiedon", out var modProp) &&
+            modProp.ValueKind != JsonValueKind.Null)
+        {
+            modifiedOn = modProp.GetDateTime();
+        }
+
+        return new CanvasLayoutResponse
+        {
+            PlaybookId = playbookId,
+            Layout = layout,
+            ModifiedOn = modifiedOn
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<CanvasLayoutResponse> SaveCanvasLayoutAsync(
+        Guid playbookId,
+        CanvasLayoutDto layout,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureAuthenticatedAsync(cancellationToken);
+
+        _logger.LogInformation("Saving canvas layout for playbook {PlaybookId}", playbookId);
+
+        // Serialize the layout to JSON
+        var layoutJson = JsonSerializer.Serialize(layout, JsonOptions);
+
+        // Update the playbook's canvas layout field
+        var payload = new Dictionary<string, object?>
+        {
+            ["sprk_canvaslayoutjson"] = layoutJson
+        };
+
+        var url = $"{EntitySetName}({playbookId})";
+        var response = await _httpClient.PatchAsJsonAsync(url, payload, JsonOptions, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        _logger.LogInformation("Saved canvas layout for playbook {PlaybookId}", playbookId);
+
+        // Return the saved layout
+        return new CanvasLayoutResponse
+        {
+            PlaybookId = playbookId,
+            Layout = layout,
+            ModifiedOn = DateTime.UtcNow
+        };
+    }
+
     #region Private Helper Methods
 
     private async Task AssociateRelationshipsAsync(

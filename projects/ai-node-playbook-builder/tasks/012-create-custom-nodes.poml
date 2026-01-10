@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Create Custom Node Components</title>
+    <phase>2: Visual Builder</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <tags>frontend, react</tags>
+    <dependencies>011</dependencies>
+    <blocks>013</blocks>
+  </metadata>
+
+  <prompt>
+    Create custom React Flow node components for each action type. Each node
+    type should have distinctive styling, icons, and connection handles.
+  </prompt>
+
+  <role>Senior frontend developer with React expertise</role>
+
+  <goal>
+    Custom node components created for all action types with consistent styling,
+    proper connection handles, and type-specific icons.
+  </goal>
+
+  <context>
+    <background>
+      Different action types (AiAnalysis, Condition, DeliverOutput, etc.) need
+      distinctive visual representation. Each node shows its name, action type,
+      and has connection handles for data flow.
+    </background>
+    <relevant-files>
+      <file>projects/ai-node-playbook-builder/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent UI v9 for styling and icons</constraint>
+    <constraint source="ADR-021">Support dark mode</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>projects/ai-node-playbook-builder/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create Nodes/ component directory</step>
+    <step order="2">Create BaseNode component with common layout</step>
+    <step order="3">Create AiAnalysisNode component</step>
+    <step order="4">Create AiCompletionNode component</step>
+    <step order="5">Create ConditionNode component (branching visual)</step>
+    <step order="6">Create DeliverOutputNode component</step>
+    <step order="7">Create CreateTaskNode component</step>
+    <step order="8">Create SendEmailNode component</step>
+    <step order="9">Create WaitNode component</step>
+    <step order="10">Add Fluent UI icons for each type</step>
+    <step order="11">Configure source and target handles</step>
+    <step order="12">Register node types with React Flow</step>
+    <step order="13">Test all node types on canvas</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create component files</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/playbook-builder/src/components/Nodes/BaseNode.tsx</output>
+    <output type="code">src/client/playbook-builder/src/components/Nodes/AiAnalysisNode.tsx</output>
+    <output type="code">src/client/playbook-builder/src/components/Nodes/ConditionNode.tsx</output>
+    <output type="code">src/client/playbook-builder/src/components/Nodes/DeliverOutputNode.tsx</output>
+    <output type="code">src/client/playbook-builder/src/components/Nodes/nodeTypes.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All action types have custom node components</criterion>
+    <criterion testable="true">Nodes render with correct icons and styling</criterion>
+    <criterion testable="true">Connection handles positioned correctly</criterion>
+    <criterion testable="true">Dark mode styling works</criterion>
+  </acceptance-criteria>
+</task>

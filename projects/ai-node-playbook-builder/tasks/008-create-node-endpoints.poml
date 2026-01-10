@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="008" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Create Node API Endpoints</title>
+    <phase>1: Foundation</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <tags>bff-api, api</tags>
+    <dependencies>007</dependencies>
+    <blocks>009</blocks>
+  </metadata>
+
+  <prompt>
+    Create the API endpoints for node management and playbook execution. Follow
+    Minimal API patterns and use endpoint filters for authorization. Include
+    SSE streaming endpoint for execution progress.
+  </prompt>
+
+  <role>Senior .NET developer with Minimal API expertise</role>
+
+  <goal>
+    All node management and execution endpoints implemented following ADR-001
+    and ADR-008 patterns, with proper authorization and SSE streaming.
+  </goal>
+
+  <context>
+    <background>
+      The API layer exposes node CRUD operations and playbook execution to
+      clients. It must follow existing patterns for endpoint registration,
+      authorization filters, and SSE streaming.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs</file>
+      <file>projects/ai-node-playbook-builder/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API patterns</constraint>
+    <constraint source="ADR-008">Use endpoint filters for authorization</constraint>
+    <constraint source="ADR-019">Return ProblemDetails for errors</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+    </files>
+    <patterns>
+      <pattern name="Playbook Endpoints">src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookEndpoints.cs</pattern>
+      <pattern name="SSE Streaming">src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing PlaybookEndpoints and AnalysisEndpoints</step>
+    <step order="2">Create NodeEndpoints.cs with MapNodeEndpoints extension</step>
+    <step order="3">Implement GET /api/ai/playbooks/{id}/nodes</step>
+    <step order="4">Implement POST /api/ai/playbooks/{id}/nodes</step>
+    <step order="5">Implement PUT /api/ai/playbooks/{id}/nodes/{nodeId}</step>
+    <step order="6">Implement DELETE /api/ai/playbooks/{id}/nodes/{nodeId}</step>
+    <step order="7">Implement PUT /api/ai/playbooks/{id}/nodes/reorder</step>
+    <step order="8">Implement PUT /api/ai/playbooks/{id}/nodes/{nodeId}/scopes</step>
+    <step order="9">Create PlaybookRunEndpoints.cs</step>
+    <step order="10">Implement POST /api/ai/playbooks/{id}/validate</step>
+    <step order="11">Implement POST /api/ai/playbooks/{id}/execute (SSE streaming)</step>
+    <step order="12">Implement GET /api/ai/playbooks/runs/{runId}</step>
+    <step order="13">Implement GET /api/ai/playbooks/runs/{runId}/stream (SSE)</step>
+    <step order="14">Add authorization filters to all endpoints</step>
+    <step order="15">Register endpoints in Program.cs</step>
+    <step order="16">Write integration tests</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing endpoints</tool>
+    <tool name="Write">Create endpoint files</tool>
+    <tool name="Edit">Update Program.cs</tool>
+    <tool name="Bash">Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/NodeEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookRunEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (modified)</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Api/NodeEndpointsTests.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Api/PlaybookRunEndpointsTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All node CRUD endpoints respond correctly</criterion>
+    <criterion testable="true">Authorization filters applied to all endpoints</criterion>
+    <criterion testable="true">Execute endpoint streams SSE events</criterion>
+    <criterion testable="true">Validation endpoint returns errors for invalid graph</criterion>
+    <criterion testable="true">Integration tests pass</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Follow existing PlaybookEndpoints pattern exactly for consistency.
+    SSE streaming follows AnalysisEndpoints pattern with proper headers.
+
+    Completed 2026-01-09. Implemented node and playbook execution endpoints:
+    - NodeEndpoints.cs: ListNodes, CreateNode, GetNode, UpdateNode, DeleteNode, ReorderNodes, UpdateNodeScopes
+    - PlaybookRunEndpoints.cs: ValidatePlaybook, ExecutePlaybook (SSE), GetRunStatus, StreamRunStatus (SSE), CancelRun
+    - All endpoints use PlaybookAuthorizationFilter (owner-only for writes, access-based for reads)
+    - SSE streaming uses Channel-based pattern for yielding events from try/catch blocks
+    - Registered IPlaybookOrchestrationService and INodeExecutorRegistry in Program.cs
+    - Updated CustomWebAppFactory with comprehensive test configuration
+    - Test assertions pass (cleanup failures are pre-existing infrastructure issue with DocumentEventProcessor)
+  </notes>
+</task>

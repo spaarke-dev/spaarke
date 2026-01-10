@@ -81,6 +81,65 @@ public class ScopeResolverServiceTests
 
     #endregion
 
+    #region ResolveNodeScopesAsync Tests
+
+    [Fact]
+    public async Task ResolveNodeScopesAsync_Phase1_ReturnsEmptyScopes()
+    {
+        // Arrange
+        var nodeId = Guid.NewGuid();
+
+        // Act
+        var result = await _service.ResolveNodeScopesAsync(nodeId, CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.Skills.Should().BeEmpty();
+        result.Knowledge.Should().BeEmpty();
+        result.Tools.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ResolveNodeScopesAsync_AnyNodeId_ReturnsValidResolvedScopes()
+    {
+        // Arrange - different node IDs should all return valid (empty) scopes
+        var nodeIds = new[] { Guid.NewGuid(), Guid.Empty, Guid.Parse("11111111-1111-1111-1111-111111111111") };
+
+        foreach (var nodeId in nodeIds)
+        {
+            // Act
+            var result = await _service.ResolveNodeScopesAsync(nodeId, CancellationToken.None);
+
+            // Assert
+            result.Should().NotBeNull();
+            result.Skills.Should().NotBeNull();
+            result.Knowledge.Should().NotBeNull();
+            result.Tools.Should().NotBeNull();
+        }
+    }
+
+    [Fact]
+    public async Task ResolveNodeScopesAsync_LogsNodeId()
+    {
+        // Arrange
+        var nodeId = Guid.NewGuid();
+
+        // Act
+        await _service.ResolveNodeScopesAsync(nodeId, CancellationToken.None);
+
+        // Assert - Verify logging occurred
+        _loggerMock.Verify(
+            x => x.Log(
+                LogLevel.Debug,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Resolving scopes from node")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
+    #endregion
+
     #region GetActionAsync Tests
 
     [Fact]

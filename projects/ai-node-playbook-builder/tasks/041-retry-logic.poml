@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Implement Retry Logic</title>
+    <phase>5: Production Hardening</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <tags>bff-api, resilience</tags>
+    <dependencies>040</dependencies>
+    <blocks>042</blocks>
+  </metadata>
+  <prompt>Implement retry logic for transient failures using Polly policies.</prompt>
+  <role>Senior .NET developer</role>
+  <goal>Transient failures retried with exponential backoff.</goal>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/api/resilience.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Add Polly policies for node execution</step>
+    <step order="2">Configure retry count from node settings</step>
+    <step order="3">Implement exponential backoff</step>
+    <step order="4">Identify retryable vs non-retryable errors</step>
+    <step order="5">Log retry attempts</step>
+    <step order="6">Write tests</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/NodeRetryPolicy.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Transient failures retried</criterion>
+    <criterion testable="true">Exponential backoff applied</criterion>
+    <criterion testable="true">Non-retryable errors fail immediately</criterion>
+  </acceptance-criteria>
+</task>

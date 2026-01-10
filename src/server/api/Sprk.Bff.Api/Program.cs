@@ -348,6 +348,15 @@ if (analysisEnabled && documentIntelligenceEnabled)
     // Playbook Service - CRUD operations for analysis playbooks (R3 Phase 3)
     builder.Services.AddHttpClient<Sprk.Bff.Api.Services.Ai.IPlaybookService, Sprk.Bff.Api.Services.Ai.PlaybookService>();
 
+    // Node Service - CRUD operations for playbook nodes (ai-node-playbook-builder project)
+    builder.Services.AddHttpClient<Sprk.Bff.Api.Services.Ai.INodeService, Sprk.Bff.Api.Services.Ai.NodeService>();
+
+    // Node Executor Registry - manages node type executors (ai-node-playbook-builder project)
+    builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutorRegistry, Sprk.Bff.Api.Services.Ai.Nodes.NodeExecutorRegistry>();
+
+    // Playbook Orchestration Service - multi-node playbook execution (ai-node-playbook-builder project)
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IPlaybookOrchestrationService, Sprk.Bff.Api.Services.Ai.PlaybookOrchestrationService>();
+
     // Playbook Sharing Service - team/organization sharing for playbooks (R3 Phase 3 Task 023)
     builder.Services.AddHttpClient<Sprk.Bff.Api.Services.Ai.IPlaybookSharingService, Sprk.Bff.Api.Services.Ai.PlaybookSharingService>();
 
@@ -895,6 +904,28 @@ app.UseCors();
 app.UseMiddleware<Sprk.Bff.Api.Api.SecurityHeadersMiddleware>();
 
 // ============================================================================
+// STATIC FILES - Serve playbook-builder SPA from wwwroot
+// ============================================================================
+// Serves static files from wwwroot/ directory. The playbook-builder React app
+// is deployed to wwwroot/playbook-builder/ and accessed at /playbook-builder/
+//
+// Note: dotnet publish creates a wwwroot/ folder in the output, but Azure App Service
+// deploys to site/wwwroot/ which IS the web root. This results in files being at
+// site/wwwroot/wwwroot/ instead of site/wwwroot/. We handle this by adding a second
+// static file provider that looks in the nested wwwroot folder.
+app.UseStaticFiles();
+
+// Handle Azure deployment where static files end up in nested wwwroot/wwwroot/
+var nestedWwwroot = Path.Combine(app.Environment.ContentRootPath, "wwwroot");
+if (Directory.Exists(nestedWwwroot))
+{
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(nestedWwwroot)
+    });
+}
+
+// ============================================================================
 // GLOBAL EXCEPTION HANDLER - RFC 7807 Problem Details
 // ============================================================================
 // Catches all unhandled exceptions and converts them to structured Problem Details JSON
@@ -1047,10 +1078,39 @@ if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
     app.MapAnalysisEndpoints();
     app.MapPlaybookEndpoints();
     app.MapScopeEndpoints();
+    app.MapNodeEndpoints();
+    app.MapPlaybookRunEndpoints();
 }
 
 // RAG endpoints for knowledge base operations (R3)
 app.MapRagEndpoints();
+
+// ============================================================================
+// PLAYBOOK BUILDER SPA FALLBACK - Client-side routing support
+// ============================================================================
+// Catch-all for /playbook-builder/* routes that don't match static files.
+// IMPORTANT: MapFallbackToFile creates a route that matches the pattern, so we need to
+// ensure it doesn't match requests for static assets (.js, .css, .map, .svg, etc).
+// The fallback only triggers for non-file paths (client-side routes).
+app.MapFallback(context =>
+{
+    var path = context.Request.Path.Value ?? "";
+    // Only serve index.html for /playbook-builder/* paths that are NOT static files
+    if (path.StartsWith("/playbook-builder/", StringComparison.OrdinalIgnoreCase) &&
+        !Path.HasExtension(path))
+    {
+        context.Request.Path = "/playbook-builder/index.html";
+        return context.RequestServices.GetRequiredService<IWebHostEnvironment>()
+            .WebRootFileProvider
+            .GetFileInfo("playbook-builder/index.html")
+            .Exists
+            ? Results.File(
+                Path.Combine(context.RequestServices.GetRequiredService<IWebHostEnvironment>().WebRootPath!, "playbook-builder/index.html"),
+                "text/html").ExecuteAsync(context)
+            : Results.NotFound().ExecuteAsync(context);
+    }
+    return Results.NotFound().ExecuteAsync(context);
+});
 
 // Resilience monitoring endpoints (circuit breaker status)
 app.MapResilienceEndpoints();

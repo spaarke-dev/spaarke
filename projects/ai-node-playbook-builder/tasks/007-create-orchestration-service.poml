@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="007" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Create PlaybookOrchestrationService</title>
+    <phase>1: Foundation</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <tags>bff-api, orchestration</tags>
+    <dependencies>006</dependencies>
+    <blocks>008</blocks>
+  </metadata>
+
+  <prompt>
+    Create the PlaybookOrchestrationService that orchestrates multi-node playbook
+    execution. Implement mode detection (Legacy vs NodeBased), sequential batch
+    execution, and SSE streaming for progress updates.
+  </prompt>
+
+  <role>Senior .NET developer with orchestration expertise</role>
+
+  <goal>
+    IPlaybookOrchestrationService and PlaybookOrchestrationService implemented
+    with mode detection, sequential execution, and SSE streaming support.
+  </goal>
+
+  <context>
+    <background>
+      The orchestration service is the central coordinator for playbook execution.
+      It must detect playbook mode (Legacy delegates to existing service, NodeBased
+      uses new execution path), build execution graph, and execute nodes in order
+      while streaming progress.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+      <file>projects/ai-node-playbook-builder/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Follow existing orchestration patterns</constraint>
+    <constraint source="ADR-013">Extend BFF, reuse existing infrastructure</constraint>
+    <constraint source="project">Legacy mode delegates to AnalysisOrchestrationService</constraint>
+    <constraint source="project">Playbook-level failure: any node fails = stop execution</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+    </files>
+    <patterns>
+      <pattern name="Orchestration">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing AnalysisOrchestrationService for patterns</step>
+    <step order="2">Create IPlaybookOrchestrationService interface</step>
+    <step order="3">Create PlaybookRunContext for shared state</step>
+    <step order="4">Create PlaybookOrchestrationService</step>
+    <step order="5">Implement mode detection (check playbookmode field)</step>
+    <step order="6">For Legacy mode: delegate to AnalysisOrchestrationService</step>
+    <step order="7">For NodeBased mode: load nodes and build ExecutionGraph</step>
+    <step order="8">Implement ExecuteAsync with IAsyncEnumerable for streaming</step>
+    <step order="9">Execute nodes sequentially by batch</step>
+    <step order="10">Store outputs in PlaybookRunContext.NodeOutputs</step>
+    <step order="11">Create and update PlaybookRun record</step>
+    <step order="12">Emit stream events: RunStarted, NodeStarted, NodeCompleted, RunCompleted</step>
+    <step order="13">Handle node failure: stop execution, emit RunFailed</step>
+    <step order="14">Write unit tests</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing orchestration</tool>
+    <tool name="Write">Create service files</tool>
+    <tool name="Bash">Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/IPlaybookOrchestrationService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookRunContext.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Services/PlaybookOrchestrationServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Legacy mode playbooks delegate to existing service</criterion>
+    <criterion testable="true">NodeBased mode builds and executes graph</criterion>
+    <criterion testable="true">Nodes execute in correct order per dependencies</criterion>
+    <criterion testable="true">Node outputs stored in context for downstream access</criterion>
+    <criterion testable="true">Stream events emitted at appropriate points</criterion>
+    <criterion testable="true">Node failure stops execution immediately</criterion>
+    <criterion testable="true">Unit tests pass</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Phase 1 implements sequential execution only. Parallel execution is Phase 3.
+    Document text extraction should be shared across all nodes (extract once).
+
+    Completed 2026-01-09. Implemented playbook orchestration service:
+    - IPlaybookOrchestrationService interface with ExecuteAsync, ValidateAsync, GetRunStatusAsync, CancelAsync
+    - PlaybookRunContext for shared state across nodes with thread-safe output storage
+    - PlaybookOrchestrationService with mode detection (nodes.Length == 0 → Legacy, else NodeBased)
+    - Legacy mode delegates to IAnalysisOrchestrationService.ExecutePlaybookAsync
+    - NodeBased mode uses ExecutionGraph for topological sorting, executes nodes sequentially
+    - SSE streaming via IAsyncEnumerable with PlaybookStreamEvent types
+    - Channel-based pattern for yielding events from try/catch blocks
+    - In-memory run tracking with ConcurrentDictionary (Phase 2 adds Dataverse persistence)
+    - 20 unit tests covering mode detection, legacy delegation, node execution, validation, error handling
+    - Consolidated PlaybookValidationResult to Models.Ai namespace (removed duplicate)
+  </notes>
+</task>
