@@ -12,7 +12,7 @@
 |-------|--------|----------|
 | Phase 1: Core Infrastructure | Complete | 8/8 |
 | Phase 2: PCF Control Development | Complete | 10/10 |
-| Phase 3: Integration & Ribbon | In Progress | 1/5 |
+| Phase 3: Integration & Ribbon | In Progress | 1/3 (2 deferred) |
 | Phase 4: Polish & Documentation | Not Started | 0/4 |
 | Wrap-up | Not Started | 0/1 |
 
@@ -41,9 +41,9 @@
 | 018 | Integration tests with Azure AI Search | 2 | ✅ | 005, 016 | STANDARD |
 | 019 | Deploy Phase 2 PCF | 2 | ✅ | 017, 018 | STANDARD |
 | 020 | Register PCF on sprk_document form | 3 | ✅ | 019 | FULL |
-| 021 | Create ribbon button command | 3 | 🔲 | 020 | FULL |
-| 022 | Implement modal dialog launcher | 3 | 🔲 | 021 | FULL |
-| 023 | End-to-end testing in Dataverse | 3 | 🔲 | 022 | STANDARD |
+| 021 | Create ribbon button command | 3 | ⏭️ | 020 | FULL |
+| 022 | Implement modal dialog launcher | 3 | ⏭️ | 021 | FULL |
+| 023 | End-to-end testing in Dataverse | 3 | 🔲 | 020 | STANDARD |
 | 024 | Deploy Phase 3 ribbon | 3 | 🔲 | 023 | STANDARD |
 | 030 | Implement export functionality | 4 | 🔲 | 024 | FULL |
 | 031 | Performance optimization | 4 | 🔲 | 024 | STANDARD |
@@ -223,6 +223,22 @@
 - Configured: documentId (bound), tenantId (static), apiBaseUrl (static)
 - Control renders with header "Document Relationships", version v1.0.1 in footer
 - Placeholder message displayed when no document context available
+
+**API Integration (2026-01-10):**
+- Identified critical gap: PCF used dummy data (`generateSampleData`) instead of calling BFF API
+- Created `types/api.ts` - Type definitions mirroring IVisualizationService.cs response models
+- Created `services/VisualizationApiService.ts` - API fetch with type mapping (API → PCF graph types)
+- Created `hooks/useVisualizationApi.ts` - React hook managing loading/error/data states
+- Updated `DocumentRelationshipViewer.tsx` - Integrated hook, removed sample data generator
+- Deployed v1.0.17 to Dataverse with full API integration
+- API endpoint: `/api/ai/visualization/related/{documentId}?tenantId={tenantId}`
+
+**Architecture Decision - Tasks 021-022 Deferred:**
+- Tasks 021 (ribbon button) and 022 (modal launcher) are NO LONGER NEEDED
+- Original design: Modal-based visualization launched from ribbon button
+- Implemented design: Section-based visualization embedded directly in form
+- Control renders inline in "Search" tab, no modal or ribbon button required
+- Skip directly to Task 023 (e2e testing) then Task 024 (deployment)
 
 **No Current Blockers.**
 

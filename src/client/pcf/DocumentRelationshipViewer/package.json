@@ -1,6 +1,6 @@
 {
   "name": "document-relationship-viewer",
-  "version": "1.0.16",
+  "version": "1.0.17",
   "description": "PCF control for visualizing document relationships using graph layout",
   "scripts": {
     "build": "pcf-scripts build",

@@ -13,10 +13,11 @@ import {
 import { DocumentFlowchart24Regular } from "@fluentui/react-icons";
 import { IInputs } from "./generated/ManifestTypes";
 import { DocumentGraph } from "./components/DocumentGraph";
-import type { DocumentNode, DocumentEdge } from "./types/graph";
+import { useVisualizationApi, formatVisualizationError } from "./hooks/useVisualizationApi";
+import type { DocumentNode } from "./types/graph";
 
 // Control version - must match ControlManifest.Input.xml
-const CONTROL_VERSION = "1.0.16";
+const CONTROL_VERSION = "1.0.17";
 
 /**
  * Props for the DocumentRelationshipViewer component
@@ -131,67 +132,6 @@ function isDarkMode(context?: ComponentFramework.Context<IInputs>): boolean {
 }
 
 /**
- * Generate sample nodes and edges for testing the graph visualization.
- * This will be replaced with API data in production.
- */
-function generateSampleData(sourceDocumentId: string): { nodes: DocumentNode[]; edges: DocumentEdge[] } {
-    // Source node (center)
-    const sourceNode: DocumentNode = {
-        id: sourceDocumentId,
-        type: "document",
-        position: { x: 0, y: 0 },
-        data: {
-            documentId: sourceDocumentId,
-            name: "Source Document.pdf",
-            fileType: "pdf",
-            size: 1024000,
-            isSource: true,
-        },
-    };
-
-    // Related documents with varying similarity
-    const relatedDocs = [
-        { id: "doc-1", name: "Related Contract.docx", fileType: "docx", similarity: 0.92 },
-        { id: "doc-2", name: "Previous Agreement.pdf", fileType: "pdf", similarity: 0.85 },
-        { id: "doc-3", name: "Meeting Notes.docx", fileType: "docx", similarity: 0.78 },
-        { id: "doc-4", name: "Project Proposal.pptx", fileType: "pptx", similarity: 0.72 },
-        { id: "doc-5", name: "Budget Report.xlsx", fileType: "xlsx", similarity: 0.65 },
-        { id: "doc-6", name: "Legal Review.pdf", fileType: "pdf", similarity: 0.58 },
-        { id: "doc-7", name: "Status Update.docx", fileType: "docx", similarity: 0.52 },
-    ];
-
-    const nodes: DocumentNode[] = [
-        sourceNode,
-        ...relatedDocs.map((doc) => ({
-            id: doc.id,
-            type: "document" as const,
-            position: { x: 0, y: 0 }, // Will be calculated by force layout
-            data: {
-                documentId: doc.id,
-                name: doc.name,
-                fileType: doc.fileType,
-                similarity: doc.similarity,
-                isSource: false,
-                parentEntityName: "Matter ABC-123",
-            },
-        })),
-    ];
-
-    // Create edges from source to all related documents
-    const edges: DocumentEdge[] = relatedDocs.map((doc) => ({
-        id: `edge-${sourceDocumentId}-${doc.id}`,
-        source: sourceDocumentId,
-        target: doc.id,
-        data: {
-            similarity: doc.similarity,
-            sharedKeywords: ["contract", "agreement"],
-        },
-    }));
-
-    return { nodes, edges };
-}
-
-/**
  * DocumentRelationshipViewer - Interactive graph visualization of related documents.
  *
  * This control displays a force-directed graph showing document relationships
@@ -221,16 +161,26 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
     const boundDocumentId = context.parameters.documentId?.raw;
     const documentId = contextEntityId ?? boundDocumentId ?? "";
     const apiBaseUrl = context.parameters.apiBaseUrl?.raw ?? "https://spe-api-dev-67e2xz.azurewebsites.net";
+    const tenantId = context.parameters.tenantId?.raw ?? "";
 
-    // State for loading and error
-    const [isLoading, setIsLoading] = React.useState(false);
-    const [error, setError] = React.useState<string | null>(null);
+    // Selected node state
     const [selectedNodeId, setSelectedNodeId] = React.useState<string | null>(null);
 
-    // Graph data state
-    const [graphData, setGraphData] = React.useState<{ nodes: DocumentNode[]; edges: DocumentEdge[] }>({
-        nodes: [],
-        edges: [],
+    // Fetch visualization data from API
+    const {
+        nodes,
+        edges,
+        metadata,
+        isLoading,
+        error,
+    } = useVisualizationApi({
+        apiBaseUrl,
+        documentId,
+        tenantId,
+        threshold: 0.65,
+        limit: 25,
+        depth: 1,
+        enabled: !!documentId && documentId.trim() !== "" && !!tenantId,
     });
 
     // Get container dimensions for layout
@@ -266,19 +216,6 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
         };
     }, []);
 
-    // Load graph data when documentId changes
-    React.useEffect(() => {
-        if (!documentId || documentId.trim() === "") {
-            setGraphData({ nodes: [], edges: [] });
-            return;
-        }
-
-        // For now, use sample data
-        // TODO: Replace with API call in production
-        const sampleData = generateSampleData(documentId);
-        setGraphData(sampleData);
-    }, [documentId, apiBaseUrl]);
-
     // Handle node selection
     const handleNodeSelect = React.useCallback(
         (node: DocumentNode) => {
@@ -291,10 +228,13 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
         [onDocumentSelect, notifyOutputChanged]
     );
 
-    // Check if we should show the placeholder
+    // Check if we should show the placeholder (missing document or tenant)
     const showPlaceholder = !documentId || documentId.trim() === "";
+    const showTenantMissing = documentId && !tenantId;
     // Check if we have measured dimensions
     const hasDimensions = dimensions !== null && dimensions.width > 0 && dimensions.height > 0;
+    // Format error message for display
+    const errorMessage = error ? formatVisualizationError(error) : null;
 
     return (
         <FluentProvider theme={theme}>
@@ -320,11 +260,21 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
                         <div className={styles.placeholder}>
                             <Spinner size="large" label="Loading relationships..." />
                         </div>
-                    ) : error ? (
+                    ) : errorMessage ? (
                         <div className={styles.errorContainer}>
                             <MessageBar intent="error">
-                                <MessageBarBody>{error}</MessageBarBody>
+                                <MessageBarBody>{errorMessage}</MessageBarBody>
                             </MessageBar>
+                        </div>
+                    ) : showTenantMissing ? (
+                        <div className={styles.placeholder}>
+                            <DocumentFlowchart24Regular style={{ fontSize: 48 }} />
+                            <Text>
+                                Configuration required
+                            </Text>
+                            <Text size={200}>
+                                Tenant ID must be configured to load relationships
+                            </Text>
                         </div>
                     ) : showPlaceholder ? (
                         <div className={styles.placeholder}>
@@ -340,10 +290,20 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
                         <div className={styles.placeholder}>
                             <Spinner size="medium" label="Initializing..." />
                         </div>
+                    ) : nodes.length === 0 ? (
+                        <div className={styles.placeholder}>
+                            <DocumentFlowchart24Regular style={{ fontSize: 48 }} />
+                            <Text>
+                                No related documents found
+                            </Text>
+                            <Text size={200}>
+                                This document has no similar documents above the similarity threshold
+                            </Text>
+                        </div>
                     ) : (
                         <DocumentGraph
-                            nodes={graphData.nodes}
-                            edges={graphData.edges}
+                            nodes={nodes}
+                            edges={edges}
                             isDarkMode={darkMode}
                             onNodeSelect={handleNodeSelect}
                             width={dimensions.width}
@@ -357,9 +317,11 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
                 {/* Footer with stats and version */}
                 <div className={styles.footer}>
                     <span>
-                        {graphData.nodes.length > 0
-                            ? `${graphData.nodes.length} documents · ${graphData.edges.length} relationships`
-                            : "No data loaded"
+                        {nodes.length > 0
+                            ? `${nodes.length} documents · ${edges.length} relationships`
+                            : metadata
+                                ? `Searched in ${metadata.searchLatencyMs}ms`
+                                : "No data loaded"
                         }
                     </span>
                     <span className={styles.versionText}>

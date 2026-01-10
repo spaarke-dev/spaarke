@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-01-09
+> **Last Updated**: 2026-01-10
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -13,18 +13,19 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 021 - Create ribbon button command |
-| **Step** | Not started |
-| **Status** | not-started |
-| **Next Action** | Create ribbon button to launch DocumentRelationshipViewer modal |
+| **Task** | Fix documentVector gap in RAG indexing |
+| **Step** | Completed |
+| **Status** | completed |
+| **Next Action** | Re-upload a document via RAG, then test visualization (Task 023) |
 
 ### Files Modified This Session
 <!-- Only files touched in CURRENT session, not all time -->
-*None yet - Task 021 not started*
+- `src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs` - Modified - Added documentVector field
+- `src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs` - Modified - Auto-compute documentVector during indexing
 
 ### Critical Context
 <!-- 1-3 sentences of essential context for continuation -->
-**Phase 3 Started (1/5 tasks).** Task 020 complete - PCF registered on sprk_document form (Search tab). Control renders with header, placeholder, and v1.0.1 footer. Next: Task 021 - Create ribbon button command to launch the modal dialog.
+**RAG documentVector gap FIXED.** The root cause of 404 errors for new documents was that RAG ingestion created chunks with `contentVector` but NOT `documentVector`. Modified `IndexDocumentsBatchAsync` to automatically compute `documentVector` by averaging chunk vectors with L2 normalization. Single-chunk documents also handled in `IndexDocumentAsync`. **Existing documents still need backfill** (run `DocumentVectorBackfillService`) OR re-upload documents. Next: Re-upload a test document and verify visualization works.
 
 ---
 
@@ -164,12 +165,39 @@ To start Task 021:
 - Task 020: Virtual control type allows PCF to bind to entity primary key
 - Task 020: Static values for tenantId and apiBaseUrl configured in control properties
 - Task 020: Control renders placeholder when document context not available
+- API Integration: Create types/api.ts mirroring C# API response models from IVisualizationService.cs
+- API Integration: Use Record<string, string> for headers to satisfy ESLint dot-notation rule
+- API Integration: Type cast JSON responses with `as` to satisfy ESLint unsafe-any rules
+- API Integration: Use RegExp.exec() instead of string.match() per ESLint prefer-regexp-exec rule
+- API Integration: Use `void` keyword for floating promises in useEffect
+- API Integration: Map API node.data.label to PCF node.data.name, node.type==="source" to isSource
+- API Integration: Extract file type from document name using regex or fallback to documentType mapping
+- DocumentVector Fix: Root cause of 404 - RAG created contentVector but NOT documentVector on new documents
+- DocumentVector Fix: KnowledgeDocument model needed documentVector field (was only in BackfillDocument internal model)
+- DocumentVector Fix: IndexDocumentsBatchAsync now groups chunks by DocumentId and computes averaged documentVector
+- DocumentVector Fix: Use L2 normalization after averaging for cosine similarity compatibility
+- DocumentVector Fix: Single-chunk documents in IndexDocumentAsync get documentVector = contentVector
+- DocumentVector Fix: Existing docs require backfill OR re-upload; new docs are now auto-computed
 
 ### Handoff Notes
 <!-- Used when context budget is high or session ending -->
 <!-- Another Claude instance should be able to continue from these notes -->
 
-**Phase 3 STARTED (1/5 tasks).** Task 020 complete - PCF registered on sprk_document form (Search tab). Control bound to documentId, tenantId, apiBaseUrl configured. Renders with "Document Relationships" header, placeholder message, and v1.0.1 footer. Next: Task 021 - Create ribbon button command that will launch the visualization modal.
+**DocumentVector Gap FIXED (2026-01-10).** User tested visualization and got 404 because new documents didn't have `documentVector`. Root cause: RAG ingestion created chunk `contentVector` but visualization API requires `documentVector` (document-level embedding). Fixed by:
+1. Added `documentVector` field to `KnowledgeDocument.cs` (was only in internal BackfillDocument)
+2. Modified `IndexDocumentsBatchAsync` to auto-compute `documentVector` when all chunks are indexed together
+3. Added single-chunk support to `IndexDocumentAsync` (sets documentVector = contentVector)
+4. 88 unit tests pass, build succeeds
+
+**To test the fix**: Deploy updated API to Azure, then either:
+- Re-upload/re-analyze a document (will get documentVector computed)
+- OR run DocumentVectorBackfillService for existing documents
+
+**Previous Session Context**:
+- API Integration Complete (v1.0.17 deployed) - PCF calls BFF API
+- Tasks 021-022 (ribbon button + modal) are NO LONGER RELEVANT - control is section-based
+- API Endpoint: `GET /api/ai/visualization/related/{documentId}?tenantId={tenantId}&threshold=0.65&limit=25&depth=1`
+- Control requires tenantId in form control properties
 
 ---
 
