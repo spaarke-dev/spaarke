@@ -32,9 +32,12 @@ public class VisualizationService : IVisualizationService
     private readonly ILogger<VisualizationService> _logger;
     private readonly DataverseOptions _dataverseOptions;
 
-    // Vector field for document-level embeddings (1536 dimensions)
-    private const string DocumentVectorFieldName = "documentVector";
-    private const int VectorDimensions = 1536;
+    // Vector field for document-level embeddings
+    // Primary: 3072-dimension field (text-embedding-3-large)
+    // Fallback: 1536-dimension field (during migration period)
+    private const string DocumentVectorFieldName3072 = "documentVector3072";
+    private const string DocumentVectorFieldNameLegacy = "documentVector";
+    private const int VectorDimensions = 3072;
 
     // Maximum nodes to prevent exponential growth
     private const int MaxTotalNodes = 100;
@@ -81,9 +84,11 @@ public class VisualizationService : IVisualizationService
                 return CreateEmptyResponse(documentId.ToString(), options);
             }
 
-            // Step 3: Search for related documents using documentVector
+            // Step 3: Search for related documents using best available documentVector
+            // Prefers 3072-dim vector, falls back to 1536-dim during migration
+            var sourceVector = sourceDocument.GetBestVector();
             var relatedDocuments = await SearchRelatedDocumentsAsync(
-                searchClient, sourceDocument.DocumentVector, documentId.ToString(), options, cancellationToken);
+                searchClient, sourceVector, documentId.ToString(), options, cancellationToken);
 
             // Step 4: Get Dataverse metadata for URLs and parent entity info
             var documentMetadata = await GetDocumentMetadataAsync(
@@ -125,12 +130,14 @@ public class VisualizationService : IVisualizationService
         CancellationToken cancellationToken)
     {
         // Query for a single chunk of the source document to get its documentVector
+        // Include both 3072-dim and 1536-dim vectors for backward compatibility during migration
         var searchOptions = new SearchOptions
         {
             Size = 1,
             Filter = $"documentId eq '{EscapeFilterValue(documentId)}' and tenantId eq '{EscapeFilterValue(tenantId)}'",
-            Select = { "id", "documentId", "documentName", "documentType", "tenantId",
-                       "createdAt", "updatedAt", "documentVector", "metadata", "tags" }
+            Select = { "id", "documentId", "speFileId", "fileName", "documentName", "fileType",
+                       "documentType", "tenantId", "createdAt", "updatedAt",
+                       "documentVector3072", "documentVector", "metadata", "tags" }
         };
 
         var response = await searchClient.SearchAsync<VisualizationDocument>("*", searchOptions, cancellationToken);
@@ -149,6 +156,7 @@ public class VisualizationService : IVisualizationService
 
     /// <summary>
     /// Search for documents with similar documentVector.
+    /// Supports both 3072-dim and 1536-dim vectors for backward compatibility during migration.
     /// </summary>
     private async Task<List<(VisualizationDocument Document, double Score)>> SearchRelatedDocumentsAsync(
         SearchClient searchClient,
@@ -163,7 +171,17 @@ public class VisualizationService : IVisualizationService
             return [];
         }
 
-        // Build search options with vector search on documentVector
+        // Determine which vector field to use based on source vector dimensions
+        // 3072-dim = use documentVector3072 field
+        // 1536-dim = use legacy documentVector field (fallback during migration)
+        var vectorFieldName = sourceVector.Length == VectorDimensions
+            ? DocumentVectorFieldName3072
+            : DocumentVectorFieldNameLegacy;
+
+        _logger.LogDebug("Using vector field {VectorField} for search (source vector has {Dimensions} dimensions)",
+            vectorFieldName, sourceVector.Length);
+
+        // Build search options with vector search on appropriate field
         var searchOptions = new SearchOptions
         {
             Size = options.Limit * 2, // Retrieve more to account for duplicates (same doc, different chunks)
@@ -175,12 +193,13 @@ public class VisualizationService : IVisualizationService
                     new VectorizedQuery(sourceVector)
                     {
                         KNearestNeighborsCount = options.Limit * 2,
-                        Fields = { DocumentVectorFieldName }
+                        Fields = { vectorFieldName }
                     }
                 }
             },
-            Select = { "id", "documentId", "documentName", "documentType", "tenantId",
-                       "createdAt", "updatedAt", "documentVector", "metadata", "tags" }
+            Select = { "id", "documentId", "speFileId", "fileName", "documentName", "fileType",
+                       "documentType", "tenantId", "createdAt", "updatedAt",
+                       "documentVector3072", "documentVector", "metadata", "tags" }
         };
 
         // Build filter: tenant isolation + exclude source document + optional document types
@@ -203,7 +222,7 @@ public class VisualizationService : IVisualizationService
         var response = await searchClient.SearchAsync<VisualizationDocument>("*", searchOptions, cancellationToken);
         var results = response.Value;
 
-        // Process results, deduplicating by documentId
+        // Process results, deduplicating by unique ID (documentId or speFileId for orphan files)
         var seenDocuments = new HashSet<string>();
         var relatedDocuments = new List<(VisualizationDocument Document, double Score)>();
 
@@ -216,8 +235,10 @@ public class VisualizationService : IVisualizationService
             // Apply threshold filter
             if (score < options.Threshold) continue;
 
-            // Deduplicate by documentId (multiple chunks from same document)
-            if (!seenDocuments.Add(result.Document.DocumentId))
+            // Deduplicate by unique ID (multiple chunks from same document)
+            // Uses documentId if available, otherwise speFileId for orphan files
+            var uniqueId = result.Document.GetUniqueId();
+            if (!seenDocuments.Add(uniqueId))
             {
                 continue;
             }
@@ -236,6 +257,7 @@ public class VisualizationService : IVisualizationService
 
     /// <summary>
     /// Get document metadata from Dataverse for URLs and parent entity info.
+    /// For orphan files (no documentId), generates metadata from SPE file info.
     /// </summary>
     private async Task<Dictionary<string, DocumentMetadata>> GetDocumentMetadataAsync(
         VisualizationDocument sourceDocument,
@@ -244,21 +266,49 @@ public class VisualizationService : IVisualizationService
     {
         var metadata = new Dictionary<string, DocumentMetadata>();
 
-        // Collect all document IDs
-        var documentIds = new List<string> { sourceDocument.DocumentId };
-        documentIds.AddRange(relatedDocuments.Select(r => r.Document.DocumentId));
+        // Collect all documents (source + related)
+        var allDocuments = new List<VisualizationDocument> { sourceDocument };
+        allDocuments.AddRange(relatedDocuments.Select(r => r.Document));
 
         // Fetch metadata for each document
-        foreach (var docId in documentIds.Distinct())
+        foreach (var doc in allDocuments)
         {
+            var uniqueId = doc.GetUniqueId();
+
+            // Skip if already processed
+            if (metadata.ContainsKey(uniqueId)) continue;
+
+            // Handle orphan files (no documentId)
+            if (string.IsNullOrEmpty(doc.DocumentId))
+            {
+                _logger.LogDebug("Processing orphan file {SpeFileId}", doc.SpeFileId);
+
+                metadata[uniqueId] = new DocumentMetadata
+                {
+                    IsOrphanFile = true,
+                    SpeFileId = doc.SpeFileId,
+                    RecordUrl = string.Empty, // No Dataverse record for orphan files
+                    FileUrl = BuildSpeFileUrl(doc.SpeFileId),
+                    FilePreviewUrl = null,
+                    ExtractedKeywords = [],
+                    ParentEntityType = null,
+                    ParentEntityId = null,
+                    ParentEntityName = null
+                };
+                continue;
+            }
+
+            // Fetch metadata from Dataverse for documents with documentId
             try
             {
-                var entity = await _dataverseService.GetDocumentAsync(docId, cancellationToken);
+                var entity = await _dataverseService.GetDocumentAsync(doc.DocumentId, cancellationToken);
                 if (entity != null)
                 {
-                    metadata[docId] = new DocumentMetadata
+                    metadata[uniqueId] = new DocumentMetadata
                     {
-                        RecordUrl = BuildRecordUrl(docId),
+                        IsOrphanFile = false,
+                        SpeFileId = doc.SpeFileId,
+                        RecordUrl = BuildRecordUrl(doc.DocumentId),
                         FileUrl = BuildFileUrl(entity),
                         FilePreviewUrl = BuildPreviewUrl(entity),
                         ExtractedKeywords = ParseKeywords(entity.Keywords),
@@ -273,11 +323,13 @@ public class VisualizationService : IVisualizationService
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to get metadata for document {DocumentId}", docId);
+                _logger.LogWarning(ex, "Failed to get metadata for document {DocumentId}", doc.DocumentId);
                 // Continue without metadata for this document
-                metadata[docId] = new DocumentMetadata
+                metadata[uniqueId] = new DocumentMetadata
                 {
-                    RecordUrl = BuildRecordUrl(docId),
+                    IsOrphanFile = false,
+                    SpeFileId = doc.SpeFileId,
+                    RecordUrl = BuildRecordUrl(doc.DocumentId),
                     FileUrl = string.Empty,
                     ExtractedKeywords = []
                 };
@@ -289,6 +341,7 @@ public class VisualizationService : IVisualizationService
 
     /// <summary>
     /// Build the graph response from search results.
+    /// Supports both regular documents and orphan files (using GetUniqueId() for consistent identification).
     /// </summary>
     private DocumentGraphResponse BuildGraphResponse(
         VisualizationDocument sourceDocument,
@@ -300,14 +353,18 @@ public class VisualizationService : IVisualizationService
         var nodes = new List<DocumentNode>();
         var edges = new List<DocumentEdge>();
 
+        // Get unique IDs for all documents (handles both regular docs and orphan files)
+        var sourceId = sourceDocument.GetUniqueId();
+
         // Add source node
-        var sourceMetadata = metadata.GetValueOrDefault(sourceDocument.DocumentId) ?? new DocumentMetadata();
+        var sourceMetadata = metadata.GetValueOrDefault(sourceId) ?? new DocumentMetadata();
         nodes.Add(CreateNode(sourceDocument, sourceMetadata, isSource: true, depth: 0, similarity: null));
 
         // Add related nodes and edges
         foreach (var (document, score) in relatedDocuments)
         {
-            var docMetadata = metadata.GetValueOrDefault(document.DocumentId) ?? new DocumentMetadata();
+            var targetId = document.GetUniqueId();
+            var docMetadata = metadata.GetValueOrDefault(targetId) ?? new DocumentMetadata();
             nodes.Add(CreateNode(document, docMetadata, isSource: false, depth: 1, similarity: score));
 
             // Create edge from source to related document
@@ -317,9 +374,9 @@ public class VisualizationService : IVisualizationService
 
             edges.Add(new DocumentEdge
             {
-                Id = $"{sourceDocument.DocumentId}-{document.DocumentId}",
-                Source = sourceDocument.DocumentId,
-                Target = document.DocumentId,
+                Id = $"{sourceId}-{targetId}",
+                Source = sourceId,
+                Target = targetId,
                 Data = new DocumentEdgeData
                 {
                     Similarity = score,
@@ -342,7 +399,7 @@ public class VisualizationService : IVisualizationService
             Edges = edges,
             Metadata = new GraphMetadata
             {
-                SourceDocumentId = sourceDocument.DocumentId,
+                SourceDocumentId = sourceId,
                 TenantId = options.TenantId,
                 TotalResults = relatedDocuments.Count,
                 Threshold = options.Threshold,
@@ -362,15 +419,27 @@ public class VisualizationService : IVisualizationService
         int depth,
         double? similarity)
     {
+        // Determine the document type for display
+        // For orphan files, use "File" as the type
+        var displayType = metadata.IsOrphanFile
+            ? GetFileTypeDisplay(document.FileType)
+            : document.DocumentType ?? "Unknown";
+
+        // For orphan files, the node type is "orphan" instead of "related"
+        var nodeType = isSource ? "source" : (metadata.IsOrphanFile ? "orphan" : "related");
+
         return new DocumentNode
         {
-            Id = document.DocumentId,
-            Type = isSource ? "source" : "related",
+            Id = document.GetUniqueId(),
+            Type = nodeType,
             Depth = depth,
             Data = new DocumentNodeData
             {
-                Label = document.DocumentName,
-                DocumentType = document.DocumentType ?? "Unknown",
+                Label = document.GetDisplayName(),
+                DocumentType = displayType,
+                FileType = document.FileType,
+                SpeFileId = document.SpeFileId,
+                IsOrphanFile = metadata.IsOrphanFile,
                 Similarity = similarity,
                 ExtractedKeywords = metadata.ExtractedKeywords,
                 CreatedOn = document.CreatedAt,
@@ -382,6 +451,25 @@ public class VisualizationService : IVisualizationService
                 ParentEntityId = metadata.ParentEntityId,
                 ParentEntityName = metadata.ParentEntityName
             }
+        };
+    }
+
+    /// <summary>
+    /// Get a display-friendly type string based on file extension.
+    /// </summary>
+    private static string GetFileTypeDisplay(string? fileType)
+    {
+        return fileType?.ToLowerInvariant() switch
+        {
+            "pdf" => "PDF Document",
+            "docx" or "doc" => "Word Document",
+            "xlsx" or "xls" => "Excel Spreadsheet",
+            "pptx" or "ppt" => "PowerPoint Presentation",
+            "msg" => "Email",
+            "eml" => "Email",
+            "txt" => "Text File",
+            "csv" => "CSV File",
+            _ => "File"
         };
     }
 
@@ -449,6 +537,22 @@ public class VisualizationService : IVisualizationService
         return $"https://graph.microsoft.com/v1.0/drives/{entity.GraphDriveId}/items/{entity.GraphItemId}";
     }
 
+    /// <summary>
+    /// Build file URL for orphan files using SPE file ID.
+    /// These files have no Dataverse record, so we use the SPE file ID directly.
+    /// </summary>
+    private static string BuildSpeFileUrl(string? speFileId)
+    {
+        if (string.IsNullOrEmpty(speFileId))
+        {
+            return string.Empty;
+        }
+
+        // For orphan files, return a placeholder URL that the PCF can handle
+        // The actual URL would need to be resolved via the SPE API
+        return $"spe://{speFileId}";
+    }
+
     private static string? BuildPreviewUrl(DocumentEntity entity)
     {
         if (string.IsNullOrEmpty(entity.GraphDriveId) || string.IsNullOrEmpty(entity.GraphItemId))
@@ -471,26 +575,98 @@ public class VisualizationService : IVisualizationService
 
 /// <summary>
 /// Document model for visualization queries (includes documentVector field).
+/// Supports both 3072-dim vectors (new) and 1536-dim vectors (migration fallback).
 /// </summary>
 internal class VisualizationDocument
 {
     public string Id { get; set; } = string.Empty;
-    public string DocumentId { get; set; } = string.Empty;
-    public string DocumentName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Link to sprk_document. Nullable for orphan files (files with no Dataverse record).
+    /// </summary>
+    public string? DocumentId { get; set; }
+
+    /// <summary>
+    /// SharePoint Embedded file ID. Always populated (primary identifier for files).
+    /// </summary>
+    public string? SpeFileId { get; set; }
+
+    /// <summary>
+    /// File display name. Populated from fileName field (or documentName as fallback).
+    /// </summary>
+    public string? FileName { get; set; }
+
+    /// <summary>
+    /// Legacy document name field (kept for backward compatibility during migration).
+    /// </summary>
+    public string? DocumentName { get; set; }
+
+    /// <summary>
+    /// File extension/type: pdf, docx, msg, xlsx, etc.
+    /// </summary>
+    public string? FileType { get; set; }
+
     public string? DocumentType { get; set; }
     public string TenantId { get; set; } = string.Empty;
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
+
+    /// <summary>
+    /// Primary 3072-dimension document-level vector (text-embedding-3-large).
+    /// </summary>
+    public ReadOnlyMemory<float> DocumentVector3072 { get; set; }
+
+    /// <summary>
+    /// Legacy 1536-dimension document-level vector (migration fallback).
+    /// </summary>
     public ReadOnlyMemory<float> DocumentVector { get; set; }
+
     public string? Metadata { get; set; }
     public IList<string>? Tags { get; set; }
+
+    /// <summary>
+    /// Gets the best available document vector (prefers 3072-dim, falls back to 1536-dim).
+    /// </summary>
+    public ReadOnlyMemory<float> GetBestVector()
+    {
+        return DocumentVector3072.Length > 0 ? DocumentVector3072 : DocumentVector;
+    }
+
+    /// <summary>
+    /// Gets the display name (prefers fileName, falls back to documentName).
+    /// </summary>
+    public string GetDisplayName()
+    {
+        return !string.IsNullOrEmpty(FileName) ? FileName :
+               !string.IsNullOrEmpty(DocumentName) ? DocumentName : "Unknown";
+    }
+
+    /// <summary>
+    /// Gets the unique identifier for this document (prefers documentId, falls back to speFileId).
+    /// </summary>
+    public string GetUniqueId()
+    {
+        return !string.IsNullOrEmpty(DocumentId) ? DocumentId :
+               !string.IsNullOrEmpty(SpeFileId) ? SpeFileId : Id;
+    }
 }
 
 /// <summary>
 /// Document metadata from Dataverse for building node data.
+/// For orphan files (no Dataverse record), contains SPE file info only.
 /// </summary>
 internal class DocumentMetadata
 {
+    /// <summary>
+    /// True if this file has no associated Dataverse record (orphan file).
+    /// </summary>
+    public bool IsOrphanFile { get; set; }
+
+    /// <summary>
+    /// SharePoint Embedded file ID (always populated).
+    /// </summary>
+    public string? SpeFileId { get; set; }
+
     public string RecordUrl { get; set; } = string.Empty;
     public string FileUrl { get; set; } = string.Empty;
     public string? FilePreviewUrl { get; set; }

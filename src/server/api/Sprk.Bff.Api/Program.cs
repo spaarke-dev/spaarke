@@ -482,10 +482,16 @@ builder.Services.Configure<Sprk.Bff.Api.Services.Jobs.DocumentVectorBackfillOpti
     builder.Configuration.GetSection(Sprk.Bff.Api.Services.Jobs.DocumentVectorBackfillOptions.SectionName));
 builder.Services.AddHostedService<Sprk.Bff.Api.Services.Jobs.DocumentVectorBackfillService>();
 
+// Embedding migration service - migrates embeddings from 1536 to 3072 dimensions (Phase 5b)
+builder.Services.Configure<Sprk.Bff.Api.Services.Jobs.EmbeddingMigrationOptions>(
+    builder.Configuration.GetSection(Sprk.Bff.Api.Services.Jobs.EmbeddingMigrationOptions.SectionName));
+builder.Services.AddHostedService<Sprk.Bff.Api.Services.Jobs.EmbeddingMigrationService>();
+
 builder.Logging.AddConsole();
 Console.WriteLine("✓ Job processing configured with Service Bus (queue: sdap-jobs)");
 Console.WriteLine("✓ Email polling backup service configured");
 Console.WriteLine("✓ Document vector backfill service registered (enable via config)");
+Console.WriteLine("✓ Embedding migration service registered (enable via config)");
 
 // ============================================================================
 // HEALTH CHECKS - Redis availability monitoring

@@ -28,6 +28,13 @@ import {
     Image20Regular,
     DocumentText20Regular,
     Folder20Regular,
+    Table20Regular,
+    SlideText20Regular,
+    Mail20Regular,
+    Code20Regular,
+    FolderZip20Regular,
+    Video20Regular,
+    DocumentQuestionMark20Regular,
 } from "@fluentui/react-icons";
 import type { DocumentNodeData } from "../types/graph";
 
@@ -37,20 +44,73 @@ import type { DocumentNodeData } from "../types/graph";
 const getFileTypeIcon = (fileType: string): React.ReactElement => {
     const type = fileType.toLowerCase();
     switch (type) {
+        // Document types
         case "pdf":
             return <DocumentPdf20Regular />;
         case "docx":
         case "doc":
         case "txt":
+        case "rtf":
             return <DocumentText20Regular />;
+
+        // Spreadsheet types
+        case "xlsx":
+        case "xls":
+        case "csv":
+            return <Table20Regular />;
+
+        // Presentation types
+        case "pptx":
+        case "ppt":
+            return <SlideText20Regular />;
+
+        // Email types
+        case "msg":
+        case "eml":
+            return <Mail20Regular />;
+
+        // Image types
         case "jpg":
         case "jpeg":
         case "png":
         case "gif":
         case "svg":
+        case "bmp":
+        case "tiff":
             return <Image20Regular />;
+
+        // Code/web types
+        case "html":
+        case "htm":
+        case "xml":
+        case "json":
+            return <Code20Regular />;
+
+        // Archive types
+        case "zip":
+        case "rar":
+        case "7z":
+        case "tar":
+        case "gz":
+            return <FolderZip20Regular />;
+
+        // Video types
+        case "mp4":
+        case "avi":
+        case "mov":
+        case "wmv":
+        case "mkv":
+            return <Video20Regular />;
+
+        // Folder
         case "folder":
             return <Folder20Regular />;
+
+        // Unknown/default
+        case "file":
+        case "unknown":
+            return <DocumentQuestionMark20Regular />;
+
         default:
             return <Document20Regular />;
     }
@@ -101,6 +161,13 @@ const useStyles = makeStyles({
         border: `1px solid ${tokens.colorNeutralStroke1}`,
         boxShadow: tokens.shadow4,
     },
+    // Orphan file styles - dashed border, muted appearance
+    orphanCard: {
+        backgroundColor: tokens.colorNeutralBackground2,
+        border: `2px dashed ${tokens.colorNeutralStroke2}`,
+        boxShadow: tokens.shadow2,
+        opacity: 0.9,
+    },
     // Compact mode styles - icon only
     compactContainer: {
         display: "flex",
@@ -126,6 +193,12 @@ const useStyles = makeStyles({
         backgroundColor: tokens.colorNeutralBackground1,
         border: `1px solid ${tokens.colorNeutralStroke1}`,
         color: tokens.colorNeutralForeground1,
+    },
+    compactOrphanIcon: {
+        backgroundColor: tokens.colorNeutralBackground2,
+        border: `2px dashed ${tokens.colorNeutralStroke2}`,
+        color: tokens.colorNeutralForeground3,
+        opacity: 0.9,
     },
     cardHeader: {
         paddingBottom: tokens.spacingVerticalXS,
@@ -178,6 +251,9 @@ const useStyles = makeStyles({
     similarityBadge: {
         marginLeft: "auto",
     },
+    orphanBadge: {
+        fontSize: tokens.fontSizeBase100,
+    },
 });
 
 /**
@@ -189,6 +265,7 @@ export const DocumentNode: React.FC<NodeProps<DocumentNodeData>> = ({
 }) => {
     const styles = useStyles();
     const isSource = data.isSource ?? false;
+    const isOrphanFile = data.isOrphanFile ?? false;
     const similarity = data.similarity ?? 0;
     const fileType = data.fileType ?? "unknown";
     const compactMode = data.compactMode ?? false;
@@ -211,9 +288,13 @@ export const DocumentNode: React.FC<NodeProps<DocumentNodeData>> = ({
                     className={mergeClasses(
                         styles.compactContainer,
                         styles.compactIcon,
-                        isSource ? styles.compactSourceIcon : styles.compactRelatedIcon
+                        isSource
+                            ? styles.compactSourceIcon
+                            : isOrphanFile
+                                ? styles.compactOrphanIcon
+                                : styles.compactRelatedIcon
                     )}
-                    title={`${data.name}${similarity > 0 ? ` (${Math.round(similarity * 100)}%)` : ""}`}
+                    title={`${data.name}${isOrphanFile ? " (File only)" : ""}${similarity > 0 ? ` (${Math.round(similarity * 100)}%)` : ""}`}
                 >
                     {getFileTypeIcon(fileType)}
                 </div>
@@ -249,7 +330,11 @@ export const DocumentNode: React.FC<NodeProps<DocumentNodeData>> = ({
             <Card
                 className={mergeClasses(
                     styles.nodeContainer,
-                    isSource ? styles.sourceCard : styles.relatedCard
+                    isSource
+                        ? styles.sourceCard
+                        : isOrphanFile
+                            ? styles.orphanCard
+                            : styles.relatedCard
                 )}
                 selected={selected}
                 size="small"
@@ -284,25 +369,45 @@ export const DocumentNode: React.FC<NodeProps<DocumentNodeData>> = ({
                     }
                 />
 
-                {/* Footer with similarity badge (only for related nodes) */}
-                {!isSource && similarity > 0 && (
-                    <div
-                        className={mergeClasses(
-                            styles.footer,
-                            isSource && styles.sourceFooter
+                {/* Footer with similarity badge (only for related nodes) or orphan indicator */}
+                {!isSource && (similarity > 0 || isOrphanFile) && (
+                    <div className={styles.footer}>
+                        {isOrphanFile ? (
+                            <>
+                                <Badge
+                                    className={styles.orphanBadge}
+                                    appearance="outline"
+                                    color="warning"
+                                    size="small"
+                                >
+                                    File only
+                                </Badge>
+                                {similarity > 0 && (
+                                    <Badge
+                                        className={styles.similarityBadge}
+                                        appearance={getSimilarityAppearance(similarity)}
+                                        color={getSimilarityColor(similarity)}
+                                        size="small"
+                                    >
+                                        {Math.round(similarity * 100)}%
+                                    </Badge>
+                                )}
+                            </>
+                        ) : (
+                            <>
+                                <Caption1 className={styles.caption}>
+                                    Similarity
+                                </Caption1>
+                                <Badge
+                                    className={styles.similarityBadge}
+                                    appearance={getSimilarityAppearance(similarity)}
+                                    color={getSimilarityColor(similarity)}
+                                    size="small"
+                                >
+                                    {Math.round(similarity * 100)}%
+                                </Badge>
+                            </>
                         )}
-                    >
-                        <Caption1 className={styles.caption}>
-                            Similarity
-                        </Caption1>
-                        <Badge
-                            className={styles.similarityBadge}
-                            appearance={getSimilarityAppearance(similarity)}
-                            color={getSimilarityColor(similarity)}
-                            size="small"
-                        >
-                            {Math.round(similarity * 100)}%
-                        </Badge>
                     </div>
                 )}
 

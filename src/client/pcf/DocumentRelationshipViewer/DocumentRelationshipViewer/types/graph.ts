@@ -10,11 +10,59 @@
 import type { Node, Edge } from "react-flow-renderer";
 
 /**
+ * Supported file types for icon selection and display.
+ * Maps file extensions to display names.
+ */
+export const FILE_TYPES = {
+    pdf: "PDF Document",
+    docx: "Word Document",
+    doc: "Word Document",
+    xlsx: "Excel Spreadsheet",
+    xls: "Excel Spreadsheet",
+    pptx: "PowerPoint",
+    ppt: "PowerPoint",
+    msg: "Email",
+    eml: "Email",
+    txt: "Text File",
+    csv: "CSV File",
+    png: "Image",
+    jpg: "Image",
+    jpeg: "Image",
+    gif: "Image",
+    bmp: "Image",
+    tiff: "Image",
+    html: "Web Page",
+    htm: "Web Page",
+    json: "JSON File",
+    xml: "XML File",
+    zip: "Archive",
+    file: "File", // Fallback for orphan files without extension
+} as const;
+
+/**
+ * File type enum values
+ */
+export type FileType = keyof typeof FILE_TYPES;
+
+/**
+ * Get display name for a file type.
+ * @param fileType - File extension (e.g., "pdf", "docx")
+ * @returns Human-readable display name
+ */
+export function getFileTypeDisplayName(fileType: string | undefined): string {
+    if (!fileType) return FILE_TYPES.file;
+    const normalizedType = fileType.toLowerCase().replace(/^\./, "") as FileType;
+    return FILE_TYPES[normalizedType] ?? FILE_TYPES.file;
+}
+
+/**
  * Document node data from the visualization API
  */
 export interface DocumentNodeData {
-    /** Document ID in Dataverse */
-    documentId: string;
+    /** Document ID in Dataverse. Undefined for orphan files (use speFileId instead) */
+    documentId?: string;
+    /** SharePoint Embedded file ID (always present). Primary identifier for file operations */
+    speFileId?: string;
     /** Document display name */
     name: string;
     /** File extension (e.g., "pdf", "docx") */
@@ -25,10 +73,14 @@ export interface DocumentNodeData {
     similarity?: number;
     /** Whether this is the source/center node */
     isSource?: boolean;
+    /** Whether this is an orphan file (no Dataverse record) */
+    isOrphanFile?: boolean;
     /** Parent entity name (Matter/Project) */
     parentEntityName?: string;
     /** URL to open the document in SPE */
     fileUrl?: string;
+    /** Dataverse record URL. Empty for orphan files */
+    recordUrl?: string;
     /** Shared keywords with connected documents */
     sharedKeywords?: string[];
     /** Compact mode - show icon only (set by DocumentGraph) */

@@ -24,8 +24,10 @@ public class VisualizationServiceTests
     private readonly Mock<ILogger<VisualizationService>> _loggerMock;
     private readonly IOptions<DataverseOptions> _dataverseOptions;
 
-    // Test embedding (1536 dimensions like text-embedding-3-small)
-    private readonly ReadOnlyMemory<float> _testEmbedding;
+    // Test embedding (3072 dimensions for text-embedding-3-large)
+    private readonly ReadOnlyMemory<float> _testEmbedding3072;
+    // Legacy test embedding (1536 dimensions for text-embedding-3-small - migration fallback)
+    private readonly ReadOnlyMemory<float> _testEmbedding1536;
 
     // Test document IDs
     private readonly Guid _sourceDocumentId = Guid.Parse("11111111-1111-1111-1111-111111111111");
@@ -41,13 +43,21 @@ public class VisualizationServiceTests
             EnvironmentUrl = "https://testorg.crm.dynamics.com"
         });
 
-        // Create a test embedding vector (1536 dimensions)
-        var embedding = new float[1536];
-        for (int i = 0; i < embedding.Length; i++)
+        // Create a test embedding vector (3072 dimensions - primary)
+        var embedding3072 = new float[3072];
+        for (int i = 0; i < embedding3072.Length; i++)
         {
-            embedding[i] = (float)(i % 10) / 10f;
+            embedding3072[i] = (float)(i % 10) / 10f;
         }
-        _testEmbedding = new ReadOnlyMemory<float>(embedding);
+        _testEmbedding3072 = new ReadOnlyMemory<float>(embedding3072);
+
+        // Create a legacy test embedding vector (1536 dimensions - fallback)
+        var embedding1536 = new float[1536];
+        for (int i = 0; i < embedding1536.Length; i++)
+        {
+            embedding1536[i] = (float)(i % 10) / 10f;
+        }
+        _testEmbedding1536 = new ReadOnlyMemory<float>(embedding1536);
     }
 
     private VisualizationService CreateService()
@@ -471,6 +481,173 @@ public class VisualizationServiceTests
 
     #endregion
 
+    #region 3072-Dim Vector Tests
+
+    [Fact]
+    public async Task GetRelatedDocumentsAsync_With3072DimVector_ReturnsValidGraph()
+    {
+        // Arrange
+        var service = CreateService();
+        var options = new VisualizationOptions { TenantId = _tenantId };
+
+        SetupSearchClientWith3072DimVector();
+        SetupDataverseMetadata();
+
+        // Act
+        var result = await service.GetRelatedDocumentsAsync(_sourceDocumentId, options);
+
+        // Assert - The service should work correctly with 3072-dim vectors
+        result.Should().NotBeNull();
+        result.Nodes.Should().HaveCountGreaterOrEqualTo(1);
+        result.Nodes[0].Type.Should().Be("source");
+    }
+
+    [Fact]
+    public async Task GetRelatedDocumentsAsync_With1536DimVector_FallsBackSuccessfully()
+    {
+        // Arrange
+        var service = CreateService();
+        var options = new VisualizationOptions { TenantId = _tenantId };
+
+        SetupSearchClientWith1536DimVector();
+        SetupDataverseMetadata();
+
+        // Act
+        var result = await service.GetRelatedDocumentsAsync(_sourceDocumentId, options);
+
+        // Assert - The service should fall back to 1536-dim vectors during migration
+        result.Should().NotBeNull();
+        result.Nodes.Should().HaveCountGreaterOrEqualTo(1);
+        result.Nodes[0].Type.Should().Be("source");
+    }
+
+    #endregion
+
+    #region Orphan File Tests
+
+    [Fact]
+    public async Task GetRelatedDocumentsAsync_OrphanFileInResults_ReturnsOrphanNodeType()
+    {
+        // Arrange
+        var service = CreateService();
+        var options = new VisualizationOptions { TenantId = _tenantId, Threshold = 0.5f };
+
+        SetupSearchClientWithOrphanFile();
+        SetupDataverseMetadata();
+
+        // Act
+        var result = await service.GetRelatedDocumentsAsync(_sourceDocumentId, options);
+
+        // Assert
+        result.Nodes.Should().HaveCount(2); // 1 source + 1 orphan
+
+        var orphanNode = result.Nodes.FirstOrDefault(n => n.Type == "orphan");
+        orphanNode.Should().NotBeNull();
+        orphanNode!.Data.IsOrphanFile.Should().BeTrue();
+        orphanNode.Data.RecordUrl.Should().BeEmpty(); // No Dataverse record for orphan
+    }
+
+    [Fact]
+    public async Task GetRelatedDocumentsAsync_OrphanFile_UsesSpeFileIdAsIdentifier()
+    {
+        // Arrange
+        var service = CreateService();
+        var options = new VisualizationOptions { TenantId = _tenantId, Threshold = 0.5f };
+        var speFileId = "spe-file-12345";
+
+        SetupSearchClientWithOrphanFile(speFileId);
+        SetupDataverseMetadata();
+
+        // Act
+        var result = await service.GetRelatedDocumentsAsync(_sourceDocumentId, options);
+
+        // Assert
+        var orphanNode = result.Nodes.FirstOrDefault(n => n.Type == "orphan");
+        orphanNode.Should().NotBeNull();
+        orphanNode!.Id.Should().Be(speFileId); // Uses speFileId as identifier
+        orphanNode.Data.SpeFileId.Should().Be(speFileId);
+    }
+
+    [Fact]
+    public async Task GetRelatedDocumentsAsync_OrphanFile_HasFileTypeDisplay()
+    {
+        // Arrange
+        var service = CreateService();
+        var options = new VisualizationOptions { TenantId = _tenantId, Threshold = 0.5f };
+
+        SetupSearchClientWithOrphanFile(fileType: "pdf");
+        SetupDataverseMetadata();
+
+        // Act
+        var result = await service.GetRelatedDocumentsAsync(_sourceDocumentId, options);
+
+        // Assert
+        var orphanNode = result.Nodes.FirstOrDefault(n => n.Type == "orphan");
+        orphanNode.Should().NotBeNull();
+        orphanNode!.Data.DocumentType.Should().Be("PDF Document"); // Human-readable display
+        orphanNode.Data.FileType.Should().Be("pdf"); // Raw file type
+    }
+
+    #endregion
+
+    #region New Fields Tests
+
+    [Fact]
+    public async Task GetRelatedDocumentsAsync_NodeData_ContainsNewFields()
+    {
+        // Arrange
+        var service = CreateService();
+        var options = new VisualizationOptions { TenantId = _tenantId };
+
+        SetupSearchClientWithNewFields();
+        SetupDataverseMetadata();
+
+        // Act
+        var result = await service.GetRelatedDocumentsAsync(_sourceDocumentId, options);
+
+        // Assert
+        var sourceNode = result.Nodes.First(n => n.Type == "source");
+        sourceNode.Data.FileType.Should().NotBeNullOrEmpty();
+        sourceNode.Data.SpeFileId.Should().NotBeNullOrEmpty();
+        sourceNode.Data.IsOrphanFile.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task GetRelatedDocumentsAsync_UsesFileNameWithFallback()
+    {
+        // Arrange
+        var service = CreateService();
+        var options = new VisualizationOptions { TenantId = _tenantId };
+
+        SetupSearchClientWithFileNameOnly(); // Has fileName but no documentName
+        SetupDataverseMetadata();
+
+        // Act
+        var result = await service.GetRelatedDocumentsAsync(_sourceDocumentId, options);
+
+        // Assert
+        var sourceNode = result.Nodes.First(n => n.Type == "source");
+        sourceNode.Data.Label.Should().Be("test-file.pdf"); // Uses fileName
+    }
+
+    #endregion
+
+    #region DocumentNodeData New Properties Tests
+
+    [Fact]
+    public void DocumentNodeData_NewProperties_HaveDefaultValues()
+    {
+        // Arrange & Act
+        var data = new DocumentNodeData();
+
+        // Assert
+        data.FileType.Should().BeNull();
+        data.SpeFileId.Should().BeNull();
+        data.IsOrphanFile.Should().BeFalse();
+    }
+
+    #endregion
+
     #region Helper Methods
 
     private void SetupEmptySearchClient()
@@ -670,12 +847,16 @@ public class VisualizationServiceTests
         {
             Id = Guid.NewGuid().ToString(),
             DocumentId = _sourceDocumentId.ToString(),
+            SpeFileId = "spe-source-default",
+            FileName = "Source Document.pdf",
             DocumentName = "Source Document.pdf",
+            FileType = "pdf",
             DocumentType = "Contract",
             TenantId = _tenantId,
             CreatedAt = DateTimeOffset.UtcNow.AddDays(-10),
             UpdatedAt = DateTimeOffset.UtcNow,
-            DocumentVector = _testEmbedding
+            DocumentVector3072 = _testEmbedding3072,
+            DocumentVector = _testEmbedding1536
         };
 
         var searchResult = SearchModelFactory.SearchResult(sourceDoc, 1.0, null);
@@ -695,16 +876,21 @@ public class VisualizationServiceTests
 
         for (int i = 0; i < count; i++)
         {
+            var docId = Guid.NewGuid().ToString();
             var doc = new VisualizationDocument
             {
                 Id = Guid.NewGuid().ToString(),
-                DocumentId = Guid.NewGuid().ToString(),
+                DocumentId = docId,
+                SpeFileId = $"spe-related-{i + 1}",
+                FileName = $"Related Document {i + 1}.pdf",
                 DocumentName = $"Related Document {i + 1}.pdf",
+                FileType = "pdf",
                 DocumentType = "Contract",
                 TenantId = _tenantId,
                 CreatedAt = DateTimeOffset.UtcNow.AddDays(-5),
                 UpdatedAt = DateTimeOffset.UtcNow,
-                DocumentVector = _testEmbedding
+                DocumentVector3072 = _testEmbedding3072,
+                DocumentVector = _testEmbedding1536
             };
 
             var searchResult = SearchModelFactory.SearchResult(doc, score, null);
@@ -737,7 +923,7 @@ public class VisualizationServiceTests
                 TenantId = _tenantId,
                 CreatedAt = DateTimeOffset.UtcNow.AddDays(-5),
                 UpdatedAt = DateTimeOffset.UtcNow,
-                DocumentVector = _testEmbedding
+                DocumentVector = _testEmbedding1536
             };
 
             var searchResult = SearchModelFactory.SearchResult(doc, scores[i], null);
@@ -747,6 +933,292 @@ public class VisualizationServiceTests
         var searchResults = SearchModelFactory.SearchResults<VisualizationDocument>(
             values: results,
             totalCount: scores.Length,
+            facets: null,
+            coverage: null,
+            rawResponse: null!);
+
+        return Response.FromValue(searchResults, null!);
+    }
+
+    private Mock<SearchClient> SetupSearchClientWith3072DimVector()
+    {
+        var searchClientMock = new Mock<SearchClient>();
+        var callCount = 0;
+
+        searchClientMock
+            .Setup(x => x.SearchAsync<VisualizationDocument>(
+                It.IsAny<string>(),
+                It.IsAny<SearchOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string query, SearchOptions options, CancellationToken ct) =>
+            {
+                callCount++;
+                if (callCount == 1)
+                {
+                    return CreateSourceDocumentResponseWith3072Vector();
+                }
+                else
+                {
+                    return CreateEmptySearchResponse();
+                }
+            });
+
+        _deploymentServiceMock
+            .Setup(x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(searchClientMock.Object);
+
+        return searchClientMock;
+    }
+
+    private Mock<SearchClient> SetupSearchClientWith1536DimVector()
+    {
+        var searchClientMock = new Mock<SearchClient>();
+        var callCount = 0;
+
+        searchClientMock
+            .Setup(x => x.SearchAsync<VisualizationDocument>(
+                It.IsAny<string>(),
+                It.IsAny<SearchOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string query, SearchOptions options, CancellationToken ct) =>
+            {
+                callCount++;
+                if (callCount == 1)
+                {
+                    return CreateSourceDocumentResponseWith1536Vector();
+                }
+                else
+                {
+                    return CreateEmptySearchResponse();
+                }
+            });
+
+        _deploymentServiceMock
+            .Setup(x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(searchClientMock.Object);
+
+        return searchClientMock;
+    }
+
+    private void SetupSearchClientWithOrphanFile(string? speFileId = null, string? fileType = null)
+    {
+        var searchClientMock = new Mock<SearchClient>();
+        var callCount = 0;
+
+        searchClientMock
+            .Setup(x => x.SearchAsync<VisualizationDocument>(
+                It.IsAny<string>(),
+                It.IsAny<SearchOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string query, SearchOptions options, CancellationToken ct) =>
+            {
+                callCount++;
+                if (callCount == 1)
+                {
+                    return CreateSourceDocumentResponseWith3072Vector();
+                }
+                else
+                {
+                    return CreateOrphanFileResponse(speFileId ?? "spe-orphan-123", fileType ?? "pdf");
+                }
+            });
+
+        _deploymentServiceMock
+            .Setup(x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(searchClientMock.Object);
+    }
+
+    private void SetupSearchClientWithNewFields()
+    {
+        var searchClientMock = new Mock<SearchClient>();
+        var callCount = 0;
+
+        searchClientMock
+            .Setup(x => x.SearchAsync<VisualizationDocument>(
+                It.IsAny<string>(),
+                It.IsAny<SearchOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string query, SearchOptions options, CancellationToken ct) =>
+            {
+                callCount++;
+                if (callCount == 1)
+                {
+                    return CreateSourceDocumentResponseWithNewFields();
+                }
+                else
+                {
+                    return CreateEmptySearchResponse();
+                }
+            });
+
+        _deploymentServiceMock
+            .Setup(x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(searchClientMock.Object);
+    }
+
+    private void SetupSearchClientWithFileNameOnly()
+    {
+        var searchClientMock = new Mock<SearchClient>();
+        var callCount = 0;
+
+        searchClientMock
+            .Setup(x => x.SearchAsync<VisualizationDocument>(
+                It.IsAny<string>(),
+                It.IsAny<SearchOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string query, SearchOptions options, CancellationToken ct) =>
+            {
+                callCount++;
+                if (callCount == 1)
+                {
+                    return CreateSourceDocumentResponseWithFileNameOnly();
+                }
+                else
+                {
+                    return CreateEmptySearchResponse();
+                }
+            });
+
+        _deploymentServiceMock
+            .Setup(x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(searchClientMock.Object);
+    }
+
+    private Response<SearchResults<VisualizationDocument>> CreateSourceDocumentResponseWith3072Vector()
+    {
+        var sourceDoc = new VisualizationDocument
+        {
+            Id = Guid.NewGuid().ToString(),
+            DocumentId = _sourceDocumentId.ToString(),
+            SpeFileId = "spe-source-123",
+            FileName = "Source Document.pdf",
+            DocumentName = "Source Document.pdf",
+            FileType = "pdf",
+            DocumentType = "Contract",
+            TenantId = _tenantId,
+            CreatedAt = DateTimeOffset.UtcNow.AddDays(-10),
+            UpdatedAt = DateTimeOffset.UtcNow,
+            DocumentVector3072 = _testEmbedding3072,
+            DocumentVector = ReadOnlyMemory<float>.Empty // No legacy vector
+        };
+
+        var searchResult = SearchModelFactory.SearchResult(sourceDoc, 1.0, null);
+        var searchResults = SearchModelFactory.SearchResults<VisualizationDocument>(
+            values: new List<SearchResult<VisualizationDocument>> { searchResult },
+            totalCount: 1,
+            facets: null,
+            coverage: null,
+            rawResponse: null!);
+
+        return Response.FromValue(searchResults, null!);
+    }
+
+    private Response<SearchResults<VisualizationDocument>> CreateSourceDocumentResponseWith1536Vector()
+    {
+        var sourceDoc = new VisualizationDocument
+        {
+            Id = Guid.NewGuid().ToString(),
+            DocumentId = _sourceDocumentId.ToString(),
+            SpeFileId = "spe-source-123",
+            FileName = "Source Document.pdf",
+            DocumentName = "Source Document.pdf",
+            FileType = "pdf",
+            DocumentType = "Contract",
+            TenantId = _tenantId,
+            CreatedAt = DateTimeOffset.UtcNow.AddDays(-10),
+            UpdatedAt = DateTimeOffset.UtcNow,
+            DocumentVector3072 = ReadOnlyMemory<float>.Empty, // No 3072-dim vector
+            DocumentVector = _testEmbedding1536 // Legacy vector only
+        };
+
+        var searchResult = SearchModelFactory.SearchResult(sourceDoc, 1.0, null);
+        var searchResults = SearchModelFactory.SearchResults<VisualizationDocument>(
+            values: new List<SearchResult<VisualizationDocument>> { searchResult },
+            totalCount: 1,
+            facets: null,
+            coverage: null,
+            rawResponse: null!);
+
+        return Response.FromValue(searchResults, null!);
+    }
+
+    private Response<SearchResults<VisualizationDocument>> CreateOrphanFileResponse(string speFileId, string fileType)
+    {
+        var orphanDoc = new VisualizationDocument
+        {
+            Id = Guid.NewGuid().ToString(),
+            DocumentId = null, // No Dataverse record - this is an orphan file
+            SpeFileId = speFileId,
+            FileName = $"orphan-file.{fileType}",
+            DocumentName = null, // No document name for orphans
+            FileType = fileType,
+            DocumentType = null,
+            TenantId = _tenantId,
+            CreatedAt = DateTimeOffset.UtcNow.AddDays(-5),
+            UpdatedAt = DateTimeOffset.UtcNow,
+            DocumentVector3072 = _testEmbedding3072
+        };
+
+        var searchResult = SearchModelFactory.SearchResult(orphanDoc, 0.8, null);
+        var searchResults = SearchModelFactory.SearchResults<VisualizationDocument>(
+            values: new List<SearchResult<VisualizationDocument>> { searchResult },
+            totalCount: 1,
+            facets: null,
+            coverage: null,
+            rawResponse: null!);
+
+        return Response.FromValue(searchResults, null!);
+    }
+
+    private Response<SearchResults<VisualizationDocument>> CreateSourceDocumentResponseWithNewFields()
+    {
+        var sourceDoc = new VisualizationDocument
+        {
+            Id = Guid.NewGuid().ToString(),
+            DocumentId = _sourceDocumentId.ToString(),
+            SpeFileId = "spe-new-fields-123",
+            FileName = "new-fields-doc.docx",
+            DocumentName = "New Fields Document",
+            FileType = "docx",
+            DocumentType = "Contract",
+            TenantId = _tenantId,
+            CreatedAt = DateTimeOffset.UtcNow.AddDays(-10),
+            UpdatedAt = DateTimeOffset.UtcNow,
+            DocumentVector3072 = _testEmbedding3072
+        };
+
+        var searchResult = SearchModelFactory.SearchResult(sourceDoc, 1.0, null);
+        var searchResults = SearchModelFactory.SearchResults<VisualizationDocument>(
+            values: new List<SearchResult<VisualizationDocument>> { searchResult },
+            totalCount: 1,
+            facets: null,
+            coverage: null,
+            rawResponse: null!);
+
+        return Response.FromValue(searchResults, null!);
+    }
+
+    private Response<SearchResults<VisualizationDocument>> CreateSourceDocumentResponseWithFileNameOnly()
+    {
+        var sourceDoc = new VisualizationDocument
+        {
+            Id = Guid.NewGuid().ToString(),
+            DocumentId = _sourceDocumentId.ToString(),
+            SpeFileId = "spe-filename-only-123",
+            FileName = "test-file.pdf", // Only fileName is populated
+            DocumentName = null, // No documentName
+            FileType = "pdf",
+            DocumentType = "Contract",
+            TenantId = _tenantId,
+            CreatedAt = DateTimeOffset.UtcNow.AddDays(-10),
+            UpdatedAt = DateTimeOffset.UtcNow,
+            DocumentVector3072 = _testEmbedding3072
+        };
+
+        var searchResult = SearchModelFactory.SearchResult(sourceDoc, 1.0, null);
+        var searchResults = SearchModelFactory.SearchResults<VisualizationDocument>(
+            values: new List<SearchResult<VisualizationDocument>> { searchResult },
+            totalCount: 1,
             facets: null,
             coverage: null,
             rawResponse: null!);

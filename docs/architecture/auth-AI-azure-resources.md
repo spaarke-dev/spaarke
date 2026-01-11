@@ -34,7 +34,24 @@
 | Deployment Name | Model | Version | Capacity | Purpose |
 |-----------------|-------|---------|----------|---------|
 | `gpt-4o-mini` | gpt-4o-mini | 2024-07-18 | 10 TPM | Document analysis, chat |
-| `text-embedding-3-small` | text-embedding-3-small | 1 | 120 TPM | Vector embeddings for RAG |
+| `text-embedding-3-small` | text-embedding-3-small | 1 | 120 TPM | Vector embeddings for RAG (legacy 1536 dims) |
+| `text-embedding-3-large` | text-embedding-3-large | 1 | 120 TPM | Vector embeddings for RAG (3072 dims) **MIGRATION TARGET** |
+
+**MIGRATION NOTE (Task 050)**: The `text-embedding-3-large` deployment must be created before Phase 5b embedding migration can proceed. Use the CLI command below to create it.
+
+### Create text-embedding-3-large Deployment
+
+```bash
+az cognitiveservices account deployment create \
+  --name spaarke-openai-dev \
+  --resource-group spe-infrastructure-westus2 \
+  --deployment-name text-embedding-3-large \
+  --model-name text-embedding-3-large \
+  --model-version "1" \
+  --model-format OpenAI \
+  --sku-capacity 120 \
+  --sku-name Standard
+```
 
 ### Rate Limits
 

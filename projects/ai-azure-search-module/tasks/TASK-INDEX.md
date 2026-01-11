@@ -14,7 +14,7 @@
 | Phase 2: PCF Control Development | Complete | 10/10 |
 | Phase 3: Integration & Ribbon | In Progress | 1/3 (2 deferred) |
 | Phase 4: Polish & Documentation | Not Started | 0/4 |
-| **Phase 5: Schema Migration** | **In Progress** | **5/16** |
+| **Phase 5: Schema Migration** | **In Progress** | **13/16** |
 | Wrap-up | Not Started | 0/1 |
 
 ---
@@ -55,14 +55,14 @@
 | 041 | Add migration fields to existing index | 5a | ✅ | 040 | STANDARD |
 | 042 | Update KnowledgeDocument model | 5a | ✅ | 041 | FULL |
 | 043 | Update RagService indexing | 5a | ✅ | 042 | FULL |
-| 050 | Update embedding configuration | 5b | 🔲 | 043 | STANDARD |
-| 051 | Add 3072-dim vector fields | 5b | 🔲 | 050 | STANDARD |
-| 052 | Create EmbeddingMigrationService | 5b | 🔲 | 051 | FULL |
-| 053 | Run embedding migration | 5b | 🔲 | 052 | STANDARD |
-| 060 | Update VisualizationService | 5c | 🔲 | 053 | FULL |
-| 061 | Update visualization API DTOs | 5c | 🔲 | 060 | STANDARD |
-| 062 | Update PCF types | 5c | 🔲 | 061 | STANDARD |
-| 063 | Update DocumentNode icons | 5c | 🔲 | 062 | STANDARD |
+| 050 | Update embedding configuration | 5b | ✅ | 043 | STANDARD |
+| 051 | Add 3072-dim vector fields | 5b | ✅ | 050 | STANDARD |
+| 052 | Create EmbeddingMigrationService | 5b | ✅ | 051 | FULL |
+| 053 | Run embedding migration | 5b | ✅ | 052 | STANDARD |
+| 060 | Update VisualizationService | 5c | ✅ | 053 | FULL |
+| 061 | Update visualization API DTOs | 5c | ✅ | 060 | STANDARD |
+| 062 | Update PCF types | 5c | ✅ | 061 | STANDARD |
+| 063 | Update DocumentNode icons | 5c | ✅ | 062 | STANDARD |
 | 064 | Unit tests for new scenarios | 5c | 🔲 | 060-063 | STANDARD |
 | 070 | Remove deprecated fields | 5d | 🔲 | 064 | STANDARD |
 | 071 | Update Azure configuration | 5d | 🔲 | 070 | STANDARD |

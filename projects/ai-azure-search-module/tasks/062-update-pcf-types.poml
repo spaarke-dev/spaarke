@@ -4,7 +4,7 @@
     <id>062</id>
     <title>Update PCF types for orphan file support</title>
     <phase>5c</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <priority>high</priority>
     <estimate>2h</estimate>
     <tags>pcf, typescript, visualization</tags>
@@ -86,4 +86,44 @@
   <dependencies>
     <dependency>061</dependency>
   </dependencies>
+
+  <notes>
+    <completed>2026-01-11</completed>
+    <summary>
+      Updated PCF TypeScript types for orphan file support:
+
+      1. types/api.ts:
+         - ApiDocumentNode.type now includes "orphan" for files without Dataverse record
+         - ApiDocumentNodeData extended with fileType, speFileId, isOrphanFile
+
+      2. types/graph.ts:
+         - DocumentNodeData.documentId now optional (undefined for orphan files)
+         - Added speFileId, isOrphanFile, recordUrl properties
+         - Added FILE_TYPES constant with 20+ file type mappings
+         - Added FileType type and getFileTypeDisplayName() helper
+
+      3. services/VisualizationApiService.ts:
+         - mapApiNodeToDocumentNode handles orphan files correctly
+         - Uses fileType from API when available, extracts from name as fallback
+         - documentId undefined for orphan files, speFileId used instead
+
+      4. components/NodeActionBar.tsx:
+         - "Open Document Record" button disabled for orphan files
+         - Tooltip explains why action unavailable for orphan files
+         - Expand button uses speFileId fallback for orphan files
+
+      5. DocumentRelationshipViewer.tsx:
+         - Node selection uses documentId ?? speFileId ?? node.id
+
+      Build: TypeScript compilation succeeds
+      Tests: 70/74 pass (4 pre-existing failures unrelated to type changes)
+
+      Files Modified:
+      - src/client/pcf/.../types/api.ts
+      - src/client/pcf/.../types/graph.ts
+      - src/client/pcf/.../services/VisualizationApiService.ts
+      - src/client/pcf/.../components/NodeActionBar.tsx
+      - src/client/pcf/.../DocumentRelationshipViewer.tsx
+    </summary>
+  </notes>
 </task>

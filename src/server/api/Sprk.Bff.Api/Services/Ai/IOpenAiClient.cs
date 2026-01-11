@@ -42,15 +42,17 @@ public interface IOpenAiClient
 
     /// <summary>
     /// Generate vector embeddings for text content.
-    /// Uses text-embedding-3-small (1536 dimensions) by default.
+    /// Uses configured embedding model and dimensions (default: text-embedding-3-large, 3072 dims).
     /// </summary>
     /// <param name="text">The text to generate embeddings for.</param>
-    /// <param name="model">Optional model override. Defaults to text-embedding-3-small.</param>
+    /// <param name="model">Optional model override. Defaults to configured EmbeddingModel.</param>
+    /// <param name="dimensions">Optional dimensions override. Defaults to configured EmbeddingDimensions.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Vector embedding as float array.</returns>
     Task<ReadOnlyMemory<float>> GenerateEmbeddingAsync(
         string text,
         string? model = null,
+        int? dimensions = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -58,11 +60,13 @@ public interface IOpenAiClient
     /// More efficient than individual calls for bulk operations.
     /// </summary>
     /// <param name="texts">The texts to generate embeddings for.</param>
-    /// <param name="model">Optional model override. Defaults to text-embedding-3-small.</param>
+    /// <param name="model">Optional model override. Defaults to configured EmbeddingModel.</param>
+    /// <param name="dimensions">Optional dimensions override. Defaults to configured EmbeddingDimensions.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>List of vector embeddings in same order as input texts.</returns>
     Task<IReadOnlyList<ReadOnlyMemory<float>>> GenerateEmbeddingsAsync(
         IEnumerable<string> texts,
         string? model = null,
+        int? dimensions = null,
         CancellationToken cancellationToken = default);
 }

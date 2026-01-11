@@ -124,7 +124,7 @@ public class RagServiceTests
 
         // Assert - Embedding should be generated
         _openAiClientMock.Verify(
-            x => x.GenerateEmbeddingAsync(query, null, It.IsAny<CancellationToken>()),
+            x => x.GenerateEmbeddingAsync(query, null, It.IsAny<int?>(), It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -147,7 +147,7 @@ public class RagServiceTests
 
         // Assert - Embedding should NOT be generated
         _openAiClientMock.Verify(
-            x => x.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            x => x.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -305,7 +305,7 @@ public class RagServiceTests
 
         // Assert - Embedding should be generated
         _openAiClientMock.Verify(
-            x => x.GenerateEmbeddingAsync("Test document content", null, It.IsAny<CancellationToken>()),
+            x => x.GenerateEmbeddingAsync("Test document content", null, It.IsAny<int?>(), It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -330,7 +330,7 @@ public class RagServiceTests
 
         // Assert - Embedding should NOT be generated
         _openAiClientMock.Verify(
-            x => x.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            x => x.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -504,7 +504,7 @@ public class RagServiceTests
             TenantId = "tenant-1",
             SpeFileId = "file-1",
             FileName = string.IsNullOrEmpty(fileName) ? null : fileName,
-            DocumentName = string.IsNullOrEmpty(fileName) ? null : fileName,
+            DocumentName = string.IsNullOrEmpty(fileName) ? string.Empty : fileName,
             ContentVector = _testEmbedding
         };
 
@@ -590,7 +590,7 @@ public class RagServiceTests
 
         // Assert - Batch embedding should be called
         _openAiClientMock.Verify(
-            x => x.GenerateEmbeddingsAsync(It.Is<IEnumerable<string>>(e => e.Count() == 2), null, It.IsAny<CancellationToken>()),
+            x => x.GenerateEmbeddingsAsync(It.Is<IEnumerable<string>>(e => e.Count() == 2), null, It.IsAny<int?>(), It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -767,7 +767,7 @@ public class RagServiceTests
 
         // Assert - Should NOT call OpenAI (cache hit)
         _openAiClientMock.Verify(
-            x => x.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            x => x.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()),
             Times.Never);
         result.Length.Should().Be(1536);
     }
@@ -784,7 +784,7 @@ public class RagServiceTests
 
         // Assert - Should call OpenAI and cache the result
         _openAiClientMock.Verify(
-            x => x.GenerateEmbeddingAsync("test text", null, It.IsAny<CancellationToken>()),
+            x => x.GenerateEmbeddingAsync("test text", null, It.IsAny<int?>(), It.IsAny<CancellationToken>()),
             Times.Once);
         _embeddingCacheMock.Verify(
             x => x.SetEmbeddingForContentAsync("test text", It.IsAny<ReadOnlyMemory<float>>(), It.IsAny<CancellationToken>()),
@@ -844,7 +844,7 @@ public class RagServiceTests
 
         // Assert - Should NOT call OpenAI when cache hits
         _openAiClientMock.Verify(
-            x => x.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            x => x.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -972,7 +972,7 @@ public class RagServiceTests
             .ReturnsAsync((ReadOnlyMemory<float>?)null);
 
         _openAiClientMock
-            .Setup(x => x.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(_testEmbedding);
     }
 
@@ -993,7 +993,7 @@ public class RagServiceTests
         }
 
         _openAiClientMock
-            .Setup(x => x.GenerateEmbeddingsAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GenerateEmbeddingsAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(embeddings);
     }
 

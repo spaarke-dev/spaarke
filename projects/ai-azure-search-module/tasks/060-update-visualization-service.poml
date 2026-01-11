@@ -4,7 +4,7 @@
     <id>060</id>
     <title>Update VisualizationService for new schema</title>
     <phase>5c</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <priority>high</priority>
     <estimate>4h</estimate>
     <tags>bff-api, visualization, azure-search</tags>
@@ -95,4 +95,46 @@
   <dependencies>
     <dependency>053</dependency>
   </dependencies>
+
+  <notes>
+    <completed>2026-01-11</completed>
+    <summary>
+      VisualizationService updated for new schema with 3072-dim vectors and orphan file support:
+
+      1. Vector Field References:
+         - Primary: documentVector3072 (3072 dimensions, text-embedding-3-large)
+         - Fallback: documentVector (1536 dimensions) for backward compatibility during migration
+         - Automatic field selection based on source vector dimensions
+
+      2. VisualizationDocument Class Extended:
+         - Added SpeFileId (always populated, primary file identifier)
+         - Added FileName (preferred) with DocumentName fallback
+         - Added FileType for icon selection (pdf, docx, msg, etc.)
+         - Added DocumentVector3072 property
+         - Added helper methods: GetBestVector(), GetDisplayName(), GetUniqueId()
+         - Made DocumentId nullable for orphan files
+
+      3. Orphan File Support:
+         - Files without Dataverse records (documentId=null) handled correctly
+         - Uses speFileId as unique identifier
+         - Node type "orphan" instead of "related"
+         - File type display: "PDF Document", "Word Document", etc.
+         - RecordUrl empty (no Dataverse record to open)
+         - FileUrl uses spe:// protocol placeholder
+
+      4. DocumentNodeData Extended (IVisualizationService.cs):
+         - Added FileType, SpeFileId, IsOrphanFile properties
+
+      5. Unit Tests (27 tests passing):
+         - 3072-dim vector support tests
+         - 1536-dim fallback tests
+         - Orphan file handling tests
+         - New field tests
+
+      Files Modified:
+      - src/server/api/Sprk.Bff.Api/Services/Ai/Visualization/VisualizationService.cs
+      - src/server/api/Sprk.Bff.Api/Services/Ai/Visualization/IVisualizationService.cs
+      - tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Visualization/VisualizationServiceTests.cs
+    </summary>
+  </notes>
 </task>

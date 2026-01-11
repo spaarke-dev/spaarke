@@ -154,8 +154,27 @@ public record DocumentNodeData
 
     /// <summary>
     /// Document type (e.g., Contract, Invoice, Agreement).
+    /// For orphan files, this is derived from the file type (e.g., "PDF Document", "Word Document").
     /// </summary>
     public string DocumentType { get; init; } = string.Empty;
+
+    /// <summary>
+    /// File extension/type: pdf, docx, msg, xlsx, etc.
+    /// Used for icon selection and file type display.
+    /// </summary>
+    public string? FileType { get; init; }
+
+    /// <summary>
+    /// SharePoint Embedded file ID (always populated).
+    /// Primary identifier for the actual file content.
+    /// </summary>
+    public string? SpeFileId { get; init; }
+
+    /// <summary>
+    /// True if this is an orphan file with no associated Dataverse record.
+    /// Orphan files have no "Open in Dataverse" action available.
+    /// </summary>
+    public bool IsOrphanFile { get; init; }
 
     /// <summary>
     /// Similarity score to the source document (0.0-1.0).
@@ -182,6 +201,7 @@ public record DocumentNodeData
     /// <summary>
     /// Dataverse record URL for "Open Document Record" action.
     /// Format: https://{org}.crm.dynamics.com/main.aspx?...
+    /// Empty for orphan files.
     /// </summary>
     public string RecordUrl { get; init; } = string.Empty;
 

@@ -138,14 +138,24 @@ export class VisualizationApiService {
      * Map an API document node to PCF DocumentNode type.
      */
     private mapApiNodeToDocumentNode(apiNode: ApiDocumentNode): DocumentNode {
+        // For orphan files, the node ID is the speFileId
+        const isOrphanFile = apiNode.data.isOrphanFile ?? apiNode.type === "orphan";
+
+        // Use fileType from API if available, otherwise extract from name
+        const fileType = apiNode.data.fileType ?? this.extractFileType(apiNode.data.label, apiNode.data.documentType);
+
         const data: DocumentNodeData = {
-            documentId: apiNode.id,
+            // For orphan files, documentId is undefined; use speFileId instead
+            documentId: isOrphanFile ? undefined : apiNode.id,
+            speFileId: apiNode.data.speFileId,
             name: apiNode.data.label,
-            fileType: this.extractFileType(apiNode.data.label, apiNode.data.documentType),
+            fileType,
             similarity: apiNode.data.similarity,
             isSource: apiNode.type === "source",
+            isOrphanFile,
             parentEntityName: apiNode.data.parentEntityName,
             fileUrl: apiNode.data.fileUrl,
+            recordUrl: apiNode.data.recordUrl,
             sharedKeywords: apiNode.data.extractedKeywords,
         };
 

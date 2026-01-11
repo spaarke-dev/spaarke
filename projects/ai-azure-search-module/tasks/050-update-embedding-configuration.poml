@@ -4,7 +4,7 @@
     <id>050</id>
     <title>Update embedding configuration for 3072 dimensions</title>
     <phase>5b</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <priority>high</priority>
     <estimate>2h</estimate>
     <tags>bff-api, azure-openai, configuration</tags>
@@ -83,4 +83,17 @@
   <dependencies>
     <dependency>043</dependency>
   </dependencies>
+
+  <notes>
+    <completed>2026-01-11</completed>
+    <summary>
+      Configuration updated for text-embedding-3-large (3072 dimensions):
+      - DocumentIntelligenceOptions: EmbeddingModel defaults to text-embedding-3-large, added EmbeddingDimensions (3072), LegacyEmbeddingDimensions (1536)
+      - OpenAiClient: GenerateEmbeddingAsync and GenerateEmbeddingsAsync now accept optional dimensions parameter
+      - IOpenAiClient: Interface updated with dimensions parameter
+      - appsettings.template.json: Added AI_EMBEDDING_MODEL and AI_EMBEDDING_DIMENSIONS placeholders
+      - auth-AI-azure-resources.md: Documented text-embedding-3-large deployment requirement with CLI command
+      NOTE: Azure deployment must be created manually before migration can proceed.
+    </summary>
+  </notes>
 </task>

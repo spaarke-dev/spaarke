@@ -146,11 +146,19 @@ export const NodeActionBar: React.FC<NodeActionBarProps> = ({
     const styles = useStyles();
     const isSource = nodeData.isSource ?? false;
 
+    // Check if this is an orphan file (no Dataverse record)
+    const isOrphanFile = nodeData.isOrphanFile ?? !nodeData.documentId;
+
     /**
      * Open document record in Dataverse form
      * Uses Xrm.Navigation.openForm per project constraint
+     * Disabled for orphan files (no Dataverse record)
      */
     const handleOpenDocumentRecord = React.useCallback(() => {
+        if (!nodeData.documentId) {
+            console.warn("Cannot open document record: orphan file has no documentId");
+            return;
+        }
         if (typeof Xrm !== "undefined" && Xrm.Navigation) {
             Xrm.Navigation.openForm({
                 entityName: "sprk_document",
@@ -189,9 +197,13 @@ export const NodeActionBar: React.FC<NodeActionBarProps> = ({
      */
     const handleExpand = React.useCallback(() => {
         if (onExpand) {
-            onExpand(nodeData.documentId);
+            // Use documentId if available, otherwise use speFileId for orphan files
+            const expandId = nodeData.documentId ?? nodeData.speFileId;
+            if (expandId) {
+                onExpand(expandId);
+            }
         }
-    }, [onExpand, nodeData.documentId]);
+    }, [onExpand, nodeData.documentId, nodeData.speFileId]);
 
     return (
         <Card className={styles.container}>
@@ -226,12 +238,16 @@ export const NodeActionBar: React.FC<NodeActionBarProps> = ({
 
             {/* Action buttons */}
             <div className={styles.actionsContainer}>
-                <Tooltip content="Open document record in Dataverse" relationship="description">
+                <Tooltip
+                    content={isOrphanFile ? "Not available for files without a document record" : "Open document record in Dataverse"}
+                    relationship="description"
+                >
                     <Button
                         className={styles.actionButton}
                         appearance="subtle"
                         icon={<Open20Regular />}
                         onClick={handleOpenDocumentRecord}
+                        disabled={isOrphanFile}
                     >
                         Open Document Record
                     </Button>

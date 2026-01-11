@@ -58,11 +58,28 @@ public class DocumentIntelligenceOptions
 
     /// <summary>
     /// Model deployment name for generating text embeddings.
-    /// Used for RAG vector search. Default: "text-embedding-3-small" (1536 dimensions).
-    /// Options: "text-embedding-3-small" (1536 dims), "text-embedding-3-large" (3072 dims)
+    /// Used for RAG vector search.
+    /// Options: "text-embedding-3-large" (3072 dims, recommended), "text-embedding-3-small" (1536 dims, legacy)
     /// Note: Model name should match Azure OpenAI deployment name.
+    /// MIGRATION: Changing from text-embedding-3-small to text-embedding-3-large for better semantic search quality.
     /// </summary>
-    public string EmbeddingModel { get; set; } = "text-embedding-3-small";
+    public string EmbeddingModel { get; set; } = "text-embedding-3-large";
+
+    /// <summary>
+    /// Vector dimensions for the embedding model.
+    /// Must match the model's native dimensions:
+    /// - text-embedding-3-large: 3072 dimensions (recommended)
+    /// - text-embedding-3-small: 1536 dimensions (legacy)
+    /// MIGRATION: New field added for explicit dimension control during schema migration.
+    /// </summary>
+    public int EmbeddingDimensions { get; set; } = 3072;
+
+    /// <summary>
+    /// Legacy embedding dimensions (1536) for backward compatibility during migration.
+    /// Used when reading from old index fields (contentVector, documentVector).
+    /// Will be removed after migration completes.
+    /// </summary>
+    public int LegacyEmbeddingDimensions { get; set; } = 1536;
 
     /// <summary>
     /// Max tokens for summary output. Higher = longer summaries.

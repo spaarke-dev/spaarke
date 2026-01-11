@@ -4,7 +4,7 @@
     <id>051</id>
     <title>Add 3072-dimension vector fields to RAG index</title>
     <phase>5b</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <priority>high</priority>
     <estimate>2h</estimate>
     <tags>azure-search, schema, vectors</tags>
@@ -74,4 +74,23 @@
   <dependencies>
     <dependency>050</dependency>
   </dependencies>
+
+  <notes>
+    <completed>2026-01-11</completed>
+    <summary>
+      3072-dim vector field support complete:
+      - Schema JSON files (v2 and migration) already include contentVector3072 and documentVector3072 (from Phase 5a)
+      - KnowledgeDocument C# model already includes ContentVector3072 and DocumentVector3072 properties (from Phase 5a)
+      - Created Update-KnowledgeIndex-3072Vectors.ps1 to apply schema changes to live Azure index
+      - Created Test-KnowledgeIndex-3072Vectors.ps1 to verify index accepts 3072-dim vectors
+
+      MANUAL STEP REQUIRED: Run Update-KnowledgeIndex-3072Vectors.ps1 against live Azure AI Search:
+      ```
+      .\infrastructure\ai-search\Update-KnowledgeIndex-3072Vectors.ps1 `
+        -ResourceGroup "spe-infrastructure-westus2" `
+        -SearchServiceName "spaarke-search-dev"
+      ```
+      Then verify with Test-KnowledgeIndex-3072Vectors.ps1.
+    </summary>
+  </notes>
 </task>

@@ -18,10 +18,10 @@ export interface DocumentGraphResponse {
  * A document node from the API response.
  */
 export interface ApiDocumentNode {
-    /** Document GUID (sprk_document ID) */
+    /** Document GUID (sprk_document ID) or speFileId for orphan files */
     id: string;
-    /** Node type: "source" for the queried document, "related" for similar documents */
-    type: "source" | "related";
+    /** Node type: "source" for the queried document, "related" for similar documents, "orphan" for files without Dataverse record */
+    type: "source" | "related" | "orphan";
     /** Depth level in the graph (0 = source, 1+ = related) */
     depth: number;
     /** Document data for display */
@@ -36,8 +36,14 @@ export interface ApiDocumentNode {
 export interface ApiDocumentNodeData {
     /** Document display name */
     label: string;
-    /** Document type (e.g., Contract, Invoice) */
+    /** Document type (e.g., Contract, Invoice). For orphan files, derived from file type (e.g., "PDF Document") */
     documentType: string;
+    /** File extension/type: pdf, docx, msg, xlsx, etc. Used for icon selection */
+    fileType?: string;
+    /** SharePoint Embedded file ID (always populated). Primary identifier for the actual file */
+    speFileId?: string;
+    /** True if this is an orphan file with no associated Dataverse record */
+    isOrphanFile?: boolean;
     /** Similarity score to source document (0.0-1.0), null for source */
     similarity?: number;
     /** Keywords extracted by AI analysis */
@@ -46,7 +52,7 @@ export interface ApiDocumentNodeData {
     createdOn: string;
     /** Document modified timestamp */
     modifiedOn: string;
-    /** Dataverse record URL for navigation */
+    /** Dataverse record URL for navigation. Empty for orphan files */
     recordUrl: string;
     /** SharePoint file URL */
     fileUrl: string;

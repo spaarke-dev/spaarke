@@ -4,7 +4,7 @@
     <id>052</id>
     <title>Create EmbeddingMigrationService for vector re-embedding</title>
     <phase>5b</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <priority>high</priority>
     <estimate>6h</estimate>
     <tags>bff-api, azure-search, background-job</tags>
@@ -98,4 +98,33 @@
   <dependencies>
     <dependency>051</dependency>
   </dependencies>
+
+  <notes>
+    <completed>2026-01-11</completed>
+    <summary>
+      EmbeddingMigrationService created with full functionality:
+      - EmbeddingMigrationOptions: Configuration class with BatchSize (20), ConcurrencyLimit (5),
+        DelayBetweenBatchesMs (2000), TenantIds, MaxDocuments, ResumeFromDocumentId, SkipAlreadyMigrated
+      - EmbeddingMigrationService: BackgroundService that re-embeds content using text-embedding-3-large
+      - Batch processing with SemaphoreSlim concurrency control
+      - Progress tracking: total/migrated/errors, lastProcessedDocumentId for resume capability
+      - Rate limiting with configurable delays and exponential backoff on errors
+      - Registered in Program.cs with configuration binding
+      - Unit tests (9 tests passing): options defaults, service behavior, rate limiting
+
+      Files Created:
+      - src/server/api/Sprk.Bff.Api/Services/Jobs/EmbeddingMigrationService.cs
+      - tests/unit/Sprk.Bff.Api.Tests/Services/Jobs/EmbeddingMigrationServiceTests.cs
+
+      Files Modified:
+      - src/server/api/Sprk.Bff.Api/Program.cs (DI registration)
+      - src/server/api/Sprk.Bff.Api/appsettings.template.json (configuration section)
+      - tests/unit/Sprk.Bff.Api.Tests/Services/Ai/RagServiceTests.cs (fixed for updated IOpenAiClient signature)
+
+      NEXT: Task 053 will run the migration. Prerequisites:
+      1. Create Azure OpenAI text-embedding-3-large deployment
+      2. Run Update-KnowledgeIndex-3072Vectors.ps1
+      3. Enable migration: "EmbeddingMigration:Enabled": true, configure TenantIds
+    </summary>
+  </notes>
 </task>

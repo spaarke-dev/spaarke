@@ -250,7 +250,9 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
         (node: DocumentNode) => {
             setSelectedNodeId(node.id);
             if (onDocumentSelect) {
-                onDocumentSelect(node.data.documentId);
+                // Use documentId if available, otherwise use speFileId or node.id for orphan files
+                const selectedId = node.data.documentId ?? node.data.speFileId ?? node.id;
+                onDocumentSelect(selectedId);
             }
             notifyOutputChanged();
         },
