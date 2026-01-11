@@ -13,19 +13,24 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Fix documentVector gap in RAG indexing |
-| **Step** | Completed |
-| **Status** | completed |
-| **Next Action** | Re-upload a document via RAG, then test visualization (Task 023) |
+| **Task** | 050 - Update embedding configuration |
+| **Step** | Not started |
+| **Status** | not-started |
+| **Next Action** | Say "work on task 050" to update embedding configuration for 3072 dimensions |
 
 ### Files Modified This Session
 <!-- Only files touched in CURRENT session, not all time -->
-- `src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs` - Modified - Added documentVector field
-- `src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs` - Modified - Auto-compute documentVector during indexing
+- `infrastructure/ai-search/spaarke-knowledge-index-v2.json` - Created v2 schema with 3072-dim vectors
+- `infrastructure/ai-search/spaarke-knowledge-index-migration.json` - Schema update for existing index
+- `src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs` - Added new fields + 3072 vectors
+- `src/server/api/Sprk.Bff.Api/Services/Ai/IRagService.cs` - Made DocumentId nullable
+- `src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs` - Updated indexing to handle new fields
+- `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/RagServiceTests.cs` - Added tests for new field handling
+- `projects/ai-azure-search-module/tasks/TASK-INDEX.md` - Updated Tasks 040-043 to ✅
 
 ### Critical Context
 <!-- 1-3 sentences of essential context for continuation -->
-**RAG documentVector gap FIXED.** The root cause of 404 errors for new documents was that RAG ingestion created chunks with `contentVector` but NOT `documentVector`. Modified `IndexDocumentsBatchAsync` to automatically compute `documentVector` by averaging chunk vectors with L2 normalization. Single-chunk documents also handled in `IndexDocumentAsync`. **Existing documents still need backfill** (run `DocumentVectorBackfillService`) OR re-upload documents. Next: Re-upload a test document and verify visualization works.
+**Phase 5a (Schema Extension) COMPLETED.** All 4 tasks (040-043) done: v2 schema created, index updated, KnowledgeDocument model has new fields (SpeFileId, FileName, FileType, 3072-dim vectors, nullable DocumentId), RagService indexing updated with validation and file metadata extraction. **Next: Phase 5b (Embedding Migration)** starting with Task 050 to update embedding configuration.
 
 ---
 
@@ -33,14 +38,14 @@
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | 021 |
-| **Task File** | tasks/021-create-ribbon-button.poml |
-| **Title** | Create ribbon button command |
-| **Phase** | 3: Integration & Ribbon |
+| **Task ID** | 050 |
+| **Task File** | tasks/050-update-embedding-configuration.poml |
+| **Title** | Update embedding configuration |
+| **Phase** | 5b: Embedding Migration |
 | **Status** | not-started |
 | **Started** | — |
-| **Rigor Level** | FULL |
-| **Rigor Reason** | Ribbon customization requires careful XML editing |
+| **Rigor Level** | STANDARD |
+| **Rigor Reason** | Configuration changes for embedding model |
 
 ---
 
@@ -86,21 +91,27 @@ No blockers. Phase 1 complete, ready for Phase 2.
 
 ## Next Action
 
-**Continue Phase 3: Integration & Ribbon**
+**Execute Task 050: Update embedding configuration**
 
-To start Task 021:
-- Say "work on task 021" or "continue"
-- This will create a ribbon button to launch the visualization modal
+To start Task 050:
+- Say "work on task 050" or "continue"
+- This begins Phase 5b to migrate to 3072-dimension embeddings
 
-**Phase 2 Complete** (10/10 tasks):
-- All Phase 2 tasks ✅
+**Phase 5: Schema Migration** (5/16 tasks):
+| Phase | Tasks | Status |
+|-------|-------|--------|
+| 5-fix | 025 (Azure config fix) | ✅ |
+| 5a | 040-043 (Schema Extension) | ✅ |
+| 5b | 050-053 (Embedding Migration) | 🔲 **NEXT** |
+| 5c | 060-064 (Service Updates) | 🔲 |
+| 5d | 070-072 (Cutover) | 🔲 |
 
-**Phase 3 Progress** (1/5 tasks):
-- Task 020: ✅ Register PCF on sprk_document form - DONE
-- Task 021: 🔲 Create ribbon button command - NEXT
-- Task 022: 🔲 Implement modal dialog launcher
-- Task 023: 🔲 End-to-end testing in Dataverse
-- Task 024: 🔲 Deploy Phase 3 ribbon
+**Key Decisions Made**:
+- Standardize on 3072 dimensions (text-embedding-3-large)
+- Add new fields: `speFileId`, `fileType`, `fileName`
+- Support orphan files (no linked `sprk_document`)
+- Keep `documentId` (always `sprk_document`) - NOT rename to `sourceRecordId`
+- Derive parent entity at runtime from `sprk_document` lookups
 
 ---
 
@@ -183,21 +194,29 @@ To start Task 021:
 <!-- Used when context budget is high or session ending -->
 <!-- Another Claude instance should be able to continue from these notes -->
 
-**DocumentVector Gap FIXED (2026-01-10).** User tested visualization and got 404 because new documents didn't have `documentVector`. Root cause: RAG ingestion created chunk `contentVector` but visualization API requires `documentVector` (document-level embedding). Fixed by:
-1. Added `documentVector` field to `KnowledgeDocument.cs` (was only in internal BackfillDocument)
-2. Modified `IndexDocumentsBatchAsync` to auto-compute `documentVector` when all chunks are indexed together
-3. Added single-chunk support to `IndexDocumentAsync` (sets documentVector = contentVector)
-4. 88 unit tests pass, build succeeds
+**Phase 5 Created (2026-01-10).** Investigation of visualization 500 errors revealed critical schema mismatch:
+1. `Analysis__SharedIndexName` was pointing to `spaarke-records-index` (Record Matching) instead of RAG index
+2. User clarified terminology: "Documents" = Dataverse `sprk_document`, "Files" = SPE content
+3. User confirmed: similarity is by FILE content (full info), NOT Document metadata
+4. User decided: Standardize on 3072 dims, support orphan files, add `speFileId`/`fileType`/`fileName`
 
-**To test the fix**: Deploy updated API to Azure, then either:
-- Re-upload/re-analyze a document (will get documentVector computed)
-- OR run DocumentVectorBackfillService for existing documents
+**Created**:
+- Analysis doc: `notes/024-index-schema-unification.md` (comprehensive investigation + plan)
+- 16 new tasks across Phase 5 sub-phases (025, 040-043, 050-053, 060-064, 070-072)
+- Updated TASK-INDEX.md with Phase 5 section
+
+**IMMEDIATE PRIORITY**: Task 025 fixes Azure configuration to unblock visualization testing.
+
+**Full Migration Plan**:
+- Phase 5a: Add new fields to index schema, update C# models
+- Phase 5b: Migrate embeddings from 1536→3072 dimensions via background service
+- Phase 5c: Update services to use new fields, update PCF for orphan file support
+- Phase 5d: Remove deprecated fields, final cutover, E2E testing
 
 **Previous Session Context**:
 - API Integration Complete (v1.0.17 deployed) - PCF calls BFF API
-- Tasks 021-022 (ribbon button + modal) are NO LONGER RELEVANT - control is section-based
-- API Endpoint: `GET /api/ai/visualization/related/{documentId}?tenantId={tenantId}&threshold=0.65&limit=25&depth=1`
-- Control requires tenantId in form control properties
+- Tasks 021-022 (ribbon button + modal) are DEFERRED - control is section-based
+- DocumentVector gap was fixed in previous session
 
 ---
 

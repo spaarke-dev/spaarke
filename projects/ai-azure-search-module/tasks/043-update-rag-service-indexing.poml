@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task xmlns="urn:spaarke:poml:task:v1">
+  <metadata>
+    <id>043</id>
+    <title>Update RagService indexing for new fields</title>
+    <phase>5a</phase>
+    <status>completed</status>
+    <priority>high</priority>
+    <estimate>3h</estimate>
+    <tags>bff-api, azure-search, rag</tags>
+    <created>2026-01-10</created>
+  </metadata>
+
+  <context>
+    <description>
+      Update RagService.IndexDocumentAsync to populate new fields:
+      - Extract speFileId from SPE file reference
+      - Extract fileType from file extension
+      - Populate fileName from file metadata
+      - Handle orphan files (no documentId)
+    </description>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-azure-search-module/notes/024-index-schema-unification.md</file>
+      <file>docs/guides/RAG-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-013">Follow AI Architecture patterns</constraint>
+    <constraint source="operations">Must handle both document-linked and orphan files</constraint>
+  </constraints>
+
+  <steps>
+    <step id="1">
+      <description>Update IndexDocumentAsync signature</description>
+      <details>
+        Add optional parameters or use a request object:
+        - speFileId (required)
+        - documentId (optional - null for orphan files)
+        - fileName (required)
+        - fileType (required)
+      </details>
+    </step>
+    <step id="2">
+      <description>Extract file metadata in indexing flow</description>
+      <details>
+        When processing file for RAG:
+        - Extract file extension for fileType
+        - Use SPE item ID for speFileId
+        - Get display name for fileName
+        - Link to documentId if available
+      </details>
+    </step>
+    <step id="3">
+      <description>Update chunk creation logic</description>
+      <details>
+        Ensure each chunk document includes:
+        - speFileId (from parent file)
+        - fileType (from parent file)
+        - fileName (from parent file)
+        - documentId (from parent file, may be null)
+      </details>
+    </step>
+    <step id="4">
+      <description>Add validation for required fields</description>
+      <details>
+        - Validate speFileId is never null
+        - Validate fileName is never empty
+        - Validate fileType is a known extension
+        - Log warning for orphan files (no documentId)
+      </details>
+    </step>
+    <step id="5">
+      <description>Update unit tests</description>
+      <details>
+        - Test indexing with full document link
+        - Test indexing orphan file (no documentId)
+        - Test file type extraction
+        - Test validation errors
+      </details>
+    </step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>New fields populated in indexed chunks</criterion>
+    <criterion>Orphan files can be indexed without documentId</criterion>
+    <criterion>File type correctly extracted from extension</criterion>
+    <criterion>speFileId always populated</criterion>
+    <criterion>Unit tests pass</criterion>
+  </acceptance-criteria>
+
+  <dependencies>
+    <dependency>042</dependency>
+  </dependencies>
+</task>

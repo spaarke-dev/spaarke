@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task xmlns="urn:spaarke:poml:task:v1">
+  <metadata>
+    <id>072</id>
+    <title>End-to-end regression testing</title>
+    <phase>5d</phase>
+    <status>not-started</status>
+    <priority>high</priority>
+    <estimate>4h</estimate>
+    <tags>testing, e2e, verification</tags>
+    <created>2026-01-10</created>
+  </metadata>
+
+  <context>
+    <description>
+      Comprehensive end-to-end testing to verify:
+      - Visualization works with new schema
+      - All file types display correctly
+      - Orphan files handled
+      - Performance is acceptable
+      - No regressions in existing functionality
+    </description>
+    <relevant-files>
+      <file>src/client/pcf/DocumentRelationshipViewer/</file>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/Ai/VisualizationEndpoints.cs</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-azure-search-module/notes/024-index-schema-unification.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="testing">Test in dev environment first</constraint>
+    <constraint source="testing">Document all test cases and results</constraint>
+  </constraints>
+
+  <steps>
+    <step id="1">
+      <description>Test visualization with various file types</description>
+      <details>
+        Test documents with different file types:
+        - PDF documents
+        - Word documents (docx, doc)
+        - Excel spreadsheets (xlsx, xls)
+        - Email files (msg, eml)
+        - Images (jpg, png)
+        Verify correct icons and display.
+      </details>
+    </step>
+    <step id="2">
+      <description>Test orphan file visualization</description>
+      <details>
+        If orphan files exist in index:
+        - Verify they appear in visualization
+        - Verify orphan indicator displays
+        - Verify tooltip shows "No linked document"
+        - Test navigation/click behavior
+      </details>
+    </step>
+    <step id="3">
+      <description>Test similarity matching accuracy</description>
+      <details>
+        Verify 3072-dim vectors provide good results:
+        - Compare similarity scores to previous
+        - Check that highly similar docs ranked first
+        - Verify threshold filtering works
+      </details>
+    </step>
+    <step id="4">
+      <description>Test performance</description>
+      <details>
+        Measure response times:
+        - API response time for visualization query
+        - Time to render graph in PCF
+        - Memory usage in browser
+        Compare to baseline and verify acceptable.
+      </details>
+    </step>
+    <step id="5">
+      <description>Test edge cases</description>
+      <details>
+        Test boundary conditions:
+        - Document with no similar documents
+        - Large number of similar documents (50+)
+        - Very high similarity (99%+)
+        - Very low similarity (threshold boundary)
+      </details>
+    </step>
+    <step id="6">
+      <description>Document test results</description>
+      <details>
+        Create test report:
+        - All test cases and results
+        - Any issues found and resolution
+        - Performance metrics
+        - Sign-off for production readiness
+      </details>
+    </step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>All file types display correctly</criterion>
+    <criterion>Orphan files handled properly</criterion>
+    <criterion>Performance is acceptable</criterion>
+    <criterion>No regressions from previous version</criterion>
+    <criterion>Test report documented</criterion>
+  </acceptance-criteria>
+
+  <dependencies>
+    <dependency>071</dependency>
+  </dependencies>
+</task>

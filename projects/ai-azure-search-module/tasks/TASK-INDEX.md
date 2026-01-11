@@ -1,8 +1,8 @@
 # Task Index: AI Search & Visualization Module
 
 > **Project**: ai-azure-search-module
-> **Last Updated**: 2026-01-09
-> **Total Tasks**: 28
+> **Last Updated**: 2026-01-10
+> **Total Tasks**: 44
 
 ---
 
@@ -14,6 +14,7 @@
 | Phase 2: PCF Control Development | Complete | 10/10 |
 | Phase 3: Integration & Ribbon | In Progress | 1/3 (2 deferred) |
 | Phase 4: Polish & Documentation | Not Started | 0/4 |
+| **Phase 5: Schema Migration** | **In Progress** | **5/16** |
 | Wrap-up | Not Started | 0/1 |
 
 ---
@@ -49,7 +50,24 @@
 | 031 | Performance optimization | 4 | 🔲 | 024 | STANDARD |
 | 032 | Accessibility audit and fixes | 4 | 🔲 | 030, 031 | STANDARD |
 | 033 | Create user documentation | 4 | 🔲 | 032 | MINIMAL |
-| 090 | Project wrap-up | 5 | 🔲 | 033 | FULL |
+| **025** | **Fix Azure index configuration** | **5-fix** | **✅** | **none** | **STANDARD** |
+| 040 | Create RAG index v2 schema JSON | 5a | ✅ | 025 | FULL |
+| 041 | Add migration fields to existing index | 5a | ✅ | 040 | STANDARD |
+| 042 | Update KnowledgeDocument model | 5a | ✅ | 041 | FULL |
+| 043 | Update RagService indexing | 5a | ✅ | 042 | FULL |
+| 050 | Update embedding configuration | 5b | 🔲 | 043 | STANDARD |
+| 051 | Add 3072-dim vector fields | 5b | 🔲 | 050 | STANDARD |
+| 052 | Create EmbeddingMigrationService | 5b | 🔲 | 051 | FULL |
+| 053 | Run embedding migration | 5b | 🔲 | 052 | STANDARD |
+| 060 | Update VisualizationService | 5c | 🔲 | 053 | FULL |
+| 061 | Update visualization API DTOs | 5c | 🔲 | 060 | STANDARD |
+| 062 | Update PCF types | 5c | 🔲 | 061 | STANDARD |
+| 063 | Update DocumentNode icons | 5c | 🔲 | 062 | STANDARD |
+| 064 | Unit tests for new scenarios | 5c | 🔲 | 060-063 | STANDARD |
+| 070 | Remove deprecated fields | 5d | 🔲 | 064 | STANDARD |
+| 071 | Update Azure configuration | 5d | 🔲 | 070 | STANDARD |
+| 072 | E2E regression testing | 5d | 🔲 | 071 | STANDARD |
+| 090 | Project wrap-up | wrap | 🔲 | 072 | FULL |
 
 ---
 
@@ -68,17 +86,19 @@
 ## Critical Path
 
 ```
-001 (index schema) ──┬──→ 003 (service) ──→ 005 (endpoint) ──→ 008 (deploy API)
-                     │
-002 (interface) ─────┘
-                     │
-004 (auth filter) ───┘
+Phase 1-4 (Complete/In Progress):
+001-008 (API infra) ──→ 010-019 (PCF) ──→ 020-024 (ribbon) ──→ 030-033 (polish)
 
-010 (PCF scaffold) ──→ 011 (React Flow) ──→ 012/013 (nodes/edges) ──→ 014-016 (UI) ──→ 019 (deploy PCF)
+Phase 5 (Schema Migration - Unblocks Visualization):
+025 (fix config) ──→ 040-043 (schema extension) ──→ 050-053 (embedding migration)
+                                                              │
+                                                              ↓
+                                                    060-064 (service updates)
+                                                              │
+                                                              ↓
+                                                    070-072 (cutover) ──→ 090 (wrap-up)
 
-019 (PCF deployed) ──→ 020-024 (ribbon integration)
-
-024 (ribbon deployed) ──→ 030-033 (polish) ──→ 090 (wrap-up)
+IMMEDIATE PRIORITY: Task 025 unblocks visualization testing
 ```
 
 ---
@@ -136,10 +156,57 @@
 | 032 - Accessibility audit and fixes | 3h | 030, 031 |
 | 033 - Create user documentation | 2h | 032 |
 
+### Phase 5: Schema Migration (Unblocks Visualization)
+**Goal**: Fix index schema mismatch, standardize on 3072-dim embeddings, support orphan files
+
+**Background**: Investigation of 500 errors revealed visualization was misconfigured to use `spaarke-records-index` (Record Matching) instead of RAG index. Additionally, user clarified:
+- "Documents" = `sprk_document` Dataverse records (metadata)
+- "Files" = SharePoint Embedded files (content)
+- Similarity is by FILE content vectors, not Document metadata
+- Files are ALWAYS linked through `sprk_document`, never directly to other entities
+- Orphan files (no linked Document) should be supported
+
+**Phase 5-fix: Immediate Fix**
+| Task | Est Hours | Dependencies |
+|------|-----------|--------------|
+| 025 - Fix Azure index configuration | 1h | none |
+
+**Phase 5a: Schema Extension**
+| Task | Est Hours | Dependencies |
+|------|-----------|--------------|
+| 040 - Create RAG index v2 schema JSON | 2h | 025 |
+| 041 - Add migration fields to existing index | 3h | 040 |
+| 042 - Update KnowledgeDocument model | 2h | 041 |
+| 043 - Update RagService indexing | 3h | 042 |
+
+**Phase 5b: Embedding Migration**
+| Task | Est Hours | Dependencies |
+|------|-----------|--------------|
+| 050 - Update embedding configuration | 2h | 043 |
+| 051 - Add 3072-dim vector fields | 2h | 050 |
+| 052 - Create EmbeddingMigrationService | 6h | 051 |
+| 053 - Run embedding migration | 4h | 052 |
+
+**Phase 5c: Service Updates**
+| Task | Est Hours | Dependencies |
+|------|-----------|--------------|
+| 060 - Update VisualizationService | 4h | 053 |
+| 061 - Update visualization API DTOs | 2h | 060 |
+| 062 - Update PCF types | 2h | 061 |
+| 063 - Update DocumentNode icons | 2h | 062 |
+| 064 - Unit tests for new scenarios | 4h | 060-063 |
+
+**Phase 5d: Cutover**
+| Task | Est Hours | Dependencies |
+|------|-----------|--------------|
+| 070 - Remove deprecated fields | 3h | 064 |
+| 071 - Update Azure configuration | 2h | 070 |
+| 072 - E2E regression testing | 4h | 071 |
+
 ### Wrap-up
 | Task | Est Hours | Dependencies |
 |------|-----------|--------------|
-| 090 - Project wrap-up | 2h | 033 |
+| 090 - Project wrap-up | 2h | 072 |
 
 ---
 
@@ -240,7 +307,18 @@
 - Control renders inline in "Search" tab, no modal or ribbon button required
 - Skip directly to Task 023 (e2e testing) then Task 024 (deployment)
 
-**No Current Blockers.**
+**Phase 5 Created (2026-01-10):**
+- Investigation of 500 errors in visualization revealed schema mismatch
+- `Analysis__SharedIndexName` was pointing to `spaarke-records-index` (Record Matching) instead of RAG index
+- User clarified terminology: "Documents" = Dataverse records, "Files" = SPE content
+- User confirmed: similarity is by FILE content (full info), NOT Document metadata (limited)
+- User decision: Standardize on 3072 dimensions, extend RAG schema, support orphan files
+- Created comprehensive analysis: `notes/024-index-schema-unification.md`
+- Created 16 new tasks across 4 sub-phases (5a, 5b, 5c, 5d)
+- Task 025 is critical path to unblock visualization testing
+
+**Current Blockers:**
+- Visualization 500 errors until Task 025 completes (fix Azure config)
 
 **Parallel Execution Opportunities:**
 - Tasks 001, 002, 004 can run in parallel (no dependencies)

@@ -47,7 +47,13 @@ public class RagService : IRagService
     private const int VectorDimensions = 1536;
 
     // Search field for keyword queries
-    private static readonly string[] SearchFields = ["content", "documentName", "knowledgeSourceName"];
+    private static readonly string[] SearchFields = ["content", "documentName", "fileName", "knowledgeSourceName"];
+
+    // Supported file extensions for type extraction
+    private static readonly HashSet<string> SupportedFileTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "pdf", "docx", "doc", "xlsx", "xls", "pptx", "ppt", "msg", "eml", "txt", "html", "htm", "rtf", "csv"
+    };
 
     public RagService(
         IKnowledgeDeploymentService deploymentService,
@@ -261,8 +267,14 @@ public class RagService : IRagService
         ArgumentNullException.ThrowIfNull(document);
         ArgumentException.ThrowIfNullOrEmpty(document.TenantId);
 
-        _logger.LogDebug("Indexing document {DocumentId} chunk {ChunkIndex} for tenant {TenantId}",
-            document.DocumentId, document.ChunkIndex, document.TenantId);
+        // Validate speFileId is populated (required for all documents including orphans)
+        ArgumentException.ThrowIfNullOrEmpty(document.SpeFileId, nameof(document.SpeFileId));
+
+        _logger.LogDebug("Indexing document {DocumentId} speFileId {SpeFileId} chunk {ChunkIndex} for tenant {TenantId}",
+            document.DocumentId ?? "(orphan)", document.SpeFileId, document.ChunkIndex, document.TenantId);
+
+        // Ensure file metadata is populated
+        PopulateFileMetadata(document);
 
         // Generate embedding if not provided
         if (document.ContentVector.Length == 0 && !string.IsNullOrEmpty(document.Content))
@@ -277,7 +289,7 @@ public class RagService : IRagService
         if (document.DocumentVector.Length == 0 && document.ContentVector.Length > 0 && document.ChunkCount == 1)
         {
             document.DocumentVector = document.ContentVector;
-            _logger.LogDebug("Set documentVector = contentVector for single-chunk document {DocumentId}", document.DocumentId);
+            _logger.LogDebug("Set documentVector = contentVector for single-chunk document speFileId {SpeFileId}", document.SpeFileId);
         }
 
         // Ensure timestamps are set
@@ -329,7 +341,19 @@ public class RagService : IRagService
         var tenantId = documentList[0].TenantId;
         ArgumentException.ThrowIfNullOrEmpty(tenantId);
 
+        // Validate all documents have speFileId (required)
+        foreach (var doc in documentList)
+        {
+            ArgumentException.ThrowIfNullOrEmpty(doc.SpeFileId, nameof(doc.SpeFileId));
+        }
+
         _logger.LogDebug("Batch indexing {Count} documents for tenant {TenantId}", documentList.Count, tenantId);
+
+        // Populate file metadata for all documents
+        foreach (var doc in documentList)
+        {
+            PopulateFileMetadata(doc);
+        }
 
         // Generate embeddings for documents without vectors
         var documentsNeedingEmbeddings = documentList
@@ -347,10 +371,11 @@ public class RagService : IRagService
             }
         }
 
-        // Compute documentVector for each unique document by averaging chunk contentVectors.
+        // Compute documentVector for each unique file by averaging chunk contentVectors.
+        // For documents with DocumentId, group by DocumentId; for orphan files, group by SpeFileId.
         // This enables document similarity visualization for the AI Azure Search Module.
         var documentGroups = documentList
-            .GroupBy(d => d.DocumentId)
+            .GroupBy(d => d.DocumentId ?? d.SpeFileId)
             .Where(g => !string.IsNullOrEmpty(g.Key));
 
         foreach (var group in documentGroups)
@@ -370,9 +395,10 @@ public class RagService : IRagService
                         doc.DocumentVector = documentVector;
                     }
 
+                    var firstDoc = group.First();
                     _logger.LogDebug(
-                        "Computed documentVector for {DocumentId} from {ChunkCount} chunks",
-                        group.Key, chunkVectors.Count);
+                        "Computed documentVector for {Identifier} from {ChunkCount} chunks (isOrphan={IsOrphan})",
+                        group.Key, chunkVectors.Count, firstDoc.DocumentId == null);
                 }
             }
         }
@@ -654,6 +680,49 @@ public class RagService : IRagService
     {
         // Escape single quotes for OData filter expressions
         return value.Replace("'", "''");
+    }
+
+    /// <summary>
+    /// Populates file metadata fields (fileName, fileType) from available document data.
+    /// Ensures consistent field population for both regular documents and orphan files.
+    /// </summary>
+    /// <param name="document">The document to populate metadata for.</param>
+    private static void PopulateFileMetadata(KnowledgeDocument document)
+    {
+        // Populate FileName from DocumentName if not already set (backward compatibility)
+        if (string.IsNullOrEmpty(document.FileName) && !string.IsNullOrEmpty(document.DocumentName))
+        {
+            document.FileName = document.DocumentName;
+        }
+
+        // Extract FileType from FileName if not already set
+        if (string.IsNullOrEmpty(document.FileType))
+        {
+            document.FileType = ExtractFileType(document.FileName);
+        }
+    }
+
+    /// <summary>
+    /// Extracts the file type (extension without dot) from a file name.
+    /// Returns "unknown" if the extension cannot be determined or is not supported.
+    /// </summary>
+    /// <param name="fileName">The file name to extract the type from.</param>
+    /// <returns>Lowercase file extension (e.g., "pdf", "docx") or "unknown".</returns>
+    private static string ExtractFileType(string? fileName)
+    {
+        if (string.IsNullOrEmpty(fileName))
+        {
+            return "unknown";
+        }
+
+        var lastDotIndex = fileName.LastIndexOf('.');
+        if (lastDotIndex < 0 || lastDotIndex == fileName.Length - 1)
+        {
+            return "unknown";
+        }
+
+        var extension = fileName[(lastDotIndex + 1)..].ToLowerInvariant();
+        return SupportedFileTypes.Contains(extension) ? extension : "unknown";
     }
 
     /// <summary>

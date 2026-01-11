@@ -3,6 +3,7 @@ import {
     DocumentRelationshipViewer as DocumentRelationshipViewerComponent,
     IDocumentRelationshipViewerProps,
 } from "./DocumentRelationshipViewer";
+import { MsalAuthProvider } from "./services/auth/MsalAuthProvider";
 import * as React from "react";
 
 /**
@@ -21,9 +22,11 @@ export class DocumentRelationshipViewer
 {
     private notifyOutputChanged: () => void;
     private selectedDocumentId: string | undefined;
+    private authProvider: MsalAuthProvider;
 
     constructor() {
-        // Empty constructor per PCF pattern
+        // Initialize MSAL auth provider singleton
+        this.authProvider = MsalAuthProvider.getInstance();
     }
 
     /**
@@ -35,6 +38,11 @@ export class DocumentRelationshipViewer
         state: ComponentFramework.Dictionary
     ): void {
         this.notifyOutputChanged = notifyOutputChanged;
+
+        // Initialize MSAL asynchronously (don't block init)
+        void this.authProvider.initialize().catch((error) => {
+            console.error("[DocumentRelationshipViewer] MSAL initialization failed:", error);
+        });
     }
 
     /**
@@ -48,6 +56,7 @@ export class DocumentRelationshipViewer
             context,
             notifyOutputChanged: this.notifyOutputChanged,
             onDocumentSelect: this.handleDocumentSelect.bind(this),
+            authProvider: this.authProvider,
         };
 
         return React.createElement(DocumentRelationshipViewerComponent, props);

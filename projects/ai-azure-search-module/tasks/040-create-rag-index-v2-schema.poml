@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task xmlns="urn:spaarke:poml:task:v1">
+  <metadata>
+    <id>040</id>
+    <title>Create RAG index v2 schema definition</title>
+    <phase>5a</phase>
+    <status>completed</status>
+    <priority>high</priority>
+    <estimate>2h</estimate>
+    <tags>azure-search, schema, infrastructure</tags>
+    <created>2026-01-10</created>
+  </metadata>
+
+  <context>
+    <description>
+      Create the Azure AI Search index schema definition for RAG index v2 with:
+      - 3072-dimension vectors (text-embedding-3-large)
+      - Nullable documentId for orphan files
+      - New fields: speFileId, fileType
+      - Renamed field: documentName -> fileName
+    </description>
+    <relevant-files>
+      <file>infrastructure/ai-search/spaarke-knowledge-index.json</file>
+      <file>infrastructure/ai-search/spaarke-records-index.json</file>
+    </relevant-files>
+    <background>
+      Architecture decision documented in: projects/ai-azure-search-module/notes/024-index-schema-unification.md
+
+      Key changes:
+      - Vector dimensions: 1536 -> 3072 (text-embedding-3-large)
+      - documentId: made nullable for orphan files
+      - Added speFileId: always populated, references SPE file directly
+      - Added fileType: for icon selection (pdf, docx, msg, etc.)
+      - documentName -> fileName: clarity that it's file name not document name
+    </background>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-azure-search-module/notes/024-index-schema-unification.md</file>
+      <file>docs/guides/RAG-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-013">Follow AI architecture patterns</constraint>
+    <constraint source="azure">Index schema must be valid Azure AI Search JSON format</constraint>
+    <constraint source="compatibility">Schema must support both current 1536-dim and new 3072-dim vectors during migration</constraint>
+  </constraints>
+
+  <steps>
+    <step id="1">
+      <description>Create new index schema JSON file</description>
+      <details>
+        Create infrastructure/ai-search/spaarke-knowledge-index-v2.json with:
+        - All existing fields from v1
+        - New fields: speFileId, fileType
+        - Renamed documentName -> fileName
+        - Both 1536 and 3072 vector fields for migration period
+      </details>
+    </step>
+    <step id="2">
+      <description>Define vector search configuration for 3072 dimensions</description>
+      <details>
+        Update vectorSearch section:
+        - Add contentVector3072 and documentVector3072 profiles
+        - Keep existing 1536 profiles for migration
+        - Use HNSW algorithm with cosine metric
+      </details>
+    </step>
+    <step id="3">
+      <description>Add semantic configuration</description>
+      <details>
+        Configure semantic search for:
+        - titleField: fileName
+        - contentFields: content
+        - keywordsFields: fileType
+      </details>
+    </step>
+    <step id="4">
+      <description>Validate schema with Azure CLI</description>
+      <details>
+        Dry-run validation:
+        - az search index create --service-name spaarke-search-dev --resource-group spe-infrastructure-westus2 --name spaarke-knowledge-v2-test --index @infrastructure/ai-search/spaarke-knowledge-index-v2.json
+        - Delete test index after validation
+      </details>
+    </step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Schema JSON file created at infrastructure/ai-search/spaarke-knowledge-index-v2.json</criterion>
+    <criterion>Schema includes all new fields: speFileId, fileType, fileName</criterion>
+    <criterion>Schema includes both 1536 and 3072 vector configurations</criterion>
+    <criterion>Schema validates successfully with Azure AI Search</criterion>
+  </acceptance-criteria>
+
+  <dependencies>
+    <dependency>025</dependency>
+  </dependencies>
+</task>

@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task xmlns="urn:spaarke:poml:task:v1">
+  <metadata>
+    <id>070</id>
+    <title>Remove deprecated fields and complete cutover</title>
+    <phase>5d</phase>
+    <status>not-started</status>
+    <priority>medium</priority>
+    <estimate>3h</estimate>
+    <tags>bff-api, cleanup, azure-search</tags>
+    <created>2026-01-10</created>
+  </metadata>
+
+  <context>
+    <description>
+      After migration is complete and verified, remove deprecated fields:
+      - documentName (replaced by fileName)
+      - contentVector 1536-dim (replaced by contentVector3072)
+      - documentVector 1536-dim (replaced by documentVector3072)
+      Clean up backward compatibility code.
+    </description>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Visualization/VisualizationService.cs</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-azure-search-module/notes/024-index-schema-unification.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="verification">Only execute after confirming all documents migrated</constraint>
+    <constraint source="testing">Run full test suite before and after</constraint>
+  </constraints>
+
+  <steps>
+    <step id="1">
+      <description>Verify migration completion</description>
+      <details>
+        Query index to confirm:
+        - All documents have contentVector3072
+        - All documents have documentVector3072
+        - All documents have speFileId, fileType, fileName
+        Document verification results.
+      </details>
+    </step>
+    <step id="2">
+      <description>Remove deprecated C# properties</description>
+      <details>
+        In KnowledgeDocument:
+        - Remove documentName (keep fileName only)
+        - Remove 1536-dim vector fallback logic
+        - Remove [Obsolete] attributes (now fully removed)
+        - Update XML comments
+      </details>
+    </step>
+    <step id="3">
+      <description>Remove backward compatibility code</description>
+      <details>
+        Clean up services:
+        - Remove vector field fallback logic
+        - Remove documentName mapping
+        - Remove migration-period conditionals
+        - Simplify query logic
+      </details>
+    </step>
+    <step id="4">
+      <description>Update unit tests</description>
+      <details>
+        Remove deprecated test cases:
+        - Remove tests for old field names
+        - Remove migration-period tests
+        - Keep core functionality tests
+        - Add tests for final schema
+      </details>
+    </step>
+    <step id="5">
+      <description>Run full test suite</description>
+      <details>
+        Verify nothing broke:
+        - dotnet test
+        - npm test
+        - Integration tests if available
+      </details>
+    </step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Deprecated fields removed from code</criterion>
+    <criterion>Backward compatibility code removed</criterion>
+    <criterion>All tests pass</criterion>
+    <criterion>Code is cleaner and simpler</criterion>
+  </acceptance-criteria>
+
+  <dependencies>
+    <dependency>064</dependency>
+  </dependencies>
+</task>

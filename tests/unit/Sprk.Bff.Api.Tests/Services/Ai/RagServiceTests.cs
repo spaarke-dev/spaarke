@@ -252,10 +252,34 @@ public class RagServiceTests
     {
         // Arrange
         var service = CreateService();
-        var document = new KnowledgeDocument { TenantId = string.Empty };
+        var document = new KnowledgeDocument { TenantId = string.Empty, SpeFileId = "file-1" };
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentException>(
+            async () => await service.IndexDocumentAsync(document));
+    }
+
+    [Fact]
+    public async Task IndexDocumentAsync_EmptySpeFileId_ThrowsArgumentException()
+    {
+        // Arrange
+        var service = CreateService();
+        var document = new KnowledgeDocument { TenantId = "tenant-1", SpeFileId = string.Empty };
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentException>(
+            async () => await service.IndexDocumentAsync(document));
+    }
+
+    [Fact]
+    public async Task IndexDocumentAsync_NullSpeFileId_ThrowsArgumentException()
+    {
+        // Arrange
+        var service = CreateService();
+        var document = new KnowledgeDocument { TenantId = "tenant-1", SpeFileId = null };
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentNullException>(
             async () => await service.IndexDocumentAsync(document));
     }
 
@@ -268,6 +292,7 @@ public class RagServiceTests
         {
             Id = "doc-1",
             TenantId = "tenant-1",
+            SpeFileId = "file-1",
             Content = "Test document content"
             // ContentVector is empty
         };
@@ -293,6 +318,7 @@ public class RagServiceTests
         {
             Id = "doc-1",
             TenantId = "tenant-1",
+            SpeFileId = "file-1",
             Content = "Test document content",
             ContentVector = _testEmbedding
         };
@@ -317,6 +343,7 @@ public class RagServiceTests
         {
             Id = "doc-1",
             TenantId = "tenant-1",
+            SpeFileId = "file-1",
             Content = "Test content",
             ContentVector = _testEmbedding
         };
@@ -333,6 +360,187 @@ public class RagServiceTests
         result.CreatedAt.Should().BeOnOrBefore(afterIndex);
         result.UpdatedAt.Should().BeOnOrAfter(beforeIndex);
         result.UpdatedAt.Should().BeOnOrBefore(afterIndex);
+    }
+
+    [Fact]
+    public async Task IndexDocumentAsync_PopulatesFileNameFromDocumentName()
+    {
+        // Arrange
+        var service = CreateService();
+        var document = new KnowledgeDocument
+        {
+            Id = "doc-1",
+            TenantId = "tenant-1",
+            SpeFileId = "file-1",
+            DocumentName = "Contract.pdf",
+            ContentVector = _testEmbedding
+        };
+
+        SetupMockSearchClientForIndexing();
+
+        // Act
+        var result = await service.IndexDocumentAsync(document);
+
+        // Assert - FileName should be populated from DocumentName
+        result.FileName.Should().Be("Contract.pdf");
+    }
+
+    [Fact]
+    public async Task IndexDocumentAsync_PreservesExistingFileName()
+    {
+        // Arrange
+        var service = CreateService();
+        var document = new KnowledgeDocument
+        {
+            Id = "doc-1",
+            TenantId = "tenant-1",
+            SpeFileId = "file-1",
+            DocumentName = "Old Name.pdf",
+            FileName = "New Name.pdf",
+            ContentVector = _testEmbedding
+        };
+
+        SetupMockSearchClientForIndexing();
+
+        // Act
+        var result = await service.IndexDocumentAsync(document);
+
+        // Assert - FileName should not be overwritten
+        result.FileName.Should().Be("New Name.pdf");
+    }
+
+    [Fact]
+    public async Task IndexDocumentAsync_ExtractsFileTypeFromFileName()
+    {
+        // Arrange
+        var service = CreateService();
+        var document = new KnowledgeDocument
+        {
+            Id = "doc-1",
+            TenantId = "tenant-1",
+            SpeFileId = "file-1",
+            FileName = "Document.docx",
+            ContentVector = _testEmbedding
+        };
+
+        SetupMockSearchClientForIndexing();
+
+        // Act
+        var result = await service.IndexDocumentAsync(document);
+
+        // Assert - FileType should be extracted
+        result.FileType.Should().Be("docx");
+    }
+
+    [Fact]
+    public async Task IndexDocumentAsync_PreservesExistingFileType()
+    {
+        // Arrange
+        var service = CreateService();
+        var document = new KnowledgeDocument
+        {
+            Id = "doc-1",
+            TenantId = "tenant-1",
+            SpeFileId = "file-1",
+            FileName = "Document.docx",
+            FileType = "pdf", // Explicitly set different type
+            ContentVector = _testEmbedding
+        };
+
+        SetupMockSearchClientForIndexing();
+
+        // Act
+        var result = await service.IndexDocumentAsync(document);
+
+        // Assert - FileType should not be overwritten
+        result.FileType.Should().Be("pdf");
+    }
+
+    [Theory]
+    [InlineData("Document.pdf", "pdf")]
+    [InlineData("Spreadsheet.xlsx", "xlsx")]
+    [InlineData("Presentation.pptx", "pptx")]
+    [InlineData("Email.msg", "msg")]
+    [InlineData("Email.eml", "eml")]
+    [InlineData("Text.txt", "txt")]
+    [InlineData("Web.html", "html")]
+    [InlineData("Word.doc", "doc")]
+    [InlineData("Excel.xls", "xls")]
+    [InlineData("Data.csv", "csv")]
+    public async Task IndexDocumentAsync_ExtractsCorrectFileType(string fileName, string expectedType)
+    {
+        // Arrange
+        var service = CreateService();
+        var document = new KnowledgeDocument
+        {
+            Id = "doc-1",
+            TenantId = "tenant-1",
+            SpeFileId = "file-1",
+            FileName = fileName,
+            ContentVector = _testEmbedding
+        };
+
+        SetupMockSearchClientForIndexing();
+
+        // Act
+        var result = await service.IndexDocumentAsync(document);
+
+        // Assert
+        result.FileType.Should().Be(expectedType);
+    }
+
+    [Theory]
+    [InlineData("Document", "unknown")]
+    [InlineData("Document.xyz", "unknown")]
+    [InlineData("", "unknown")]
+    [InlineData("Document.", "unknown")]
+    public async Task IndexDocumentAsync_ReturnsUnknownForInvalidExtension(string fileName, string expectedType)
+    {
+        // Arrange
+        var service = CreateService();
+        var document = new KnowledgeDocument
+        {
+            Id = "doc-1",
+            TenantId = "tenant-1",
+            SpeFileId = "file-1",
+            FileName = string.IsNullOrEmpty(fileName) ? null : fileName,
+            DocumentName = string.IsNullOrEmpty(fileName) ? null : fileName,
+            ContentVector = _testEmbedding
+        };
+
+        SetupMockSearchClientForIndexing();
+
+        // Act
+        var result = await service.IndexDocumentAsync(document);
+
+        // Assert
+        result.FileType.Should().Be(expectedType);
+    }
+
+    [Fact]
+    public async Task IndexDocumentAsync_OrphanFile_WorksWithNullDocumentId()
+    {
+        // Arrange
+        var service = CreateService();
+        var document = new KnowledgeDocument
+        {
+            Id = "file-1_0",
+            TenantId = "tenant-1",
+            SpeFileId = "file-1",
+            DocumentId = null, // Orphan file
+            FileName = "Orphan.pdf",
+            ContentVector = _testEmbedding
+        };
+
+        SetupMockSearchClientForIndexing();
+
+        // Act
+        var result = await service.IndexDocumentAsync(document);
+
+        // Assert
+        result.DocumentId.Should().BeNull();
+        result.SpeFileId.Should().Be("file-1");
+        result.FileType.Should().Be("pdf");
     }
 
     #endregion
@@ -370,8 +578,8 @@ public class RagServiceTests
         var service = CreateService();
         var documents = new[]
         {
-            new KnowledgeDocument { Id = "doc-1", TenantId = "tenant-1", Content = "Content 1" },
-            new KnowledgeDocument { Id = "doc-2", TenantId = "tenant-1", Content = "Content 2" }
+            new KnowledgeDocument { Id = "doc-1", TenantId = "tenant-1", SpeFileId = "file-1", Content = "Content 1" },
+            new KnowledgeDocument { Id = "doc-2", TenantId = "tenant-1", SpeFileId = "file-2", Content = "Content 2" }
         };
 
         SetupMockBatchEmbeddings(2);
@@ -384,6 +592,101 @@ public class RagServiceTests
         _openAiClientMock.Verify(
             x => x.GenerateEmbeddingsAsync(It.Is<IEnumerable<string>>(e => e.Count() == 2), null, It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    [Fact]
+    public async Task IndexDocumentsBatchAsync_MissingSpeFileId_ThrowsArgumentException()
+    {
+        // Arrange
+        var service = CreateService();
+        var documents = new[]
+        {
+            new KnowledgeDocument { Id = "doc-1", TenantId = "tenant-1", SpeFileId = "file-1", Content = "Content 1" },
+            new KnowledgeDocument { Id = "doc-2", TenantId = "tenant-1", SpeFileId = null, Content = "Content 2" }
+        };
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentNullException>(
+            async () => await service.IndexDocumentsBatchAsync(documents));
+    }
+
+    [Fact]
+    public async Task IndexDocumentsBatchAsync_PopulatesFileMetadataForAllDocuments()
+    {
+        // Arrange
+        var service = CreateService();
+        var documents = new[]
+        {
+            new KnowledgeDocument
+            {
+                Id = "doc-1",
+                TenantId = "tenant-1",
+                SpeFileId = "file-1",
+                DocumentName = "Contract.pdf",
+                ContentVector = _testEmbedding
+            },
+            new KnowledgeDocument
+            {
+                Id = "doc-2",
+                TenantId = "tenant-1",
+                SpeFileId = "file-2",
+                DocumentName = "Report.docx",
+                ContentVector = _testEmbedding
+            }
+        };
+
+        SetupMockSearchClientForIndexing();
+
+        // Act
+        await service.IndexDocumentsBatchAsync(documents);
+
+        // Assert - All documents should have file metadata populated
+        documents[0].FileName.Should().Be("Contract.pdf");
+        documents[0].FileType.Should().Be("pdf");
+        documents[1].FileName.Should().Be("Report.docx");
+        documents[1].FileType.Should().Be("docx");
+    }
+
+    [Fact]
+    public async Task IndexDocumentsBatchAsync_OrphanFiles_GroupsBySpeFileId()
+    {
+        // Arrange
+        var service = CreateService();
+        var speFileId = "orphan-file-1";
+        var documents = new[]
+        {
+            new KnowledgeDocument
+            {
+                Id = $"{speFileId}_0",
+                TenantId = "tenant-1",
+                SpeFileId = speFileId,
+                DocumentId = null, // Orphan - no DocumentId
+                FileName = "Orphan.pdf",
+                ContentVector = _testEmbedding,
+                ChunkIndex = 0
+            },
+            new KnowledgeDocument
+            {
+                Id = $"{speFileId}_1",
+                TenantId = "tenant-1",
+                SpeFileId = speFileId,
+                DocumentId = null, // Orphan - no DocumentId
+                FileName = "Orphan.pdf",
+                ContentVector = _testEmbedding,
+                ChunkIndex = 1
+            }
+        };
+
+        SetupMockSearchClientForIndexing();
+
+        // Act
+        await service.IndexDocumentsBatchAsync(documents);
+
+        // Assert - Both chunks should have documentVector set (grouped by SpeFileId)
+        documents[0].DocumentVector.Length.Should().BeGreaterThan(0);
+        documents[1].DocumentVector.Length.Should().BeGreaterThan(0);
+        // Both should have the same documentVector (averaged from same file's chunks)
+        documents[0].DocumentVector.ToArray().Should().BeEquivalentTo(documents[1].DocumentVector.ToArray());
     }
 
     #endregion

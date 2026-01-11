@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task xmlns="urn:spaarke:poml:task:v1">
+  <metadata>
+    <id>064</id>
+    <title>Unit tests for new visualization scenarios</title>
+    <phase>5c</phase>
+    <status>not-started</status>
+    <priority>high</priority>
+    <estimate>4h</estimate>
+    <tags>testing, unit-test, visualization</tags>
+    <created>2026-01-10</created>
+  </metadata>
+
+  <context>
+    <description>
+      Create comprehensive unit tests for:
+      - New schema fields (speFileId, fileType, fileName)
+      - Orphan file handling
+      - 3072-dimension vector queries
+      - Backward compatibility during migration
+    </description>
+    <relevant-files>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Visualization/</file>
+      <file>src/client/pcf/DocumentRelationshipViewer/DocumentRelationshipViewer/__tests__/</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-azure-search-module/notes/024-index-schema-unification.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="testing">Achieve minimum 80% code coverage for new code</constraint>
+    <constraint source="testing">Include edge cases for null/missing fields</constraint>
+  </constraints>
+
+  <steps>
+    <step id="1">
+      <description>Create VisualizationService unit tests</description>
+      <details>
+        Test scenarios:
+        - Query with 3072-dim vectors
+        - Results include new fields
+        - Orphan file results (null documentId)
+        - Backward compat with 1536-dim vectors
+        - Similarity threshold filtering
+      </details>
+    </step>
+    <step id="2">
+      <description>Create KnowledgeDocument serialization tests</description>
+      <details>
+        Test scenarios:
+        - Serialize with all new fields
+        - Deserialize old format (backward compat)
+        - Nullable documentId handling
+        - File type validation
+      </details>
+    </step>
+    <step id="3">
+      <description>Create RagService indexing tests</description>
+      <details>
+        Test scenarios:
+        - Index document with all new fields
+        - Index orphan file (no documentId)
+        - File type extraction from extension
+        - Validation errors for missing required fields
+      </details>
+    </step>
+    <step id="4">
+      <description>Create PCF component tests</description>
+      <details>
+        Test scenarios:
+        - DocumentNode renders with new fileType
+        - Orphan file indicator displays
+        - Icon selection for all file types
+        - Type transformation from API
+      </details>
+    </step>
+    <step id="5">
+      <description>Run full test suite and verify coverage</description>
+      <details>
+        - Run dotnet test with coverage
+        - Run npm test with coverage
+        - Verify new code meets 80% threshold
+        - Add tests for any uncovered paths
+      </details>
+    </step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>All new scenarios have unit tests</criterion>
+    <criterion>Edge cases covered (null, missing, invalid)</criterion>
+    <criterion>Code coverage >= 80% for new code</criterion>
+    <criterion>All tests pass</criterion>
+  </acceptance-criteria>
+
+  <dependencies>
+    <dependency>060</dependency>
+    <dependency>061</dependency>
+    <dependency>062</dependency>
+    <dependency>063</dependency>
+  </dependencies>
+</task>

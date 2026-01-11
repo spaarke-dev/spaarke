@@ -11,7 +11,7 @@ namespace Sprk.Bff.Api.Models.Ai;
 /// <remarks>
 /// This model maps to the "spaarke-knowledge-index" in Azure AI Search.
 /// Supports 3 deployment models: Shared (filtered by tenantId), Dedicated (per-customer index), CustomerOwned.
-/// Vector dimensions: 1536 (text-embedding-3-small).
+/// Vector dimensions: 1536 (text-embedding-3-small) and 3072 (text-embedding-3-large) during migration.
 /// </remarks>
 public class KnowledgeDocument
 {
@@ -58,25 +58,54 @@ public class KnowledgeDocument
     public string? KnowledgeSourceName { get; set; }
 
     /// <summary>
-    /// Original document identifier (SPE document ID or external reference).
+    /// Original document identifier (sprk_document record ID).
+    /// Nullable to support orphan files (files with no linked Dataverse document).
     /// </summary>
     [SimpleField(IsFilterable = true)]
     [JsonPropertyName("documentId")]
-    public string DocumentId { get; set; } = string.Empty;
+    public string? DocumentId { get; set; }
+
+    /// <summary>
+    /// SharePoint Embedded file identifier. Always populated.
+    /// Use this for direct file access when documentId is null (orphan files).
+    /// </summary>
+    [SimpleField(IsFilterable = true)]
+    [JsonPropertyName("speFileId")]
+    public string? SpeFileId { get; set; }
 
     /// <summary>
     /// Document file name or title.
     /// </summary>
+    /// <remarks>
+    /// Deprecated: Use FileName instead. Kept for backward compatibility during migration.
+    /// </remarks>
     [SearchableField(AnalyzerName = LexicalAnalyzerName.Values.StandardLucene, IsSortable = true)]
     [JsonPropertyName("documentName")]
     public string DocumentName { get; set; } = string.Empty;
 
     /// <summary>
+    /// File display name.
+    /// </summary>
+    [SearchableField(AnalyzerName = LexicalAnalyzerName.Values.StandardLucene, IsSortable = true)]
+    [JsonPropertyName("fileName")]
+    public string? FileName { get; set; }
+
+    /// <summary>
     /// Document type (e.g., contract, policy, procedure).
     /// </summary>
+    /// <remarks>
+    /// Deprecated: Use FileType instead. Kept for backward compatibility during migration.
+    /// </remarks>
     [SimpleField(IsFilterable = true, IsFacetable = true)]
     [JsonPropertyName("documentType")]
     public string? DocumentType { get; set; }
+
+    /// <summary>
+    /// File extension for icon selection (pdf, docx, msg, xlsx, etc.).
+    /// </summary>
+    [SimpleField(IsFilterable = true, IsFacetable = true)]
+    [JsonPropertyName("fileType")]
+    public string? FileType { get; set; }
 
     /// <summary>
     /// Zero-based index of this chunk within the document.
@@ -102,6 +131,9 @@ public class KnowledgeDocument
     /// <summary>
     /// Vector embedding of the content (1536 dimensions for text-embedding-3-small).
     /// </summary>
+    /// <remarks>
+    /// Deprecated: Use ContentVector3072 after migration is complete.
+    /// </remarks>
     [VectorSearchField(VectorSearchDimensions = 1536, VectorSearchProfileName = "knowledge-vector-profile")]
     [JsonPropertyName("contentVector")]
     public ReadOnlyMemory<float> ContentVector { get; set; }
@@ -110,9 +142,28 @@ public class KnowledgeDocument
     /// Document-level vector embedding computed as the normalized average of all chunk contentVectors.
     /// Used for document similarity visualization. Computed automatically during batch indexing.
     /// </summary>
+    /// <remarks>
+    /// Deprecated: Use DocumentVector3072 after migration is complete.
+    /// </remarks>
     [VectorSearchField(VectorSearchDimensions = 1536, VectorSearchProfileName = "knowledge-vector-profile")]
     [JsonPropertyName("documentVector")]
     public ReadOnlyMemory<float> DocumentVector { get; set; }
+
+    /// <summary>
+    /// Vector embedding of the content (3072 dimensions for text-embedding-3-large).
+    /// Higher quality embeddings for improved similarity matching.
+    /// </summary>
+    [VectorSearchField(VectorSearchDimensions = 3072, VectorSearchProfileName = "knowledge-vector-profile-3072")]
+    [JsonPropertyName("contentVector3072")]
+    public ReadOnlyMemory<float> ContentVector3072 { get; set; }
+
+    /// <summary>
+    /// Document-level vector embedding (3072 dimensions for text-embedding-3-large).
+    /// Used for document similarity visualization with improved accuracy.
+    /// </summary>
+    [VectorSearchField(VectorSearchDimensions = 3072, VectorSearchProfileName = "knowledge-vector-profile-3072")]
+    [JsonPropertyName("documentVector3072")]
+    public ReadOnlyMemory<float> DocumentVector3072 { get; set; }
 
     /// <summary>
     /// JSON metadata for extensibility.

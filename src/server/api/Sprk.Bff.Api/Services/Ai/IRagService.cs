@@ -201,9 +201,10 @@ public record RagSearchResult
     public string Id { get; init; } = string.Empty;
 
     /// <summary>
-    /// The source document ID.
+    /// The source document ID (sprk_document record ID).
+    /// Null for orphan files that have no linked Dataverse document.
     /// </summary>
-    public string DocumentId { get; init; } = string.Empty;
+    public string? DocumentId { get; init; }
 
     /// <summary>
     /// The source document name.

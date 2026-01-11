@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task xmlns="urn:spaarke:poml:task:v1">
+  <metadata>
+    <id>025</id>
+    <title>Fix Azure App Service index configuration</title>
+    <phase>3.1</phase>
+    <status>completed</status>
+    <priority>critical</priority>
+    <estimate>1h</estimate>
+    <tags>azure, configuration, visualization, immediate-fix</tags>
+    <created>2026-01-10</created>
+  </metadata>
+
+  <context>
+    <description>
+      The DocumentRelationshipViewer PCF is returning 500 errors because the Azure App Service
+      configuration has Analysis__SharedIndexName set to "spaarke-records-index" which is the
+      Record Matching index (for Matters/Projects), NOT the RAG index containing document chunks.
+
+      This task fixes the immediate configuration issue to unblock visualization testing.
+    </description>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/AnalysisOptions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/KnowledgeDeploymentService.cs</file>
+    </relevant-files>
+    <background>
+      Root cause investigation documented in: projects/ai-azure-search-module/notes/024-index-schema-unification.md
+
+      Current misconfiguration:
+      - Analysis__SharedIndexName = "spaarke-records-index" (WRONG - Record Matching index)
+      - Should be: "spaarke-knowledge-index" or correct RAG index name
+    </background>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/RAG-ARCHITECTURE.md</file>
+      <file>projects/ai-azure-search-module/notes/024-index-schema-unification.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="operations">Verify correct index name exists in Azure AI Search before updating config</constraint>
+    <constraint source="operations">Use Azure CLI or Azure Portal to update App Service configuration</constraint>
+  </constraints>
+
+  <steps>
+    <step id="1">
+      <description>Identify correct RAG index name in Azure AI Search</description>
+      <details>
+        Use Azure CLI or Portal to list indexes in spaarke-search-dev:
+        - az search index list --service-name spaarke-search-dev --resource-group spe-infrastructure-westus2
+        - Look for index with RAG schema (documentId, contentVector 1536 dims)
+        - Expected: "spaarke-knowledge-index" or similar
+      </details>
+    </step>
+    <step id="2">
+      <description>Verify index has required fields for visualization</description>
+      <details>
+        Check index schema includes:
+        - documentId (filterable)
+        - documentVector or contentVector (for similarity)
+        - tenantId (filterable)
+        - documentName (for display)
+      </details>
+    </step>
+    <step id="3">
+      <description>Update Azure App Service configuration</description>
+      <details>
+        Update Analysis__SharedIndexName to correct index name:
+        - az webapp config appsettings set --name spe-api-dev-67e2xz --resource-group spe-infrastructure-westus2 --settings Analysis__SharedIndexName={correct-index-name}
+        - Restart App Service to apply changes
+      </details>
+    </step>
+    <step id="4">
+      <description>Test visualization API endpoint</description>
+      <details>
+        Call visualization endpoint and verify no 500 error:
+        - GET /api/ai/visualization/related/{documentId}?tenantId={tenantId}
+        - May still return empty results if no data, but should not 500
+      </details>
+    </step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Analysis__SharedIndexName points to correct RAG index</criterion>
+    <criterion>Visualization API returns 200 (may be empty data if no documents indexed)</criterion>
+    <criterion>No 500 errors related to index schema mismatch</criterion>
+  </acceptance-criteria>
+
+  <dependencies>
+    <dependency>none - immediate fix</dependency>
+  </dependencies>
+</task>

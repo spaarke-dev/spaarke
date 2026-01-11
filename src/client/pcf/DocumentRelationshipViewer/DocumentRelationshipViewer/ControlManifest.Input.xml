@@ -1,12 +1,13 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="DocumentRelationshipViewer" version="1.0.17"
+  <control namespace="Spaarke.Controls" constructor="DocumentRelationshipViewer" version="1.0.18"
            display-name-key="Document Relationship Viewer"
-           description-key="Interactive graph visualization of related documents based on vector similarity (v1.0.17)"
+           description-key="Interactive graph visualization of related documents based on vector similarity (v1.0.18)"
            control-type="virtual">
 
     <external-service-usage enabled="true">
       <domain>spe-api-dev-67e2xz.azurewebsites.net</domain>
+      <domain>login.microsoftonline.com</domain>
     </external-service-usage>
 
     <!-- Input: Document ID to find relationships for -->

@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task xmlns="urn:spaarke:poml:task:v1">
+  <metadata>
+    <id>052</id>
+    <title>Create EmbeddingMigrationService for vector re-embedding</title>
+    <phase>5b</phase>
+    <status>not-started</status>
+    <priority>high</priority>
+    <estimate>6h</estimate>
+    <tags>bff-api, azure-search, background-job</tags>
+    <created>2026-01-10</created>
+  </metadata>
+
+  <context>
+    <description>
+      Create a background service to migrate existing 1536-dimension embeddings
+      to 3072-dimension embeddings. This service re-embeds document content
+      and updates the new vector fields without disrupting live operations.
+    </description>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/EmbeddingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-azure-search-module/notes/024-index-schema-unification.md</file>
+      <file>docs/guides/RAG-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-001">Use BackgroundService pattern, not Azure Functions</constraint>
+    <constraint source="azure-openai">Respect TPM rate limits for embedding calls</constraint>
+    <constraint source="operations">Must be resumable after interruption</constraint>
+  </constraints>
+
+  <steps>
+    <step id="1">
+      <description>Create EmbeddingMigrationService class</description>
+      <details>
+        Implement IHostedService/BackgroundService:
+        - Query documents missing 3072-dim vectors
+        - Process in batches (configurable size)
+        - Track progress in migration state table/document
+      </details>
+    </step>
+    <step id="2">
+      <description>Implement batch processing with rate limiting</description>
+      <details>
+        - Use SemaphoreSlim for concurrency control
+        - Implement exponential backoff on rate limit errors
+        - Log progress every N documents
+        - Support pause/resume via configuration
+      </details>
+    </step>
+    <step id="3">
+      <description>Implement progress tracking</description>
+      <details>
+        Track migration state:
+        - Total documents to migrate
+        - Documents migrated
+        - Last processed document ID (for resume)
+        - Errors encountered
+        Store in durable location (table storage or index document).
+      </details>
+    </step>
+    <step id="4">
+      <description>Add configuration options</description>
+      <details>
+        Add to appsettings:
+        - MigrationEnabled: bool
+        - BatchSize: int
+        - ConcurrencyLimit: int
+        - DelayBetweenBatches: TimeSpan
+      </details>
+    </step>
+    <step id="5">
+      <description>Create unit tests</description>
+      <details>
+        - Test batch processing logic
+        - Test rate limiting behavior
+        - Test resume from last position
+        - Test error handling
+      </details>
+    </step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Migration service processes documents in batches</criterion>
+    <criterion>Rate limiting prevents Azure OpenAI throttling</criterion>
+    <criterion>Progress is tracked and resumable</criterion>
+    <criterion>Configuration controls migration behavior</criterion>
+    <criterion>Unit tests pass</criterion>
+  </acceptance-criteria>
+
+  <dependencies>
+    <dependency>051</dependency>
+  </dependencies>
+</task>

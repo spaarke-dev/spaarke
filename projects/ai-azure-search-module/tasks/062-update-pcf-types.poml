@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task xmlns="urn:spaarke:poml:task:v1">
+  <metadata>
+    <id>062</id>
+    <title>Update PCF types for orphan file support</title>
+    <phase>5c</phase>
+    <status>not-started</status>
+    <priority>high</priority>
+    <estimate>2h</estimate>
+    <tags>pcf, typescript, visualization</tags>
+    <created>2026-01-10</created>
+  </metadata>
+
+  <context>
+    <description>
+      Update TypeScript types in DocumentRelationshipViewer PCF to support:
+      - New fields: speFileId, fileType, fileName
+      - Orphan files (documentId null)
+      - Display type variations
+    </description>
+    <relevant-files>
+      <file>src/client/pcf/DocumentRelationshipViewer/DocumentRelationshipViewer/types/graph.ts</file>
+      <file>src/client/pcf/DocumentRelationshipViewer/DocumentRelationshipViewer/types/api.ts</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-azure-search-module/notes/024-index-schema-unification.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent UI v9 patterns</constraint>
+    <constraint source="ADR-022">React 16 compatible APIs only</constraint>
+  </constraints>
+
+  <steps>
+    <step id="1">
+      <description>Update DocumentNodeData type</description>
+      <details>
+        Add/update fields:
+        - speFileId: string (always present)
+        - fileType: string (pdf, docx, msg, etc.)
+        - fileName: string (display name)
+        - documentId?: string (optional for orphan files)
+        - isOrphanFile?: boolean
+      </details>
+    </step>
+    <step id="2">
+      <description>Update API response types</description>
+      <details>
+        Update api.ts types to match new DTOs:
+        - RelatedDocument with new fields
+        - VisualizationResponse structure
+        - Handle nullable documentId
+      </details>
+    </step>
+    <step id="3">
+      <description>Update data transformation</description>
+      <details>
+        Update transformer functions:
+        - Map API response to DocumentNodeData
+        - Derive isOrphanFile from null documentId
+        - Use fileName (fallback to documentName for old data)
+      </details>
+    </step>
+    <step id="4">
+      <description>Update file type constants</description>
+      <details>
+        Add/update file type constants:
+        - FILE_TYPES enum or const object
+        - Include all supported types: pdf, docx, xlsx, msg, etc.
+        - Include "file" for orphan files without extension
+      </details>
+    </step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>TypeScript types match API DTOs</criterion>
+    <criterion>Orphan files handled correctly</criterion>
+    <criterion>File types enumerated</criterion>
+    <criterion>Type compilation succeeds</criterion>
+  </acceptance-criteria>
+
+  <dependencies>
+    <dependency>061</dependency>
+  </dependencies>
+</task>

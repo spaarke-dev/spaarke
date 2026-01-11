@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task xmlns="urn:spaarke:poml:task:v1">
+  <metadata>
+    <id>053</id>
+    <title>Run embedding migration to 3072 dimensions</title>
+    <phase>5b</phase>
+    <status>not-started</status>
+    <priority>high</priority>
+    <estimate>4h</estimate>
+    <tags>operations, azure-search, migration</tags>
+    <created>2026-01-10</created>
+  </metadata>
+
+  <context>
+    <description>
+      Execute the embedding migration to populate 3072-dimension vectors
+      for all existing documents. Monitor progress and verify completion.
+    </description>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/EmbeddingMigrationService.cs</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-azure-search-module/notes/024-index-schema-unification.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="operations">Run during low-traffic period</constraint>
+    <constraint source="azure-openai">Monitor TPM usage to avoid service degradation</constraint>
+    <constraint source="cost">Track embedding API costs during migration</constraint>
+  </constraints>
+
+  <steps>
+    <step id="1">
+      <description>Enable migration in configuration</description>
+      <details>
+        Update Azure App Service configuration:
+        - EmbeddingMigration__Enabled = true
+        - EmbeddingMigration__BatchSize = 50
+        - EmbeddingMigration__ConcurrencyLimit = 5
+        Deploy configuration and restart API.
+      </details>
+    </step>
+    <step id="2">
+      <description>Monitor migration progress</description>
+      <details>
+        Track via logs and metrics:
+        - Application Insights queries for progress logs
+        - Azure OpenAI metrics for TPM usage
+        - Search index document count with new vectors
+      </details>
+    </step>
+    <step id="3">
+      <description>Verify migration completion</description>
+      <details>
+        Query index for documents with/without 3072-dim vectors:
+        - Count documents with contentVector3072 populated
+        - Compare to total document count
+        - Identify any failed documents
+      </details>
+    </step>
+    <step id="4">
+      <description>Handle migration failures</description>
+      <details>
+        For any failed documents:
+        - Review error logs
+        - Retry failed batch
+        - Document any permanent failures
+      </details>
+    </step>
+    <step id="5">
+      <description>Disable migration service</description>
+      <details>
+        After completion:
+        - Set EmbeddingMigration__Enabled = false
+        - Document migration completion date
+        - Note: Keep service code for future migrations
+      </details>
+    </step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>All existing documents have 3072-dim vectors</criterion>
+    <criterion>Migration completed without service degradation</criterion>
+    <criterion>Any failures documented and addressed</criterion>
+    <criterion>Migration service disabled after completion</criterion>
+  </acceptance-criteria>
+
+  <dependencies>
+    <dependency>052</dependency>
+  </dependencies>
+</task>

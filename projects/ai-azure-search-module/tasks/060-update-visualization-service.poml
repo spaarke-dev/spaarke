@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task xmlns="urn:spaarke:poml:task:v1">
+  <metadata>
+    <id>060</id>
+    <title>Update VisualizationService for new schema</title>
+    <phase>5c</phase>
+    <status>not-started</status>
+    <priority>high</priority>
+    <estimate>4h</estimate>
+    <tags>bff-api, visualization, azure-search</tags>
+    <created>2026-01-10</created>
+  </metadata>
+
+  <context>
+    <description>
+      Update VisualizationService to use new schema fields:
+      - Use 3072-dim vectors (documentVector3072, contentVector3072)
+      - Return speFileId, fileType, fileName in results
+      - Handle orphan files (null documentId)
+    </description>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Visualization/VisualizationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Visualization/RelatedDocument.cs</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-azure-search-module/notes/024-index-schema-unification.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="backward-compat">Support queries during migration (check both vector fields)</constraint>
+    <constraint source="ADR-013">Follow AI Architecture patterns</constraint>
+  </constraints>
+
+  <steps>
+    <step id="1">
+      <description>Update vector field references</description>
+      <details>
+        Change vector search to use new fields:
+        - Primary: documentVector3072
+        - Fallback: documentVector (during migration)
+        Use configuration to control which fields are queried.
+      </details>
+    </step>
+    <step id="2">
+      <description>Update result mapping</description>
+      <details>
+        Map new fields to RelatedDocument:
+        - speFileId from search result
+        - fileType from search result
+        - fileName from search result (with fallback to documentName)
+        - documentId (may be null for orphan files)
+      </details>
+    </step>
+    <step id="3">
+      <description>Handle orphan files in results</description>
+      <details>
+        When documentId is null:
+        - Still include in visualization results
+        - Use "File" as display type
+        - Generate URL using speFileId instead of documentId
+      </details>
+    </step>
+    <step id="4">
+      <description>Update similarity search query</description>
+      <details>
+        Adjust vector similarity query:
+        - Use correct vector field based on configuration
+        - Set appropriate k and threshold values
+        - Include all new fields in select clause
+      </details>
+    </step>
+    <step id="5">
+      <description>Add unit tests</description>
+      <details>
+        - Test with documents having all new fields
+        - Test with orphan files (no documentId)
+        - Test backward compatibility during migration
+        - Test similarity threshold filtering
+      </details>
+    </step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>VisualizationService uses 3072-dim vectors</criterion>
+    <criterion>New fields returned in results</criterion>
+    <criterion>Orphan files handled correctly</criterion>
+    <criterion>Backward compatible during migration</criterion>
+    <criterion>Unit tests pass</criterion>
+  </acceptance-criteria>
+
+  <dependencies>
+    <dependency>053</dependency>
+  </dependencies>
+</task>

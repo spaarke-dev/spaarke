@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task xmlns="urn:spaarke:poml:task:v1">
+  <metadata>
+    <id>051</id>
+    <title>Add 3072-dimension vector fields to RAG index</title>
+    <phase>5b</phase>
+    <status>not-started</status>
+    <priority>high</priority>
+    <estimate>2h</estimate>
+    <tags>azure-search, schema, vectors</tags>
+    <created>2026-01-10</created>
+  </metadata>
+
+  <context>
+    <description>
+      Add new 3072-dimension vector fields to the existing RAG index
+      alongside the existing 1536-dimension fields. This enables parallel
+      operation during migration without data loss.
+    </description>
+    <relevant-files>
+      <file>infrastructure/ai-search/spaarke-knowledge-index-v2.json</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-azure-search-module/notes/024-index-schema-unification.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="azure">Vector fields cannot be modified after creation</constraint>
+    <constraint source="azure">New vector fields require different names than existing</constraint>
+    <constraint source="operations">Index must remain operational during update</constraint>
+  </constraints>
+
+  <steps>
+    <step id="1">
+      <description>Add new vector fields to index schema</description>
+      <details>
+        Add fields via Azure CLI:
+        - contentVector3072 (Collection(Edm.Single), 3072 dimensions, HNSW)
+        - documentVector3072 (Collection(Edm.Single), 3072 dimensions, HNSW)
+        Keep existing 1536-dim fields for migration period.
+      </details>
+    </step>
+    <step id="2">
+      <description>Update vector search configuration</description>
+      <details>
+        Add vector search profiles for new fields:
+        - Profile: contentVector3072-profile
+        - Profile: documentVector3072-profile
+        Configure HNSW algorithm parameters to match existing.
+      </details>
+    </step>
+    <step id="3">
+      <description>Verify index accepts new vector dimensions</description>
+      <details>
+        Test document insertion with 3072-dim vectors:
+        - Create test document with new vector fields
+        - Verify successful indexing
+        - Delete test document
+      </details>
+    </step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>New 3072-dim vector fields added to index</criterion>
+    <criterion>Vector search profiles configured</criterion>
+    <criterion>Index accepts documents with new vector fields</criterion>
+    <criterion>Existing documents with 1536-dim vectors unaffected</criterion>
+  </acceptance-criteria>
+
+  <dependencies>
+    <dependency>050</dependency>
+  </dependencies>
+</task>

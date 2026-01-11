@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task xmlns="urn:spaarke:poml:task:v1">
+  <metadata>
+    <id>061</id>
+    <title>Update visualization API DTOs</title>
+    <phase>5c</phase>
+    <status>not-started</status>
+    <priority>high</priority>
+    <estimate>2h</estimate>
+    <tags>bff-api, visualization, dto</tags>
+    <created>2026-01-10</created>
+  </metadata>
+
+  <context>
+    <description>
+      Update API DTOs for visualization endpoints to include new fields:
+      - speFileId, fileType, fileName in responses
+      - Support for orphan files
+      Ensure OpenAPI spec reflects changes.
+    </description>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Visualization/RelatedDocument.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Visualization/VisualizationResponse.cs</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-azure-search-module/notes/024-index-schema-unification.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-013">Follow AI Architecture DTO patterns</constraint>
+    <constraint source="backward-compat">documentName included for legacy clients during transition</constraint>
+  </constraints>
+
+  <steps>
+    <step id="1">
+      <description>Update RelatedDocument DTO</description>
+      <details>
+        Add new properties:
+        - string? SpeFileId { get; set; }
+        - string FileType { get; set; }
+        - string FileName { get; set; }
+        Mark DocumentId as nullable.
+        Keep DocumentName as deprecated during transition.
+      </details>
+    </step>
+    <step id="2">
+      <description>Add IsOrphanFile computed property</description>
+      <details>
+        Add computed property:
+        - bool IsOrphanFile => DocumentId == null;
+        This helps clients identify orphan files in visualization.
+      </details>
+    </step>
+    <step id="3">
+      <description>Update VisualizationResponse</description>
+      <details>
+        Ensure response includes:
+        - Source document with new fields
+        - Related documents with new fields
+        - Total count of related (including orphans)
+      </details>
+    </step>
+    <step id="4">
+      <description>Update OpenAPI documentation</description>
+      <details>
+        Add XML comments and OpenAPI attributes:
+        - Document new fields
+        - Mark deprecated fields as [Obsolete]
+        - Add examples in comments
+      </details>
+    </step>
+    <step id="5">
+      <description>Verify OpenAPI spec generation</description>
+      <details>
+        Run API and check /swagger:
+        - New fields appear in schema
+        - Deprecated fields marked
+        - Examples render correctly
+      </details>
+    </step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>DTOs include new fields</criterion>
+    <criterion>DocumentId is nullable</criterion>
+    <criterion>OpenAPI spec updated correctly</criterion>
+    <criterion>Backward compatibility maintained</criterion>
+  </acceptance-criteria>
+
+  <dependencies>
+    <dependency>060</dependency>
+  </dependencies>
+</task>
