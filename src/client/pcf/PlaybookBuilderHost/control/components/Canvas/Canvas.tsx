@@ -17,6 +17,7 @@ import ReactFlow, {
 import { makeStyles, tokens } from '@fluentui/react-components';
 import { useCanvasStore, PlaybookNodeType, PlaybookNode } from '../../stores';
 import { nodeTypes } from '../Nodes';
+import { edgeTypes } from '../Edges';
 import 'react-flow-renderer/dist/style.css';
 
 const useStyles = makeStyles({
@@ -115,6 +116,7 @@ export const Canvas = React.memo(function Canvas() {
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}

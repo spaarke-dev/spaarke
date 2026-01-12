@@ -575,7 +575,9 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 }
             }
 
-            // TODO: Evaluate condition if present (Phase 3+)
+            // Note: ConditionJson on nodes is for conditional execution guards (Phase 5).
+            // The Condition ActionType is handled by ConditionNodeExecutor (Phase 4) which
+            // returns ConditionResult with branch selection for orchestrator-level branching.
 
             // Resolve scopes for this node
             var scopes = await _scopeResolver.ResolveNodeScopesAsync(
@@ -597,9 +599,8 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 return errorOutput;
             }
 
-            // Determine action type (Phase 1: All nodes are AiAnalysis)
-            // Phase 2: ActionType field will be on the action entity
-            var actionType = ActionType.AiAnalysis;
+            // Get action type from the action entity (Phase 4+)
+            var actionType = action.ActionType;
 
             // Get executor for action type
             var executor = _executorRegistry.GetExecutor(actionType);

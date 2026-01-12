@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement Model Selection API</title>
     <phase>4: Advanced Features</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <tags>bff-api, api</tags>
     <dependencies>029</dependencies>
@@ -27,4 +27,12 @@
     <criterion testable="true">API returns model deployments</criterion>
     <criterion testable="true">Node uses selected model</criterion>
   </acceptance-criteria>
+  <notes>
+    <note>Created GET /api/ai/model-deployments and GET /api/ai/model-deployments/{id} endpoints with stub data</note>
+    <note>ModelDeploymentDto includes: Id, Name, Provider (enum), Capability (enum), ModelId, ContextWindow, Description, IsActive</note>
+    <note>Added ModelDeploymentId property to ToolExecutionContext to pass through from NodeExecutionContext</note>
+    <note>Updated AiAnalysisNodeExecutor.CreateToolExecutionContext to pass ModelDeploymentId from node</note>
+    <note>Unit tests created for DTO enum values and pagination behavior</note>
+    <note>Stub data includes: GPT-4o, GPT-4o Mini, GPT-4 Turbo, text-embedding-3-large, Claude 3.5 Sonnet</note>
+  </notes>
 </task>

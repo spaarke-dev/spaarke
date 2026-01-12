@@ -227,6 +227,7 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
             KnowledgeContext = knowledgeContext,
             MaxTokens = context.MaxTokens,
             Temperature = context.Temperature,
+            ModelDeploymentId = context.ModelDeploymentId ?? context.Node.ModelDeploymentId,
             CorrelationId = context.CorrelationId,
             CreatedAt = context.CreatedAt
         };

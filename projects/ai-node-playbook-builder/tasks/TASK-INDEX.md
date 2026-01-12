@@ -83,12 +83,12 @@ See: [Architecture Refactor Documentation](../notes/architecture/ARCHITECTURE-RE
 
 | Task | Title | Status | Depends | Tags |
 |------|-------|--------|---------|------|
-| 030 | Create ConditionNodeExecutor | :white_large_square: | 029 | bff-api, executor |
-| 031 | Add Condition UI in Builder | :white_large_square: | 030 | frontend, react |
-| 032 | Implement Model Selection API | :white_large_square: | 029 | bff-api, api |
-| 033 | Add Model Selection UI | :white_large_square: | 032 | frontend, react |
-| 034 | Implement Confidence Scores | :white_large_square: | 029 | bff-api, ai |
-| 035 | Add Confidence UI Display | :white_large_square: | 034 | frontend, react |
+| 030 | Create ConditionNodeExecutor | :white_check_mark: | 029 | bff-api, executor |
+| 031 | Add Condition UI in Builder | :white_check_mark: | 030 | frontend, react |
+| 032 | Implement Model Selection API | :white_check_mark: | 029 | bff-api, api |
+| 033 | Add Model Selection UI | :white_check_mark: | 032 | frontend, react |
+| 034 | Implement Confidence Scores | :white_check_mark: | 029 | bff-api, ai |
+| 035 | Add Confidence UI Display | :white_check_mark: | 034 | frontend, react |
 | 036 | Create Playbook Templates Feature | :white_large_square: | 029 | bff-api, feature |
 | 037 | Add Template Library UI | :white_large_square: | 036 | frontend, react |
 | 038 | Implement Execution History | :white_large_square: | 029 | bff-api, feature |

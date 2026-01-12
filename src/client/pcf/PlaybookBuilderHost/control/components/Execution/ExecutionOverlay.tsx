@@ -29,8 +29,10 @@ import {
   Dismiss20Regular,
   Clock20Regular,
   BrainCircuit20Regular,
+  Sparkle20Regular,
 } from '@fluentui/react-icons';
 import { useExecutionStore, NodeExecutionStatus } from '../../stores/executionStore';
+import { ConfidenceBadge, ConfidenceNodeBadge } from './ConfidenceBadge';
 
 const useStyles = makeStyles({
   overlay: {
@@ -119,7 +121,7 @@ export const ExecutionOverlay: React.FC<ExecutionOverlayProps> = ({
 }) => {
   const styles = useStyles();
 
-  const { status, nodeStates, totalTokensUsed, error, startedAt, completedAt } =
+  const { status, nodeStates, totalTokensUsed, error, startedAt, completedAt, overallConfidence } =
     useExecutionStore();
 
   // Calculate execution metrics
@@ -294,6 +296,19 @@ export const ExecutionOverlay: React.FC<ExecutionOverlayProps> = ({
             </div>
           )}
 
+          {/* Overall Confidence */}
+          {overallConfidence !== null && overallConfidence !== undefined && (
+            <div className={styles.metricsRow}>
+              <Text className={styles.metricsLabel} size={200}>
+                <Sparkle20Regular
+                  style={{ verticalAlign: 'middle', marginRight: '4px' }}
+                />
+                Confidence
+              </Text>
+              <ConfidenceBadge confidence={overallConfidence} size="compact" />
+            </div>
+          )}
+
           {/* Error message */}
           {error && (
             <Text
@@ -328,7 +343,7 @@ export const NodeExecutionBadge: React.FC<NodeExecutionBadgeProps> = ({ nodeId }
     return null;
   }
 
-  const { status, progress } = nodeState;
+  const { status, progress, confidence } = nodeState;
 
   return (
     <div className={styles.nodeBadge}>
@@ -338,9 +353,13 @@ export const NodeExecutionBadge: React.FC<NodeExecutionBadgeProps> = ({ nodeId }
         </Tooltip>
       )}
       {status === 'completed' && (
-        <Tooltip content="Completed" relationship="label">
-          <Badge appearance="filled" color="success" icon={<Checkmark20Regular />} />
-        </Tooltip>
+        confidence !== undefined ? (
+          <ConfidenceNodeBadge confidence={confidence} />
+        ) : (
+          <Tooltip content="Completed" relationship="label">
+            <Badge appearance="filled" color="success" icon={<Checkmark20Regular />} />
+          </Tooltip>
+        )
       )}
       {status === 'failed' && (
         <Tooltip content={nodeState.error ?? 'Failed'} relationship="label">

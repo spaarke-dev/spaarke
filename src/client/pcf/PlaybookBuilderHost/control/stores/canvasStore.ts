@@ -44,6 +44,8 @@ export interface PlaybookNodeData {
   skillIds?: string[];
   knowledgeIds?: string[];
   toolId?: string;
+  // AI model selection (for aiAnalysis, aiCompletion nodes)
+  modelDeploymentId?: string;
   [key: string]: unknown; // Index signature for React Flow compatibility
 }
 
@@ -166,17 +168,36 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     })),
 
   onConnect: (connection) =>
-    set((state) => ({
-      edges: addEdge(
-        {
-          ...connection,
-          type: 'smoothstep',
-          animated: true,
-        },
-        state.edges
-      ),
-      isDirty: true,
-    })),
+    set((state) => {
+      // Determine edge type based on source node and handle
+      let edgeType = 'smoothstep';
+      let animated = true;
+
+      // Check if source is a condition node
+      const sourceNode = state.nodes.find((n) => n.id === connection.source);
+      if (sourceNode?.data.type === 'condition' && connection.sourceHandle) {
+        // Use branch-specific edge types for condition nodes
+        if (connection.sourceHandle === 'true') {
+          edgeType = 'trueBranch';
+          animated = false; // Static for better visual clarity
+        } else if (connection.sourceHandle === 'false') {
+          edgeType = 'falseBranch';
+          animated = false;
+        }
+      }
+
+      return {
+        edges: addEdge(
+          {
+            ...connection,
+            type: edgeType,
+            animated,
+          },
+          state.edges
+        ),
+        isDirty: true,
+      };
+    }),
 
   // Selection
   selectNode: (nodeId) => set({ selectedNodeId: nodeId }),

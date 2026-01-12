@@ -26,3 +26,10 @@ export {
   type ExecutionState,
   type ExecutionEvent,
 } from './executionStore';
+
+export {
+  useModelStore,
+  type AiProvider,
+  type AiCapability,
+  type ModelDeploymentItem,
+} from './modelStore';

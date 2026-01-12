@@ -37,6 +37,7 @@ export interface NodeExecutionState {
   error?: string;
   outputPreview?: string; // Brief text preview of output
   tokensUsed?: number;
+  confidence?: number; // 0.0-1.0 confidence score from AI
 }
 
 // Overall execution state
@@ -48,6 +49,7 @@ export interface ExecutionState {
   nodeStates: Map<string, NodeExecutionState>;
   totalTokensUsed: number;
   error: string | null;
+  overallConfidence: number | null; // Average confidence across all nodes
 }
 
 // SSE event payload structure (matches backend PlaybookExecutionEvent)
@@ -60,6 +62,8 @@ export interface ExecutionEvent {
   progress?: number;
   outputPreview?: string;
   tokensUsed?: number;
+  confidence?: number; // Node confidence score (0.0-1.0)
+  overallConfidence?: number; // Overall execution confidence (for completion event)
   error?: string;
   timestamp: string;
 }
@@ -85,6 +89,7 @@ const initialState: ExecutionState = {
   nodeStates: new Map(),
   totalTokensUsed: 0,
   error: null,
+  overallConfidence: null,
 };
 
 /**
@@ -103,12 +108,13 @@ export const useExecutionStore = create<ExecutionStoreState>((set, get) => ({
       nodeStates: new Map(),
       totalTokensUsed: 0,
       error: null,
+      overallConfidence: null,
     });
     console.info('[ExecutionStore] Execution started:', executionId);
   },
 
   handleEvent: (event: ExecutionEvent) => {
-    const { eventType, nodeId, status, progress, outputPreview, tokensUsed, error } = event;
+    const { eventType, nodeId, status, progress, outputPreview, tokensUsed, confidence, overallConfidence, error } = event;
 
     console.debug('[ExecutionStore] Handling event:', eventType, nodeId);
 
@@ -150,6 +156,7 @@ export const useExecutionStore = create<ExecutionStoreState>((set, get) => ({
               progress: 100,
               outputPreview,
               tokensUsed,
+              confidence,
             });
           }
           return {
@@ -174,6 +181,7 @@ export const useExecutionStore = create<ExecutionStoreState>((set, get) => ({
           return {
             status: 'completed',
             completedAt: event.timestamp,
+            overallConfidence: overallConfidence ?? null,
           };
 
         case 'execution_failed':

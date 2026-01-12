@@ -7,13 +7,13 @@
 
 ## Active Task
 
-**Task ID**: 030
-**Task File**: tasks/030-condition-node-executor.poml
-**Title**: Create ConditionNodeExecutor
+**Task ID**: 036
+**Task File**: tasks/036-playbook-templates.poml
+**Title**: Create Playbook Templates Feature
 **Phase**: 4: Advanced Features
 **Status**: not-started
 **Started**: —
-**Rigor Level**: TBD (Phase 4 entry task)
+**Rigor Level**: TBD (bff-api, feature task)
 
 ---
 
@@ -21,14 +21,14 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 030 - Create ConditionNodeExecutor |
+| **Task** | 036 - Create Playbook Templates Feature |
 | **Step** | Not started |
 | **Status** | pending |
-| **Next Action** | Begin Step 1 of task 030 |
+| **Next Action** | Begin Step 1 of task 036 |
 
 **To resume**:
 ```
-continue task 030
+continue task 036
 ```
 
 ---
@@ -41,18 +41,21 @@ continue task 030
 
 ## Files Modified This Session
 
-**Task 029 Files** (completed):
-- `projects/ai-node-playbook-builder/notes/phase3-deployment-notes.md` - NEW deployment notes
+**Task 035 Files** (completed):
+- `src/client/pcf/PlaybookBuilderHost/control/components/Execution/ConfidenceBadge.tsx` - NEW: Color-coded confidence badge component
+- `src/client/pcf/PlaybookBuilderHost/control/stores/executionStore.ts` - Added confidence fields to NodeExecutionState and ExecutionState
+- `src/client/pcf/PlaybookBuilderHost/control/components/Execution/ExecutionOverlay.tsx` - Added overall confidence display and per-node confidence badges
 
 ---
 
 ## Key Decisions Made
 
-**Task 029**:
-- Used `pac solution import` instead of `pac pcf push` due to path resolution bug
-- Created bin/net462 directory as workaround for MSBuild solution targets
-- Documented manual verification checklist for UI-based features
-- All 18 integration tests pass
+**Task 035**:
+- Created ConfidenceBadge with three thresholds: green (>=0.9), yellow (0.7-0.9), red (<0.7)
+- Used Fluent UI semantic tokens for colors (colorPaletteGreen/Yellow/RedBackground2)
+- Added ConfidenceNodeBadge variant using Fluent Badge component for node status
+- Included tooltips with human-readable confidence explanations
+- Per-node confidence replaces the checkmark badge when confidence is available
 
 ---
 
@@ -64,46 +67,33 @@ None.
 
 ## Knowledge Files To Load
 
-For Phase 4 (030):
+For Phase 4 (036):
 - `.claude/constraints/api.md` - API constraints
-- `.claude/patterns/api/endpoint-definition.md` - API patterns
+- `src/server/api/CLAUDE.md` - BFF API conventions
 
 ---
 
 ## Applicable ADRs
 
-- ADR-001: Minimal API patterns
+- ADR-001: Minimal API and Workers
+- ADR-008: Endpoint filters for auth
 
 ---
 
 ## Session Notes
 
-### Phase 3 Complete!
+### Task 035 Complete!
 
-**All Phase 3 Tasks Completed:**
-- Task 020: Parallel execution ✅
-- Task 021: TemplateEngine ✅
-- Tasks 022-025: Delivery node executors ✅
-- Task 026: Power Apps Integration ✅
-- Task 027: Execution Visualization ✅
-- Task 028: Phase 3 Integration Tests ✅
-- Task 029: Phase 3 Deployment ✅
+**Confidence UI Display Implementation:**
+- Created ConfidenceBadge component with color-coded display
+- Added confidence field to executionStore (NodeExecutionState.confidence and ExecutionState.overallConfidence)
+- Updated ExecutionEvent interface to accept confidence from SSE backend
+- Added overall confidence row to metrics panel with Sparkle icon
+- Updated NodeExecutionBadge to show colored percentage badge when confidence available
+- All badges include tooltips with explanation (e.g., "High confidence (95%) - AI is highly certain...")
+- Build verified successfully
 
-**Deployment Summary:**
-- API deployed to `spe-api-dev-67e2xz.azurewebsites.net`
-- PCF control deployed via solution import to SPAARKE DEV 1
-
-**Phase 4 Tasks (030-039):**
-- Task 030: Create ConditionNodeExecutor (NEXT)
-- Task 031: Add Condition UI in Builder
-- Task 032: Implement Model Selection API
-- Task 033: Add Model Selection UI
-- Task 034: Implement Confidence Scores
-- Task 035: Add Confidence UI Display
-- Task 036: Create Playbook Templates Feature
-- Task 037: Add Template Library UI
-- Task 038: Implement Execution History
-- Task 039: Phase 4 Tests and Deployment
+**Next**: Task 036 - Create Playbook Templates Feature
 
 ---
 

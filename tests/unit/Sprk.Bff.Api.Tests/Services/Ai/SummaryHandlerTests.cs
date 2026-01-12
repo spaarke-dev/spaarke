@@ -252,9 +252,10 @@ public class SummaryHandlerTests
         var context = CreateValidContext(extractedText: "This is a short test document for summarization.");
         var tool = CreateTool();
 
+        var jsonResponse = """{"summary": "## Executive Summary\n\nThis is the summary.", "confidence": 0.85}""";
         _openAiClientMock
             .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync("## Executive Summary\n\nThis is the summary.");
+            .ReturnsAsync(jsonResponse);
 
         // Act
         var result = await _handler.ExecuteAsync(context, tool, CancellationToken.None);
@@ -266,7 +267,7 @@ public class SummaryHandlerTests
         Assert.Equal(tool.Name, result.ToolName);
         Assert.NotNull(result.Data);
         Assert.Equal("## Executive Summary\n\nThis is the summary.", result.Summary);
-        Assert.Equal(0.9, result.Confidence);
+        Assert.Equal(0.85, result.Confidence);
 
         // Verify single model call
         Assert.Equal(1, result.Execution.ModelCalls);
@@ -287,7 +288,7 @@ public class SummaryHandlerTests
             .ReturnsAsync(() =>
             {
                 callCount++;
-                return $"Summary of chunk {callCount}";
+                return $$$"""{"summary": "Summary of chunk {{{callCount}}}", "confidence": 0.8}""";
             });
 
         // Act
@@ -352,7 +353,7 @@ public class SummaryHandlerTests
 
         _openAiClientMock
             .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync("Test summary response");
+            .ReturnsAsync("""{"summary": "Test summary response", "confidence": 0.9}""");
 
         // Act
         var result = await _handler.ExecuteAsync(context, tool, CancellationToken.None);
@@ -374,25 +375,27 @@ public class SummaryHandlerTests
         var context = CreateValidContext();
         var tool = CreateTool(configuration: """{"format": "structured"}""");
 
-        var structuredResponse = """
-            ## Executive Summary
-            This is the executive summary.
+        var structuredSummary = """
+## Executive Summary
+This is the executive summary.
 
-            ## Key Terms
-            - Term 1: Definition 1
-            - Term 2: Definition 2
+## Key Terms
+- Term 1: Definition 1
+- Term 2: Definition 2
 
-            ## Obligations
-            - Party A must do X
-            - Party B must do Y
+## Obligations
+- Party A must do X
+- Party B must do Y
 
-            ## Notable Provisions
-            - Important clause 1
-            """;
+## Notable Provisions
+- Important clause 1
+""";
+
+        var jsonResponse = $$"""{"summary": "{{structuredSummary.Replace("\n", "\\n").Replace("\"", "\\\"")}}", "confidence": 0.88}""";
 
         _openAiClientMock
             .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(structuredResponse);
+            .ReturnsAsync(jsonResponse);
 
         // Act
         var result = await _handler.ExecuteAsync(context, tool, CancellationToken.None);
@@ -415,10 +418,10 @@ public class SummaryHandlerTests
         var context = CreateValidContext();
         var tool = CreateTool();
 
-        var response = "This is a test summary with exactly eleven words in it.";
+        var summaryText = "This is a test summary with exactly eleven words in it.";
         _openAiClientMock
             .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(response);
+            .ReturnsAsync($$$"""{"summary": "{{{summaryText}}}", "confidence": 0.9}""");
 
         // Act
         var result = await _handler.ExecuteAsync(context, tool, CancellationToken.None);
@@ -439,7 +442,7 @@ public class SummaryHandlerTests
 
         _openAiClientMock
             .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync("This is a paragraph summary.");
+            .ReturnsAsync("""{"summary": "This is a paragraph summary.", "confidence": 0.92}""");
 
         // Act
         var result = await _handler.ExecuteAsync(context, tool, CancellationToken.None);
@@ -460,7 +463,7 @@ public class SummaryHandlerTests
 
         _openAiClientMock
             .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync("- Point 1\n- Point 2\n- Point 3");
+            .ReturnsAsync("""{"summary": "- Point 1\n- Point 2\n- Point 3", "confidence": 0.88}""");
 
         // Act
         var result = await _handler.ExecuteAsync(context, tool, CancellationToken.None);
@@ -483,7 +486,7 @@ public class SummaryHandlerTests
         _openAiClientMock
             .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .Callback<string, string?, CancellationToken>((prompt, _, _) => capturedPrompt = prompt)
-            .ReturnsAsync("Test summary");
+            .ReturnsAsync("""{"summary": "Test summary", "confidence": 0.85}""");
 
         // Act
         await _handler.ExecuteAsync(context, tool, CancellationToken.None);
@@ -503,7 +506,7 @@ public class SummaryHandlerTests
 
         _openAiClientMock
             .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync("Summary with context");
+            .ReturnsAsync("""{"summary": "Summary with context", "confidence": 0.87}""");
 
         // Act
         var result = await _handler.ExecuteAsync(context, tool, CancellationToken.None);
@@ -521,7 +524,7 @@ public class SummaryHandlerTests
 
         _openAiClientMock
             .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync("Focused summary");
+            .ReturnsAsync("""{"summary": "Focused summary", "confidence": 0.9}""");
 
         // Act
         var result = await _handler.ExecuteAsync(context, tool, CancellationToken.None);
@@ -544,14 +547,14 @@ public class SummaryHandlerTests
 
         var responses = new Queue<string>(new[]
         {
-            "Summary of section 1",
-            "Summary of section 2",
-            "Final synthesized summary combining all sections"
+            """{"summary": "Summary of section 1", "confidence": 0.85}""",
+            """{"summary": "Summary of section 2", "confidence": 0.82}""",
+            """{"summary": "Final synthesized summary combining all sections", "confidence": 0.88}"""
         });
 
         _openAiClientMock
             .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() => responses.Count > 0 ? responses.Dequeue() : "Fallback summary");
+            .ReturnsAsync(() => responses.Count > 0 ? responses.Dequeue() : """{"summary": "Fallback summary", "confidence": 0.7}""");
 
         // Act
         var result = await _handler.ExecuteAsync(context, tool, CancellationToken.None);
@@ -573,7 +576,7 @@ public class SummaryHandlerTests
 
         _openAiClientMock
             .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync("Chunk summary text");
+            .ReturnsAsync("""{"summary": "Chunk summary text", "confidence": 0.85}""");
 
         // Act
         var result = await _handler.ExecuteAsync(context, tool, CancellationToken.None);
@@ -605,7 +608,7 @@ public class SummaryHandlerTests
                     // Simulate cancellation during the second chunk
                     throw new OperationCanceledException();
                 }
-                return Task.FromResult("Chunk summary");
+                return Task.FromResult("""{"summary": "Chunk summary", "confidence": 0.85}""");
             });
 
         // Act
@@ -631,7 +634,7 @@ public class SummaryHandlerTests
         _openAiClientMock
             .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .Callback<string, string?, CancellationToken>((prompt, _, _) => capturedPrompt = prompt)
-            .ReturnsAsync("Default summary");
+            .ReturnsAsync("""{"summary": "Default summary", "confidence": 0.85}""");
 
         // Act
         var result = await _handler.ExecuteAsync(context, tool, CancellationToken.None);
@@ -648,6 +651,7 @@ public class SummaryHandlerTests
         var context = CreateValidContext();
         var tool = CreateTool();
 
+        // Test fallback behavior when JSON parsing fails
         _openAiClientMock
             .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("");
@@ -655,11 +659,12 @@ public class SummaryHandlerTests
         // Act
         var result = await _handler.ExecuteAsync(context, tool, CancellationToken.None);
 
-        // Assert - Empty response is still technically a success (AI returned something)
+        // Assert - Empty response triggers fallback with default confidence
         Assert.True(result.Success);
         var data = result.GetData<SummaryResult>();
         Assert.NotNull(data);
         Assert.Equal(0, data.WordCount);
+        Assert.Equal(0.7, result.Confidence); // Fallback confidence when JSON parse fails
     }
 
     [Fact]
@@ -672,7 +677,7 @@ public class SummaryHandlerTests
 
         _openAiClientMock
             .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync("Summary of document with special characters");
+            .ReturnsAsync("""{"summary": "Summary of document with special characters", "confidence": 0.9}""");
 
         // Act
         var result = await _handler.ExecuteAsync(context, tool, CancellationToken.None);
@@ -691,13 +696,82 @@ public class SummaryHandlerTests
 
         _openAiClientMock
             .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync("Summary of multilingual document");
+            .ReturnsAsync("""{"summary": "Summary of multilingual document", "confidence": 0.88}""");
 
         // Act
         var result = await _handler.ExecuteAsync(context, tool, CancellationToken.None);
 
         // Assert
         Assert.True(result.Success);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ParsesConfidenceFromAiResponse()
+    {
+        // Arrange
+        var context = CreateValidContext();
+        var tool = CreateTool();
+
+        _openAiClientMock
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("""{"summary": "Test summary with confidence", "confidence": 0.92}""");
+
+        // Act
+        var result = await _handler.ExecuteAsync(context, tool, CancellationToken.None);
+
+        // Assert
+        Assert.True(result.Success);
+        Assert.Equal(0.92, result.Confidence);
+        var data = result.GetData<SummaryResult>();
+        Assert.NotNull(data);
+        Assert.Equal(0.92, data.Confidence);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ClampsConfidenceToValidRange()
+    {
+        // Arrange
+        var context = CreateValidContext();
+        var tool = CreateTool();
+
+        // AI returns confidence > 1.0, should be clamped to 1.0
+        _openAiClientMock
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("""{"summary": "Test summary", "confidence": 1.5}""");
+
+        // Act
+        var result = await _handler.ExecuteAsync(context, tool, CancellationToken.None);
+
+        // Assert
+        Assert.True(result.Success);
+        Assert.Equal(1.0, result.Confidence);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WithMarkdownCodeBlock_ParsesJsonCorrectly()
+    {
+        // Arrange
+        var context = CreateValidContext();
+        var tool = CreateTool();
+
+        // AI returns JSON wrapped in markdown code blocks
+        var markdownResponse = """
+            ```json
+            {"summary": "Summary from markdown", "confidence": 0.87}
+            ```
+            """;
+
+        _openAiClientMock
+            .Setup(x => x.GetCompletionAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(markdownResponse);
+
+        // Act
+        var result = await _handler.ExecuteAsync(context, tool, CancellationToken.None);
+
+        // Assert
+        Assert.True(result.Success);
+        Assert.Equal(0.87, result.Confidence);
+        Assert.Equal("Summary from markdown", result.Summary);
     }
 
     #endregion

@@ -21,8 +21,16 @@ export {
   nodeTypes,
 } from './Nodes';
 
+// Edges
+export {
+  TrueBranchEdge,
+  FalseBranchEdge,
+  edgeTypes,
+  EDGE_TYPES,
+} from './Edges';
+
 // Properties
-export { PropertiesPanel, NodePropertiesForm, ScopeSelector } from './Properties';
+export { PropertiesPanel, NodePropertiesForm, ScopeSelector, ConditionEditor } from './Properties';
 
 // Execution
 export {

@@ -3,7 +3,7 @@
   <metadata>
     <title>Add Model Selection UI</title>
     <phase>4: Advanced Features</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <tags>frontend, react</tags>
     <dependencies>032</dependencies>
@@ -20,11 +20,24 @@
     <step order="5">Save selection to node</step>
   </steps>
   <outputs>
-    <output type="code">src/client/playbook-builder/src/components/Properties/ModelSelector.tsx</output>
+    <output type="code">src/client/pcf/PlaybookBuilderHost/control/components/Properties/ModelSelector.tsx</output>
+    <output type="code">src/client/pcf/PlaybookBuilderHost/control/stores/modelStore.ts</output>
   </outputs>
   <acceptance-criteria>
     <criterion testable="true">Models load from API</criterion>
     <criterion testable="true">Selection saves to node</criterion>
     <criterion testable="true">Only shown for AI nodes</criterion>
   </acceptance-criteria>
+  <notes>
+    <note date="2026-01-12">
+      Implementation complete:
+      - Created modelStore.ts with mock model deployments matching BFF API
+      - Created ModelSelector.tsx dropdown component with provider badges
+      - Added modelDeploymentId to PlaybookNodeData interface
+      - Integrated ModelSelector into NodePropertiesForm (AI Model accordion section)
+      - Only shows for aiAnalysis and aiCompletion node types
+      - Bumped PCF version to 2.6.0
+      - Build verified successfully
+    </note>
+  </notes>
 </task>

@@ -13,7 +13,6 @@ import {
   Text,
   Input,
   Label,
-  Textarea,
   SpinButton,
   Badge,
   Accordion,
@@ -28,6 +27,8 @@ import type {
 } from '@fluentui/react-components';
 import { useCanvasStore, PlaybookNode, PlaybookNodeData, PlaybookNodeType } from '../../stores';
 import { ScopeSelector } from './ScopeSelector';
+import { ConditionEditor } from './ConditionEditor';
+import { ModelSelector } from './ModelSelector';
 
 const useStyles = makeStyles({
   form: {
@@ -49,10 +50,6 @@ const useStyles = makeStyles({
   },
   fieldHint: {
     color: tokens.colorNeutralForeground3,
-  },
-  conditionEditor: {
-    fontFamily: 'monospace',
-    fontSize: '12px',
   },
   accordionPanel: {
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalXS),
@@ -100,6 +97,7 @@ export const NodePropertiesForm = React.memo(function NodePropertiesForm({
   const updateNode = useCanvasStore((state) => state.updateNode);
 
   const isConditionNode = node.data.type === 'condition';
+  const isAiNode = node.data.type === 'aiAnalysis' || node.data.type === 'aiCompletion';
 
   // Create a memoized update handler
   const handleUpdate = useCallback(
@@ -142,6 +140,7 @@ export const NodePropertiesForm = React.memo(function NodePropertiesForm({
       skillIds: node.data.skillIds || [],
       knowledgeIds: node.data.knowledgeIds || [],
       toolId: node.data.toolId,
+      modelDeploymentId: node.data.modelDeploymentId,
     }),
     [node.data]
   );
@@ -202,6 +201,20 @@ export const NodePropertiesForm = React.memo(function NodePropertiesForm({
             </div>
           </AccordionPanel>
         </AccordionItem>
+
+        {/* AI Model Section (only for AI nodes) */}
+        {isAiNode && (
+          <AccordionItem value="aiModel">
+            <AccordionHeader size="small">AI Model</AccordionHeader>
+            <AccordionPanel className={styles.accordionPanel}>
+              <ModelSelector
+                nodeId={node.id}
+                selectedModelId={values.modelDeploymentId}
+                onUpdate={updateNode}
+              />
+            </AccordionPanel>
+          </AccordionItem>
+        )}
 
         {/* Skills Section */}
         <AccordionItem value="skills">
@@ -301,23 +314,10 @@ export const NodePropertiesForm = React.memo(function NodePropertiesForm({
           <AccordionItem value="condition">
             <AccordionHeader size="small">Condition</AccordionHeader>
             <AccordionPanel className={styles.accordionPanel}>
-              <div className={styles.field}>
-                <Label htmlFor="condition-json" size="small">
-                  Condition JSON
-                </Label>
-                <Textarea
-                  id="condition-json"
-                  className={styles.conditionEditor}
-                  value={values.conditionJson}
-                  onChange={handleTextChange('conditionJson')}
-                  rows={5}
-                  resize="vertical"
-                  placeholder='{"field": "score", "operator": ">=", "value": 0.8}'
-                />
-                <Text size={100} className={styles.fieldHint}>
-                  True branch executes if condition passes
-                </Text>
-              </div>
+              <ConditionEditor
+                conditionJson={values.conditionJson}
+                onChange={(json) => handleUpdate('conditionJson', json)}
+              />
             </AccordionPanel>
           </AccordionItem>
         )}

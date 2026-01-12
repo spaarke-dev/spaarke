@@ -193,13 +193,24 @@ public sealed class DeliverOutputNodeExecutor : INodeExecutor
         // Include metadata if requested
         if (config.OutputFormat?.IncludeMetadata == true)
         {
+            // Calculate overall confidence from all successful node outputs
+            var confidences = context.PreviousOutputs
+                .Where(kvp => kvp.Value.Success && kvp.Value.Confidence.HasValue)
+                .Select(kvp => kvp.Value.Confidence!.Value)
+                .ToList();
+
+            var overallConfidence = confidences.Count > 0
+                ? Math.Round(confidences.Average(), 2)
+                : (double?)null;
+
             outputData["_metadata"] = new
             {
                 playbookId = context.PlaybookId,
                 runId = context.RunId,
                 nodeId = context.Node.Id,
                 generatedAt = DateTimeOffset.UtcNow,
-                nodeCount = context.PreviousOutputs.Count
+                nodeCount = context.PreviousOutputs.Count,
+                overallConfidence
             };
         }
 

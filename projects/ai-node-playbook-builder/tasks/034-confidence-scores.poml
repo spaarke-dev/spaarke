@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement Confidence Scores</title>
     <phase>4: Advanced Features</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <tags>bff-api, ai</tags>
     <dependencies>029</dependencies>
@@ -27,4 +27,20 @@
     <criterion testable="true">Confidence scores in AI output</criterion>
     <criterion testable="true">Overall confidence in _meta</criterion>
   </acceptance-criteria>
+  <notes>
+    <note date="2026-01-12">
+      Implementation complete:
+      - Updated SummaryHandler prompts to request JSON with confidence scores
+      - Added SummaryJsonResponse class for parsing AI responses
+      - Added Confidence property to SummaryResult and SummaryGenerationResult
+      - Added ParseSummaryJsonResponse method with fallback for non-JSON responses
+      - Updated DeliverOutputNodeExecutor to include overallConfidence in _metadata
+      - Overall confidence calculated as average of all node output confidences
+      - Updated 41 unit tests to use JSON responses with confidence
+      - All tests passing
+
+      Note: Analysis found 7 of 8 tool handlers already properly implement confidence.
+      Only SummaryHandler needed updating (was hardcoded 0.9).
+    </note>
+  </notes>
 </task>

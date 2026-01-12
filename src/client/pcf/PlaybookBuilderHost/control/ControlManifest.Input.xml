@@ -2,7 +2,7 @@
 <manifest>
   <control namespace="Spaarke.PCF"
            constructor="PlaybookBuilderHost"
-           version="2.4.0"
+           version="2.6.0"
            display-name-key="Playbook Builder Host"
            description-key="Node-based Playbook Builder with visual canvas for AI workflow design"
            control-type="standard">

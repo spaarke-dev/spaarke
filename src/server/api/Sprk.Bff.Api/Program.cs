@@ -370,6 +370,9 @@ if (analysisEnabled && documentIntelligenceEnabled)
     builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.UpdateRecordNodeExecutor>();
     builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.DeliverOutputNodeExecutor>();
 
+    // Condition Node Executor - Phase 4 conditional branching (Task 030)
+    builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.ConditionNodeExecutor>();
+
     // Playbook Sharing Service - team/organization sharing for playbooks (R3 Phase 3 Task 023)
     builder.Services.AddHttpClient<Sprk.Bff.Api.Services.Ai.IPlaybookSharingService, Sprk.Bff.Api.Services.Ai.PlaybookSharingService>();
 
@@ -1124,6 +1127,7 @@ if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
     app.MapScopeEndpoints();
     app.MapNodeEndpoints();
     app.MapPlaybookRunEndpoints();
+    app.MapModelEndpoints();
 }
 
 // RAG endpoints for knowledge base operations (R3)

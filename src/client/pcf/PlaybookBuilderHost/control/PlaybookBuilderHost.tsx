@@ -9,7 +9,7 @@
  * - Canvas state managed by Zustand store
  * - Dirty state tracked and exposed to PCF host
  *
- * @version 2.3.0
+ * @version 2.6.0
  */
 
 import * as React from 'react';
@@ -314,7 +314,7 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
           <BuilderLayout />
         </ReactFlowProvider>
         {/* Version badge in corner */}
-        <Text className={styles.versionBadge}>v2.4.0</Text>
+        <Text className={styles.versionBadge}>v2.6.0</Text>
       </div>
     </div>
   );
