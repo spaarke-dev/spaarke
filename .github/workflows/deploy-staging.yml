@@ -42,7 +42,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download deployment artifacts
         uses: dawidd6/action-download-artifact@v11
@@ -103,7 +103,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download deployment artifacts
         uses: dawidd6/action-download-artifact@v11
@@ -150,7 +150,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup .NET 8
         uses: actions/setup-dotnet@v4
