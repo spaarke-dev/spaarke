@@ -7,6 +7,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Infrastructure.Json;
 using Sprk.Bff.Api.Models.Email;
 using Sprk.Bff.Api.Models.Jobs;
 using Sprk.Bff.Api.Services.Email;
@@ -222,13 +223,11 @@ public static class EmailEndpoints
             }
 
             // Step 4: Parse webhook payload
+            // Uses DataverseJsonOptions with BracedGuidConverter to handle Dataverse's "{guid}" format
             DataverseWebhookPayload? payload;
             try
             {
-                payload = JsonSerializer.Deserialize<DataverseWebhookPayload>(requestBody, new JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true
-                });
+                payload = JsonSerializer.Deserialize<DataverseWebhookPayload>(requestBody, DataverseJsonOptions.Default);
             }
             catch (JsonException ex)
             {
