@@ -1,28 +1,36 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest>
-  <control namespace="Spaarke.Controls"
+  <control namespace="Spaarke.PCF"
            constructor="PlaybookBuilderHost"
-           version="1.2.4"
+           version="2.3.0"
            display-name-key="Playbook Builder Host"
-           description-key="Host control for the node-based Playbook Builder visual canvas"
+           description-key="Node-based Playbook Builder with visual canvas for AI workflow design"
            control-type="standard">
 
     <external-service-usage enabled="false" />
 
     <!--
-      PLAYBOOK BUILDER HOST PCF CONTROL
+      PLAYBOOK BUILDER HOST PCF CONTROL v2.0.0
 
-      Purpose: Embeds the React 18 Playbook Builder app in an iframe.
-      - Passes playbook data to iframe via postMessage
-      - Receives dirty state notifications from iframe
-      - Handles save/load operations with Dataverse
+      Purpose: Visual node-based builder for AI analysis playbooks.
+      - Drag-and-drop node placement from palette
+      - Edge connections between nodes for workflow
+      - Properties panel for node configuration
+      - Zustand state management for canvas
 
       Entity: sprk_analysisplaybook (Analysis Playbook)
 
-      Architecture:
-      - PCF uses React 16 APIs (platform-provided)
-      - Builder app uses React 18 (bundled in iframe)
-      - Communication via postMessage bridge
+      Architecture (v2.0 - Direct PCF Rendering):
+      - Uses React 16 APIs (platform-provided) per ADR-022
+      - Uses react-flow-renderer v10 (React 16 compatible)
+      - No iframe - direct rendering in PCF control
+      - Fluent UI v9 components
+
+      Migration from v1.x:
+      - Removed iframe architecture
+      - Removed builderBaseUrl property (no longer needed)
+      - Moved from @xyflow/react v12 to react-flow-renderer v10
+      - All UI now renders directly in PCF control
 
       Note: The playbook ID is automatically obtained from the form context
       (context.mode.contextInfo.entityId). The playbookId property below is
@@ -51,14 +59,6 @@
               description-key="Serialized JSON of the canvas nodes and edges"
               of-type="Multiple"
               usage="bound"
-              required="false" />
-
-    <!-- Builder Base URL (INPUT - where the React 18 app is hosted) -->
-    <property name="builderBaseUrl"
-              display-name-key="Builder Base URL"
-              description-key="Base URL for the playbook builder app"
-              of-type="SingleLine.Text"
-              usage="input"
               required="false" />
 
     <!-- Is Dirty (OUTPUT - indicates unsaved changes) -->

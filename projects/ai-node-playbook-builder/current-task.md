@@ -1,21 +1,21 @@
 # Current Task State
 
 > **Purpose**: Context recovery after compaction or new session
-> **Updated**: 2026-01-09
+> **Updated**: 2026-01-10
 
 ---
 
 ## Active Task
 
-**Task ID**: 019
-**Task File**: tasks/019-phase2-tests-deploy.poml
-**Title**: Phase 2 Tests and PCF Deployment
-**Phase**: 2: Visual Builder
+**Task ID**: 019a
+**Task File**: tasks/019a-refactor-react-flow-v10.poml
+**Title**: Refactor to React Flow v10 Direct PCF Integration
+**Phase**: 2.5: Architecture Refactor
 **Status**: in-progress
-**Started**: 2026-01-09
+**Started**: 2026-01-10
 
-**Rigor Level**: STANDARD
-**Reason**: Testing/deploy tags, creates new files
+**Rigor Level**: FULL
+**Reason**: Task has tags pcf, react-flow, refactor, architecture - code implementation modifying .ts/.tsx files
 
 ---
 
@@ -23,134 +23,91 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 019 - Phase 2 Tests and PCF Deployment |
-| **Step** | 3 of 10 - Add control to playbook form |
-| **Status** | in-progress (blocked on manual form configuration) |
-| **Next Action** | Configure PlaybookBuilderHost on sprk_aiplaybook form in Power Apps |
+| **Task** | 019a - Refactor to React Flow v10 Direct PCF Integration |
+| **Step** | 1 of 15: Install react-flow-renderer v10 |
+| **Status** | in-progress |
+| **Next Action** | Update package.json and npm install |
 
 **To resume**:
 ```
-work on task 019
+work on task 019a
 ```
 
 ---
 
 ## Completed Steps
 
-- [x] Step 1: Build PCF control (npm run build:prod) - bundle.js ~30KB
-- [x] Step 2: Deploy PCF to Dataverse
-  - Created solution wrapper with pac solution init
-  - Added ManagePackageVersionsCentrally=false to project files
-  - Built Solution.zip and imported to spaarkedev1
-- [x] Step 10: Document deployment - Created notes/phase2-deployment-notes.md
+(In progress...)
 
 ---
 
 ## Files Modified This Session
 
-| File | Purpose |
-|------|---------|
-| `src/client/pcf/PlaybookBuilderHost/PlaybookBuilderHost.pcfproj` | Added ManagePackageVersionsCentrally=false |
-| `src/client/pcf/PlaybookBuilderHost/Solution/Solution.cdsproj` | Added ManagePackageVersionsCentrally=false |
-| `projects/ai-node-playbook-builder/notes/phase2-deployment-notes.md` | Deployment documentation |
+- `src/client/pcf/PlaybookBuilderHost/package.json` - Adding react-flow-renderer v10 dependencies
 
 ---
 
 ## Key Decisions Made
 
-- Used solution import workflow instead of pac pcf push (pac pcf push had path errors)
-- Disabled central package management for PCF solution builds
+**Architecture Decision (2026-01-10)**:
+- Decided to refactor from iframe + React 18 + React Flow v12 to direct PCF + React 16 + react-flow-renderer v10
+- Rationale: Eliminates postMessage complexity, dual deployment, CSP configuration
+- Timing: Execute now before Phase 3 to prevent accumulating technical debt
+- Full documentation: notes/architecture/ARCHITECTURE-REFACTOR-REACT-FLOW-V10.md
 
 ---
 
 ## Blocked Items
 
-**Form Configuration Required (Manual)**:
-Steps 3-9 require manual configuration in Power Apps maker portal:
-1. Open sprk_aiplaybook form in Power Apps
-2. Add PlaybookBuilderHost control to form
-3. Bind to sprk_canvaslayoutjson field
-4. Set builderBaseUrl to https://spe-api-dev-67e2xz.azurewebsites.net/playbook-builder/
-
-See: `notes/phase2-deployment-notes.md` for full instructions
+None
 
 ---
 
 ## Knowledge Files Loaded
 
-(To be loaded when task starts)
+- `.claude/adr/ADR-022-pcf-platform-libraries.md` - React 16 requirement
+- `.claude/constraints/pcf.md` - PCF development constraints
+- `src/client/pcf/CLAUDE.md` - PCF module instructions
+- `projects/ai-node-playbook-builder/notes/architecture/ARCHITECTURE-REFACTOR-REACT-FLOW-V10.md` - Refactor plan
+- **Reference**: DocumentRelationshipViewer PCF (react-flow-renderer v10 pattern)
 
 ## Applicable ADRs
 
-(To be determined from task tags)
+- ADR-022: PCF Platform Libraries (React 16 requirement)
 
 ---
 
 ## Session Notes
 
-### Phase 1 Complete ✅
+### Phase 1 Complete
 All Phase 1 tasks (001-009) completed:
 - Dataverse schema fully deployed via Web API
 - BFF API deployed with all new endpoints
 - Ready for Phase 2: Visual Builder
 
-### Phase 2 Progress
-- Task 010 (Setup Builder React App) ✅ Complete
-  - Created src/client/playbook-builder/ with React 18 + Vite + TypeScript
-  - Installed React Flow, Zustand, Fluent UI v9
-  - Build successful, ~132KB gzipped output
+### Phase 2 Complete
+All Phase 2 tasks (010-019) completed:
+- React 18 playbook builder with React Flow canvas
+- Custom node components (AI Analysis, Condition, Delivery nodes)
+- Properties panel with form fields
+- PCF host control with iframe embedding (v1.2.4)
+- postMessage communication protocol
+- Canvas persistence API (GET/PUT endpoints)
+- Deployed to Azure and Dataverse
+- E2E testing confirmed working in Dataverse form
 
-- Task 011 (Implement React Flow Canvas) ✅ Complete
-  - Created Canvas.tsx with ReactFlow, Background, Controls, MiniMap
-  - Created canvasStore.ts Zustand store for nodes/edges
-  - Implemented drag-and-drop from palette
-  - Added node selection and properties panel
-  - Dark mode support via Fluent UI tokens
+### Phase 2.5: Architecture Refactor (Current)
+Task 019a: Refactor to React Flow v10 Direct PCF Integration
+- Migrate from iframe + React 18 to direct PCF + React 16
+- Use react-flow-renderer v10 (React 16 compatible)
+- Eliminate postMessage, separate SPA deployment
+- Simplifies all Phase 3+ development
 
-- Task 012 (Create Custom Node Components) ✅ Complete
-  - Created Nodes/ directory with custom components
-  - BaseNode, AiAnalysisNode, AiCompletionNode
-  - ConditionNode (True/False handles), DeliverOutputNode (terminal)
-  - CreateTaskNode, SendEmailNode, WaitNode
-  - nodeTypes.ts registry for React Flow
-  - Griffel shorthands for type-safe CSS
-
-- Task 013 (Create Properties Panel) ✅ Complete
-  - Created Properties/ directory with components
-  - PropertiesPanel.tsx with empty state
-  - NodePropertiesForm.tsx with form fields:
-    - Name, Output Variable (text inputs)
-    - Timeout, Retry Count (spin buttons)
-    - Condition JSON editor (for condition nodes only)
-  - Auto-save via Zustand store updateNode
-  - Fluent UI v9 form components (Input, SpinButton, Textarea, Badge)
-
-- Task 014 (Implement Scope Selector) ✅ Complete
-  - Created ScopeSelector.tsx component
-  - Integrated with canvasStore for playbook scope
-
-- Task 015 (Create PCF Host Control) ✅ Complete
-  - Created PlaybookBuilderHost PCF control
-  - Renders iframe pointing to builder app
-  - Uses React 16 APIs per ADR-022
-
-- Task 016 (Implement Host-Builder Communication) ✅ Complete
-  - Implemented postMessage protocol between PCF host and builder iframe
-  - Added dirty state tracking to canvasStore
-  - Created useHostBridge hook for React Flow integration
-  - Message types: INIT, READY, DIRTY_CHANGE, SAVE_REQUEST, SAVE_SUCCESS, SAVE_ERROR
-
-- Task 017 (Add Canvas Persistence API) ✅ Complete
-  - Created CanvasLayoutDto with ViewportDto, CanvasNodeDto, CanvasEdgeDto
-  - Extended IPlaybookService with GetCanvasLayoutAsync and SaveCanvasLayoutAsync
-  - Implemented service methods using sprk_canvaslayoutjson field
-  - Added GET/PUT endpoints to PlaybookEndpoints.cs with authorization filters
-
-- Task 018 (Deploy Builder to App Service) ✅ Complete
-  - Built playbook-builder with npm run build (~710KB total, ~210KB gzipped)
-  - Copied dist/ to src/server/api/Sprk.Bff.Api/wwwroot/playbook-builder/
-  - Added UseStaticFiles() and MapFallbackToFile() middleware to Program.cs
-  - Deployment to Azure via GitHub Actions on PR merge
+### After Refactor: Phase 3
+Task 020: Implement Parallel Execution
+- Extend ExecutionGraph for parallel node execution
+- Add throttling for concurrent AI operations
+- Will benefit from simplified direct PCF architecture
 
 ---
 

@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="019a" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Refactor to React Flow v10 Direct PCF Integration</title>
+    <phase>2.5: Architecture Refactor</phase>
+    <status>not-started</status>
+    <estimated-hours>16</estimated-hours>
+    <tags>pcf, react-flow, refactor, architecture</tags>
+    <dependencies>019</dependencies>
+    <blocks>020</blocks>
+  </metadata>
+
+  <prompt>
+    Migrate from iframe + React 18 + React Flow v12 architecture to direct
+    PCF integration with React 16 + react-flow-renderer v10. This eliminates
+    the separate SPA, postMessage complexity, and dual deployment.
+  </prompt>
+
+  <role>Spaarke AI Developer Agent</role>
+
+  <goal>
+    Single PCF control with react-flow-renderer v10 directly integrated,
+    eliminating iframe architecture and simplifying all future development.
+  </goal>
+
+  <context>
+    <background>
+      Current architecture uses an iframe to host a React 18 SPA because
+      React Flow v11+ requires React 18. However, react-flow-renderer v10
+      is compatible with React 16, allowing direct PCF integration.
+    </background>
+    <rationale>
+      - Eliminates postMessage complexity
+      - Single deployment target (PCF only)
+      - Direct Dataverse WebAPI access
+      - Simpler debugging and maintenance
+      - Aligns with Document Visualization module approach
+    </rationale>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-node-playbook-builder/notes/architecture/ARCHITECTURE-REFACTOR-REACT-FLOW-V10.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-022">Use React 16 APIs only (ReactDOM.render, not createRoot)</constraint>
+    <constraint>Maintain identical visual appearance and functionality</constraint>
+    <constraint>Keep backend API unchanged</constraint>
+    <constraint>Preserve Zustand store patterns</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">
+      Install react-flow-renderer v10 in PCF project:
+      - cd src/client/pcf/PlaybookBuilderHost
+      - npm install react-flow-renderer@10.3.17 d3-force@3.0.0
+      - Verify package.json updated correctly
+    </step>
+
+    <step order="2">
+      Create PCF component structure:
+      - Create control/components/ directory
+      - Create control/components/Nodes/ directory
+      - Create control/components/Properties/ directory
+      - Create control/stores/ directory
+      - Create control/types/ directory
+    </step>
+
+    <step order="3">
+      Migrate Canvas component:
+      - Copy src/client/playbook-builder/src/components/Canvas.tsx
+      - Update imports from @xyflow/react to react-flow-renderer
+      - Adjust any React 18-specific patterns
+      - Test component compiles
+    </step>
+
+    <step order="4">
+      Migrate custom node components:
+      - Copy all files from playbook-builder/src/components/Nodes/
+      - Update Handle, Position imports
+      - Verify Fluent UI tokens work in PCF context
+      - Create nodeTypes.ts registry
+    </step>
+
+    <step order="5">
+      Migrate Properties Panel:
+      - Copy PropertiesPanel.tsx and NodePropertiesForm.tsx
+      - Already uses Fluent UI, should work directly
+      - Update any store imports
+    </step>
+
+    <step order="6">
+      Migrate Zustand store:
+      - Copy canvasStore.ts to control/stores/
+      - Zustand works with React 16
+      - Update import paths
+    </step>
+
+    <step order="7">
+      Migrate BuilderLayout:
+      - Copy and adapt BuilderLayout.tsx
+      - Integrate Canvas and Properties panel
+      - Update NodePalette integration
+    </step>
+
+    <step order="8">
+      Replace iframe with direct rendering:
+      - Update PlaybookBuilder.tsx (rename from PlaybookBuilderHost.tsx)
+      - Remove iframe element
+      - Render BuilderLayout directly
+      - Pass canvasJson from context.parameters
+    </step>
+
+    <step order="9">
+      Update data flow:
+      - Read from context.parameters.canvasJson.raw
+      - Write via bound field (notifyOutputChanged)
+      - Remove all postMessage handlers
+      - Remove hostBridge references
+    </step>
+
+    <step order="10">
+      Update dirty state handling:
+      - Subscribe to store isDirty state
+      - Update isDirty output property
+      - Trigger notifyOutputChanged when dirty changes
+    </step>
+
+    <step order="11">
+      Test all functionality:
+      - Node creation via drag-and-drop
+      - Edge connections
+      - Node selection and properties editing
+      - Save/load canvas state
+      - Dark mode theming
+      - Multiple node types
+    </step>
+
+    <step order="12">
+      Delete deprecated SPA code:
+      - Remove src/client/playbook-builder/ directory
+      - Remove SPA from Azure deployment (wwwroot/playbook-builder/)
+      - Remove MapFallbackToFile from Program.cs
+      - Update CSP headers (remove iframe-specific rules)
+    </step>
+
+    <step order="13">
+      Update ControlManifest.Input.xml:
+      - Bump version to 2.0.0 (major change)
+      - Remove builderBaseUrl property (no longer needed)
+      - Update description
+    </step>
+
+    <step order="14">
+      Build and deploy PCF:
+      - npm run build:prod
+      - Build solution package
+      - Import to Dataverse
+      - Verify control loads on form
+    </step>
+
+    <step order="15">
+      Update documentation:
+      - Update PCF CLAUDE.md
+      - Update project README
+      - Document new architecture
+    </step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/pcf/PlaybookBuilderHost/ (refactored)</output>
+    <output type="deleted">src/client/playbook-builder/ (removed)</output>
+    <output type="docs">Updated architecture documentation</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">PCF control renders React Flow canvas directly (no iframe)</criterion>
+    <criterion testable="true">All node types render correctly</criterion>
+    <criterion testable="true">Drag-and-drop node creation works</criterion>
+    <criterion testable="true">Edge connections work</criterion>
+    <criterion testable="true">Properties panel edits nodes</criterion>
+    <criterion testable="true">Canvas state saves to Dataverse</criterion>
+    <criterion testable="true">Canvas state loads from Dataverse</criterion>
+    <criterion testable="true">Dark mode theming works</criterion>
+    <criterion testable="true">No postMessage or iframe code remains</criterion>
+    <criterion testable="true">SPA removed from Azure deployment</criterion>
+  </acceptance-criteria>
+</task>

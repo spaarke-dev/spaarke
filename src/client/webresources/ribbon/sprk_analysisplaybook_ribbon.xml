@@ -1,0 +1,187 @@
+<!--
+  Analysis Playbook Ribbon Customization
+
+  Adds Playbook Builder buttons to:
+  1. List View (HomepageGrid) - "+ New" button
+  2. Form Command Bar - "Analysis Builder" menu with "Open" and "+ New"
+
+  Web Resource: sprk_playbook_commands.js
+  Custom Page: sprk_playbookbuilder_c0199
+
+  Version: 1.1.0
+-->
+<RibbonDiffXml>
+  <CustomActions>
+
+    <!-- ================================================================== -->
+    <!-- 1. LIST VIEW: "+ New" Button                                       -->
+    <!-- ================================================================== -->
+    <CustomAction Id="Spaarke.Playbook.NewFromList.CustomAction"
+                  Location="Mscrm.HomepageGrid.sprk_analysisplaybook.MainTab.Actions.Controls._children"
+                  Sequence="5">
+      <CommandUIDefinition>
+        <Button Id="Spaarke.Playbook.NewFromList.Button"
+                Command="Spaarke.Playbook.NewFromList.Command"
+                LabelText="+ New"
+                Alt="Create New Playbook"
+                ToolTipTitle="New Playbook"
+                ToolTipDescription="Open the visual Playbook Builder to create a new playbook"
+                TemplateAlias="o1"
+                Image16by16="/_imgs/ribbon/Add_16.png"
+                Image32by32="/_imgs/ribbon/Add_32.png"
+                ModernImage="Add" />
+      </CommandUIDefinition>
+    </CustomAction>
+
+    <!-- ================================================================== -->
+    <!-- 2. FORM: "Analysis Builder" Flyout Menu                            -->
+    <!-- ================================================================== -->
+    <CustomAction Id="Spaarke.Playbook.BuilderMenu.CustomAction"
+                  Location="Mscrm.Form.sprk_analysisplaybook.MainTab.Actions.Controls._children"
+                  Sequence="10">
+      <CommandUIDefinition>
+        <FlyoutAnchor Id="Spaarke.Playbook.BuilderMenu.FlyoutAnchor"
+                      Command="Spaarke.Playbook.BuilderMenu.Command"
+                      LabelText="Analysis Builder"
+                      Alt="Analysis Builder"
+                      ToolTipTitle="Analysis Builder"
+                      ToolTipDescription="Open the visual Playbook Builder"
+                      TemplateAlias="o1"
+                      Image16by16="/_imgs/ribbon/Flow_16.png"
+                      Image32by32="/_imgs/ribbon/Flow_32.png"
+                      ModernImage="Flow"
+                      PopulateDynamically="false"
+                      PopulateQueryCommand="">
+          <Menu Id="Spaarke.Playbook.BuilderMenu.Menu">
+            <MenuSection Id="Spaarke.Playbook.BuilderMenu.Section"
+                         Title="Playbook Builder"
+                         Sequence="10"
+                         DisplayMode="Menu16">
+              <Controls Id="Spaarke.Playbook.BuilderMenu.Section.Controls">
+
+                <!-- Open Button (for existing playbook) -->
+                <Button Id="Spaarke.Playbook.Open.Button"
+                        Command="Spaarke.Playbook.Open.Command"
+                        LabelText="Open"
+                        Alt="Open Playbook Builder"
+                        ToolTipTitle="Open"
+                        ToolTipDescription="Open the Playbook Builder for this playbook"
+                        Sequence="10"
+                        Image16by16="/_imgs/ribbon/OpenFile_16.png"
+                        Image32by32="/_imgs/ribbon/OpenFile_32.png"
+                        ModernImage="OpenFile" />
+
+                <!-- + New Button (create new playbook) -->
+                <Button Id="Spaarke.Playbook.NewFromForm.Button"
+                        Command="Spaarke.Playbook.NewFromForm.Command"
+                        LabelText="+ New"
+                        Alt="Create New Playbook"
+                        ToolTipTitle="+ New"
+                        ToolTipDescription="Create a new playbook using the Playbook Builder"
+                        Sequence="20"
+                        Image16by16="/_imgs/ribbon/Add_16.png"
+                        Image32by32="/_imgs/ribbon/Add_32.png"
+                        ModernImage="Add" />
+
+              </Controls>
+            </MenuSection>
+          </Menu>
+        </FlyoutAnchor>
+      </CommandUIDefinition>
+    </CustomAction>
+
+  </CustomActions>
+
+  <CommandDefinitions>
+
+    <!-- ================================================================== -->
+    <!-- Command: New from List View                                        -->
+    <!-- ================================================================== -->
+    <CommandDefinition Id="Spaarke.Playbook.NewFromList.Command">
+      <EnableRules>
+        <EnableRule Id="Spaarke.Playbook.NewFromList.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_playbook_commands.js"
+                           FunctionName="Spaarke_NewPlaybookFromList">
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+
+    <!-- ================================================================== -->
+    <!-- Command: Builder Menu (always enabled)                             -->
+    <!-- ================================================================== -->
+    <CommandDefinition Id="Spaarke.Playbook.BuilderMenu.Command">
+      <EnableRules>
+        <EnableRule Id="Mscrm.Enabled" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions />
+    </CommandDefinition>
+
+    <!-- ================================================================== -->
+    <!-- Command: Open Builder (for existing playbook)                      -->
+    <!-- ================================================================== -->
+    <CommandDefinition Id="Spaarke.Playbook.Open.Command">
+      <EnableRules>
+        <EnableRule Id="Spaarke.Playbook.Open.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_playbook_commands.js"
+                           FunctionName="Spaarke_OpenPlaybookBuilder">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+
+    <!-- ================================================================== -->
+    <!-- Command: New from Form                                             -->
+    <!-- ================================================================== -->
+    <CommandDefinition Id="Spaarke.Playbook.NewFromForm.Command">
+      <EnableRules>
+        <EnableRule Id="Spaarke.Playbook.NewFromForm.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_playbook_commands.js"
+                           FunctionName="Spaarke_NewPlaybookBuilder">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+
+  </CommandDefinitions>
+
+  <RuleDefinitions>
+    <EnableRules>
+
+      <!-- Enable Rule: New from List (always enabled) -->
+      <EnableRule Id="Spaarke.Playbook.NewFromList.EnableRule">
+        <CustomRule Library="$webresource:sprk_playbook_commands.js"
+                   FunctionName="Spaarke_EnableNewPlaybookBuilder"
+                   Default="true">
+        </CustomRule>
+      </EnableRule>
+
+      <!-- Enable Rule: Open (only if record is saved) -->
+      <EnableRule Id="Spaarke.Playbook.Open.EnableRule">
+        <CustomRule Library="$webresource:sprk_playbook_commands.js"
+                   FunctionName="Spaarke_EnableOpenPlaybookBuilder"
+                   Default="false">
+          <CrmParameter Value="PrimaryControl" />
+        </CustomRule>
+      </EnableRule>
+
+      <!-- Enable Rule: New from Form (always enabled) -->
+      <EnableRule Id="Spaarke.Playbook.NewFromForm.EnableRule">
+        <CustomRule Library="$webresource:sprk_playbook_commands.js"
+                   FunctionName="Spaarke_EnableNewPlaybookBuilder"
+                   Default="true">
+        </CustomRule>
+      </EnableRule>
+
+    </EnableRules>
+  </RuleDefinitions>
+</RibbonDiffXml>

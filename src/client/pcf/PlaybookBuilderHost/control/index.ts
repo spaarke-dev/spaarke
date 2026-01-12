@@ -1,19 +1,19 @@
 /**
  * Playbook Builder Host PCF Control
  *
- * Embeds the React 18 Playbook Builder app in an iframe.
- * Uses React 16 APIs per ADR-022 (platform-provided libraries).
+ * Direct React Flow integration - NO iframe.
+ * Uses react-flow-renderer v10 for React 16 compatibility (ADR-022).
  *
  * Architecture:
- * - PCF control (React 16) hosts an iframe
- * - Builder app (React 18) runs inside iframe
- * - Communication via postMessage bridge
+ * - PCF control renders React Flow canvas directly
+ * - Zustand store manages canvas state
+ * - No postMessage complexity
  *
  * ADR Compliance:
  * - ADR-022: React 16 APIs (ReactDOM.render, not createRoot)
  * - ADR-021: Fluent UI v9 theming
  *
- * @version 1.0.0
+ * @version 2.0.0
  */
 
 import { IInputs, IOutputs } from "./generated/ManifestTypes";
@@ -111,6 +111,7 @@ export class PlaybookBuilderHost
 
   // Output values
   private isDirty: boolean = false;
+  private canvasJsonOutput: string | undefined = undefined;
 
   constructor() {
     logInfo('Constructor called');
@@ -172,9 +173,16 @@ export class PlaybookBuilderHost
   }
 
   public getOutputs(): IOutputs {
-    return {
+    const outputs: IOutputs = {
       isDirty: this.isDirty,
     };
+
+    // Include canvasJson only if it has been updated
+    if (this.canvasJsonOutput !== undefined) {
+      outputs.canvasJson = this.canvasJsonOutput;
+    }
+
+    return outputs;
   }
 
   public destroy(): void {
@@ -241,7 +249,6 @@ export class PlaybookBuilderHost
       // Get other input parameters
       const playbookName = context.parameters.playbookName?.raw || '';
       const canvasJson = context.parameters.canvasJson?.raw || '';
-      const builderBaseUrl = context.parameters.builderBaseUrl?.raw || '/playbook-builder/';
 
       logInfo('Rendering with context', {
         playbookId,
@@ -258,7 +265,6 @@ export class PlaybookBuilderHost
             playbookId,
             playbookName,
             canvasJson,
-            builderBaseUrl,
             onDirtyChange: this.handleDirtyChange.bind(this),
             onSave: this.handleSave.bind(this),
           })
@@ -281,12 +287,15 @@ export class PlaybookBuilderHost
   private handleSave(canvasJson: string): void {
     logInfo('Save requested', { jsonLength: canvasJson.length });
 
-    // Update the bound field via WebAPI
-    if (this.context?.parameters.canvasJson?.raw !== undefined) {
-      // Trigger form update by notifying output changed
-      // The parent form should handle persisting the canvasJson
-      this.notifyOutputChanged();
-    }
+    // Store the updated canvas JSON for getOutputs() to return
+    this.canvasJsonOutput = canvasJson;
+    this.isDirty = false;
+
+    // Notify the framework that outputs have changed
+    // This triggers getOutputs() and writes canvasJson back to the bound field
+    this.notifyOutputChanged();
+
+    logInfo('Save complete - canvasJson output updated');
   }
 
   private setupThemeListeners(): void {

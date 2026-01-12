@@ -1,6 +1,6 @@
 # CLAUDE.md - PCF Controls Module
 
-> **Last Updated**: December 3, 2025
+> **Last Updated**: January 10, 2026
 >
 > **Purpose**: Module-specific instructions for Power Platform PCF (PowerApps Component Framework) controls.
 
@@ -11,6 +11,7 @@ This module contains TypeScript/React PCF controls for Dataverse model-driven ap
 - **UniversalDatasetGrid** - Custom dataset grid with actions
 - **SpeFileViewer** - SharePoint Embedded file viewer
 - **DocumentGrid** / **DocumentViewer** - Document management components
+- **PlaybookBuilderHost** - Node-based visual workflow builder (see special architecture below)
 
 ## Key Structure
 
@@ -351,6 +352,68 @@ pac solution list | grep -i "{SolutionName}"
 ```
 
 > **Full Guide**: See `docs/ai-knowledge/guides/PCF-V9-PACKAGING.md` Part B
+
+## PlaybookBuilderHost Architecture (Special Case)
+
+The **PlaybookBuilderHost** control uses a unique architecture due to React Flow requirements:
+
+### Architecture Overview (v2.0)
+
+```
+PlaybookBuilderHost/
+├── control/
+│   ├── index.ts                    # PCF entry point (React 16 APIs)
+│   ├── ControlManifest.Input.xml   # v2.0.0
+│   ├── PlaybookBuilderHost.tsx     # Main React component
+│   ├── components/
+│   │   ├── BuilderLayout.tsx       # Main layout with palette + canvas + properties
+│   │   ├── Canvas/
+│   │   │   └── Canvas.tsx          # React Flow canvas
+│   │   ├── Nodes/                  # Custom node components
+│   │   │   ├── AiAnalysisNode.tsx
+│   │   │   ├── ConditionNode.tsx
+│   │   │   └── ...
+│   │   └── Properties/             # Node configuration panels
+│   │       ├── PropertiesPanel.tsx
+│   │       ├── NodePropertiesForm.tsx
+│   │       └── ScopeSelector.tsx
+│   └── stores/
+│       ├── canvasStore.ts          # Zustand store for nodes/edges
+│       └── scopeStore.ts           # Zustand store for skills/knowledge/tools
+```
+
+### Key Differences from Standard PCF Controls
+
+| Aspect | Standard PCF | PlaybookBuilderHost |
+|--------|-------------|---------------------|
+| React Flow | N/A | `react-flow-renderer` v10.3.17 (bundled) |
+| State Management | React hooks / context | Zustand stores |
+| Canvas Library | N/A | React Flow with custom nodes |
+| Complexity | Single component | Multi-component with drag-drop |
+
+### Why react-flow-renderer v10?
+
+Per ADR-022, PCF must use React 16 APIs. The modern `@xyflow/react` (v12+) requires React 18:
+
+```typescript
+// ❌ NOT COMPATIBLE: @xyflow/react v12+ requires React 18
+import { ReactFlow } from '@xyflow/react';
+
+// ✅ COMPATIBLE: react-flow-renderer v10 works with React 16
+import ReactFlow from 'react-flow-renderer';
+import 'react-flow-renderer/dist/style.css';
+```
+
+### Migration History
+
+- **v1.x**: Used iframe + postMessage bridge to separate React 18 SPA
+- **v2.0**: Direct PCF rendering with react-flow-renderer v10
+
+The v2.0 architecture eliminates:
+- iframe complexity
+- postMessage communication
+- Dual deployment (PCF + SPA)
+- CSP configuration for iframe source
 
 ## Common Issues
 

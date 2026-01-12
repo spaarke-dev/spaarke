@@ -3,7 +3,7 @@
   <metadata>
     <title>Phase 2 Tests and PCF Deployment</title>
     <phase>2: Visual Builder</phase>
-    <status>in-progress</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <tags>testing, deploy, pcf</tags>
     <dependencies>018</dependencies>
@@ -66,6 +66,17 @@
 
       Testing Blocked:
       - Steps 4-9 require form configuration to be completed first
+    </note>
+    <note date="2026-01-10">
+      Phase 2 Complete (v1.2.4):
+      - Fixed PCF version caching (clean rebuild resolved stale v1.2.3)
+      - Added Azure origin to postMessage allowlist
+      - Set minHeight 800px for proper iframe display
+      - Redeployed SPA to Azure with correct static files
+      - CSP headers correctly configured for iframe embedding
+      - PCF loads in Dataverse form and builder renders in iframe
+      - Commit: fix(pcf): iframe embedding fixes for PlaybookBuilderHost v1.2.4
+      - PR #106 updated
     </note>
   </notes>
 </task>

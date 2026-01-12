@@ -46,7 +46,19 @@
 | 016 | Implement Host-Builder Communication | :white_check_mark: | 015 | pcf, frontend |
 | 017 | Add Canvas Persistence API | :white_check_mark: | 008 | bff-api, api |
 | 018 | Deploy Builder to App Service | :white_check_mark: | 014, 016, 017 | deploy, azure |
-| 019 | Phase 2 Tests and PCF Deployment | :white_large_square: | 018 | testing, deploy, pcf |
+| 019 | Phase 2 Tests and PCF Deployment | :white_check_mark: | 018 | testing, deploy, pcf |
+
+---
+
+## Phase 2.5: Architecture Refactor (019a)
+
+| Task | Title | Status | Depends | Tags |
+|------|-------|--------|---------|------|
+| 019a | Refactor to React Flow v10 Direct PCF Integration | :white_large_square: | 019 | pcf, react-flow, refactor, architecture |
+
+**Rationale**: Migrate from iframe + React 18 to direct PCF + React 16 before Phase 3.
+This eliminates postMessage complexity, dual deployment, and simplifies all future work.
+See: [Architecture Refactor Documentation](../notes/architecture/ARCHITECTURE-REFACTOR-REACT-FLOW-V10.md)
 
 ---
 
@@ -54,7 +66,7 @@
 
 | Task | Title | Status | Depends | Tags |
 |------|-------|--------|---------|------|
-| 020 | Implement Parallel Execution | :white_large_square: | 019 | bff-api, orchestration |
+| 020 | Implement Parallel Execution | :white_large_square: | 019a | bff-api, orchestration |
 | 021 | Create TemplateEngine | :white_large_square: | 020 | bff-api, service |
 | 022 | Create CreateTaskNodeExecutor | :white_large_square: | 021 | bff-api, executor |
 | 023 | Create SendEmailNodeExecutor | :white_large_square: | 021 | bff-api, executor |
