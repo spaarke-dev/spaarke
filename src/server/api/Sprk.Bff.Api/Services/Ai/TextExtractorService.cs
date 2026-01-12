@@ -317,7 +317,7 @@ public class TextExtractorService : ITextExtractor
             From = msg.Sender?.Email ?? msg.Sender?.DisplayName,
             To = recipients,
             Cc = null, // MsgReader Recipients includes all; To/CC not easily distinguishable
-            Date = msg.SentOn,
+            Date = msg.SentOn?.DateTime, // MsgReader 6.x returns DateTimeOffset?
             Body = body,
             Attachments = attachments
         };
