@@ -75,7 +75,7 @@ See: [Architecture Refactor Documentation](../notes/architecture/ARCHITECTURE-RE
 | 026 | Implement Power Apps Integration | :white_check_mark: | 025 | bff-api, integration |
 | 027 | Add Execution Visualization | :white_check_mark: | 020 | frontend, react |
 | 028 | Phase 3 Integration Tests | :white_check_mark: | 027 | testing |
-| 029 | Phase 3 Deployment | :white_large_square: | 028 | deploy |
+| 029 | Phase 3 Deployment | :white_check_mark: | 028 | deploy |
 
 ---
 
