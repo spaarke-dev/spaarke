@@ -1,21 +1,21 @@
 # Current Task State
 
 > **Purpose**: Context recovery after compaction or new session
-> **Updated**: 2026-01-10
+> **Updated**: 2026-01-12
 
 ---
 
 ## Active Task
 
-**Task ID**: 019a
-**Task File**: tasks/019a-refactor-react-flow-v10.poml
-**Title**: Refactor to React Flow v10 Direct PCF Integration
-**Phase**: 2.5: Architecture Refactor
-**Status**: in-progress
-**Started**: 2026-01-10
+**Task ID**: none (task 021 just completed)
+**Task File**: —
+**Title**: —
+**Phase**: 3: Parallel Execution + Delivery
+**Status**: awaiting-next-task
+**Started**: —
 
-**Rigor Level**: FULL
-**Reason**: Task has tags pcf, react-flow, refactor, architecture - code implementation modifying .ts/.tsx files
+**Rigor Level**: —
+**Reason**: —
 
 ---
 
@@ -23,91 +23,90 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 019a - Refactor to React Flow v10 Direct PCF Integration |
-| **Step** | 1 of 15: Install react-flow-renderer v10 |
-| **Status** | in-progress |
-| **Next Action** | Update package.json and npm install |
+| **Task** | 021 - Create TemplateEngine |
+| **Step** | COMPLETED |
+| **Status** | completed |
+| **Next Action** | Start task 022, 023, 024, or 025 (all unblocked) |
 
 **To resume**:
 ```
-work on task 019a
+work on task 022
 ```
 
 ---
 
 ## Completed Steps
 
-(In progress...)
+(Reset for next task)
 
 ---
 
 ## Files Modified This Session
 
-- `src/client/pcf/PlaybookBuilderHost/package.json` - Adding react-flow-renderer v10 dependencies
+**Task 021**:
+- `src/server/api/Sprk.Bff.Api/Services/Ai/ITemplateEngine.cs` - NEW interface
+- `src/server/api/Sprk.Bff.Api/Services/Ai/TemplateEngine.cs` - NEW implementation (Handlebars.NET)
+- `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/TemplateEngineTests.cs` - NEW unit tests (28 tests)
+- `src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj` - Added Handlebars.Net 2.1.6
+- `src/server/api/Sprk.Bff.Api/Program.cs` - Registered ITemplateEngine in DI
 
 ---
 
 ## Key Decisions Made
 
-**Architecture Decision (2026-01-10)**:
-- Decided to refactor from iframe + React 18 + React Flow v12 to direct PCF + React 16 + react-flow-renderer v10
-- Rationale: Eliminates postMessage complexity, dual deployment, CSP configuration
-- Timing: Execute now before Phase 3 to prevent accumulating technical debt
-- Full documentation: notes/architecture/ARCHITECTURE-REFACTOR-REACT-FLOW-V10.md
+**Task 021 (completed)**:
+- Used Handlebars.NET 2.1.6 (most popular .NET Handlebars library)
+- Configured NoEscape=true (not rendering HTML)
+- Configured ThrowOnUnresolvedBindingExpression=false for graceful missing variable handling
+- Registered as Singleton (thread-safe, stateless)
+- Returns root variable name for nested access (e.g., "node" from "node.output.field")
+
+**Previous Session (020 completed)**:
+- Completed parallel execution with batch-based Task.WhenAll
+- SemaphoreSlim throttling (DefaultMaxParallelNodes = 3)
+- Exponential backoff on 429 rate limit responses
 
 ---
 
 ## Blocked Items
 
-None
+None - Tasks 022, 023, 024, 025 are now unblocked by task 021 completion.
 
 ---
 
-## Knowledge Files Loaded
+## Knowledge Files To Load
 
-- `.claude/adr/ADR-022-pcf-platform-libraries.md` - React 16 requirement
-- `.claude/constraints/pcf.md` - PCF development constraints
-- `src/client/pcf/CLAUDE.md` - PCF module instructions
-- `projects/ai-node-playbook-builder/notes/architecture/ARCHITECTURE-REFACTOR-REACT-FLOW-V10.md` - Refactor plan
-- **Reference**: DocumentRelationshipViewer PCF (react-flow-renderer v10 pattern)
+For delivery node executors (022-025):
+- `.claude/adr/ADR-016-ai-rate-limits.md` - Rate limit handling
+- `.claude/patterns/api/resilience.md` - Resilience patterns
+- `.claude/constraints/api.md` - API constraints
+
+---
 
 ## Applicable ADRs
 
-- ADR-022: PCF Platform Libraries (React 16 requirement)
+- ADR-016: AI Rate Limits (rate limit handling with backoff)
 
 ---
 
 ## Session Notes
 
 ### Phase 1 Complete
-All Phase 1 tasks (001-009) completed:
-- Dataverse schema fully deployed via Web API
-- BFF API deployed with all new endpoints
-- Ready for Phase 2: Visual Builder
+All Phase 1 tasks (001-009) completed.
 
 ### Phase 2 Complete
-All Phase 2 tasks (010-019) completed:
-- React 18 playbook builder with React Flow canvas
-- Custom node components (AI Analysis, Condition, Delivery nodes)
-- Properties panel with form fields
-- PCF host control with iframe embedding (v1.2.4)
-- postMessage communication protocol
-- Canvas persistence API (GET/PUT endpoints)
-- Deployed to Azure and Dataverse
-- E2E testing confirmed working in Dataverse form
+All Phase 2 tasks (010-019) completed.
 
-### Phase 2.5: Architecture Refactor (Current)
-Task 019a: Refactor to React Flow v10 Direct PCF Integration
-- Migrate from iframe + React 18 to direct PCF + React 16
-- Use react-flow-renderer v10 (React 16 compatible)
-- Eliminate postMessage, separate SPA deployment
-- Simplifies all Phase 3+ development
+### Phase 2.5 Complete (Task 019a)
+- Migrated PCF from iframe + React 18 to direct PCF + React 16
+- Used react-flow-renderer v10 (React 16 compatible)
+- Deployed v2.4.0 with all UI fixes
+- Eliminated postMessage complexity
 
-### After Refactor: Phase 3
-Task 020: Implement Parallel Execution
-- Extend ExecutionGraph for parallel node execution
-- Add throttling for concurrent AI operations
-- Will benefit from simplified direct PCF architecture
+### Phase 3 Progress
+- Task 020: Parallel execution implemented ✅
+- Task 021: TemplateEngine implemented ✅
+- Next: Tasks 022-025 (delivery node executors)
 
 ---
 

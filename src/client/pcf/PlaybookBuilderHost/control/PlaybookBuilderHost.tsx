@@ -9,19 +9,23 @@
  * - Canvas state managed by Zustand store
  * - Dirty state tracked and exposed to PCF host
  *
- * @version 2.0.0
+ * @version 2.3.0
  */
 
 import * as React from 'react';
-import { useEffect, useCallback, useRef } from 'react';
+import { useEffect, useCallback, useRef, useState } from 'react';
 import {
   Button,
   Spinner,
   Text,
+  Input,
+  Textarea,
+  Label,
   makeStyles,
   tokens,
   shorthands,
 } from '@fluentui/react-components';
+import { Save20Regular } from '@fluentui/react-icons';
 import { ReactFlowProvider } from 'react-flow-renderer';
 import { BuilderLayout } from './components';
 import { useCanvasStore } from './stores';
@@ -33,9 +37,10 @@ import { useCanvasStore } from './stores';
 export interface PlaybookBuilderHostProps {
   playbookId: string;
   playbookName: string;
+  playbookDescription?: string;
   canvasJson: string;
   onDirtyChange: (isDirty: boolean) => void;
-  onSave: (canvasJson: string) => void;
+  onSave: (canvasJson: string, name: string, description: string) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -48,21 +53,40 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     width: '100%',
     height: '100%',
-    minHeight: '800px',
     ...shorthands.overflow('hidden'),
   },
-  toolbar: {
+  header: {
     display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
-    ...shorthands.gap(tokens.spacingHorizontalS),
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    ...shorthands.padding(tokens.spacingVerticalM, tokens.spacingHorizontalL),
+    ...shorthands.gap(tokens.spacingHorizontalL),
     ...shorthands.borderBottom(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke1),
     backgroundColor: tokens.colorNeutralBackground1,
+    flexShrink: 0,
+  },
+  headerFields: {
+    display: 'flex',
+    flexDirection: 'column',
+    ...shorthands.gap(tokens.spacingVerticalS),
+    flex: 1,
+    maxWidth: '600px',
+  },
+  headerField: {
+    display: 'flex',
+    flexDirection: 'column',
+    ...shorthands.gap(tokens.spacingVerticalXXS),
+  },
+  headerActions: {
+    display: 'flex',
+    alignItems: 'center',
+    ...shorthands.gap(tokens.spacingHorizontalS),
+    flexShrink: 0,
   },
   builderContainer: {
     flex: 1,
     position: 'relative',
+    minHeight: 0, // Critical for flex child to shrink properly
     ...shorthands.overflow('hidden'),
   },
   loading: {
@@ -83,19 +107,16 @@ const useStyles = makeStyles({
     textAlign: 'center',
     color: tokens.colorPaletteRedForeground1,
   },
-  footer: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    ...shorthands.padding(tokens.spacingVerticalXS, tokens.spacingHorizontalS),
-    fontSize: '11px',
-    color: tokens.colorNeutralForeground3,
-    backgroundColor: tokens.colorNeutralBackground2,
-    ...shorthands.borderTop(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke2),
-  },
   dirtyIndicator: {
     color: tokens.colorPaletteMarigoldForeground1,
-    marginRight: tokens.spacingHorizontalS,
+  },
+  versionBadge: {
+    fontSize: '10px',
+    color: tokens.colorNeutralForeground3,
+    position: 'absolute',
+    bottom: tokens.spacingVerticalXS,
+    right: tokens.spacingHorizontalS,
+    pointerEvents: 'none',
   },
 });
 
@@ -106,22 +127,31 @@ const useStyles = makeStyles({
 export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
   playbookId,
   playbookName,
+  playbookDescription = '',
   canvasJson,
   onDirtyChange,
   onSave,
 }) => {
   const styles = useStyles();
   const initializedRef = useRef(false);
-  const [isLoading, setIsLoading] = React.useState(true);
-  const [error, setError] = React.useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Local state for editable fields
+  const [name, setName] = useState(playbookName || '');
+  const [description, setDescription] = useState(playbookDescription || '');
+  const [fieldsModified, setFieldsModified] = useState(false);
 
   // Get store state and actions
-  const { isDirty, loadCanvas, getCanvasJson, clearDirty } = useCanvasStore((state) => ({
+  const { isDirty: canvasDirty, loadCanvas, getCanvasJson, clearDirty } = useCanvasStore((state) => ({
     isDirty: state.isDirty,
     loadCanvas: state.loadCanvas,
     getCanvasJson: state.getCanvasJson,
     clearDirty: state.clearDirty,
   }));
+
+  // Combined dirty state: canvas changes OR field changes
+  const isDirty = canvasDirty || fieldsModified;
 
   // Initialize canvas from props (only once)
   useEffect(() => {
@@ -152,18 +182,35 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
     onDirtyChange(isDirty);
   }, [isDirty, onDirtyChange]);
 
+  // Handle name change
+  const handleNameChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setName(e.target.value);
+    setFieldsModified(true);
+  }, []);
+
+  // Handle description change
+  const handleDescriptionChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setDescription(e.target.value);
+    setFieldsModified(true);
+  }, []);
+
   // Handle save button click
   const handleSaveClick = useCallback(() => {
     try {
       const json = getCanvasJson();
-      console.info('[PlaybookBuilderHost] Saving canvas', { jsonLength: json.length });
-      onSave(json);
+      console.info('[PlaybookBuilderHost] Saving canvas', {
+        jsonLength: json.length,
+        name,
+        description: description.substring(0, 50) + '...',
+      });
+      onSave(json, name, description);
       clearDirty();
+      setFieldsModified(false);
     } catch (err) {
       console.error('[PlaybookBuilderHost] Failed to save canvas:', err);
       setError('Failed to save the playbook. Please try again.');
     }
-  }, [getCanvasJson, onSave, clearDirty]);
+  }, [getCanvasJson, onSave, clearDirty, name, description]);
 
   // Handle retry
   const handleRetryClick = useCallback(() => {
@@ -214,16 +261,51 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
 
   return (
     <div className={styles.container}>
-      {/* Toolbar */}
-      <div className={styles.toolbar}>
-        {isDirty && (
-          <Text className={styles.dirtyIndicator} size={200}>
-            Unsaved changes
-          </Text>
-        )}
-        <Button appearance="primary" disabled={!isDirty} onClick={handleSaveClick}>
-          Save
-        </Button>
+      {/* Header with Name/Description and Save */}
+      <div className={styles.header}>
+        <div className={styles.headerFields}>
+          <div className={styles.headerField}>
+            <Label htmlFor="playbook-name" required size="small">
+              Playbook Name
+            </Label>
+            <Input
+              id="playbook-name"
+              size="small"
+              value={name}
+              onChange={handleNameChange}
+              placeholder="Enter playbook name"
+            />
+          </div>
+          <div className={styles.headerField}>
+            <Label htmlFor="playbook-description" size="small">
+              Description
+            </Label>
+            <Textarea
+              id="playbook-description"
+              size="small"
+              value={description}
+              onChange={handleDescriptionChange}
+              placeholder="Enter playbook description"
+              rows={2}
+              resize="none"
+            />
+          </div>
+        </div>
+        <div className={styles.headerActions}>
+          {isDirty && (
+            <Text className={styles.dirtyIndicator} size={200}>
+              Unsaved changes
+            </Text>
+          )}
+          <Button
+            appearance="primary"
+            icon={<Save20Regular />}
+            disabled={!isDirty}
+            onClick={handleSaveClick}
+          >
+            Save
+          </Button>
+        </div>
       </div>
 
       {/* Builder Container with ReactFlowProvider */}
@@ -231,11 +313,8 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
         <ReactFlowProvider>
           <BuilderLayout />
         </ReactFlowProvider>
-      </div>
-
-      {/* Footer with version */}
-      <div className={styles.footer}>
-        <Text size={100}>v2.0.0</Text>
+        {/* Version badge in corner */}
+        <Text className={styles.versionBadge}>v2.4.0</Text>
       </div>
     </div>
   );

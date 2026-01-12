@@ -357,6 +357,15 @@ if (analysisEnabled && documentIntelligenceEnabled)
     // Playbook Orchestration Service - multi-node playbook execution (ai-node-playbook-builder project)
     builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IPlaybookOrchestrationService, Sprk.Bff.Api.Services.Ai.PlaybookOrchestrationService>();
 
+    // Template Engine - Handlebars.NET for variable substitution in prompts and delivery templates
+    builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.ITemplateEngine, Sprk.Bff.Api.Services.Ai.TemplateEngine>();
+
+    // Delivery Node Executors - Phase 3 delivery actions (CreateTask, SendEmail, UpdateRecord, DeliverOutput)
+    builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.CreateTaskNodeExecutor>();
+    builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.SendEmailNodeExecutor>();
+    builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.UpdateRecordNodeExecutor>();
+    builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.DeliverOutputNodeExecutor>();
+
     // Playbook Sharing Service - team/organization sharing for playbooks (R3 Phase 3 Task 023)
     builder.Services.AddHttpClient<Sprk.Bff.Api.Services.Ai.IPlaybookSharingService, Sprk.Bff.Api.Services.Ai.PlaybookSharingService>();
 

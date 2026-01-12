@@ -88,11 +88,16 @@ interface ScopeSelectorProps {
   skillIds: string[];
   knowledgeIds: string[];
   toolId?: string;
+  // Control which sections to show (for separate accordion panels)
+  showSkills?: boolean;
+  showKnowledge?: boolean;
+  showTools?: boolean;
 }
 
 /**
  * ScopeSelector component for selecting skills, knowledge, and tools for a node.
  * Filters available options based on the node's action type capabilities.
+ * Can show all sections or specific sections based on props.
  */
 export const ScopeSelector = React.memo(function ScopeSelector({
   nodeId,
@@ -100,6 +105,9 @@ export const ScopeSelector = React.memo(function ScopeSelector({
   skillIds,
   knowledgeIds,
   toolId,
+  showSkills = true,
+  showKnowledge = true,
+  showTools = true,
 }: ScopeSelectorProps) {
   const styles = useStyles();
   const updateNode = useCanvasStore((state) => state.updateNode);
@@ -111,28 +119,46 @@ export const ScopeSelector = React.memo(function ScopeSelector({
     [getCapabilities, nodeType]
   );
 
-  // If no capabilities are enabled, show a message
-  if (
-    !capabilities.allowsSkills &&
-    !capabilities.allowsKnowledge &&
-    !capabilities.allowsTools
-  ) {
-    return (
-      <div className={styles.container}>
-        <Divider>Scope</Divider>
+  // Determine what to render based on props and capabilities
+  const shouldShowSkills = showSkills && capabilities.allowsSkills;
+  const shouldShowKnowledge = showKnowledge && capabilities.allowsKnowledge;
+  const shouldShowTools = showTools && capabilities.allowsTools;
+
+  // If nothing to show for this section, show appropriate message
+  if (!shouldShowSkills && !shouldShowKnowledge && !shouldShowTools) {
+    // If we're showing a specific section (e.g., just skills) and it's not allowed
+    if (showSkills && !showKnowledge && !showTools && !capabilities.allowsSkills) {
+      return (
         <Text className={styles.disabledMessage}>
-          This node type does not support scope selections.
+          This node type does not support skills.
         </Text>
-      </div>
+      );
+    }
+    if (!showSkills && showKnowledge && !showTools && !capabilities.allowsKnowledge) {
+      return (
+        <Text className={styles.disabledMessage}>
+          This node type does not support knowledge sources.
+        </Text>
+      );
+    }
+    if (!showSkills && !showKnowledge && showTools && !capabilities.allowsTools) {
+      return (
+        <Text className={styles.disabledMessage}>
+          This node type does not support tools.
+        </Text>
+      );
+    }
+    return (
+      <Text className={styles.disabledMessage}>
+        This node type does not support scope selections.
+      </Text>
     );
   }
 
   return (
     <div className={styles.container}>
-      <Divider>Scope</Divider>
-
       {/* Skills Section */}
-      {capabilities.allowsSkills && (
+      {shouldShowSkills && (
         <SkillsMultiSelect
           skills={skills}
           selectedIds={skillIds}
@@ -142,7 +168,7 @@ export const ScopeSelector = React.memo(function ScopeSelector({
       )}
 
       {/* Knowledge Section */}
-      {capabilities.allowsKnowledge && (
+      {shouldShowKnowledge && (
         <KnowledgeMultiSelect
           knowledge={knowledge}
           selectedIds={knowledgeIds}
@@ -152,7 +178,7 @@ export const ScopeSelector = React.memo(function ScopeSelector({
       )}
 
       {/* Tool Section */}
-      {capabilities.allowsTools && (
+      {shouldShowTools && (
         <ToolDropdown
           tools={tools}
           selectedId={toolId}

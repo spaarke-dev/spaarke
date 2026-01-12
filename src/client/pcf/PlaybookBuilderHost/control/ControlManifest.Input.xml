@@ -2,7 +2,7 @@
 <manifest>
   <control namespace="Spaarke.PCF"
            constructor="PlaybookBuilderHost"
-           version="2.3.0"
+           version="2.4.0"
            display-name-key="Playbook Builder Host"
            description-key="Node-based Playbook Builder with visual canvas for AI workflow design"
            control-type="standard">
@@ -45,12 +45,20 @@
               usage="input"
               required="false" />
 
-    <!-- Playbook Name (INPUT - for display) -->
+    <!-- Playbook Name (BOUND - sprk_name field) -->
     <property name="playbookName"
               display-name-key="Playbook Name"
-              description-key="Display name of the playbook"
+              description-key="Name of the playbook (sprk_name)"
               of-type="SingleLine.Text"
-              usage="input"
+              usage="bound"
+              required="false" />
+
+    <!-- Playbook Description (BOUND - sprk_description field) -->
+    <property name="playbookDescription"
+              display-name-key="Playbook Description"
+              description-key="Description of the playbook (sprk_description)"
+              of-type="Multiple"
+              usage="bound"
               required="false" />
 
     <!-- Canvas JSON (BOUND - serialized node graph) -->

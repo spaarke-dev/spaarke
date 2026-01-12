@@ -112,6 +112,8 @@ export class PlaybookBuilderHost
   // Output values
   private isDirty: boolean = false;
   private canvasJsonOutput: string | undefined = undefined;
+  private playbookNameOutput: string | undefined = undefined;
+  private playbookDescriptionOutput: string | undefined = undefined;
 
   constructor() {
     logInfo('Constructor called');
@@ -182,6 +184,14 @@ export class PlaybookBuilderHost
       outputs.canvasJson = this.canvasJsonOutput;
     }
 
+    // Include name and description if updated
+    if (this.playbookNameOutput !== undefined) {
+      outputs.playbookName = this.playbookNameOutput;
+    }
+    if (this.playbookDescriptionOutput !== undefined) {
+      outputs.playbookDescription = this.playbookDescriptionOutput;
+    }
+
     return outputs;
   }
 
@@ -248,6 +258,7 @@ export class PlaybookBuilderHost
 
       // Get other input parameters
       const playbookName = context.parameters.playbookName?.raw || '';
+      const playbookDescription = context.parameters.playbookDescription?.raw || '';
       const canvasJson = context.parameters.canvasJson?.raw || '';
 
       logInfo('Rendering with context', {
@@ -264,6 +275,7 @@ export class PlaybookBuilderHost
           React.createElement(PlaybookBuilderHostApp, {
             playbookId,
             playbookName,
+            playbookDescription,
             canvasJson,
             onDirtyChange: this.handleDirtyChange.bind(this),
             onSave: this.handleSave.bind(this),
@@ -284,18 +296,20 @@ export class PlaybookBuilderHost
     }
   }
 
-  private handleSave(canvasJson: string): void {
-    logInfo('Save requested', { jsonLength: canvasJson.length });
+  private handleSave(canvasJson: string, name: string, description: string): void {
+    logInfo('Save requested', { jsonLength: canvasJson.length, name, description: description?.substring(0, 50) });
 
-    // Store the updated canvas JSON for getOutputs() to return
+    // Store the updated values for getOutputs() to return
     this.canvasJsonOutput = canvasJson;
+    this.playbookNameOutput = name;
+    this.playbookDescriptionOutput = description;
     this.isDirty = false;
 
     // Notify the framework that outputs have changed
-    // This triggers getOutputs() and writes canvasJson back to the bound field
+    // This triggers getOutputs() and writes values back to bound fields
     this.notifyOutputChanged();
 
-    logInfo('Save complete - canvasJson output updated');
+    logInfo('Save complete - outputs updated');
   }
 
   private setupThemeListeners(): void {

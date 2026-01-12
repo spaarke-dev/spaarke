@@ -21,16 +21,21 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// <item>For NodeBased: Uses <see cref="ExecutionGraph"/> and <see cref="INodeExecutorRegistry"/></item>
 /// </list>
 /// <para>
-/// Phase 1 limitations:
+/// Phase 3 parallel execution:
 /// </para>
 /// <list type="bullet">
-/// <item>Sequential node execution only (parallel execution is Phase 3)</item>
-/// <item>In-memory run tracking (Dataverse persistence is Phase 2)</item>
-/// <item>Single document support (multi-document is Phase 2)</item>
+/// <item>Nodes in same batch execute in parallel (independent nodes)</item>
+/// <item>Throttled by maxParallelNodes to prevent overwhelming AI services</item>
+/// <item>Rate limit handling with exponential backoff per ADR-016</item>
 /// </list>
 /// </remarks>
 public class PlaybookOrchestrationService : IPlaybookOrchestrationService
 {
+    // Throttling configuration (per ADR-016)
+    private const int DefaultMaxParallelNodes = 3;
+    private const int MaxRateLimitRetries = 3;
+    private static readonly TimeSpan BaseRetryDelay = TimeSpan.FromSeconds(2);
+
     private readonly INodeService _nodeService;
     private readonly INodeExecutorRegistry _executorRegistry;
     private readonly IScopeResolverService _scopeResolver;
@@ -354,6 +359,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
 
     /// <summary>
     /// Executes playbook in NodeBased mode using ExecutionGraph.
+    /// Phase 3: Executes nodes in parallel within batches, respecting dependencies.
     /// </summary>
     private async Task ExecuteNodeBasedModeAsync(
         PlaybookRunContext context,
@@ -375,46 +381,71 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         await writer.WriteAsync(PlaybookStreamEvent.RunStarted(
             context.RunId, context.PlaybookId, totalNodes), cancellationToken);
 
-        // Get topological order for sequential execution (Phase 1)
-        // Phase 3 will use GetExecutionBatches() for parallel execution
-        var executionOrder = graph.GetTopologicalOrder();
+        // Get execution batches for parallel processing
+        var batches = graph.GetExecutionBatches();
 
         _logger.LogDebug(
-            "Execution order for playbook {PlaybookId}: {Order}",
-            context.PlaybookId,
-            string.Join(" → ", executionOrder.Select(n => n.Name)));
+            "Execution batches for playbook {PlaybookId}: {BatchCount} batches",
+            context.PlaybookId, batches.Count);
 
-        // Execute nodes in order
-        foreach (var node in executionOrder)
+        // Create semaphore for throttling parallel execution
+        using var throttle = new SemaphoreSlim(DefaultMaxParallelNodes, DefaultMaxParallelNodes);
+
+        // Execute batches sequentially (nodes within batch execute in parallel)
+        var batchNumber = 0;
+        foreach (var batch in batches)
         {
+            batchNumber++;
+
             if (context.CancellationToken.IsCancellationRequested)
             {
                 _logger.LogInformation(
-                    "Playbook execution cancelled at node {NodeName}",
-                    node.Name);
+                    "Playbook execution cancelled before batch {BatchNumber}",
+                    batchNumber);
                 break;
             }
 
-            context.CurrentNodeId = node.Id;
+            _logger.LogDebug(
+                "Executing batch {BatchNumber}/{TotalBatches} with {NodeCount} nodes: {Nodes}",
+                batchNumber, batches.Count, batch.Count,
+                string.Join(", ", batch.Select(n => n.Name)));
 
-            // Execute single node
-            var result = await ExecuteNodeAsync(context, node, graph, writer, cancellationToken);
-
-            // Stop if node failed and playbook doesn't continue on error
-            if (!result.Success)
+            // Execute all nodes in this batch in parallel (with throttling)
+            var batchTasks = batch.Select(async node =>
             {
-                // Phase 1: Always stop on failure
-                // Phase 2: Check sprk_continueonerror field
-                _logger.LogWarning(
-                    "Node {NodeName} failed - stopping playbook execution",
-                    node.Name);
+                // Acquire throttle slot
+                await throttle.WaitAsync(context.CancellationToken);
+                try
+                {
+                    context.CurrentNodeId = node.Id;
+                    return await ExecuteNodeWithRetryAsync(context, node, graph, writer, cancellationToken);
+                }
+                finally
+                {
+                    throttle.Release();
+                }
+            });
 
-                context.MarkFailed($"Node '{node.Name}' failed: {result.ErrorMessage}");
+            // Wait for all nodes in batch to complete
+            var results = await Task.WhenAll(batchTasks);
+
+            // Check for failures in this batch
+            var failedNode = batch.Zip(results, (node, result) => new { node, result })
+                .FirstOrDefault(x => !x.result.Success);
+
+            if (failedNode != null)
+            {
+                // TODO (Phase 4): Check sprk_continueonerror field per node
+                _logger.LogWarning(
+                    "Node {NodeName} in batch {BatchNumber} failed - stopping playbook execution",
+                    failedNode.node.Name, batchNumber);
+
+                context.MarkFailed($"Node '{failedNode.node.Name}' failed: {failedNode.result.ErrorMessage}");
 
                 await writer.WriteAsync(PlaybookStreamEvent.RunFailed(
                     context.RunId,
                     context.PlaybookId,
-                    $"Node '{node.Name}' failed",
+                    $"Node '{failedNode.node.Name}' failed",
                     context.GetMetrics(totalNodes)), cancellationToken);
 
                 return;
@@ -436,6 +467,68 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 context.PlaybookId,
                 context.GetMetrics(totalNodes)), cancellationToken);
         }
+    }
+
+    /// <summary>
+    /// Executes a node with retry logic for rate limit (429) responses.
+    /// Implements exponential backoff per ADR-016.
+    /// </summary>
+    private async Task<NodeOutput> ExecuteNodeWithRetryAsync(
+        PlaybookRunContext context,
+        PlaybookNodeDto node,
+        ExecutionGraph graph,
+        ChannelWriter<PlaybookStreamEvent> writer,
+        CancellationToken cancellationToken)
+    {
+        var retryCount = 0;
+
+        while (true)
+        {
+            try
+            {
+                return await ExecuteNodeAsync(context, node, graph, writer, cancellationToken);
+            }
+            catch (HttpRequestException ex) when (IsRateLimitError(ex) && retryCount < MaxRateLimitRetries)
+            {
+                retryCount++;
+                var delay = CalculateBackoffDelay(retryCount, ex);
+
+                _logger.LogWarning(
+                    "Node {NodeName} hit rate limit (attempt {RetryCount}/{MaxRetries}), retrying after {Delay}ms",
+                    node.Name, retryCount, MaxRateLimitRetries, delay.TotalMilliseconds);
+
+                await Task.Delay(delay, cancellationToken);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Checks if an exception is a rate limit (429) error.
+    /// </summary>
+    private static bool IsRateLimitError(HttpRequestException ex)
+    {
+        return ex.StatusCode == System.Net.HttpStatusCode.TooManyRequests;
+    }
+
+    /// <summary>
+    /// Calculates exponential backoff delay with jitter.
+    /// Respects Retry-After header if present in the exception.
+    /// </summary>
+    private static TimeSpan CalculateBackoffDelay(int retryCount, HttpRequestException ex)
+    {
+        // Check for Retry-After header in exception data
+        if (ex.Data.Contains("Retry-After") && ex.Data["Retry-After"] is int retryAfterSeconds)
+        {
+            return TimeSpan.FromSeconds(retryAfterSeconds);
+        }
+
+        // Exponential backoff: 2^retryCount * baseDelay (2s, 4s, 8s)
+        var exponentialDelay = TimeSpan.FromSeconds(Math.Pow(2, retryCount) * BaseRetryDelay.TotalSeconds);
+
+        // Add jitter (0-25% of delay) to prevent thundering herd
+        var jitter = TimeSpan.FromMilliseconds(Random.Shared.Next(0, (int)(exponentialDelay.TotalMilliseconds * 0.25)));
+
+        return exponentialDelay + jitter;
     }
 
     /// <summary>

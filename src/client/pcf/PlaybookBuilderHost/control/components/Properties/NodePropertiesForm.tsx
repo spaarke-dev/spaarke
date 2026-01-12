@@ -203,9 +203,60 @@ export const NodePropertiesForm = React.memo(function NodePropertiesForm({
           </AccordionPanel>
         </AccordionItem>
 
-        {/* Execution Settings Section */}
-        <AccordionItem value="execution">
-          <AccordionHeader size="small">Execution</AccordionHeader>
+        {/* Skills Section */}
+        <AccordionItem value="skills">
+          <AccordionHeader size="small">Skills</AccordionHeader>
+          <AccordionPanel className={styles.accordionPanel}>
+            <ScopeSelector
+              nodeId={node.id}
+              nodeType={node.data.type}
+              skillIds={values.skillIds}
+              knowledgeIds={[]}
+              toolId={undefined}
+              showSkills={true}
+              showKnowledge={false}
+              showTools={false}
+            />
+          </AccordionPanel>
+        </AccordionItem>
+
+        {/* Knowledge Section */}
+        <AccordionItem value="knowledge">
+          <AccordionHeader size="small">Knowledge</AccordionHeader>
+          <AccordionPanel className={styles.accordionPanel}>
+            <ScopeSelector
+              nodeId={node.id}
+              nodeType={node.data.type}
+              skillIds={[]}
+              knowledgeIds={values.knowledgeIds}
+              toolId={undefined}
+              showSkills={false}
+              showKnowledge={true}
+              showTools={false}
+            />
+          </AccordionPanel>
+        </AccordionItem>
+
+        {/* Tools Section */}
+        <AccordionItem value="tools">
+          <AccordionHeader size="small">Tools</AccordionHeader>
+          <AccordionPanel className={styles.accordionPanel}>
+            <ScopeSelector
+              nodeId={node.id}
+              nodeType={node.data.type}
+              skillIds={[]}
+              knowledgeIds={[]}
+              toolId={values.toolId}
+              showSkills={false}
+              showKnowledge={false}
+              showTools={true}
+            />
+          </AccordionPanel>
+        </AccordionItem>
+
+        {/* Runtime Settings Section (formerly Execution) */}
+        <AccordionItem value="runtime">
+          <AccordionHeader size="small">Runtime Settings</AccordionHeader>
           <AccordionPanel className={styles.accordionPanel}>
             <div className={styles.field}>
               <Label htmlFor="timeout-seconds" size="small">
@@ -242,20 +293,6 @@ export const NodePropertiesForm = React.memo(function NodePropertiesForm({
                 0-5 retries on failure
               </Text>
             </div>
-          </AccordionPanel>
-        </AccordionItem>
-
-        {/* Skills & Knowledge Section */}
-        <AccordionItem value="scope">
-          <AccordionHeader size="small">Skills & Knowledge</AccordionHeader>
-          <AccordionPanel className={styles.accordionPanel}>
-            <ScopeSelector
-              nodeId={node.id}
-              nodeType={node.data.type}
-              skillIds={values.skillIds}
-              knowledgeIds={values.knowledgeIds}
-              toolId={values.toolId}
-            />
           </AccordionPanel>
         </AccordionItem>
 

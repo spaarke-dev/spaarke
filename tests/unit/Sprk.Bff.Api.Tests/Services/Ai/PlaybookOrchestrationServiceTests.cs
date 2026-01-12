@@ -462,6 +462,279 @@ public class PlaybookOrchestrationServiceTests
 
     #endregion
 
+    #region Parallel Execution Tests (Phase 3)
+
+    [Fact]
+    public async Task ExecuteAsync_IndependentNodes_ExecuteInParallel()
+    {
+        // Arrange
+        var playbookId = Guid.NewGuid();
+        var actionId = Guid.NewGuid();
+        var request = CreateRequest(playbookId);
+
+        // Create 3 independent nodes (no dependencies - they can run in parallel)
+        var node1 = CreateNode("Node A", actionId, "node_a_output", order: 1);
+        var node2 = CreateNode("Node B", actionId, "node_b_output", order: 2);
+        var node3 = CreateNode("Node C", actionId, "node_c_output", order: 3);
+
+        _nodeServiceMock
+            .Setup(x => x.GetNodesAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([node1, node2, node3]);
+
+        _scopeResolverMock
+            .Setup(x => x.ResolveNodeScopesAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateEmptyScopes());
+
+        _scopeResolverMock
+            .Setup(x => x.GetActionAsync(actionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateAction(actionId));
+
+        // Track concurrent execution count
+        var concurrentCount = 0;
+        var maxConcurrent = 0;
+        var lockObj = new object();
+
+        var mockExecutor = new Mock<INodeExecutor>();
+        mockExecutor.Setup(x => x.Validate(It.IsAny<NodeExecutionContext>()))
+            .Returns(NodeValidationResult.Success());
+        mockExecutor.Setup(x => x.ExecuteAsync(It.IsAny<NodeExecutionContext>(), It.IsAny<CancellationToken>()))
+            .Returns(async (NodeExecutionContext ctx, CancellationToken _) =>
+            {
+                lock (lockObj)
+                {
+                    concurrentCount++;
+                    maxConcurrent = Math.Max(maxConcurrent, concurrentCount);
+                }
+
+                // Simulate some work
+                await Task.Delay(50);
+
+                lock (lockObj)
+                {
+                    concurrentCount--;
+                }
+
+                return NodeOutput.Ok(ctx.Node.Id, ctx.Node.OutputVariable, new { });
+            });
+
+        _executorRegistryMock
+            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Returns(mockExecutor.Object);
+
+        // Act
+        var events = new List<PlaybookStreamEvent>();
+        await foreach (var evt in _service.ExecuteAsync(request, _mockHttpContext, CancellationToken.None))
+        {
+            events.Add(evt);
+        }
+
+        // Assert
+        var nodeCompletedEvents = events.Where(e => e.Type == PlaybookEventType.NodeCompleted).ToList();
+        nodeCompletedEvents.Should().HaveCount(3);
+
+        // Verify nodes ran in parallel (max concurrent > 1)
+        maxConcurrent.Should().BeGreaterThan(1, "Independent nodes should execute in parallel");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DependentNodes_ExecuteInBatches()
+    {
+        // Arrange
+        var playbookId = Guid.NewGuid();
+        var actionId = Guid.NewGuid();
+        var request = CreateRequest(playbookId);
+
+        // Create nodes: A, B (depends on A), C (depends on A)
+        // A should run first, then B and C can run in parallel
+        var nodeA = CreateNode("Node A", actionId, "node_a_output", order: 1);
+        var nodeB = CreateNode("Node B", actionId, "node_b_output", order: 2, nodeA.Id);
+        var nodeC = CreateNode("Node C", actionId, "node_c_output", order: 3, nodeA.Id);
+
+        _nodeServiceMock
+            .Setup(x => x.GetNodesAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([nodeA, nodeB, nodeC]);
+
+        _scopeResolverMock
+            .Setup(x => x.ResolveNodeScopesAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateEmptyScopes());
+
+        _scopeResolverMock
+            .Setup(x => x.GetActionAsync(actionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateAction(actionId));
+
+        var executionOrder = new List<string>();
+        var lockObj = new object();
+
+        var mockExecutor = new Mock<INodeExecutor>();
+        mockExecutor.Setup(x => x.Validate(It.IsAny<NodeExecutionContext>()))
+            .Returns(NodeValidationResult.Success());
+        mockExecutor.Setup(x => x.ExecuteAsync(It.IsAny<NodeExecutionContext>(), It.IsAny<CancellationToken>()))
+            .Returns(async (NodeExecutionContext ctx, CancellationToken _) =>
+            {
+                lock (lockObj)
+                {
+                    executionOrder.Add($"START:{ctx.Node.Name}");
+                }
+
+                await Task.Delay(30); // Simulate work
+
+                lock (lockObj)
+                {
+                    executionOrder.Add($"END:{ctx.Node.Name}");
+                }
+
+                return NodeOutput.Ok(ctx.Node.Id, ctx.Node.OutputVariable, new { });
+            });
+
+        _executorRegistryMock
+            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Returns(mockExecutor.Object);
+
+        // Act
+        var events = new List<PlaybookStreamEvent>();
+        await foreach (var evt in _service.ExecuteAsync(request, _mockHttpContext, CancellationToken.None))
+        {
+            events.Add(evt);
+        }
+
+        // Assert
+        // Node A must complete before B and C start
+        var nodeAEndIndex = executionOrder.IndexOf("END:Node A");
+        var nodeBStartIndex = executionOrder.IndexOf("START:Node B");
+        var nodeCStartIndex = executionOrder.IndexOf("START:Node C");
+
+        nodeAEndIndex.Should().BeLessThan(nodeBStartIndex, "Node A must complete before Node B starts");
+        nodeAEndIndex.Should().BeLessThan(nodeCStartIndex, "Node A must complete before Node C starts");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ThrottlesParallelExecution()
+    {
+        // Arrange
+        var playbookId = Guid.NewGuid();
+        var actionId = Guid.NewGuid();
+        var request = CreateRequest(playbookId);
+
+        // Create 5 independent nodes (more than default throttle of 3)
+        var nodes = Enumerable.Range(1, 5)
+            .Select(i => CreateNode($"Node {i}", actionId, $"node_{i}_output", order: i))
+            .ToArray();
+
+        _nodeServiceMock
+            .Setup(x => x.GetNodesAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(nodes);
+
+        _scopeResolverMock
+            .Setup(x => x.ResolveNodeScopesAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateEmptyScopes());
+
+        _scopeResolverMock
+            .Setup(x => x.GetActionAsync(actionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateAction(actionId));
+
+        var concurrentCount = 0;
+        var maxConcurrent = 0;
+        var lockObj = new object();
+
+        var mockExecutor = new Mock<INodeExecutor>();
+        mockExecutor.Setup(x => x.Validate(It.IsAny<NodeExecutionContext>()))
+            .Returns(NodeValidationResult.Success());
+        mockExecutor.Setup(x => x.ExecuteAsync(It.IsAny<NodeExecutionContext>(), It.IsAny<CancellationToken>()))
+            .Returns(async (NodeExecutionContext ctx, CancellationToken _) =>
+            {
+                lock (lockObj)
+                {
+                    concurrentCount++;
+                    maxConcurrent = Math.Max(maxConcurrent, concurrentCount);
+                }
+
+                await Task.Delay(100); // Hold the slot for a bit
+
+                lock (lockObj)
+                {
+                    concurrentCount--;
+                }
+
+                return NodeOutput.Ok(ctx.Node.Id, ctx.Node.OutputVariable, new { });
+            });
+
+        _executorRegistryMock
+            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Returns(mockExecutor.Object);
+
+        // Act
+        var events = new List<PlaybookStreamEvent>();
+        await foreach (var evt in _service.ExecuteAsync(request, _mockHttpContext, CancellationToken.None))
+        {
+            events.Add(evt);
+        }
+
+        // Assert
+        var nodeCompletedEvents = events.Where(e => e.Type == PlaybookEventType.NodeCompleted).ToList();
+        nodeCompletedEvents.Should().HaveCount(5);
+
+        // Max concurrent should not exceed DefaultMaxParallelNodes (3)
+        maxConcurrent.Should().BeLessOrEqualTo(3, "Throttling should limit concurrent execution to 3");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ParallelBatch_OneNodeFails_StopsExecution()
+    {
+        // Arrange
+        var playbookId = Guid.NewGuid();
+        var actionId = Guid.NewGuid();
+        var request = CreateRequest(playbookId);
+
+        // Create 3 independent nodes
+        var node1 = CreateNode("Node A", actionId, "node_a_output", order: 1);
+        var node2 = CreateNode("Node B", actionId, "node_b_output", order: 2);
+        var node3 = CreateNode("Node C", actionId, "node_c_output", order: 3);
+
+        _nodeServiceMock
+            .Setup(x => x.GetNodesAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([node1, node2, node3]);
+
+        _scopeResolverMock
+            .Setup(x => x.ResolveNodeScopesAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateEmptyScopes());
+
+        _scopeResolverMock
+            .Setup(x => x.GetActionAsync(actionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateAction(actionId));
+
+        var mockExecutor = new Mock<INodeExecutor>();
+        mockExecutor.Setup(x => x.Validate(It.IsAny<NodeExecutionContext>()))
+            .Returns(NodeValidationResult.Success());
+        mockExecutor.Setup(x => x.ExecuteAsync(It.IsAny<NodeExecutionContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((NodeExecutionContext ctx, CancellationToken _) =>
+            {
+                // Node B fails
+                if (ctx.Node.Name == "Node B")
+                {
+                    return NodeOutput.Error(ctx.Node.Id, ctx.Node.OutputVariable, "Simulated failure");
+                }
+                return NodeOutput.Ok(ctx.Node.Id, ctx.Node.OutputVariable, new { });
+            });
+
+        _executorRegistryMock
+            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Returns(mockExecutor.Object);
+
+        // Act
+        var events = new List<PlaybookStreamEvent>();
+        await foreach (var evt in _service.ExecuteAsync(request, _mockHttpContext, CancellationToken.None))
+        {
+            events.Add(evt);
+        }
+
+        // Assert
+        var runFailedEvent = events.FirstOrDefault(e => e.Type == PlaybookEventType.RunFailed);
+        runFailedEvent.Should().NotBeNull();
+        runFailedEvent!.Error.Should().Contain("Node B");
+    }
+
+    #endregion
+
     #region Validation Tests
 
     [Fact]
