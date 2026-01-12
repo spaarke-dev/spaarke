@@ -74,7 +74,7 @@ See: [Architecture Refactor Documentation](../notes/architecture/ARCHITECTURE-RE
 | 025 | Create DeliverOutputNodeExecutor | :white_check_mark: | 021 | bff-api, executor |
 | 026 | Implement Power Apps Integration | :white_check_mark: | 025 | bff-api, integration |
 | 027 | Add Execution Visualization | :white_check_mark: | 020 | frontend, react |
-| 028 | Phase 3 Integration Tests | :white_large_square: | 027 | testing |
+| 028 | Phase 3 Integration Tests | :white_check_mark: | 027 | testing |
 | 029 | Phase 3 Deployment | :white_large_square: | 028 | deploy |
 
 ---

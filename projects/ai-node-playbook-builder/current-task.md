@@ -7,12 +7,13 @@
 
 ## Active Task
 
-**Task ID**: 028
-**Task File**: tasks/028-phase3-integration-tests.poml
-**Title**: Phase 3 Integration Tests
+**Task ID**: 029
+**Task File**: tasks/029-phase3-deployment.poml
+**Title**: Phase 3 Deployment
 **Phase**: 3: Parallel Execution + Delivery
 **Status**: not-started
 **Started**: —
+**Rigor Level**: STANDARD (deploy tag)
 
 ---
 
@@ -20,14 +21,14 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 028 - Phase 3 Integration Tests |
+| **Task** | 029 - Phase 3 Deployment |
 | **Step** | Not started |
 | **Status** | pending |
-| **Next Action** | Begin Step 1 of task 028 |
+| **Next Action** | Begin Step 1 of task 029 |
 
 **To resume**:
 ```
-continue task 028
+continue task 029
 ```
 
 ---
@@ -40,27 +41,18 @@ continue task 028
 
 ## Files Modified This Session
 
-**Task 027 Files**:
-- `src/client/pcf/PlaybookBuilderHost/control/stores/executionStore.ts` - NEW execution state store
-- `src/client/pcf/PlaybookBuilderHost/control/hooks/useExecutionStream.ts` - NEW SSE hook
-- `src/client/pcf/PlaybookBuilderHost/control/hooks/index.ts` - NEW barrel export
-- `src/client/pcf/PlaybookBuilderHost/control/components/Execution/ExecutionOverlay.tsx` - NEW overlay component
-- `src/client/pcf/PlaybookBuilderHost/control/components/Execution/index.ts` - NEW barrel export
-- `src/client/pcf/PlaybookBuilderHost/control/components/index.ts` - Added Execution exports
-- `src/client/pcf/PlaybookBuilderHost/control/stores/index.ts` - Added executionStore exports
-- `src/client/pcf/PlaybookBuilderHost/control/components/BuilderLayout.tsx` - Integrated ExecutionOverlay
+**Task 028 Files** (completed):
+- `tests/unit/Sprk.Bff.Api.Tests/Integration/PlaybookExecutionTests.cs` - NEW integration tests
 
 ---
 
 ## Key Decisions Made
 
-**Task 027**:
-- Created separate executionStore (Zustand) for execution state, not polluting canvasStore
-- ExecutionOverlay positioned absolutely over canvas with pointer-events: none for click-through
-- NodeExecutionBadge component for individual node status badges
-- SSE connection via useExecutionStream hook with EventSource API
-- Status bar shows real-time progress, stop button, and metrics
-- Metrics panel shows completed/failed/running counts, tokens used, duration
+**Task 028**:
+- Used TestMocks record pattern for organizing mock objects
+- Created helper methods (CreateNode, CreateRequest, CreateNodeContext) for test data
+- Verified correct executor constructor signatures by reading implementations
+- Comprehensive test coverage: registry, parallel execution, throttling, all executors, e2e
 
 ---
 
@@ -72,27 +64,29 @@ None.
 
 ## Knowledge Files To Load
 
-For Phase 3 Integration Tests (028):
-- `.claude/constraints/testing.md` - Testing constraints
+For Phase 3 Deployment (029):
+- `.claude/skills/azure-deploy/SKILL.md` - Azure deployment procedures
+- `.claude/skills/dataverse-deploy/SKILL.md` - PCF/solution deployment
 
 ---
 
 ## Applicable ADRs
 
-- Testing patterns from codebase
+- ADR-001: Minimal API deployment patterns
+- ADR-006: PCF deployment patterns
 
 ---
 
 ## Session Notes
 
 ### Phase 3 Progress
-- Task 020: Parallel execution implemented
-- Task 021: TemplateEngine implemented
-- Tasks 022-025: Delivery node executors
-- Task 026: Power Apps Integration
-- Task 027: Execution Visualization
-- Task 028: Phase 3 Integration Tests (next)
-- Task 029: Phase 3 Deployment
+- Task 020: Parallel execution ✅
+- Task 021: TemplateEngine ✅
+- Tasks 022-025: Delivery node executors ✅
+- Task 026: Power Apps Integration ✅
+- Task 027: Execution Visualization ✅
+- Task 028: Phase 3 Integration Tests ✅
+- Task 029: Phase 3 Deployment (NEXT)
 
 ---
 
