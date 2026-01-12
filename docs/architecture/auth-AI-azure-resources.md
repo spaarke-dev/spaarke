@@ -1,9 +1,9 @@
 # AI Azure Resources
 
-> **Last Updated**: December 29, 2025
+> **Last Updated**: January 12, 2026
 > **Purpose**: Quick reference for AI-related Azure resource IDs and configuration.
 > **Secrets**: Actual secrets stored in `config/ai-config.local.json` (gitignored)
-> **Verified**: Task 003 - AI Document Intelligence R3 (2025-12-29)
+> **Verified**: AI Search & Visualization Module (2026-01-12)
 
 ---
 
@@ -34,10 +34,10 @@
 | Deployment Name | Model | Version | Capacity | Purpose |
 |-----------------|-------|---------|----------|---------|
 | `gpt-4o-mini` | gpt-4o-mini | 2024-07-18 | 10 TPM | Document analysis, chat |
-| `text-embedding-3-small` | text-embedding-3-small | 1 | 120 TPM | Vector embeddings for RAG (legacy 1536 dims) |
-| `text-embedding-3-large` | text-embedding-3-large | 1 | 120 TPM | Vector embeddings for RAG (3072 dims) **MIGRATION TARGET** |
+| `text-embedding-3-small` | text-embedding-3-small | 1 | 120 TPM | Vector embeddings (legacy 1536 dims) - **DEPRECATED** |
+| `text-embedding-3-large` | text-embedding-3-large | 1 | 120 TPM | Vector embeddings for RAG (3072 dims) - **PRIMARY** |
 
-**MIGRATION NOTE (Task 050)**: The `text-embedding-3-large` deployment must be created before Phase 5b embedding migration can proceed. Use the CLI command below to create it.
+**MIGRATION COMPLETE (2026-01-12)**: All RAG documents migrated to 3072-dim vectors via `text-embedding-3-large`. The 1536-dim fields remain for backward compatibility but new indexing uses 3072-dim exclusively.
 
 ### Create text-embedding-3-large Deployment
 
@@ -200,20 +200,28 @@ az cognitiveservices account keys regenerate \
 | Index Name | Purpose | Vector Dims | Status |
 |------------|---------|-------------|--------|
 | `spaarke-records-index` | Record matching (Matters, Projects, etc.) | N/A | Active |
-| `spaarke-knowledge-index` | RAG knowledge retrieval (R3) | 1536 | Active |
+| `spaarke-knowledge-index-v2` | RAG knowledge retrieval + Document Visualization | 3072 | **Active** |
+| `spaarke-knowledge-index` | RAG knowledge retrieval (R3 legacy) | 1536 | Deprecated |
 
-### RAG Knowledge Index (`spaarke-knowledge-index`)
+### RAG Knowledge Index (`spaarke-knowledge-index-v2`)
 
-Deployed in R3 for hybrid RAG search with the following key features:
+Current production index with 3072-dim vectors and document visualization support:
 
 | Feature | Configuration |
 |---------|---------------|
-| **Vector Field** | `contentVector` - 1536 dimensions (text-embedding-3-small) |
+| **Chunk Vector Field** | `contentVector3072` - 3072 dimensions (text-embedding-3-large) |
+| **Document Vector Field** | `documentVector3072` - 3072 dimensions (averaged from chunks) |
 | **Vector Algorithm** | HNSW (m=4, efConstruction=400, efSearch=500, cosine) |
 | **Semantic Config** | `knowledge-semantic-config` |
 | **Multi-Tenant Fields** | `tenantId`, `deploymentId`, `deploymentModel` |
+| **File Fields** | `speFileId` (required), `documentId` (optional for orphans), `fileName`, `fileType` |
 
-**Index Definition**: [`infrastructure/ai-search/spaarke-knowledge-index.json`](../../infrastructure/ai-search/spaarke-knowledge-index.json)
+**New Features (AI Search & Visualization Module - 2026-01-12)**:
+- **Document-level vectors**: `documentVector3072` enables similarity search across entire documents
+- **Orphan file support**: Files without Dataverse records supported (`documentId` nullable)
+- **File metadata**: `speFileId`, `fileName`, `fileType` for better identification
+
+**Index Definition**: [`infrastructure/ai-search/spaarke-knowledge-index-v2.json`](../../infrastructure/ai-search/spaarke-knowledge-index-v2.json)
 
 ### RAG Deployment Models (R3)
 

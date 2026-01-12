@@ -77,6 +77,7 @@ When modifying a component, check this table for potential downstream effects:
 │  │  • Ai/AnalysisOrchestrationService — Document analysis orchestration   ││
 │  │  • Ai/AnalysisContextBuilder — Prompt construction for AI analysis     ││
 │  │  • Ai/RagService — Hybrid vector search for knowledge retrieval        ││
+│  │  • Ai/VisualizationService — Document relationship visualization (NEW) ││
 │  │  • Ai/Export/ — DOCX, PDF, Email, Teams export services (R3)           ││
 │  │  • Ai/OpenAiClient — Azure OpenAI with Polly resilience (R3)           ││
 │  └─────────────────────────────────────────────────────────────────────────┘│
@@ -475,6 +476,56 @@ exceptions
 - **No token leakage**: User tokens never logged, only hashed identifiers in diagnostics
 - **Audit trail**: All authorization decisions logged with correlation IDs
 
+### Pattern 8: Document Relationship Visualization Flow (2026-01-12)
+
+```
+User → PCF (DocumentRelationshipViewer) → BFF API (VisualizationEndpoints) → Azure AI Search
+                │                                      │
+                │  React Flow                          ├──→ VisualizationService → Vector similarity search
+                │  d3-force layout                     │      (documentVector3072 - 3072 dim)
+                │                                      │
+                ▼                                      └──→ VisualizationAuthorizationFilter → Dataverse
+        Interactive Graph
+        (nodes = documents,
+         edges = similarity)
+```
+
+**Components involved:**
+1. `src/client/pcf/DocumentRelationshipViewer/` — React Flow canvas with d3-force layout
+   - `DocumentRelationshipViewer.tsx` — Main control with Fluent UI v9
+   - `components/DocumentGraph.tsx` — React Flow graph with force-directed layout
+   - `components/DocumentNode.tsx` — Custom node with file type icons, similarity badges
+   - `components/DocumentEdge.tsx` — Similarity-based edge styling
+   - `components/ControlPanel.tsx` — Threshold, depth, node limit filters
+   - `components/NodeActionBar.tsx` — Open Document Record, View in SPE actions
+   - `services/VisualizationApiService.ts` — API client with type mapping
+   - `hooks/useVisualizationApi.ts` — Data fetching hook
+2. `src/server/api/Sprk.Bff.Api/Api/Ai/VisualizationEndpoints.cs` — GET /api/ai/visualization/related/{documentId}
+3. `src/server/api/Sprk.Bff.Api/Services/Ai/VisualizationService.cs` — Document similarity via vector search
+4. `src/server/api/Sprk.Bff.Api/Api/Filters/VisualizationAuthorizationFilter.cs` — Resource-based auth
+
+**Key Features (AI Search & Visualization Module):**
+- **3072-dim document vectors**: `documentVector3072` field for whole-document similarity
+- **Orphan file support**: Files without Dataverse records (`documentId` nullable, `speFileId` required)
+- **Force-directed layout**: Edge distance = `200 * (1 - similarity)` for natural clustering
+- **Real-time filtering**: Similarity threshold, depth limit, max nodes per level
+- **Dark mode**: Full Fluent UI v9 token support (ADR-021)
+
+**Change Impact:**
+| Change | Impact |
+|--------|--------|
+| Modify VisualizationService vector search | Update test mocks, verify similarity calculations |
+| Change graph data model | Update PCF TypeScript types, VisualizationApiService |
+| Add new filter options | Update ControlPanel UI, endpoint query parameters |
+| Modify node/edge styling | Update DocumentNode/DocumentEdge components |
+| Change authorization rules | Update VisualizationAuthorizationFilter |
+
+**Key Files:**
+- `VisualizationEndpoints.cs` — GET /api/ai/visualization/related/{documentId}?tenantId={tenantId}
+- `VisualizationService.cs` — Uses `IRagService` for vector search with `documentVector3072`
+- `IVisualizationService.cs` — Interface with `DocumentNodeData`, `DocumentEdgeData` models
+- PCF bundle: 6.65 MB (React 16, Fluent UI v9 externalized via platform-library)
+
 ---
 
 ## Shared Dependencies
@@ -610,6 +661,9 @@ src/ ─────────────✗────→ tests/ (no test c
 | PCF UniversalQuickCreate | `src/client/pcf/UniversalQuickCreate/` | Manual testing |
 | PCF SpeFileViewer | `src/client/pcf/SpeFileViewer/` | Manual testing |
 | PCF AnalysisWorkspace | `src/client/pcf/AnalysisWorkspace/` (v1.2.7) | Manual testing |
+| **PCF DocumentRelationshipViewer** | `src/client/pcf/DocumentRelationshipViewer/` (v1.0.18) | `__tests__/` (40 component tests) |
+| **Visualization Endpoints** | `src/server/api/Sprk.Bff.Api/Api/Ai/VisualizationEndpoints.cs` | Same test project |
+| **Visualization Service** | `src/server/api/Sprk.Bff.Api/Services/Ai/VisualizationService.cs` | Same test project (27 tests) |
 | PCF Shared Auth | `src/client/pcf/*/services/auth/` | — |
 | Bicep Modules | `infrastructure/bicep/modules/` | `what-if` validation |
 | Bicep AI Modules | `infrastructure/bicep/modules/dashboard.bicep`, `alerts.bicep` | `what-if` validation |
