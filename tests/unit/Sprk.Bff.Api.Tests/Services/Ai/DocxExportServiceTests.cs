@@ -197,7 +197,7 @@ public class DocxExportServiceTests
         // Assert
         using var stream = new MemoryStream(result.FileBytes!);
         using var doc = WordprocessingDocument.Open(stream, false);
-        var body = doc.MainDocumentPart!.Document.Body!;
+        var body = doc.MainDocumentPart!.Document!.Body!;
         var paragraphs = body.Elements<Paragraph>().ToList();
 
         // First paragraph should be the title
@@ -220,7 +220,7 @@ public class DocxExportServiceTests
         // Assert
         using var stream = new MemoryStream(result.FileBytes!);
         using var doc = WordprocessingDocument.Open(stream, false);
-        var body = doc.MainDocumentPart!.Document.Body!;
+        var body = doc.MainDocumentPart!.Document!.Body!;
         var fullText = body.InnerText;
 
         fullText.Should().Contain(expectedContent);
@@ -240,7 +240,7 @@ public class DocxExportServiceTests
         // Assert
         using var stream = new MemoryStream(result.FileBytes!);
         using var doc = WordprocessingDocument.Open(stream, false);
-        var body = doc.MainDocumentPart!.Document.Body!;
+        var body = doc.MainDocumentPart!.Document!.Body!;
         var fullText = body.InnerText;
 
         fullText.Should().Contain("Executive Summary");
@@ -284,7 +284,7 @@ public class DocxExportServiceTests
         // Assert
         using var stream = new MemoryStream(result.FileBytes!);
         using var doc = WordprocessingDocument.Open(stream, false);
-        var body = doc.MainDocumentPart!.Document.Body!;
+        var body = doc.MainDocumentPart!.Document!.Body!;
 
         // Should have at least one table for entities
         var tables = body.Elements<Table>().ToList();
@@ -330,7 +330,7 @@ public class DocxExportServiceTests
         // Assert
         using var stream = new MemoryStream(result.FileBytes!);
         using var doc = WordprocessingDocument.Open(stream, false);
-        var body = doc.MainDocumentPart!.Document.Body!;
+        var body = doc.MainDocumentPart!.Document!.Body!;
         var fullText = body.InnerText;
 
         fullText.Should().Contain("Contract Clause Analysis");
@@ -351,7 +351,7 @@ public class DocxExportServiceTests
         // Assert
         using var stream = new MemoryStream(result.FileBytes!);
         using var doc = WordprocessingDocument.Open(stream, false);
-        var body = doc.MainDocumentPart!.Document.Body!;
+        var body = doc.MainDocumentPart!.Document!.Body!;
         var fullText = body.InnerText;
 
         // Footer should contain branding and date
@@ -398,7 +398,7 @@ public class DocxExportServiceTests
         // Assert
         using var stream = new MemoryStream(result.FileBytes!);
         using var doc = WordprocessingDocument.Open(stream, false);
-        var body = doc.MainDocumentPart!.Document.Body!;
+        var body = doc.MainDocumentPart!.Document!.Body!;
         var fullText = body.InnerText;
 
         // Should contain the text but not HTML tags
