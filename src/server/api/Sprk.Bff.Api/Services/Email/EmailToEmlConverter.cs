@@ -268,7 +268,8 @@ public class EmailToEmlConverter : IEmailToEmlConverter
         Guid emailActivityId,
         CancellationToken cancellationToken)
     {
-        var select = "$select=subject,description,sender,torecipients,ccrecipients,messageid," +
+        // Note: ccrecipients field doesn't exist on email entity - CC recipients are in activityparty
+        var select = "$select=subject,description,sender,torecipients,messageid," +
                      "directioncode,actualend,createdon,trackingtoken,conversationindex," +
                      "_regardingobjectid_value";
 
@@ -294,7 +295,7 @@ public class EmailToEmlConverter : IEmailToEmlConverter
             Description = GetStringOrNull(data, "description"),
             Sender = GetStringOrNull(data, "sender"),
             ToRecipients = GetStringOrNull(data, "torecipients"),
-            CcRecipients = GetStringOrNull(data, "ccrecipients"),
+            CcRecipients = null, // CC recipients need to be fetched from activityparty if needed
             MessageId = GetStringOrNull(data, "messageid"),
             DirectionCode = GetBoolOrNull(data, "directioncode"),
             ActualEnd = GetDateTimeOrNull(data, "actualend"),

@@ -195,12 +195,6 @@ public static class EmailEndpoints
             var requestBody = await reader.ReadToEndAsync(cancellationToken);
             request.Body.Position = 0;
 
-            // DEBUG: Log headers and payload for troubleshooting
-            var headersList = string.Join(", ", request.Headers.Select(h => $"{h.Key}={h.Value}"));
-            logger.LogInformation("Webhook headers: {Headers}", headersList);
-            logger.LogInformation("Webhook payload (first 2000 chars): {Payload}",
-                requestBody.Length > 2000 ? requestBody[..2000] : requestBody);
-
             if (string.IsNullOrWhiteSpace(requestBody))
             {
                 logger.LogWarning("Empty webhook payload received");
