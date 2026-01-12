@@ -2,14 +2,14 @@ namespace Sprk.Bff.Api.Configuration;
 
 /// <summary>
 /// Configuration options for email-to-document processing.
-/// Loaded from appsettings.json "Email" section.
+/// Loaded from appsettings.json "EmailProcessing" section.
 /// </summary>
 public class EmailProcessingOptions
 {
     /// <summary>
     /// Configuration section name.
     /// </summary>
-    public const string SectionName = "Email";
+    public const string SectionName = "EmailProcessing";
 
     /// <summary>
     /// Whether automatic email processing is enabled.

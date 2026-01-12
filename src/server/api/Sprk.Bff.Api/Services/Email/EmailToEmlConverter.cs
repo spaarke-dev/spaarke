@@ -58,7 +58,8 @@ public class EmailToEmlConverter : IEmailToEmlConverter
         var dataverseUrl = configuration["Dataverse:ServiceUrl"]
             ?? throw new InvalidOperationException("Dataverse:ServiceUrl configuration is required");
 
-        _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2";
+        // Important: BaseAddress must end with '/' for relative URIs to combine correctly
+        _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2/";
 
         // Use provided credential or create from configuration
         if (credential != null)
@@ -275,6 +276,8 @@ public class EmailToEmlConverter : IEmailToEmlConverter
 
         var url = $"emails({emailActivityId})?{select}";
 
+        _logger.LogInformation("Fetching email from Dataverse: {BaseUrl}{Url}", _httpClient.BaseAddress, url);
+
         var response = await _httpClient.GetAsync(url, cancellationToken);
 
         if (!response.IsSuccessStatusCode)
@@ -283,6 +286,12 @@ public class EmailToEmlConverter : IEmailToEmlConverter
             {
                 return null;
             }
+
+            // Log the error response body for debugging
+            var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            _logger.LogError("Dataverse API error {StatusCode} for email {EmailId}: {ErrorBody}",
+                (int)response.StatusCode, emailActivityId, errorBody);
+
             response.EnsureSuccessStatusCode();
         }
 
@@ -408,14 +417,25 @@ public class EmailToEmlConverter : IEmailToEmlConverter
         {
             var dataverseUrl = _configuration["Dataverse:ServiceUrl"]!.TrimEnd('/');
             var scope = $"{dataverseUrl}/.default";
-            _currentToken = await _credential.GetTokenAsync(
-                new TokenRequestContext([scope]),
-                cancellationToken);
 
-            _httpClient.DefaultRequestHeaders.Authorization =
-                new AuthenticationHeaderValue("Bearer", _currentToken.Value.Token);
+            _logger.LogInformation("Acquiring Dataverse token with scope: {Scope}", scope);
 
-            _logger.LogDebug("Refreshed Dataverse access token for email operations");
+            try
+            {
+                _currentToken = await _credential.GetTokenAsync(
+                    new TokenRequestContext([scope]),
+                    cancellationToken);
+
+                _httpClient.DefaultRequestHeaders.Authorization =
+                    new AuthenticationHeaderValue("Bearer", _currentToken.Value.Token);
+
+                _logger.LogInformation("Acquired Dataverse token, expires: {ExpiresOn}", _currentToken.Value.ExpiresOn);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to acquire Dataverse access token");
+                throw;
+            }
         }
     }
 
