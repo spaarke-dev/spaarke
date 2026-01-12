@@ -47,7 +47,7 @@
     <PackageReference Include="Microsoft.Identity.Web" Version="4.2.0" />
     <PackageReference Include="Microsoft.Identity.Web.MicrosoftGraph" Version="4.2.0" />
     <PackageReference Include="MimeKit" Version="4.14.0" />
-    <PackageReference Include="MsgReader" Version="5.2.0" />
+    <PackageReference Include="MsgReader" Version="6.0.6" />
 
     <!-- Observability -->
     <PackageReference Include="OpenTelemetry" Version="1.9.0" />
