@@ -4,7 +4,7 @@
     <id>072</id>
     <title>End-to-end regression testing</title>
     <phase>5d</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <priority>high</priority>
     <estimate>4h</estimate>
     <tags>testing, e2e, verification</tags>

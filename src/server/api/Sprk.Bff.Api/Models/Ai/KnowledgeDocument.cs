@@ -74,21 +74,11 @@ public class KnowledgeDocument
     public string? SpeFileId { get; set; }
 
     /// <summary>
-    /// Document file name or title.
-    /// </summary>
-    /// <remarks>
-    /// Deprecated: Use FileName instead. Kept for backward compatibility during migration.
-    /// </remarks>
-    [SearchableField(AnalyzerName = LexicalAnalyzerName.Values.StandardLucene, IsSortable = true)]
-    [JsonPropertyName("documentName")]
-    public string DocumentName { get; set; } = string.Empty;
-
-    /// <summary>
     /// File display name.
     /// </summary>
     [SearchableField(AnalyzerName = LexicalAnalyzerName.Values.StandardLucene, IsSortable = true)]
     [JsonPropertyName("fileName")]
-    public string? FileName { get; set; }
+    public string FileName { get; set; } = string.Empty;
 
     /// <summary>
     /// Document type (e.g., contract, policy, procedure).
@@ -129,41 +119,19 @@ public class KnowledgeDocument
     public string Content { get; set; } = string.Empty;
 
     /// <summary>
-    /// Vector embedding of the content (1536 dimensions for text-embedding-3-small).
-    /// </summary>
-    /// <remarks>
-    /// Deprecated: Use ContentVector3072 after migration is complete.
-    /// </remarks>
-    [VectorSearchField(VectorSearchDimensions = 1536, VectorSearchProfileName = "knowledge-vector-profile")]
-    [JsonPropertyName("contentVector")]
-    public ReadOnlyMemory<float> ContentVector { get; set; }
-
-    /// <summary>
-    /// Document-level vector embedding computed as the normalized average of all chunk contentVectors.
-    /// Used for document similarity visualization. Computed automatically during batch indexing.
-    /// </summary>
-    /// <remarks>
-    /// Deprecated: Use DocumentVector3072 after migration is complete.
-    /// </remarks>
-    [VectorSearchField(VectorSearchDimensions = 1536, VectorSearchProfileName = "knowledge-vector-profile")]
-    [JsonPropertyName("documentVector")]
-    public ReadOnlyMemory<float> DocumentVector { get; set; }
-
-    /// <summary>
     /// Vector embedding of the content (3072 dimensions for text-embedding-3-large).
-    /// Higher quality embeddings for improved similarity matching.
     /// </summary>
     [VectorSearchField(VectorSearchDimensions = 3072, VectorSearchProfileName = "knowledge-vector-profile-3072")]
     [JsonPropertyName("contentVector3072")]
-    public ReadOnlyMemory<float> ContentVector3072 { get; set; }
+    public ReadOnlyMemory<float> ContentVector { get; set; }
 
     /// <summary>
     /// Document-level vector embedding (3072 dimensions for text-embedding-3-large).
-    /// Used for document similarity visualization with improved accuracy.
+    /// Used for document similarity visualization.
     /// </summary>
     [VectorSearchField(VectorSearchDimensions = 3072, VectorSearchProfileName = "knowledge-vector-profile-3072")]
     [JsonPropertyName("documentVector3072")]
-    public ReadOnlyMemory<float> DocumentVector3072 { get; set; }
+    public ReadOnlyMemory<float> DocumentVector { get; set; }
 
     /// <summary>
     /// JSON metadata for extensibility.

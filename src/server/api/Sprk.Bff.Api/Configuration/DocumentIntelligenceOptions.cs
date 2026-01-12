@@ -67,19 +67,10 @@ public class DocumentIntelligenceOptions
 
     /// <summary>
     /// Vector dimensions for the embedding model.
-    /// Must match the model's native dimensions:
-    /// - text-embedding-3-large: 3072 dimensions (recommended)
-    /// - text-embedding-3-small: 1536 dimensions (legacy)
-    /// MIGRATION: New field added for explicit dimension control during schema migration.
+    /// Must match the model's native dimensions.
+    /// Uses text-embedding-3-large with 3072 dimensions for optimal quality.
     /// </summary>
     public int EmbeddingDimensions { get; set; } = 3072;
-
-    /// <summary>
-    /// Legacy embedding dimensions (1536) for backward compatibility during migration.
-    /// Used when reading from old index fields (contentVector, documentVector).
-    /// Will be removed after migration completes.
-    /// </summary>
-    public int LegacyEmbeddingDimensions { get; set; } = 1536;
 
     /// <summary>
     /// Max tokens for summary output. Higher = longer summaries.

@@ -32,11 +32,8 @@ public class VisualizationService : IVisualizationService
     private readonly ILogger<VisualizationService> _logger;
     private readonly DataverseOptions _dataverseOptions;
 
-    // Vector field for document-level embeddings
-    // Primary: 3072-dimension field (text-embedding-3-large)
-    // Fallback: 1536-dimension field (during migration period)
-    private const string DocumentVectorFieldName3072 = "documentVector3072";
-    private const string DocumentVectorFieldNameLegacy = "documentVector";
+    // Vector field for document-level embeddings (3072 dimensions, text-embedding-3-large)
+    private const string DocumentVectorFieldName = "documentVector3072";
     private const int VectorDimensions = 3072;
 
     // Maximum nodes to prevent exponential growth
@@ -130,14 +127,13 @@ public class VisualizationService : IVisualizationService
         CancellationToken cancellationToken)
     {
         // Query for a single chunk of the source document to get its documentVector
-        // Include both 3072-dim and 1536-dim vectors for backward compatibility during migration
         var searchOptions = new SearchOptions
         {
             Size = 1,
             Filter = $"documentId eq '{EscapeFilterValue(documentId)}' and tenantId eq '{EscapeFilterValue(tenantId)}'",
-            Select = { "id", "documentId", "speFileId", "fileName", "documentName", "fileType",
+            Select = { "id", "documentId", "speFileId", "fileName", "fileType",
                        "documentType", "tenantId", "createdAt", "updatedAt",
-                       "documentVector3072", "documentVector", "metadata", "tags" }
+                       "documentVector3072", "metadata", "tags" }
         };
 
         var response = await searchClient.SearchAsync<VisualizationDocument>("*", searchOptions, cancellationToken);
@@ -156,7 +152,6 @@ public class VisualizationService : IVisualizationService
 
     /// <summary>
     /// Search for documents with similar documentVector.
-    /// Supports both 3072-dim and 1536-dim vectors for backward compatibility during migration.
     /// </summary>
     private async Task<List<(VisualizationDocument Document, double Score)>> SearchRelatedDocumentsAsync(
         SearchClient searchClient,
@@ -171,17 +166,7 @@ public class VisualizationService : IVisualizationService
             return [];
         }
 
-        // Determine which vector field to use based on source vector dimensions
-        // 3072-dim = use documentVector3072 field
-        // 1536-dim = use legacy documentVector field (fallback during migration)
-        var vectorFieldName = sourceVector.Length == VectorDimensions
-            ? DocumentVectorFieldName3072
-            : DocumentVectorFieldNameLegacy;
-
-        _logger.LogDebug("Using vector field {VectorField} for search (source vector has {Dimensions} dimensions)",
-            vectorFieldName, sourceVector.Length);
-
-        // Build search options with vector search on appropriate field
+        // Build search options with vector search
         var searchOptions = new SearchOptions
         {
             Size = options.Limit * 2, // Retrieve more to account for duplicates (same doc, different chunks)
@@ -193,13 +178,13 @@ public class VisualizationService : IVisualizationService
                     new VectorizedQuery(sourceVector)
                     {
                         KNearestNeighborsCount = options.Limit * 2,
-                        Fields = { vectorFieldName }
+                        Fields = { DocumentVectorFieldName }
                     }
                 }
             },
-            Select = { "id", "documentId", "speFileId", "fileName", "documentName", "fileType",
+            Select = { "id", "documentId", "speFileId", "fileName", "fileType",
                        "documentType", "tenantId", "createdAt", "updatedAt",
-                       "documentVector3072", "documentVector", "metadata", "tags" }
+                       "documentVector3072", "metadata", "tags" }
         };
 
         // Build filter: tenant isolation + exclude source document + optional document types
@@ -575,7 +560,6 @@ public class VisualizationService : IVisualizationService
 
 /// <summary>
 /// Document model for visualization queries (includes documentVector field).
-/// Supports both 3072-dim vectors (new) and 1536-dim vectors (migration fallback).
 /// </summary>
 internal class VisualizationDocument
 {
@@ -592,14 +576,9 @@ internal class VisualizationDocument
     public string? SpeFileId { get; set; }
 
     /// <summary>
-    /// File display name. Populated from fileName field (or documentName as fallback).
+    /// File display name.
     /// </summary>
     public string? FileName { get; set; }
-
-    /// <summary>
-    /// Legacy document name field (kept for backward compatibility during migration).
-    /// </summary>
-    public string? DocumentName { get; set; }
 
     /// <summary>
     /// File extension/type: pdf, docx, msg, xlsx, etc.
@@ -612,34 +591,22 @@ internal class VisualizationDocument
     public DateTimeOffset UpdatedAt { get; set; }
 
     /// <summary>
-    /// Primary 3072-dimension document-level vector (text-embedding-3-large).
+    /// Document-level vector (3072 dimensions, text-embedding-3-large).
     /// </summary>
     public ReadOnlyMemory<float> DocumentVector3072 { get; set; }
-
-    /// <summary>
-    /// Legacy 1536-dimension document-level vector (migration fallback).
-    /// </summary>
-    public ReadOnlyMemory<float> DocumentVector { get; set; }
 
     public string? Metadata { get; set; }
     public IList<string>? Tags { get; set; }
 
     /// <summary>
-    /// Gets the best available document vector (prefers 3072-dim, falls back to 1536-dim).
+    /// Gets the document vector for similarity search.
     /// </summary>
-    public ReadOnlyMemory<float> GetBestVector()
-    {
-        return DocumentVector3072.Length > 0 ? DocumentVector3072 : DocumentVector;
-    }
+    public ReadOnlyMemory<float> GetBestVector() => DocumentVector3072;
 
     /// <summary>
-    /// Gets the display name (prefers fileName, falls back to documentName).
+    /// Gets the display name for the document.
     /// </summary>
-    public string GetDisplayName()
-    {
-        return !string.IsNullOrEmpty(FileName) ? FileName :
-               !string.IsNullOrEmpty(DocumentName) ? DocumentName : "Unknown";
-    }
+    public string GetDisplayName() => FileName ?? "Unknown";
 
     /// <summary>
     /// Gets the unique identifier for this document (prefers documentId, falls back to speFileId).

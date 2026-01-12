@@ -6,6 +6,8 @@
  * - Related node rendering with similarity score
  * - File type icons
  * - File size formatting
+ * - Orphan file display (Task 064)
+ * - Compact mode rendering (Task 064)
  */
 
 import * as React from 'react';
@@ -227,6 +229,203 @@ describe('DocumentNode', () => {
             // The Card component receives the selected prop
             // Visual selection state is handled by Fluent UI
             expect(screen.getByText('Test Document.pdf')).toBeInTheDocument();
+        });
+    });
+
+    describe('Orphan File Display', () => {
+        it('displays "File only" badge for orphan files', () => {
+            const props = createNodeProps({
+                isOrphanFile: true,
+                documentId: undefined, // No linked Dataverse record
+                similarity: 0.75,
+            });
+
+            render(
+                <TestWrapper>
+                    <DocumentNode {...props} />
+                </TestWrapper>
+            );
+
+            expect(screen.getByText('File only')).toBeInTheDocument();
+        });
+
+        it('shows both orphan badge and similarity for orphan files with score', () => {
+            const props = createNodeProps({
+                isOrphanFile: true,
+                similarity: 0.80,
+            });
+
+            render(
+                <TestWrapper>
+                    <DocumentNode {...props} />
+                </TestWrapper>
+            );
+
+            expect(screen.getByText('File only')).toBeInTheDocument();
+            expect(screen.getByText('80%')).toBeInTheDocument();
+        });
+
+        it('does not show orphan badge for regular related nodes', () => {
+            const props = createNodeProps({
+                isOrphanFile: false,
+                similarity: 0.85,
+            });
+
+            render(
+                <TestWrapper>
+                    <DocumentNode {...props} />
+                </TestWrapper>
+            );
+
+            expect(screen.queryByText('File only')).not.toBeInTheDocument();
+            expect(screen.getByText('Similarity')).toBeInTheDocument();
+        });
+
+        it('shows file type for orphan files', () => {
+            const props = createNodeProps({
+                isOrphanFile: true,
+                fileType: 'pdf',
+            });
+
+            render(
+                <TestWrapper>
+                    <DocumentNode {...props} />
+                </TestWrapper>
+            );
+
+            expect(screen.getByText(/PDF/)).toBeInTheDocument();
+        });
+    });
+
+    describe('Compact Mode', () => {
+        it('renders compact mode with icon only', () => {
+            const props = createNodeProps({
+                compactMode: true,
+                name: 'Test Document.pdf',
+            });
+
+            render(
+                <TestWrapper>
+                    <DocumentNode {...props} />
+                </TestWrapper>
+            );
+
+            // In compact mode, document name should NOT be rendered as text content
+            // (it's only in the tooltip/title attribute)
+            expect(screen.queryByText('Test Document.pdf')).not.toBeInTheDocument();
+        });
+
+        it('includes document name in compact mode tooltip', () => {
+            const props = createNodeProps({
+                compactMode: true,
+                name: 'Test Document.pdf',
+                similarity: 0.85,
+            });
+
+            render(
+                <TestWrapper>
+                    <DocumentNode {...props} />
+                </TestWrapper>
+            );
+
+            // Check the tooltip via title attribute
+            const iconContainer = document.querySelector('[title*="Test Document.pdf"]');
+            expect(iconContainer).toBeInTheDocument();
+        });
+
+        it('includes "File only" in compact mode tooltip for orphan files', () => {
+            const props = createNodeProps({
+                compactMode: true,
+                name: 'Orphan File.pdf',
+                isOrphanFile: true,
+            });
+
+            render(
+                <TestWrapper>
+                    <DocumentNode {...props} />
+                </TestWrapper>
+            );
+
+            // Check the tooltip includes "(File only)" for orphan files
+            const iconContainer = document.querySelector('[title*="File only"]');
+            expect(iconContainer).toBeInTheDocument();
+        });
+    });
+
+    describe('Extended File Type Icons', () => {
+        it.each([
+            ['pptx', 'PPTX'],
+            ['ppt', 'PPT'],
+            ['msg', 'MSG'],
+            ['eml', 'EML'],
+            ['html', 'HTML'],
+            ['xml', 'XML'],
+            ['zip', 'ZIP'],
+            ['rar', 'RAR'],
+            ['mp4', 'MP4'],
+            ['csv', 'CSV'],
+        ])('renders %s file type correctly', (fileType, expectedLabel) => {
+            const props = createNodeProps({ fileType });
+
+            render(
+                <TestWrapper>
+                    <DocumentNode {...props} />
+                </TestWrapper>
+            );
+
+            expect(screen.getByText(new RegExp(expectedLabel))).toBeInTheDocument();
+        });
+
+        it('renders unknown file type with question mark icon', () => {
+            const props = createNodeProps({ fileType: 'unknown' });
+
+            render(
+                <TestWrapper>
+                    <DocumentNode {...props} />
+                </TestWrapper>
+            );
+
+            expect(screen.getByText(/UNKNOWN/)).toBeInTheDocument();
+        });
+
+        it('renders file type with default icon', () => {
+            const props = createNodeProps({ fileType: 'file' });
+
+            render(
+                <TestWrapper>
+                    <DocumentNode {...props} />
+                </TestWrapper>
+            );
+
+            expect(screen.getByText(/FILE/)).toBeInTheDocument();
+        });
+    });
+
+    describe('Default Values', () => {
+        it('uses default fileType when undefined', () => {
+            const props = createNodeProps({ fileType: undefined });
+
+            render(
+                <TestWrapper>
+                    <DocumentNode {...props} />
+                </TestWrapper>
+            );
+
+            // Should show UNKNOWN when fileType is undefined
+            expect(screen.getByText(/UNKNOWN/)).toBeInTheDocument();
+        });
+
+        it('shows zero similarity correctly', () => {
+            const props = createNodeProps({ similarity: 0 });
+
+            render(
+                <TestWrapper>
+                    <DocumentNode {...props} />
+                </TestWrapper>
+            );
+
+            // When similarity is 0, footer should not be shown for related nodes
+            expect(screen.queryByText('Similarity')).not.toBeInTheDocument();
         });
     });
 });

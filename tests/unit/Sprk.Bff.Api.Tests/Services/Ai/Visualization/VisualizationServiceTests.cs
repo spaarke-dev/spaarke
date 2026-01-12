@@ -26,8 +26,6 @@ public class VisualizationServiceTests
 
     // Test embedding (3072 dimensions for text-embedding-3-large)
     private readonly ReadOnlyMemory<float> _testEmbedding3072;
-    // Legacy test embedding (1536 dimensions for text-embedding-3-small - migration fallback)
-    private readonly ReadOnlyMemory<float> _testEmbedding1536;
 
     // Test document IDs
     private readonly Guid _sourceDocumentId = Guid.Parse("11111111-1111-1111-1111-111111111111");
@@ -43,21 +41,13 @@ public class VisualizationServiceTests
             EnvironmentUrl = "https://testorg.crm.dynamics.com"
         });
 
-        // Create a test embedding vector (3072 dimensions - primary)
+        // Create a test embedding vector (3072 dimensions)
         var embedding3072 = new float[3072];
         for (int i = 0; i < embedding3072.Length; i++)
         {
             embedding3072[i] = (float)(i % 10) / 10f;
         }
         _testEmbedding3072 = new ReadOnlyMemory<float>(embedding3072);
-
-        // Create a legacy test embedding vector (1536 dimensions - fallback)
-        var embedding1536 = new float[1536];
-        for (int i = 0; i < embedding1536.Length; i++)
-        {
-            embedding1536[i] = (float)(i % 10) / 10f;
-        }
-        _testEmbedding1536 = new ReadOnlyMemory<float>(embedding1536);
     }
 
     private VisualizationService CreateService()
@@ -502,25 +492,6 @@ public class VisualizationServiceTests
         result.Nodes[0].Type.Should().Be("source");
     }
 
-    [Fact]
-    public async Task GetRelatedDocumentsAsync_With1536DimVector_FallsBackSuccessfully()
-    {
-        // Arrange
-        var service = CreateService();
-        var options = new VisualizationOptions { TenantId = _tenantId };
-
-        SetupSearchClientWith1536DimVector();
-        SetupDataverseMetadata();
-
-        // Act
-        var result = await service.GetRelatedDocumentsAsync(_sourceDocumentId, options);
-
-        // Assert - The service should fall back to 1536-dim vectors during migration
-        result.Should().NotBeNull();
-        result.Nodes.Should().HaveCountGreaterOrEqualTo(1);
-        result.Nodes[0].Type.Should().Be("source");
-    }
-
     #endregion
 
     #region Orphan File Tests
@@ -849,14 +820,12 @@ public class VisualizationServiceTests
             DocumentId = _sourceDocumentId.ToString(),
             SpeFileId = "spe-source-default",
             FileName = "Source Document.pdf",
-            DocumentName = "Source Document.pdf",
             FileType = "pdf",
             DocumentType = "Contract",
             TenantId = _tenantId,
             CreatedAt = DateTimeOffset.UtcNow.AddDays(-10),
             UpdatedAt = DateTimeOffset.UtcNow,
-            DocumentVector3072 = _testEmbedding3072,
-            DocumentVector = _testEmbedding1536
+            DocumentVector3072 = _testEmbedding3072
         };
 
         var searchResult = SearchModelFactory.SearchResult(sourceDoc, 1.0, null);
@@ -883,14 +852,12 @@ public class VisualizationServiceTests
                 DocumentId = docId,
                 SpeFileId = $"spe-related-{i + 1}",
                 FileName = $"Related Document {i + 1}.pdf",
-                DocumentName = $"Related Document {i + 1}.pdf",
                 FileType = "pdf",
                 DocumentType = "Contract",
                 TenantId = _tenantId,
                 CreatedAt = DateTimeOffset.UtcNow.AddDays(-5),
                 UpdatedAt = DateTimeOffset.UtcNow,
-                DocumentVector3072 = _testEmbedding3072,
-                DocumentVector = _testEmbedding1536
+                DocumentVector3072 = _testEmbedding3072
             };
 
             var searchResult = SearchModelFactory.SearchResult(doc, score, null);
@@ -918,12 +885,14 @@ public class VisualizationServiceTests
             {
                 Id = Guid.NewGuid().ToString(),
                 DocumentId = Guid.NewGuid().ToString(),
-                DocumentName = $"Mixed Score Doc {i + 1}.pdf",
+                SpeFileId = $"spe-mixed-{i + 1}",
+                FileName = $"Mixed Score Doc {i + 1}.pdf",
+                FileType = "pdf",
                 DocumentType = "Contract",
                 TenantId = _tenantId,
                 CreatedAt = DateTimeOffset.UtcNow.AddDays(-5),
                 UpdatedAt = DateTimeOffset.UtcNow,
-                DocumentVector = _testEmbedding1536
+                DocumentVector3072 = _testEmbedding3072
             };
 
             var searchResult = SearchModelFactory.SearchResult(doc, scores[i], null);
@@ -956,36 +925,6 @@ public class VisualizationServiceTests
                 if (callCount == 1)
                 {
                     return CreateSourceDocumentResponseWith3072Vector();
-                }
-                else
-                {
-                    return CreateEmptySearchResponse();
-                }
-            });
-
-        _deploymentServiceMock
-            .Setup(x => x.GetSearchClientAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(searchClientMock.Object);
-
-        return searchClientMock;
-    }
-
-    private Mock<SearchClient> SetupSearchClientWith1536DimVector()
-    {
-        var searchClientMock = new Mock<SearchClient>();
-        var callCount = 0;
-
-        searchClientMock
-            .Setup(x => x.SearchAsync<VisualizationDocument>(
-                It.IsAny<string>(),
-                It.IsAny<SearchOptions>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string query, SearchOptions options, CancellationToken ct) =>
-            {
-                callCount++;
-                if (callCount == 1)
-                {
-                    return CreateSourceDocumentResponseWith1536Vector();
                 }
                 else
                 {
@@ -1092,43 +1031,12 @@ public class VisualizationServiceTests
             DocumentId = _sourceDocumentId.ToString(),
             SpeFileId = "spe-source-123",
             FileName = "Source Document.pdf",
-            DocumentName = "Source Document.pdf",
             FileType = "pdf",
             DocumentType = "Contract",
             TenantId = _tenantId,
             CreatedAt = DateTimeOffset.UtcNow.AddDays(-10),
             UpdatedAt = DateTimeOffset.UtcNow,
-            DocumentVector3072 = _testEmbedding3072,
-            DocumentVector = ReadOnlyMemory<float>.Empty // No legacy vector
-        };
-
-        var searchResult = SearchModelFactory.SearchResult(sourceDoc, 1.0, null);
-        var searchResults = SearchModelFactory.SearchResults<VisualizationDocument>(
-            values: new List<SearchResult<VisualizationDocument>> { searchResult },
-            totalCount: 1,
-            facets: null,
-            coverage: null,
-            rawResponse: null!);
-
-        return Response.FromValue(searchResults, null!);
-    }
-
-    private Response<SearchResults<VisualizationDocument>> CreateSourceDocumentResponseWith1536Vector()
-    {
-        var sourceDoc = new VisualizationDocument
-        {
-            Id = Guid.NewGuid().ToString(),
-            DocumentId = _sourceDocumentId.ToString(),
-            SpeFileId = "spe-source-123",
-            FileName = "Source Document.pdf",
-            DocumentName = "Source Document.pdf",
-            FileType = "pdf",
-            DocumentType = "Contract",
-            TenantId = _tenantId,
-            CreatedAt = DateTimeOffset.UtcNow.AddDays(-10),
-            UpdatedAt = DateTimeOffset.UtcNow,
-            DocumentVector3072 = ReadOnlyMemory<float>.Empty, // No 3072-dim vector
-            DocumentVector = _testEmbedding1536 // Legacy vector only
+            DocumentVector3072 = _testEmbedding3072
         };
 
         var searchResult = SearchModelFactory.SearchResult(sourceDoc, 1.0, null);
@@ -1150,7 +1058,6 @@ public class VisualizationServiceTests
             DocumentId = null, // No Dataverse record - this is an orphan file
             SpeFileId = speFileId,
             FileName = $"orphan-file.{fileType}",
-            DocumentName = null, // No document name for orphans
             FileType = fileType,
             DocumentType = null,
             TenantId = _tenantId,
@@ -1178,7 +1085,6 @@ public class VisualizationServiceTests
             DocumentId = _sourceDocumentId.ToString(),
             SpeFileId = "spe-new-fields-123",
             FileName = "new-fields-doc.docx",
-            DocumentName = "New Fields Document",
             FileType = "docx",
             DocumentType = "Contract",
             TenantId = _tenantId,
@@ -1205,8 +1111,7 @@ public class VisualizationServiceTests
             Id = Guid.NewGuid().ToString(),
             DocumentId = _sourceDocumentId.ToString(),
             SpeFileId = "spe-filename-only-123",
-            FileName = "test-file.pdf", // Only fileName is populated
-            DocumentName = null, // No documentName
+            FileName = "test-file.pdf",
             FileType = "pdf",
             DocumentType = "Contract",
             TenantId = _tenantId,

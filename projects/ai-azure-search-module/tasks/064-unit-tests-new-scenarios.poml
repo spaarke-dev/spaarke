@@ -4,7 +4,7 @@
     <id>064</id>
     <title>Unit tests for new visualization scenarios</title>
     <phase>5c</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <priority>high</priority>
     <estimate>4h</estimate>
     <tags>testing, unit-test, visualization</tags>
@@ -102,4 +102,36 @@
     <dependency>062</dependency>
     <dependency>063</dependency>
   </dependencies>
+
+  <notes>
+    <completed>2026-01-11</completed>
+    <summary>
+      Unit tests for new visualization scenarios completed:
+
+      1. VisualizationServiceTests.cs (already done in Task 060):
+         - 27 tests for 3072-dim vectors, orphan files, new schema fields
+         - Tests: GetRelatedDocumentsAsync_With3072DimVector_ReturnsValidGraph
+         - Tests: GetRelatedDocumentsAsync_OrphanFileInResults_ReturnsOrphanNodeType
+         - Tests: GetRelatedDocumentsAsync_NodeData_ContainsNewFields
+
+      2. RagServiceTests.cs (already done in Task 060):
+         - 58 tests for indexing, embedding, caching
+         - Tests: IndexDocumentAsync_OrphanFile_WorksWithNullDocumentId
+         - Tests: IndexDocumentAsync_ExtractsFileTypeFromFileName (10 file types)
+         - Tests: IndexDocumentsBatchAsync_OrphanFiles_GroupsBySpeFileId
+
+      3. DocumentNode.test.tsx (added 21 new tests):
+         - Orphan File Display: 4 tests for "File only" badge, orphan styling
+         - Compact Mode: 3 tests for icon-only rendering, tooltips
+         - Extended File Type Icons: 12 tests for pptx, msg, html, zip, mp4, etc.
+         - Default Values: 2 tests for undefined fileType, zero similarity
+
+      Test Results:
+      - .NET: 85 tests passing (VisualizationService + RagService)
+      - PCF: 40 tests passing (DocumentNode component)
+
+      Files Modified:
+      - src/client/pcf/.../DocumentNode.test.tsx - Added 21 new tests
+    </summary>
+  </notes>
 </task>

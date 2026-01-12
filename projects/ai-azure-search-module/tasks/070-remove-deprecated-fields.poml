@@ -4,7 +4,7 @@
     <id>070</id>
     <title>Remove deprecated fields and complete cutover</title>
     <phase>5d</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <priority>medium</priority>
     <estimate>3h</estimate>
     <tags>bff-api, cleanup, azure-search</tags>

@@ -4,7 +4,7 @@
     <id>071</id>
     <title>Update Azure configuration for final schema</title>
     <phase>5d</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <priority>medium</priority>
     <estimate>2h</estimate>
     <tags>operations, azure, configuration</tags>
@@ -57,6 +57,7 @@
       <description>Deploy configuration changes</description>
       <details>
         - Deploy via Azure CLI or portal
+        - Use skill /azue-deploy
         - Restart App Service
         - Verify settings applied correctly
       </details>

@@ -24,7 +24,7 @@ public class RagServiceTests
     private readonly Mock<ILogger<RagService>> _loggerMock;
     private readonly IOptions<AnalysisOptions> _options;
 
-    // Test embedding (1536 dimensions like text-embedding-3-small)
+    // Test embedding (3072 dimensions like text-embedding-3-large)
     private readonly ReadOnlyMemory<float> _testEmbedding;
 
     public RagServiceTests()
@@ -40,8 +40,8 @@ public class RagServiceTests
             MinRelevanceScore = 0.7f
         });
 
-        // Create a test embedding vector (1536 dimensions)
-        var embedding = new float[1536];
+        // Create a test embedding vector (3072 dimensions for text-embedding-3-large)
+        var embedding = new float[3072];
         for (int i = 0; i < embedding.Length; i++)
         {
             embedding[i] = (float)(i % 10) / 10f;
@@ -363,7 +363,7 @@ public class RagServiceTests
     }
 
     [Fact]
-    public async Task IndexDocumentAsync_PopulatesFileNameFromDocumentName()
+    public async Task IndexDocumentAsync_UsesProvidedFileName()
     {
         // Arrange
         var service = CreateService();
@@ -372,7 +372,7 @@ public class RagServiceTests
             Id = "doc-1",
             TenantId = "tenant-1",
             SpeFileId = "file-1",
-            DocumentName = "Contract.pdf",
+            FileName = "Contract.pdf",
             ContentVector = _testEmbedding
         };
 
@@ -381,32 +381,8 @@ public class RagServiceTests
         // Act
         var result = await service.IndexDocumentAsync(document);
 
-        // Assert - FileName should be populated from DocumentName
+        // Assert - FileName should be preserved
         result.FileName.Should().Be("Contract.pdf");
-    }
-
-    [Fact]
-    public async Task IndexDocumentAsync_PreservesExistingFileName()
-    {
-        // Arrange
-        var service = CreateService();
-        var document = new KnowledgeDocument
-        {
-            Id = "doc-1",
-            TenantId = "tenant-1",
-            SpeFileId = "file-1",
-            DocumentName = "Old Name.pdf",
-            FileName = "New Name.pdf",
-            ContentVector = _testEmbedding
-        };
-
-        SetupMockSearchClientForIndexing();
-
-        // Act
-        var result = await service.IndexDocumentAsync(document);
-
-        // Assert - FileName should not be overwritten
-        result.FileName.Should().Be("New Name.pdf");
     }
 
     [Fact]
@@ -503,8 +479,7 @@ public class RagServiceTests
             Id = "doc-1",
             TenantId = "tenant-1",
             SpeFileId = "file-1",
-            FileName = string.IsNullOrEmpty(fileName) ? null : fileName,
-            DocumentName = string.IsNullOrEmpty(fileName) ? string.Empty : fileName,
+            FileName = string.IsNullOrEmpty(fileName) ? "unknown" : fileName,
             ContentVector = _testEmbedding
         };
 
@@ -611,7 +586,7 @@ public class RagServiceTests
     }
 
     [Fact]
-    public async Task IndexDocumentsBatchAsync_PopulatesFileMetadataForAllDocuments()
+    public async Task IndexDocumentsBatchAsync_ExtractsFileTypeForAllDocuments()
     {
         // Arrange
         var service = CreateService();
@@ -622,7 +597,7 @@ public class RagServiceTests
                 Id = "doc-1",
                 TenantId = "tenant-1",
                 SpeFileId = "file-1",
-                DocumentName = "Contract.pdf",
+                FileName = "Contract.pdf",
                 ContentVector = _testEmbedding
             },
             new KnowledgeDocument
@@ -630,7 +605,7 @@ public class RagServiceTests
                 Id = "doc-2",
                 TenantId = "tenant-1",
                 SpeFileId = "file-2",
-                DocumentName = "Report.docx",
+                FileName = "Report.docx",
                 ContentVector = _testEmbedding
             }
         };
@@ -640,10 +615,8 @@ public class RagServiceTests
         // Act
         await service.IndexDocumentsBatchAsync(documents);
 
-        // Assert - All documents should have file metadata populated
-        documents[0].FileName.Should().Be("Contract.pdf");
+        // Assert - All documents should have file type extracted
         documents[0].FileType.Should().Be("pdf");
-        documents[1].FileName.Should().Be("Report.docx");
         documents[1].FileType.Should().Be("docx");
     }
 
@@ -751,8 +724,8 @@ public class RagServiceTests
         // Act
         var result = await service.GetEmbeddingAsync("test text");
 
-        // Assert
-        result.Length.Should().Be(1536);
+        // Assert - 3072 dimensions for text-embedding-3-large
+        result.Length.Should().Be(3072);
     }
 
     [Fact]
@@ -769,7 +742,7 @@ public class RagServiceTests
         _openAiClientMock.Verify(
             x => x.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()),
             Times.Never);
-        result.Length.Should().Be(1536);
+        result.Length.Should().Be(3072);
     }
 
     [Fact]

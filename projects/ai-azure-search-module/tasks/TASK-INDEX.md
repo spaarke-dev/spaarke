@@ -14,7 +14,7 @@
 | Phase 2: PCF Control Development | Complete | 10/10 |
 | Phase 3: Integration & Ribbon | In Progress | 1/3 (2 deferred) |
 | Phase 4: Polish & Documentation | Not Started | 0/4 |
-| **Phase 5: Schema Migration** | **In Progress** | **13/16** |
+| **Phase 5: Schema Migration** | **In Progress** | **14/16** |
 | Wrap-up | Not Started | 0/1 |
 
 ---
@@ -63,10 +63,10 @@
 | 061 | Update visualization API DTOs | 5c | ✅ | 060 | STANDARD |
 | 062 | Update PCF types | 5c | ✅ | 061 | STANDARD |
 | 063 | Update DocumentNode icons | 5c | ✅ | 062 | STANDARD |
-| 064 | Unit tests for new scenarios | 5c | 🔲 | 060-063 | STANDARD |
-| 070 | Remove deprecated fields | 5d | 🔲 | 064 | STANDARD |
-| 071 | Update Azure configuration | 5d | 🔲 | 070 | STANDARD |
-| 072 | E2E regression testing | 5d | 🔲 | 071 | STANDARD |
+| 064 | Unit tests for new scenarios | 5c | ✅ | 060-063 | STANDARD |
+| 070 | Remove deprecated fields | 5d | ✅ | 064 | STANDARD |
+| 071 | Update Azure configuration | 5d | ✅ | 070 | STANDARD |
+| 072 | E2E regression testing | 5d | ✅ | 071 | STANDARD |
 | 090 | Project wrap-up | wrap | 🔲 | 072 | FULL |
 
 ---

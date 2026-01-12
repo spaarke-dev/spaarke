@@ -42,12 +42,12 @@ public class RagService : IRagService
     // Semantic configuration name from the index definition
     private const string SemanticConfigurationName = "knowledge-semantic-config";
 
-    // Vector field name and dimensions
-    private const string VectorFieldName = "contentVector";
-    private const int VectorDimensions = 1536;
+    // Vector field name and dimensions (3072-dim text-embedding-3-large)
+    private const string VectorFieldName = "contentVector3072";
+    private const int VectorDimensions = 3072;
 
     // Search field for keyword queries
-    private static readonly string[] SearchFields = ["content", "documentName", "fileName", "knowledgeSourceName"];
+    private static readonly string[] SearchFields = ["content", "fileName", "knowledgeSourceName"];
 
     // Supported file extensions for type extraction
     private static readonly HashSet<string> SupportedFileTypes = new(StringComparer.OrdinalIgnoreCase)
@@ -166,7 +166,7 @@ public class RagService : IRagService
                 {
                     Id = result.Document.Id,
                     DocumentId = result.Document.DocumentId,
-                    DocumentName = result.Document.DocumentName,
+                    DocumentName = result.Document.FileName,
                     Content = result.Document.Content,
                     KnowledgeSourceName = result.Document.KnowledgeSourceName,
                     Score = effectiveScore,
@@ -683,18 +683,11 @@ public class RagService : IRagService
     }
 
     /// <summary>
-    /// Populates file metadata fields (fileName, fileType) from available document data.
-    /// Ensures consistent field population for both regular documents and orphan files.
+    /// Populates file metadata fields (fileType) from fileName if not already set.
     /// </summary>
     /// <param name="document">The document to populate metadata for.</param>
     private static void PopulateFileMetadata(KnowledgeDocument document)
     {
-        // Populate FileName from DocumentName if not already set (backward compatibility)
-        if (string.IsNullOrEmpty(document.FileName) && !string.IsNullOrEmpty(document.DocumentName))
-        {
-            document.FileName = document.DocumentName;
-        }
-
         // Extract FileType from FileName if not already set
         if (string.IsNullOrEmpty(document.FileType))
         {
