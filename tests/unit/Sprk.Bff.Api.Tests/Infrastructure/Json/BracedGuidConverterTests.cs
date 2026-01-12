@@ -213,4 +213,103 @@ public class BracedGuidConverterTests
     {
         public Guid? NullableId { get; set; }
     }
+
+    private class TestDateTimeModel
+    {
+        public DateTime Date { get; set; }
+    }
+
+    private class TestNullableDateTimeModel
+    {
+        public DateTime? NullableDate { get; set; }
+    }
+
+    // WCF DateTime Converter Tests
+
+    [Fact]
+    public void WcfDateTimeConverter_DeserializesWcfFormat()
+    {
+        // Arrange - WCF format: /Date(1234567890000)/
+        // 1234567890000 ms = 2009-02-13T23:31:30.000Z
+        var json = @"{ ""Date"": ""/Date(1234567890000)/"" }";
+
+        // Act
+        var result = JsonSerializer.Deserialize<TestDateTimeModel>(json, DataverseJsonOptions.Default);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.Date.Should().Be(new DateTime(2009, 2, 13, 23, 31, 30, DateTimeKind.Utc));
+    }
+
+    [Fact]
+    public void WcfDateTimeConverter_DeserializesWcfFormatWithTimezone()
+    {
+        // Arrange - WCF format with timezone: /Date(1234567890000+0000)/
+        var json = @"{ ""Date"": ""/Date(1234567890000+0000)/"" }";
+
+        // Act
+        var result = JsonSerializer.Deserialize<TestDateTimeModel>(json, DataverseJsonOptions.Default);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.Date.Should().Be(new DateTime(2009, 2, 13, 23, 31, 30, DateTimeKind.Utc));
+    }
+
+    [Fact]
+    public void WcfDateTimeConverter_DeserializesIso8601Format()
+    {
+        // Arrange - Standard ISO 8601 format still works
+        var json = @"{ ""Date"": ""2026-01-12T15:30:00Z"" }";
+
+        // Act
+        var result = JsonSerializer.Deserialize<TestDateTimeModel>(json, DataverseJsonOptions.Default);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.Date.Year.Should().Be(2026);
+        result.Date.Month.Should().Be(1);
+        result.Date.Day.Should().Be(12);
+    }
+
+    [Fact]
+    public void NullableWcfDateTimeConverter_DeserializesNull()
+    {
+        // Arrange
+        var json = @"{ ""NullableDate"": null }";
+
+        // Act
+        var result = JsonSerializer.Deserialize<TestNullableDateTimeModel>(json, DataverseJsonOptions.Default);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.NullableDate.Should().BeNull();
+    }
+
+    [Fact]
+    public void NullableWcfDateTimeConverter_DeserializesWcfFormat()
+    {
+        // Arrange
+        var json = @"{ ""NullableDate"": ""/Date(1234567890000)/"" }";
+
+        // Act
+        var result = JsonSerializer.Deserialize<TestNullableDateTimeModel>(json, DataverseJsonOptions.Default);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.NullableDate.Should().Be(new DateTime(2009, 2, 13, 23, 31, 30, DateTimeKind.Utc));
+    }
+
+    [Fact]
+    public void WcfDateTimeConverter_SerializesAsIso8601()
+    {
+        // Arrange
+        var model = new TestDateTimeModel { Date = new DateTime(2026, 1, 12, 15, 30, 0, DateTimeKind.Utc) };
+
+        // Act
+        var json = JsonSerializer.Serialize(model, DataverseJsonOptions.Default);
+
+        // Assert
+        json.Should().Contain("2026-01-12");
+        json.Should().NotContain("/Date(");
+    }
 }
