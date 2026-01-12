@@ -57,7 +57,7 @@ public class RagSharedDeploymentTests : IClassFixture<IntegrationTestFixture>, I
         {
             var indexed = await _ragService.IndexDocumentAsync(doc);
             _indexedDocumentIds.Add(indexed.Id);
-            _output.WriteLine($"Indexed: {indexed.Id} - {indexed.DocumentName}");
+            _output.WriteLine($"Indexed: {indexed.Id} - {indexed.FileName}");
         }
 
         // Index some documents for the other tenant (for isolation testing)
@@ -104,7 +104,7 @@ public class RagSharedDeploymentTests : IClassFixture<IntegrationTestFixture>, I
             TenantId = _testTenantId,
             DeploymentModel = KnowledgeDeploymentModel.Shared,
             DocumentId = "test-source-doc-1",
-            DocumentName = "Index Test Document.pdf",
+            FileName = "Index Test Document.pdf",
             DocumentType = "contract",
             ChunkIndex = 0,
             ChunkCount = 1,
@@ -121,7 +121,7 @@ public class RagSharedDeploymentTests : IClassFixture<IntegrationTestFixture>, I
         // Assert
         result.Should().NotBeNull();
         result.Id.Should().Be(doc.Id);
-        result.ContentVector.Length.Should().Be(1536, "text-embedding-3-small produces 1536 dimensions");
+        result.ContentVector.Length.Should().Be(3072, "text-embedding-3-large produces 3072 dimensions");
 
         _output.WriteLine($"Document indexed with ID: {result.Id}");
         _output.WriteLine($"Embedding dimensions: {result.ContentVector.Length}");
@@ -137,7 +137,7 @@ public class RagSharedDeploymentTests : IClassFixture<IntegrationTestFixture>, I
             TenantId = _testTenantId,
             DeploymentModel = KnowledgeDeploymentModel.Shared,
             DocumentId = "test-batch-source",
-            DocumentName = $"Batch Test Document {i}.pdf",
+            FileName = $"Batch Test Document {i}.pdf",
             DocumentType = "policy",
             ChunkIndex = i,
             ChunkCount = 5,
@@ -490,7 +490,7 @@ public class RagSharedDeploymentTests : IClassFixture<IntegrationTestFixture>, I
                 TenantId = tenantId,
                 DeploymentModel = KnowledgeDeploymentModel.Shared,
                 DocumentId = $"{prefix}employee-handbook",
-                DocumentName = "Employee Handbook 2024.pdf",
+                FileName = "Employee Handbook 2024.pdf",
                 DocumentType = "policy",
                 KnowledgeSourceId = "ks-hr-policies",
                 KnowledgeSourceName = "HR Policies",
@@ -507,7 +507,7 @@ public class RagSharedDeploymentTests : IClassFixture<IntegrationTestFixture>, I
                 TenantId = tenantId,
                 DeploymentModel = KnowledgeDeploymentModel.Shared,
                 DocumentId = $"{prefix}employee-handbook",
-                DocumentName = "Employee Handbook 2024.pdf",
+                FileName = "Employee Handbook 2024.pdf",
                 DocumentType = "policy",
                 KnowledgeSourceId = "ks-hr-policies",
                 KnowledgeSourceName = "HR Policies",
@@ -524,7 +524,7 @@ public class RagSharedDeploymentTests : IClassFixture<IntegrationTestFixture>, I
                 TenantId = tenantId,
                 DeploymentModel = KnowledgeDeploymentModel.Shared,
                 DocumentId = $"{prefix}legal-contract-template",
-                DocumentName = "Standard Service Agreement.docx",
+                FileName = "Standard Service Agreement.docx",
                 DocumentType = "contract",
                 KnowledgeSourceId = "ks-legal-templates",
                 KnowledgeSourceName = "Legal Templates",
@@ -541,7 +541,7 @@ public class RagSharedDeploymentTests : IClassFixture<IntegrationTestFixture>, I
                 TenantId = tenantId,
                 DeploymentModel = KnowledgeDeploymentModel.Shared,
                 DocumentId = $"{prefix}expense-policy",
-                DocumentName = "Expense Reimbursement Policy.pdf",
+                FileName = "Expense Reimbursement Policy.pdf",
                 DocumentType = "policy",
                 KnowledgeSourceId = "ks-finance-policies",
                 KnowledgeSourceName = "Finance Policies",
