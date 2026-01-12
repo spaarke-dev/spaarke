@@ -7,10 +7,10 @@
 
 ## Project Status
 
-- **Phase**: Planning
-- **Last Updated**: 2026-01-08
-- **Current Task**: Not started
-- **Next Action**: Execute task 001 to begin implementation
+- **Phase**: Complete
+- **Last Updated**: 2026-01-12
+- **Current Task**: None (project complete)
+- **Next Action**: None - project graduated
 
 ---
 
@@ -132,7 +132,15 @@ See [task-execute SKILL.md](../../.claude/skills/task-execute/SKILL.md) for comp
 
 <!-- Add notes about gotchas, workarounds, or important learnings during implementation -->
 
-*No notes yet*
+### Key Implementation Notes (2026-01-12)
+
+1. **Bundle Size**: PCF bundle reduced from 24.4MB to 6.65MB via platform-library externalization
+2. **Vector Dimensions**: Using 3072-dim vectors with `GetBestVector()` fallback to 1536-dim for migration
+3. **Orphan Files**: Files without Dataverse records supported via nullable `documentId`, required `speFileId`
+4. **Architecture Change**: Implemented inline section-based visualization instead of ribbon button + modal
+5. **Test Coverage**: 85 .NET tests + 40 PCF tests + 18 E2E tests = 143 total tests
+
+See [lessons-learned.md](lessons-learned.md) for comprehensive project retrospective.
 
 ---
 
