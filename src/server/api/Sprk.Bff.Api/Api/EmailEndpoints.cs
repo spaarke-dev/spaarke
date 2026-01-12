@@ -195,6 +195,12 @@ public static class EmailEndpoints
             var requestBody = await reader.ReadToEndAsync(cancellationToken);
             request.Body.Position = 0;
 
+            // DEBUG: Log headers and payload for troubleshooting
+            var headersList = string.Join(", ", request.Headers.Select(h => $"{h.Key}={h.Value}"));
+            logger.LogInformation("Webhook headers: {Headers}", headersList);
+            logger.LogInformation("Webhook payload (first 2000 chars): {Payload}",
+                requestBody.Length > 2000 ? requestBody[..2000] : requestBody);
+
             if (string.IsNullOrWhiteSpace(requestBody))
             {
                 logger.LogWarning("Empty webhook payload received");
@@ -231,11 +237,12 @@ public static class EmailEndpoints
             }
             catch (JsonException ex)
             {
-                logger.LogWarning(ex, "Failed to parse webhook payload");
+                logger.LogError(ex, "Failed to parse webhook payload. Path={Path}, LineNumber={Line}, BytePosition={Pos}",
+                    ex.Path, ex.LineNumber, ex.BytePositionInLine);
                 telemetry.RecordWebhookRejected(stopwatch, "invalid_json");
                 return Results.Problem(
                     title: "Invalid Payload",
-                    detail: "Failed to parse webhook payload as JSON",
+                    detail: $"Failed to parse webhook payload: {ex.Message}",
                     statusCode: StatusCodes.Status400BadRequest);
             }
 

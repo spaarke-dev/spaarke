@@ -6,7 +6,7 @@ using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Infrastructure.Json;
 
-public class BracedGuidConverterTests
+public class DataverseJsonConvertersTests
 {
     [Fact]
     public void BracedGuidConverter_DeserializesBracedGuid()
