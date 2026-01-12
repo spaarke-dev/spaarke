@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task xmlns="urn:spaarke:poml:task:v1">
+  <metadata>
+    <id>050</id>
+    <title>Update embedding configuration for 3072 dimensions</title>
+    <phase>5b</phase>
+    <status>completed</status>
+    <priority>high</priority>
+    <estimate>2h</estimate>
+    <tags>bff-api, azure-openai, configuration</tags>
+    <created>2026-01-10</created>
+  </metadata>
+
+  <context>
+    <description>
+      Update DocumentIntelligenceOptions and embedding configuration to use
+      text-embedding-3-large (3072 dimensions) instead of text-embedding-3-small (1536).
+      This standardizes vector dimensions across RAG and Record Matching indexes.
+    </description>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Options/DocumentIntelligenceOptions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/EmbeddingService.cs</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-azure-search-module/notes/024-index-schema-unification.md</file>
+      <file>docs/guides/RAG-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="azure-openai">text-embedding-3-large produces 3072 dimensions</constraint>
+    <constraint source="cost">3072-dim embeddings cost more; verify budget impact</constraint>
+  </constraints>
+
+  <steps>
+    <step id="1">
+      <description>Update DocumentIntelligenceOptions</description>
+      <details>
+        Add or update embedding model configuration:
+        - EmbeddingModel = "text-embedding-3-large"
+        - EmbeddingDimensions = 3072
+        Keep old values as deprecated fallback during migration.
+      </details>
+    </step>
+    <step id="2">
+      <description>Update Azure configuration</description>
+      <details>
+        Update Azure App Service settings:
+        - DocumentIntelligence__EmbeddingModel = text-embedding-3-large
+        - DocumentIntelligence__EmbeddingDimensions = 3072
+      </details>
+    </step>
+    <step id="3">
+      <description>Update EmbeddingService</description>
+      <details>
+        Ensure EmbeddingService uses configuration for:
+        - Model name selection
+        - Dimension validation
+        - Add logging for model being used
+      </details>
+    </step>
+    <step id="4">
+      <description>Verify Azure OpenAI deployment</description>
+      <details>
+        Confirm text-embedding-3-large is deployed in Azure OpenAI:
+        - Check deployment exists
+        - Verify TPM quota is sufficient
+        - Document any quota increase needed
+      </details>
+    </step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Configuration updated to 3072 dimensions</criterion>
+    <criterion>EmbeddingService uses new model</criterion>
+    <criterion>Azure OpenAI deployment verified</criterion>
+    <criterion>Local and deployed configs aligned</criterion>
+  </acceptance-criteria>
+
+  <dependencies>
+    <dependency>043</dependency>
+  </dependencies>
+
+  <notes>
+    <completed>2026-01-11</completed>
+    <summary>
+      Configuration updated for text-embedding-3-large (3072 dimensions):
+      - DocumentIntelligenceOptions: EmbeddingModel defaults to text-embedding-3-large, added EmbeddingDimensions (3072), LegacyEmbeddingDimensions (1536)
+      - OpenAiClient: GenerateEmbeddingAsync and GenerateEmbeddingsAsync now accept optional dimensions parameter
+      - IOpenAiClient: Interface updated with dimensions parameter
+      - appsettings.template.json: Added AI_EMBEDDING_MODEL and AI_EMBEDDING_DIMENSIONS placeholders
+      - auth-AI-azure-resources.md: Documented text-embedding-3-large deployment requirement with CLI command
+      NOTE: Azure deployment must be created manually before migration can proceed.
+    </summary>
+  </notes>
+</task>

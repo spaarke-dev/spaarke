@@ -1,11 +1,12 @@
 # Spaarke AI Architecture
 
-> **Version**: 1.6
-> **Date**: January 2, 2026
-> **Status**: Production (R3 Phases 1-5 Complete)
+> **Version**: 1.7
+> **Date**: January 12, 2026
+> **Status**: Production (R3 Phases 1-5 Complete + Document Visualization)
 > **Author**: Spaarke Engineering
 > **Related**: [SPAARKE-AI-STRATEGY.md](../../reference/architecture/SPAARKE-AI-STRATEGY.md)
 > **R3 Updates**: RAG Foundation, Analysis Orchestration, Export Services, Monitoring/Resilience, Security
+> **2026-01-12**: Document Relationship Visualization module added (3072-dim vectors, orphan file support)
 
 ---
 
@@ -28,6 +29,7 @@ For strategic context, use cases, and Microsoft Foundry platform details, see th
 | **AI Client** | `OpenAiClient` (new, shared across tools) |
 | **Text Extraction** | `TextExtractorService` (native + Document Intelligence) |
 | **RAG Deployment** | `IKnowledgeDeploymentService` - Multi-tenant SearchClient routing (R3) |
+| **Visualization** | `IVisualizationService` - Document relationship graph via vector similarity (2026-01-12) |
 | **Background Jobs** | Service Bus + `IJobHandler` pattern (existing) |
 | **Caching** | Redis with TTL-based invalidation (existing) |
 
@@ -2765,6 +2767,133 @@ Bicep modules for Azure Monitor dashboards are available:
 
 ---
 
+## 16. Document Relationship Visualization (2026-01-12)
+
+### 16.1 Overview
+
+The Document Relationship Visualization module enables users to discover semantically similar documents through an interactive graph interface. Documents are represented as nodes, with edges indicating similarity based on 3072-dimension document vectors.
+
+### 16.2 Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     DocumentRelationshipViewer PCF                           │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐             │
+│  │  DocumentGraph  │  │  ControlPanel   │  │  NodeActionBar  │             │
+│  │  (React Flow +  │  │  (threshold,    │  │  (Open Record,  │             │
+│  │   d3-force)     │  │   depth, limit) │  │   View in SPE)  │             │
+│  └────────┬────────┘  └─────────────────┘  └─────────────────┘             │
+└───────────┼─────────────────────────────────────────────────────────────────┘
+            │ GET /api/ai/visualization/related/{documentId}
+            ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        VisualizationEndpoints                                │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ VisualizationAuthorizationFilter                                    │   │
+│  │ • Validates user has access to source document                      │   │
+│  │ • Resource-based auth via Dataverse OBO                             │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                    │                                        │
+│                                    ▼                                        │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ IVisualizationService                                               │   │
+│  │ • GetRelatedDocumentsAsync(documentId, options)                     │   │
+│  │ • Uses IRagService for vector similarity search                     │   │
+│  │ • Returns DocumentGraphResponse with nodes, edges, metadata         │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────────┘
+            │
+            ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     Azure AI Search (spaarke-knowledge-index-v2)            │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ Vector Search on documentVector3072 (3072 dimensions)               │   │
+│  │ • Cosine similarity via HNSW algorithm                              │   │
+│  │ • Filtered by tenantId for multi-tenant isolation                   │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 16.3 Key Components
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| `IVisualizationService` | `Services/Ai/IVisualizationService.cs` | Interface for document visualization |
+| `VisualizationService` | `Services/Ai/VisualizationService.cs` | Vector similarity search implementation |
+| `VisualizationEndpoints` | `Api/Ai/VisualizationEndpoints.cs` | GET endpoint for related documents |
+| `VisualizationAuthorizationFilter` | `Api/Filters/VisualizationAuthorizationFilter.cs` | Resource-based authorization |
+| `DocumentRelationshipViewer` | `src/client/pcf/DocumentRelationshipViewer/` | PCF control (React Flow + d3-force) |
+
+### 16.4 Data Models
+
+```csharp
+// Response model for document graph
+public class DocumentGraphResponse
+{
+    public IReadOnlyList<DocumentNodeData> Nodes { get; set; }
+    public IReadOnlyList<DocumentEdgeData> Edges { get; set; }
+    public GraphMetadata Metadata { get; set; }
+}
+
+public class DocumentNodeData
+{
+    public string Id { get; set; }               // Node identifier
+    public string? DocumentId { get; set; }      // Dataverse document ID (null for orphans)
+    public string SpeFileId { get; set; }        // SPE file ID (always populated)
+    public string FileName { get; set; }         // Display name
+    public string FileType { get; set; }         // Extension (pdf, docx, etc.)
+    public string NodeType { get; set; }         // "source", "related", or "orphan"
+    public double Similarity { get; set; }       // 0.0 to 1.0
+    public bool IsOrphanFile { get; set; }       // True if no Dataverse record
+}
+```
+
+### 16.5 Key Features
+
+| Feature | Implementation |
+|---------|----------------|
+| **3072-dim vectors** | Uses `documentVector3072` for whole-document similarity |
+| **Orphan file support** | Files without Dataverse records (`documentId` nullable) |
+| **Force-directed layout** | Edge distance = `200 * (1 - similarity)` for natural clustering |
+| **Real-time filtering** | Similarity threshold, depth limit, max nodes per level |
+| **Dark mode** | Full Fluent UI v9 token support (ADR-021) |
+| **Multi-tenant isolation** | `tenantId` filter on all searches |
+
+### 16.6 API Endpoint
+
+```
+GET /api/ai/visualization/related/{documentId}
+    ?tenantId={tenantId}
+    &similarityThreshold={0.65}   // Default: 0.65
+    &depthLimit={1}               // Default: 1
+    &maxNodesPerLevel={25}        // Default: 25
+
+Response: DocumentGraphResponse
+```
+
+### 16.7 PCF Control Details
+
+| Aspect | Implementation |
+|--------|----------------|
+| **Framework** | React Flow v10 (React 16 compatible) + d3-force |
+| **Bundle Size** | 6.65 MB (React, Fluent UI externalized via platform-library) |
+| **Test Coverage** | 40 component tests (Jest + React Testing Library) |
+| **Version** | 1.0.18 |
+| **Form Integration** | Embedded in "Search" tab of `sprk_document` form |
+
+### 16.8 Test Coverage
+
+| Component | Tests | Type |
+|-----------|-------|------|
+| VisualizationService | 27 | Unit (.NET) |
+| DocumentNode | 15 | Component (Jest) |
+| ControlPanel | 18 | Component (Jest) |
+| NodeActionBar | 20 | Component (Jest) |
+| E2E Tests | 18 | Integration |
+| **Total** | **143** | |
+
+---
+
 ## Related Documents
 
 - [SPAARKE-AI-STRATEGY.md](../../reference/architecture/SPAARKE-AI-STRATEGY.md) - Strategic context, Microsoft Foundry, use cases
@@ -2772,9 +2901,11 @@ Bicep modules for Azure Monitor dashboards are available:
 - [ADR-004: Async Job Contract](../../reference/adr/ADR-004-async-job-contract.md)
 - [ADR-009: Redis-first Caching](../../reference/adr/ADR-009-caching-redis-first.md)
 - [BFF API Patterns](../architecture/sdap-bff-api-patterns.md)
+- [AI Search & Visualization Module](../../projects/ai-azure-search-module/README.md) - Project documentation
 
 ---
 
 *Document Owner: Spaarke Engineering*
-*Last Updated: December 29, 2025*
+*Last Updated: January 12, 2026*
 *R3 Updates: RAG Deployment Models (Section 8), Knowledge Index Schema (Section 9.2), Tool Framework (Section 10), Playbook System (Section 11), Export Services (Section 12)*
+*2026-01-12: Document Relationship Visualization (Section 16)*

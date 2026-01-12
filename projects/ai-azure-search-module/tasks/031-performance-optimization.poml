@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="ai-azure-search-module">
+  <metadata>
+    <title>Performance optimization</title>
+    <phase>4: Polish and Documentation</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>024</dependencies>
+    <blocks>032</blocks>
+    <tags>pcf, performance, optimization</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Optimization task - STANDARD rigor</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Profile and optimize the visualization control for large document sets.
+    Ensure smooth performance with 50+ nodes and responsive UI interactions.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in React performance optimization.
+  </role>
+
+  <goal>
+    Visualization performs smoothly with large document sets (50+ nodes).
+  </goal>
+
+  <context>
+    <background>
+      Users with many related documents need the graph to remain responsive.
+      d3-force simulations and React re-renders can cause performance issues if not optimized.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Must handle 50+ nodes smoothly</constraint>
+    <constraint source="ADR-022">React 16 APIs only (no concurrent features)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Profile current performance with React DevTools</step>
+    <step order="2">Identify render bottlenecks</step>
+    <step order="3">Implement React.memo for DocumentNode and DocumentEdge</step>
+    <step order="4">Optimize d3-force simulation parameters (alphaDecay, velocityDecay)</step>
+    <step order="5">Add node virtualization if needed for very large graphs</step>
+    <step order="6">Implement debouncing for filter changes</step>
+    <step order="7">Test with 50+ nodes to verify smooth performance</step>
+    <step order="8">Document performance recommendations in code comments</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="react-devtools">Performance profiling</tool>
+    <tool name="npm">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/DocumentRelationshipViewer/ (optimized components)</output>
+    <output type="docs">Performance notes in code comments</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Graph renders 50 nodes in under 2 seconds</criterion>
+    <criterion testable="true">Pan/zoom operations remain smooth (60fps target)</criterion>
+    <criterion testable="true">Filter changes apply within 300ms</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

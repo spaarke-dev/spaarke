@@ -372,7 +372,10 @@ if (analysisEnabled && documentIntelligenceEnabled)
 
         // RagService - Hybrid search service for RAG retrieval (keyword + vector + semantic ranking)
         builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.IRagService, Sprk.Bff.Api.Services.Ai.RagService>();
-        Console.WriteLine("✓ RAG services enabled (hybrid search + embedding cache)");
+
+        // VisualizationService - Document relationship visualization using vector similarity
+        builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Visualization.IVisualizationService, Sprk.Bff.Api.Services.Ai.Visualization.VisualizationService>();
+        Console.WriteLine("✓ RAG services enabled (hybrid search + embedding cache + visualization)");
     }
     else
     {
@@ -473,9 +476,22 @@ if (string.IsNullOrWhiteSpace(serviceBusConnectionString))
 builder.Services.AddSingleton(sp => new Azure.Messaging.ServiceBus.ServiceBusClient(serviceBusConnectionString));
 builder.Services.AddHostedService<Sprk.Bff.Api.Services.Jobs.ServiceBusJobProcessor>();
 builder.Services.AddHostedService<Sprk.Bff.Api.Services.Jobs.EmailPollingBackupService>();
+
+// DocumentVector backfill service - one-time migration to populate documentVector field
+builder.Services.Configure<Sprk.Bff.Api.Services.Jobs.DocumentVectorBackfillOptions>(
+    builder.Configuration.GetSection(Sprk.Bff.Api.Services.Jobs.DocumentVectorBackfillOptions.SectionName));
+builder.Services.AddHostedService<Sprk.Bff.Api.Services.Jobs.DocumentVectorBackfillService>();
+
+// Embedding migration service - migrates embeddings from 1536 to 3072 dimensions (Phase 5b)
+builder.Services.Configure<Sprk.Bff.Api.Services.Jobs.EmbeddingMigrationOptions>(
+    builder.Configuration.GetSection(Sprk.Bff.Api.Services.Jobs.EmbeddingMigrationOptions.SectionName));
+builder.Services.AddHostedService<Sprk.Bff.Api.Services.Jobs.EmbeddingMigrationService>();
+
 builder.Logging.AddConsole();
 Console.WriteLine("✓ Job processing configured with Service Bus (queue: sdap-jobs)");
 Console.WriteLine("✓ Email polling backup service configured");
+Console.WriteLine("✓ Document vector backfill service registered (enable via config)");
+Console.WriteLine("✓ Embedding migration service registered (enable via config)");
 
 // ============================================================================
 // HEALTH CHECKS - Redis availability monitoring
@@ -1051,6 +1067,9 @@ if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
 
 // RAG endpoints for knowledge base operations (R3)
 app.MapRagEndpoints();
+
+// Visualization endpoints for document relationship discovery
+app.MapVisualizationEndpoints();
 
 // Resilience monitoring endpoints (circuit breaker status)
 app.MapResilienceEndpoints();

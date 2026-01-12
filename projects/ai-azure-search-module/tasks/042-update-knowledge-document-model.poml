@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task xmlns="urn:spaarke:poml:task:v1">
+  <metadata>
+    <id>042</id>
+    <title>Update KnowledgeDocument model with new fields</title>
+    <phase>5a</phase>
+    <status>completed</status>
+    <priority>high</priority>
+    <estimate>2h</estimate>
+    <tags>bff-api, azure-search, model</tags>
+    <created>2026-01-10</created>
+  </metadata>
+
+  <context>
+    <description>
+      Add new fields to KnowledgeDocument C# model to support:
+      - speFileId: Direct SPE file reference (always populated)
+      - fileType: File extension for icon selection
+      - fileName: Renamed from documentName
+      - Nullable documentId for orphan files
+      - 3072-dimension vector fields
+    </description>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-azure-search-module/notes/024-index-schema-unification.md</file>
+      <file>docs/guides/RAG-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-013">Follow AI Architecture patterns</constraint>
+    <constraint source="backward-compat">Support both old and new field names during migration</constraint>
+  </constraints>
+
+  <steps>
+    <step id="1">
+      <description>Update KnowledgeDocument class with new properties</description>
+      <details>
+        Add properties:
+        - public string? SpeFileId { get; set; } // Always populated
+        - public string? FileType { get; set; } // pdf, docx, msg, etc.
+        - public string? FileName { get; set; } // Display name
+        Mark documentId as nullable for orphan file support.
+        Keep documentName as deprecated alias during migration.
+      </details>
+    </step>
+    <step id="2">
+      <description>Add Azure Search field attributes</description>
+      <details>
+        - [SearchableField] for fileName
+        - [SimpleField(IsFilterable = true)] for speFileId, fileType
+        - Update vector field dimensions to 3072
+      </details>
+    </step>
+    <step id="3">
+      <description>Update serialization for backward compatibility</description>
+      <details>
+        Add JsonPropertyName attributes to map old field names:
+        - fileName maps to both "fileName" and "documentName"
+        Use custom converter if needed for reading old documents.
+      </details>
+    </step>
+    <step id="4">
+      <description>Update unit tests</description>
+      <details>
+        - Test KnowledgeDocument serialization with new fields
+        - Test backward compatibility with old field names
+        - Test nullable documentId for orphan files
+      </details>
+    </step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>KnowledgeDocument has speFileId, fileType, fileName properties</criterion>
+    <criterion>documentId is nullable</criterion>
+    <criterion>Vector dimensions support 3072</criterion>
+    <criterion>Old documents can still be deserialized</criterion>
+    <criterion>Unit tests pass</criterion>
+  </acceptance-criteria>
+
+  <dependencies>
+    <dependency>041</dependency>
+  </dependencies>
+</task>

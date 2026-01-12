@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="ai-azure-search-module">
+  <metadata>
+    <title>User documentation</title>
+    <phase>4: Polish and Documentation</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>032</dependencies>
+    <blocks>090</blocks>
+    <tags>documentation</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation task - MINIMAL rigor</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create user-facing documentation for the AI Search &amp; Visualization Module.
+    Include admin guide for setup and user guide for daily usage.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Technical writer.
+  </role>
+
+  <goal>
+    Complete documentation enabling admins to configure and users to use the feature.
+  </goal>
+
+  <context>
+    <background>
+      Documentation is critical for adoption and support.
+      Admin guide covers deployment and configuration.
+      User guide covers how to find and explore related documents.
+    </background>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-azure-search-module/spec.md</file>
+      <file>projects/ai-azure-search-module/README.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create admin guide covering: solution import, form configuration, environment variables</step>
+    <step order="2">Create user guide covering: accessing feature, interpreting graph, using filters, node actions</step>
+    <step order="3">Add screenshots of key UI elements</step>
+    <step order="4">Document troubleshooting steps for common issues</step>
+    <step order="5">Review documentation for clarity and completeness</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="markdown">Documentation format</tool>
+    <tool name="screenshots">Capture UI examples</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/guides/ai-search-visualization-admin-guide.md</output>
+    <output type="docs">docs/guides/ai-search-visualization-user-guide.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Admin guide covers all setup steps</criterion>
+    <criterion testable="true">User guide explains all features with screenshots</criterion>
+    <criterion testable="true">Troubleshooting section addresses common issues</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

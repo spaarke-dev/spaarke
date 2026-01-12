@@ -18,8 +18,8 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// - CustomerOwned model requires Key Vault integration (connection strings)
 /// - Deployment configs cached in-memory (TODO: Dataverse persistence in future task)
 ///
-/// Index naming:
-/// - Shared: "spaarke-knowledge-index" (single multi-tenant index)
+/// Index naming (configurable via AnalysisOptions):
+/// - Shared: Uses AnalysisOptions.SharedIndexName (single multi-tenant index)
 /// - Dedicated: "{tenantId}-knowledge" (per-customer index)
 /// - CustomerOwned: Customer-specified index name
 /// </remarks>
@@ -33,9 +33,6 @@ public class KnowledgeDeploymentService : IKnowledgeDeploymentService
     // In-memory cache for deployment configs (TODO: Move to Dataverse in future task)
     private readonly ConcurrentDictionary<string, KnowledgeDeploymentConfig> _configCache = new();
     private readonly ConcurrentDictionary<string, SearchClient> _clientCache = new();
-
-    // Default shared index configuration
-    private const string SharedIndexName = "spaarke-knowledge-index";
 
     public KnowledgeDeploymentService(
         SearchIndexClient searchIndexClient,
@@ -204,7 +201,7 @@ public class KnowledgeDeploymentService : IKnowledgeDeploymentService
                 TenantId = tenantId,
                 Name = "Default Shared Deployment",
                 Model = RagDeploymentModel.Shared,
-                IndexName = SharedIndexName,
+                IndexName = _options.SharedIndexName,
                 IsActive = true,
                 CreatedAt = DateTimeOffset.UtcNow
             },

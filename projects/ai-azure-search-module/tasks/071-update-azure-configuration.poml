@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task xmlns="urn:spaarke:poml:task:v1">
+  <metadata>
+    <id>071</id>
+    <title>Update Azure configuration for final schema</title>
+    <phase>5d</phase>
+    <status>completed</status>
+    <priority>medium</priority>
+    <estimate>2h</estimate>
+    <tags>operations, azure, configuration</tags>
+    <created>2026-01-10</created>
+  </metadata>
+
+  <context>
+    <description>
+      Update Azure configuration to:
+      - Point to final vector fields (remove migration fallbacks)
+      - Disable migration service permanently
+      - Document final configuration state
+    </description>
+    <relevant-files>
+      <file>infrastructure/bicep/app-service.bicep</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-azure-search-module/notes/024-index-schema-unification.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="operations">Apply during low-traffic window</constraint>
+    <constraint source="verification">Verify after deployment</constraint>
+  </constraints>
+
+  <steps>
+    <step id="1">
+      <description>Update App Service configuration</description>
+      <details>
+        Update settings:
+        - Remove EmbeddingMigration__* settings
+        - Update vector field configuration to use final names
+        - Ensure Analysis__SharedIndexName points to correct index
+      </details>
+    </step>
+    <step id="2">
+      <description>Update Bicep templates</description>
+      <details>
+        Ensure infrastructure-as-code reflects final state:
+        - Remove migration-related configuration
+        - Document final schema in comments
+        - Update any vector dimension references to 3072
+      </details>
+    </step>
+    <step id="3">
+      <description>Deploy configuration changes</description>
+      <details>
+        - Deploy via Azure CLI or portal
+        - Use skill /azue-deploy
+        - Restart App Service
+        - Verify settings applied correctly
+      </details>
+    </step>
+    <step id="4">
+      <description>Verify API functionality</description>
+      <details>
+        Test post-deployment:
+        - Health check passes
+        - Visualization endpoint returns results
+        - New fields present in responses
+        - No errors in logs
+      </details>
+    </step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Azure configuration updated</criterion>
+    <criterion>Bicep templates reflect final state</criterion>
+    <criterion>API functioning correctly</criterion>
+    <criterion>No migration-related settings remain</criterion>
+  </acceptance-criteria>
+
+  <dependencies>
+    <dependency>070</dependency>
+  </dependencies>
+</task>

@@ -24,7 +24,7 @@ public class RagServiceTests
     private readonly Mock<ILogger<RagService>> _loggerMock;
     private readonly IOptions<AnalysisOptions> _options;
 
-    // Test embedding (1536 dimensions like text-embedding-3-small)
+    // Test embedding (3072 dimensions like text-embedding-3-large)
     private readonly ReadOnlyMemory<float> _testEmbedding;
 
     public RagServiceTests()
@@ -40,8 +40,8 @@ public class RagServiceTests
             MinRelevanceScore = 0.7f
         });
 
-        // Create a test embedding vector (1536 dimensions)
-        var embedding = new float[1536];
+        // Create a test embedding vector (3072 dimensions for text-embedding-3-large)
+        var embedding = new float[3072];
         for (int i = 0; i < embedding.Length; i++)
         {
             embedding[i] = (float)(i % 10) / 10f;
@@ -124,7 +124,7 @@ public class RagServiceTests
 
         // Assert - Embedding should be generated
         _openAiClientMock.Verify(
-            x => x.GenerateEmbeddingAsync(query, null, It.IsAny<CancellationToken>()),
+            x => x.GenerateEmbeddingAsync(query, null, It.IsAny<int?>(), It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -147,7 +147,7 @@ public class RagServiceTests
 
         // Assert - Embedding should NOT be generated
         _openAiClientMock.Verify(
-            x => x.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            x => x.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -252,10 +252,34 @@ public class RagServiceTests
     {
         // Arrange
         var service = CreateService();
-        var document = new KnowledgeDocument { TenantId = string.Empty };
+        var document = new KnowledgeDocument { TenantId = string.Empty, SpeFileId = "file-1" };
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentException>(
+            async () => await service.IndexDocumentAsync(document));
+    }
+
+    [Fact]
+    public async Task IndexDocumentAsync_EmptySpeFileId_ThrowsArgumentException()
+    {
+        // Arrange
+        var service = CreateService();
+        var document = new KnowledgeDocument { TenantId = "tenant-1", SpeFileId = string.Empty };
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentException>(
+            async () => await service.IndexDocumentAsync(document));
+    }
+
+    [Fact]
+    public async Task IndexDocumentAsync_NullSpeFileId_ThrowsArgumentException()
+    {
+        // Arrange
+        var service = CreateService();
+        var document = new KnowledgeDocument { TenantId = "tenant-1", SpeFileId = null };
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentNullException>(
             async () => await service.IndexDocumentAsync(document));
     }
 
@@ -268,6 +292,7 @@ public class RagServiceTests
         {
             Id = "doc-1",
             TenantId = "tenant-1",
+            SpeFileId = "file-1",
             Content = "Test document content"
             // ContentVector is empty
         };
@@ -280,7 +305,7 @@ public class RagServiceTests
 
         // Assert - Embedding should be generated
         _openAiClientMock.Verify(
-            x => x.GenerateEmbeddingAsync("Test document content", null, It.IsAny<CancellationToken>()),
+            x => x.GenerateEmbeddingAsync("Test document content", null, It.IsAny<int?>(), It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -293,6 +318,7 @@ public class RagServiceTests
         {
             Id = "doc-1",
             TenantId = "tenant-1",
+            SpeFileId = "file-1",
             Content = "Test document content",
             ContentVector = _testEmbedding
         };
@@ -304,7 +330,7 @@ public class RagServiceTests
 
         // Assert - Embedding should NOT be generated
         _openAiClientMock.Verify(
-            x => x.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            x => x.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -317,6 +343,7 @@ public class RagServiceTests
         {
             Id = "doc-1",
             TenantId = "tenant-1",
+            SpeFileId = "file-1",
             Content = "Test content",
             ContentVector = _testEmbedding
         };
@@ -333,6 +360,162 @@ public class RagServiceTests
         result.CreatedAt.Should().BeOnOrBefore(afterIndex);
         result.UpdatedAt.Should().BeOnOrAfter(beforeIndex);
         result.UpdatedAt.Should().BeOnOrBefore(afterIndex);
+    }
+
+    [Fact]
+    public async Task IndexDocumentAsync_UsesProvidedFileName()
+    {
+        // Arrange
+        var service = CreateService();
+        var document = new KnowledgeDocument
+        {
+            Id = "doc-1",
+            TenantId = "tenant-1",
+            SpeFileId = "file-1",
+            FileName = "Contract.pdf",
+            ContentVector = _testEmbedding
+        };
+
+        SetupMockSearchClientForIndexing();
+
+        // Act
+        var result = await service.IndexDocumentAsync(document);
+
+        // Assert - FileName should be preserved
+        result.FileName.Should().Be("Contract.pdf");
+    }
+
+    [Fact]
+    public async Task IndexDocumentAsync_ExtractsFileTypeFromFileName()
+    {
+        // Arrange
+        var service = CreateService();
+        var document = new KnowledgeDocument
+        {
+            Id = "doc-1",
+            TenantId = "tenant-1",
+            SpeFileId = "file-1",
+            FileName = "Document.docx",
+            ContentVector = _testEmbedding
+        };
+
+        SetupMockSearchClientForIndexing();
+
+        // Act
+        var result = await service.IndexDocumentAsync(document);
+
+        // Assert - FileType should be extracted
+        result.FileType.Should().Be("docx");
+    }
+
+    [Fact]
+    public async Task IndexDocumentAsync_PreservesExistingFileType()
+    {
+        // Arrange
+        var service = CreateService();
+        var document = new KnowledgeDocument
+        {
+            Id = "doc-1",
+            TenantId = "tenant-1",
+            SpeFileId = "file-1",
+            FileName = "Document.docx",
+            FileType = "pdf", // Explicitly set different type
+            ContentVector = _testEmbedding
+        };
+
+        SetupMockSearchClientForIndexing();
+
+        // Act
+        var result = await service.IndexDocumentAsync(document);
+
+        // Assert - FileType should not be overwritten
+        result.FileType.Should().Be("pdf");
+    }
+
+    [Theory]
+    [InlineData("Document.pdf", "pdf")]
+    [InlineData("Spreadsheet.xlsx", "xlsx")]
+    [InlineData("Presentation.pptx", "pptx")]
+    [InlineData("Email.msg", "msg")]
+    [InlineData("Email.eml", "eml")]
+    [InlineData("Text.txt", "txt")]
+    [InlineData("Web.html", "html")]
+    [InlineData("Word.doc", "doc")]
+    [InlineData("Excel.xls", "xls")]
+    [InlineData("Data.csv", "csv")]
+    public async Task IndexDocumentAsync_ExtractsCorrectFileType(string fileName, string expectedType)
+    {
+        // Arrange
+        var service = CreateService();
+        var document = new KnowledgeDocument
+        {
+            Id = "doc-1",
+            TenantId = "tenant-1",
+            SpeFileId = "file-1",
+            FileName = fileName,
+            ContentVector = _testEmbedding
+        };
+
+        SetupMockSearchClientForIndexing();
+
+        // Act
+        var result = await service.IndexDocumentAsync(document);
+
+        // Assert
+        result.FileType.Should().Be(expectedType);
+    }
+
+    [Theory]
+    [InlineData("Document", "unknown")]
+    [InlineData("Document.xyz", "unknown")]
+    [InlineData("", "unknown")]
+    [InlineData("Document.", "unknown")]
+    public async Task IndexDocumentAsync_ReturnsUnknownForInvalidExtension(string fileName, string expectedType)
+    {
+        // Arrange
+        var service = CreateService();
+        var document = new KnowledgeDocument
+        {
+            Id = "doc-1",
+            TenantId = "tenant-1",
+            SpeFileId = "file-1",
+            FileName = string.IsNullOrEmpty(fileName) ? "unknown" : fileName,
+            ContentVector = _testEmbedding
+        };
+
+        SetupMockSearchClientForIndexing();
+
+        // Act
+        var result = await service.IndexDocumentAsync(document);
+
+        // Assert
+        result.FileType.Should().Be(expectedType);
+    }
+
+    [Fact]
+    public async Task IndexDocumentAsync_OrphanFile_WorksWithNullDocumentId()
+    {
+        // Arrange
+        var service = CreateService();
+        var document = new KnowledgeDocument
+        {
+            Id = "file-1_0",
+            TenantId = "tenant-1",
+            SpeFileId = "file-1",
+            DocumentId = null, // Orphan file
+            FileName = "Orphan.pdf",
+            ContentVector = _testEmbedding
+        };
+
+        SetupMockSearchClientForIndexing();
+
+        // Act
+        var result = await service.IndexDocumentAsync(document);
+
+        // Assert
+        result.DocumentId.Should().BeNull();
+        result.SpeFileId.Should().Be("file-1");
+        result.FileType.Should().Be("pdf");
     }
 
     #endregion
@@ -370,8 +553,8 @@ public class RagServiceTests
         var service = CreateService();
         var documents = new[]
         {
-            new KnowledgeDocument { Id = "doc-1", TenantId = "tenant-1", Content = "Content 1" },
-            new KnowledgeDocument { Id = "doc-2", TenantId = "tenant-1", Content = "Content 2" }
+            new KnowledgeDocument { Id = "doc-1", TenantId = "tenant-1", SpeFileId = "file-1", Content = "Content 1" },
+            new KnowledgeDocument { Id = "doc-2", TenantId = "tenant-1", SpeFileId = "file-2", Content = "Content 2" }
         };
 
         SetupMockBatchEmbeddings(2);
@@ -382,8 +565,101 @@ public class RagServiceTests
 
         // Assert - Batch embedding should be called
         _openAiClientMock.Verify(
-            x => x.GenerateEmbeddingsAsync(It.Is<IEnumerable<string>>(e => e.Count() == 2), null, It.IsAny<CancellationToken>()),
+            x => x.GenerateEmbeddingsAsync(It.Is<IEnumerable<string>>(e => e.Count() == 2), null, It.IsAny<int?>(), It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    [Fact]
+    public async Task IndexDocumentsBatchAsync_MissingSpeFileId_ThrowsArgumentException()
+    {
+        // Arrange
+        var service = CreateService();
+        var documents = new[]
+        {
+            new KnowledgeDocument { Id = "doc-1", TenantId = "tenant-1", SpeFileId = "file-1", Content = "Content 1" },
+            new KnowledgeDocument { Id = "doc-2", TenantId = "tenant-1", SpeFileId = null, Content = "Content 2" }
+        };
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentNullException>(
+            async () => await service.IndexDocumentsBatchAsync(documents));
+    }
+
+    [Fact]
+    public async Task IndexDocumentsBatchAsync_ExtractsFileTypeForAllDocuments()
+    {
+        // Arrange
+        var service = CreateService();
+        var documents = new[]
+        {
+            new KnowledgeDocument
+            {
+                Id = "doc-1",
+                TenantId = "tenant-1",
+                SpeFileId = "file-1",
+                FileName = "Contract.pdf",
+                ContentVector = _testEmbedding
+            },
+            new KnowledgeDocument
+            {
+                Id = "doc-2",
+                TenantId = "tenant-1",
+                SpeFileId = "file-2",
+                FileName = "Report.docx",
+                ContentVector = _testEmbedding
+            }
+        };
+
+        SetupMockSearchClientForIndexing();
+
+        // Act
+        await service.IndexDocumentsBatchAsync(documents);
+
+        // Assert - All documents should have file type extracted
+        documents[0].FileType.Should().Be("pdf");
+        documents[1].FileType.Should().Be("docx");
+    }
+
+    [Fact]
+    public async Task IndexDocumentsBatchAsync_OrphanFiles_GroupsBySpeFileId()
+    {
+        // Arrange
+        var service = CreateService();
+        var speFileId = "orphan-file-1";
+        var documents = new[]
+        {
+            new KnowledgeDocument
+            {
+                Id = $"{speFileId}_0",
+                TenantId = "tenant-1",
+                SpeFileId = speFileId,
+                DocumentId = null, // Orphan - no DocumentId
+                FileName = "Orphan.pdf",
+                ContentVector = _testEmbedding,
+                ChunkIndex = 0
+            },
+            new KnowledgeDocument
+            {
+                Id = $"{speFileId}_1",
+                TenantId = "tenant-1",
+                SpeFileId = speFileId,
+                DocumentId = null, // Orphan - no DocumentId
+                FileName = "Orphan.pdf",
+                ContentVector = _testEmbedding,
+                ChunkIndex = 1
+            }
+        };
+
+        SetupMockSearchClientForIndexing();
+
+        // Act
+        await service.IndexDocumentsBatchAsync(documents);
+
+        // Assert - Both chunks should have documentVector set (grouped by SpeFileId)
+        documents[0].DocumentVector.Length.Should().BeGreaterThan(0);
+        documents[1].DocumentVector.Length.Should().BeGreaterThan(0);
+        // Both should have the same documentVector (averaged from same file's chunks)
+        documents[0].DocumentVector.ToArray().Should().BeEquivalentTo(documents[1].DocumentVector.ToArray());
     }
 
     #endregion
@@ -448,8 +724,8 @@ public class RagServiceTests
         // Act
         var result = await service.GetEmbeddingAsync("test text");
 
-        // Assert
-        result.Length.Should().Be(1536);
+        // Assert - 3072 dimensions for text-embedding-3-large
+        result.Length.Should().Be(3072);
     }
 
     [Fact]
@@ -464,9 +740,9 @@ public class RagServiceTests
 
         // Assert - Should NOT call OpenAI (cache hit)
         _openAiClientMock.Verify(
-            x => x.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            x => x.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()),
             Times.Never);
-        result.Length.Should().Be(1536);
+        result.Length.Should().Be(3072);
     }
 
     [Fact]
@@ -481,7 +757,7 @@ public class RagServiceTests
 
         // Assert - Should call OpenAI and cache the result
         _openAiClientMock.Verify(
-            x => x.GenerateEmbeddingAsync("test text", null, It.IsAny<CancellationToken>()),
+            x => x.GenerateEmbeddingAsync("test text", null, It.IsAny<int?>(), It.IsAny<CancellationToken>()),
             Times.Once);
         _embeddingCacheMock.Verify(
             x => x.SetEmbeddingForContentAsync("test text", It.IsAny<ReadOnlyMemory<float>>(), It.IsAny<CancellationToken>()),
@@ -541,7 +817,7 @@ public class RagServiceTests
 
         // Assert - Should NOT call OpenAI when cache hits
         _openAiClientMock.Verify(
-            x => x.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            x => x.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -669,7 +945,7 @@ public class RagServiceTests
             .ReturnsAsync((ReadOnlyMemory<float>?)null);
 
         _openAiClientMock
-            .Setup(x => x.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(_testEmbedding);
     }
 
@@ -690,7 +966,7 @@ public class RagServiceTests
         }
 
         _openAiClientMock
-            .Setup(x => x.GenerateEmbeddingsAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.GenerateEmbeddingsAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(embeddings);
     }
 

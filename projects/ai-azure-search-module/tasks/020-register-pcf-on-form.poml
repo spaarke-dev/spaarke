@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="ai-azure-search-module">
+  <metadata>
+    <title>Register PCF on sprk_document form</title>
+    <phase>3: Integration and Ribbon</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>019</dependencies>
+    <blocks>021</blocks>
+    <tags>dataverse, pcf, solution</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Dataverse form configuration - affects production forms</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Register the DocumentRelationshipViewer PCF control on the sprk_document entity form.
+    Configure it as a hidden field that will be invoked by the ribbon button.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse form customization.
+  </role>
+
+  <goal>
+    PCF control registered on sprk_document form, ready to be invoked by ribbon button.
+  </goal>
+
+  <context>
+    <background>
+      The PCF control needs to be on the form so the ribbon button can invoke it.
+      It can be hidden or in a dedicated section since users interact via the modal.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">Use PCF, not webresources</constraint>
+    <constraint source="project">Control should be invokable from ribbon</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Open sprk_document main form in form designer</step>
+    <step order="2">Add a new section for visualization (or use existing)</step>
+    <step order="3">Add the DocumentRelationshipViewer control to a field</step>
+    <step order="4">Configure control properties</step>
+    <step order="5">Save and publish form</step>
+    <step order="6">Verify control renders on form</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">sprk_document form with PCF control</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">PCF control is on sprk_document form</criterion>
+    <criterion testable="true">Control renders without errors when form opens</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+
+  <notes>
+    <completed-date>2026-01-09</completed-date>
+    <summary>
+      Registered DocumentRelationshipViewer PCF control on sprk_document main form.
+      Control added to "Search" tab as virtual control with bound documentId property.
+      Configured tenant ID and API base URL as static values.
+      Control renders with "Document Relationships" header and version v1.0.1 in footer.
+      Placeholder message displayed when no document context is available.
+    </summary>
+    <configuration>
+      - Location: sprk_document main form, Search tab
+      - Binding: documentId bound to table column (sprk_document primary key)
+      - Static values: tenantId, apiBaseUrl configured for dev environment
+      - Control type: Virtual (PCF)
+    </configuration>
+  </notes>
+</task>

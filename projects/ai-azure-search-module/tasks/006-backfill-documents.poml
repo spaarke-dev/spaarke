@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="006" project="ai-azure-search-module">
+  <metadata>
+    <title>Backfill existing documents with documentVector</title>
+    <phase>1: Core Infrastructure</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>none</blocks>
+    <tags>azure-ai, azure-search, migration, worker</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Migration/data task - not core code implementation</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create a migration script or job to backfill existing indexed documents with document-level embeddings.
+    For each document, compute the documentVector by averaging chunk embeddings or generating from summary.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Azure AI Search indexing and batch processing.
+  </role>
+
+  <goal>
+    All existing documents in the Azure AI Search index have populated documentVector fields.
+  </goal>
+
+  <context>
+    <background>
+      Per owner clarification, existing indexed documents should be backfilled with document-level embeddings.
+      This enables visualization for all documents, not just newly indexed ones.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-009">Use existing embedding cache where possible</constraint>
+    <constraint source="project">Use average pooling of chunk embeddings as fallback</constraint>
+    <constraint source="project">Run during off-peak hours for large datasets</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/jobs.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Query Azure AI Search for documents without documentVector</step>
+    <step order="2">For each document, retrieve all chunk embeddings (contentVector)</step>
+    <step order="3">Compute document-level embedding via average pooling</step>
+    <step order="4">Update document in index with computed documentVector</step>
+    <step order="5">Log progress and handle errors gracefully</step>
+    <step order="6">Verify all documents have documentVector populated</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Run .NET console app or script</tool>
+    <tool name="az">Azure CLI for index operations</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/Backfill-DocumentVectors.ps1 or src/server/api/Sprk.Bff.Api/Services/Jobs/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Script/job completes without errors</criterion>
+    <criterion testable="true">Query for documents without documentVector returns 0 results</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

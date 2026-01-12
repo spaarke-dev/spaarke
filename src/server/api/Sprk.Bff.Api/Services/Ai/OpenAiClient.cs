@@ -384,30 +384,38 @@ public class OpenAiClient : IOpenAiClient
 
     /// <summary>
     /// Generate vector embeddings for text content.
-    /// Uses text-embedding-3-small (1536 dimensions) by default.
+    /// Uses configured embedding model and dimensions (default: text-embedding-3-large, 3072 dims).
     /// Protected by circuit breaker - throws OpenAiCircuitBrokenException when open.
     /// </summary>
     /// <param name="text">The text to generate embeddings for.</param>
-    /// <param name="model">Optional model override. Defaults to text-embedding-3-small.</param>
+    /// <param name="model">Optional model override. Defaults to configured EmbeddingModel.</param>
+    /// <param name="dimensions">Optional dimensions override. Defaults to configured EmbeddingDimensions.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Vector embedding as float array.</returns>
     /// <exception cref="OpenAiCircuitBrokenException">Thrown when circuit breaker is open.</exception>
     public async Task<ReadOnlyMemory<float>> GenerateEmbeddingAsync(
         string text,
         string? model = null,
+        int? dimensions = null,
         CancellationToken cancellationToken = default)
     {
-        var deploymentName = model ?? _options.EmbeddingModel ?? "text-embedding-3-small";
+        var deploymentName = model ?? _options.EmbeddingModel;
+        var embeddingDimensions = dimensions ?? _options.EmbeddingDimensions;
         var embeddingClient = _client.GetEmbeddingClient(deploymentName);
 
-        _logger.LogDebug("Generating embedding with model {Model}, TextLength={Length}",
-            deploymentName, text.Length);
+        _logger.LogDebug("Generating embedding with model {Model}, Dimensions={Dims}, TextLength={Length}",
+            deploymentName, embeddingDimensions, text.Length);
 
         try
         {
+            var embeddingOptions = new OpenAI.Embeddings.EmbeddingGenerationOptions
+            {
+                Dimensions = embeddingDimensions
+            };
+
             var response = await _circuitBreaker.ExecuteAsync(async ct =>
             {
-                return await embeddingClient.GenerateEmbeddingAsync(text, cancellationToken: ct);
+                return await embeddingClient.GenerateEmbeddingAsync(text, embeddingOptions, ct);
             }, cancellationToken);
 
             _logger.LogDebug("Embedding generated with model {Model}, Dimensions={Dims}",
@@ -433,27 +441,35 @@ public class OpenAiClient : IOpenAiClient
     /// Protected by circuit breaker - throws OpenAiCircuitBrokenException when open.
     /// </summary>
     /// <param name="texts">The texts to generate embeddings for.</param>
-    /// <param name="model">Optional model override. Defaults to text-embedding-3-small.</param>
+    /// <param name="model">Optional model override. Defaults to configured EmbeddingModel.</param>
+    /// <param name="dimensions">Optional dimensions override. Defaults to configured EmbeddingDimensions.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>List of vector embeddings in same order as input texts.</returns>
     /// <exception cref="OpenAiCircuitBrokenException">Thrown when circuit breaker is open.</exception>
     public async Task<IReadOnlyList<ReadOnlyMemory<float>>> GenerateEmbeddingsAsync(
         IEnumerable<string> texts,
         string? model = null,
+        int? dimensions = null,
         CancellationToken cancellationToken = default)
     {
         var textList = texts.ToList();
-        var deploymentName = model ?? _options.EmbeddingModel ?? "text-embedding-3-small";
+        var deploymentName = model ?? _options.EmbeddingModel;
+        var embeddingDimensions = dimensions ?? _options.EmbeddingDimensions;
         var embeddingClient = _client.GetEmbeddingClient(deploymentName);
 
-        _logger.LogDebug("Generating batch embeddings with model {Model}, Count={Count}",
-            deploymentName, textList.Count);
+        _logger.LogDebug("Generating batch embeddings with model {Model}, Dimensions={Dims}, Count={Count}",
+            deploymentName, embeddingDimensions, textList.Count);
 
         try
         {
+            var embeddingOptions = new OpenAI.Embeddings.EmbeddingGenerationOptions
+            {
+                Dimensions = embeddingDimensions
+            };
+
             var response = await _circuitBreaker.ExecuteAsync(async ct =>
             {
-                return await embeddingClient.GenerateEmbeddingsAsync(textList, cancellationToken: ct);
+                return await embeddingClient.GenerateEmbeddingsAsync(textList, embeddingOptions, ct);
             }, cancellationToken);
 
             var embeddings = response.Value

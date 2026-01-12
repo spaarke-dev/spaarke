@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="ai-azure-search-module">
+  <metadata>
+    <title>Project wrap-up</title>
+    <phase>5: Wrap-up</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>033</dependencies>
+    <blocks></blocks>
+    <tags>wrap-up, documentation</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Wrap-up task - MINIMAL rigor</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Complete project wrap-up activities: update README status, create lessons-learned,
+    archive artifacts, and run repository cleanup.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer.
+  </role>
+
+  <goal>
+    Project properly closed with all artifacts archived and status updated.
+  </goal>
+
+  <context>
+    <background>
+      Project wrap-up ensures knowledge is captured, artifacts are archived,
+      and the repository is clean for the next project.
+    </background>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>projects/ai-azure-search-module/README.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Update README.md status from "In Development" to "Complete"</step>
+    <step order="2">Create lessons-learned.md with:
+      - What went well
+      - What could be improved
+      - Technical decisions that worked
+      - Challenges encountered and solutions
+    </step>
+    <step order="3">Review all task files - ensure all are marked completed</step>
+    <step order="4">Archive any ephemeral working files in notes/</step>
+    <step order="5">Run /repo-cleanup to validate structure</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status to completed</step>
+    <step order="7">Final commit: "feat(ai): complete AI Search &amp; Visualization Module"</step>
+  </steps>
+
+  <tools>
+    <tool name="repo-cleanup">Repository hygiene validation</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-azure-search-module/lessons-learned.md</output>
+    <output type="config">projects/ai-azure-search-module/README.md (status updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">README status shows "Complete"</criterion>
+    <criterion testable="true">All tasks in TASK-INDEX.md marked completed</criterion>
+    <criterion testable="true">lessons-learned.md documents project learnings</criterion>
+    <criterion testable="true">/repo-cleanup passes with no errors</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

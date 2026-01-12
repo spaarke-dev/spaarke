@@ -58,11 +58,19 @@ public class DocumentIntelligenceOptions
 
     /// <summary>
     /// Model deployment name for generating text embeddings.
-    /// Used for RAG vector search. Default: "text-embedding-3-small" (1536 dimensions).
-    /// Options: "text-embedding-3-small" (1536 dims), "text-embedding-3-large" (3072 dims)
+    /// Used for RAG vector search.
+    /// Options: "text-embedding-3-large" (3072 dims, recommended), "text-embedding-3-small" (1536 dims, legacy)
     /// Note: Model name should match Azure OpenAI deployment name.
+    /// MIGRATION: Changing from text-embedding-3-small to text-embedding-3-large for better semantic search quality.
     /// </summary>
-    public string EmbeddingModel { get; set; } = "text-embedding-3-small";
+    public string EmbeddingModel { get; set; } = "text-embedding-3-large";
+
+    /// <summary>
+    /// Vector dimensions for the embedding model.
+    /// Must match the model's native dimensions.
+    /// Uses text-embedding-3-large with 3072 dimensions for optimal quality.
+    /// </summary>
+    public int EmbeddingDimensions { get; set; } = 3072;
 
     /// <summary>
     /// Max tokens for summary output. Higher = longer summaries.

@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task xmlns="urn:spaarke:poml:task:v1">
+  <metadata>
+    <id>063</id>
+    <title>Update DocumentNode for file type icons</title>
+    <phase>5c</phase>
+    <status>completed</status>
+    <priority>medium</priority>
+    <estimate>2h</estimate>
+    <tags>pcf, react, fluent-ui, visualization</tags>
+    <created>2026-01-10</created>
+  </metadata>
+
+  <context>
+    <description>
+      Update DocumentNode component to:
+      - Show appropriate icons based on fileType
+      - Handle orphan file display
+      - Show "File" badge for orphan files
+      Already has getFileTypeIcon function - extend for all types.
+    </description>
+    <relevant-files>
+      <file>src/client/pcf/DocumentRelationshipViewer/DocumentRelationshipViewer/components/DocumentNode.tsx</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-azure-search-module/notes/024-index-schema-unification.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent UI v9 icons and design tokens</constraint>
+    <constraint source="ADR-022">React 16 compatible APIs only</constraint>
+  </constraints>
+
+  <steps>
+    <step id="1">
+      <description>Extend getFileTypeIcon function</description>
+      <details>
+        Add additional file type icons:
+        - xlsx, xls: Table/spreadsheet icon
+        - pptx, ppt: Presentation icon
+        - msg, eml: Mail icon
+        - html, htm: Code icon
+        - zip, rar: Archive icon
+        - mp4, avi: Video icon
+        Use @fluentui/react-icons.
+      </details>
+    </step>
+    <step id="2">
+      <description>Add orphan file visual indicator</description>
+      <details>
+        For nodes where isOrphanFile = true:
+        - Use different border style (dashed?)
+        - Show "Orphan" or "File Only" badge
+        - Use muted color scheme
+      </details>
+    </step>
+    <step id="3">
+      <description>Update node tooltip</description>
+      <details>
+        Enhance tooltip to show:
+        - File name
+        - File type
+        - "No linked document" for orphan files
+        - Similarity score
+      </details>
+    </step>
+    <step id="4">
+      <description>Update compact mode display</description>
+      <details>
+        For compact mode:
+        - Ensure icon correctly reflects file type
+        - Add subtle orphan indicator
+        - Update title tooltip
+      </details>
+    </step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>All file types have appropriate icons</criterion>
+    <criterion>Orphan files visually distinguished</criterion>
+    <criterion>Tooltips show relevant information</criterion>
+    <criterion>Both full and compact modes updated</criterion>
+  </acceptance-criteria>
+
+  <dependencies>
+    <dependency>062</dependency>
+  </dependencies>
+
+  <notes>
+    <completed>2026-01-11</completed>
+    <summary>
+      Updated DocumentNode.tsx with file type icons and orphan file visual indicators:
+
+      1. Extended getFileTypeIcon with new Fluent UI v9 icons:
+         - Table20Regular for xlsx/xls/csv
+         - SlideText20Regular for pptx/ppt
+         - Mail20Regular for msg/eml
+         - Code20Regular for html/htm/xml/json
+         - FolderZip20Regular for zip/rar/7z/tar/gz
+         - Video20Regular for mp4/avi/mov/wmv/mkv
+         - DocumentQuestionMark20Regular for file/unknown types
+
+      2. Added orphan file visual styles:
+         - orphanCard: dashed border, muted background (colorNeutralBackground2)
+         - compactOrphanIcon: dashed border with reduced opacity
+         - "File only" warning badge displayed in footer for orphan files
+
+      3. Updated tooltips:
+         - Compact mode: Shows "(File only)" suffix for orphan files
+         - Full mode: Orphan badge displayed alongside similarity score
+
+      4. Updated conditional styling:
+         - Card className uses three-way conditional: source → orphan → related
+         - Compact icon uses same three-way conditional
+
+      Build: TypeScript compilation succeeds
+      Bundle size reduced from 24.4MB to 6.65MB (tree-shaking improved with specific icon imports)
+
+      Files Modified:
+      - src/client/pcf/DocumentRelationshipViewer/DocumentRelationshipViewer/components/DocumentNode.tsx
+    </summary>
+  </notes>
+</task>

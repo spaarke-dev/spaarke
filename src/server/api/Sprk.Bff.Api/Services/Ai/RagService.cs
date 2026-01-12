@@ -42,12 +42,18 @@ public class RagService : IRagService
     // Semantic configuration name from the index definition
     private const string SemanticConfigurationName = "knowledge-semantic-config";
 
-    // Vector field name and dimensions
-    private const string VectorFieldName = "contentVector";
-    private const int VectorDimensions = 1536;
+    // Vector field name and dimensions (3072-dim text-embedding-3-large)
+    private const string VectorFieldName = "contentVector3072";
+    private const int VectorDimensions = 3072;
 
     // Search field for keyword queries
-    private static readonly string[] SearchFields = ["content", "documentName", "knowledgeSourceName"];
+    private static readonly string[] SearchFields = ["content", "fileName", "knowledgeSourceName"];
+
+    // Supported file extensions for type extraction
+    private static readonly HashSet<string> SupportedFileTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "pdf", "docx", "doc", "xlsx", "xls", "pptx", "ppt", "msg", "eml", "txt", "html", "htm", "rtf", "csv"
+    };
 
     public RagService(
         IKnowledgeDeploymentService deploymentService,
@@ -160,7 +166,7 @@ public class RagService : IRagService
                 {
                     Id = result.Document.Id,
                     DocumentId = result.Document.DocumentId,
-                    DocumentName = result.Document.DocumentName,
+                    DocumentName = result.Document.FileName,
                     Content = result.Document.Content,
                     KnowledgeSourceName = result.Document.KnowledgeSourceName,
                     Score = effectiveScore,
@@ -261,14 +267,29 @@ public class RagService : IRagService
         ArgumentNullException.ThrowIfNull(document);
         ArgumentException.ThrowIfNullOrEmpty(document.TenantId);
 
-        _logger.LogDebug("Indexing document {DocumentId} chunk {ChunkIndex} for tenant {TenantId}",
-            document.DocumentId, document.ChunkIndex, document.TenantId);
+        // Validate speFileId is populated (required for all documents including orphans)
+        ArgumentException.ThrowIfNullOrEmpty(document.SpeFileId, nameof(document.SpeFileId));
+
+        _logger.LogDebug("Indexing document {DocumentId} speFileId {SpeFileId} chunk {ChunkIndex} for tenant {TenantId}",
+            document.DocumentId ?? "(orphan)", document.SpeFileId, document.ChunkIndex, document.TenantId);
+
+        // Ensure file metadata is populated
+        PopulateFileMetadata(document);
 
         // Generate embedding if not provided
         if (document.ContentVector.Length == 0 && !string.IsNullOrEmpty(document.Content))
         {
             var embedding = await _openAiClient.GenerateEmbeddingAsync(document.Content, cancellationToken: cancellationToken);
             document.ContentVector = embedding;
+        }
+
+        // For single-chunk documents, documentVector equals contentVector.
+        // For multi-chunk documents indexed individually, use IndexDocumentsBatchAsync to compute documentVector
+        // by averaging all chunk contentVectors, or run DocumentVectorBackfillService afterward.
+        if (document.DocumentVector.Length == 0 && document.ContentVector.Length > 0 && document.ChunkCount == 1)
+        {
+            document.DocumentVector = document.ContentVector;
+            _logger.LogDebug("Set documentVector = contentVector for single-chunk document speFileId {SpeFileId}", document.SpeFileId);
         }
 
         // Ensure timestamps are set
@@ -320,7 +341,19 @@ public class RagService : IRagService
         var tenantId = documentList[0].TenantId;
         ArgumentException.ThrowIfNullOrEmpty(tenantId);
 
+        // Validate all documents have speFileId (required)
+        foreach (var doc in documentList)
+        {
+            ArgumentException.ThrowIfNullOrEmpty(doc.SpeFileId, nameof(doc.SpeFileId));
+        }
+
         _logger.LogDebug("Batch indexing {Count} documents for tenant {TenantId}", documentList.Count, tenantId);
+
+        // Populate file metadata for all documents
+        foreach (var doc in documentList)
+        {
+            PopulateFileMetadata(doc);
+        }
 
         // Generate embeddings for documents without vectors
         var documentsNeedingEmbeddings = documentList
@@ -335,6 +368,38 @@ public class RagService : IRagService
             for (int i = 0; i < documentsNeedingEmbeddings.Count; i++)
             {
                 documentsNeedingEmbeddings[i].ContentVector = embeddings[i];
+            }
+        }
+
+        // Compute documentVector for each unique file by averaging chunk contentVectors.
+        // For documents with DocumentId, group by DocumentId; for orphan files, group by SpeFileId.
+        // This enables document similarity visualization for the AI Azure Search Module.
+        var documentGroups = documentList
+            .GroupBy(d => d.DocumentId ?? d.SpeFileId)
+            .Where(g => !string.IsNullOrEmpty(g.Key));
+
+        foreach (var group in documentGroups)
+        {
+            var chunkVectors = group
+                .Select(d => d.ContentVector)
+                .Where(v => v.Length > 0)
+                .ToList();
+
+            if (chunkVectors.Count > 0)
+            {
+                var documentVector = ComputeDocumentVector(chunkVectors);
+                if (documentVector.Length > 0)
+                {
+                    foreach (var doc in group)
+                    {
+                        doc.DocumentVector = documentVector;
+                    }
+
+                    var firstDoc = group.First();
+                    _logger.LogDebug(
+                        "Computed documentVector for {Identifier} from {ChunkCount} chunks (isOrphan={IsOrphan})",
+                        group.Key, chunkVectors.Count, firstDoc.DocumentId == null);
+                }
             }
         }
 
@@ -615,6 +680,104 @@ public class RagService : IRagService
     {
         // Escape single quotes for OData filter expressions
         return value.Replace("'", "''");
+    }
+
+    /// <summary>
+    /// Populates file metadata fields (fileType) from fileName if not already set.
+    /// </summary>
+    /// <param name="document">The document to populate metadata for.</param>
+    private static void PopulateFileMetadata(KnowledgeDocument document)
+    {
+        // Extract FileType from FileName if not already set
+        if (string.IsNullOrEmpty(document.FileType))
+        {
+            document.FileType = ExtractFileType(document.FileName);
+        }
+    }
+
+    /// <summary>
+    /// Extracts the file type (extension without dot) from a file name.
+    /// Returns "unknown" if the extension cannot be determined or is not supported.
+    /// </summary>
+    /// <param name="fileName">The file name to extract the type from.</param>
+    /// <returns>Lowercase file extension (e.g., "pdf", "docx") or "unknown".</returns>
+    private static string ExtractFileType(string? fileName)
+    {
+        if (string.IsNullOrEmpty(fileName))
+        {
+            return "unknown";
+        }
+
+        var lastDotIndex = fileName.LastIndexOf('.');
+        if (lastDotIndex < 0 || lastDotIndex == fileName.Length - 1)
+        {
+            return "unknown";
+        }
+
+        var extension = fileName[(lastDotIndex + 1)..].ToLowerInvariant();
+        return SupportedFileTypes.Contains(extension) ? extension : "unknown";
+    }
+
+    /// <summary>
+    /// Compute document-level embedding by averaging chunk contentVectors with L2 normalization.
+    /// This enables document similarity visualization per the AI Azure Search Module design.
+    /// </summary>
+    /// <param name="chunkVectors">Content vectors from all chunks of a document.</param>
+    /// <returns>Normalized averaged document vector, or empty if no valid vectors.</returns>
+    private static ReadOnlyMemory<float> ComputeDocumentVector(IReadOnlyList<ReadOnlyMemory<float>> chunkVectors)
+    {
+        if (chunkVectors.Count == 0)
+        {
+            return ReadOnlyMemory<float>.Empty;
+        }
+
+        // Filter valid vectors (non-empty with correct dimensions)
+        var validVectors = chunkVectors.Where(v => v.Length == VectorDimensions).ToList();
+        if (validVectors.Count == 0)
+        {
+            return ReadOnlyMemory<float>.Empty;
+        }
+
+        // Single vector - return as-is (already normalized by OpenAI)
+        if (validVectors.Count == 1)
+        {
+            return validVectors[0];
+        }
+
+        // Compute average of all chunk vectors
+        var result = new float[VectorDimensions];
+        foreach (var vector in validVectors)
+        {
+            var span = vector.Span;
+            for (int i = 0; i < VectorDimensions; i++)
+            {
+                result[i] += span[i];
+            }
+        }
+
+        var count = validVectors.Count;
+        for (int i = 0; i < VectorDimensions; i++)
+        {
+            result[i] /= count;
+        }
+
+        // L2 normalization for cosine similarity
+        var magnitude = 0f;
+        for (int i = 0; i < VectorDimensions; i++)
+        {
+            magnitude += result[i] * result[i];
+        }
+        magnitude = MathF.Sqrt(magnitude);
+
+        if (magnitude > 0)
+        {
+            for (int i = 0; i < VectorDimensions; i++)
+            {
+                result[i] /= magnitude;
+            }
+        }
+
+        return result;
     }
 
     #endregion

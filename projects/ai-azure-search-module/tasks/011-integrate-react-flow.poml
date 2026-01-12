@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="ai-azure-search-module">
+  <metadata>
+    <title>Integrate React Flow with d3-force layout</title>
+    <phase>2: PCF Control Development</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>012, 013</blocks>
+    <tags>pcf, react, frontend, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Core visualization library integration - code implementation</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Integrate @xyflow/react (React Flow) with d3-force for force-directed graph layout.
+    Configure force simulation to position nodes based on similarity (closer = more similar).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in React Flow and d3-force layout algorithms.
+  </role>
+
+  <goal>
+    React Flow canvas with d3-force layout rendering sample nodes with similarity-based positioning.
+  </goal>
+
+  <context>
+    <background>
+      React Flow provides the canvas; d3-force calculates node positions.
+      Edge length should encode similarity (shorter edges = higher similarity).
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-022">Use React 16 compatible APIs</constraint>
+    <constraint source="project">Edge distance = 200 * (1 - similarity)</constraint>
+    <constraint source="project">Configure forceCollide to prevent node overlap</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>projects/ai-azure-search-module/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add @xyflow/react and d3-force to package.json</step>
+    <step order="2">Create useForceLayout custom hook</step>
+    <step order="3">Configure d3-force simulation with forceLink, forceManyBody, forceCenter, forceCollide</step>
+    <step order="4">Create DocumentGraph component wrapping ReactFlow</step>
+    <step order="5">Implement layout calculation on data change</step>
+    <step order="6">Add sample nodes/edges for testing</step>
+    <step order="7">Verify nodes position based on force simulation</step>
+    <step order="8">npm run build and test</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Package management and build</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/DocumentRelationshipViewer/hooks/useForceLayout.ts</output>
+    <output type="code">src/client/pcf/DocumentRelationshipViewer/components/DocumentGraph.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">React Flow canvas renders</criterion>
+    <criterion testable="true">Nodes position via d3-force simulation</criterion>
+    <criterion testable="true">Edge length reflects similarity value</criterion>
+    <criterion testable="true">Control builds without errors</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+
+  <notes>
+    <note date="2026-01-09">
+      Task completed successfully. Integrated React Flow with d3-force:
+      - Used react-flow-renderer v10.3.17 (React 16 compatible) instead of @xyflow/react (requires React 17+)
+      - Created useForceLayout hook with d3-force simulation (forceLink, forceManyBody, forceCenter, forceCollide)
+      - Edge distance formula: 200 * (1 - similarity) - higher similarity = shorter edges
+      - DocumentGraph component with ReactFlow, Background, Controls, MiniMap
+      - Sample data with 8 nodes (1 source + 7 related) with similarity 0.52-0.92
+      - Bundle size increased to 1.4 MiB (react-flow-renderer + d3-force bundled)
+      - react-flow-renderer deprecation warning expected (v10 needed for React 16)
+    </note>
+  </notes>
+</task>

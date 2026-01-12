@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<manifest>
+  <control namespace="Spaarke.Controls" constructor="DocumentRelationshipViewer" version="1.0.18"
+           display-name-key="Document Relationship Viewer"
+           description-key="Interactive graph visualization of related documents based on vector similarity (v1.0.18)"
+           control-type="virtual">
+
+    <external-service-usage enabled="true">
+      <domain>spe-api-dev-67e2xz.azurewebsites.net</domain>
+      <domain>login.microsoftonline.com</domain>
+    </external-service-usage>
+
+    <!-- Input: Document ID to find relationships for -->
+    <property name="documentId" display-name-key="Document ID" description-key="The GUID of the source document"
+              of-type="SingleLine.Text" usage="bound" required="true" />
+
+    <!-- Input: Tenant ID for multi-tenant routing -->
+    <property name="tenantId" display-name-key="Tenant ID" description-key="Tenant identifier for API routing"
+              of-type="SingleLine.Text" usage="input" required="false" />
+
+    <!-- Input: API Base URL -->
+    <property name="apiBaseUrl" display-name-key="API Base URL" description-key="BFF API base URL"
+              of-type="SingleLine.Text" usage="input" required="false" />
+
+    <!-- Output: Selected document ID when user clicks a node -->
+    <property name="selectedDocumentId" display-name-key="Selected Document" description-key="The document selected by the user"
+              of-type="SingleLine.Text" usage="output" />
+
+    <resources>
+      <code path="index.ts" order="1"/>
+      <!-- Platform-provided libraries (not bundled) -->
+      <platform-library name="React" version="16.14.0" />
+      <platform-library name="Fluent" version="9.46.2" />
+    </resources>
+
+    <feature-usage>
+      <uses-feature name="WebAPI" required="true" />
+      <uses-feature name="Utility" required="true" />
+    </feature-usage>
+  </control>
+</manifest>

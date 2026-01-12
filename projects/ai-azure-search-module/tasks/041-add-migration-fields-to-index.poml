@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task xmlns="urn:spaarke:poml:task:v1">
+  <metadata>
+    <id>041</id>
+    <title>Add migration fields to existing RAG index</title>
+    <phase>5a</phase>
+    <status>completed</status>
+    <priority>high</priority>
+    <estimate>3h</estimate>
+    <tags>azure-search, schema, migration</tags>
+    <created>2026-01-10</created>
+  </metadata>
+
+  <context>
+    <description>
+      Add new fields to the existing RAG index without removing old ones.
+      This enables parallel operation during migration period.
+      Azure AI Search allows adding fields without reindexing.
+    </description>
+    <relevant-files>
+      <file>infrastructure/ai-search/spaarke-knowledge-index-v2.json</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-azure-search-module/notes/024-index-schema-unification.md</file>
+      <file>docs/guides/RAG-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="azure">Cannot change existing field types or remove fields without reindexing</constraint>
+    <constraint source="azure">Can add new fields without data loss</constraint>
+    <constraint source="operations">Index must remain operational during update</constraint>
+  </constraints>
+
+  <steps>
+    <step id="1">
+      <description>Add new fields to existing index</description>
+      <details>
+        Use Azure CLI to update index schema with new fields:
+        - speFileId (String, filterable)
+        - fileType (String, filterable, facetable)
+        - fileName (String, searchable) - parallel to documentName during migration
+        - contentVector3072 (Collection(Edm.Single), 3072 dimensions)
+        - documentVector3072 (Collection(Edm.Single), 3072 dimensions)
+      </details>
+    </step>
+    <step id="2">
+      <description>Verify fields added successfully</description>
+      <details>
+        Query index definition:
+        - az search index show --service-name spaarke-search-dev --name spaarke-knowledge-index
+        - Confirm all new fields present
+        - Confirm existing fields unchanged
+      </details>
+    </step>
+    <step id="3">
+      <description>Test index accepts documents with new fields</description>
+      <details>
+        Create test document with new fields:
+        - POST to index with speFileId, fileType, fileName populated
+        - Verify document indexed successfully
+        - Delete test document
+      </details>
+    </step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>New fields added to existing index without data loss</criterion>
+    <criterion>Existing documents remain accessible</criterion>
+    <criterion>New documents can include new fields</criterion>
+    <criterion>Index search operations continue working</criterion>
+  </acceptance-criteria>
+
+  <dependencies>
+    <dependency>040</dependency>
+  </dependencies>
+</task>
