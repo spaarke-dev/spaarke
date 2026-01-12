@@ -335,10 +335,17 @@ public static class EmailEndpoints
             return Task.FromResult(true);
         }
 
-        // Check for X-Dataverse-Signature header
-        var signature = request.Headers["X-Dataverse-Signature"].FirstOrDefault();
+        // Check for Dataverse WebKey authentication header (authtype=4)
+        // Dataverse sends the WebKey value in x-ms-dynamics-msg-keyvalue header
+        var signature = request.Headers["x-ms-dynamics-msg-keyvalue"].FirstOrDefault();
 
-        // Also check for custom authorization header (HttpHeader auth type)
+        // Fallback to X-Dataverse-Signature header (HMAC signature mode)
+        if (string.IsNullOrEmpty(signature))
+        {
+            signature = request.Headers["X-Dataverse-Signature"].FirstOrDefault();
+        }
+
+        // Also check for custom header (development/testing)
         if (string.IsNullOrEmpty(signature))
         {
             signature = request.Headers["X-Webhook-Secret"].FirstOrDefault();
