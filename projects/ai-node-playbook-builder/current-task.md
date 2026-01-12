@@ -7,15 +7,12 @@
 
 ## Active Task
 
-**Task ID**: none (task 021 just completed)
-**Task File**: —
-**Title**: —
+**Task ID**: 027
+**Task File**: tasks/027-execution-visualization.poml
+**Title**: Add Execution Visualization
 **Phase**: 3: Parallel Execution + Delivery
-**Status**: awaiting-next-task
+**Status**: not-started
 **Started**: —
-
-**Rigor Level**: —
-**Reason**: —
 
 ---
 
@@ -23,90 +20,81 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 021 - Create TemplateEngine |
-| **Step** | COMPLETED |
-| **Status** | completed |
-| **Next Action** | Start task 022, 023, 024, or 025 (all unblocked) |
+| **Task** | 027 - Add Execution Visualization |
+| **Step** | Not started |
+| **Status** | pending |
+| **Next Action** | Begin Step 1 of task 027 |
 
 **To resume**:
 ```
-work on task 022
+continue task 027
 ```
 
 ---
 
 ## Completed Steps
 
-(Reset for next task)
+(Ready for new task)
 
 ---
 
 ## Files Modified This Session
 
-**Task 021**:
-- `src/server/api/Sprk.Bff.Api/Services/Ai/ITemplateEngine.cs` - NEW interface
-- `src/server/api/Sprk.Bff.Api/Services/Ai/TemplateEngine.cs` - NEW implementation (Handlebars.NET)
-- `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/TemplateEngineTests.cs` - NEW unit tests (28 tests)
-- `src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj` - Added Handlebars.Net 2.1.6
-- `src/server/api/Sprk.Bff.Api/Program.cs` - Registered ITemplateEngine in DI
+**Previous Session (022-025)**:
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/CreateTaskNodeExecutor.cs` - NEW executor
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/SendEmailNodeExecutor.cs` - NEW executor
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/UpdateRecordNodeExecutor.cs` - NEW executor
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/DeliverOutputNodeExecutor.cs` - NEW executor
+- Unit tests for all 4 executors
+- Program.cs - DI registration
+
+**Task 026 Files**:
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Delivery/WordTemplateService.cs` - NEW service
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Delivery/EmailTemplateService.cs` - NEW service
+- `src/server/api/Sprk.Bff.Api/Program.cs` - Added DI registrations
 
 ---
 
 ## Key Decisions Made
 
-**Task 021 (completed)**:
-- Used Handlebars.NET 2.1.6 (most popular .NET Handlebars library)
-- Configured NoEscape=true (not rendering HTML)
-- Configured ThrowOnUnresolvedBindingExpression=false for graceful missing variable handling
-- Registered as Singleton (thread-safe, stateless)
-- Returns root variable name for nested access (e.g., "node" from "node.output.field")
-
-**Previous Session (020 completed)**:
-- Completed parallel execution with batch-based Task.WhenAll
-- SemaphoreSlim throttling (DefaultMaxParallelNodes = 3)
-- Exponential backoff on 429 rate limit responses
+**Task 026**:
+- Created separate WordTemplateService and EmailTemplateService in Services/Ai/Delivery/
+- Used ITemplateEngine for consistent placeholder rendering across Word and Email templates
+- EmailTemplateService converts Dataverse {!variable} syntax to {{variable}} for TemplateEngine
+- Services registered as Singleton in Program.cs
 
 ---
 
 ## Blocked Items
 
-None - Tasks 022, 023, 024, 025 are now unblocked by task 021 completion.
+None.
 
 ---
 
 ## Knowledge Files To Load
 
-For delivery node executors (022-025):
-- `.claude/adr/ADR-016-ai-rate-limits.md` - Rate limit handling
-- `.claude/patterns/api/resilience.md` - Resilience patterns
-- `.claude/constraints/api.md` - API constraints
+For Execution Visualization (027):
+- `src/client/pcf/CLAUDE.md` - PCF development patterns
+- `.claude/constraints/pcf.md` - PCF constraints
 
 ---
 
 ## Applicable ADRs
 
-- ADR-016: AI Rate Limits (rate limit handling with backoff)
+- ADR-006: PCF over webresources
+- ADR-021: Fluent UI v9 Design System
+- ADR-022: PCF Platform Libraries (React 16)
 
 ---
 
 ## Session Notes
 
-### Phase 1 Complete
-All Phase 1 tasks (001-009) completed.
-
-### Phase 2 Complete
-All Phase 2 tasks (010-019) completed.
-
-### Phase 2.5 Complete (Task 019a)
-- Migrated PCF from iframe + React 18 to direct PCF + React 16
-- Used react-flow-renderer v10 (React 16 compatible)
-- Deployed v2.4.0 with all UI fixes
-- Eliminated postMessage complexity
-
 ### Phase 3 Progress
 - Task 020: Parallel execution implemented ✅
 - Task 021: TemplateEngine implemented ✅
-- Next: Tasks 022-025 (delivery node executors)
+- Tasks 022-025: Delivery node executors ✅
+- Task 026: Power Apps Integration ✅
+- Task 027: Execution Visualization (next)
 
 ---
 

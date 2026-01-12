@@ -360,6 +360,10 @@ if (analysisEnabled && documentIntelligenceEnabled)
     // Template Engine - Handlebars.NET for variable substitution in prompts and delivery templates
     builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.ITemplateEngine, Sprk.Bff.Api.Services.Ai.TemplateEngine>();
 
+    // Power Apps Template Services - Word document and Email template integration (Task 026)
+    builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Delivery.IWordTemplateService, Sprk.Bff.Api.Services.Ai.Delivery.WordTemplateService>();
+    builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Delivery.IEmailTemplateService, Sprk.Bff.Api.Services.Ai.Delivery.EmailTemplateService>();
+
     // Delivery Node Executors - Phase 3 delivery actions (CreateTask, SendEmail, UpdateRecord, DeliverOutput)
     builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.CreateTaskNodeExecutor>();
     builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.SendEmailNodeExecutor>();

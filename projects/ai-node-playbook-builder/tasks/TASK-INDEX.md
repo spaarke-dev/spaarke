@@ -68,11 +68,11 @@ See: [Architecture Refactor Documentation](../notes/architecture/ARCHITECTURE-RE
 |------|-------|--------|---------|------|
 | 020 | Implement Parallel Execution | :white_check_mark: | 019a | bff-api, orchestration |
 | 021 | Create TemplateEngine | :white_check_mark: | 020 | bff-api, service |
-| 022 | Create CreateTaskNodeExecutor | :white_large_square: | 021 | bff-api, executor |
-| 023 | Create SendEmailNodeExecutor | :white_large_square: | 021 | bff-api, executor |
-| 024 | Create UpdateRecordNodeExecutor | :white_large_square: | 021 | bff-api, executor |
-| 025 | Create DeliverOutputNodeExecutor | :white_large_square: | 021 | bff-api, executor |
-| 026 | Implement Power Apps Integration | :white_large_square: | 025 | bff-api, integration |
+| 022 | Create CreateTaskNodeExecutor | :white_check_mark: | 021 | bff-api, executor |
+| 023 | Create SendEmailNodeExecutor | :white_check_mark: | 021 | bff-api, executor |
+| 024 | Create UpdateRecordNodeExecutor | :white_check_mark: | 021 | bff-api, executor |
+| 025 | Create DeliverOutputNodeExecutor | :white_check_mark: | 021 | bff-api, executor |
+| 026 | Implement Power Apps Integration | :white_check_mark: | 025 | bff-api, integration |
 | 027 | Add Execution Visualization | :white_large_square: | 020 | frontend, react |
 | 028 | Phase 3 Integration Tests | :white_large_square: | 027 | testing |
 | 029 | Phase 3 Deployment | :white_large_square: | 028 | deploy |
