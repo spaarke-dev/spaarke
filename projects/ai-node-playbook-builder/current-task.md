@@ -7,9 +7,9 @@
 
 ## Active Task
 
-**Task ID**: 027
-**Task File**: tasks/027-execution-visualization.poml
-**Title**: Add Execution Visualization
+**Task ID**: 028
+**Task File**: tasks/028-phase3-integration-tests.poml
+**Title**: Phase 3 Integration Tests
 **Phase**: 3: Parallel Execution + Delivery
 **Status**: not-started
 **Started**: —
@@ -20,14 +20,14 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 027 - Add Execution Visualization |
+| **Task** | 028 - Phase 3 Integration Tests |
 | **Step** | Not started |
 | **Status** | pending |
-| **Next Action** | Begin Step 1 of task 027 |
+| **Next Action** | Begin Step 1 of task 028 |
 
 **To resume**:
 ```
-continue task 027
+continue task 028
 ```
 
 ---
@@ -40,28 +40,27 @@ continue task 027
 
 ## Files Modified This Session
 
-**Previous Session (022-025)**:
-- `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/CreateTaskNodeExecutor.cs` - NEW executor
-- `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/SendEmailNodeExecutor.cs` - NEW executor
-- `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/UpdateRecordNodeExecutor.cs` - NEW executor
-- `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/DeliverOutputNodeExecutor.cs` - NEW executor
-- Unit tests for all 4 executors
-- Program.cs - DI registration
-
-**Task 026 Files**:
-- `src/server/api/Sprk.Bff.Api/Services/Ai/Delivery/WordTemplateService.cs` - NEW service
-- `src/server/api/Sprk.Bff.Api/Services/Ai/Delivery/EmailTemplateService.cs` - NEW service
-- `src/server/api/Sprk.Bff.Api/Program.cs` - Added DI registrations
+**Task 027 Files**:
+- `src/client/pcf/PlaybookBuilderHost/control/stores/executionStore.ts` - NEW execution state store
+- `src/client/pcf/PlaybookBuilderHost/control/hooks/useExecutionStream.ts` - NEW SSE hook
+- `src/client/pcf/PlaybookBuilderHost/control/hooks/index.ts` - NEW barrel export
+- `src/client/pcf/PlaybookBuilderHost/control/components/Execution/ExecutionOverlay.tsx` - NEW overlay component
+- `src/client/pcf/PlaybookBuilderHost/control/components/Execution/index.ts` - NEW barrel export
+- `src/client/pcf/PlaybookBuilderHost/control/components/index.ts` - Added Execution exports
+- `src/client/pcf/PlaybookBuilderHost/control/stores/index.ts` - Added executionStore exports
+- `src/client/pcf/PlaybookBuilderHost/control/components/BuilderLayout.tsx` - Integrated ExecutionOverlay
 
 ---
 
 ## Key Decisions Made
 
-**Task 026**:
-- Created separate WordTemplateService and EmailTemplateService in Services/Ai/Delivery/
-- Used ITemplateEngine for consistent placeholder rendering across Word and Email templates
-- EmailTemplateService converts Dataverse {!variable} syntax to {{variable}} for TemplateEngine
-- Services registered as Singleton in Program.cs
+**Task 027**:
+- Created separate executionStore (Zustand) for execution state, not polluting canvasStore
+- ExecutionOverlay positioned absolutely over canvas with pointer-events: none for click-through
+- NodeExecutionBadge component for individual node status badges
+- SSE connection via useExecutionStream hook with EventSource API
+- Status bar shows real-time progress, stop button, and metrics
+- Metrics panel shows completed/failed/running counts, tokens used, duration
 
 ---
 
@@ -73,28 +72,27 @@ None.
 
 ## Knowledge Files To Load
 
-For Execution Visualization (027):
-- `src/client/pcf/CLAUDE.md` - PCF development patterns
-- `.claude/constraints/pcf.md` - PCF constraints
+For Phase 3 Integration Tests (028):
+- `.claude/constraints/testing.md` - Testing constraints
 
 ---
 
 ## Applicable ADRs
 
-- ADR-006: PCF over webresources
-- ADR-021: Fluent UI v9 Design System
-- ADR-022: PCF Platform Libraries (React 16)
+- Testing patterns from codebase
 
 ---
 
 ## Session Notes
 
 ### Phase 3 Progress
-- Task 020: Parallel execution implemented ✅
-- Task 021: TemplateEngine implemented ✅
-- Tasks 022-025: Delivery node executors ✅
-- Task 026: Power Apps Integration ✅
-- Task 027: Execution Visualization (next)
+- Task 020: Parallel execution implemented
+- Task 021: TemplateEngine implemented
+- Tasks 022-025: Delivery node executors
+- Task 026: Power Apps Integration
+- Task 027: Execution Visualization
+- Task 028: Phase 3 Integration Tests (next)
+- Task 029: Phase 3 Deployment
 
 ---
 

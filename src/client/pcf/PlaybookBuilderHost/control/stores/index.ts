@@ -17,3 +17,12 @@ export {
   type ToolItem,
   type ActionTypeCapabilities,
 } from './scopeStore';
+
+export {
+  useExecutionStore,
+  type NodeExecutionStatus,
+  type ExecutionEventType,
+  type NodeExecutionState,
+  type ExecutionState,
+  type ExecutionEvent,
+} from './executionStore';

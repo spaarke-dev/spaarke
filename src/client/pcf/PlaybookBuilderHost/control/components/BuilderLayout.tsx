@@ -29,7 +29,9 @@ import {
 } from '@fluentui/react-icons';
 import { Canvas } from './Canvas';
 import { PropertiesPanel } from './Properties';
+import { ExecutionOverlay } from './Execution';
 import { useCanvasStore, type PlaybookNodeType } from '../stores/canvasStore';
+import { useExecutionStore } from '../stores/executionStore';
 
 const useStyles = makeStyles({
   container: {
@@ -198,6 +200,9 @@ export const BuilderLayout = React.memo(function BuilderLayout() {
   // Track selected node for auto-opening properties panel
   const selectedNodeId = useCanvasStore((state) => state.selectedNodeId);
 
+  // Execution state
+  const stopExecution = useExecutionStore((state) => state.stopExecution);
+
   // Auto-open properties panel when a node is selected
   useEffect(() => {
     if (selectedNodeId) {
@@ -276,6 +281,9 @@ export const BuilderLayout = React.memo(function BuilderLayout() {
         />
 
         <Canvas />
+
+        {/* Execution Overlay */}
+        <ExecutionOverlay onStop={stopExecution} />
       </main>
 
       {/* Right Sidebar - Properties Panel */}
