@@ -163,15 +163,15 @@ public class AttachmentProcessingResult
         int filtered,
         IReadOnlyList<AttachmentDocumentRecord> documents,
         IReadOnlyList<FilteredAttachmentInfo> filteredAttachments) => new()
-    {
-        Success = true,
-        TotalAttachments = total,
-        FilteredCount = filtered,
-        ProcessedCount = documents.Count,
-        FailedCount = total - filtered - documents.Count,
-        Documents = documents,
-        FilteredAttachments = filteredAttachments
-    };
+        {
+            Success = true,
+            TotalAttachments = total,
+            FilteredCount = filtered,
+            ProcessedCount = documents.Count,
+            FailedCount = total - filtered - documents.Count,
+            Documents = documents,
+            FilteredAttachments = filteredAttachments
+        };
 
     /// <summary>
     /// Create a failure result.
