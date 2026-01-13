@@ -97,3 +97,9 @@ dev/ai-workspace/active-context/*.tmp
 dev/ai-workspace/sessions/*/temp/
 # Claude Code local settings (contains secrets)
 .claude/settings.local.json
+
+# Local debugging/testing scripts
+scripts/Check-Registration-*.ps1
+scripts/Decode-Token.ps1
+scripts/Test-BffApi-*.ps1
+scripts/Update-Registration.ps1
