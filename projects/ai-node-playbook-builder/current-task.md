@@ -22,8 +22,13 @@
 - Canvas UI fix (absolute positioning)
 - Documentation updates (5 guides)
 
+**PCF Deployment (2026-01-13 11:43):**
+- Rebuilt with UI fix: 235 KB bundle
+- Deployed via Manual Pack Fallback
+- Published to SPAARKE DEV 1
+
 ### Critical Context
-Phase 4 COMPLETE and COMMITTED. All documentation updated with deployment lessons learned (icon tree-shaking, pac pcf push dev mode, orphaned controls, styles.css). Ready to begin Phase 5: Production Hardening with Task 040.
+Phase 4 COMPLETE, COMMITTED, and DEPLOYED. Canvas UI fix (absolute positioning) deployed. All documentation updated with deployment lessons. Ready to begin Phase 5: Production Hardening with Task 040.
 
 ---
 
