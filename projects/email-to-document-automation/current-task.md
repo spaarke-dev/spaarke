@@ -1,6 +1,6 @@
 # Current Task State - Email-to-Document Automation
 
-> **Last Updated**: 2026-01-13 16:45 (by context-handoff)
+> **Last Updated**: 2026-01-13 17:30 (by context-handoff)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -10,9 +10,52 @@
 | Field | Value |
 |-------|-------|
 | **Task** | Email-to-Document Automation - Phase 2 |
-| **Step** | Documentation complete, ready for user testing |
-| **Status** | waiting-on-user |
-| **Next Action** | User: Test email to verify `sprk_filepath` is populated. Then start Phase A (attachment processing). |
+| **Step** | Testing revealed SPE permission issue - Option B required for MVP |
+| **Status** | ready-for-implementation |
+| **Next Action** | Implement Option B: API-proxied download endpoint with Dataverse authorization |
+
+### Testing Results (2026-01-13)
+
+✅ **Working:**
+- `sprk_filepath` is populated correctly with SPE WebUrl
+- File preview works (Graph Preview API returns ephemeral authenticated URL)
+- End-to-end flow: Email → .eml → SPE upload → Document record ✅
+
+❌ **Issue Discovered:**
+- Users CANNOT open .eml files: "ralph.schroeder@spaarke.com does not have permission to access this resource"
+- Files uploaded via PCF (OBO) work fine
+- Files uploaded via app-only auth (email processing) fail
+
+### Root Cause Analysis
+
+**App-Only vs OBO Authentication:**
+- PCF uploads use OBO (On-Behalf-Of) → User has SPE container permissions automatically
+- Email processing uses app-only auth → Only the app has SPE permissions, not users
+- Graph Preview API returns pre-authenticated ephemeral URLs (works regardless of user permissions)
+- Direct WebUrl access requires actual SPE container permissions (fails for app-uploaded files)
+
+### Decision: Option B for MVP ✅
+
+**Implement API-proxied download endpoint** instead of:
+- ❌ Option A (field security on `sprk_filepath`) - too simple, no audit trail
+- ❌ Quick fix (grant container permissions) - duplicates permission management
+
+**Why Option B:**
+1. **Audit trail** - Log all downloads for compliance (legal emails)
+2. **Single source of truth** - Dataverse controls all authorization
+3. **Future-proof** - Works for AppOnlyAnalysisService, bulk imports, any non-user uploads
+4. **Granular control** - Can differentiate read vs download permissions if needed
+
+### Immediate Next Steps (Updated)
+
+1. **Option B (MVP Required)**: Create API-proxied download endpoint
+   - `GET /api/documents/{documentId}/download`
+   - Validate Dataverse authorization
+   - Use app-only `SpeFileStore.DownloadFileAsync()` to proxy file
+   - Log download for audit trail
+2. **Phase A**: Implement attachment processing (extract, upload, create child Documents)
+3. **Phase B**: Create AppOnlyAnalysisService for background AI analysis
+4. **Phase C**: Create Email Analysis Playbook
 
 ### Documentation Update ✅ COMPLETE
 
@@ -28,13 +71,6 @@ Updated the following docs to document the email processing approach and bug fix
 - WCF date format handling (`/Date(123)/`) for webhook payloads
 - DefaultContainerId is Drive ID format (`b!xxx`), not raw GUID
 - Planned AppOnlyAnalysisService architecture (separate from OBO AnalysisOrchestrationService)
-
-### Immediate Next Steps
-
-1. **User Testing**: Test email to verify `sprk_filepath` is populated correctly
-2. **Phase A**: Implement attachment processing (extract, upload, create child Documents)
-3. **Phase B**: Create AppOnlyAnalysisService for background AI analysis
-4. **Phase C**: Create Email Analysis Playbook
 
 ### Files Modified This Session
 **Code Changes (Earlier):**
@@ -178,11 +214,18 @@ Email Webhook Triggers
 |--------|--------|
 | Code Implementation | ✅ 33/33 original tasks complete |
 | Azure Deployment | ✅ Deployed with FilePath fix |
-| End-to-End Flow | ✅ Working |
-| FilePath URL (Issue #1) | ✅ Deployed, needs user testing |
+| End-to-End Flow | ✅ Working (upload + preview) |
+| FilePath URL (Issue #1) | ✅ Deployed and verified working |
 | Documentation Update | ✅ Complete - all docs updated |
+| **Option B: API-Proxied Download** | 🔴 **MVP REQUIRED** - Users can't open app-uploaded files |
 | Attachment Processing (Issue #2) | ❌ Design complete, needs implementation |
 | AI Analysis (Issue #3) | ❌ Architecture defined, needs implementation |
+
+### MVP Priority Order
+1. 🔴 **Option B** - API-proxied download endpoint (blocks user access to .eml files)
+2. Phase A - Attachment processing
+3. Phase B - AppOnlyAnalysisService
+4. Phase C - Email Analysis Playbook
 
 ---
 
