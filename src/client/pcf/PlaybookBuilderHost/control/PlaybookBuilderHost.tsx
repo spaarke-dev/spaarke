@@ -9,7 +9,7 @@
  * - Canvas state managed by Zustand store
  * - Dirty state tracked and exposed to PCF host
  *
- * @version 2.6.0
+ * @version 2.7.0
  */
 
 import * as React from 'react';
@@ -21,14 +21,15 @@ import {
   Input,
   Textarea,
   Label,
+  Tooltip,
   makeStyles,
   tokens,
   shorthands,
 } from '@fluentui/react-components';
-import { Save20Regular } from '@fluentui/react-icons';
+import { Save20Regular, DocumentMultiple20Regular } from '@fluentui/react-icons';
 import { ReactFlowProvider } from 'react-flow-renderer';
-import { BuilderLayout } from './components';
-import { useCanvasStore } from './stores';
+import { BuilderLayout, TemplateLibraryDialog } from './components';
+import { useCanvasStore, useTemplateStore } from './stores';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -39,6 +40,7 @@ export interface PlaybookBuilderHostProps {
   playbookName: string;
   playbookDescription?: string;
   canvasJson: string;
+  apiBaseUrl?: string;
   onDirtyChange: (isDirty: boolean) => void;
   onSave: (canvasJson: string, name: string, description: string) => void;
 }
@@ -129,6 +131,7 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
   playbookName,
   playbookDescription = '',
   canvasJson,
+  apiBaseUrl = '',
   onDirtyChange,
   onSave,
 }) => {
@@ -141,6 +144,14 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
   const [name, setName] = useState(playbookName || '');
   const [description, setDescription] = useState(playbookDescription || '');
   const [fieldsModified, setFieldsModified] = useState(false);
+
+  // Template library dialog state
+  const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
+
+  // Template store - initialize API base URL
+  const { setApiBaseUrl } = useTemplateStore((state) => ({
+    setApiBaseUrl: state.setApiBaseUrl,
+  }));
 
   // Get store state and actions
   const { isDirty: canvasDirty, loadCanvas, getCanvasJson, clearDirty } = useCanvasStore((state) => ({
@@ -176,6 +187,13 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
       setIsLoading(false);
     }
   }, [canvasJson, loadCanvas, playbookId, playbookName]);
+
+  // Initialize template store API URL
+  useEffect(() => {
+    if (apiBaseUrl) {
+      setApiBaseUrl(apiBaseUrl);
+    }
+  }, [apiBaseUrl, setApiBaseUrl]);
 
   // Notify parent of dirty state changes
   useEffect(() => {
@@ -229,6 +247,45 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
       setIsLoading(false);
     }
   }, [canvasJson, loadCanvas]);
+
+  // Handle template library open
+  const handleOpenTemplateLibrary = useCallback(() => {
+    setTemplateDialogOpen(true);
+  }, []);
+
+  // Handle template library close
+  const handleCloseTemplateLibrary = useCallback(() => {
+    setTemplateDialogOpen(false);
+  }, []);
+
+  // Handle clone success - navigate to the cloned playbook
+  const handleCloneSuccess = useCallback((clonedId: string, clonedName: string) => {
+    setTemplateDialogOpen(false);
+    console.info('[PlaybookBuilderHost] Template cloned successfully', { clonedId, clonedName });
+
+    // Navigate to the cloned playbook record
+    // In Dataverse, we use Xrm.Navigation.openForm to navigate to records
+    try {
+      const Xrm = (window as unknown as { Xrm?: { Navigation?: { openForm: (options: unknown) => void } } }).Xrm;
+      if (Xrm?.Navigation?.openForm) {
+        Xrm.Navigation.openForm({
+          entityName: 'sprk_analysisplaybook',
+          entityId: clonedId,
+        });
+      } else {
+        // Fallback: reload the page with the new record ID in URL
+        const currentUrl = window.location.href;
+        const newUrl = currentUrl.replace(/id=[^&]+/, `id=${clonedId}`);
+        if (newUrl !== currentUrl) {
+          window.location.href = newUrl;
+        } else {
+          console.warn('[PlaybookBuilderHost] Could not navigate to cloned playbook - Xrm.Navigation not available');
+        }
+      }
+    } catch (err) {
+      console.error('[PlaybookBuilderHost] Failed to navigate to cloned playbook:', err);
+    }
+  }, []);
 
   // Error state
   if (error) {
@@ -297,6 +354,17 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
               Unsaved changes
             </Text>
           )}
+          {apiBaseUrl && (
+            <Tooltip content="Browse playbook templates" relationship="description">
+              <Button
+                appearance="subtle"
+                icon={<DocumentMultiple20Regular />}
+                onClick={handleOpenTemplateLibrary}
+              >
+                Templates
+              </Button>
+            </Tooltip>
+          )}
           <Button
             appearance="primary"
             icon={<Save20Regular />}
@@ -314,8 +382,15 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
           <BuilderLayout />
         </ReactFlowProvider>
         {/* Version badge in corner */}
-        <Text className={styles.versionBadge}>v2.6.0</Text>
+        <Text className={styles.versionBadge}>v2.7.0</Text>
       </div>
+
+      {/* Template Library Dialog */}
+      <TemplateLibraryDialog
+        open={templateDialogOpen}
+        onClose={handleCloseTemplateLibrary}
+        onCloneSuccess={handleCloneSuccess}
+      />
     </div>
   );
 };

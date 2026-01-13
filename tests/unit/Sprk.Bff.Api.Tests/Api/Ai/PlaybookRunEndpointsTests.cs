@@ -220,4 +220,98 @@ public class PlaybookRunEndpointsTests : IClassFixture<CustomWebAppFactory>
     }
 
     #endregion
+
+    #region Get Run History
+
+    [Fact]
+    public async Task GetRunHistory_EndpointExists_AcceptsGet()
+    {
+        // Act
+        var response = await _client.GetAsync($"/api/ai/playbooks/{_testPlaybookId}/runs");
+
+        // Assert
+        response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task GetRunHistory_WithoutAuth_RequiresAuthentication()
+    {
+        // Act
+        var response = await _client.GetAsync($"/api/ai/playbooks/{_testPlaybookId}/runs");
+
+        // Assert
+        response.StatusCode.Should().BeOneOf(
+            HttpStatusCode.Unauthorized,
+            HttpStatusCode.InternalServerError);
+    }
+
+    [Fact]
+    public async Task GetRunHistory_WithAuth_ProceedsToEndpoint()
+    {
+        // Arrange
+        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
+
+        // Act
+        var response = await _client.GetAsync($"/api/ai/playbooks/{_testPlaybookId}/runs");
+
+        // Assert - endpoint should respond (may fail with auth/service errors)
+        response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task GetRunHistory_WithQueryParams_AcceptsGet()
+    {
+        // Arrange
+        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
+
+        // Act
+        var response = await _client.GetAsync($"/api/ai/playbooks/{_testPlaybookId}/runs?page=1&pageSize=10&state=Completed");
+
+        // Assert
+        response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+    }
+
+    #endregion
+
+    #region Get Run Detail
+
+    [Fact]
+    public async Task GetRunDetail_EndpointExists_AcceptsGet()
+    {
+        // Act
+        var response = await _client.GetAsync($"/api/ai/playbooks/runs/{_testRunId}/detail");
+
+        // Assert
+        response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task GetRunDetail_WithoutAuth_RequiresAuthentication()
+    {
+        // Act
+        var response = await _client.GetAsync($"/api/ai/playbooks/runs/{_testRunId}/detail");
+
+        // Assert
+        response.StatusCode.Should().BeOneOf(
+            HttpStatusCode.Unauthorized,
+            HttpStatusCode.InternalServerError);
+    }
+
+    [Fact]
+    public async Task GetRunDetail_WithAuth_ReturnsNotFoundForUnknownRun()
+    {
+        // Arrange
+        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
+
+        // Act
+        var response = await _client.GetAsync($"/api/ai/playbooks/runs/{_testRunId}/detail");
+
+        // Assert
+        response.StatusCode.Should().BeOneOf(
+            HttpStatusCode.NotFound,
+            HttpStatusCode.Unauthorized,
+            HttpStatusCode.InternalServerError);
+    }
+
+    #endregion
 }

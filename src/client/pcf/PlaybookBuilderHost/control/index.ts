@@ -260,6 +260,7 @@ export class PlaybookBuilderHost
       const playbookName = context.parameters.playbookName?.raw || '';
       const playbookDescription = context.parameters.playbookDescription?.raw || '';
       const canvasJson = context.parameters.canvasJson?.raw || '';
+      const apiBaseUrl = context.parameters.apiBaseUrl?.raw || '';
 
       logInfo('Rendering with context', {
         playbookId,
@@ -277,6 +278,7 @@ export class PlaybookBuilderHost
             playbookName,
             playbookDescription,
             canvasJson,
+            apiBaseUrl,
             onDirtyChange: this.handleDirtyChange.bind(this),
             onSave: this.handleSave.bind(this),
           })

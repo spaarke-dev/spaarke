@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="PlaybookBuilderHost" version="2.2.0" display-name-key="Playbook Builder Host" description-key="Node-based Playbook Builder with visual canvas for AI workflow design" control-type="virtual" api-version="1.3.18">
+  <control namespace="Spaarke.PCF" constructor="PlaybookBuilderHost" version="2.7.0" display-name-key="Playbook Builder Host" description-key="Node-based Playbook Builder with visual canvas for AI workflow design" control-type="standard" api-version="1.3.18">
     <external-service-usage enabled="false"/>
     <property name="playbookId" display-name-key="Playbook ID" description-key="Optional fallback - record ID is auto-detected from form context" of-type="SingleLine.Text" usage="input" required="false"/>
-    <property name="playbookName" display-name-key="Playbook Name" description-key="Display name of the playbook" of-type="SingleLine.Text" usage="input" required="false"/>
+    <property name="playbookName" display-name-key="Playbook Name" description-key="Name of the playbook (sprk_name)" of-type="SingleLine.Text" usage="bound" required="false"/>
+    <property name="playbookDescription" display-name-key="Playbook Description" description-key="Description of the playbook (sprk_description)" of-type="Multiple" usage="bound" required="false"/>
     <property name="canvasJson" display-name-key="Canvas JSON" description-key="Serialized JSON of the canvas nodes and edges" of-type="Multiple" usage="bound" required="false"/>
+    <property name="apiBaseUrl" display-name-key="API Base URL" description-key="Base URL for BFF API (e.g., https://spe-api-dev.azurewebsites.net)" of-type="SingleLine.Text" usage="input" required="false"/>
     <property name="isDirty" display-name-key="Is Dirty" description-key="True when canvas has unsaved changes" of-type="TwoOptions" usage="output" required="false"/>
     <resources>
       <code path="bundle.js" order="1"/>

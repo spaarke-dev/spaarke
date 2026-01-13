@@ -89,10 +89,10 @@ See: [Architecture Refactor Documentation](../notes/architecture/ARCHITECTURE-RE
 | 033 | Add Model Selection UI | :white_check_mark: | 032 | frontend, react |
 | 034 | Implement Confidence Scores | :white_check_mark: | 029 | bff-api, ai |
 | 035 | Add Confidence UI Display | :white_check_mark: | 034 | frontend, react |
-| 036 | Create Playbook Templates Feature | :white_large_square: | 029 | bff-api, feature |
-| 037 | Add Template Library UI | :white_large_square: | 036 | frontend, react |
-| 038 | Implement Execution History | :white_large_square: | 029 | bff-api, feature |
-| 039 | Phase 4 Tests and Deployment | :white_large_square: | 038 | testing, deploy |
+| 036 | Create Playbook Templates Feature | :white_check_mark: | 029 | bff-api, feature |
+| 037 | Add Template Library UI | :white_check_mark: | 036 | frontend, react |
+| 038 | Implement Execution History | :white_check_mark: | 029 | bff-api, feature |
+| 039 | Phase 4 Tests and Deployment | :white_check_mark: | 038 | testing, deploy |
 
 ---
 

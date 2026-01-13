@@ -263,6 +263,151 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         return Task.FromResult(false);
     }
 
+    /// <inheritdoc />
+    public Task<Models.Ai.PlaybookRunHistoryResponse> GetRunHistoryAsync(
+        Guid playbookId,
+        int page = 1,
+        int pageSize = 20,
+        string? stateFilter = null,
+        CancellationToken cancellationToken = default)
+    {
+        // Filter runs for this playbook
+        var runs = _activeRuns.Values
+            .Where(r => r.PlaybookId == playbookId);
+
+        // Apply state filter
+        if (!string.IsNullOrWhiteSpace(stateFilter) &&
+            Enum.TryParse<PlaybookRunState>(stateFilter, ignoreCase: true, out var state))
+        {
+            runs = runs.Where(r => r.State == state);
+        }
+
+        // Order by start time descending (most recent first)
+        var orderedRuns = runs
+            .OrderByDescending(r => r.StartedAt)
+            .ToList();
+
+        var totalCount = orderedRuns.Count;
+
+        // Apply pagination
+        var normalizedPageSize = Math.Clamp(pageSize, 1, 100);
+        var skip = (Math.Max(1, page) - 1) * normalizedPageSize;
+
+        var pageItems = orderedRuns
+            .Skip(skip)
+            .Take(normalizedPageSize)
+            .Select(r => ConvertToRunSummary(r))
+            .ToArray();
+
+        var response = new Models.Ai.PlaybookRunHistoryResponse
+        {
+            Items = pageItems,
+            TotalCount = totalCount,
+            Page = page,
+            PageSize = normalizedPageSize
+        };
+
+        _logger.LogDebug(
+            "Retrieved run history for playbook {PlaybookId}: {Count} of {Total} runs (page {Page})",
+            playbookId, pageItems.Length, totalCount, page);
+
+        return Task.FromResult(response);
+    }
+
+    /// <inheritdoc />
+    public Task<Models.Ai.PlaybookRunDetail?> GetRunDetailAsync(
+        Guid runId,
+        CancellationToken cancellationToken)
+    {
+        if (!_activeRuns.TryGetValue(runId, out var context))
+        {
+            return Task.FromResult<Models.Ai.PlaybookRunDetail?>(null);
+        }
+
+        var summary = ConvertToRunSummary(context);
+        var nodeDetails = context.NodeOutputs.Values
+            .Select(output => new Models.Ai.NodeRunDetail
+            {
+                NodeId = output.NodeId,
+                NodeName = output.OutputVariable, // Use output variable as proxy for name
+                OutputVariable = output.OutputVariable,
+                Success = output.Success,
+                DurationMs = output.Metrics.DurationMs,
+                TokensIn = output.Metrics.TokensIn,
+                TokensOut = output.Metrics.TokensOut,
+                Confidence = output.Confidence,
+                ErrorMessage = output.ErrorMessage,
+                OutputPreview = TruncateOutput(output.TextContent)
+            })
+            .ToArray();
+
+        var detail = new Models.Ai.PlaybookRunDetail
+        {
+            RunId = summary.RunId,
+            PlaybookId = summary.PlaybookId,
+            State = summary.State,
+            StartedAt = summary.StartedAt,
+            CompletedAt = summary.CompletedAt,
+            DurationMs = summary.DurationMs,
+            TotalNodes = summary.TotalNodes,
+            CompletedNodes = summary.CompletedNodes,
+            FailedNodes = summary.FailedNodes,
+            SkippedNodes = summary.SkippedNodes,
+            TotalTokensIn = summary.TotalTokensIn,
+            TotalTokensOut = summary.TotalTokensOut,
+            ErrorMessage = summary.ErrorMessage,
+            DocumentIds = context.DocumentIds,
+            UserContext = context.UserContext,
+            NodeDetails = nodeDetails
+        };
+
+        _logger.LogDebug(
+            "Retrieved run detail for {RunId}: {NodeCount} nodes",
+            runId, nodeDetails.Length);
+
+        return Task.FromResult<Models.Ai.PlaybookRunDetail?>(detail);
+    }
+
+    #region Private Methods - Run History Helpers
+
+    private static Models.Ai.PlaybookRunSummary ConvertToRunSummary(PlaybookRunContext context)
+    {
+        var nodeCount = context.NodeOutputs.Count;
+        var metrics = context.GetMetrics(nodeCount);
+
+        return new Models.Ai.PlaybookRunSummary
+        {
+            RunId = context.RunId,
+            PlaybookId = context.PlaybookId,
+            State = context.State.ToString(),
+            StartedAt = context.StartedAt,
+            CompletedAt = context.CompletedAt,
+            DurationMs = context.CompletedAt.HasValue
+                ? (long)(context.CompletedAt.Value - context.StartedAt).TotalMilliseconds
+                : null,
+            TotalNodes = metrics.TotalNodes,
+            CompletedNodes = metrics.CompletedNodes,
+            FailedNodes = metrics.FailedNodes,
+            SkippedNodes = metrics.SkippedNodes,
+            TotalTokensIn = metrics.TotalTokensIn,
+            TotalTokensOut = metrics.TotalTokensOut,
+            ErrorMessage = context.ErrorMessage
+        };
+    }
+
+    private static string? TruncateOutput(string? value, int maxLength = 200)
+    {
+        if (string.IsNullOrEmpty(value))
+            return null;
+
+        if (value.Length <= maxLength)
+            return value;
+
+        return value[..maxLength] + "...";
+    }
+
+    #endregion
+
     #region Private Methods - Cleanup
 
     private void ScheduleCleanup(Guid runId)

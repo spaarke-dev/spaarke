@@ -100,7 +100,8 @@ public class PlaybookService : IPlaybookService
         {
             ["sprk_name"] = request.Name,
             ["sprk_description"] = request.Description,
-            ["sprk_ispublic"] = request.IsPublic
+            ["sprk_ispublic"] = request.IsPublic,
+            ["sprk_istemplate"] = request.IsTemplate
         };
 
         // Add output type lookup if provided
@@ -143,7 +144,8 @@ public class PlaybookService : IPlaybookService
         {
             ["sprk_name"] = request.Name,
             ["sprk_description"] = request.Description,
-            ["sprk_ispublic"] = request.IsPublic
+            ["sprk_ispublic"] = request.IsPublic,
+            ["sprk_istemplate"] = request.IsTemplate
         };
 
         // Add output type lookup if provided
@@ -175,7 +177,7 @@ public class PlaybookService : IPlaybookService
         await EnsureAuthenticatedAsync(cancellationToken);
 
         // NOTE: OutputTypeId field removed - output types are N:N relationship, not lookup
-        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_ownerid_value,createdon,modifiedon";
+        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,sprk_istemplate,_ownerid_value,createdon,modifiedon";
         var url = $"{EntitySetName}({playbookId})?$select={select}";
 
         var response = await _httpClient.GetAsync(url, cancellationToken);
@@ -201,6 +203,7 @@ public class PlaybookService : IPlaybookService
             Description = entity.Description,
             OutputTypeId = entity.OutputTypeId,
             IsPublic = entity.IsPublic ?? false,
+            IsTemplate = entity.IsTemplate ?? false,
             OwnerId = entity.OwnerId ?? Guid.Empty,
             ActionIds = actionIds,
             SkillIds = skillIds,
@@ -362,7 +365,7 @@ public class PlaybookService : IPlaybookService
 
         // Query by name - exact match, case-insensitive per Dataverse default
         // NOTE: OutputTypeId field removed - output types are N:N relationship, not lookup
-        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_ownerid_value,createdon,modifiedon";
+        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,sprk_istemplate,_ownerid_value,createdon,modifiedon";
         var filter = $"sprk_name eq '{EscapeODataString(name)}'";
         var url = $"{EntitySetName}?$select={select}&$filter={Uri.EscapeDataString(filter)}&$top=1";
 
@@ -414,6 +417,7 @@ public class PlaybookService : IPlaybookService
             Description = entity.Description,
             OutputTypeId = entity.OutputTypeId,
             IsPublic = entity.IsPublic ?? false,
+            IsTemplate = entity.IsTemplate ?? false,
             OwnerId = entity.OwnerId ?? Guid.Empty,
             ActionIds = actionIds,
             SkillIds = skillIds,
@@ -464,7 +468,7 @@ public class PlaybookService : IPlaybookService
 
         // Get paginated results
         // NOTE: OutputTypeId field removed - output types are N:N relationship, not lookup
-        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_ownerid_value,modifiedon";
+        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,sprk_istemplate,_ownerid_value,modifiedon";
         var url = $"{EntitySetName}?$select={select}&$filter={Uri.EscapeDataString(filter)}&$orderby={orderBy}&$top={pageSize}&$skip={skip}";
 
         var response = await _httpClient.GetAsync(url, cancellationToken);
@@ -492,6 +496,7 @@ public class PlaybookService : IPlaybookService
             // NOTE: OutputTypeId always null - output types are N:N relationship, not lookup
             OutputTypeId = null,
             IsPublic = element.TryGetProperty("sprk_ispublic", out var publicProp) && publicProp.GetBoolean(),
+            IsTemplate = element.TryGetProperty("sprk_istemplate", out var templateProp) && templateProp.GetBoolean(),
             OwnerId = element.TryGetProperty("_ownerid_value", out var ownerProp) ? ownerProp.GetGuid() : Guid.Empty,
             ModifiedOn = element.TryGetProperty("modifiedon", out var modProp) ? modProp.GetDateTime() : DateTime.UtcNow
         };
@@ -602,6 +607,80 @@ public class PlaybookService : IPlaybookService
             Layout = layout,
             ModifiedOn = DateTime.UtcNow
         };
+    }
+
+    /// <inheritdoc />
+    public async Task<PlaybookListResponse> ListTemplatesAsync(
+        PlaybookQueryParameters query,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureAuthenticatedAsync(cancellationToken);
+
+        var pageSize = query.GetNormalizedPageSize();
+        var skip = query.GetSkip();
+
+        // Build OData filter for template playbooks
+        var filter = "sprk_istemplate eq true";
+        if (!string.IsNullOrWhiteSpace(query.NameFilter))
+        {
+            filter += $" and contains(sprk_name, '{EscapeODataString(query.NameFilter)}')";
+        }
+
+        _logger.LogInformation("Listing template playbooks with filter: {Filter}", filter);
+
+        return await ExecuteListQueryAsync(filter, query, pageSize, skip, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<PlaybookResponse> ClonePlaybookAsync(
+        Guid sourcePlaybookId,
+        Guid userId,
+        string? newName = null,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureAuthenticatedAsync(cancellationToken);
+
+        _logger.LogInformation("Cloning playbook {SourceId} for user {UserId}", sourcePlaybookId, userId);
+
+        // Get the source playbook with all relationships
+        var source = await GetPlaybookAsync(sourcePlaybookId, cancellationToken)
+            ?? throw PlaybookNotFoundException.ById(sourcePlaybookId);
+
+        // Generate name for clone
+        var cloneName = newName ?? $"{source.Name} (Copy)";
+
+        // Get canvas layout from source
+        var canvasLayout = await GetCanvasLayoutAsync(sourcePlaybookId, cancellationToken);
+
+        // Create the clone request
+        var cloneRequest = new SavePlaybookRequest
+        {
+            Name = cloneName,
+            Description = source.Description,
+            OutputTypeId = source.OutputTypeId,
+            IsPublic = false, // Clones are private by default
+            IsTemplate = false, // Clones are not templates
+            ActionIds = source.ActionIds,
+            SkillIds = source.SkillIds,
+            KnowledgeIds = source.KnowledgeIds,
+            ToolIds = source.ToolIds
+        };
+
+        // Create the new playbook
+        var clonedPlaybook = await CreatePlaybookAsync(cloneRequest, userId, cancellationToken);
+
+        _logger.LogInformation("Created clone {CloneId} from source {SourceId}", clonedPlaybook.Id, sourcePlaybookId);
+
+        // Copy canvas layout if present
+        if (canvasLayout?.Layout != null)
+        {
+            await SaveCanvasLayoutAsync(clonedPlaybook.Id, canvasLayout.Layout, cancellationToken);
+            _logger.LogInformation("Copied canvas layout to clone {CloneId}", clonedPlaybook.Id);
+        }
+
+        // Return the cloned playbook with updated data
+        return await GetPlaybookAsync(clonedPlaybook.Id, cancellationToken)
+            ?? throw new InvalidOperationException("Failed to retrieve cloned playbook");
     }
 
     #region Private Helper Methods
@@ -758,6 +837,9 @@ public class PlaybookService : IPlaybookService
 
         [JsonPropertyName("sprk_ispublic")]
         public bool? IsPublic { get; set; }
+
+        [JsonPropertyName("sprk_istemplate")]
+        public bool? IsTemplate { get; set; }
 
         [JsonPropertyName("_sprk_outputtypeid_value")]
         public Guid? OutputTypeId { get; set; }

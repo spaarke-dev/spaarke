@@ -33,3 +33,10 @@ export {
   type AiCapability,
   type ModelDeploymentItem,
 } from './modelStore';
+
+export {
+  useTemplateStore,
+  type PlaybookTemplate,
+  type TemplateListResponse,
+  type ClonedPlaybook,
+} from './templateStore';

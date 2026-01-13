@@ -38,3 +38,6 @@ export {
   NodeExecutionBadge,
   getNodeExecutionClassName,
 } from './Execution';
+
+// Templates
+export { TemplateLibraryDialog } from './Templates';

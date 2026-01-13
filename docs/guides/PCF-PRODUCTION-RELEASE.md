@@ -24,6 +24,26 @@
 - [ ] All code changes complete
 - [ ] Tests pass
 - [ ] Current PAC auth points to correct environment: `pac auth list`
+- [ ] Bundle size optimized (see below)
+
+---
+
+## Bundle Size Optimization (IMPORTANT)
+
+If your bundle is large (>500KB), check if `@fluentui/react-icons` is tree-shaking properly.
+
+**Quick Check:**
+```bash
+ls -la out/controls/control/bundle.js
+# Should be 200-400KB with platform libraries + icon tree-shaking
+# If 1-9MB, icons are not tree-shaking
+```
+
+**Fix:** See [PCF-V9-PACKAGING.md](PCF-V9-PACKAGING.md) Section 4.4 for icon tree-shaking setup.
+
+**Required files:**
+1. `featureconfig.json` with `pcfAllowCustomWebpack: "on"`
+2. `webpack.config.js` with `sideEffects: false` rule for icons
 
 ---
 

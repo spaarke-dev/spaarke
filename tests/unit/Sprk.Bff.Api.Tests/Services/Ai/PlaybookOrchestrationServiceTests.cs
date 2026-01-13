@@ -956,6 +956,266 @@ public class PlaybookOrchestrationServiceTests
 
     #endregion
 
+    #region Run History Tests
+
+    [Fact]
+    public async Task GetRunHistoryAsync_NoRuns_ReturnsEmptyList()
+    {
+        // Arrange
+        var playbookId = Guid.NewGuid();
+
+        // Act
+        var response = await _service.GetRunHistoryAsync(playbookId, 1, 20, null, CancellationToken.None);
+
+        // Assert
+        response.Should().NotBeNull();
+        response.Items.Should().BeEmpty();
+        response.TotalCount.Should().Be(0);
+        response.Page.Should().Be(1);
+        response.PageSize.Should().Be(20);
+    }
+
+    [Fact]
+    public async Task GetRunHistoryAsync_WithRuns_ReturnsMatchingRuns()
+    {
+        // Arrange
+        var playbookId = Guid.NewGuid();
+        var request = CreateRequest(playbookId);
+
+        _nodeServiceMock
+            .Setup(x => x.GetNodesAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<PlaybookNodeDto>());
+
+        SetupLegacyOrchestrator(["content"]);
+
+        // Execute to create a run
+        await foreach (var _ in _service.ExecuteAsync(request, _mockHttpContext, CancellationToken.None))
+        {
+            // Consume all events
+        }
+
+        // Act
+        var response = await _service.GetRunHistoryAsync(playbookId, 1, 20, null, CancellationToken.None);
+
+        // Assert
+        response.Items.Should().HaveCount(1);
+        response.TotalCount.Should().Be(1);
+        response.Items[0].PlaybookId.Should().Be(playbookId);
+        response.Items[0].State.Should().Be("Completed");
+    }
+
+    [Fact]
+    public async Task GetRunHistoryAsync_StateFilter_FiltersRuns()
+    {
+        // Arrange
+        var playbookId = Guid.NewGuid();
+        var request = CreateRequest(playbookId);
+
+        _nodeServiceMock
+            .Setup(x => x.GetNodesAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<PlaybookNodeDto>());
+
+        SetupLegacyOrchestrator(["content"]);
+
+        // Execute to create a completed run
+        await foreach (var _ in _service.ExecuteAsync(request, _mockHttpContext, CancellationToken.None))
+        {
+            // Consume all events
+        }
+
+        // Act - filter for "Failed" state (should find nothing)
+        var response = await _service.GetRunHistoryAsync(playbookId, 1, 20, "Failed", CancellationToken.None);
+
+        // Assert
+        response.Items.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetRunHistoryAsync_Pagination_RespectsPageSize()
+    {
+        // Arrange
+        var playbookId = Guid.NewGuid();
+
+        _nodeServiceMock
+            .Setup(x => x.GetNodesAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<PlaybookNodeDto>());
+
+        SetupLegacyOrchestrator(["content"]);
+
+        // Execute multiple runs
+        for (int i = 0; i < 5; i++)
+        {
+            var request = CreateRequest(playbookId);
+            await foreach (var _ in _service.ExecuteAsync(request, _mockHttpContext, CancellationToken.None))
+            {
+                // Consume all events
+            }
+        }
+
+        // Act - request page 1 with size 2
+        var response = await _service.GetRunHistoryAsync(playbookId, 1, 2, null, CancellationToken.None);
+
+        // Assert
+        response.Items.Should().HaveCount(2);
+        response.TotalCount.Should().Be(5);
+        response.PageSize.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task GetRunHistoryAsync_NormalizesPageSize()
+    {
+        // Arrange
+        var playbookId = Guid.NewGuid();
+
+        // Act - request with pageSize > 100
+        var response = await _service.GetRunHistoryAsync(playbookId, 1, 500, null, CancellationToken.None);
+
+        // Assert - should clamp to 100
+        response.PageSize.Should().Be(100);
+    }
+
+    #endregion
+
+    #region Run Detail Tests
+
+    [Fact]
+    public async Task GetRunDetailAsync_RunNotFound_ReturnsNull()
+    {
+        // Arrange
+        var runId = Guid.NewGuid();
+
+        // Act
+        var detail = await _service.GetRunDetailAsync(runId, CancellationToken.None);
+
+        // Assert
+        detail.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetRunDetailAsync_ExistingRun_ReturnsDetail()
+    {
+        // Arrange
+        var playbookId = Guid.NewGuid();
+        var actionId = Guid.NewGuid();
+        var request = CreateRequest(playbookId);
+        var node = CreateNode("Test Node", actionId);
+
+        _nodeServiceMock
+            .Setup(x => x.GetNodesAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([node]);
+
+        _scopeResolverMock
+            .Setup(x => x.ResolveNodeScopesAsync(node.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateEmptyScopes());
+
+        _scopeResolverMock
+            .Setup(x => x.GetActionAsync(actionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateAction(actionId));
+
+        var mockExecutor = new Mock<INodeExecutor>();
+        mockExecutor.Setup(x => x.Validate(It.IsAny<NodeExecutionContext>()))
+            .Returns(NodeValidationResult.Success());
+        mockExecutor.Setup(x => x.ExecuteAsync(It.IsAny<NodeExecutionContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(NodeOutput.Ok(node.Id, node.OutputVariable, new { result = "test" }, "Test output", 0.95));
+
+        _executorRegistryMock
+            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Returns(mockExecutor.Object);
+
+        // Execute to create a run
+        Guid capturedRunId = Guid.Empty;
+        await foreach (var evt in _service.ExecuteAsync(request, _mockHttpContext, CancellationToken.None))
+        {
+            if (evt.Type == PlaybookEventType.RunStarted)
+            {
+                capturedRunId = evt.RunId;
+            }
+        }
+
+        // Act
+        var detail = await _service.GetRunDetailAsync(capturedRunId, CancellationToken.None);
+
+        // Assert
+        detail.Should().NotBeNull();
+        detail!.RunId.Should().Be(capturedRunId);
+        detail.PlaybookId.Should().Be(playbookId);
+        detail.State.Should().Be("Completed");
+        detail.DocumentIds.Should().NotBeEmpty();
+        detail.NodeDetails.Should().HaveCount(1);
+        detail.NodeDetails[0].Success.Should().BeTrue();
+        detail.NodeDetails[0].Confidence.Should().Be(0.95);
+        detail.NodeDetails[0].OutputPreview.Should().Be("Test output");
+    }
+
+    [Fact]
+    public async Task GetRunDetailAsync_IncludesTokenMetrics()
+    {
+        // Arrange - Use node-based execution to test token tracking
+        var playbookId = Guid.NewGuid();
+        var actionId = Guid.NewGuid();
+        var request = CreateRequest(playbookId);
+        var node = CreateNode("Test Node", actionId);
+
+        _nodeServiceMock
+            .Setup(x => x.GetNodesAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([node]);
+
+        _scopeResolverMock
+            .Setup(x => x.ResolveNodeScopesAsync(node.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateEmptyScopes());
+
+        _scopeResolverMock
+            .Setup(x => x.GetActionAsync(actionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateAction(actionId));
+
+        // Create executor that returns output with token metrics
+        var mockExecutor = new Mock<INodeExecutor>();
+        mockExecutor.Setup(x => x.Validate(It.IsAny<NodeExecutionContext>()))
+            .Returns(NodeValidationResult.Success());
+        mockExecutor.Setup(x => x.ExecuteAsync(It.IsAny<NodeExecutionContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new NodeOutput
+            {
+                NodeId = node.Id,
+                OutputVariable = node.OutputVariable,
+                Success = true,
+                TextContent = "Test result",
+                Metrics = new NodeExecutionMetrics
+                {
+                    StartedAt = DateTimeOffset.UtcNow.AddSeconds(-1),
+                    CompletedAt = DateTimeOffset.UtcNow,
+                    TokensIn = 100,
+                    TokensOut = 50
+                }
+            });
+
+        _executorRegistryMock
+            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Returns(mockExecutor.Object);
+
+        // Execute to create a run
+        Guid capturedRunId = Guid.Empty;
+        await foreach (var evt in _service.ExecuteAsync(request, _mockHttpContext, CancellationToken.None))
+        {
+            if (evt.Type == PlaybookEventType.RunStarted)
+            {
+                capturedRunId = evt.RunId;
+            }
+        }
+
+        // Act
+        var detail = await _service.GetRunDetailAsync(capturedRunId, CancellationToken.None);
+
+        // Assert
+        detail.Should().NotBeNull();
+        detail!.TotalTokensIn.Should().Be(100);
+        detail.TotalTokensOut.Should().Be(50);
+        detail.NodeDetails.Should().HaveCount(1);
+        detail.NodeDetails[0].TokensIn.Should().Be(100);
+        detail.NodeDetails[0].TokensOut.Should().Be(50);
+    }
+
+    #endregion
+
     #region Error Handling Tests
 
     [Fact]

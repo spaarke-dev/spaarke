@@ -29,7 +29,9 @@
       "Bash(claude update:*)",
       "Bash(claude:*)",
       "Bash(npm view:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Skill(azure-deploy)",
+      "Skill(azure-deploy:*)"
     ]
   }
 }

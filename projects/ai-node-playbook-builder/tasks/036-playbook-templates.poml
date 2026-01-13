@@ -3,7 +3,7 @@
   <metadata>
     <title>Create Playbook Templates Feature</title>
     <phase>4: Advanced Features</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <tags>bff-api, feature</tags>
     <dependencies>029</dependencies>
@@ -30,4 +30,17 @@
     <criterion testable="true">Clone creates new playbook</criterion>
     <criterion testable="true">Cloned playbook has all nodes</criterion>
   </acceptance-criteria>
+  <notes>
+    <note timestamp="2026-01-12T10:00:00Z">
+      Implementation complete:
+      - Added IsTemplate field to SavePlaybookRequest, PlaybookResponse, PlaybookSummary, PlaybookEntity
+      - Added sprk_istemplate to all Dataverse select statements and payloads
+      - Implemented ListTemplatesAsync with OData filter on sprk_istemplate eq true
+      - Implemented ClonePlaybookAsync that copies all fields, relationships, and canvas layout
+      - Created GET /api/ai/playbooks/templates endpoint
+      - Created POST /api/ai/playbooks/{id}/clone endpoint with ClonePlaybookRequest model
+      - Clone sets IsPublic=false and IsTemplate=false by default
+      - Build verified successfully
+    </note>
+  </notes>
 </task>

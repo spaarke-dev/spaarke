@@ -80,6 +80,26 @@ public static class PlaybookRunEndpoints
             .ProducesProblem(401)
             .ProducesProblem(404);
 
+        // GET /api/ai/playbooks/{id}/runs - Get run history for a playbook
+        playbookGroup.MapGet("/runs", GetRunHistory)
+            .AddPlaybookAccessAuthorizationFilter()
+            .WithName("GetPlaybookRunHistory")
+            .WithSummary("Get execution history for a playbook")
+            .WithDescription("Returns a paginated list of execution runs for the specified playbook.")
+            .Produces<Models.Ai.PlaybookRunHistoryResponse>()
+            .ProducesProblem(401)
+            .ProducesProblem(403)
+            .ProducesProblem(404);
+
+        // GET /api/ai/playbooks/runs/{runId}/detail - Get detailed run information
+        runsGroup.MapGet("/{runId:guid}/detail", GetRunDetail)
+            .WithName("GetPlaybookRunDetail")
+            .WithSummary("Get detailed information for a specific run")
+            .WithDescription("Returns detailed run information including node-level execution metrics.")
+            .Produces<Models.Ai.PlaybookRunDetail>()
+            .ProducesProblem(401)
+            .ProducesProblem(404);
+
         return app;
     }
 
@@ -331,6 +351,82 @@ public static class PlaybookRunEndpoints
                 statusCode: 500,
                 title: "Internal Server Error",
                 detail: "Failed to cancel run");
+        }
+    }
+
+    /// <summary>
+    /// Get execution history for a playbook.
+    /// GET /api/ai/playbooks/{id}/runs
+    /// </summary>
+    private static async Task<IResult> GetRunHistory(
+        Guid id,
+        int? page,
+        int? pageSize,
+        string? state,
+        IPlaybookOrchestrationService orchestrationService,
+        ILoggerFactory loggerFactory,
+        CancellationToken cancellationToken)
+    {
+        var logger = loggerFactory.CreateLogger("PlaybookRunEndpoints");
+
+        try
+        {
+            var response = await orchestrationService.GetRunHistoryAsync(
+                id,
+                page ?? 1,
+                pageSize ?? 20,
+                state,
+                cancellationToken);
+
+            logger.LogDebug(
+                "Retrieved run history for playbook {PlaybookId}: {Count} runs",
+                id, response.Items.Length);
+
+            return Results.Ok(response);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to get run history for playbook {PlaybookId}", id);
+            return Results.Problem(
+                statusCode: 500,
+                title: "Internal Server Error",
+                detail: "Failed to get run history");
+        }
+    }
+
+    /// <summary>
+    /// Get detailed information for a specific run.
+    /// GET /api/ai/playbooks/runs/{runId}/detail
+    /// </summary>
+    private static async Task<IResult> GetRunDetail(
+        Guid runId,
+        IPlaybookOrchestrationService orchestrationService,
+        ILoggerFactory loggerFactory,
+        CancellationToken cancellationToken)
+    {
+        var logger = loggerFactory.CreateLogger("PlaybookRunEndpoints");
+
+        try
+        {
+            var detail = await orchestrationService.GetRunDetailAsync(runId, cancellationToken);
+            if (detail == null)
+            {
+                return Results.NotFound(new { error = $"Run {runId} not found" });
+            }
+
+            logger.LogDebug(
+                "Retrieved run detail for {RunId}: {NodeCount} nodes",
+                runId, detail.NodeDetails.Length);
+
+            return Results.Ok(detail);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to get detail for run {RunId}", runId);
+            return Results.Problem(
+                statusCode: 500,
+                title: "Internal Server Error",
+                detail: "Failed to get run detail");
         }
     }
 

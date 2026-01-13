@@ -3,7 +3,7 @@
   <metadata>
     <title>Add Template Library UI</title>
     <phase>4: Advanced Features</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <tags>frontend, react</tags>
     <dependencies>036</dependencies>
@@ -21,10 +21,28 @@
     <step order="6">Add template library access from toolbar</step>
   </steps>
   <outputs>
-    <output type="code">src/client/playbook-builder/src/components/Templates/TemplateLibrary.tsx</output>
+    <output type="code">src/client/pcf/PlaybookBuilderHost/control/stores/templateStore.ts</output>
+    <output type="code">src/client/pcf/PlaybookBuilderHost/control/components/Templates/TemplateLibraryDialog.tsx</output>
+    <output type="code">src/client/pcf/PlaybookBuilderHost/control/components/Templates/index.ts</output>
+    <output type="code">src/client/pcf/PlaybookBuilderHost/control/PlaybookBuilderHost.tsx (modified)</output>
+    <output type="code">src/client/pcf/PlaybookBuilderHost/control/index.ts (modified)</output>
+    <output type="code">src/client/pcf/PlaybookBuilderHost/control/ControlManifest.Input.xml (modified)</output>
   </outputs>
   <acceptance-criteria>
     <criterion testable="true">Templates displayed in grid</criterion>
     <criterion testable="true">Clone creates new playbook</criterion>
   </acceptance-criteria>
+  <notes>
+    <note timestamp="2026-01-12T16:23:00Z">
+      Implementation complete:
+      - Created templateStore.ts with Zustand state management for template API calls
+      - Created TemplateLibraryDialog component with search, template card grid, and clone functionality
+      - Added apiBaseUrl property to ControlManifest.Input.xml for BFF API configuration
+      - Added Templates button to PlaybookBuilderHost header (only shown when apiBaseUrl is set)
+      - Clone success handler navigates to cloned playbook using Xrm.Navigation.openForm
+      - Updated version to 2.7.0
+      - Build verified successfully
+      Note: Output paths updated to post-refactor location (src/client/pcf/PlaybookBuilderHost/control/)
+    </note>
+  </notes>
 </task>

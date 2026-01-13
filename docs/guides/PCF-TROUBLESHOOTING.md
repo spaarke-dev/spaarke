@@ -150,6 +150,69 @@ mv solution.xml Other/Solution.xml
 mv customizations.xml Other/Customizations.xml
 ```
 
+### Missing styles.css Error
+
+**Error:**
+```
+CustomControls Source File resource path styles.css does not exist
+```
+
+**Cause:** styles.css not copied during Manual Pack Fallback
+
+**Solution:**
+```bash
+# Copy ALL three required files
+cp out/controls/*/bundle.js obj/PowerAppsToolsTemp_sprk/bin/net462/control/
+cp out/controls/*/ControlManifest.xml obj/PowerAppsToolsTemp_sprk/bin/net462/control/
+cp control/css/styles.css obj/PowerAppsToolsTemp_sprk/bin/net462/control/  # Don't forget this!
+```
+
+### Orphaned Controls Blocking Deployment
+
+**Error:**
+```
+Component with same name already exists
+Duplicate component found
+```
+
+**Cause:** Namespace changed (e.g., `Spaarke.PCF` → `Spaarke.Controls`) or old controls exist with different publishers
+
+**Symptoms:**
+- Deployment fails with duplicate component errors
+- Multiple versions of same control visible in solution list
+- Different namespaces for same control name
+
+**Solution - Delete Orphaned Controls via Web API:**
+
+1. **Find orphaned control IDs** using Dataverse Web API or XrmToolBox:
+```
+GET https://{org}.crm.dynamics.com/api/data/v9.2/customcontrols?$filter=contains(name,'{ControlName}')
+```
+
+2. **Delete orphaned controls:**
+```
+DELETE https://{org}.crm.dynamics.com/api/data/v9.2/customcontrols({control-guid})
+```
+
+3. **Alternative - Use PAC CLI:**
+```bash
+# List all custom controls
+pac org fetch --entity customcontrol
+
+# Delete specific control by name/namespace
+# (May require manual identification of GUID)
+```
+
+4. **Clean up via Power Platform Admin Center:**
+- Navigate to Environments → Your Environment → Settings → Solutions
+- Find solutions containing orphaned controls
+- Delete the orphaned components or entire solution
+
+**Prevention:**
+- Use consistent namespace (always `Spaarke.Controls`)
+- Delete old solutions before changing namespace
+- Use `pac solution delete --solution-name {OldSolution}` before deploying new
+
 ---
 
 ## Version/Update Errors

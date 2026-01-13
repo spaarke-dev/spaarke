@@ -22,8 +22,13 @@ import 'react-flow-renderer/dist/style.css';
 
 const useStyles = makeStyles({
   container: {
-    width: '100%',
-    height: '100%',
+    // Use absolute positioning to fill the relatively-positioned parent
+    // This ensures the canvas fills all available space (fixes bottom spacing issue)
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: tokens.colorNeutralBackground1,
   },
 });

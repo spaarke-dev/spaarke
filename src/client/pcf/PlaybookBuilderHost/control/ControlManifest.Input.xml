@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest>
-  <control namespace="Spaarke.PCF"
+  <control namespace="Spaarke.Controls"
            constructor="PlaybookBuilderHost"
-           version="2.6.0"
+           version="2.7.0"
            display-name-key="Playbook Builder Host"
            description-key="Node-based Playbook Builder with visual canvas for AI workflow design"
            control-type="standard">
@@ -67,6 +67,14 @@
               description-key="Serialized JSON of the canvas nodes and edges"
               of-type="Multiple"
               usage="bound"
+              required="false" />
+
+    <!-- API Base URL (for BFF API calls) -->
+    <property name="apiBaseUrl"
+              display-name-key="API Base URL"
+              description-key="Base URL for BFF API (e.g., https://spe-api-dev.azurewebsites.net)"
+              of-type="SingleLine.Text"
+              usage="input"
               required="false" />
 
     <!-- Is Dirty (OUTPUT - indicates unsaved changes) -->

@@ -63,6 +63,32 @@ public interface IPlaybookOrchestrationService
     Task<bool> CancelAsync(
         Guid runId,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Get execution history for a playbook.
+    /// </summary>
+    /// <param name="playbookId">Playbook ID to get history for.</param>
+    /// <param name="page">Page number (1-based).</param>
+    /// <param name="pageSize">Page size.</param>
+    /// <param name="stateFilter">Optional state filter (e.g., "Completed", "Failed").</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Paginated list of run summaries.</returns>
+    Task<Models.Ai.PlaybookRunHistoryResponse> GetRunHistoryAsync(
+        Guid playbookId,
+        int page = 1,
+        int pageSize = 20,
+        string? stateFilter = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Get detailed information for a specific run including node-level metrics.
+    /// </summary>
+    /// <param name="runId">Run ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Detailed run information or null if not found.</returns>
+    Task<Models.Ai.PlaybookRunDetail?> GetRunDetailAsync(
+        Guid runId,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>
