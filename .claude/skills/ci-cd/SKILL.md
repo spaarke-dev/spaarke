@@ -11,6 +11,30 @@ Document and interact with GitHub Actions CI/CD workflows. Provides guidance on 
 
 ---
 
+## Key Terminology
+
+Understanding the distinction between CI, deployment, and sync:
+
+| Term | What It Means | Workflow |
+|------|---------------|----------|
+| **CI (Continuous Integration)** | Build, test, code quality checks | `sdap-ci.yml` |
+| **Staging Deployment** | Deploy to staging environment | `deploy-staging.yml` (separate workflow) |
+| **Production Deployment** | Deploy to production | `deploy-to-azure.yml` (manual trigger) |
+| **Merge to Master** | Push changes to origin/master | Git operation (not a workflow) |
+| **Sync Main Repo** | Pull origin/master to local main repo | Git operation (needed for worktrees) |
+
+### Important Distinctions
+
+1. **CI ≠ Staging Deployment**: CI validates code quality. Staging deployment is a *separate* workflow that runs *after* CI passes on master.
+
+2. **"Merge to master" updates origin/master** but does NOT:
+   - Trigger staging deployment immediately (CI runs first)
+   - Sync the main repo's local master (must be done explicitly when using worktrees)
+
+3. **Staging deployment triggers automatically** after CI passes on master, but may fail independently of CI.
+
+---
+
 ## Applies When
 
 - Checking CI status after pushing code
@@ -333,3 +357,22 @@ No secrets required - runs in read-only mode.
 - Staging deploys automatically after master merge - no manual trigger needed
 - Production deployment requires manual trigger - never auto-deploy to prod
 - Use `gh run watch` to monitor long-running deployments
+
+### Worktree Considerations
+
+- After merging to master from a worktree, **always sync the main repo**
+- CI passing does NOT mean the main repo is synced - these are separate concerns
+- When user asks to "merge to master and sync", ensure BOTH operations complete:
+  1. Push to origin/master (triggers CI → staging)
+  2. Pull origin/master to main repo's local master
+- Report full status: CI status, staging deployment status, AND main repo sync status
+
+### Complete Merge Flow (Worktree)
+
+```
+1. Push branch:master → updates origin/master
+2. CI runs on master → monitor with gh run watch
+3. If CI passes → staging deployment triggers automatically
+4. Sync main repo → cd {main-repo} && git pull origin master
+5. Report all statuses to user
+```

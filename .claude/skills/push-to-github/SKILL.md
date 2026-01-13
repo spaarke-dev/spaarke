@@ -6,7 +6,7 @@ alwaysApply: false
 # Push to GitHub
 
 > **Category**: Operations
-> **Last Updated**: December 2025
+> **Last Updated**: January 2026
 
 ---
 
@@ -30,6 +30,51 @@ Automate the git workflow from staged changes to pull request creation. Ensures 
 1. **Git configured**: `git config user.name` and `git.config user.email` set
 2. **On a branch**: Should NOT be on `main` or `master` for feature work
 3. **GitHub CLI (optional)**: `gh` CLI for automated PR creation
+
+---
+
+## Worktree Support
+
+When working in a **git worktree** (e.g., `spaarke-wt-{project-name}`), additional sync is required:
+
+### Architecture Understanding
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Main Repo (C:/code_files/spaarke)                          │
+│  └─ LOCAL master branch ← needs explicit pull after merge   │
+├─────────────────────────────────────────────────────────────┤
+│  Worktree (C:/code_files/spaarke-wt-{project})              │
+│  └─ feature/work branch → pushes to origin/master           │
+├─────────────────────────────────────────────────────────────┤
+│  GitHub (origin/master) ← "merge to master" updates this    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Worktree Detection
+
+```
+DETECT worktree:
+  git rev-parse --git-common-dir
+
+  IF output contains ".git/worktrees":
+    → Working in a worktree
+    → MAIN_REPO_PATH = git rev-parse --git-common-dir (parent of .git/worktrees)
+    → After merge to master, MUST sync main repo
+```
+
+### Auto-Sync After Merge (MANDATORY for Worktrees)
+
+When merging to master from a worktree, **always** sync the main repo:
+
+```powershell
+# After pushing branch:master
+cd {MAIN_REPO_PATH}
+git fetch origin
+git pull origin master
+```
+
+This ensures the main repo's local master matches origin/master.
 
 ---
 
@@ -341,6 +386,32 @@ Next steps:
 4. Merge when approved and CI passes
 ```
 
+### Step 10: Merge to Master (When Ready)
+
+When user requests "merge to master" or "merge and sync":
+
+```
+1. Verify CI passes:
+   gh pr checks (or gh run list --branch {branch})
+
+2. Push branch to master:
+   git push origin {branch}:master
+
+3. IF in worktree (MANDATORY):
+   MAIN_REPO=$(git rev-parse --git-common-dir | sed 's|/.git/worktrees.*||')
+   cd "$MAIN_REPO"
+   git fetch origin
+   git pull origin master
+   → Report: "✅ Main repo synced to {commit-sha}"
+
+4. Summary:
+   ✅ Merged to master
+   ✅ Remote origin/master updated
+   ✅ Main repo local master synced (if worktree)
+```
+
+**Important**: "Merge to master" updates origin/master but does NOT automatically update the main repo's local master when working in a worktree. Step 3 ensures full sync.
+
 ---
 
 ## Conventions
@@ -412,3 +483,11 @@ gh pr create                            # Create PR (if gh installed)
 - If CI fails, use `gh run view {id} --log` to diagnose before suggesting fixes
 - Never suggest merging until all CI checks pass
 - Reference `ci-cd` skill for detailed troubleshooting guidance
+
+### Worktree-Specific Tips
+
+- **ALWAYS** detect if working in a worktree before merge operations
+- After merging to master, **ALWAYS** sync the main repo's local master
+- Use `git rev-parse --git-common-dir` to find the main repo path
+- Report both remote AND local sync status to user
+- If user says "merge to master", this means: push to origin/master AND sync main repo
