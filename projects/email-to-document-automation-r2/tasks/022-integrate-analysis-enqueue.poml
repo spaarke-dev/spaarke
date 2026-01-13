@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="email-to-document-automation-r2">
+  <metadata>
+    <title>Integrate AI Analysis Enqueueing in Email Handler</title>
+    <phase>3: AppOnlyAnalysisService</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>021</dependencies>
+    <blocks>023</blocks>
+    <tags>bff-api, api, worker, job</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task integrates existing components without major new code</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Modify EmailToDocumentJobHandler to enqueue AppOnlyDocumentAnalysis jobs for the .eml
+    Document and each child attachment Document. This enables automatic AI analysis of all
+    email-related documents after upload.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in job enqueueing and async workflows.
+  </role>
+
+  <goal>
+    EmailToDocumentJobHandler enqueues AI analysis jobs:
+    1. After .eml Document created → enqueue analysis for .eml
+    2. After each attachment Document created → enqueue analysis for attachment
+    3. Controlled by AutoEnqueueAi configuration setting
+  </goal>
+
+  <context>
+    <background>
+      The email handler creates Documents but doesn't trigger AI analysis (R1 limitation).
+      Now with AppOnlyAnalysisService, we can enqueue analysis jobs for background processing.
+      This is controlled by EmailProcessingOptions.AutoEnqueueAi.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/EmailToDocumentJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/JobSubmissionService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/EmailProcessingOptions.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">MUST use JobContract schema for enqueued jobs</constraint>
+    <constraint source="project">MUST be configurable via AutoEnqueueAi setting</constraint>
+    <constraint source="project">AI analysis failure should not fail email processing</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>docs/guides/EMAIL-TO-DOCUMENT-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read EmailToDocumentJobHandler to find where to add enqueueing</step>
+    <step order="2">Verify AutoEnqueueAi exists in EmailProcessingOptions</step>
+    <step order="3">Inject JobSubmissionService if not already injected</step>
+    <step order="4">After .eml Document created, check AutoEnqueueAi setting</step>
+    <step order="5">If enabled, enqueue AppOnlyDocumentAnalysis job for .eml Document</step>
+    <step order="6">After each attachment Document created, enqueue analysis job</step>
+    <step order="7">Use try/catch to ensure enqueue failures don't fail main processing</step>
+    <step order="8">Add telemetry for AI jobs enqueued</step>
+    <step order="9">Verify solution builds</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and verify .NET project</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/EmailToDocumentJobHandler.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given AutoEnqueueAi=true, when email processed, then AI analysis jobs enqueued.
+    </criterion>
+    <criterion testable="true">
+      Given AutoEnqueueAi=false, when email processed, then no AI jobs enqueued.
+    </criterion>
+    <criterion testable="true">
+      If job enqueueing fails, email processing still succeeds.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Check if EmailProcessingOptions.AutoEnqueueAi already exists from R1.
+    The job submission should include correlation ID for tracing.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

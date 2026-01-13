@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="email-to-document-automation-r2">
+  <metadata>
+    <title>Create EmailAnalysis Job Handler</title>
+    <phase>4: Email Analysis Playbook</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>031</dependencies>
+    <blocks>033</blocks>
+    <tags>bff-api, api, worker, job</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task follows established job handler pattern</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create EmailAnalysisJobHandler that processes email analysis jobs from Service Bus.
+    This handler calls AppOnlyAnalysisService.AnalyzeEmailAsync and handles the comprehensive
+    email + attachments analysis.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Service Bus job handlers.
+  </role>
+
+  <goal>
+    Job handler that:
+    1. Handles job type "EmailAnalysis"
+    2. Calls AnalyzeEmailAsync with email ID
+    3. Updates email entity with AI analysis results
+    4. Handles errors appropriately
+  </goal>
+
+  <context>
+    <background>
+      After document analysis jobs complete, an EmailAnalysis job can run to combine
+      all the pieces and produce the comprehensive email-level analysis.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/AppOnlyDocumentAnalysisJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Analysis/AppOnlyAnalysisService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">MUST use standard JobContract schema</constraint>
+    <constraint source="ADR-004">MUST be idempotent</constraint>
+    <constraint source="project">Idempotency key: emailanalysis-{emailId}</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/constraints/jobs.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create EmailAnalysisJobHandler.cs based on existing handler pattern</step>
+    <step order="2">Define job type constant "EmailAnalysis"</step>
+    <step order="3">Implement HandleAsync with idempotency check</step>
+    <step order="4">Call AppOnlyAnalysisService.AnalyzeEmailAsync</step>
+    <step order="5">Handle success: emit JobOutcome.Completed</step>
+    <step order="6">Handle failure: emit JobOutcome.Failed</step>
+    <step order="7">Register handler in job processor routing</step>
+    <step order="8">Verify solution builds</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and verify .NET project</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/EmailAnalysisJobHandler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Job handler registered for type "EmailAnalysis".
+    </criterion>
+    <criterion testable="true">
+      Handler calls AnalyzeEmailAsync with correct email ID.
+    </criterion>
+    <criterion testable="true">
+      Idempotency prevents duplicate email analysis.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This handler should run after document analysis jobs complete to ensure
+    attachment text is available for the combined analysis.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

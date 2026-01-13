@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="039" project="email-to-document-automation-r2">
+  <metadata>
+    <title>Deploy and Verify Phase 4 (Email Analysis Playbook)</title>
+    <phase>4: Email Analysis Playbook</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>033</dependencies>
+    <blocks>040</blocks>
+    <tags>deploy, azure, bff-api, ai</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task with verification steps</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Deploy email analysis playbook execution to Azure and verify. Process an email and
+    verify the email entity AI fields are populated with combined analysis from email + attachments.
+    Verify NFR-04: analysis completes within 5 minutes.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Azure deployment and AI verification.
+  </role>
+
+  <goal>
+    Phase 4 deployed and verified:
+    1. Email Analysis Playbook exists in Dataverse
+    2. Email entity AI fields populated after processing
+    3. Combined email + attachment context used
+    4. NFR-04: Analysis completes &lt; 5 minutes
+  </goal>
+
+  <context>
+    <background>
+      This phase completes the comprehensive email analysis capability.
+    </background>
+    <relevant-files>
+      <file>infrastructure/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">MUST verify FR-09: Email entity AI fields populated</constraint>
+    <constraint source="project">MUST verify NFR-04: Completion &lt; 5 min</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Ensure all Phase 4 tests pass</step>
+    <step order="2">Deploy to Azure App Service</step>
+    <step order="3">Verify playbook record exists in Dataverse</step>
+    <step order="4">Trigger email processing for test email with attachments</step>
+    <step order="5">Wait for all jobs to complete (documents + email analysis)</step>
+    <step order="6">Query email entity for AI fields (TL;DR, Summary, Keywords, Entities)</step>
+    <step order="7">Verify fields are populated with relevant content</step>
+    <step order="8">Check total processing time &lt; 5 minutes</step>
+    <step order="9">Document findings in notes/phase4-deployment-notes.md</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET project</tool>
+    <tool name="az">Azure CLI</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/email-to-document-automation-r2/notes/phase4-deployment-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Email entity AI fields contain relevant analysis content.
+    </criterion>
+    <criterion testable="true">
+      Analysis reflects both email content and attachment content.
+    </criterion>
+    <criterion testable="true">
+      Total processing time under 5 minutes.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The email analysis job depends on document analysis completing first.
+    Monitor job queue to ensure ordering is correct.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

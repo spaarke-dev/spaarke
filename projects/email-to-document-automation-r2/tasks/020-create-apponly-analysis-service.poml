@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="email-to-document-automation-r2">
+  <metadata>
+    <title>Create AppOnlyAnalysisService</title>
+    <phase>3: AppOnlyAnalysisService</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>019</dependencies>
+    <blocks>021, 022</blocks>
+    <tags>bff-api, api, ai, azure-openai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task creates new AI service with app-only authentication</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create AppOnlyAnalysisService for background AI analysis of documents uploaded via app-only auth.
+    This service uses app-only SPE access (not OBO) and can analyze documents without user context.
+    It complements the existing AnalysisOrchestrationService which requires OBO authentication.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Azure OpenAI integration and app-only authentication.
+    Follow patterns from AnalysisOrchestrationService.
+  </role>
+
+  <goal>
+    AppOnlyAnalysisService that:
+    1. Downloads document from SPE using app-only auth
+    2. Extracts text via TextExtractorService
+    3. Analyzes via OpenAiClient
+    4. Creates/updates Document Profile in Dataverse
+    5. Works without HttpContext (background job compatible)
+  </goal>
+
+  <context>
+    <background>
+      AnalysisOrchestrationService requires OBO auth via HttpContext, making it unusable for
+      background email processing. AppOnlyAnalysisService fills this gap by providing AI analysis
+      for app-uploaded documents. Per the architecture doc, these are separate services sharing
+      common components (OpenAiClient, TextExtractorService).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Analysis/AnalysisOrchestrationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Analysis/TextExtractorService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Analysis/OpenAiClient.cs</file>
+      <file>src/server/shared/Spaarke.Spe/SpeFileStore.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Follow AI Tool Framework patterns</constraint>
+    <constraint source="ADR-010">Register as concrete type (not interface) unless seam needed</constraint>
+    <constraint source="project">MUST NOT require HttpContext</constraint>
+    <constraint source="project">MUST use app-only SPE access</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>docs/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+      <file>docs/guides/EMAIL-TO-DOCUMENT-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read AnalysisOrchestrationService.cs to understand the pattern</step>
+    <step order="2">Read how it uses OBO auth and HttpContext</step>
+    <step order="3">Create AppOnlyAnalysisService.cs in Services/Analysis/</step>
+    <step order="4">Inject SpeFileStore, TextExtractorService, OpenAiClient, IDataverseService</step>
+    <step order="5">Create AnalyzeDocumentAsync(documentId) method</step>
+    <step order="6">Implement: fetch document metadata from Dataverse</step>
+    <step order="7">Implement: download file from SPE using app-only SpeFileStore</step>
+    <step order="8">Implement: extract text via TextExtractorService</step>
+    <step order="9">Implement: analyze via OpenAiClient (use Document Profile prompt)</step>
+    <step order="10">Implement: save Document Profile to Dataverse</step>
+    <step order="11">Register service in DI</step>
+    <step order="12">Verify solution builds</step>
+    <step order="13">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and verify .NET project</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Analysis/AppOnlyAnalysisService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (modified - DI registration)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      AppOnlyAnalysisService compiles and can be instantiated without HttpContext.
+    </criterion>
+    <criterion testable="true">
+      Service uses app-only SpeFileStore for file download.
+    </criterion>
+    <criterion testable="true">
+      AnalyzeDocumentAsync method signature does not require user token.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    SpeFileStore may need an app-only mode or a separate method for app-only downloads.
+    Check how the existing service handles the dual OBO/app-only scenario.
+    Consider creating an interface if both services need to be swappable.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

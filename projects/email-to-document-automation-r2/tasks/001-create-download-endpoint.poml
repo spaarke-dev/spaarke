@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="email-to-document-automation-r2">
+  <metadata>
+    <title>Create Document Download Endpoint</title>
+    <phase>1: Download Endpoint</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>002, 003, 004</blocks>
+    <tags>bff-api, api, minimal-api, endpoints</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task tags include 'bff-api' (code implementation)</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create a new download endpoint `GET /api/v1/documents/{id}/download` that proxies SPE file downloads
+    using app-only authentication. This allows users to download .eml files that were uploaded by background
+    email processing (which uses app-only auth and thus doesn't grant user SPE permissions).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs, Microsoft Graph SDK, and SharePoint
+    Embedded file operations. Follow ADR-001 (Minimal API pattern) and ADR-007 (SpeFileStore facade).
+  </role>
+
+  <goal>
+    A working download endpoint at `/api/v1/documents/{id}/download` that:
+    1. Accepts document ID
+    2. Looks up SPE file via SpeFileStore (app-only auth)
+    3. Returns file as streaming download response
+    4. Sets appropriate content headers (Content-Disposition, Content-Type, Content-Length)
+  </goal>
+
+  <context>
+    <background>
+      R1 email processing uploads .eml files using app-only authentication. Users can preview these files
+      (Graph Preview API returns ephemeral authenticated URLs) but cannot download them directly because
+      they lack SPE container permissions. This endpoint proxies the download through the BFF API, which
+      has app-only access to SPE.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/DocumentEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/EmailEndpoints.cs</file>
+      <file>src/server/shared/Spaarke.Spe/SpeFileStore.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">MUST use Minimal API pattern for endpoint definition</constraint>
+    <constraint source="ADR-007">MUST use SpeFileStore facade for all SPE operations</constraint>
+    <constraint source="ADR-008">MUST use endpoint filter for authorization (added in task 002)</constraint>
+    <constraint source="project">MUST stream file response - no full buffering in memory (NFR-06)</constraint>
+    <constraint source="project">MUST support files up to 250MB (SPE limit)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>docs/guides/EMAIL-TO-DOCUMENT-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Endpoint Definition" location=".claude/patterns/api/endpoint-definition.md">
+        Follow Minimal API endpoint registration pattern
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing DocumentEndpoints.cs and EmailEndpoints.cs to understand endpoint patterns</step>
+    <step order="2">Create new endpoint method `DownloadDocument` in DocumentEndpoints.cs</step>
+    <step order="3">Add route registration: `documents.MapGet("/{id}/download", DownloadDocument)`</step>
+    <step order="4">Implement document lookup via IDataverseService to get SPE file metadata (graphItemId, graphDriveId)</step>
+    <step order="5">Implement SpeFileStore call to download file as stream (create method if needed)</step>
+    <step order="6">Return Results.Stream() with proper content headers</step>
+    <step order="7">Handle error cases: document not found (404), file not in SPE (404), unauthorized (403 - placeholder)</step>
+    <step order="8">Verify endpoint compiles and basic structure is correct</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and verify .NET project compiles</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/DocumentEndpoints.cs (modified)</output>
+    <output type="code">src/server/shared/Spaarke.Spe/SpeFileStore.cs (may need DownloadFileAsync method)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given a valid document ID with SPE file, when calling GET /api/v1/documents/{id}/download,
+      then the file streams back with correct Content-Type header.
+    </criterion>
+    <criterion testable="true">
+      Given an invalid document ID, when calling the download endpoint, then 404 Not Found is returned.
+    </criterion>
+    <criterion testable="true">
+      The endpoint compiles and follows Minimal API pattern.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Check if SpeFileStore already has a download method. If not, create one that returns a Stream.
+    The authorization filter will be added in task 002 - for now, the endpoint can be unprotected.
+    Reference EmailEndpoints.cs for patterns on error handling and response formatting.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>
