@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="email-to-document-automation-r2">
+  <metadata>
+    <title>Unit Tests for Download Endpoint</title>
+    <phase>1: Download Endpoint</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>004</dependencies>
+    <blocks>009</blocks>
+    <tags>testing, unit-test, bff-api</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task tags include 'testing', 'unit-test'</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Write comprehensive unit tests for the download endpoint and authorization filter.
+    Cover success paths, error handling, authorization scenarios, and edge cases.
+    Follow existing test patterns in the codebase.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in xUnit testing and ASP.NET Core endpoint testing.
+    Follow existing test patterns and mocking strategies.
+  </role>
+
+  <goal>
+    Unit tests covering:
+    1. Successful download returns file stream with correct headers
+    2. Document not found returns 404
+    3. Unauthorized user returns 403
+    4. File not in SPE returns 404
+    5. Authorization filter correctly blocks/allows requests
+  </goal>
+
+  <context>
+    <background>
+      Unit tests ensure the download endpoint behaves correctly and prevent regressions.
+      Tests should mock Dataverse and SpeFileStore dependencies to test endpoint logic in isolation.
+    </background>
+    <relevant-files>
+      <file>tests/Sprk.Bff.Api.Tests/</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/DocumentEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Filters/DocumentDownloadAuthorizationFilter.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Tests MUST use xUnit framework</constraint>
+    <constraint source="project">Tests MUST mock external dependencies (Dataverse, Graph)</constraint>
+    <constraint source="ADR-022">Follow existing test patterns in the solution</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing test patterns in tests/Sprk.Bff.Api.Tests/</step>
+    <step order="2">Create test file DocumentDownloadEndpointTests.cs</step>
+    <step order="3">Write test: DownloadDocument_ValidId_ReturnsFileStream</step>
+    <step order="4">Write test: DownloadDocument_InvalidId_Returns404</step>
+    <step order="5">Write test: DownloadDocument_NoSpeFile_Returns404</step>
+    <step order="6">Create test file DocumentDownloadAuthorizationFilterTests.cs</step>
+    <step order="7">Write test: Filter_AuthorizedUser_CallsNext</step>
+    <step order="8">Write test: Filter_UnauthorizedUser_Returns403</step>
+    <step order="9">Run all tests and verify they pass</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Run dotnet test</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Api/DocumentDownloadEndpointTests.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Filters/DocumentDownloadAuthorizationFilterTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All unit tests pass when running dotnet test.</criterion>
+    <criterion testable="true">Test coverage includes success, not found, and unauthorized scenarios.</criterion>
+    <criterion testable="true">Tests use mocks for SpeFileStore and IDataverseService.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use Moq or NSubstitute for mocking (check which is used in existing tests).
+    Consider testing telemetry calls if the pattern exists.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

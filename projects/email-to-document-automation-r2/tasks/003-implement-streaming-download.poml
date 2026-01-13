@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="email-to-document-automation-r2">
+  <metadata>
+    <title>Implement Streaming Download Response</title>
+    <phase>1: Download Endpoint</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001, 002</dependencies>
+    <blocks>004</blocks>
+    <tags>bff-api, api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task modifies API code with performance-critical streaming requirements</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Ensure the download endpoint streams file content without buffering the entire file in memory.
+    This is critical for large files (up to 250MB) and meeting the NFR-06 requirement.
+    Implement proper Content-Disposition and Content-Type headers for browser download experience.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core streaming responses and Microsoft Graph
+    file download APIs. Focus on memory-efficient large file handling.
+  </role>
+
+  <goal>
+    Download endpoint returns streaming response with:
+    1. Content-Disposition: attachment; filename="original-filename.eml"
+    2. Content-Type: message/rfc822 (for .eml) or appropriate MIME type
+    3. Content-Length header (if available)
+    4. No full file buffering - streams directly from Graph API to response
+  </goal>
+
+  <context>
+    <background>
+      NFR-06 requires streaming downloads without full memory buffering. The Graph API provides
+      file content as a stream, and ASP.NET Core can pipe this directly to the HTTP response.
+      This ensures the BFF API memory usage doesn't spike with large files.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/DocumentEndpoints.cs</file>
+      <file>src/server/shared/Spaarke.Spe/SpeFileStore.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">MUST stream file - no buffering entire file in memory (NFR-06)</constraint>
+    <constraint source="project">MUST support files up to 250MB (NFR-05)</constraint>
+    <constraint source="project">MUST achieve P95 latency under 2 seconds for first byte (NFR-01)</constraint>
+    <constraint source="ADR-007">MUST use SpeFileStore for Graph API interactions</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>docs/guides/EMAIL-TO-DOCUMENT-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review SpeFileStore download method implementation</step>
+    <step order="2">Ensure Graph API call returns Stream (not byte array)</step>
+    <step order="3">Update endpoint to use Results.Stream() with the Graph stream</step>
+    <step order="4">Add Content-Disposition header with original filename</step>
+    <step order="5">Set Content-Type based on file MIME type from document metadata</step>
+    <step order="6">Set Content-Length header if file size is known</step>
+    <step order="7">Test with a sample .eml file to verify headers are correct</step>
+    <step order="8">Verify solution builds and endpoint works for basic case</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and verify .NET project</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/DocumentEndpoints.cs (modified)</output>
+    <output type="code">src/server/shared/Spaarke.Spe/SpeFileStore.cs (may need modification)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given a 50MB file download, when monitoring memory usage, then BFF process memory
+      does not increase by 50MB during download.
+    </criterion>
+    <criterion testable="true">
+      Download response includes Content-Disposition: attachment header.
+    </criterion>
+    <criterion testable="true">
+      Download response includes correct Content-Type header.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The Graph SDK's DriveItem content endpoint returns a Stream that can be piped directly.
+    Use Results.Stream(stream, contentType, fileDownloadName) for ASP.NET Core streaming.
+    Consider adding cancellation token support for long downloads.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

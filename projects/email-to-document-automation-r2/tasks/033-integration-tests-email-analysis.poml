@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="email-to-document-automation-r2">
+  <metadata>
+    <title>Integration Tests for Email Analysis</title>
+    <phase>4: Email Analysis Playbook</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>032</dependencies>
+    <blocks>039</blocks>
+    <tags>testing, integration-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task tags include 'testing', 'integration-test'</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Write integration tests for the email analysis flow. Test the full pipeline from
+    email + attachments to populated AI fields on the email entity. Test context size
+    management with large emails.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in integration testing with AI services.
+  </role>
+
+  <goal>
+    Integration tests covering:
+    1. Full email analysis flow (email + attachments)
+    2. Context size management for large emails
+    3. Email entity AI field population
+    4. Error handling scenarios
+  </goal>
+
+  <context>
+    <background>
+      Integration tests verify the complete email analysis pipeline works correctly.
+      These tests may use test doubles or sandbox AI endpoints.
+    </background>
+    <relevant-files>
+      <file>tests/Sprk.Bff.Api.Tests/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Tests should verify FR-11, FR-12, FR-13</constraint>
+    <constraint source="project">Large email tests should use realistic sample sizes</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create test file EmailAnalysisIntegrationTests.cs</step>
+    <step order="2">Setup test fixtures for sample emails with attachments</step>
+    <step order="3">Write test: AnalyzeEmail_WithAttachments_CombinesContext</step>
+    <step order="4">Write test: AnalyzeEmail_LargeEmail_TruncatesGracefully</step>
+    <step order="5">Write test: AnalyzeEmail_PopulatesEntityFields</step>
+    <step order="6">Write test: AnalyzeEmail_OutputMatchesDocumentProfileSchema</step>
+    <step order="7">Run tests and verify pass</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Run dotnet test</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Integration/EmailAnalysisIntegrationTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All integration tests pass.</criterion>
+    <criterion testable="true">Tests verify context combination from multiple sources.</criterion>
+    <criterion testable="true">Tests verify large email handling.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Consider using test fixtures with known content for predictable AI responses.
+    May need to mock AI service for deterministic testing.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

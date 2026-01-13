@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="email-to-document-automation-r2">
+  <metadata>
+    <title>Unit Tests for Attachment Processing</title>
+    <phase>2: Attachment Processing</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>012</dependencies>
+    <blocks>019</blocks>
+    <tags>testing, unit-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task tags include 'testing', 'unit-test'</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Write unit tests for attachment extraction and filtering. Cover the EmailToEmlConverter
+    ExtractAttachments method and AttachmentFilterService filter logic. Test edge cases
+    like empty emails, malformed attachments, and various filter scenarios.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in xUnit testing with MimeKit test data.
+  </role>
+
+  <goal>
+    Unit tests for:
+    1. ExtractAttachments with various email structures
+    2. AttachmentFilterService filtering rules
+    3. Integration of extraction + filtering in job handler
+  </goal>
+
+  <context>
+    <background>
+      Attachment processing is critical for FR-04 and FR-05. Thorough tests ensure
+      extraction works correctly for various email formats and filtering rules work as expected.
+    </background>
+    <relevant-files>
+      <file>tests/Sprk.Bff.Api.Tests/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Email/EmailToEmlConverter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Email/AttachmentFilterService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Tests MUST cover extraction of various MIME types</constraint>
+    <constraint source="project">Tests MUST verify filter rules work correctly</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing email-related tests for patterns</step>
+    <step order="2">Create test file EmailAttachmentExtractionTests.cs</step>
+    <step order="3">Write test: ExtractAttachments_EmailWithPdfAttachment_ReturnsPdf</step>
+    <step order="4">Write test: ExtractAttachments_EmailNoAttachments_ReturnsEmpty</step>
+    <step order="5">Write test: ExtractAttachments_InlineImages_FlaggedCorrectly</step>
+    <step order="6">Create test file AttachmentFilterServiceTests.cs</step>
+    <step order="7">Write test: Filter_SmallImage_Excluded</step>
+    <step order="8">Write test: Filter_TrackingPixel_Excluded</step>
+    <step order="9">Write test: Filter_LargePdf_Included</step>
+    <step order="10">Write test: Filter_CalendarFile_ExcludedIfConfigured</step>
+    <step order="11">Run all tests and verify they pass</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Run dotnet test</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Services/Email/EmailAttachmentExtractionTests.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Services/Email/AttachmentFilterServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All tests pass when running dotnet test.</criterion>
+    <criterion testable="true">Extraction tests cover multiple MIME types.</criterion>
+    <criterion testable="true">Filter tests verify each filter rule.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Consider creating sample .eml files as test fixtures for realistic testing.
+    MimeKit can create MimeMessage programmatically for test setup.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

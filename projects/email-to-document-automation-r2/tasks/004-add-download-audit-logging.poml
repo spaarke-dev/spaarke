@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="email-to-document-automation-r2">
+  <metadata>
+    <title>Add Download Audit Logging</title>
+    <phase>1: Download Endpoint</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>003</dependencies>
+    <blocks>005</blocks>
+    <tags>bff-api, api</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task adds logging without complex code changes</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Add comprehensive audit logging for all download requests to Application Insights.
+    This is required for FR-03 and supports legal compliance requirements for email document access.
+    Log successful downloads, failed attempts, and authorization denials.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in OpenTelemetry and Application Insights integration.
+    Follow existing telemetry patterns in the codebase.
+  </role>
+
+  <goal>
+    Application Insights receives audit events for:
+    1. Successful downloads (documentId, userId, filename, fileSize, duration)
+    2. Authorization denials (documentId, userId, reason)
+    3. Not found errors (documentId, userId)
+  </goal>
+
+  <context>
+    <background>
+      Email documents are often legal correspondence that requires audit trails. FR-03 requires
+      audit logging for all downloads. The existing EmailTelemetry class provides a pattern
+      for structured telemetry in this domain.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Telemetry/EmailTelemetry.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/DocumentEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Filters/DocumentDownloadAuthorizationFilter.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">MUST log to Application Insights (FR-03)</constraint>
+    <constraint source="project">MUST include user identity in audit logs</constraint>
+    <constraint source="project">MUST NOT log file content or sensitive data</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>docs/guides/EMAIL-TO-DOCUMENT-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Telemetry" location="src/server/api/Sprk.Bff.Api/Telemetry/EmailTelemetry.cs">
+        Follow existing telemetry class pattern with counters and histograms
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read EmailTelemetry.cs to understand the telemetry pattern</step>
+    <step order="2">Create or extend telemetry class with document download metrics</step>
+    <step order="3">Add counter: document.download.requests (with tags: status, userId)</step>
+    <step order="4">Add histogram: document.download.duration (ms)</step>
+    <step order="5">Add counter: document.download.denied (with tag: reason)</step>
+    <step order="6">Inject telemetry into DocumentEndpoints download handler</step>
+    <step order="7">Inject telemetry into DocumentDownloadAuthorizationFilter</step>
+    <step order="8">Verify builds and telemetry calls are in place</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and verify .NET project</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Telemetry/DocumentTelemetry.cs (new or extended)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/DocumentEndpoints.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Filters/DocumentDownloadAuthorizationFilter.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given a successful download, when querying Application Insights, then document.download.requests
+      event exists with status=success.
+    </criterion>
+    <criterion testable="true">
+      Given an authorization denial, when querying Application Insights, then document.download.denied
+      event exists with userId and reason.
+    </criterion>
+    <criterion testable="true">
+      Download duration is recorded as histogram metric.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use the existing Meter pattern from EmailTelemetry. Include correlation ID for request tracing.
+    Consider using ILogger for structured logs in addition to metrics.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

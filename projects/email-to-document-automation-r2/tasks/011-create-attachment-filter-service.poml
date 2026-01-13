@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="email-to-document-automation-r2">
+  <metadata>
+    <title>Create Attachment Filter Service</title>
+    <phase>2: Attachment Processing</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>012</blocks>
+    <tags>bff-api, api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task creates new service with filtering logic</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create an AttachmentFilterService that filters out noise attachments from emails.
+    Filter signature logos, tracking pixels, calendar files, and small inline images that
+    don't add document value. Make filtering rules configurable via EmailProcessingOptions.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in email processing and content filtering.
+    Follow ADR-010 for DI registration.
+  </role>
+
+  <goal>
+    AttachmentFilterService that:
+    1. Filters signature logos (small images with common signature patterns)
+    2. Filters tracking pixels (1x1 images, known tracker domains)
+    3. Filters calendar files (.ics, .vcs) if configured
+    4. Returns only meaningful attachments for document creation
+    5. Configurable via EmailProcessingOptions
+  </goal>
+
+  <context>
+    <background>
+      Not all email attachments should become Documents. Signature logos, tracking pixels,
+      and small inline images add noise without document value. This service filters attachments
+      to only process meaningful files. FR-05 requires filtering noise attachments.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Email/EmailFilterService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/EmailProcessingOptions.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">MUST filter signature logos (FR-05)</constraint>
+    <constraint source="project">MUST filter tracking pixels (FR-05)</constraint>
+    <constraint source="project">MUST be configurable (FR-07)</constraint>
+    <constraint source="ADR-010">MUST register concrete type (not interface) unless seam needed</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>docs/guides/EMAIL-TO-DOCUMENT-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review EmailFilterService.cs for pattern reference</step>
+    <step order="2">Review EmailProcessingOptions.cs for existing configuration</step>
+    <step order="3">Add attachment filter settings to EmailProcessingOptions</step>
+    <step order="4">Create AttachmentFilterService class</step>
+    <step order="5">Implement size-based filtering (exclude images &lt; 5KB by default)</step>
+    <step order="6">Implement content-type filtering (exclude tracking pixel patterns)</step>
+    <step order="7">Implement filename filtering (signature patterns like "image001.png")</step>
+    <step order="8">Implement calendar file filtering (.ics, .vcs)</step>
+    <step order="9">Add method: FilterAttachments(IEnumerable&lt;EmailAttachmentInfo&gt;) returns filtered list</step>
+    <step order="10">Register service in DI if needed</step>
+    <step order="11">Verify solution builds</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and verify .NET project</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Email/AttachmentFilterService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Configuration/EmailProcessingOptions.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given attachments including a 1x1 tracking pixel, when filtering, then the pixel is excluded.
+    </criterion>
+    <criterion testable="true">
+      Given a small inline image named "image001.png", when filtering, then it is excluded.
+    </criterion>
+    <criterion testable="true">
+      Given a PDF attachment, when filtering, then it is included.
+    </criterion>
+    <criterion testable="true">
+      Filter rules are configurable via EmailProcessingOptions.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Common signature image patterns: "image001.png", "image00*.gif", files under 5KB.
+    Tracking pixels: 1x1 dimensions, transparent GIFs, known tracking domains.
+    Consider maintaining a list of known signature/tracking patterns.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

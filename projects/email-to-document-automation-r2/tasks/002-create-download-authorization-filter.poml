@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="email-to-document-automation-r2">
+  <metadata>
+    <title>Create Download Authorization Filter</title>
+    <phase>1: Download Endpoint</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>003</blocks>
+    <tags>bff-api, api, auth, authorization</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task tags include 'bff-api' and 'auth' (security-critical code)</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create a DocumentDownloadAuthorizationFilter that validates Dataverse permissions before allowing
+    file downloads. The filter should check if the calling user has read access to the document record
+    in Dataverse, ensuring authorization is consistent with Dataverse security model.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core endpoint filters and Dataverse authorization.
+    Follow ADR-008 (endpoint filters for authorization).
+  </role>
+
+  <goal>
+    A working endpoint filter `DocumentDownloadAuthorizationFilter` that:
+    1. Extracts document ID from route
+    2. Validates user has Dataverse read permission on document record
+    3. Returns 403 Forbidden if unauthorized
+    4. Passes through to endpoint handler if authorized
+  </goal>
+
+  <context>
+    <background>
+      Per ADR-008, resource-based authorization must use endpoint filters, not global middleware.
+      The download endpoint needs to verify the user can access the document in Dataverse before
+      allowing them to download the SPE file. This maintains Dataverse as single source of truth
+      for permissions.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Filters/DocumentAuthorizationFilter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/DocumentEndpoints.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008">MUST use endpoint filter for resource authorization</constraint>
+    <constraint source="ADR-008">MUST NOT use global middleware for document-level authorization</constraint>
+    <constraint source="ADR-019">MUST return ProblemDetails on 403</constraint>
+    <constraint source="project">Authorization check must validate Dataverse permissions</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+    </files>
+    <patterns>
+      <pattern name="Endpoint Filter" location=".claude/patterns/api/endpoint-filters.md">
+        Follow existing DocumentAuthorizationFilter pattern
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing DocumentAuthorizationFilter.cs to understand the pattern</step>
+    <step order="2">Create DocumentDownloadAuthorizationFilter implementing IEndpointFilter</step>
+    <step order="3">Extract document ID from EndpointFilterInvocationContext route values</step>
+    <step order="4">Call Dataverse service to verify user has read access to document</step>
+    <step order="5">Return Results.Problem() with 403 status if unauthorized</step>
+    <step order="6">Call next(context) if authorized</step>
+    <step order="7">Register filter on download endpoint in DocumentEndpoints.cs</step>
+    <step order="8">Verify solution builds without errors</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and verify .NET project compiles</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Filters/DocumentDownloadAuthorizationFilter.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/DocumentEndpoints.cs (modified - add filter)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given a user with Dataverse read permission on document, when calling download endpoint,
+      then request proceeds to handler.
+    </criterion>
+    <criterion testable="true">
+      Given a user without Dataverse read permission, when calling download endpoint,
+      then 403 Forbidden with ProblemDetails is returned.
+    </criterion>
+    <criterion testable="true">
+      Filter is registered on download endpoint via .AddEndpointFilter&lt;DocumentDownloadAuthorizationFilter&gt;().
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    May be able to reuse existing DocumentAuthorizationFilter if it already checks read permission.
+    Consider whether download needs different permission than read (could add Operation.Download later).
+    The authorization service should use Dataverse WhoAmI or RetrieveMultiple with FetchXML to check access.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

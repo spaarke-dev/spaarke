@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="email-to-document-automation-r2">
+  <metadata>
+    <title>Create Email Analysis Playbook</title>
+    <phase>4: Email Analysis Playbook</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>029</dependencies>
+    <blocks>031</blocks>
+    <tags>dataverse, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task creates new playbook with AI prompt design</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create an "Email Analysis" playbook record in Dataverse that combines email metadata
+    with attachment contents for comprehensive AI analysis. Design the prompt to extract
+    TL;DR, summary, keywords, and entities from the full email context.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in AI prompt engineering and Dataverse playbook entity.
+    Design prompts that maximize information extraction from email context.
+  </role>
+
+  <goal>
+    Email Analysis playbook in Dataverse that:
+    1. Accepts email metadata + attachment text as input
+    2. Produces structured output: TL;DR, Summary, Keywords, Entities
+    3. Handles varying email sizes gracefully
+    4. Output format compatible with email entity fields
+  </goal>
+
+  <context>
+    <background>
+      FR-11 requires an extract-combine-analyze approach. The playbook combines:
+      - Email metadata (subject, from, to, date)
+      - Email body text
+      - Extracted text from all attachments
+      This comprehensive context enables better AI analysis than individual document analysis.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Analysis/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">MUST produce output compatible with email entity AI fields</constraint>
+    <constraint source="project">MUST handle emails up to 100KB combined text</constraint>
+    <constraint source="ADR-013">Follow AI Tool Framework patterns</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>docs/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing playbook records in Dataverse for pattern</step>
+    <step order="2">Design prompt template for email analysis</step>
+    <step order="3">Include instructions for TL;DR (1-2 sentences)</step>
+    <step order="4">Include instructions for Summary (key points)</step>
+    <step order="5">Include instructions for Keywords (comma-separated)</step>
+    <step order="6">Include instructions for Entities (people, organizations, dates)</step>
+    <step order="7">Create playbook record in Dataverse (sprk_playbook entity)</step>
+    <step order="8">Set playbook type and configuration</step>
+    <step order="9">Test prompt with sample email content manually</step>
+    <step order="10">Document playbook ID for use in code</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/email-to-document-automation-r2/notes/email-analysis-playbook.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Playbook record exists in Dataverse sprk_playbook entity.
+    </criterion>
+    <criterion testable="true">
+      Prompt produces structured output with TL;DR, Summary, Keywords, Entities.
+    </criterion>
+    <criterion testable="true">
+      Output format is parseable for storage in email entity fields.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Coordinate with Playbook module team on playbook schema.
+    Consider JSON output format for structured parsing.
+    Test with various email types: short, long, with/without attachments.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

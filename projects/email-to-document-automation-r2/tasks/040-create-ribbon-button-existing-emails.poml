@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="email-to-document-automation-r2">
+  <metadata>
+    <title>Create Ribbon Button for Existing Emails</title>
+    <phase>5: UI/Ribbon Enhancements</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>039</dependencies>
+    <blocks>041, 042</blocks>
+    <tags>dataverse, ribbon, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task involves ribbon customization and UI modification</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Add a ribbon button "Archive Email" to the email form in Dataverse. This button allows
+    users to manually trigger email-to-document processing for existing emails that weren't
+    automatically archived. Follow existing ribbon patterns and use ribbon-edit skill.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse ribbon customization and solution deployment.
+    Follow ADR-002 (no HTTP calls from plugins) - use web resource for button handler.
+  </role>
+
+  <goal>
+    Ribbon button on email form that:
+    1. Appears on email entity main form command bar
+    2. Labeled "Archive Email" with appropriate icon
+    3. Visible only when email is not already archived
+    4. Triggers JavaScript handler (implemented in task 042)
+  </goal>
+
+  <context>
+    <background>
+      FR-14 requires a way to process existing emails. Some emails may not have been archived
+      automatically (e.g., before automation was enabled). The ribbon button provides manual
+      control for users to archive specific emails.
+    </background>
+    <relevant-files>
+      <file>src/solutions/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-002">MUST NOT make HTTP calls from plugin - use web resource</constraint>
+    <constraint source="project">Button handler MUST be JavaScript web resource</constraint>
+    <constraint source="project">Use ribbon-edit skill for customization</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/guides/RIBBON-WORKBENCH-HOW-TO-ADD-BUTTON.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read ribbon-edit skill for procedure</step>
+    <step order="2">Export solution containing email entity customizations</step>
+    <step order="3">Modify RibbonDiffXml for email form</step>
+    <step order="4">Add CommandDefinition for "Archive Email" button</step>
+    <step order="5">Add DisplayRule to hide button if already archived (check sprk_document lookup)</step>
+    <step order="6">Reference JavaScript function: Sprk.Email.archiveEmail</step>
+    <step order="7">Add web resource reference to ribbon</step>
+    <step order="8">Import modified solution</step>
+    <step order="9">Verify button appears on email form</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">PAC CLI for solution operations</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeEmail/RibbonDiffXml modifications</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      "Archive Email" button appears on email form command bar.
+    </criterion>
+    <criterion testable="true">
+      Button is hidden when email already has associated sprk_document.
+    </criterion>
+    <criterion testable="true">
+      Button references JavaScript handler function.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use existing solution or create new one for email customizations.
+    DisplayRule should check if sprk_document lookup field is populated.
+    Icon suggestion: DocumentWithContent or Mail archive icon.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>
