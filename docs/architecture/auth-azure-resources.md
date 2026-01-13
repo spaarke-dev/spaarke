@@ -1,8 +1,7 @@
-```markdown
 # Authentication Azure Resources & GUIDs
 
 > **Source**: AUTHENTICATION-ARCHITECTURE.md
-> **Last Updated**: December 4, 2025
+> **Last Updated**: January 13, 2026
 > **Applies To**: Debugging, deployment, configuration lookup
 
 ---
@@ -468,6 +467,48 @@ else
 
 ---
 
+## Email Processing Configuration
+
+### App Service Settings for Email Processing
+
+| Setting | Value | Notes |
+|---------|-------|-------|
+| `EmailProcessing__Enabled` | `true` | Feature toggle |
+| `EmailProcessing__EnableWebhook` | `true` | Enable webhook endpoint |
+| `EmailProcessing__WebhookSecret` | (Key Vault) | HMAC-SHA256 secret |
+| `EmailProcessing__DefaultContainerId` | `b!yLRdWEO...` | **MUST be Drive ID format** |
+
+### DefaultContainerId Format
+
+**Critical**: The `DefaultContainerId` must be in **Drive ID format** (`b!xxx`), NOT a raw GUID.
+
+```
+❌ WRONG: "58dd5db4-8043-4676-965e-c92e45f07221"
+✅ CORRECT: "b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50"
+```
+
+**Setting via Azure CLI**:
+```powershell
+# Use PowerShell to avoid bash escaping issues with '!' character
+az webapp config appsettings set `
+  --name spe-api-dev-67e2xz `
+  --resource-group spe-infrastructure-westus2 `
+  --settings "EmailProcessing__DefaultContainerId=b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50"
+```
+
+**Note**: In bash, the `!` character causes history expansion issues. Use PowerShell or escape with `\!`.
+
+### Email Processing Authentication
+
+Email processing uses **app-only authentication** (not OBO) because:
+1. Dataverse webhooks arrive without user context
+2. Background job handlers have no `HttpContext`
+3. The app uploads files on its own behalf
+
+See [sdap-auth-patterns.md](sdap-auth-patterns.md) Pattern 6 for details.
+
+---
+
 ## GUID Quick Lookup
 
 | What | GUID |
@@ -477,6 +518,7 @@ else
 | BFF API App | `1e40baad-e065-4aea-a8d4-4b7ab273458c` |
 | Graph Resource | `https://graph.microsoft.com` |
 | Dataverse Resource | `https://spaarkedev1.crm.dynamics.com` |
+| Email Container (Dev) | `b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50` |
 
 ---
 

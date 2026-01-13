@@ -226,16 +226,19 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             document["sprk_filename"] = request.FileName;
 
         if (request.FileSize.HasValue)
-            document["sprk_filesize"] = request.FileSize.Value;
+            document["sprk_filesize"] = (int)request.FileSize.Value; // Dataverse field is Whole Number (int)
 
         if (request.MimeType != null)
-            document["sprk_filetype"] = request.MimeType;
+            document["sprk_mimetype"] = request.MimeType;
 
         if (request.GraphItemId != null)
             document["sprk_graphitemid"] = request.GraphItemId;
 
         if (request.GraphDriveId != null)
             document["sprk_graphdriveid"] = request.GraphDriveId;
+
+        if (request.FilePath != null)
+            document["sprk_filepath"] = request.FilePath;
 
         if (request.Status.HasValue)
             document["statuscode"] = new OptionSetValue((int)request.Status.Value);

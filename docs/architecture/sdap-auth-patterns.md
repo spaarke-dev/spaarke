@@ -1,7 +1,7 @@
 # SDAP Authentication Patterns
 
 > **Source**: SDAP-ARCHITECTURE-GUIDE.md (Authentication & Security section)
-> **Last Updated**: January 3, 2026
+> **Last Updated**: January 13, 2026
 > **Applies To**: Authentication code, token handling, Azure AD configuration
 
 ---
@@ -522,6 +522,128 @@ var result = await _accessDataSource.GetUserAccessAsync(
 
 ---
 
+## Pattern 6: App-Only Auth for Background Email Processing
+
+**When**: Email webhook triggers or background job handlers need to upload files to SPE and update Dataverse **without user context**.
+
+**Critical**: This pattern is **separate from OBO** because:
+1. Webhooks arrive from Dataverse with no user context
+2. Background job handlers run asynchronously without `HttpContext`
+3. The application acts on its own behalf, not on behalf of a user
+
+### App-Only vs OBO Authentication
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  User-Initiated (OBO)              Background/Webhook (App-Only)        │
+│  ─────────────────────             ─────────────────────────────        │
+│  AnalysisOrchestrationService      EmailToDocumentJobHandler            │
+│  - PCF triggers                    - Dataverse webhook triggers         │
+│  - User context (OBO)              - No user context                    │
+│  - HttpContext required            - Uses ClientCredentials             │
+│  - SPE: User permissions apply     - SPE: App registration permissions  │
+│                                                                          │
+│  ✅ Use for: AI analysis           ✅ Use for: Email archival           │
+│  ✅ Use for: Document preview      ✅ Use for: Bulk document uploads    │
+│  ✅ Use for: User file operations  ❌ NOT for: AI analysis (needs OBO)  │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### App-Only SPE File Upload Pattern
+
+```csharp
+// EmailToDocumentJobHandler.cs
+public async Task<JobOutcome> ProcessAsync(JobContract job, CancellationToken ct)
+{
+    // No HttpContext available - use app-only SpeFileStore methods
+
+    // 1. Resolve container ID to Drive ID (app-only)
+    var driveId = await _speFileStore.ResolveDriveIdAsync(containerId, ct);
+
+    // 2. Upload file using app-only credentials
+    var fileHandle = await _speFileStore.UploadSmallAsync(
+        driveId,
+        uploadPath,
+        emlStream,
+        ct);
+
+    // 3. fileHandle contains WebUrl for sprk_filepath field
+    var updateRequest = new UpdateDocumentRequest
+    {
+        GraphDriveId = driveId,
+        GraphItemId = fileHandle.Id,
+        FilePath = fileHandle.WebUrl  // SharePoint URL for links
+    };
+}
+```
+
+### SpeFileStore App-Only Methods
+
+| Method | Auth Type | Use Case |
+|--------|-----------|----------|
+| `ResolveDriveIdAsync(containerId)` | App-only | Convert container GUID to Drive ID |
+| `UploadSmallAsync(driveId, path, stream)` | App-only | Upload files <4MB |
+| `UploadLargeAsync(driveId, path, stream, size)` | App-only | Upload files ≥4MB |
+| `DownloadFileAsUserAsync(httpContext, ...)` | OBO | User-initiated downloads |
+
+### DefaultContainerId Configuration
+
+**Critical**: The `DefaultContainerId` must be in **Drive ID format** (`b!xxx`), not a raw GUID.
+
+```json
+// appsettings.json
+{
+  "EmailProcessing": {
+    "DefaultContainerId": "b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50"
+  }
+}
+```
+
+**Why Drive ID format?** The Graph API expects Drive ID for SPE operations. The `b!` prefix indicates a base64-encoded SharePoint container ID.
+
+### App Registration Requirements for App-Only
+
+The BFF API app registration (`1e40baad-e065-4aea-a8d4-4b7ab273458c`) must have:
+
+**API Permissions (Application - not Delegated)**:
+- Microsoft Graph: `Files.ReadWrite.All` (Application)
+- Microsoft Graph: `Sites.ReadWrite.All` (Application)
+
+**SPE Container Permissions**:
+- App must be registered as a container owner/contributor in SharePoint Embedded
+- This is separate from Azure AD permissions
+
+### When to Use Each Pattern
+
+| Scenario | Pattern | Reason |
+|----------|---------|--------|
+| AI Analysis (Document Profile) | OBO | Needs user's SPE permissions |
+| AI Analysis (Playbooks) | OBO | File downloads need user context |
+| PCF file upload | OBO | User is uploading their files |
+| Email webhook processing | App-Only | No user context available |
+| Background job file upload | App-Only | No HttpContext in job handlers |
+| Bulk document import | App-Only | System operation, no user |
+
+### Future: AppOnlyAnalysisService
+
+For AI analysis of email documents (where no user context exists), a separate `AppOnlyAnalysisService` is planned:
+
+```
+AnalysisOrchestrationService     AppOnlyAnalysisService (planned)
+├─ OBO authentication            ├─ App-only authentication
+├─ PCF-triggered analysis        ├─ Email/webhook-triggered analysis
+├─ User context required         ├─ No user context needed
+│                                │
+└─── Shared Components ──────────┘
+     - OpenAiClient
+     - TextExtractorService (limited: no .eml native support)
+     - IDataverseService
+```
+
+**Note**: Azure Document Intelligence does NOT natively process `.eml` files. Email analysis requires extracting attachments separately.
+
+---
+
 ## Token Scopes Reference
 
 | Token For | Scope | Pattern |
@@ -529,6 +651,7 @@ var result = await _accessDataSource.GetUserAccessAsync(
 | BFF API (from PCF) | `api://1e40baad-.../user_impersonation` | MSAL.js |
 | Graph API (from BFF) | `https://graph.microsoft.com/.default` | OBO |
 | Graph API for AI Analysis | `https://graph.microsoft.com/.default` | OBO (via HttpContext) |
+| Graph API for Email Processing | `https://graph.microsoft.com/.default` | ClientCredentials (App-Only) |
 | Dataverse (from BFF, metadata queries) | `https://{org}.crm.dynamics.com/.default` | ClientCredentials |
 | Dataverse (from BFF, authorization checks) | `https://{org}.crm.dynamics.com/.default` | OBO (via HttpContext) |
 
@@ -598,6 +721,8 @@ pac admin list-service-principals --environment https://spaarkedev1.crm.dynamics
 | Using ManagedIdentity for Dataverse | No User Assigned Managed Identity found | Use ClientSecret connection string |
 | Expired client secret | 401 on all BFF calls | Rotate secret in Azure AD + Key Vault |
 | Using app-only auth for AI file download | 403 Access Denied from SPE | Use `DownloadFileAsUserAsync(httpContext, ...)` with OBO |
+| DefaultContainerId as raw GUID | Graph API rejects container ID | Use Drive ID format (`b!xxx`) - see Pattern 6 |
+| Wrong Dataverse field type for FileSize | Type mismatch error | `sprk_filesize` is Whole Number (int), cast `(int)` |
 
 ---
 
