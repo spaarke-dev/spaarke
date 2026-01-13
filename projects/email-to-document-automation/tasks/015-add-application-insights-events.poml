@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>015</id>
+    <title>Add Application Insights custom events</title>
+    <phase>2</phase>
+    <status>completed</status>
+    <estimate>2h</estimate>
+    <tags>bff-api, telemetry, azure</tags>
+    <dependencies>012</dependencies>
+  </metadata>
+
+  <description>
+    Create EmailTelemetry class with OpenTelemetry-compatible metrics for email processing.
+    Track conversion requests, webhook triggers, filter evaluations, and job processing
+    with appropriate dimensions for Application Insights analysis.
+  </description>
+
+  <knowledge>
+    <files>
+      <file>projects/email-to-document-automation/SPEC.md</file>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="project">OpenTelemetry-compatible meter naming</constraint>
+    <constraint source="project">No PII in telemetry dimensions</constraint>
+  </constraints>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Telemetry/EmailTelemetry.cs</file>
+    </relevant-files>
+  </context>
+
+  <steps>
+    <step id="1">Create EmailTelemetry class with Meter "Sprk.Bff.Api.Email"</step>
+    <step id="2">Add conversion metrics (requests, successes, failures, duration)</step>
+    <step id="3">Add webhook metrics (received, enqueued, rejected, duration)</step>
+    <step id="4">Add polling metrics (runs, emails_found, emails_enqueued)</step>
+    <step id="5">Add filter metrics (evaluations, matched, default_action)</step>
+    <step id="6">Add job metrics (processed, succeeded, failed, skipped_duplicate, duration)</step>
+    <step id="7">Add file metrics (eml_file_size, attachments_processed)</step>
+    <step id="8">Add ActivitySource for distributed tracing</step>
+    <step id="9">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>EmailTelemetry registered as singleton in DI</criterion>
+    <criterion>Metrics use standard OpenTelemetry naming (email.conversion.*, email.webhook.*, etc.)</criterion>
+    <criterion>Histograms track duration in milliseconds</criterion>
+    <criterion>Counters track success/failure with status dimension</criterion>
+    <criterion>ActivitySource enables distributed tracing</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Completed as part of Phase 2 implementation.
+    Application Insights queries documented in class comments.
+  </notes>
+</task>

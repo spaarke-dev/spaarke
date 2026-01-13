@@ -27,6 +27,12 @@ public static class WorkersModule
         // Register idempotency service for event deduplication (ADR-004)
         services.AddScoped<IIdempotencyService, IdempotencyService>();
 
+        // Register batch job status store for tracking batch processing progress (Task 041)
+        services.AddScoped<BatchJobStatusStore>();
+
+        // Register DLQ service for viewing and re-driving dead-lettered messages (Task 043)
+        services.AddScoped<DeadLetterQueueService>();
+
         // Register document event processor background service (only if Service Bus is configured)
         if (!string.IsNullOrWhiteSpace(serviceBusConnectionString))
         {

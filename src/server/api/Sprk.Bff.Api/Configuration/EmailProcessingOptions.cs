@@ -2,14 +2,14 @@ namespace Sprk.Bff.Api.Configuration;
 
 /// <summary>
 /// Configuration options for email-to-document processing.
-/// Loaded from appsettings.json "Email" section.
+/// Loaded from appsettings.json "EmailProcessing" section.
 /// </summary>
 public class EmailProcessingOptions
 {
     /// <summary>
     /// Configuration section name.
     /// </summary>
-    public const string SectionName = "Email";
+    public const string SectionName = "EmailProcessing";
 
     /// <summary>
     /// Whether automatic email processing is enabled.
@@ -122,6 +122,19 @@ public class EmailProcessingOptions
     /// Must match the secret configured in Dataverse Service Endpoint.
     /// </summary>
     public string? WebhookSecret { get; set; }
+
+    /// <summary>
+    /// Maximum concurrent emails to process in a batch job.
+    /// Controls bounded concurrency to prevent throttling.
+    /// Default: 5
+    /// </summary>
+    public int BatchMaxConcurrency { get; set; } = 5;
+
+    /// <summary>
+    /// Batch size for batch processing - how many emails to fetch per query.
+    /// Default: 50
+    /// </summary>
+    public int BatchProcessingBatchSize { get; set; } = 50;
 
     /// <summary>
     /// Computed max attachment size in bytes.

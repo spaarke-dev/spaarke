@@ -25,6 +25,10 @@ public class UpdateDocumentRequest
     public string? MimeType { get; set; }
     public string? GraphItemId { get; set; }
     public string? GraphDriveId { get; set; }
+
+    /// <summary>SharePoint file URL (enables "Open in SharePoint" links). Maps to sprk_filepath.</summary>
+    public string? FilePath { get; set; }
+
     public bool? HasFile { get; set; }
     public DocumentStatus? Status { get; set; }
 

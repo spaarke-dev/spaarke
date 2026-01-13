@@ -209,6 +209,7 @@ public class EmailToDocumentJobHandler : IJobHandler
                     MimeType = "message/rfc822",
                     GraphItemId = fileHandle.Id,
                     GraphDriveId = driveId,
+                    FilePath = fileHandle.WebUrl, // SharePoint URL for "Open in SharePoint" links
                     HasFile = true,
                     DocumentType = DocumentTypeEmail,
                     IsEmailArchive = true,

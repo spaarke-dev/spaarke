@@ -1,9 +1,9 @@
 # Email-to-Document Automation Architecture
 
-> **Version**: 1.0
-> **Date**: December 30, 2025
+> **Version**: 1.1
+> **Date**: January 13, 2026
 > **Project**: Email-to-Document Automation (Phase 2)
-> **Status**: Implementation Complete
+> **Status**: Core Implementation Complete, AI Analysis Planned
 
 ---
 
@@ -171,6 +171,18 @@ Extended `sprk_document` with email-specific fields:
 | `sprk_emailmessageid` | Text | RFC 2822 Message-ID |
 | `sprk_emaildirection` | Choice | Received/Sent |
 
+### Additional SPE File Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `sprk_graphitemid` | Text | Graph API item ID |
+| `sprk_graphdriveid` | Text | Graph API drive ID |
+| `sprk_filepath` | Text | SharePoint WebUrl for "Open in SharePoint" links |
+| `sprk_filename` | Text | Original file name |
+| `sprk_filesize` | Whole Number | File size in bytes (cast to int, NOT Int64) |
+| `sprk_mimetype` | Text | MIME type (NOT `sprk_filetype`) |
+| `sprk_hasfile` | Boolean | Whether file is uploaded |
+
 ---
 
 ## Configuration
@@ -196,11 +208,18 @@ Extended `sprk_document` with email-specific fields:
 
 ### Environment Variables
 
-| Variable | Purpose |
-|----------|---------|
-| `EmailProcessing__Enabled` | Feature toggle |
-| `EmailProcessing__WebhookSecret` | HMAC signature secret |
-| `EmailProcessing__DefaultContainerId` | SPE container for emails |
+| Variable | Purpose | Notes |
+|----------|---------|-------|
+| `EmailProcessing__Enabled` | Feature toggle | |
+| `EmailProcessing__WebhookSecret` | HMAC signature secret | |
+| `EmailProcessing__DefaultContainerId` | SPE container for emails | **Must be Drive ID format (`b!xxx`)** |
+
+**Critical**: The `DefaultContainerId` must be in Drive ID format, not a raw GUID.
+
+```
+❌ WRONG: "58dd5db4-8043-4676-965e-c92e45f07221"
+✅ CORRECT: "b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50"
+```
 
 ---
 
@@ -280,6 +299,115 @@ After max retry attempts (default: 3), jobs are moved to dead-letter queue with 
 
 ---
 
+## Authentication Pattern
+
+Email processing uses **app-only authentication** (not OBO) because webhooks and background jobs have no user context. See [sdap-auth-patterns.md](../architecture/sdap-auth-patterns.md) Pattern 6.
+
+### OBO vs App-Only for Email
+
+| Component | Auth Type | Why |
+|-----------|-----------|-----|
+| `EmailToDocumentJobHandler` | App-Only | No user context in job handlers |
+| `SpeFileStore.UploadSmallAsync` | App-Only | No HttpContext available |
+| `AnalysisOrchestrationService` | OBO | AI analysis needs user's SPE permissions |
+
+**Important**: AI analysis of email documents requires a separate **AppOnlyAnalysisService** (planned) because `AnalysisOrchestrationService` requires OBO authentication via `HttpContext`.
+
+---
+
+## Bug Fixes and Lessons Learned (January 2026)
+
+### Issue 1: DateTime Parse Error on OperationCreatedOn
+
+**Problem**: Dataverse webhooks send dates in WCF format (`/Date(1234567890000)/`), not ISO 8601.
+
+**Fix**: Added `NullableWcfDateTimeConverter` to `DataverseWebhookPayload.cs`:
+```csharp
+[JsonConverter(typeof(NullableWcfDateTimeConverter))]
+public DateTime? OperationCreatedOn { get; set; }
+```
+
+### Issue 2: Field Name Mismatch (sprk_filetype)
+
+**Problem**: Code used `sprk_filetype` but Dataverse field is `sprk_mimetype`.
+
+**Fix**: Updated `DataverseServiceClientImpl.cs` and `DataverseWebApiService.cs` to use correct field name.
+
+### Issue 3: FileSize Type Mismatch
+
+**Problem**: `sprk_filesize` is Dataverse "Whole Number" (int32), but code passed long.
+
+**Fix**: Cast to `(int)` when setting the field value.
+
+### Issue 4: DefaultContainerId Format
+
+**Problem**: Graph API requires Drive ID format (`b!xxx`), not raw GUID.
+
+**Fix**: Updated Azure config to use Drive ID. Created `scripts/Set-ContainerId.ps1` to avoid bash `!` escaping issues.
+
+### Issue 5: FilePath URL Not Saved
+
+**Problem**: PCF sets `sprk_filepath: file.webUrl` but job handler wasn't setting this field.
+
+**Fix**: Added `FilePath` property to `UpdateDocumentRequest` and set `FilePath = fileHandle.WebUrl` in `EmailToDocumentJobHandler.cs`.
+
+---
+
+## Future: AI Analysis Architecture
+
+### Three Distinct Email Analysis Requirements
+
+| # | Entity | What's Needed | Current State |
+|---|--------|---------------|---------------|
+| 1 | **Document** (.eml) | SPE file + AI Document Profile | ✅ File uploaded, ❌ AI analysis |
+| 2 | **Document** (per attachment) | SPE file + AI Document Profile (child of .eml Document) | ❌ Not created |
+| 3 | **Email** (activity record) | AI analysis combining email metadata + all attachment content | ❌ Not implemented |
+
+### Why Three Separate Analyses?
+
+**Azure Document Intelligence does NOT process .eml files natively.** It supports: PDF, JPEG, PNG, BMP, TIFF, HEIF, DOCX, XLSX, PPTX, HTML.
+
+For .eml files, `TextExtractorService` falls back to raw text extraction which sees MIME structure but does NOT decode base64-encoded attachments meaningfully.
+
+### Planned Architecture: AppOnlyAnalysisService
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  User-Initiated (OBO)              App-Only (Background)    │
+│  ─────────────────────             ────────────────────     │
+│  AnalysisOrchestrationService      AppOnlyAnalysisService   │
+│  - PCF triggers                    - Email processing       │
+│  - User context (OBO)              - Bulk uploads           │
+│  - HttpContext required            - No user context        │
+│                                                             │
+│              ↘                    ↙                        │
+│                 Shared Components                           │
+│                 - OpenAiClient                              │
+│                 - TextExtractorService                      │
+│                 - SpeFileStore (app-only mode)              │
+│                 - IDataverseService                         │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Planned Implementation Phases
+
+**Phase A: Attachment Processing**
+1. Enhance `EmailToEmlConverter` to expose attachment extraction
+2. Modify `EmailToDocumentJobHandler` to process attachments as separate uploads
+3. Create child Document records with `sprk_ParentDocumentLookup` relationship
+
+**Phase B: App-Only Analysis Service**
+1. Create `IAppOnlyAnalysisService` interface
+2. Implement `AppOnlyAnalysisService` using shared components
+3. Add endpoint or job handler for triggering app-only analysis
+
+**Phase C: Email Analysis Playbook**
+1. Create "Email Analysis" playbook in Dataverse
+2. Design prompt that combines email metadata + attachment contents
+3. Implement playbook execution in `AppOnlyAnalysisService`
+
+---
+
 ## Related Documentation
 
 | Document | Purpose |
@@ -288,6 +416,9 @@ After max retry attempts (default: 3), jobs are moved to dead-letter queue with 
 | `projects/email-to-document-automation/notes/WEBHOOK-REGISTRATION.md` | Webhook setup guide |
 | `docs/architecture/sdap-overview.md` | SDAP system overview |
 | `docs/architecture/sdap-component-interactions.md` | Component interaction patterns |
+| `docs/architecture/sdap-auth-patterns.md` | Auth patterns including app-only (Pattern 6) |
+| `docs/architecture/sdap-bff-api-patterns.md` | BFF API patterns including job handlers |
+| `docs/architecture/auth-azure-resources.md` | Azure config including DefaultContainerId |
 
 ---
 
@@ -309,4 +440,4 @@ After max retry attempts (default: 3), jobs are moved to dead-letter queue with 
 
 ---
 
-*Last Updated: December 30, 2025*
+*Last Updated: January 13, 2026*

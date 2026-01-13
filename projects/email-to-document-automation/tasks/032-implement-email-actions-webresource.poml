@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>032</id>
+    <title>Implement sprk_emailactions.js web resource</title>
+    <phase>4</phase>
+    <status>not-started</status>
+    <estimate>3h</estimate>
+    <tags>dataverse, frontend, typescript</tags>
+    <dependencies>031</dependencies>
+  </metadata>
+
+  <description>
+    Create JavaScript web resource to handle the "Save to Document" ribbon button click.
+    Calls the BFF API convert-to-document endpoint and provides user feedback
+    on success or failure.
+  </description>
+
+  <knowledge>
+    <files>
+      <file>projects/email-to-document-automation/SPEC.md</file>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="project">Use Xrm.WebApi for API calls where possible</constraint>
+    <constraint source="project">Show progress indicator during conversion</constraint>
+    <constraint source="project">Handle errors gracefully with user-friendly messages</constraint>
+  </constraints>
+
+  <context>
+    <relevant-files>
+      <file>src/client/webresources/sprk_emailactions.ts</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/EmailEndpoints.cs</file>
+    </relevant-files>
+  </context>
+
+  <steps>
+    <step id="1">Create sprk_emailactions.ts file</step>
+    <step id="2">Implement saveEmailAsDocument function</step>
+    <step id="3">Get email ID from form context</step>
+    <step id="4">Show progress indicator</step>
+    <step id="5">Call BFF API POST /api/v1/emails/{emailId}/save-as-document</step>
+    <step id="6">Handle success - show notification with document link</step>
+    <step id="7">Handle errors - show user-friendly error message</step>
+    <step id="8">Handle 409 Conflict (already saved)</step>
+    <step id="9">Compile TypeScript to JavaScript</step>
+    <step id="10">Register web resource in solution</step>
+    <step id="11">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Web resource registered in Dataverse solution</criterion>
+    <criterion>Function callable from ribbon button</criterion>
+    <criterion>Progress indicator shown during API call</criterion>
+    <criterion>Success notification includes link to created document</criterion>
+    <criterion>Error messages are user-friendly (not technical)</criterion>
+    <criterion>409 Conflict shows "Email already saved" message</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    TypeScript source in src/client/webresources/, compiled JS deployed to Dataverse.
+    Use async/await pattern for API calls.
+  </notes>
+</task>

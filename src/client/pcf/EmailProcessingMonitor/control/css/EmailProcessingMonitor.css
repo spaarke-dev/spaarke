@@ -1,0 +1,55 @@
+/**
+ * Email Processing Monitor PCF Control Styles
+ *
+ * Note: Most styling is handled by Fluent UI v9 makeStyles.
+ * This CSS file provides loading/error states before React mounts.
+ */
+
+/* Loading overlay (shown during MSAL init before React mounts) */
+.email-monitor-loading-overlay {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 16px;
+    padding: 24px;
+    background-color: var(--colorNeutralBackground1, #ffffff);
+}
+
+.email-monitor-loading-spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid var(--colorNeutralStroke1, #d1d1d1);
+    border-top-color: var(--colorBrandForeground1, #0078d4);
+    border-radius: 50%;
+    animation: email-monitor-spin 1s linear infinite;
+}
+
+@keyframes email-monitor-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.email-monitor-loading-text {
+    color: var(--colorNeutralForeground3, #616161);
+    font-size: 14px;
+    font-family: var(--fontFamilyBase, 'Segoe UI', system-ui, sans-serif);
+}
+
+/* Dark mode support for loading state */
+@media (prefers-color-scheme: dark) {
+    .email-monitor-loading-overlay {
+        background-color: #292929;
+    }
+
+    .email-monitor-loading-spinner {
+        border-color: #3d3d3d;
+        border-top-color: #479ef5;
+    }
+
+    .email-monitor-loading-text {
+        color: #d6d6d6;
+    }
+}

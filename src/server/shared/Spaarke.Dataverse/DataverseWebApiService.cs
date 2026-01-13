@@ -349,7 +349,7 @@ public class DataverseWebApiService : IDataverseService
         if (request.Description != null) payload["sprk_documentdescription"] = request.Description;
         if (request.FileName != null) payload["sprk_filename"] = request.FileName;
         if (request.FileSize.HasValue) payload["sprk_filesize"] = request.FileSize.Value;
-        if (request.MimeType != null) payload["sprk_filetype"] = request.MimeType;
+        if (request.MimeType != null) payload["sprk_mimetype"] = request.MimeType;
         if (request.GraphItemId != null) payload["sprk_graphitemid"] = request.GraphItemId;
         if (request.GraphDriveId != null) payload["sprk_graphdriveid"] = request.GraphDriveId;
         if (request.HasFile.HasValue) payload["sprk_hasfile"] = request.HasFile.Value;
@@ -535,7 +535,7 @@ public class DataverseWebApiService : IDataverseService
             HasFile = GetBoolValue(data, "sprk_hasfile"),
             FileName = GetStringValue(data, "sprk_filename"),
             FileSize = GetLongValue(data, "sprk_filesize"),
-            MimeType = GetStringValue(data, "sprk_filetype"),
+            MimeType = GetStringValue(data, "sprk_mimetype"),
             GraphItemId = GetStringValue(data, "sprk_graphitemid"),
             GraphDriveId = GetStringValue(data, "sprk_graphdriveid"),
             Status = GetIntValue(data, "statuscode").HasValue

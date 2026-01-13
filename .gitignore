@@ -44,6 +44,7 @@ webapp-logs-*/
 *.temp
 *.bak
 .tmp/
+tmpclaude-*
 
 # Package files
 *.nupkg

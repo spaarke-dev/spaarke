@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>031</id>
+    <title>Create Email form ribbon button</title>
+    <phase>4</phase>
+    <status>completed</status>
+    <estimate>4h</estimate>
+    <tags>dataverse, ribbon, frontend</tags>
+    <dependencies>005</dependencies>
+  </metadata>
+
+  <description>
+    Add "Save to Document" ribbon button to the Email entity form in Dataverse.
+    Button should only be visible for completed emails and call the BFF API
+    to convert the email to a document.
+  </description>
+
+  <knowledge>
+    <files>
+      <file>projects/email-to-document-automation/SPEC.md</file>
+      <file>docs/guides/RIBBON-WORKBENCH-HOW-TO-ADD-BUTTON.md</file>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-006">PCF over webresources, but webresource needed for ribbon handler</constraint>
+    <constraint source="project">Button visible only for completed emails</constraint>
+    <constraint source="project">Validate user has read access to email</constraint>
+  </constraints>
+
+  <context>
+    <relevant-files>
+      <file>src/solutions/SpaarkeCore/RibbonDiffXml/</file>
+      <file>src/client/webresources/sprk_emailactions.ts</file>
+    </relevant-files>
+  </context>
+
+  <steps>
+    <step id="1">Export Email entity ribbon using Ribbon Workbench or XrmToolBox</step>
+    <step id="2">Add custom button to Email form command bar</step>
+    <step id="3">Configure Enable Rule for completed emails only</step>
+    <step id="4">Configure Display Rule for appropriate security</step>
+    <step id="5">Set command action to call JavaScript web resource</step>
+    <step id="6">Import modified ribbon to solution</step>
+    <step id="7">Test button visibility and state</step>
+    <step id="8">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Button visible on Email form command bar</criterion>
+    <criterion>Button enabled only for completed emails (statecode = 1)</criterion>
+    <criterion>Button disabled for draft/pending emails</criterion>
+    <criterion>Button icon and label are clear</criterion>
+    <criterion>Clicking button triggers JavaScript handler</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use ribbon-edit skill for step-by-step ribbon modification process.
+    Button ID: sprk.Email.SaveToDocument
+  </notes>
+</task>

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>003</id>
+    <title>Add alternate key for idempotency</title>
+    <phase>1</phase>
+    <status>completed</status>
+    <estimate>1h</estimate>
+    <tags>dataverse, solution, fields</tags>
+    <dependencies>001</dependencies>
+  </metadata>
+
+  <description>
+    Add an alternate key to sprk_document entity on (sprk_emailactivityid, sprk_isemailarchive)
+    to enable storage-level uniqueness and prevent duplicate email documents.
+  </description>
+
+  <knowledge>
+    <files>
+      <file>projects/email-to-document-automation/SPEC.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-002">Keep Dataverse customizations thin</constraint>
+    <constraint source="project">Idempotency by design - repeated triggers produce at most one primary email Document</constraint>
+  </constraints>
+
+  <context>
+    <relevant-files>
+      <file>src/solutions/SpaarkeCore/Entities/sprk_document/</file>
+    </relevant-files>
+  </context>
+
+  <steps>
+    <step id="1">Open Dataverse solution SpaarkeCore</step>
+    <step id="2">Navigate to sprk_document entity</step>
+    <step id="3">Add alternate key on (sprk_emailactivityid, sprk_isemailarchive)</step>
+    <step id="4">Export and commit solution changes</step>
+    <step id="5">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Alternate key exists on sprk_document for email idempotency</criterion>
+    <criterion>Duplicate email creation attempts fail with constraint violation</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Completed as part of Phase 1 implementation.
+    Alternate key prevents duplicate documents when same email is processed multiple times.
+  </notes>
+</task>

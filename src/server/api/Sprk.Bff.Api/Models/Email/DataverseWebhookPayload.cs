@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Sprk.Bff.Api.Infrastructure.Json;
 
 namespace Sprk.Bff.Api.Models.Email;
 
@@ -70,8 +71,10 @@ public class DataverseWebhookPayload
 
     /// <summary>
     /// When the operation was created.
+    /// Dataverse sends this in WCF date format: /Date(1234567890000)/
     /// </summary>
     [JsonPropertyName("OperationCreatedOn")]
+    [JsonConverter(typeof(NullableWcfDateTimeConverter))]
     public DateTime? OperationCreatedOn { get; set; }
 
     /// <summary>

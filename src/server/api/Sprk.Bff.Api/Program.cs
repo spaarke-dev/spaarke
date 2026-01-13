@@ -426,8 +426,12 @@ else
 // ============================================================================
 // EMAIL-TO-DOCUMENT CONVERSION SERVICES (Email-to-Document Automation project)
 // ============================================================================
-// Email telemetry - OpenTelemetry-compatible metrics for email processing
-builder.Services.AddSingleton<Sprk.Bff.Api.Telemetry.EmailTelemetry>();
+// Email processing stats service - in-memory stats readable via API (admin monitoring PCF)
+builder.Services.AddSingleton<Sprk.Bff.Api.Services.Email.EmailProcessingStatsService>();
+
+// Email telemetry - OpenTelemetry-compatible metrics for email processing (delegates to stats service)
+builder.Services.AddSingleton<Sprk.Bff.Api.Telemetry.EmailTelemetry>(sp =>
+    new Sprk.Bff.Api.Telemetry.EmailTelemetry(sp.GetService<Sprk.Bff.Api.Services.Email.EmailProcessingStatsService>()));
 
 // Register Email Processing configuration
 builder.Services.Configure<Sprk.Bff.Api.Configuration.EmailProcessingOptions>(
@@ -445,6 +449,14 @@ builder.Services.AddScoped<Sprk.Bff.Api.Services.Email.IEmailFilterService,
 // Email rule seed service - seeds default exclusion rules to Dataverse
 builder.Services.AddScoped<Sprk.Bff.Api.Services.Email.EmailRuleSeedService>();
 
+// Email association service - determines Matter/Account/Contact associations with confidence scoring
+builder.Services.AddScoped<Sprk.Bff.Api.Services.Email.IEmailAssociationService,
+    Sprk.Bff.Api.Services.Email.EmailAssociationService>();
+
+// Email attachment processor - creates separate document records for email attachments
+builder.Services.AddScoped<Sprk.Bff.Api.Services.Email.IEmailAttachmentProcessor,
+    Sprk.Bff.Api.Services.Email.EmailAttachmentProcessor>();
+
 // HttpClient for email polling backup service (Dataverse queries)
 builder.Services.AddHttpClient("DataversePolling")
     .ConfigureHttpClient(client =>
@@ -461,6 +473,9 @@ builder.Services.AddSingleton<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>()
 // Register job handlers
 builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.DocumentProcessingJobHandler>();
 builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.EmailToDocumentJobHandler>();
+builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.BatchProcessEmailsJobHandler>();
+// Also register EmailToDocumentJobHandler as concrete type for BatchProcessEmailsJobHandler dependency
+builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.Handlers.EmailToDocumentJobHandler>();
 // DocumentAnalysisJobHandler removed - background AI analysis is now triggered from PCF (requires user context)
 
 // Configure Service Bus job processing

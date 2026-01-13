@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>029</id>
+    <title>Phase 3 Deploy - Association & Attachments</title>
+    <phase>3</phase>
+    <status>completed</status>
+    <estimate>2h</estimate>
+    <tags>deploy, bff-api, validation, testing</tags>
+    <dependencies>020, 021, 022, 023, 024</dependencies>
+  </metadata>
+
+  <description>
+    Deploy Phase 3 implementation to the dev environment. This includes:
+    - IEmailAssociationService with 6 association methods
+    - Tracking token matching
+    - IEmailAttachmentProcessor
+    - Association preview endpoint
+    - Unit tests for association methods
+  </description>
+
+  <knowledge>
+    <files>
+      <file>projects/email-to-document-automation/SPEC.md</file>
+      <file>projects/email-to-document-automation/CLAUDE.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API + BackgroundService pattern</constraint>
+    <constraint source="ADR-007">SpeFileStore facade for all SPE operations</constraint>
+    <constraint source="project">Association accuracy target greater than 80%</constraint>
+  </constraints>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Email/EmailAssociationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Email/EmailAttachmentProcessor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/EmailEndpoints.cs</file>
+    </relevant-files>
+  </context>
+
+  <steps>
+    <step id="1">Verify all Phase 3 code builds successfully (dotnet build)</step>
+    <step id="2">Run unit tests to ensure no regressions (dotnet test)</step>
+    <step id="3">Verify DI registrations for new services</step>
+    <step id="4">Test association preview endpoint manually</step>
+    <step id="5">Test attachment processing with sample email</step>
+    <step id="6">Verify parent-child document relationships</step>
+    <step id="7">Create PR for Phase 3 changes</step>
+    <step id="8">Update TASK-INDEX.md status to completed</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Solution builds without errors</criterion>
+    <criterion>All unit tests pass</criterion>
+    <criterion>Association preview endpoint responds correctly</criterion>
+    <criterion>Attachments create separate document records</criterion>
+    <criterion>Parent-child relationships properly set</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Phase 3 completes the core email processing pipeline.
+    After this phase, emails can be automatically associated and attachments extracted.
+  </notes>
+</task>

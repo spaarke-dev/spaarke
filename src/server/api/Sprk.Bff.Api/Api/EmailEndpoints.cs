@@ -7,7 +7,9 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Infrastructure.Json;
 using Sprk.Bff.Api.Models.Email;
+using Sprk.Bff.Api.Models.Jobs;
 using Sprk.Bff.Api.Services.Email;
 using Sprk.Bff.Api.Services.Jobs;
 
@@ -32,6 +34,9 @@ public static class EmailEndpoints
     // Job type for email processing
     private const string JobTypeProcessEmail = "ProcessEmailToDocument";
 
+    // Job type for batch email processing
+    private const string JobTypeBatchProcessEmails = "BatchProcessEmails";
+
     public static IEndpointRouteBuilder MapEmailEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/v1/emails")
@@ -54,6 +59,14 @@ public static class EmailEndpoints
             .WithDescription("Check if an email has already been saved as a document")
             .Produces<EmailDocumentStatusResponse>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
+
+        // GET /api/v1/emails/{emailId}/association-preview - Preview automatic associations
+        group.MapGet("/{emailId:guid}/association-preview", GetAssociationPreviewAsync)
+            .WithName("GetEmailAssociationPreview")
+            .WithDescription("Preview automatic associations for an email before saving, showing all detected signals and confidence scores")
+            .Produces<AssociationSignalsResponse>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
 
         // POST /api/v1/emails/webhook-trigger - Dataverse webhook receiver (AllowAnonymous with secret validation)
         app.MapPost("/api/v1/emails/webhook-trigger", HandleWebhookTriggerAsync)
@@ -90,6 +103,58 @@ public static class EmailEndpoints
             .WithName("RefreshEmailRulesCache")
             .WithDescription("Force refresh the email processing rules cache")
             .Produces(StatusCodes.Status204NoContent)
+            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
+
+        // POST /api/v1/emails/admin/batch-process - Batch process historical emails
+        adminGroup.MapPost("/batch-process", BatchProcessEmailsAsync)
+            .WithName("BatchProcessEmails")
+            .WithDescription("Submit a batch job to process historical emails within a date range")
+            .Produces<BatchProcessEmailsResponse>(StatusCodes.Status202Accepted)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
+
+        // GET /api/v1/emails/admin/batch-process/{jobId}/status - Get batch job status
+        adminGroup.MapGet("/batch-process/{jobId}/status", GetBatchJobStatusAsync)
+            .WithName("GetBatchJobStatus")
+            .WithDescription("Get the status of a batch processing job")
+            .Produces<BatchJobStatusResponse>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
+
+        // ═══════════════════════════════════════════════════════════════════════════
+        // DLQ Admin Endpoints (Task 043)
+        // ═══════════════════════════════════════════════════════════════════════════
+
+        // GET /api/v1/emails/admin/dlq - List dead-lettered messages
+        adminGroup.MapGet("/dlq", ListDlqMessagesAsync)
+            .WithName("ListDlqMessages")
+            .WithDescription("List messages in the dead-letter queue with optional pagination")
+            .Produces<DlqListResponse>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
+
+        // GET /api/v1/emails/admin/dlq/{sequenceNumber} - Get specific DLQ message
+        adminGroup.MapGet("/dlq/{sequenceNumber:long}", GetDlqMessageAsync)
+            .WithName("GetDlqMessage")
+            .WithDescription("Get a specific dead-lettered message by sequence number")
+            .Produces<DlqMessage>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
+
+        // POST /api/v1/emails/admin/dlq/redrive - Re-drive messages from DLQ
+        adminGroup.MapPost("/dlq/redrive", RedriveDlqMessagesAsync)
+            .WithName("RedriveDlqMessages")
+            .WithDescription("Re-drive messages from the dead-letter queue back to the main queue for reprocessing")
+            .Produces<RedriveResponse>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
+
+        // GET /api/admin/email-processing/stats - Get processing statistics for admin monitoring
+        app.MapGet("/api/admin/email-processing/stats", GetProcessingStatsAsync)
+            .RequireAuthorization()
+            .WithName("GetEmailProcessingStats")
+            .WithTags("Email Admin")
+            .WithDescription("Get email processing statistics for admin monitoring PCF control")
+            .Produces<EmailProcessingStatsResponse>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
 
         return app;
@@ -158,21 +223,20 @@ public static class EmailEndpoints
             }
 
             // Step 4: Parse webhook payload
+            // Uses DataverseJsonOptions with BracedGuidConverter to handle Dataverse's "{guid}" format
             DataverseWebhookPayload? payload;
             try
             {
-                payload = JsonSerializer.Deserialize<DataverseWebhookPayload>(requestBody, new JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true
-                });
+                payload = JsonSerializer.Deserialize<DataverseWebhookPayload>(requestBody, DataverseJsonOptions.Default);
             }
             catch (JsonException ex)
             {
-                logger.LogWarning(ex, "Failed to parse webhook payload");
+                logger.LogError(ex, "Failed to parse webhook payload. Path={Path}, LineNumber={Line}, BytePosition={Pos}",
+                    ex.Path, ex.LineNumber, ex.BytePositionInLine);
                 telemetry.RecordWebhookRejected(stopwatch, "invalid_json");
                 return Results.Problem(
                     title: "Invalid Payload",
-                    detail: "Failed to parse webhook payload as JSON",
+                    detail: $"Failed to parse webhook payload: {ex.Message}",
                     statusCode: StatusCodes.Status400BadRequest);
             }
 
@@ -272,10 +336,17 @@ public static class EmailEndpoints
             return Task.FromResult(true);
         }
 
-        // Check for X-Dataverse-Signature header
-        var signature = request.Headers["X-Dataverse-Signature"].FirstOrDefault();
+        // Check for Dataverse WebKey authentication header (authtype=4)
+        // Dataverse sends the WebKey value in x-ms-dynamics-msg-keyvalue header
+        var signature = request.Headers["x-ms-dynamics-msg-keyvalue"].FirstOrDefault();
 
-        // Also check for custom authorization header (HttpHeader auth type)
+        // Fallback to X-Dataverse-Signature header (HMAC signature mode)
+        if (string.IsNullOrEmpty(signature))
+        {
+            signature = request.Headers["X-Dataverse-Signature"].FirstOrDefault();
+        }
+
+        // Also check for custom header (development/testing)
         if (string.IsNullOrEmpty(signature))
         {
             signature = request.Headers["X-Webhook-Secret"].FirstOrDefault();
@@ -568,6 +639,40 @@ public static class EmailEndpoints
     }
 
     /// <summary>
+    /// Preview automatic associations for an email before saving.
+    /// Returns all detected signals with confidence scores and the recommended association.
+    /// </summary>
+    private static async Task<IResult> GetAssociationPreviewAsync(
+        Guid emailId,
+        IEmailAssociationService associationService,
+        ILogger<Program> logger,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            logger.LogDebug("Getting association preview for email {EmailId}", emailId);
+
+            var signals = await associationService.GetAssociationSignalsAsync(emailId, cancellationToken);
+
+            logger.LogInformation(
+                "Association preview for email {EmailId}: {SignalCount} signals, recommended={HasRecommendation}",
+                emailId,
+                signals.Signals.Count,
+                signals.RecommendedAssociation != null);
+
+            return Results.Ok(signals);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error getting association preview for email {EmailId}", emailId);
+            return Results.Problem(
+                title: "Internal Server Error",
+                detail: "Failed to get association preview",
+                statusCode: StatusCodes.Status500InternalServerError);
+        }
+    }
+
+    /// <summary>
     /// Check if a document already exists for the given email ID.
     /// Returns the document ID if found, null otherwise.
     /// </summary>
@@ -733,6 +838,379 @@ public static class EmailEndpoints
                 title: "Cache Refresh Failed",
                 detail: ex.Message,
                 statusCode: StatusCodes.Status500InternalServerError);
+        }
+    }
+
+    /// <summary>
+    /// Submit a batch job to process historical emails.
+    /// Returns 202 Accepted with job tracking information.
+    /// </summary>
+    private static async Task<IResult> BatchProcessEmailsAsync(
+        BatchProcessEmailsRequest request,
+        JobSubmissionService jobSubmissionService,
+        BatchJobStatusStore statusStore,
+        IOptions<EmailProcessingOptions> emailOptions,
+        Telemetry.EmailTelemetry telemetry,
+        ILogger<Program> logger,
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        var traceId = context.TraceIdentifier;
+        var correlationId = context.Request.Headers["X-Correlation-Id"].FirstOrDefault() ?? traceId;
+
+        try
+        {
+            logger.LogInformation(
+                "Received batch process request: StartDate={StartDate}, EndDate={EndDate}, MaxEmails={MaxEmails}, CorrelationId={CorrelationId}",
+                request.StartDate, request.EndDate, request.MaxEmails, correlationId);
+
+            // Validate date range
+            if (request.StartDate > request.EndDate)
+            {
+                return Results.Problem(
+                    title: "Invalid Date Range",
+                    detail: "StartDate must be before or equal to EndDate",
+                    statusCode: StatusCodes.Status400BadRequest,
+                    extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+            }
+
+            // Validate date range is not too far in the future
+            if (request.EndDate > DateTime.UtcNow.AddDays(1))
+            {
+                return Results.Problem(
+                    title: "Invalid Date Range",
+                    detail: "EndDate cannot be in the future",
+                    statusCode: StatusCodes.Status400BadRequest,
+                    extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+            }
+
+            // Validate date range span (max 365 days)
+            var dateSpan = request.EndDate - request.StartDate;
+            if (dateSpan.TotalDays > 365)
+            {
+                return Results.Problem(
+                    title: "Invalid Date Range",
+                    detail: "Date range cannot exceed 365 days. Submit multiple batch jobs for larger ranges.",
+                    statusCode: StatusCodes.Status400BadRequest,
+                    extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+            }
+
+            // Determine container ID
+            var containerId = request.ContainerId ?? emailOptions.Value.DefaultContainerId;
+            if (string.IsNullOrEmpty(containerId))
+            {
+                return Results.Problem(
+                    title: "Missing Container",
+                    detail: "No container ID specified and no default configured",
+                    statusCode: StatusCodes.Status400BadRequest,
+                    extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+            }
+
+            // Create batch job payload
+            var jobPayload = JsonDocument.Parse(JsonSerializer.Serialize(new
+            {
+                StartDate = request.StartDate,
+                EndDate = request.EndDate,
+                ContainerId = containerId,
+                IncludeAttachments = request.IncludeAttachments,
+                CreateAttachmentDocuments = request.CreateAttachmentDocuments,
+                QueueForAiProcessing = request.QueueForAiProcessing,
+                DirectionFilter = request.DirectionFilter?.ToString(),
+                StatusFilter = request.StatusFilter.ToString(),
+                SkipAlreadyConverted = request.SkipAlreadyConverted,
+                MaxEmails = request.MaxEmails,
+                MailboxFilter = request.MailboxFilter,
+                SenderDomainFilter = request.SenderDomainFilter,
+                SubjectContainsFilter = request.SubjectContainsFilter,
+                Priority = request.Priority
+            }));
+
+            // Generate unique idempotency key based on request parameters
+            var idempotencyKey = $"BatchProcess:{request.StartDate:yyyyMMdd}-{request.EndDate:yyyyMMdd}:{correlationId}";
+
+            var job = new JobContract
+            {
+                JobType = JobTypeBatchProcessEmails,
+                SubjectId = $"batch-{request.StartDate:yyyyMMdd}-{request.EndDate:yyyyMMdd}",
+                CorrelationId = correlationId,
+                IdempotencyKey = idempotencyKey,
+                Payload = jobPayload,
+                MaxAttempts = 1 // Batch jobs should not auto-retry (admin can resubmit)
+            };
+
+            await jobSubmissionService.SubmitJobAsync(job, cancellationToken);
+
+            // Create initial status record in distributed cache
+            var filters = new BatchFiltersApplied
+            {
+                StartDate = request.StartDate,
+                EndDate = request.EndDate,
+                DirectionFilter = request.DirectionFilter?.ToString(),
+                StatusFilter = request.StatusFilter.ToString(),
+                SkipAlreadyConverted = request.SkipAlreadyConverted,
+                MaxEmails = request.MaxEmails,
+                MailboxFilter = request.MailboxFilter,
+                SenderDomainFilter = request.SenderDomainFilter,
+                SubjectContainsFilter = request.SubjectContainsFilter
+            };
+
+            await statusStore.CreateJobStatusAsync(
+                job.JobId.ToString(),
+                filters,
+                request.MaxEmails, // Estimated count - actual count determined during processing
+                cancellationToken);
+
+            logger.LogInformation(
+                "Submitted batch job {JobId} for date range {StartDate} to {EndDate}, MaxEmails={MaxEmails}",
+                job.JobId, request.StartDate, request.EndDate, request.MaxEmails);
+
+            telemetry.RecordBatchJobSubmitted(request.StartDate, request.EndDate, request.MaxEmails);
+
+            var statusUrl = $"/api/v1/emails/admin/batch-process/{job.JobId}/status";
+
+            return Results.Accepted(
+                statusUrl,
+                new BatchProcessEmailsResponse
+                {
+                    JobId = job.JobId.ToString(),
+                    CorrelationId = correlationId,
+                    StatusUrl = statusUrl,
+                    Message = $"Batch processing job submitted for emails from {request.StartDate:yyyy-MM-dd} to {request.EndDate:yyyy-MM-dd}",
+                    EstimatedEmailCount = request.MaxEmails, // Actual count determined during processing
+                    Filters = filters,
+                    SubmittedAt = DateTime.UtcNow
+                });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error submitting batch process job, TraceId={TraceId}", traceId);
+            return Results.Problem(
+                title: "Batch Job Submission Failed",
+                detail: "An unexpected error occurred submitting the batch processing job",
+                statusCode: StatusCodes.Status500InternalServerError,
+                extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+        }
+    }
+
+    /// <summary>
+    /// Get email processing statistics for admin monitoring.
+    /// Returns in-memory stats since service startup.
+    /// </summary>
+    private static IResult GetProcessingStatsAsync(
+        EmailProcessingStatsService statsService,
+        ILogger<Program> logger)
+    {
+        try
+        {
+            var stats = statsService.GetStats();
+            return Results.Ok(stats);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error retrieving email processing statistics");
+            return Results.Problem(
+                title: "Failed to Retrieve Statistics",
+                detail: ex.Message,
+                statusCode: StatusCodes.Status500InternalServerError);
+        }
+    }
+
+    /// <summary>
+    /// Get the status of a batch processing job.
+    /// Returns progress, counts, errors, and estimated time remaining.
+    /// </summary>
+    private static async Task<IResult> GetBatchJobStatusAsync(
+        string jobId,
+        BatchJobStatusStore statusStore,
+        ILogger<Program> logger,
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        var traceId = context.TraceIdentifier;
+
+        try
+        {
+            logger.LogDebug("Retrieving batch job status for {JobId}", jobId);
+
+            // Validate job ID format
+            if (!Guid.TryParse(jobId, out _))
+            {
+                return Results.Problem(
+                    title: "Invalid Job ID",
+                    detail: "Job ID must be a valid GUID",
+                    statusCode: StatusCodes.Status400BadRequest,
+                    extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+            }
+
+            var status = await statusStore.GetJobStatusAsync(jobId, cancellationToken);
+
+            if (status == null)
+            {
+                logger.LogWarning("Batch job status not found for {JobId}", jobId);
+                return Results.Problem(
+                    title: "Job Not Found",
+                    detail: $"No batch processing job found with ID '{jobId}'",
+                    statusCode: StatusCodes.Status404NotFound,
+                    extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+            }
+
+            logger.LogDebug(
+                "Batch job {JobId} status: {Status}, Progress={Progress}%",
+                jobId, status.Status, status.ProgressPercent);
+
+            return Results.Ok(status);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error retrieving batch job status for {JobId}", jobId);
+            return Results.Problem(
+                title: "Status Retrieval Failed",
+                detail: "An unexpected error occurred retrieving job status",
+                statusCode: StatusCodes.Status500InternalServerError,
+                extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // DLQ Endpoint Handlers (Task 043)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// List messages in the dead-letter queue.
+    /// </summary>
+    private static async Task<IResult> ListDlqMessagesAsync(
+        [FromQuery] int? maxMessages,
+        [FromQuery] long? fromSequenceNumber,
+        DeadLetterQueueService dlqService,
+        ILogger<Program> logger,
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        var traceId = context.TraceIdentifier;
+
+        try
+        {
+            var max = maxMessages ?? 50;
+            var from = fromSequenceNumber ?? 0;
+
+            logger.LogInformation(
+                "Listing DLQ messages: MaxMessages={MaxMessages}, FromSequenceNumber={FromSequenceNumber}",
+                max, from);
+
+            var result = await dlqService.ListMessagesAsync(max, from, cancellationToken);
+
+            logger.LogInformation(
+                "DLQ list returned {Count} messages, TotalCount={TotalCount}, HasMore={HasMore}",
+                result.Messages.Count, result.TotalCount, result.HasMore);
+
+            return Results.Ok(result);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error listing DLQ messages, TraceId={TraceId}", traceId);
+            return Results.Problem(
+                title: "DLQ List Failed",
+                detail: "An unexpected error occurred listing dead-letter queue messages",
+                statusCode: StatusCodes.Status500InternalServerError,
+                extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+        }
+    }
+
+    /// <summary>
+    /// Get a specific dead-lettered message by sequence number.
+    /// </summary>
+    private static async Task<IResult> GetDlqMessageAsync(
+        long sequenceNumber,
+        DeadLetterQueueService dlqService,
+        ILogger<Program> logger,
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        var traceId = context.TraceIdentifier;
+
+        try
+        {
+            logger.LogDebug("Getting DLQ message with sequence number {SequenceNumber}", sequenceNumber);
+
+            var message = await dlqService.GetMessageAsync(sequenceNumber, cancellationToken);
+
+            if (message == null)
+            {
+                logger.LogWarning("DLQ message {SequenceNumber} not found", sequenceNumber);
+                return Results.Problem(
+                    title: "Message Not Found",
+                    detail: $"No dead-lettered message found with sequence number {sequenceNumber}",
+                    statusCode: StatusCodes.Status404NotFound,
+                    extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+            }
+
+            return Results.Ok(message);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error getting DLQ message {SequenceNumber}, TraceId={TraceId}",
+                sequenceNumber, traceId);
+            return Results.Problem(
+                title: "DLQ Get Failed",
+                detail: "An unexpected error occurred retrieving the dead-letter queue message",
+                statusCode: StatusCodes.Status500InternalServerError,
+                extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+        }
+    }
+
+    /// <summary>
+    /// Re-drive messages from the dead-letter queue back to the main queue.
+    /// </summary>
+    private static async Task<IResult> RedriveDlqMessagesAsync(
+        RedriveRequest request,
+        DeadLetterQueueService dlqService,
+        ILogger<Program> logger,
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        var traceId = context.TraceIdentifier;
+
+        try
+        {
+            // Validate request
+            if (request.MaxMessages <= 0)
+            {
+                return Results.Problem(
+                    title: "Invalid Request",
+                    detail: "MaxMessages must be greater than 0",
+                    statusCode: StatusCodes.Status400BadRequest,
+                    extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+            }
+
+            if (request.MaxMessages > 1000)
+            {
+                return Results.Problem(
+                    title: "Invalid Request",
+                    detail: "MaxMessages cannot exceed 1000 for safety. Submit multiple redrive operations for larger batches.",
+                    statusCode: StatusCodes.Status400BadRequest,
+                    extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+            }
+
+            logger.LogInformation(
+                "Redriving DLQ messages: SequenceNumbers={SequenceNumberCount}, MaxMessages={MaxMessages}, ReasonFilter={ReasonFilter}",
+                request.SequenceNumbers?.Count ?? 0, request.MaxMessages, request.ReasonFilter);
+
+            var result = await dlqService.RedriveMessagesAsync(request, cancellationToken);
+
+            logger.LogInformation(
+                "DLQ redrive completed: {SuccessCount} succeeded, {FailureCount} failed",
+                result.SuccessCount, result.FailureCount);
+
+            return Results.Ok(result);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error redriving DLQ messages, TraceId={TraceId}", traceId);
+            return Results.Problem(
+                title: "DLQ Redrive Failed",
+                detail: "An unexpected error occurred during the redrive operation",
+                statusCode: StatusCodes.Status500InternalServerError,
+                extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
         }
     }
 }

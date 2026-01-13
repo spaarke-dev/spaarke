@@ -1,7 +1,7 @@
 # SDAP BFF API Patterns
 
 > **Source**: SDAP-ARCHITECTURE-GUIDE.md (BFF API section)
-> **Last Updated**: December 3, 2025
+> **Last Updated**: January 13, 2026
 > **Applies To**: Backend API development, endpoint changes, service layer
 
 ---
@@ -601,6 +601,181 @@ AnalysisOrchestrationService
 
 ---
 
+## Email Webhook + Job Handler Pattern
+
+**Purpose**: Process Dataverse email activities via webhook triggers and background jobs using app-only authentication.
+
+### Email Webhook Endpoint Pattern
+
+```csharp
+// EmailEndpoints.cs
+app.MapPost("/api/v1/emails/webhook-trigger",
+    async (HttpContext httpContext,
+           IEmailFilterService filterService,
+           JobSubmissionService jobSubmission,
+           ILogger<Program> logger) =>
+{
+    // 1. Validate webhook signature (HMAC-SHA256 or WebKey)
+    if (!ValidateWebhookAuth(httpContext, _options.WebhookSecret))
+    {
+        return Results.Unauthorized();
+    }
+
+    // 2. Parse Dataverse webhook payload (handles WCF date format)
+    var payload = await ParseWebhookPayloadAsync(httpContext);
+
+    // 3. Apply filter rules
+    var filterResult = await filterService.EvaluateAsync(payload.EmailId);
+    if (filterResult.Action == FilterAction.Exclude)
+    {
+        return Results.Ok(new { status = "excluded", reason = filterResult.RuleName });
+    }
+
+    // 4. Enqueue job for async processing
+    await jobSubmission.EnqueueAsync(new JobContract
+    {
+        JobType = "ProcessEmailToDocument",
+        SubjectId = payload.EmailId.ToString(),
+        IdempotencyKey = $"Email:{payload.EmailId}:Archive",
+        Payload = JsonDocument.Parse(JsonSerializer.Serialize(payload))
+    });
+
+    return Results.Accepted();
+});
+```
+
+### WCF DateTime Format Handling
+
+**Critical**: Dataverse webhooks send dates in WCF format (`/Date(1234567890000)/`), not ISO 8601.
+
+```csharp
+// DataverseWebhookPayload.cs
+public class DataverseWebhookPayload
+{
+    public Guid PrimaryEntityId { get; set; }
+
+    [JsonPropertyName("OperationCreatedOn")]
+    [JsonConverter(typeof(NullableWcfDateTimeConverter))]
+    public DateTime? OperationCreatedOn { get; set; }
+}
+
+// NullableWcfDateTimeConverter.cs
+public class NullableWcfDateTimeConverter : JsonConverter<DateTime?>
+{
+    // Handles: "/Date(1234567890000)/" → DateTime
+    // Falls back to ISO 8601 parsing if WCF format not detected
+    public override DateTime? Read(ref Utf8JsonReader reader, ...)
+    {
+        var value = reader.GetString();
+        if (string.IsNullOrEmpty(value)) return null;
+
+        // WCF format: /Date(milliseconds)/
+        var match = Regex.Match(value, @"/Date\((-?\d+)\)/");
+        if (match.Success)
+        {
+            var ms = long.Parse(match.Groups[1].Value);
+            return DateTimeOffset.FromUnixTimeMilliseconds(ms).UtcDateTime;
+        }
+
+        return DateTime.Parse(value);
+    }
+}
+```
+
+### Email-to-Document Job Handler Pattern
+
+```csharp
+// EmailToDocumentJobHandler.cs
+public class EmailToDocumentJobHandler : IJobHandler
+{
+    public string JobType => "ProcessEmailToDocument";
+
+    public async Task<JobOutcome> ProcessAsync(JobContract job, CancellationToken ct)
+    {
+        // 1. Parse payload
+        var payload = ParsePayload(job.Payload);
+
+        // 2. Idempotency check
+        if (await _idempotencyService.IsEventProcessedAsync(job.IdempotencyKey, ct))
+        {
+            return JobOutcome.Success(job.JobId, JobType, stopwatch.Elapsed);
+        }
+
+        // 3. Acquire processing lock
+        await _idempotencyService.TryAcquireProcessingLockAsync(
+            job.IdempotencyKey, TimeSpan.FromMinutes(5), ct);
+
+        try
+        {
+            // 4. Convert email to .eml
+            var emlResult = await _emlConverter.ConvertToEmlAsync(
+                payload.EmailId, includeAttachments: true, ct);
+
+            // 5. Upload to SPE (app-only auth)
+            var driveId = await _speFileStore.ResolveDriveIdAsync(containerId, ct);
+            var fileHandle = await _speFileStore.UploadSmallAsync(driveId, path, stream, ct);
+
+            // 6. Create Dataverse document record
+            var documentId = await _dataverseService.CreateDocumentAsync(request, ct);
+
+            // 7. Update with file info (note correct field names)
+            var updateRequest = new UpdateDocumentRequest
+            {
+                FileName = fileName,
+                FileSize = emlResult.FileSizeBytes,     // Note: cast to (int)
+                MimeType = "message/rfc822",            // Note: sprk_mimetype, not sprk_filetype
+                GraphItemId = fileHandle.Id,
+                GraphDriveId = driveId,
+                FilePath = fileHandle.WebUrl,           // SharePoint URL for links
+                // ... email metadata
+            };
+            await _dataverseService.UpdateDocumentAsync(documentId, updateRequest, ct);
+
+            // 8. Mark as processed
+            await _idempotencyService.MarkEventAsProcessedAsync(
+                job.IdempotencyKey, TimeSpan.FromDays(7), ct);
+
+            return JobOutcome.Success(job.JobId, JobType, stopwatch.Elapsed);
+        }
+        finally
+        {
+            await _idempotencyService.ReleaseProcessingLockAsync(job.IdempotencyKey, ct);
+        }
+    }
+}
+```
+
+### Dataverse Document Field Mappings
+
+**Critical**: Match these field names and types exactly.
+
+| Property | Dataverse Field | Type | Notes |
+|----------|-----------------|------|-------|
+| `FileName` | `sprk_filename` | Text | |
+| `FileSize` | `sprk_filesize` | Whole Number | Cast `(int)` - NOT Int64 |
+| `MimeType` | `sprk_mimetype` | Text | NOT `sprk_filetype` |
+| `GraphItemId` | `sprk_graphitemid` | Text | |
+| `GraphDriveId` | `sprk_graphdriveid` | Text | |
+| `FilePath` | `sprk_filepath` | Text | SharePoint WebUrl for "Open" links |
+| `HasFile` | `sprk_hasfile` | Boolean | |
+
+### FileHandleDto Properties
+
+The `SpeFileStore.UploadSmallAsync()` returns a `FileHandleDto` with these key properties:
+
+```csharp
+public record FileHandleDto(
+    string Id,           // Graph item ID (sprk_graphitemid)
+    string Name,         // File name
+    long? Size,          // File size in bytes
+    string? WebUrl       // SharePoint URL (sprk_filepath) ← USE THIS
+);
+```
+
+**Pattern**: Always set `FilePath = fileHandle.WebUrl` to enable "Open in SharePoint" links in the UI.
+
+---
+
 ## Common Mistakes
 
 | Mistake | Error | Fix |
@@ -609,6 +784,10 @@ AnalysisOrchestrationService
 | Wrong connection string format | ServiceClient failed | Use `AuthType=ClientSecret;Url=...;ClientId=...;ClientSecret=...` |
 | Not using [Authorize] attribute | 401 on valid token | Add `[Authorize]` to endpoint |
 | Hardcoded secrets | Security risk | Use Key Vault references |
+| Using `sprk_filetype` instead of `sprk_mimetype` | Field not found | Correct field is `sprk_mimetype` |
+| FileSize as Int64 | Type mismatch | `sprk_filesize` is Whole Number - cast to `(int)` |
+| Not setting `FilePath` | "Open in SharePoint" broken | Set `FilePath = fileHandle.WebUrl` |
+| Parsing WCF dates as ISO 8601 | DateTime parse error | Use `WcfDateTimeConverter` for webhook payloads |
 
 ---
 

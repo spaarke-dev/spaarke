@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ImportExportXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" OrganizationVersion="9.2.25114.166" OrganizationSchemaType="Standard" CRMServerServiceabilityVersion="9.2.25114.00173">
+  <Entities />
+  <Roles />
+  <Workflows />
+  <FieldSecurityProfiles />
+  <Templates />
+  <EntityMaps />
+  <EntityRelationships />
+  <OrganizationSettings />
+  <optionsets />
+  <CustomControls />
+  <EntityDataProviders />
+  <WebResources>
+    <WebResource>
+      <WebResourceId>{00000000-0000-0000-0000-000000000001}</WebResourceId>
+      <Name>sprk_emailactions.js</Name>
+      <DisplayName>Email Actions</DisplayName>
+      <Description>Email form ribbon button handlers for Save to Document functionality</Description>
+      <WebResourceType>3</WebResourceType>
+      <IntroducedVersion>1.0.0.0</IntroducedVersion>
+      <IsEnabledForMobileClient>0</IsEnabledForMobileClient>
+      <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+      <DependencyXml>&lt;Dependencies&gt;&lt;Dependency componentType="WebResource"/&gt;&lt;/Dependencies&gt;</DependencyXml>
+      <IsCustomizable>1</IsCustomizable>
+      <CanBeDeleted>1</CanBeDeleted>
+      <IsHidden>0</IsHidden>
+      <FileName>/WebResources/sprk_emailactions.js</FileName>
+    </WebResource>
+  </WebResources>
+  <Languages>
+    <Language>1033</Language>
+  </Languages>
+</ImportExportXml>
