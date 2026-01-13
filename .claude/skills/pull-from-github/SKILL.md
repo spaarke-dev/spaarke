@@ -6,7 +6,7 @@ alwaysApply: false
 # Pull from GitHub
 
 > **Category**: Operations
-> **Last Updated**: December 2025
+> **Last Updated**: January 2026
 
 ---
 
@@ -29,6 +29,51 @@ Safely pull the latest changes from GitHub, handling merge conflicts if they ari
 
 1. **Git configured**: Repository initialized with remote
 2. **Clean working directory recommended**: Uncommitted changes may cause conflicts
+
+---
+
+## Worktree Support
+
+When working in a **git worktree**, you cannot checkout master (it's checked out in the main repo). Use `origin/master` directly instead.
+
+### Worktree Detection
+
+```
+DETECT worktree:
+  git rev-parse --git-common-dir
+
+  IF output contains ".git/worktrees":
+    → Working in a worktree
+    → CANNOT checkout master
+    → Must rebase on origin/master directly
+```
+
+### Worktree Pull Workflow
+
+```powershell
+# 1. Fetch latest from remote
+git fetch origin
+
+# 2. Rebase current branch on origin/master (NOT local master)
+git rebase origin/master
+
+# 3. If rebase succeeds, push to remote branch
+#    --force-with-lease is REQUIRED because rebase rewrites history
+git push origin HEAD --force-with-lease
+```
+
+### Why --force-with-lease?
+
+After rebasing, your local commits have new hashes. The remote branch still has the old hashes. A normal push will fail because the histories diverged. `--force-with-lease` safely overwrites the remote, but ONLY if no one else pushed in the meantime.
+
+### Complete Worktree Update Flow
+
+```
+1. git fetch origin                      # Get latest
+2. git rebase origin/master              # Rebase on origin/master
+3. Resolve any conflicts if needed
+4. git push origin HEAD --force-with-lease  # Update remote branch
+```
 
 ---
 
@@ -187,11 +232,20 @@ git stash drop
 ```
 
 ### Updating Feature Branch from Master
+
+**Standard repo:**
 ```
 1. git checkout master
 2. git pull origin master
 3. git checkout feature-branch
 4. git rebase master
+```
+
+**Worktree (CANNOT checkout master):**
+```
+1. git fetch origin
+2. git rebase origin/master
+3. git push origin HEAD --force-with-lease
 ```
 
 ---
@@ -212,3 +266,21 @@ git stash drop
 
 - `push-to-github` - For pushing after pulling (includes linting pre-flight)
 - `code-review` - Review pulled changes if needed (includes linting check)
+- `ci-cd` - Monitor CI status after pushing rebased branch
+
+---
+
+## Tips for AI
+
+- Always detect if working in a worktree before suggesting `git checkout master`
+- In worktrees, use `git rebase origin/master` (not local master)
+- After rebase in worktree, remind user that `--force-with-lease` is needed for push
+- If rebase has conflicts, guide user through resolution before push
+- Check `git status` after rebase to confirm clean state before push
+
+### Worktree-Specific Tips
+
+- **NEVER** suggest `git checkout master` in a worktree - it will fail
+- Use `git rev-parse --git-common-dir` to detect worktree
+- After successful rebase + push, CI will run on the updated branch
+- If user says "update my branch" or "get latest", this means: fetch + rebase origin/master + force push
