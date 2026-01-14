@@ -3,7 +3,7 @@
   <metadata>
     <title>Create AppOnlyAnalysisService</title>
     <phase>3: AppOnlyAnalysisService</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>019</dependencies>
     <blocks>021, 022</blocks>
@@ -107,6 +107,31 @@
     Check how the existing service handles the dual OBO/app-only scenario.
     Consider creating an interface if both services need to be swappable.
   </notes>
+
+  <completion>
+    <completed-on>2026-01-14</completed-on>
+    <summary>
+      Created AppOnlyAnalysisService for background AI analysis without HttpContext:
+      - AnalyzeDocumentAsync: Takes document ID, downloads from SPE using app-only auth,
+        extracts text, runs Document Profile analysis via OpenAI, updates Dataverse
+      - AnalyzeDocumentFromStreamAsync: For in-memory files (e.g., email attachments)
+      - Uses ISpeFileOperations.DownloadFileAsync for app-only SPE access
+      - Uses ITextExtractor for text extraction
+      - Uses IOpenAiClient.GetCompletionAsync for Document Profile analysis
+      - Parses structured output (TL;DR, Summary, Keywords, Document Type, Entities)
+      - Updates sprk_document fields via IDataverseService.UpdateDocumentAsync
+      - Registered as concrete type per ADR-010 (no interface seam needed)
+    </summary>
+    <files-modified>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs (new)</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs (modified - DI registration)</file>
+    </files-modified>
+    <acceptance-criteria-met>
+      <criterion>AppOnlyAnalysisService compiles and can be instantiated without HttpContext ✅</criterion>
+      <criterion>Service uses app-only SpeFileStore for file download (ISpeFileOperations.DownloadFileAsync) ✅</criterion>
+      <criterion>AnalyzeDocumentAsync method signature does not require user token ✅</criterion>
+    </acceptance-criteria-met>
+  </completion>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

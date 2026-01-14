@@ -3,7 +3,7 @@
   <metadata>
     <title>Unit Tests for AppOnlyAnalysisService</title>
     <phase>3: AppOnlyAnalysisService</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>022</dependencies>
     <blocks>029</blocks>

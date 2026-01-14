@@ -1,7 +1,12 @@
 using System.ComponentModel.DataAnnotations;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Graph.Models.ODataErrors;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Api;
 
@@ -235,6 +240,155 @@ public static class DataverseDocumentsEndpoints
                     extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
             }
         })
+        .RequireAuthorization();
+
+        // GET /api/v1/documents/{id}/download - Download document file (app-only auth)
+        // Proxies SPE file downloads for files uploaded by background processing.
+        // Users can't download these files directly because they lack SPE container permissions.
+        documentsGroup.MapGet("/{id}/download", async (
+            string id,
+            IDataverseService dataverseService,
+            SpeFileStore speFileStore,
+            DocumentTelemetry documentTelemetry,
+            ILogger<Program> logger,
+            HttpContext context,
+            CancellationToken ct) =>
+        {
+            var traceId = context.TraceIdentifier;
+            var userId = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+            // Start telemetry tracking (FR-03: audit logging)
+            var stopwatch = documentTelemetry.RecordDownloadStart(id, userId);
+
+            try
+            {
+                // Step 1: Validate document ID format
+                if (string.IsNullOrWhiteSpace(id) || !Guid.TryParse(id, out _))
+                {
+                    logger.LogWarning("Invalid document ID format: {DocumentId}", id);
+                    documentTelemetry.RecordDownloadFailure(stopwatch, id, userId, "invalid_document_id");
+                    return ProblemDetailsHelper.ValidationError("Document ID must be a valid GUID");
+                }
+
+                logger.LogInformation("Download requested for document {DocumentId}, TraceId={TraceId}", id, traceId);
+
+                // Step 2: Get document entity from Dataverse (includes SPE pointers)
+                var document = await dataverseService.GetDocumentAsync(id, ct);
+
+                if (document == null)
+                {
+                    logger.LogWarning("Document not found for download: {DocumentId}", id);
+                    documentTelemetry.RecordDownloadNotFound(stopwatch, id, userId, "document_not_found");
+                    return TypedResults.NotFound(new
+                    {
+                        status = 404,
+                        title = "Document Not Found",
+                        detail = $"Document with ID {id} was not found",
+                        traceId
+                    });
+                }
+
+                // Step 3: Validate SPE pointers exist (file must be uploaded to SPE)
+                if (string.IsNullOrWhiteSpace(document.GraphDriveId))
+                {
+                    logger.LogWarning("Document {DocumentId} missing GraphDriveId", id);
+                    documentTelemetry.RecordDownloadNotFound(stopwatch, id, userId, "missing_drive_id");
+                    return TypedResults.NotFound(new
+                    {
+                        status = 404,
+                        title = "File Not Available",
+                        detail = $"Document {id} does not have an associated file in storage",
+                        traceId
+                    });
+                }
+
+                if (string.IsNullOrWhiteSpace(document.GraphItemId))
+                {
+                    logger.LogWarning("Document {DocumentId} missing GraphItemId", id);
+                    documentTelemetry.RecordDownloadNotFound(stopwatch, id, userId, "missing_item_id");
+                    return TypedResults.NotFound(new
+                    {
+                        status = 404,
+                        title = "File Not Available",
+                        detail = $"Document {id} does not have an associated file in storage",
+                        traceId
+                    });
+                }
+
+                logger.LogDebug(
+                    "Downloading file for document {DocumentId}: DriveId={DriveId}, ItemId={ItemId}",
+                    id, document.GraphDriveId, document.GraphItemId);
+
+                // Step 4: Download file stream from SPE using app-only auth
+                var fileStream = await speFileStore.DownloadFileAsync(
+                    document.GraphDriveId,
+                    document.GraphItemId,
+                    ct);
+
+                if (fileStream == null)
+                {
+                    logger.LogWarning("File stream null for document {DocumentId}", id);
+                    documentTelemetry.RecordDownloadNotFound(stopwatch, id, userId, "file_stream_null");
+                    return TypedResults.NotFound(new
+                    {
+                        status = 404,
+                        title = "File Not Found",
+                        detail = $"File content not found in storage for document {id}",
+                        traceId
+                    });
+                }
+
+                // Step 5: Determine content type and filename
+                var contentType = document.MimeType ?? "application/octet-stream";
+                var fileName = document.FileName ?? $"{id}.bin";
+
+                logger.LogInformation(
+                    "Streaming download for document {DocumentId}: FileName={FileName}, ContentType={ContentType}, Size={Size}",
+                    id, fileName, contentType, document.FileSize);
+
+                // Record successful download (FR-03: audit logging)
+                documentTelemetry.RecordDownloadSuccess(
+                    stopwatch,
+                    id,
+                    userId,
+                    fileName,
+                    contentType,
+                    document.FileSize);
+
+                // Step 6: Return streaming file response with proper headers
+                // Using TypedResults.Stream for streaming without full buffering (NFR-06)
+                return TypedResults.Stream(
+                    fileStream,
+                    contentType: contentType,
+                    fileDownloadName: fileName,
+                    enableRangeProcessing: true); // Support partial downloads for large files
+            }
+            catch (ODataError ex)
+            {
+                logger.LogError(ex, "Graph API error downloading file for document {DocumentId}", id);
+                documentTelemetry.RecordDownloadFailure(stopwatch, id, userId, $"graph_error_{ex.Error?.Code ?? "unknown"}");
+                return ProblemDetailsHelper.FromGraphException(ex);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to download document {DocumentId}", id);
+                documentTelemetry.RecordDownloadFailure(stopwatch, id, userId, "unexpected_error");
+                return TypedResults.Problem(
+                    statusCode: 500,
+                    title: "Internal Server Error",
+                    detail: "An unexpected error occurred while downloading the document",
+                    extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+            }
+        })
+        .WithName("DownloadDocument")
+        .WithDescription("Download document file using app-only authentication. " +
+            "Proxies SPE file downloads for files uploaded by background processing.")
+        .Produces(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status400BadRequest)
+        .Produces(StatusCodes.Status403Forbidden)
+        .Produces(StatusCodes.Status404NotFound)
+        .Produces(StatusCodes.Status500InternalServerError)
+        .AddDocumentAuthorizationFilter("read")
         .RequireAuthorization();
 
         // GET /api/v1/documents - List documents (optionally filtered by container)

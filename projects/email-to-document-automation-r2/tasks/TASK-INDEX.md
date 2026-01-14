@@ -36,31 +36,31 @@
 
 | ID | Title | Status | Dependencies | Rigor |
 |----|-------|--------|--------------|-------|
-| 001 | [Create Document Download Endpoint](001-create-download-endpoint.poml) | 🔲 | none | FULL |
-| 002 | [Create Download Authorization Filter](002-create-download-authorization-filter.poml) | 🔲 | 001 | FULL |
-| 003 | [Implement Streaming Download Response](003-implement-streaming-download.poml) | 🔲 | 001, 002 | FULL |
-| 004 | [Add Download Audit Logging](004-add-download-audit-logging.poml) | 🔲 | 003 | STANDARD |
-| 005 | [Unit Tests for Download Endpoint](005-unit-tests-download-endpoint.poml) | 🔲 | 004 | STANDARD |
-| 009 | [Deploy and Verify Phase 1](009-deploy-phase1.poml) | 🔲 | 005 | STANDARD |
+| 001 | [Create Document Download Endpoint](001-create-download-endpoint.poml) | ✅ | none | FULL |
+| 002 | [Create Download Authorization Filter](002-create-download-authorization-filter.poml) | ✅ | 001 | FULL |
+| 003 | [Implement Streaming Download Response](003-implement-streaming-download.poml) | ✅ | 001, 002 | FULL |
+| 004 | [Add Download Audit Logging](004-add-download-audit-logging.poml) | ✅ | 003 | STANDARD |
+| 005 | [Unit Tests for Download Endpoint](005-unit-tests-download-endpoint.poml) | ✅ | 004 | STANDARD |
+| 009 | [Deploy and Verify Phase 1](009-deploy-phase1.poml) | ✅ | 005 | STANDARD |
 
 ### Phase 2: Attachment Processing
 
 | ID | Title | Status | Dependencies | Rigor |
 |----|-------|--------|--------------|-------|
-| 010 | [Enhance EmailToEmlConverter with Attachment Extraction](010-enhance-eml-converter-attachments.poml) | 🔲 | 009 | FULL |
-| 011 | [Create Attachment Filter Service](011-create-attachment-filter-service.poml) | 🔲 | 010 | FULL |
-| 012 | [Modify Job Handler for Attachment Processing](012-modify-job-handler-attachments.poml) | 🔲 | 010, 011 | FULL |
-| 013 | [Unit Tests for Attachment Processing](013-unit-tests-attachment-processing.poml) | 🔲 | 012 | STANDARD |
-| 019 | [Deploy and Verify Phase 2](019-deploy-phase2.poml) | 🔲 | 013 | STANDARD |
+| 010 | [Enhance EmailToEmlConverter with Attachment Extraction](010-enhance-eml-converter-attachments.poml) | ✅ | 009 | FULL |
+| 011 | [Create Attachment Filter Service](011-create-attachment-filter-service.poml) | ✅ | 010 | FULL |
+| 012 | [Modify Job Handler for Attachment Processing](012-modify-job-handler-attachments.poml) | ✅ | 010, 011 | FULL |
+| 013 | [Unit Tests for Attachment Processing](013-unit-tests-attachment-processing.poml) | ✅ | 012 | STANDARD |
+| 019 | [Deploy and Verify Phase 2](019-deploy-phase2.poml) | ✅ | 013 | STANDARD |
 
 ### Phase 3: AppOnlyAnalysisService
 
 | ID | Title | Status | Dependencies | Rigor |
 |----|-------|--------|--------------|-------|
-| 020 | [Create AppOnlyAnalysisService](020-create-apponly-analysis-service.poml) | 🔲 | 019 | FULL |
-| 021 | [Create AppOnlyDocumentAnalysis Job Handler](021-create-apponly-analysis-job-handler.poml) | 🔲 | 020 | FULL |
-| 022 | [Integrate AI Analysis Enqueueing in Email Handler](022-integrate-analysis-enqueue.poml) | 🔲 | 021 | STANDARD |
-| 023 | [Unit Tests for AppOnlyAnalysisService](023-unit-tests-apponly-analysis.poml) | 🔲 | 022 | STANDARD |
+| 020 | [Create AppOnlyAnalysisService](020-create-apponly-analysis-service.poml) | ✅ | 019 | FULL |
+| 021 | [Create AppOnlyDocumentAnalysis Job Handler](021-create-apponly-analysis-job-handler.poml) | ✅ | 020 | FULL |
+| 022 | [Integrate AI Analysis Enqueueing in Email Handler](022-integrate-analysis-enqueue.poml) | ✅ | 021 | STANDARD |
+| 023 | [Unit Tests for AppOnlyAnalysisService](023-unit-tests-apponly-analysis.poml) | ✅ | 022 | STANDARD |
 | 029 | [Deploy and Verify Phase 3](029-deploy-phase3.poml) | 🔲 | 023 | STANDARD |
 
 ### Phase 4: Email Analysis Playbook

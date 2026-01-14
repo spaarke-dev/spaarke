@@ -345,6 +345,9 @@ if (analysisEnabled && documentIntelligenceEnabled)
 
     builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IAnalysisOrchestrationService, Sprk.Bff.Api.Services.Ai.AnalysisOrchestrationService>();
 
+    // App-only analysis service for background jobs (email-to-document automation)
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IAppOnlyAnalysisService, Sprk.Bff.Api.Services.Ai.AppOnlyAnalysisService>();
+
     // Playbook Service - CRUD operations for analysis playbooks (R3 Phase 3)
     builder.Services.AddHttpClient<Sprk.Bff.Api.Services.Ai.IPlaybookService, Sprk.Bff.Api.Services.Ai.PlaybookService>();
 
@@ -458,6 +461,9 @@ builder.Services.AddSingleton<Sprk.Bff.Api.Services.Email.EmailProcessingStatsSe
 builder.Services.AddSingleton<Sprk.Bff.Api.Telemetry.EmailTelemetry>(sp =>
     new Sprk.Bff.Api.Telemetry.EmailTelemetry(sp.GetService<Sprk.Bff.Api.Services.Email.EmailProcessingStatsService>()));
 
+// Document telemetry - OpenTelemetry-compatible metrics for document downloads (FR-03 audit logging)
+builder.Services.AddSingleton<Sprk.Bff.Api.Telemetry.DocumentTelemetry>();
+
 // Register Email Processing configuration
 builder.Services.Configure<Sprk.Bff.Api.Configuration.EmailProcessingOptions>(
     builder.Configuration.GetSection(Sprk.Bff.Api.Configuration.EmailProcessingOptions.SectionName));
@@ -482,6 +488,9 @@ builder.Services.AddScoped<Sprk.Bff.Api.Services.Email.IEmailAssociationService,
 builder.Services.AddScoped<Sprk.Bff.Api.Services.Email.IEmailAttachmentProcessor,
     Sprk.Bff.Api.Services.Email.EmailAttachmentProcessor>();
 
+// Attachment filter service - filters out noise attachments (signatures, tracking pixels, etc.)
+builder.Services.AddScoped<Sprk.Bff.Api.Services.Email.AttachmentFilterService>();
+
 // HttpClient for email polling backup service (Dataverse queries)
 builder.Services.AddHttpClient("DataversePolling")
     .ConfigureHttpClient(client =>
@@ -501,7 +510,10 @@ builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.
 builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.BatchProcessEmailsJobHandler>();
 // Also register EmailToDocumentJobHandler as concrete type for BatchProcessEmailsJobHandler dependency
 builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.Handlers.EmailToDocumentJobHandler>();
-// DocumentAnalysisJobHandler removed - background AI analysis is now triggered from PCF (requires user context)
+
+// App-only document analysis job handler - for background AI analysis without user context
+// Uses AppOnlyAnalysisService with playbook-based analysis (FR-10)
+builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.AppOnlyDocumentAnalysisJobHandler>();
 
 // Configure Service Bus job processing
 var serviceBusConnectionString = builder.Configuration.GetConnectionString("ServiceBus");

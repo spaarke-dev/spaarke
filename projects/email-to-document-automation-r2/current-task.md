@@ -1,30 +1,30 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-01-13 00:00
+> **Last Updated**: 2026-01-14
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
 
 ## Quick Recovery (READ THIS FIRST)
 
-<!-- This section is for FAST context restoration after compaction -->
-<!-- Must be readable in < 30 seconds -->
-
 | Field | Value |
 |-------|-------|
-| **Task** | none |
-| **Step** | — |
-| **Status** | none (project initialized, no active task) |
-| **Next Action** | Run task-create to decompose plan, then start task 001 |
+| **Task** | 029 - Deploy and Verify Phase 3 |
+| **Step** | 1 of 11: Ensure all Phase 3 tests pass locally |
+| **Status** | in-progress |
+| **Next Action** | Run dotnet test to verify all tests pass |
 
 ### Files Modified This Session
-<!-- Only files touched in CURRENT session, not all time -->
-- *No files modified yet*
+- `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/AppOnlyAnalysisServiceTests.cs` - New test file for AppOnlyAnalysisService
+- `tests/unit/Sprk.Bff.Api.Tests/Services/Jobs/AppOnlyDocumentAnalysisJobHandlerTests.cs` - New test file for job handler
+- `src/server/api/Sprk.Bff.Api/Services/Ai/IAppOnlyAnalysisService.cs` - New interface for AppOnlyAnalysisService
+- `src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs` - Updated to implement interface
+- `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/AppOnlyDocumentAnalysisJobHandler.cs` - Updated to use interface
+- `src/server/api/Sprk.Bff.Api/Program.cs` - Updated DI registration
 
 ### Critical Context
-<!-- 1-3 sentences of essential context for continuation -->
-Project artifacts created (README, PLAN, CLAUDE.md). Ready for task decomposition.
+Phase 3 nearly complete. Task 023 COMPLETE. All unit tests passing (39 tests). Created IAppOnlyAnalysisService interface for testability. Next: Task 029 - Deploy Phase 3.
 
 ---
 
@@ -32,11 +32,11 @@ Project artifacts created (README, PLAN, CLAUDE.md). Ready for task decompositio
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | none |
-| **Task File** | — |
-| **Title** | — |
-| **Phase** | — |
-| **Status** | none |
+| **Task ID** | 029 |
+| **Task File** | tasks/029-deploy-phase3.poml |
+| **Title** | Deploy and Verify Phase 3 |
+| **Phase** | 3: AppOnlyAnalysisService |
+| **Status** | not-started |
 | **Started** | — |
 
 ---
@@ -45,76 +45,74 @@ Project artifacts created (README, PLAN, CLAUDE.md). Ready for task decompositio
 
 ### Completed Steps
 
-<!-- Updated by task-execute after each step completion -->
-<!-- Format: - [x] Step N: {description} ({YYYY-MM-DD HH:MM}) -->
-
 *No steps completed yet*
 
 ### Current Step
 
-*No active task*
+*Awaiting task start*
 
 ### Files Modified (All Task)
-
-<!-- Track all files created or modified during this task -->
-<!-- Format: - `path/to/file` - {Created|Modified} - {brief purpose} -->
 
 *No files modified yet*
 
 ### Decisions Made
 
-<!-- Log implementation decisions for context recovery -->
-<!-- Format: - {YYYY-MM-DD}: {Decision} — Reason: {why} -->
-
 *No decisions recorded yet*
+
+---
+
+## Session History
+
+### Task 022 (Completed)
+- **Title**: Integrate AI Analysis Enqueueing in Email Handler
+- **Completed**: 2026-01-14
+- **Summary**: Modified EmailToDocumentJobHandler to enqueue AppOnlyDocumentAnalysis jobs after document creation. Added EnqueueAiAnalysisJobAsync helper method that submits jobs via JobSubmissionService. Jobs are enqueued for both main email documents and attachments, controlled by AutoEnqueueAi config setting. Added telemetry metrics for job enqueueing.
+- **Files Modified**:
+  - `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/EmailToDocumentJobHandler.cs` (modified)
+  - `src/server/api/Sprk.Bff.Api/Telemetry/EmailTelemetry.cs` (added metrics)
+
+### Task 021 (Completed)
+- **Title**: Create AppOnlyDocumentAnalysis Job Handler
+- **Completed**: 2026-01-14
+- **Summary**: Created AppOnlyDocumentAnalysisJobHandler for background AI analysis jobs.
+- **Files Modified**:
+  - `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/AppOnlyDocumentAnalysisJobHandler.cs` (new)
+  - `src/server/api/Sprk.Bff.Api/Telemetry/DocumentTelemetry.cs` (added metrics)
+  - `src/server/api/Sprk.Bff.Api/Program.cs` (DI registration)
+
+### Task 020 (Completed)
+- **Title**: Create AppOnlyAnalysisService
+- **Completed**: 2026-01-14
+- **Summary**: Created AppOnlyAnalysisService for background AI analysis without HttpContext.
+
+### Phase 1 & 2 Complete
+- All tasks 001-019 completed
 
 ---
 
 ## Next Action
 
-**Next Step**: Run task-create to decompose plan.md into task files
+**Next Step**: Begin task 023 - Unit Tests for AppOnlyAnalysisService
 
 **Pre-conditions**:
-- plan.md exists ✅
-- Project structure created ✅
+- Task 020 complete - AppOnlyAnalysisService created ✅
+- Task 021 complete - AppOnlyDocumentAnalysisJobHandler created ✅
+- Task 022 complete - AI job enqueueing integrated ✅
 
 **Key Context**:
-- 5 phases defined in plan.md
-- Refer to spec.md for requirements
+- Phase 3 nearing completion
+- Need tests for AppOnlyAnalysisService, job handler, and enqueueing
 
 **Expected Output**:
-- Task files in tasks/ folder
-- TASK-INDEX.md with task registry
+- Unit tests for AppOnlyAnalysisService
+- Unit tests for AppOnlyDocumentAnalysisJobHandler
+- Unit tests for AI job enqueueing in EmailToDocumentJobHandler
 
 ---
 
 ## Blockers
 
-<!-- List anything preventing progress -->
-
 **Status**: None
-
----
-
-## Session Notes
-
-<!-- Free-form notes for current session context -->
-<!-- These persist across compaction for context recovery -->
-
-### Current Session
-- Started: 2026-01-13
-- Focus: Project initialization via project-pipeline
-
-### Key Learnings
-<!-- Gotchas, warnings, or important discoveries -->
-
-*None yet*
-
-### Handoff Notes
-<!-- Used when context budget is high or session ending -->
-<!-- Another Claude instance should be able to continue from these notes -->
-
-*No handoff notes*
 
 ---
 
@@ -125,36 +123,12 @@ Project artifacts created (README, PLAN, CLAUDE.md). Ready for task decompositio
 - **Project CLAUDE.md**: [`CLAUDE.md`](./CLAUDE.md)
 - **Task Index**: [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md)
 
-### Applicable ADRs
-<!-- From task constraints -->
-- ADR-001: Minimal API - Download endpoint pattern
-- ADR-004: Job Contract - New job types
-- ADR-007: SpeFileStore - Download proxying
-- ADR-008: Endpoint Filters - Authorization
-- ADR-010: DI Minimalism - Service registration
-
-### Knowledge Files Loaded
-<!-- From task knowledge section -->
-- `docs/guides/EMAIL-TO-DOCUMENT-ARCHITECTURE.md` - R1 reference
-
----
-
-## Recovery Instructions
-
-**To recover context after compaction or new session:**
-
-1. **Quick Recovery**: Read the "Quick Recovery" section above (< 30 seconds)
-2. **If more context needed**: Read Active Task and Progress sections
-3. **Load task file**: `tasks/{task-id}-*.poml`
-4. **Load knowledge files**: From task's `<knowledge>` section
-5. **Resume**: From the "Next Action" section
-
-**Commands**:
-- `/project-continue` - Full project context reload + master sync
-- `/context-handoff` - Save current state before compaction
-- "where was I?" - Quick context recovery
-
-**For full protocol**: See [docs/procedures/context-recovery.md](../../docs/procedures/context-recovery.md)
+### Phase Status
+- Phase 1: ✅ Complete (Tasks 001-009)
+- Phase 2: ✅ Complete (Tasks 010-019)
+- Phase 3: 🔄 In progress (Tasks 020-029) - Tasks 020, 021, 022 complete
+- Phase 4: 🔲 Not started (Tasks 030-039)
+- Phase 5: 🔲 Not started (Tasks 040-049)
 
 ---
 
