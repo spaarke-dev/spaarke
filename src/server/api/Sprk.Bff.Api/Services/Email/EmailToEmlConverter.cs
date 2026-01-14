@@ -560,6 +560,174 @@ public class EmailToEmlConverter : IEmailToEmlConverter
         return null;
     }
 
+    /// <inheritdoc />
+    public IReadOnlyList<EmailAttachmentInfo> ExtractAttachments(Stream emlStream)
+    {
+        ArgumentNullException.ThrowIfNull(emlStream);
+
+        if (!emlStream.CanRead)
+        {
+            throw new ArgumentException("Stream must be readable", nameof(emlStream));
+        }
+
+        // Reset stream position if possible
+        if (emlStream.CanSeek)
+        {
+            emlStream.Position = 0;
+        }
+
+        var attachments = new List<EmailAttachmentInfo>();
+
+        try
+        {
+            // Parse the .eml file using MimeKit
+            var message = MimeMessage.Load(emlStream);
+
+            // Iterate through all MIME parts to find attachments
+            foreach (var part in IterateMimeParts(message.Body))
+            {
+                if (part is MimePart mimePart)
+                {
+                    // Check if this is an attachment (either explicit attachment or inline with content)
+                    var isAttachment = mimePart.IsAttachment ||
+                                       mimePart.ContentDisposition?.Disposition == ContentDisposition.Attachment;
+                    var isInline = mimePart.ContentDisposition?.Disposition == ContentDisposition.Inline &&
+                                   !string.IsNullOrEmpty(mimePart.ContentId);
+
+                    // Skip parts that are not attachments and not inline images with Content-ID
+                    if (!isAttachment && !isInline)
+                    {
+                        continue;
+                    }
+
+                    // Get content to memory stream
+                    var contentStream = new MemoryStream();
+                    mimePart.Content.DecodeTo(contentStream);
+                    contentStream.Position = 0;
+
+                    var sizeBytes = contentStream.Length;
+
+                    // Check max size (NFR-05: 250MB)
+                    if (sizeBytes > _options.MaxAttachmentSizeBytes)
+                    {
+                        _logger.LogWarning(
+                            "Attachment '{FileName}' exceeds max size ({Size} bytes > {MaxSize} bytes), skipping",
+                            mimePart.FileName ?? "unknown", sizeBytes, _options.MaxAttachmentSizeBytes);
+                        contentStream.Dispose();
+                        continue;
+                    }
+
+                    // Determine filename
+                    var fileName = mimePart.FileName;
+                    if (string.IsNullOrEmpty(fileName))
+                    {
+                        // Generate a filename based on content type
+                        var extension = GetExtensionForMimeType(mimePart.ContentType.MimeType);
+                        fileName = $"attachment_{attachments.Count + 1}{extension}";
+                    }
+
+                    // Get content ID (strip angle brackets if present)
+                    var contentId = mimePart.ContentId;
+                    if (!string.IsNullOrEmpty(contentId))
+                    {
+                        contentId = contentId.Trim('<', '>');
+                    }
+
+                    // Evaluate if this attachment should be processed as a document
+                    var (shouldCreate, skipReason) = EvaluateAttachment(
+                        fileName,
+                        mimePart.ContentType.MimeType,
+                        sizeBytes);
+
+                    attachments.Add(new EmailAttachmentInfo
+                    {
+                        AttachmentId = Guid.Empty, // No Dataverse ID for extracted attachments
+                        FileName = fileName,
+                        MimeType = mimePart.ContentType.MimeType,
+                        Content = contentStream,
+                        SizeBytes = sizeBytes,
+                        IsInline = isInline,
+                        ContentId = contentId,
+                        ShouldCreateDocument = shouldCreate,
+                        SkipReason = skipReason
+                    });
+                }
+            }
+
+            _logger.LogDebug(
+                "Extracted {Count} attachments from .eml stream, {InlineCount} inline, {SkipCount} will be skipped",
+                attachments.Count,
+                attachments.Count(a => a.IsInline),
+                attachments.Count(a => !a.ShouldCreateDocument));
+
+            return attachments;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to extract attachments from .eml stream");
+
+            // Dispose any already-extracted streams on error
+            foreach (var attachment in attachments)
+            {
+                attachment.Content?.Dispose();
+            }
+
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Recursively iterate through all MIME parts in a message body.
+    /// </summary>
+    private static IEnumerable<MimeEntity> IterateMimeParts(MimeEntity? entity)
+    {
+        if (entity == null)
+            yield break;
+
+        if (entity is Multipart multipart)
+        {
+            foreach (var child in multipart)
+            {
+                foreach (var part in IterateMimeParts(child))
+                {
+                    yield return part;
+                }
+            }
+        }
+        else
+        {
+            yield return entity;
+        }
+    }
+
+    /// <summary>
+    /// Get a file extension for a MIME type.
+    /// </summary>
+    private static string GetExtensionForMimeType(string mimeType)
+    {
+        return mimeType.ToLowerInvariant() switch
+        {
+            "image/png" => ".png",
+            "image/jpeg" => ".jpg",
+            "image/gif" => ".gif",
+            "image/bmp" => ".bmp",
+            "image/webp" => ".webp",
+            "application/pdf" => ".pdf",
+            "application/msword" => ".doc",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => ".docx",
+            "application/vnd.ms-excel" => ".xls",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => ".xlsx",
+            "application/vnd.ms-powerpoint" => ".ppt",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation" => ".pptx",
+            "text/plain" => ".txt",
+            "text/html" => ".html",
+            "text/csv" => ".csv",
+            "application/zip" => ".zip",
+            "application/x-zip-compressed" => ".zip",
+            _ => ".bin"
+        };
+    }
+
     /// <summary>
     /// Internal class to hold email activity data from Dataverse.
     /// </summary>
