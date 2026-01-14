@@ -3,7 +3,7 @@
   <metadata>
     <title>Deploy and Verify Phase 3 (AppOnlyAnalysisService)</title>
     <phase>3: AppOnlyAnalysisService</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>023</dependencies>
     <blocks>030</blocks>
