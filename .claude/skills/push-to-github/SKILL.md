@@ -153,6 +153,42 @@ RUN quality checks (ask user first):
     → IF lint errors OR critical issues: STOP and ask user to fix first
 ```
 
+### Step 1.5: Check for Untracked Source Files (MANDATORY)
+
+**This step prevents accidentally leaving source files uncommitted.**
+
+```
+CHECK for untracked source files:
+  git status --porcelain | grep "^??" | grep -E "\.(cs|ts|tsx|ps1|js|json|md)$"
+
+  IF untracked source files found:
+    → 🚨 WARNING: Untracked source files detected!
+    → List all untracked source files with paths
+    → ASK: "These files are NOT staged for commit. Actions:"
+      1. Add all to this commit (git add {files})
+      2. Add to .gitignore (if intentionally excluded)
+      3. Review each file individually
+      4. Abort and investigate
+    → REQUIRE explicit user decision before proceeding
+    → IF user chooses to add: git add {files}
+    → IF user chooses to ignore: Confirm files are truly not needed
+    → DO NOT proceed to Step 2 until resolved
+
+  IF no untracked source files:
+    → Continue to Step 2
+
+RATIONALE: Untracked source files are a common cause of "missing code after merge"
+issues. This check ensures all source files are explicitly handled before push.
+```
+
+**Source file patterns to check:**
+- `.cs` - C# source files
+- `.ts`, `.tsx` - TypeScript/React files
+- `.js` - JavaScript files
+- `.ps1` - PowerShell scripts
+- `.json` - Configuration files (in src/ directories)
+- `.md` - Documentation (in docs/ or project directories)
+
 ### Step 2: Review Changes
 
 ```powershell
@@ -472,6 +508,8 @@ gh pr create                            # Create PR (if gh installed)
 
 ## Tips for AI
 
+- **CRITICAL: Always run Step 1.5 (untracked source file check) before ANY commit/push**
+- Untracked files have caused code loss - treat this check as mandatory, not optional
 - Always show `git status` before committing so user sees what's included
 - Propose a commit message based on changed files - don't just ask user to write one
 - If user is on main/master, strongly recommend creating a feature branch first

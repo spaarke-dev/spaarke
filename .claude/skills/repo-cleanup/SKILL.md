@@ -186,7 +186,44 @@ git_checks:
   - Binary files that should be ignored
   - Sensitive patterns (secrets, keys, passwords)
   - Merge conflict markers left in files
+  - Untracked source files (CRITICAL - see below)
 ```
+
+#### 7.1 Untracked Source Files Check (CRITICAL)
+
+**This check prevents code loss when merging to main.**
+
+```
+CHECK for untracked source files:
+  git status --porcelain | grep "^??" | grep -E "\.(cs|ts|tsx|ps1|js)$"
+
+  IF untracked source files found in src/, tests/, or infrastructure/:
+    → 🚨 CRITICAL: Untracked source files detected!
+    → Severity: HIGH (blocks merge)
+    → List all files with full paths
+    → Action: Must be either committed or explicitly excluded
+
+  REPORT format:
+    | File | Location | Action Required |
+    |------|----------|-----------------|
+    | {filename} | {path} | Commit or add to .gitignore |
+
+RATIONALE: Untracked source files in worktrees have caused code loss after merge.
+This check is MANDATORY before any merge to main/master.
+```
+
+**Patterns that trigger CRITICAL warning:**
+- `src/**/*.cs` - C# source files
+- `src/**/*.ts` - TypeScript files
+- `src/**/*.tsx` - React components
+- `src/**/*.ps1` - PowerShell scripts
+- `tests/**/*.cs` - Test files
+- `infrastructure/**/*.bicep` - Infrastructure as code
+
+**Patterns that trigger WARNING (review recommended):**
+- `docs/**/*.md` - Documentation files
+- `projects/**/*.md` - Project documentation
+- `scripts/*.ps1` - Utility scripts
 
 ### Step 8: Generate Report
 
