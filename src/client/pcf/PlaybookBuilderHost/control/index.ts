@@ -126,6 +126,16 @@ export class PlaybookBuilderHost
     container: HTMLDivElement
   ): void {
     try {
+      // Log all bound parameters on init for debugging
+      const canvasJsonParam = context.parameters.canvasJson;
+      logInfo('Init - Parameter bindings', {
+        canvasJson_raw: canvasJsonParam?.raw,
+        canvasJson_type: canvasJsonParam?.type,
+        canvasJson_formatted: canvasJsonParam?.formatted,
+        playbookName: context.parameters.playbookName?.raw,
+        playbookDescription: context.parameters.playbookDescription?.raw,
+        playbookId: context.parameters.playbookId?.raw,
+      });
       logInfo('Init - Setting up container');
 
       this.context = context;
@@ -136,15 +146,14 @@ export class PlaybookBuilderHost
       context.mode.trackContainerResize(true);
 
       // Set container styles
-      // Note: Dataverse form sections don't have explicit height, so we need min-height
-      // to ensure the control has usable canvas space
+      // Note: Custom Pages provide allocatedHeight/Width, form sections may not
       this.container.style.display = 'flex';
       this.container.style.flexDirection = 'column';
       this.container.style.boxSizing = 'border-box';
       this.container.style.overflow = 'hidden';
-      this.container.style.width = '100%';
-      this.container.style.height = '100%';
-      this.container.style.minHeight = '800px'; // Ensure usable canvas height
+
+      // Use allocated dimensions from context (Custom Page provides these)
+      this.updateContainerSize(context);
 
       // Set up theme
       this.currentTheme = getResolvedTheme();
@@ -164,9 +173,8 @@ export class PlaybookBuilderHost
     try {
       this.context = context;
 
-      // Debug: Log context.mode structure to understand what's available
-      logInfo('UpdateView - context.mode keys', Object.keys(context.mode));
-      logInfo('UpdateView - context.mode', context.mode);
+      // Update container size on each view update (handles resize)
+      this.updateContainerSize(context);
 
       this.renderReactTree(context);
     } catch (error) {
@@ -218,6 +226,37 @@ export class PlaybookBuilderHost
   // ─────────────────────────────────────────────────────────────────────────
 
   /**
+   * Update container size based on allocated dimensions from context.
+   * Custom Pages provide allocatedHeight/Width; form sections may not.
+   */
+  private updateContainerSize(context: ComponentFramework.Context<IInputs>): void {
+    if (!this.container) return;
+
+    const allocatedWidth = context.mode.allocatedWidth;
+    const allocatedHeight = context.mode.allocatedHeight;
+
+    logInfo('Container size update', { allocatedWidth, allocatedHeight });
+
+    // Width: use allocated width if available, otherwise 100%
+    if (allocatedWidth > 0) {
+      this.container.style.width = `${allocatedWidth}px`;
+    } else {
+      this.container.style.width = '100%';
+    }
+
+    // Height: use allocated height if available, otherwise use minHeight fallback
+    // Increased height by 30% (800px → 1040px) for better canvas visibility
+    if (allocatedHeight > 0) {
+      this.container.style.height = `${allocatedHeight}px`;
+      this.container.style.minHeight = ''; // Clear minHeight when explicit height set
+    } else {
+      // Fallback for form sections that don't provide allocated height
+      this.container.style.height = '100%';
+      this.container.style.minHeight = '1040px';
+    }
+  }
+
+  /**
    * Render the React component tree.
    * Uses React 16 API (ReactDOM.render) per ADR-022.
    */
@@ -265,14 +304,22 @@ export class PlaybookBuilderHost
       logInfo('Rendering with context', {
         playbookId,
         entityType: contextInfo?.entityTypeName,
-        hasCanvasJson: !!canvasJson
+        hasCanvasJson: !!canvasJson,
+        canvasJsonLength: canvasJson?.length || 0,
+        canvasJsonPreview: canvasJson ? canvasJson.substring(0, 200) : '(empty)',
+        playbookName,
+        hasDescription: !!playbookDescription,
       });
 
       // React 16 API - ReactDOM.render
+      // FluentProvider needs flex styling to pass through the height chain
       ReactDOM.render(
         React.createElement(
           FluentProvider,
-          { theme: this.currentTheme },
+          {
+            theme: this.currentTheme,
+            style: { height: '100%', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }
+          },
           React.createElement(PlaybookBuilderHostApp, {
             playbookId,
             playbookName,
@@ -298,20 +345,102 @@ export class PlaybookBuilderHost
     }
   }
 
+  /**
+   * Handle canvas sync from React component.
+   * Updates bound field outputs, notifies framework, and auto-saves to Dataverse.
+   */
   private handleSave(canvasJson: string, name: string, description: string): void {
-    logInfo('Save requested', { jsonLength: canvasJson.length, name, description: description?.substring(0, 50) });
+    logInfo('Canvas synced to bound field', { jsonLength: canvasJson.length });
 
     // Store the updated values for getOutputs() to return
     this.canvasJsonOutput = canvasJson;
     this.playbookNameOutput = name;
     this.playbookDescriptionOutput = description;
-    this.isDirty = false;
 
     // Notify the framework that outputs have changed
     // This triggers getOutputs() and writes values back to bound fields
     this.notifyOutputChanged();
 
-    logInfo('Save complete - outputs updated');
+    // Auto-save to Dataverse so changes persist
+    this.autoSaveToDataverse();
+  }
+
+  /**
+   * Auto-save canvas to Dataverse using WebAPI.
+   * This ensures changes persist without requiring manual form save.
+   */
+  private autoSaveToDataverse(): void {
+    if (!this.context) {
+      logInfo('No context available for auto-save');
+      return;
+    }
+
+    try {
+      // Try multiple methods to get the record ID (same as renderReactTree)
+      const contextInfo = (this.context.mode as unknown as {
+        contextInfo?: { entityId?: string; entityTypeName?: string }
+      }).contextInfo;
+
+      // Method 2: Extract from URL
+      let urlRecordId = '';
+      try {
+        const url = window.location.href;
+        const idMatch = url.match(/[?&]id=([^&]+)/i);
+        if (idMatch) {
+          urlRecordId = decodeURIComponent(idMatch[1]);
+        }
+      } catch { /* URL parsing error */ }
+
+      // Method 3: Input parameter
+      const paramId = this.context.parameters.playbookId?.raw || '';
+
+      // Resolve entity ID
+      const entityId = contextInfo?.entityId || urlRecordId || paramId;
+      const entityName = contextInfo?.entityTypeName || 'sprk_analysisplaybook';
+
+      logInfo('Auto-save entity resolution', {
+        contextInfoId: contextInfo?.entityId,
+        contextInfoType: contextInfo?.entityTypeName,
+        urlRecordId,
+        paramId,
+        resolvedId: entityId,
+        resolvedType: entityName,
+      });
+
+      if (!entityId) {
+        logError('No entity ID found - cannot auto-save. Check PCF binding configuration.');
+        return;
+      }
+
+      // Build the update data using the correct Dataverse field name
+      const updateData: Record<string, unknown> = {};
+      if (this.canvasJsonOutput !== undefined) {
+        updateData['sprk_canvaslayoutjson'] = this.canvasJsonOutput;
+      }
+
+      if (Object.keys(updateData).length === 0) {
+        logInfo('No canvas data to auto-save');
+        return;
+      }
+
+      logInfo('Auto-saving canvas via WebAPI', {
+        entityName,
+        entityId,
+        jsonLength: this.canvasJsonOutput?.length || 0,
+      });
+
+      // Use the PCF webAPI to update the record directly
+      this.context.webAPI.updateRecord(entityName, entityId, updateData).then(
+        () => {
+          logInfo('Canvas auto-saved successfully');
+        },
+        (error: unknown) => {
+          logError('Canvas auto-save failed', error);
+        }
+      );
+    } catch (error) {
+      logError('Failed to auto-save canvas', error);
+    }
   }
 
   private setupThemeListeners(): void {

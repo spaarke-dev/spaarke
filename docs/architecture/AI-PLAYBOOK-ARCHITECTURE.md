@@ -1,7 +1,7 @@
 # AI Playbook Architecture
 
-> **Version**: 1.0
-> **Last Updated**: January 8, 2026
+> **Version**: 2.0
+> **Last Updated**: January 15, 2026
 > **Author**: AI Summary and Analysis Enhancements Team
 > **Related ADRs**: ADR-013, ADR-014, ADR-015, ADR-016
 
@@ -21,6 +21,12 @@
 - [Data Flow by Output Path](#data-flow-by-output-path)
 - [Component Interaction Diagram](#component-interaction-diagram)
 - [Critical Implementation Files](#critical-implementation-files)
+- [Playbook Builder PCF Control](#playbook-builder-pcf-control)
+  - [Architecture Overview](#architecture-overview-1)
+  - [PCF Control Properties](#pcf-control-properties)
+  - [Auto-Save Architecture](#auto-save-architecture)
+  - [State Management](#state-management)
+  - [Key Components](#key-components)
 - [ADR Compliance](#adr-compliance)
 - [Limitations and Future Enhancements](#limitations-and-future-enhancements)
 
@@ -538,6 +544,298 @@ Displayed in: Document form → File Entities field
 | OpenAI Client | `IOpenAiClient.cs` / implementation | `GetCompletionAsync()` |
 | Dataverse Service | `IDataverseService.cs` | `GetDocumentAsync()`, `UpdateDocumentFieldsAsync()`, `CreateAnalysisOutputAsync()` |
 | Playbook Service | `IPlaybookService.cs` | `GetPlaybookAsync()`, authorization checks |
+| **PCF Control** | `PlaybookBuilderHost/control/index.ts` | `init()`, `updateView()`, `handleSave()`, `autoSaveToDataverse()` |
+| **PCF React App** | `PlaybookBuilderHost/control/PlaybookBuilderHost.tsx` | Main component, dirty state, auto-sync effect |
+| **Canvas Store** | `PlaybookBuilderHost/control/stores/canvasStore.ts` | `loadFromJson()`, `toJson()`, node/edge state |
+| **PCF Manifest** | `PlaybookBuilderHost/control/ControlManifest.Input.xml` | Bound properties, feature usage |
+
+---
+
+## Playbook Builder PCF Control
+
+The **PlaybookBuilderHost** is a Power Apps Component Framework (PCF) control that provides a visual node-based interface for designing AI analysis playbooks. It enables drag-and-drop workflow creation with real-time auto-save to Dataverse.
+
+### Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    PlaybookBuilderHost PCF Control                       │
+│                         (v2.13.x - Direct Rendering)                     │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │                     PCF Control Class (index.ts)                  │   │
+│  │  - Manages lifecycle (init, updateView, destroy)                 │   │
+│  │  - Handles bound property I/O                                    │   │
+│  │  - Implements auto-save via WebAPI                               │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│                              │                                           │
+│                              ↓                                           │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │              React Component (PlaybookBuilderHost.tsx)            │   │
+│  │  - FluentProvider wrapper (theme support)                        │   │
+│  │  - BuilderLayout container                                       │   │
+│  │  - Dirty state tracking & indicator                              │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│                              │                                           │
+│         ┌────────────────────┼────────────────────┐                     │
+│         ↓                    ↓                    ↓                     │
+│  ┌─────────────┐    ┌──────────────┐    ┌──────────────────┐           │
+│  │ NodePalette │    │    Canvas    │    │ PropertiesPanel  │           │
+│  │ (Draggable  │    │ (React Flow) │    │ (Node Config)    │           │
+│  │  node types)│    │              │    │                  │           │
+│  └─────────────┘    └──────────────┘    └──────────────────┘           │
+│                              │                                           │
+│                              ↓                                           │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │                  Zustand Canvas Store                             │   │
+│  │  - Nodes[], Edges[] (React Flow state)                           │   │
+│  │  - Selection state (selectedNodeId, selectedEdgeId)              │   │
+│  │  - isDirty flag for change tracking                              │   │
+│  │  - loadFromJson() / toJson() for persistence                     │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+                              │
+                              ↓
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         Dataverse Storage                                │
+│  Entity: sprk_analysisplaybook                                          │
+│  Field: sprk_canvaslayoutjson (Multiline Text)                          │
+│  Format: JSON { nodes: [...], edges: [...], version: 1 }                │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Key Design Decisions (ADR-022 Compliance)**:
+- Uses **React 16 APIs** (`ReactDOM.render`, not `createRoot`) for Dataverse platform compatibility
+- Uses **react-flow-renderer v10** (React 16 compatible, not @xyflow/react v12)
+- Uses **Fluent UI v9** for consistent Dataverse theming
+- Direct PCF rendering (no iframe architecture)
+
+### PCF Control Properties
+
+The control is configured via `ControlManifest.Input.xml`:
+
+| Property | Type | Usage | Bound Field | Description |
+|----------|------|-------|-------------|-------------|
+| `playbookId` | SingleLine.Text | input | (auto-detected) | Optional fallback - record ID auto-detected from form context |
+| `playbookName` | SingleLine.Text | bound | `sprk_name` | Playbook name displayed in header |
+| `playbookDescription` | Multiple | bound | `sprk_description` | Playbook description |
+| `canvasJson` | Multiple | bound | `sprk_canvaslayoutjson` | **Critical**: Serialized canvas state (nodes + edges) |
+| `apiBaseUrl` | SingleLine.Text | input | — | BFF API base URL for backend calls |
+| `isDirty` | TwoOptions | output | — | True when canvas has unsaved changes |
+
+**Form Configuration Requirements**:
+
+When adding the PCF control to a Dataverse form:
+
+1. **Canvas JSON Binding** (Critical): Bind the `canvasJson` property to the `sprk_canvaslayoutjson` field
+2. **Name Binding**: Bind `playbookName` to `sprk_name`
+3. **Description Binding**: Bind `playbookDescription` to `sprk_description`
+4. **API URL**: Set `apiBaseUrl` to your BFF API endpoint (e.g., `https://spe-api-dev-67e2xz.azurewebsites.net`)
+
+### Auto-Save Architecture
+
+The control implements automatic persistence with dual-path saving:
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                         Auto-Save Flow                                  │
+├────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  User Action (drag node, edit property, connect edge)                   │
+│       │                                                                 │
+│       ↓                                                                 │
+│  Zustand Store: isDirty = true                                          │
+│       │                                                                 │
+│       ↓                                                                 │
+│  React Effect (500ms debounce)                                          │
+│       │                                                                 │
+│       ├──────────────────────────────────────────────────────┐         │
+│       ↓                                                       ↓         │
+│  Path 1: notifyOutputChanged()              Path 2: autoSaveToDataverse()│
+│  ─────────────────────────────              ─────────────────────────────│
+│  • Updates PCF bound properties             • Direct WebAPI PATCH call   │
+│  • Framework writes to form fields          • Immediate Dataverse write  │
+│  • Requires form Save to persist            • Persists without form Save │
+│       │                                                       │         │
+│       ↓                                                       ↓         │
+│  getOutputs() returns:                      context.webAPI.updateRecord()│
+│  {                                          PATCH sprk_analysisplaybook  │
+│    canvasJson: "...",                       {                            │
+│    playbookName: "...",                       sprk_canvaslayoutjson: ... │
+│    isDirty: false                           }                            │
+│  }                                                            │         │
+│       │                                                       │         │
+│       └───────────────────────────────────────────────────────┘         │
+│                              │                                          │
+│                              ↓                                          │
+│                   isDirty = false (clearDirty())                        │
+│                   "Unsaved changes" indicator hidden                     │
+│                                                                         │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+**Key Implementation Methods** (`index.ts`):
+
+```typescript
+// Auto-save triggered by React effect after 500ms debounce
+private handleSave(canvasJson: string, name: string, description: string): void {
+  // Store values for getOutputs()
+  this.canvasJsonOutput = canvasJson;
+  this.playbookNameOutput = name;
+  this.playbookDescriptionOutput = description;
+
+  // Path 1: Notify framework (updates bound properties)
+  this.notifyOutputChanged();
+
+  // Path 2: Direct Dataverse save (persists immediately)
+  this.autoSaveToDataverse();
+}
+
+// Direct WebAPI save to Dataverse
+private autoSaveToDataverse(): void {
+  // Resolve entity ID (multiple fallback methods)
+  const entityId = contextInfo?.entityId || urlRecordId || paramId;
+
+  // Update the canvas layout field
+  const updateData = { 'sprk_canvaslayoutjson': this.canvasJsonOutput };
+
+  this.context.webAPI.updateRecord(
+    'sprk_analysisplaybook',
+    entityId,
+    updateData
+  );
+}
+```
+
+**Why Dual-Path Saving?**
+
+| Path | Mechanism | Persistence | Use Case |
+|------|-----------|-------------|----------|
+| **Path 1** | `notifyOutputChanged()` | Requires form Save | Standard PCF pattern, framework-managed |
+| **Path 2** | `webAPI.updateRecord()` | Immediate | Ensures data persists even if user closes without saving |
+
+### State Management
+
+The canvas state is managed by a Zustand store (`canvasStore.ts`):
+
+```typescript
+interface CanvasState {
+  // Core state
+  nodes: PlaybookNode[];           // React Flow nodes
+  edges: Edge[];                   // React Flow edges
+  selectedNodeId: string | null;   // Currently selected node
+  selectedEdgeId: string | null;   // Currently selected edge
+  isDirty: boolean;                // Has unsaved changes
+  lastSavedJson: string | null;    // Last persisted state
+
+  // Actions
+  setNodes: (nodes: PlaybookNode[]) => void;
+  addNode: (node: PlaybookNode) => void;
+  updateNode: (nodeId: string, data: Partial<PlaybookNodeData>) => void;
+  removeNode: (nodeId: string) => void;
+  onConnect: (connection: Connection) => void;
+
+  // Persistence
+  loadFromJson: (json: string) => void;
+  toJson: () => string;
+  markSaved: () => void;           // clearDirty alias
+}
+```
+
+**Node Data Structure**:
+
+```typescript
+interface PlaybookNodeData {
+  label: string;                    // Display name
+  type: PlaybookNodeType;           // 'aiAnalysis' | 'aiCompletion' | 'condition' | etc.
+  outputVariable?: string;          // Variable name for output reference
+  timeoutSeconds?: number;          // Execution timeout (30-3600s)
+  retryCount?: number;              // Retry attempts (0-5)
+  conditionJson?: string;           // Condition expression (condition nodes only)
+  skillIds?: string[];              // Linked skills
+  knowledgeIds?: string[];          // Linked knowledge sources
+  toolId?: string;                  // Linked tool
+  modelDeploymentId?: string;       // AI model selection (AI nodes only)
+}
+
+type PlaybookNodeType =
+  | 'aiAnalysis'      // AI analysis node
+  | 'aiCompletion'    // AI completion node
+  | 'condition'       // Conditional branching
+  | 'deliverOutput'   // Output delivery
+  | 'createTask'      // Task creation action
+  | 'sendEmail'       // Email action
+  | 'wait';           // Wait/delay action
+```
+
+**Canvas JSON Format** (stored in `sprk_canvaslayoutjson`):
+
+```json
+{
+  "nodes": [
+    {
+      "id": "node_1736956789_abc123def",
+      "type": "aiAnalysis",
+      "position": { "x": 250, "y": 100 },
+      "data": {
+        "label": "Extract Entities",
+        "type": "aiAnalysis",
+        "outputVariable": "entities",
+        "timeoutSeconds": 300,
+        "skillIds": ["SKL-001", "SKL-008"],
+        "modelDeploymentId": "gpt-4o-mini"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "reactflow__edge-node_1-node_2",
+      "source": "node_1",
+      "target": "node_2",
+      "type": "smoothstep",
+      "animated": true
+    }
+  ],
+  "version": 1
+}
+```
+
+### Key Components
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| **PCF Control** | `index.ts` | Lifecycle management, bound properties, auto-save |
+| **Main React Component** | `PlaybookBuilderHost.tsx` | Layout, theme provider, dirty indicator |
+| **Canvas Store** | `stores/canvasStore.ts` | Zustand state management for nodes/edges |
+| **Execution Store** | `stores/executionStore.ts` | Playbook execution state |
+| **Canvas** | `components/Canvas/Canvas.tsx` | React Flow wrapper, drag-drop handling |
+| **Node Palette** | `components/Palette/NodePalette.tsx` | Draggable node type list |
+| **Properties Panel** | `components/Properties/PropertiesPanel.tsx` | Node configuration form |
+| **Base Node** | `components/Nodes/BaseNode.tsx` | Common node rendering |
+| **Condition Node** | `components/Nodes/ConditionNode.tsx` | Branching node with true/false handles |
+
+**Component Hierarchy**:
+
+```
+PlaybookBuilderHost (PCF index.ts)
+└── FluentProvider (theme)
+    └── PlaybookBuilderHostApp (React component)
+        ├── Header (title, dirty indicator)
+        ├── BuilderLayout
+        │   ├── NodePalette (left sidebar)
+        │   ├── Canvas (center - React Flow)
+        │   │   ├── BaseNode (AI, action nodes)
+        │   │   ├── ConditionNode (branching)
+        │   │   └── Custom edge types
+        │   └── PropertiesPanel (right sidebar)
+        │       └── NodePropertiesForm
+        │           ├── ScopeSelector (skills, knowledge, tools)
+        │           ├── ModelSelector (AI model dropdown)
+        │           └── ConditionEditor (condition nodes)
+        └── Footer (version badge)
+```
 
 ---
 
@@ -696,5 +994,5 @@ This architecture follows:
 
 ---
 
-**Last Review**: January 8, 2026
+**Last Review**: January 15, 2026
 **Next Review**: March 2026 (or after major architecture changes)

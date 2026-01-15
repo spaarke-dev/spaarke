@@ -9,7 +9,7 @@
  * - Canvas state managed by Zustand store
  * - Dirty state tracked and exposed to PCF host
  *
- * @version 2.7.0
+ * @version 2.13.1
  */
 
 import * as React from 'react';
@@ -18,15 +18,12 @@ import {
   Button,
   Spinner,
   Text,
-  Input,
-  Textarea,
-  Label,
   Tooltip,
   makeStyles,
   tokens,
   shorthands,
 } from '@fluentui/react-components';
-import { Save20Regular, DocumentMultiple20Regular } from '@fluentui/react-icons';
+import { DocumentMultiple20Regular } from '@fluentui/react-icons';
 import { ReactFlowProvider } from 'react-flow-renderer';
 import { BuilderLayout, TemplateLibraryDialog } from './components';
 import { useCanvasStore, useTemplateStore } from './stores';
@@ -55,40 +52,30 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     width: '100%',
     height: '100%',
+    flex: 1,
+    minHeight: 0, // Critical for flex child sizing
+    boxSizing: 'border-box',
     ...shorthands.overflow('hidden'),
   },
   header: {
     display: 'flex',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    ...shorthands.padding(tokens.spacingVerticalM, tokens.spacingHorizontalL),
-    ...shorthands.gap(tokens.spacingHorizontalL),
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalL),
+    ...shorthands.gap(tokens.spacingHorizontalS),
     ...shorthands.borderBottom(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke1),
     backgroundColor: tokens.colorNeutralBackground1,
     flexShrink: 0,
-  },
-  headerFields: {
-    display: 'flex',
-    flexDirection: 'column',
-    ...shorthands.gap(tokens.spacingVerticalS),
-    flex: 1,
-    maxWidth: '600px',
-  },
-  headerField: {
-    display: 'flex',
-    flexDirection: 'column',
-    ...shorthands.gap(tokens.spacingVerticalXXS),
   },
   headerActions: {
     display: 'flex',
     alignItems: 'center',
     ...shorthands.gap(tokens.spacingHorizontalS),
-    flexShrink: 0,
   },
   builderContainer: {
     flex: 1,
     position: 'relative',
-    minHeight: 0, // Critical for flex child to shrink properly
+    minHeight: 0, // Allow flex shrink, parent has explicit height
     ...shorthands.overflow('hidden'),
   },
   loading: {
@@ -111,13 +98,21 @@ const useStyles = makeStyles({
   },
   dirtyIndicator: {
     color: tokens.colorPaletteMarigoldForeground1,
+    minWidth: '110px', // Reserve space to prevent layout shift
+    textAlign: 'right',
+  },
+  footer: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    ...shorthands.padding(tokens.spacingVerticalXS, tokens.spacingHorizontalM),
+    backgroundColor: tokens.colorNeutralBackground2,
+    ...shorthands.borderTop(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke2),
+    flexShrink: 0,
   },
   versionBadge: {
     fontSize: '10px',
     color: tokens.colorNeutralForeground3,
-    position: 'absolute',
-    bottom: tokens.spacingVerticalXS,
-    right: tokens.spacingHorizontalS,
     pointerEvents: 'none',
   },
 });
@@ -140,11 +135,6 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Local state for editable fields
-  const [name, setName] = useState(playbookName || '');
-  const [description, setDescription] = useState(playbookDescription || '');
-  const [fieldsModified, setFieldsModified] = useState(false);
-
   // Template library dialog state
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
 
@@ -154,15 +144,15 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
   }));
 
   // Get store state and actions
-  const { isDirty: canvasDirty, loadCanvas, getCanvasJson, clearDirty } = useCanvasStore((state) => ({
+  const { isDirty, loadCanvas, getCanvasJson, clearDirty } = useCanvasStore((state) => ({
     isDirty: state.isDirty,
     loadCanvas: state.loadCanvas,
     getCanvasJson: state.getCanvasJson,
     clearDirty: state.clearDirty,
   }));
 
-  // Combined dirty state: canvas changes OR field changes
-  const isDirty = canvasDirty || fieldsModified;
+  // Debounce timer ref for auto-sync
+  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Initialize canvas from props (only once)
   useEffect(() => {
@@ -200,35 +190,38 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
     onDirtyChange(isDirty);
   }, [isDirty, onDirtyChange]);
 
-  // Handle name change
-  const handleNameChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setName(e.target.value);
-    setFieldsModified(true);
-  }, []);
+  // Auto-sync canvas changes to bound field (debounced)
+  // This enables the form's Save button to persist canvas changes
+  useEffect(() => {
+    if (!isDirty || !initializedRef.current) return;
 
-  // Handle description change
-  const handleDescriptionChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setDescription(e.target.value);
-    setFieldsModified(true);
-  }, []);
-
-  // Handle save button click
-  const handleSaveClick = useCallback(() => {
-    try {
-      const json = getCanvasJson();
-      console.info('[PlaybookBuilderHost] Saving canvas', {
-        jsonLength: json.length,
-        name,
-        description: description.substring(0, 50) + '...',
-      });
-      onSave(json, name, description);
-      clearDirty();
-      setFieldsModified(false);
-    } catch (err) {
-      console.error('[PlaybookBuilderHost] Failed to save canvas:', err);
-      setError('Failed to save the playbook. Please try again.');
+    // Clear any pending sync
+    if (syncTimerRef.current) {
+      clearTimeout(syncTimerRef.current);
     }
-  }, [getCanvasJson, onSave, clearDirty, name, description]);
+
+    // Debounce sync by 500ms to avoid excessive updates during drag
+    syncTimerRef.current = setTimeout(() => {
+      try {
+        const json = getCanvasJson();
+        console.info('[PlaybookBuilderHost] Auto-syncing canvas to bound field', {
+          jsonLength: json.length,
+        });
+        // Sync to bound field - form Save button will persist
+        onSave(json, playbookName, playbookDescription || '');
+        // Clear dirty state - canvas is now synced to bound field
+        clearDirty();
+      } catch (err) {
+        console.error('[PlaybookBuilderHost] Failed to sync canvas:', err);
+      }
+    }, 500);
+
+    return () => {
+      if (syncTimerRef.current) {
+        clearTimeout(syncTimerRef.current);
+      }
+    };
+  }, [isDirty, getCanvasJson, onSave, playbookName, playbookDescription, clearDirty]);
 
   // Handle retry
   const handleRetryClick = useCallback(() => {
@@ -318,42 +311,16 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
 
   return (
     <div className={styles.container}>
-      {/* Header with Name/Description and Save */}
+      {/* Header with Actions */}
       <div className={styles.header}>
-        <div className={styles.headerFields}>
-          <div className={styles.headerField}>
-            <Label htmlFor="playbook-name" required size="small">
-              Playbook Name
-            </Label>
-            <Input
-              id="playbook-name"
-              size="small"
-              value={name}
-              onChange={handleNameChange}
-              placeholder="Enter playbook name"
-            />
-          </div>
-          <div className={styles.headerField}>
-            <Label htmlFor="playbook-description" size="small">
-              Description
-            </Label>
-            <Textarea
-              id="playbook-description"
-              size="small"
-              value={description}
-              onChange={handleDescriptionChange}
-              placeholder="Enter playbook description"
-              rows={2}
-              resize="none"
-            />
-          </div>
-        </div>
         <div className={styles.headerActions}>
-          {isDirty && (
-            <Text className={styles.dirtyIndicator} size={200}>
-              Unsaved changes
-            </Text>
-          )}
+          <Text
+            className={styles.dirtyIndicator}
+            size={200}
+            style={{ visibility: isDirty ? 'visible' : 'hidden' }}
+          >
+            Unsaved changes
+          </Text>
           {apiBaseUrl && (
             <Tooltip content="Browse playbook templates" relationship="description">
               <Button
@@ -365,14 +332,6 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
               </Button>
             </Tooltip>
           )}
-          <Button
-            appearance="primary"
-            icon={<Save20Regular />}
-            disabled={!isDirty}
-            onClick={handleSaveClick}
-          >
-            Save
-          </Button>
         </div>
       </div>
 
@@ -381,8 +340,11 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
         <ReactFlowProvider>
           <BuilderLayout />
         </ReactFlowProvider>
-        {/* Version badge in corner */}
-        <Text className={styles.versionBadge}>v2.7.0</Text>
+      </div>
+
+      {/* Footer with Version */}
+      <div className={styles.footer}>
+        <Text className={styles.versionBadge}>v2.13.1 2025-01-15</Text>
       </div>
 
       {/* Template Library Dialog */}
