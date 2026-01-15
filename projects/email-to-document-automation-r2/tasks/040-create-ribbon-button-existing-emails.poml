@@ -3,7 +3,7 @@
   <metadata>
     <title>Create Ribbon Button for Existing Emails</title>
     <phase>5: UI/Ribbon Enhancements</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>039</dependencies>
     <blocks>041, 042</blocks>
@@ -95,6 +95,24 @@
     DisplayRule should check if sprk_document lookup field is populated.
     Icon suggestion: DocumentWithContent or Mail archive icon.
   </notes>
+
+  <completion-notes date="2026-01-15">
+    COMPLETED: Reused existing EmailRibbons solution at infrastructure/dataverse/ribbon/EmailRibbons/
+
+    Changes made:
+    1. Updated sprk_emailactions.js - Added isEmailArchived, _checkEmailArchivedAsync, canArchiveEmail functions
+       - Uses session caching for performance
+       - Queries sprk_document for email lookup to determine archive status
+    2. Updated RibbonDiff.xml - Renamed button from "Save to Document" to "Archive Email"
+       - Added DisplayRule (sprk.Email.ArchiveEmail.DisplayRule.NotArchived) to hide when archived
+       - Updated LocLabels for Archive Email terminology
+    3. Updated Solution.xml - Bumped version from 1.0.0.0 to 1.1.0.0
+
+    Deployment: Successfully imported EmailRibbons_v1.1.0.zip to SPAARKE DEV 1
+
+    Note: Task 042 (Create JavaScript Web Resource) is partially complete - archiveEmail handler
+    already exists in sprk_emailactions.js. Task 042 should verify/enhance the handler.
+  </completion-notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

@@ -10,27 +10,18 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 039 - Deploy and Verify Phase 4 (Bug Investigation) |
-| **Step** | Fix applied - ready to deploy and test |
-| **Status** | in-progress |
-| **Next Action** | Deploy API to Azure and test with Test #30/#31 emails |
+| **Task** | 090 - Project Wrap-up |
+| **Step** | Not started |
+| **Status** | pending |
+| **Next Action** | Begin Task 090 - Final project wrap-up |
 
 ### Files Modified This Session
-- `src/server/api/Sprk.Bff.Api/Services/Email/EmailToEmlConverter.cs` - Added retry logic in FetchAttachmentsAsync
-- `tests/unit/Sprk.Bff.Api.Tests/Integration/DataverseEntitySchemaTests.cs` - Fixed obsolete ParentDocumentId reference
-- `tests/unit/Sprk.Bff.Api.Tests/Services/Email/EmailAttachmentExtractionTests.cs` - Added .txt file test
-- `projects/email-to-document-automation-r2/notes/project-follow-up-items.md` - Updated with root cause analysis
+- `projects/email-to-document-automation-r2/notes/ribbon-testing-checklist.md` (created)
+- `projects/email-to-document-automation-r2/notes/phase5-deployment-notes.md` (created)
 
 ### Critical Context
-**P2 Bug Root Cause Identified**: **Race condition** between webhook and attachment creation.
-- Webhook fires on email Create event
-- Attachments are added via separate API call (activitymimeattachments)
-- FetchAttachmentsAsync may run before attachments exist in Dataverse
-
-**Fix Applied**: Added retry logic in `FetchAttachmentsAsync`:
-- If 0 attachments found on first query, wait 2 seconds and retry once
-- Handles the timing window where webhook job runs before attachments created
-- Build succeeded, 17 attachment extraction tests pass
+All 5 phases complete. 21/22 tasks done. Ready for project wrap-up (Task 090).
+Graduation criteria: 5/7 fully met, 2/7 partially met (AI auto-enqueue deferred to r5).
 
 ---
 
@@ -38,14 +29,14 @@
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | 039 (Bug Investigation) |
-| **Task File** | tasks/009-deploy-phase1.poml |
-| **Title** | Deploy and Verify Phase 4 - Attachment Bug Investigation |
-| **Phase** | 4: Email-specific AI Analysis |
-| **Status** | in-progress |
-| **Started** | 2026-01-14 |
+| **Task ID** | 090 |
+| **Task File** | tasks/090-project-wrap-up.poml |
+| **Title** | Project Wrap-up |
+| **Phase** | Wrap-up |
+| **Status** | pending |
+| **Started** | — |
 | **Rigor Level** | FULL |
-| **Rigor Reason** | Production bug investigation requiring code analysis |
+| **Rigor Reason** | Project completion with PR creation
 
 ---
 
@@ -53,33 +44,60 @@
 
 ### Completed Steps
 
-*No steps completed yet - new task*
+(Reset for new task)
 
 ### Current Step
 
-Pending task start
+Not started - awaiting execution
 
 ### Files Modified (All Task)
 
-*No files modified yet*
+(Reset for new task)
 
 ### Decisions Made
 
-*No decisions recorded yet*
+(Reset for new task)
 
 ---
 
 ## Knowledge Files Loaded
 
-*Will be loaded when task starts*
+- `.claude/skills/ribbon-edit/SKILL.md`
+- `.claude/skills/dataverse-deploy/SKILL.md`
+- `docs/guides/RIBBON-WORKBENCH-HOW-TO-ADD-BUTTON.md`
 
 ## Constraints Loaded
 
-*Will be loaded when task starts*
+- ADR-002: MUST NOT make HTTP calls from plugin - use web resource
 
 ---
 
 ## Session History
+
+### Task 049 (Completed)
+- **Title**: Deploy and Verify Phase 5 (UI/Ribbon)
+- **Completed**: 2026-01-15
+- **Summary**: Phase 5 deployment verified. EmailRibbons v1.1.0 deployed in Task 040. Created phase5-deployment-notes.md documenting graduation criteria status (5/7 fully met, 2/7 deferred). Ribbon button functional for existing/sent emails.
+
+### Task 043 (Completed)
+- **Title**: Manual Testing Checklist for Ribbon Buttons
+- **Completed**: 2026-01-15
+- **Summary**: Created comprehensive testing checklist (10 test cases) at notes/ribbon-testing-checklist.md. Covers received/sent email processing, button visibility rules, error handling scenarios, and FR-14/FR-15 verification. Ready for human test execution.
+
+### Task 042 (Completed)
+- **Title**: Create JavaScript Web Resource for Ribbon Handler
+- **Completed**: 2026-01-15
+- **Summary**: Verified sprk_emailactions.js already exists with full implementation. Includes Spaarke.Email.saveToDocument(), MSAL authentication, progress indicator, success/error dialogs. No code changes needed.
+
+### Task 041 (Completed)
+- **Title**: Create Ribbon Button for Sent Emails
+- **Completed**: 2026-01-15
+- **Summary**: Verified Task 040 implementation is direction-agnostic. No code changes needed - the "Archive Email" button already works for both received (directioncode=0) and sent (directioncode=1) emails.
+
+### Task 040 (Completed)
+- **Title**: Create Ribbon Button for Existing Emails
+- **Completed**: 2026-01-15
+- **Summary**: Reused existing EmailRibbons solution. Renamed button to "Archive Email", added DisplayRule to hide when email already archived. Deployed EmailRibbons v1.1.0 to SPAARKE DEV 1. Solution imported successfully.
 
 ### Task 039 (Completed)
 - **Title**: Deploy and Verify Phase 4 (Email Analysis Playbook)
@@ -108,7 +126,7 @@ Pending task start
 - Phase 2: Complete (Tasks 010-019)
 - Phase 3: Complete (Tasks 020-029)
 - Phase 4: Complete (Tasks 030-039)
-- Phase 5: Not started (Tasks 040-049)
+- Phase 5: ✅ Complete (Tasks 040-049) - All tasks completed
 
 ---
 

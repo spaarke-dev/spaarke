@@ -1,6 +1,6 @@
 # Task Index - Email-to-Document Automation R2
 
-> **Last Updated**: 2026-01-14
+> **Last Updated**: 2026-01-15
 > **Total Tasks**: 22
 > **Project**: email-to-document-automation-r2
 
@@ -77,11 +77,11 @@
 
 | ID | Title | Status | Dependencies | Rigor |
 |----|-------|--------|--------------|-------|
-| 040 | [Create Ribbon Button for Existing Emails](040-create-ribbon-button-existing-emails.poml) | 🔲 | 039 | FULL |
-| 041 | [Create Ribbon Button for Sent Emails](041-create-ribbon-button-sent-emails.poml) | 🔲 | 040 | STANDARD |
-| 042 | [Create JavaScript Web Resource for Ribbon Handler](042-create-ribbon-webresource.poml) | 🔲 | 040, 041 | FULL |
-| 043 | [Manual Testing Checklist for Ribbon Buttons](043-manual-testing-ribbon.poml) | 🔲 | 042 | MINIMAL |
-| 049 | [Deploy and Verify Phase 5](049-deploy-phase5.poml) | 🔲 | 043 | STANDARD |
+| 040 | [Create Ribbon Button for Existing Emails](040-create-ribbon-button-existing-emails.poml) | ✅ | 039 | FULL |
+| 041 | [Create Ribbon Button for Sent Emails](041-create-ribbon-button-sent-emails.poml) | ✅ | 040 | STANDARD |
+| 042 | [Create JavaScript Web Resource for Ribbon Handler](042-create-ribbon-webresource.poml) | ✅ | 040, 041 | FULL |
+| 043 | [Manual Testing Checklist for Ribbon Buttons](043-manual-testing-ribbon.poml) | ✅ | 042 | MINIMAL |
+| 049 | [Deploy and Verify Phase 5](049-deploy-phase5.poml) | ✅ | 043 | STANDARD |
 
 ### Wrap-up
 
