@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Add Condition UI in Builder</title>
+    <phase>4: Advanced Features</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <tags>frontend, react</tags>
+    <dependencies>030</dependencies>
+    <blocks>039</blocks>
+  </metadata>
+  <prompt>Add condition node UI with branching visualization and expression editor.</prompt>
+  <role>Senior frontend developer</role>
+  <goal>Condition node shows branching paths and has expression editor in properties.</goal>
+  <steps>
+    <step order="1">Update ConditionNode component with branch handles</step>
+    <step order="2">Add true/false output handles</step>
+    <step order="3">Create ConditionEditor component</step>
+    <step order="4">Add expression builder UI</step>
+    <step order="5">Show branch paths visually</step>
+    <step order="6">Update edge styling for branches</step>
+  </steps>
+  <outputs>
+    <output type="code">src/client/pcf/PlaybookBuilderHost/control/components/Properties/ConditionEditor.tsx</output>
+    <output type="code">src/client/pcf/PlaybookBuilderHost/control/components/Edges/ConditionEdge.tsx</output>
+    <output type="code">src/client/pcf/PlaybookBuilderHost/control/components/Edges/edgeTypes.ts</output>
+    <output type="code">src/client/pcf/PlaybookBuilderHost/control/components/Edges/index.ts</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Condition node shows true/false branches</criterion>
+    <criterion testable="true">Expression editor works</criterion>
+  </acceptance-criteria>
+  <notes>
+    <note>ConditionNode already had branch handles from initial implementation - Steps 1-2 were pre-existing</note>
+    <note>Created ConditionEditor with visual expression builder UI (operators: eq, ne, gt, lt, gte, lte, contains, startsWith, endsWith, exists)</note>
+    <note>Created custom edge components (TrueBranchEdge, FalseBranchEdge) with colored labels</note>
+    <note>Updated canvasStore onConnect to assign branch-specific edge types from condition nodes</note>
+    <note>Uses react-flow-renderer v10 EdgeText for edge labels (v10 compatible)</note>
+    <note>PCF version bumped to 2.5.0</note>
+  </notes>
+</task>

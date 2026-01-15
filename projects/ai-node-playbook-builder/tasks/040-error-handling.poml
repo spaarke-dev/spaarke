@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Comprehensive Error Handling</title>
+    <phase>5: Production Hardening</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <tags>bff-api, quality</tags>
+    <dependencies>039</dependencies>
+    <blocks>041</blocks>
+  </metadata>
+  <prompt>Implement comprehensive error handling across orchestration and executor services.</prompt>
+  <role>Senior .NET developer</role>
+  <goal>All error scenarios handled with proper ProblemDetails responses.</goal>
+  <constraints>
+    <constraint source="ADR-019">Return ProblemDetails for all errors</constraint>
+  </constraints>
+  <steps>
+    <step order="1">Audit all services for unhandled exceptions</step>
+    <step order="2">Add try/catch with logging</step>
+    <step order="3">Create custom exception types</step>
+    <step order="4">Map exceptions to ProblemDetails</step>
+    <step order="5">Add correlation IDs to error responses</step>
+    <step order="6">Write tests for error scenarios</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Exceptions/PlaybookExecutionException.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">All exceptions handled</criterion>
+    <criterion testable="true">ProblemDetails returned for errors</criterion>
+    <criterion testable="true">Correlation IDs in responses</criterion>
+  </acceptance-criteria>
+</task>

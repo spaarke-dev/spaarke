@@ -111,6 +111,49 @@ public static class PlaybookEndpoints
             .ProducesProblem(403)
             .ProducesProblem(404);
 
+        // GET /api/ai/playbooks/{id}/canvas - Get canvas layout
+        group.MapGet("/{id:guid}/canvas", GetCanvasLayout)
+            .AddPlaybookAccessAuthorizationFilter()
+            .WithName("GetCanvasLayout")
+            .WithSummary("Get canvas layout for playbook builder")
+            .WithDescription("Returns the visual canvas layout (node positions, edges, viewport) for the playbook builder.")
+            .Produces<CanvasLayoutResponse>()
+            .ProducesProblem(401)
+            .ProducesProblem(403)
+            .ProducesProblem(404);
+
+        // PUT /api/ai/playbooks/{id}/canvas - Save canvas layout
+        group.MapPut("/{id:guid}/canvas", SaveCanvasLayout)
+            .AddPlaybookOwnerAuthorizationFilter()
+            .WithName("SaveCanvasLayout")
+            .WithSummary("Save canvas layout for playbook builder")
+            .WithDescription("Saves the visual canvas layout (node positions, edges, viewport). User must own the playbook.")
+            .Produces<CanvasLayoutResponse>()
+            .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(403)
+            .ProducesProblem(404);
+
+        // GET /api/ai/playbooks/templates - List template playbooks
+        group.MapGet("/templates", ListTemplates)
+            .WithName("ListTemplates")
+            .WithSummary("List template playbooks available for cloning")
+            .WithDescription("Returns a paginated list of template playbooks that can be cloned as starting points for new playbooks.")
+            .Produces<PlaybookListResponse>()
+            .ProducesProblem(401);
+
+        // POST /api/ai/playbooks/{id}/clone - Clone a playbook
+        group.MapPost("/{id:guid}/clone", ClonePlaybook)
+            .AddPlaybookAccessAuthorizationFilter()
+            .WithName("ClonePlaybook")
+            .WithSummary("Clone a playbook")
+            .WithDescription("Creates a copy of the playbook owned by the current user. Useful for customizing templates.")
+            .Produces<PlaybookResponse>(201)
+            .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(403)
+            .ProducesProblem(404);
+
         return app;
     }
 
@@ -495,6 +538,159 @@ public static class PlaybookEndpoints
                 statusCode: 500,
                 title: "Internal Server Error",
                 detail: "Failed to get sharing info");
+        }
+    }
+
+    /// <summary>
+    /// Get canvas layout for a playbook.
+    /// </summary>
+    private static async Task<IResult> GetCanvasLayout(
+        Guid id,
+        IPlaybookService playbookService,
+        ILoggerFactory loggerFactory)
+    {
+        var logger = loggerFactory.CreateLogger("PlaybookEndpoints");
+
+        try
+        {
+            var result = await playbookService.GetCanvasLayoutAsync(id);
+            if (result == null)
+            {
+                return Results.NotFound();
+            }
+
+            return Results.Ok(result);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to get canvas layout for playbook {PlaybookId}", id);
+            return Results.Problem(
+                statusCode: 500,
+                title: "Internal Server Error",
+                detail: "Failed to get canvas layout");
+        }
+    }
+
+    /// <summary>
+    /// Save canvas layout for a playbook.
+    /// </summary>
+    private static async Task<IResult> SaveCanvasLayout(
+        Guid id,
+        SaveCanvasLayoutRequest request,
+        IPlaybookService playbookService,
+        ILoggerFactory loggerFactory)
+    {
+        var logger = loggerFactory.CreateLogger("PlaybookEndpoints");
+
+        if (request.Layout == null)
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Bad Request",
+                detail: "Layout is required");
+        }
+
+        try
+        {
+            var result = await playbookService.SaveCanvasLayoutAsync(id, request.Layout);
+            logger.LogInformation("Saved canvas layout for playbook {PlaybookId}", id);
+            return Results.Ok(result);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to save canvas layout for playbook {PlaybookId}", id);
+            return Results.Problem(
+                statusCode: 500,
+                title: "Internal Server Error",
+                detail: "Failed to save canvas layout");
+        }
+    }
+
+    /// <summary>
+    /// List template playbooks available for cloning.
+    /// </summary>
+    private static async Task<IResult> ListTemplates(
+        IPlaybookService playbookService,
+        ILoggerFactory loggerFactory,
+        int page = 1,
+        int pageSize = 20,
+        string? nameFilter = null,
+        string sortBy = "modifiedon",
+        bool sortDescending = true)
+    {
+        var logger = loggerFactory.CreateLogger("PlaybookEndpoints");
+
+        var query = new PlaybookQueryParameters
+        {
+            Page = page,
+            PageSize = pageSize,
+            NameFilter = nameFilter,
+            SortBy = sortBy,
+            SortDescending = sortDescending
+        };
+
+        try
+        {
+            var result = await playbookService.ListTemplatesAsync(query);
+            logger.LogDebug("Listed {Count} template playbooks", result.Items.Length);
+            return Results.Ok(result);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to list template playbooks");
+            return Results.Problem(
+                statusCode: 500,
+                title: "Internal Server Error",
+                detail: "Failed to list template playbooks");
+        }
+    }
+
+    /// <summary>
+    /// Clone a playbook to create a new copy owned by the current user.
+    /// </summary>
+    private static async Task<IResult> ClonePlaybook(
+        Guid id,
+        ClonePlaybookRequest? request,
+        IPlaybookService playbookService,
+        HttpContext httpContext,
+        ILoggerFactory loggerFactory)
+    {
+        var logger = loggerFactory.CreateLogger("PlaybookEndpoints");
+
+        // Get user ID from claims
+        var userIdClaim = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+            ?? httpContext.User.FindFirst("oid")?.Value;
+        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
+        {
+            return Results.Problem(
+                statusCode: 401,
+                title: "Unauthorized",
+                detail: "User identity not found");
+        }
+
+        try
+        {
+            var clonedPlaybook = await playbookService.ClonePlaybookAsync(id, userId, request?.NewName);
+            logger.LogInformation("Cloned playbook {SourceId} to {CloneId} for user {UserId}",
+                id, clonedPlaybook.Id, userId);
+
+            return Results.Created($"/api/ai/playbooks/{clonedPlaybook.Id}", clonedPlaybook);
+        }
+        catch (PlaybookNotFoundException ex)
+        {
+            logger.LogWarning("Source playbook not found for cloning: {Id}", id);
+            return Results.Problem(
+                statusCode: 404,
+                title: "Playbook Not Found",
+                detail: ex.Message);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to clone playbook {Id}", id);
+            return Results.Problem(
+                statusCode: 500,
+                title: "Internal Server Error",
+                detail: "Failed to clone playbook");
         }
     }
 }

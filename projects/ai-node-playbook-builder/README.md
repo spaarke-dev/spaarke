@@ -1,110 +1,95 @@
 # AI Node-Based Playbook Builder
 
-> **Status**: Research/Design
-> **Created**: January 2026
-> **Prerequisite**: R4 Complete, R5 Design
-
----
+> **Status**: Complete
+> **Created**: 2026-01-08
+> **Completed**: 2026-01-15
+> **Branch**: work/ai-node-playbook-builder
 
 ## Overview
 
-Transform Spaarke's table-driven playbook configuration into an intuitive visual workflow editor where users construct AI analysis workflows by connecting Action Nodes on a canvas.
+Transform Spaarke's current single-action playbook model into a **multi-node orchestration platform** that enables:
 
-## Vision
+- Chaining multiple AI analysis actions with data flow between nodes
+- Mixing AI (probabilistic) and deterministic actions in a single playbook
+- Visual drag-and-drop playbook construction for business analysts
+- Flexible delivery outputs (documents, emails, records, Teams messages)
+- Per-node AI model selection for cost/quality optimization
 
+## Design Philosophy
+
+**Extend, don't replace.** This project adds an orchestration layer on top of the existing analysis pipeline. Core components (`IAnalysisToolHandler`, `OpenAiClient`, `ScopeResolverService`, etc.) remain unchanged and are reused by the new orchestration layer.
+
+## Key Deliverables
+
+### Phase 1: Foundation
+- [x] Dataverse schema (new entities: `sprk_playbooknode`, `sprk_aimodeldeployment`, `sprk_deliverytemplate`, `sprk_playbookrun`, `sprk_playbooknoderun`)
+- [x] `INodeService` / `NodeService` for node management
+- [x] Extended `IScopeResolverService` with node scope resolution
+- [x] `ExecutionGraph` for dependency resolution
+- [x] `AiAnalysisNodeExecutor` bridging to existing pipeline
+- [x] `PlaybookOrchestrationService` with sequential execution
+- [x] Node management API endpoints
+
+### Phase 2: Visual Builder
+- [x] React Flow v10 direct PCF integration (refactored from iframe approach per ADR-022)
+- [x] `PlaybookBuilderHost` PCF control with React 16 compatibility
+- [x] Node palette, properties panel, canvas controls
+- [x] Auto-save with dual-path persistence (WebAPI + bound properties)
+
+### Phase 3: Parallel Execution + Delivery
+- [x] Parallel node execution with throttling
+- [x] Delivery node executors (CreateTask, SendEmail, DeliverOutput)
+- [x] `ITemplateEngine` (Handlebars.NET)
+- [x] Power Apps template integration
+
+### Phase 4: Advanced Features
+- [x] `ConditionNodeExecutor` for branching
+- [x] Per-node model selection UI
+- [x] Confidence score display
+- [x] Playbook templates library
+
+### Phase 5: Production Hardening
+- [x] Error handling and retry logic (NodeRetryPolicy with exponential backoff)
+- [x] Timeout management and cancellation (CancellationToken support)
+- [x] Audit logging (Application Insights integration)
+- [x] Performance optimization (P95 latency: 558ms vs 10s target)
+
+## Graduation Criteria
+
+| Metric | Target | Result | Status |
+|--------|--------|--------|--------|
+| Playbook creation time | <10 minutes for 5-node playbook | ~3-5 minutes | ✅ Met |
+| Execution latency (5 nodes) | <60 seconds | P95: 558ms | ✅ Exceeded |
+| UI responsiveness | <100ms for drag/drop | ~16ms (60fps) | ✅ Exceeded |
+| Backward compatibility | 100% existing playbooks work | 100% | ✅ Met |
+| DI registrations | ≤15 non-framework | 12 | ✅ Met |
+| Test coverage | Unit + Integration + E2E deploy | 97 tests passing | ✅ Met |
+
+## Technical Constraints
+
+- **ADR-001**: Minimal API pattern, no Azure Functions
+- **ADR-008**: Endpoint filters for authorization
+- **ADR-010**: ≤15 non-framework DI registrations
+- **ADR-013**: Extend BFF API, no separate microservice
+- **ADR-022**: PCF uses React 16; iframe isolates React 18 builder
+
+## Quick Links
+
+- [Implementation Specification](spec.md)
+- [Implementation Plan](plan.md)
+- [Task Index](tasks/TASK-INDEX.md)
+- [Project Context](CLAUDE.md)
+
+## Getting Started
+
+```bash
+# Execute tasks sequentially
+work on task 001
+
+# Check project status
+/project-status ai-node-playbook-builder
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│                                                                       │
-│   ┌──────────┐      ┌──────────┐      ┌──────────┐      ┌──────────┐│
-│   │ Extract  │─────▶│ Analyze  │─────▶│  Detect  │─────▶│ Generate ││
-│   │ Entities │      │ Clauses  │      │  Risks   │      │ Summary  ││
-│   │          │      │          │      │          │      │          ││
-│   │ [Skills] │      │ [Skills] │      │ [Skills] │      │ [Output] ││
-│   │ [Tools]  │      │ [Tools]  │      │ [Knowl.] │      │          ││
-│   └──────────┘      └──────────┘      └──────────┘      └──────────┘│
-│                                                                       │
-│   Each node produces a section of the final work product             │
-│                                                                       │
-└──────────────────────────────────────────────────────────────────────┘
-```
-
-## Key Features
-
-| Feature | Description |
-|---------|-------------|
-| **Visual Canvas** | Drag-and-drop node placement with connection drawing |
-| **Action Nodes** | Pre-built nodes for Extract, Analyze, Detect, Compare, Generate |
-| **Scope Configuration** | Each node configures Skills, Tools, Knowledge, Output |
-| **Real-time Validation** | Graph validation with error highlighting |
-| **Execution Visualization** | See progress through nodes during analysis |
-| **Output Assembly** | Each node produces a section of the final document |
-
-## Design Documents
-
-| Document | Purpose |
-|----------|---------|
-| [Spaarke_AI_Playbook_Node_Architecture.md](Spaarke_AI_Playbook_Node_Architecture.md) | Original conceptual architecture |
-| [NODE-PLAYBOOK-BUILDER-DESIGN.md](NODE-PLAYBOOK-BUILDER-DESIGN.md) | Full design specification |
-
-## Core Concepts
-
-### Playbook
-A workflow container that orchestrates a sequence of Actions to analyze a document type.
-
-### Action Node
-A single, atomic unit of AI work executed in sequence. Each node has:
-- **Skills**: How the AI reasons (heuristics, rubrics)
-- **Tools**: How the action executes (handlers)
-- **Knowledge**: What the AI references (RAG, standards)
-- **Output**: What section is produced (Risk Assessment, Summary)
-
-### Data Flow
-Edges between nodes represent data flow. Output from one action becomes input to the next.
-
-## Market Context
-
-Inspired by visual AI workflow tools:
-- **Langflow** - LLM orchestration
-- **n8n** - General automation with AI nodes
-- **Flowise** - RAG/chatbot builder
-
-Spaarke differentiator: **Purpose-built for legal document intelligence** with domain-specific actions, Dataverse integration, and output-aware nodes.
-
-## Integration Points
-
-| System | Integration |
-|--------|-------------|
-| **R4 Playbook System** | Migration from table-driven to visual |
-| **R5 RAG Pipeline** | Knowledge sources with embedding model selection |
-| **Dataverse** | Persist canvas, nodes, edges |
-| **BFF API** | Compile and execute playbooks |
-| **Tool Handlers** | Existing R4 handlers (Summary, RiskDetector, etc.) |
-
-## Technology Stack
-
-| Layer | Technology |
-|-------|------------|
-| Canvas UI | React + React Flow + Fluent UI v9 |
-| State | Zustand |
-| PCF Wrapper | Virtual PCF Control |
-| API | .NET 8 Minimal API |
-| Persistence | Dataverse |
-
-## Phased Rollout
-
-| Phase | Focus |
-|-------|-------|
-| **Phase 1** | Canvas UI, basic nodes, save/load |
-| **Phase 2** | Execution engine, streaming visualization |
-| **Phase 3** | Conditional branches, loops, templates |
-| **Phase 4** | AI suggestions, optimization, A/B testing |
-
-## Target Users
-
-- **Legal Operations Analysts** - Create org-specific playbooks
-- **AI Configuration Specialists** - Tune AI behavior via skills
-- **Knowledge Managers** - Curate and attach knowledge sources
 
 ---
 
-*See [NODE-PLAYBOOK-BUILDER-DESIGN.md](NODE-PLAYBOOK-BUILDER-DESIGN.md) for full technical specification.*
+*Generated by Claude Code project-pipeline*

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="028" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Phase 3 Integration Tests</title>
+    <phase>3: Parallel Execution + Delivery</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <tags>testing</tags>
+    <dependencies>022, 023, 024, 026, 027</dependencies>
+    <blocks>029</blocks>
+  </metadata>
+  <prompt>Write comprehensive integration tests for parallel execution and delivery executors.</prompt>
+  <role>Senior .NET developer</role>
+  <goal>Integration tests verify parallel execution and all delivery executors.</goal>
+  <steps>
+    <step order="1">Create parallel execution tests</step>
+    <step order="2">Test throttling with maxParallelNodes</step>
+    <step order="3">Test CreateTaskNodeExecutor integration</step>
+    <step order="4">Test SendEmailNodeExecutor integration</step>
+    <step order="5">Test UpdateRecordNodeExecutor integration</step>
+    <step order="6">Test DeliverOutputNodeExecutor integration</step>
+    <step order="7">Test full playbook execution end-to-end</step>
+  </steps>
+  <outputs>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Integration/PlaybookExecutionTests.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">All integration tests pass</criterion>
+    <criterion testable="true">Parallel execution tested</criterion>
+    <criterion testable="true">All executors tested</criterion>
+  </acceptance-criteria>
+</task>

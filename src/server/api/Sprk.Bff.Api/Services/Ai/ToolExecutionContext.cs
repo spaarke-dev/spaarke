@@ -65,6 +65,12 @@ public record ToolExecutionContext
     public double Temperature { get; init; } = 0.3;
 
     /// <summary>
+    /// AI model deployment ID override for this execution.
+    /// If null, uses the default model deployment.
+    /// </summary>
+    public Guid? ModelDeploymentId { get; init; }
+
+    /// <summary>
     /// Correlation ID for distributed tracing.
     /// </summary>
     public string? CorrelationId { get; init; }

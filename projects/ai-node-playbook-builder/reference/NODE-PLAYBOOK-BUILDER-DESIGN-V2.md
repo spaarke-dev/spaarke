@@ -57,21 +57,6 @@ Playbook → (1) Action → (N) Skills, Tools, Knowledge
 Playbook → (N) Nodes → each Node = Action + Skills + Tools + Knowledge
 ```
 
-### 1.4 Critical Review of GPT 5.2 Design
-
-The original GPT-generated design (`Unified_Node_Playbook_and_Workflow_Design.md`) was reviewed against the existing codebase. Key findings:
-
-| GPT Proposal | Issue | Resolution |
-|--------------|-------|------------|
-| New entity structure | Duplicates existing scope entities | Reuse existing entities, add Node wrapper |
-| React Flow canvas | Requires React 18, violates ADR-022 | Iframe embedding pattern |
-| New execution engine | Parallel to existing orchestration | Orchestration layer over existing pipeline |
-| Workflow as separate concept | Creates two systems | Playbook is unified container |
-
-The GPT design's **visual canvas concept is valid** but its architecture was wrong for this codebase. This V2 design preserves the UX vision while aligning with existing architecture.
-
----
-
 ## 2. Objectives and Requirements
 
 ### 2.1 Business Objectives

@@ -197,6 +197,76 @@ const useStyles = makeStyles({
   }
 });
 
+### 4.4. Enable Icon Tree-Shaking (CRITICAL for large bundles)
+
+Even with platform libraries enabled, `@fluentui/react-icons` can balloon your bundle. The full icon library is **~6.8MB** despite only using a handful of icons. This happens because pcf-scripts doesn't tree-shake the icons package by default.
+
+**Symptoms:**
+- Bundle is 1-9MB even with platform libraries
+- Build analyzer shows `@fluentui/react-icons` is largest chunk
+- You only import ~20-30 icons but entire library is bundled
+
+**Solution:** Enable custom webpack with `sideEffects: false` for the icons package.
+
+**Step 1: Update featureconfig.json**
+
+Add `pcfAllowCustomWebpack` to enable custom webpack configuration:
+
+```json
+{
+  "pcfReactPlatformLibraries": "on",
+  "pcfAllowCustomWebpack": "on"
+}
+```
+
+**Step 2: Create webpack.config.js in control root**
+
+Create a file named `webpack.config.js` (same directory as `.pcfproj`):
+
+```javascript
+// Custom webpack configuration for PCF control
+// This file is merged with pcf-scripts default config when pcfAllowCustomWebpack is enabled
+
+module.exports = {
+  optimization: {
+    // Enable aggressive tree-shaking
+    usedExports: true,
+    sideEffects: true,
+    innerGraph: true,
+    providedExports: true
+  },
+  // Override module rules to handle @fluentui/react-icons more efficiently
+  module: {
+    rules: [
+      {
+        // Mark @fluentui/react-icons as side-effect-free for tree-shaking
+        test: /[\\/]node_modules[\\/]@fluentui[\\/]react-icons[\\/]/,
+        sideEffects: false
+      }
+    ]
+  }
+};
+```
+
+**Step 3: Rebuild and verify**
+
+```bash
+npm run build:prod
+ls -la out/controls/*/bundle.js
+# Expected: 200-400KB instead of 5-9MB
+```
+
+**Example - Real-world impact (PlaybookBuilderHost PCF, January 2026):**
+- Before: 9.0 MB (full `@fluentui/react-icons` bundled)
+- After: 240 KB (only ~22 used icons included)
+- Reduction: **97% smaller bundle**
+
+**Why This Works:**
+
+The `sideEffects: false` flag tells webpack that all exports from `@fluentui/react-icons` are pure and can be safely tree-shaken. Without this flag, webpack assumes the package may have side effects and includes everything.
+
+> **⚠️ IMPORTANT**: `pac pcf push` rebuilds in development mode, ignoring production build optimizations including this webpack config. Use the **Manual Pack Fallback** (see dataverse-deploy skill) to preserve production bundle.
+
 
 ## 5. Build, validate, and size-check
 Once you have edited the manifest and dependencies, run a clean build and verify the artifact size.

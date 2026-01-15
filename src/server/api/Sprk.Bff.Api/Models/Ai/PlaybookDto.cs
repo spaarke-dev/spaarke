@@ -32,6 +32,12 @@ public record SavePlaybookRequest
     public bool IsPublic { get; init; } = false;
 
     /// <summary>
+    /// Whether this playbook is a template that can be cloned.
+    /// Templates are managed by administrators and provide standard starting points.
+    /// </summary>
+    public bool IsTemplate { get; init; } = false;
+
+    /// <summary>
     /// Action IDs to associate with this playbook.
     /// N:N relationship with sprk_analysisaction entity.
     /// </summary>
@@ -87,6 +93,11 @@ public record PlaybookResponse
     public bool IsPublic { get; init; }
 
     /// <summary>
+    /// Whether this playbook is a template.
+    /// </summary>
+    public bool IsTemplate { get; init; }
+
+    /// <summary>
     /// Owner user ID.
     /// </summary>
     public Guid OwnerId { get; init; }
@@ -138,9 +149,15 @@ public record PlaybookValidationResult
     public string[] Errors { get; init; } = [];
 
     /// <summary>
+    /// Validation warnings (non-blocking).
+    /// </summary>
+    public string[] Warnings { get; init; } = [];
+
+    /// <summary>
     /// Create a successful validation result.
     /// </summary>
-    public static PlaybookValidationResult Success() => new() { IsValid = true };
+    public static PlaybookValidationResult Success(string[]? warnings = null) =>
+        new() { IsValid = true, Warnings = warnings ?? [] };
 
     /// <summary>
     /// Create a failed validation result with errors.
@@ -231,6 +248,11 @@ public record PlaybookSummary
     public bool IsPublic { get; init; }
 
     /// <summary>
+    /// Whether this playbook is a template.
+    /// </summary>
+    public bool IsTemplate { get; init; }
+
+    /// <summary>
     /// Owner user ID.
     /// </summary>
     public Guid OwnerId { get; init; }
@@ -280,6 +302,19 @@ public record PlaybookListResponse
     /// Whether there is a previous page.
     /// </summary>
     public bool HasPreviousPage => Page > 1;
+}
+
+/// <summary>
+/// Request to clone a playbook.
+/// </summary>
+public record ClonePlaybookRequest
+{
+    /// <summary>
+    /// Optional new name for the cloned playbook.
+    /// If not provided, defaults to "[SourceName] (Copy)".
+    /// </summary>
+    [StringLength(200)]
+    public string? NewName { get; init; }
 }
 
 /// <summary>

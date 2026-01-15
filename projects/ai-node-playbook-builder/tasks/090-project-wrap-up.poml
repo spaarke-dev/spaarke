@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Project Wrap-up</title>
+    <phase>6: Wrap-up</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <tags>documentation, cleanup</tags>
+    <dependencies>049</dependencies>
+    <blocks>none</blocks>
+  </metadata>
+
+  <prompt>
+    Complete project wrap-up: update README status, create lessons-learned document,
+    archive ephemeral files, and run repo-cleanup skill.
+  </prompt>
+
+  <role>Spaarke AI Developer Agent</role>
+
+  <goal>
+    Project marked complete with documentation updated and repository cleaned.
+  </goal>
+
+  <steps>
+    <step order="1">Update README.md status to Complete</step>
+    <step order="2">Update all graduation criteria to checked</step>
+    <step order="3">Create notes/lessons-learned.md</step>
+    <step order="4">Document what worked well</step>
+    <step order="5">Document challenges and solutions</step>
+    <step order="6">Document architectural decisions made</step>
+    <step order="7">Archive notes/ ephemeral files if needed</step>
+    <step order="8">Run /repo-cleanup skill</step>
+    <step order="9">Create final commit</step>
+    <step order="10">Merge PR to master</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">Update README</tool>
+    <tool name="Write">Create lessons-learned</tool>
+    <tool name="Skill">Run repo-cleanup</tool>
+    <tool name="Bash">Git commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-node-playbook-builder/README.md (updated)</output>
+    <output type="docs">projects/ai-node-playbook-builder/notes/lessons-learned.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">README status is Complete</criterion>
+    <criterion testable="true">All graduation criteria checked</criterion>
+    <criterion testable="true">Lessons-learned documented</criterion>
+    <criterion testable="true">Repo-cleanup passed</criterion>
+    <criterion testable="true">PR merged to master</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is the final task. After completion, the project branch
+    should be merged and the project artifacts archived.
+  </notes>
+</task>

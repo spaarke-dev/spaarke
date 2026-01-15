@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="019" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Phase 2 Tests and PCF Deployment</title>
+    <phase>2: Visual Builder</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <tags>testing, deploy, pcf</tags>
+    <dependencies>018</dependencies>
+    <blocks>020</blocks>
+  </metadata>
+
+  <prompt>
+    Complete Phase 2 by deploying PCF control to dev environment, running E2E
+    tests, and verifying end-to-end visual builder functionality in Dataverse.
+  </prompt>
+
+  <role>Spaarke AI Developer Agent</role>
+
+  <goal>Phase 2 complete: PCF deployed, builder works in Dataverse form.</goal>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Build PCF control: npm run build</step>
+    <step order="2">Deploy PCF to Dataverse using pac pcf push</step>
+    <step order="3">Add control to playbook form</step>
+    <step order="4">Test iframe loads builder</step>
+    <step order="5">Test node creation on canvas</step>
+    <step order="6">Test properties panel</step>
+    <step order="7">Test scope selection</step>
+    <step order="8">Test save functionality</step>
+    <step order="9">Test dirty state warning</step>
+    <step order="10">Document any issues</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">projects/ai-node-playbook-builder/notes/phase2-deployment-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">PCF control loads in Dataverse form</criterion>
+    <criterion testable="true">Builder iframe renders correctly</criterion>
+    <criterion testable="true">Nodes can be created and configured</criterion>
+    <criterion testable="true">Save persists playbook changes</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2026-01-09">
+      PCF Deployment Complete:
+      - Built PlaybookBuilderHost PCF control (~30KB bundle.js)
+      - Created solution package with pac solution init + add-reference
+      - Disabled ManagePackageVersionsCentrally in .cdsproj and .pcfproj
+      - Successfully imported Solution.zip to spaarkedev1 environment
+      - Created deployment notes at notes/phase2-deployment-notes.md
+
+      Form Configuration Pending:
+      - Requires manual configuration in Power Apps maker portal
+      - Add PlaybookBuilderHost control to sprk_aiplaybook form
+      - Bind to sprk_canvaslayoutjson field
+      - Set builderBaseUrl to https://spe-api-dev-67e2xz.azurewebsites.net/playbook-builder/
+
+      Testing Blocked:
+      - Steps 4-9 require form configuration to be completed first
+    </note>
+    <note date="2026-01-10">
+      Phase 2 Complete (v1.2.4):
+      - Fixed PCF version caching (clean rebuild resolved stale v1.2.3)
+      - Added Azure origin to postMessage allowlist
+      - Set minHeight 800px for proper iframe display
+      - Redeployed SPA to Azure with correct static files
+      - CSP headers correctly configured for iframe embedding
+      - PCF loads in Dataverse form and builder renders in iframe
+      - Commit: fix(pcf): iframe embedding fixes for PlaybookBuilderHost v1.2.4
+      - PR #106 updated
+    </note>
+  </notes>
+</task>

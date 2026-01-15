@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Create ConditionNodeExecutor</title>
+    <phase>4: Advanced Features</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <tags>bff-api, executor</tags>
+    <dependencies>029</dependencies>
+    <blocks>031</blocks>
+  </metadata>
+  <prompt>Create ConditionNodeExecutor for if/else branching based on JSON expression evaluation.</prompt>
+  <role>Senior .NET developer</role>
+  <goal>Condition executor evaluates expressions and routes to appropriate branch.</goal>
+  <steps>
+    <step order="1">Design JSON condition expression syntax</step>
+    <step order="2">Create ConditionNodeExecutor</step>
+    <step order="3">Parse condition from configJson</step>
+    <step order="4">Evaluate condition against context variables</step>
+    <step order="5">Return NodeOutput with branch decision</step>
+    <step order="6">Update orchestrator to handle branching</step>
+    <step order="7">Write unit tests</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ConditionNodeExecutor.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Simple comparisons evaluate correctly</criterion>
+    <criterion testable="true">Variable access works ({{node1.output.value}})</criterion>
+    <criterion testable="true">Branch decision returned in output</criterion>
+  </acceptance-criteria>
+</task>

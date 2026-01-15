@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Extend ScopeResolverService</title>
+    <phase>1: Foundation</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <tags>bff-api, service</tags>
+    <dependencies>003</dependencies>
+    <blocks>006</blocks>
+  </metadata>
+
+  <prompt>
+    Extend the existing ScopeResolverService with a new method for resolving
+    node-level scopes. The new method should resolve skills, knowledge, and
+    tool for a specific node rather than the entire playbook.
+  </prompt>
+
+  <role>Senior .NET developer with Spaarke AI expertise</role>
+
+  <goal>
+    IScopeResolverService extended with ResolveNodeScopesAsync method that
+    resolves skills, knowledge, and tool at the node level.
+  </goal>
+
+  <context>
+    <background>
+      In the node-based model, each node has its own scopes (skills, knowledge,
+      single tool) rather than inheriting from the playbook. The scope resolver
+      needs to support both playbook-level (legacy) and node-level resolution.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IScopeResolverService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Maintain backward compatibility with existing ResolvePlaybookScopesAsync</constraint>
+    <constraint source="ADR-010">Do not add new DI registrations</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>projects/ai-node-playbook-builder/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Scope Resolution">src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing ScopeResolverService implementation</step>
+    <step order="2">Understand current ResolvePlaybookScopesAsync method</step>
+    <step order="3">Add ResolveNodeScopesAsync to IScopeResolverService interface</step>
+    <step order="4">Implement ResolveNodeScopesAsync in ScopeResolverService</step>
+    <step order="5">Query node's N:N relationships for skills and knowledge</step>
+    <step order="6">Query node's single tool lookup</step>
+    <step order="7">Return ResolvedScopes with node-specific data</step>
+    <step order="8">Write unit tests for new method</step>
+    <step order="9">Ensure existing tests still pass</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing service</tool>
+    <tool name="Edit">Modify interface and implementation</tool>
+    <tool name="Bash">Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/IScopeResolverService.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs (modified)</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Services/ScopeResolverServiceTests.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ResolveNodeScopesAsync method exists and compiles</criterion>
+    <criterion testable="true">Method returns skills, knowledge, and tool for a node</criterion>
+    <criterion testable="true">Existing ResolvePlaybookScopesAsync still works</criterion>
+    <criterion testable="true">Unit tests pass</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Completed 2026-01-09. Added ResolveNodeScopesAsync method to IScopeResolverService
+    interface and ScopeResolverService implementation. Phase 1 scaffolding returns
+    empty scopes (actual Dataverse N:N relationship queries in Task 032). Added 3
+    unit tests verifying Phase 1 stub behavior, valid return types, and logging.
+  </notes>
+</task>

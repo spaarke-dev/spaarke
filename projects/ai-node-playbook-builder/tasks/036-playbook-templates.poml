@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="036" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Create Playbook Templates Feature</title>
+    <phase>4: Advanced Features</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <tags>bff-api, feature</tags>
+    <dependencies>029</dependencies>
+    <blocks>037</blocks>
+  </metadata>
+  <prompt>Implement playbook templates feature for standard product playbooks that can be cloned and customized.</prompt>
+  <role>Senior .NET developer</role>
+  <goal>Template playbooks can be cloned and customized per tenant.</goal>
+  <steps>
+    <step order="1">Add isTemplate field to playbook entity</step>
+    <step order="2">Create GET /api/ai/playbooks/templates endpoint</step>
+    <step order="3">Create POST /api/ai/playbooks/{id}/clone endpoint</step>
+    <step order="4">Implement ClonePlaybookAsync in service</step>
+    <step order="5">Clone nodes and relationships</step>
+    <step order="6">Set cloned playbook owner to current user</step>
+    <step order="7">Write tests</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookEndpoints.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookService.cs (modified)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Templates listed via API</criterion>
+    <criterion testable="true">Clone creates new playbook</criterion>
+    <criterion testable="true">Cloned playbook has all nodes</criterion>
+  </acceptance-criteria>
+  <notes>
+    <note timestamp="2026-01-12T10:00:00Z">
+      Implementation complete:
+      - Added IsTemplate field to SavePlaybookRequest, PlaybookResponse, PlaybookSummary, PlaybookEntity
+      - Added sprk_istemplate to all Dataverse select statements and payloads
+      - Implemented ListTemplatesAsync with OData filter on sprk_istemplate eq true
+      - Implemented ClonePlaybookAsync that copies all fields, relationships, and canvas layout
+      - Created GET /api/ai/playbooks/templates endpoint
+      - Created POST /api/ai/playbooks/{id}/clone endpoint with ClonePlaybookRequest model
+      - Clone sets IsPublic=false and IsTemplate=false by default
+      - Build verified successfully
+    </note>
+  </notes>
+</task>
