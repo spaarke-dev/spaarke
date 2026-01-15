@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Spaarke" constructor="SpeDocumentViewer" version="1.0.10" display-name-key="SpeDocumentViewer" description-key="SpeDocumentViewer_Desc" control-type="standard">
+  <control namespace="Spaarke" constructor="SpeDocumentViewer" version="1.0.12" display-name-key="SpeDocumentViewer" description-key="SpeDocumentViewer_Desc" control-type="standard">
     <external-service-usage enabled="false">
     </external-service-usage>
 

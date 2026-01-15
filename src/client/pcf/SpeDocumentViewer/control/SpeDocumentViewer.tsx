@@ -29,8 +29,8 @@ import { BffClient } from './BffClient';
 import './css/SpeDocumentViewer.css';
 
 // Control version - update in all 4 locations per PCF-V9-PACKAGING.md
-const CONTROL_VERSION = '1.0.10';
-const BUILD_DATE = '2025-12-18';
+const CONTROL_VERSION = '1.0.11';
+const BUILD_DATE = '2026-01-15';
 
 /**
  * DocumentViewerApp - Main React component
@@ -228,6 +228,8 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
 
     /**
      * Handle download button click
+     * Uses the BFF download endpoint which uses app-only auth.
+     * This works for all documents including those uploaded by email-to-document.
      */
     const handleDownload = useCallback(async () => {
         if (!documentId) return;
@@ -235,17 +237,18 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
         console.log('[SpeDocumentViewer] Download button clicked');
 
         try {
-            // Get open links and trigger download
-            const response = await bffClient.current.getOpenLinks(documentId, accessToken, correlationId);
-
-            if (response.webUrl) {
-                // Open in new tab - browser will handle download based on content-disposition
-                window.open(response.webUrl, '_blank', 'noopener,noreferrer');
-            }
+            // Download through BFF proxy (app-only auth on server)
+            // This works for documents that users don't have direct SPE permissions for
+            await bffClient.current.downloadDocument(
+                documentId,
+                accessToken,
+                correlationId,
+                documentInfo?.name
+            );
         } catch (err) {
             console.error('[SpeDocumentViewer] Download failed:', err);
         }
-    }, [documentId, accessToken, correlationId]);
+    }, [documentId, accessToken, correlationId, documentInfo?.name]);
 
     /**
      * Handle delete button click (after confirmation)

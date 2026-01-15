@@ -9,6 +9,22 @@
         "**/*.test.ts",
         "**/*.test.tsx",
         "**/*.spec.ts",
-        "**/*.spec.tsx"
+        "**/*.spec.tsx",
+        "**/*.stories.ts",
+        "**/*.stories.tsx",
+        "**/jest.setup.ts",
+        "AnalysisBuilder/**",
+        "AnalysisWorkspace/**",
+        "AiToolAgent/**",
+        "AISummaryPanel/**",
+        "DocumentRelationshipViewer/**",
+        "DrillThroughWorkspace/**",
+        "EmailProcessingMonitor/**",
+        "SpeFileViewer/**",
+        "SourceDocumentViewer/**",
+        "ThemeEnforcer/**",
+        "UniversalDatasetGrid/**",
+        "UniversalQuickCreate/**",
+        "VisualHost/**"
     ]
 }
