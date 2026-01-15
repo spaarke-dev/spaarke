@@ -1,21 +1,38 @@
 # Document Check-Out/Check-In Viewer - AI Context
 
 ## Project Status
-- **Phase**: Ready for Implementation
-- **Last Updated**: 2025-12-18
-- **Next Action**: Begin Phase 1 - Task 001 (Create sprk_fileversion Entity)
+- **Phase**: Phase 5 - Migration & Integration (ACTIVE)
+- **Last Updated**: 2026-01-15
+- **Next Action**: Begin Task 045 (Add getViewUrl to BffClient)
+- **Reactivated**: January 2026 for email-to-document automation support
 
 ## Task Summary
-| Phase | Tasks | Description |
-|-------|-------|-------------|
-| 1: Dataverse Schema | 001-003 | Entity creation, fields, solution deploy |
-| 2: BFF API Endpoints | 010-015 | checkout, checkin, discard, delete, preview-url |
-| 3: SpeDocumentViewer PCF | 020-025 | Scaffolding, preview, toolbar, checkout flow, edit, deploy |
-| 4: Delete & Ribbon | 030-032 | Webresource, ribbon button, deploy |
-| 5: Migration & Integration | 050-053 | Migrate components, AI integration, docs |
-| Wrap-up | 090 | Final cleanup and validation |
+| Phase | Tasks | Description | Status |
+|-------|-------|-------------|--------|
+| 1: Dataverse Schema | 001-003 | Entity creation, fields, solution deploy | ✅ Complete |
+| 2: BFF API Endpoints | 010-015 | checkout, checkin, discard, delete, preview-url | ✅ Complete |
+| 3: SpeDocumentViewer PCF | 020-025 | Scaffolding, preview, toolbar, checkout flow, edit, deploy | ✅ Complete |
+| 4: Delete & Ribbon | 030-032 | Webresource, ribbon button, deploy | ✅ Complete |
+| 5: Migration & Integration | 045-053 | Real-time preview, Open in Web, form deploy, docs | 🔲 Active |
+| Wrap-up | 090 | Final cleanup and validation | 🔲 Pending |
 
-**Total**: 23 tasks | **Recommended order**: Start with 001 and follow dependency chain
+**Total**: 26 tasks (3 new) | **Completed**: 18 | **Remaining**: 8
+
+## January 2026 Updates
+
+Project reactivated to support email-to-document automation (.eml file viewing).
+
+**New Tasks Added (Phase 5):**
+- 045: Add getViewUrl to BffClient (real-time preview without cache)
+- 046: Switch useDocumentPreview hook to real-time endpoint
+- 047: Add "Open in Web" button (hidden for .eml files)
+
+**Task 050 Updated:**
+- Original: Migrate SpeFileViewer to SpeDocumentViewer
+- Updated: Deploy SpeDocumentViewer to Document form (simplified - no migration needed)
+- Reason: Audit confirmed no forms currently use SpeFileViewer or SpeDocumentViewer
+
+**Related:** `projects/email-to-document-automation-r2/notes/document-viewer-remediation-plan.md`
 
 ## Key Files
 - `spec.md` - Original design specification (permanent reference)
@@ -40,12 +57,13 @@ Preview Mode (embed.aspx)  →  Check Out  →  Edit Mode (embedview)  →  Chec
 ```
 
 ### Key Components
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| SpeDocumentViewer | `src/client/pcf/SpeDocumentViewer/` | Unified PCF control (TO CREATE) |
-| sprk_fileversion | Dataverse | Version tracking entity (TO CREATE) |
-| BFF Endpoints | `src/server/api/Sprk.Bff.Api/` | checkout, checkin, discard, delete |
-| Delete Ribbon | Solution | sprk_DocumentDelete.js webresource |
+| Component | Location | Purpose | Status |
+|-----------|----------|---------|--------|
+| SpeDocumentViewer | `src/client/pcf/SpeDocumentViewer/` | Unified PCF control | ✅ Built (v1.0.12) |
+| sprk_fileversion | Dataverse | Version tracking entity | ✅ Deployed |
+| BFF Endpoints | `src/server/api/Sprk.Bff.Api/` | checkout, checkin, discard, delete | ✅ Deployed |
+| Delete Ribbon | Solution | sprk_DocumentDelete.js webresource | ✅ Deployed |
+| Document Form Binding | Dataverse | SpeDocumentViewer on Document entity | 🔲 Task 050 |
 
 ### ADR Constraints
 - **ADR-006**: Use PCF controls (exception: delete ribbon button)
@@ -56,6 +74,10 @@ Preview Mode (embed.aspx)  →  Check Out  →  Edit Mode (embedview)  →  Chec
 - 2025-12-17: Separate sprk_fileversion entity (not just fields on Document) for full audit trail
 - 2025-12-17: Delete via ribbon JavaScript for native UX, works without PCF loaded
 - 2025-12-17: Preview uses embed.aspx (no Share), Edit uses embedview (Share OK during editing)
+- 2026-01-15: Use getViewUrl() instead of getPreviewUrl() for real-time preview (no 30-60s cache delay)
+- 2026-01-15: Hide "Open in Web" button for .eml files (no Office Online viewer exists)
+- 2026-01-15: No SpeFileViewer migration needed - audit confirmed no forms use it
+- 2026-01-15: Deprecate SpeFileViewer due to ADR-022 violation (bundles React 19)
 
 ## Current Constraints
 - Preview mode must hide Share button (security requirement)

@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="047" project="document-checkout-viewer">
+  <metadata>
+    <title>Add Open in Web Button (Hidden for .eml)</title>
+    <phase>5: Migration &amp; Integration</phase>
+    <status>not-started</status>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>046</dependencies>
+    <blocks>050</blocks>
+    <tags>pcf, react, fluent-ui, toolbar</tags>
+  </metadata>
+
+  <prompt>
+    Add an "Open in Web" button to SpeDocumentViewer toolbar that opens
+    documents in Office Online. The button should be hidden for file types
+    that don't have Office Online viewers (like .eml, .pdf, .txt).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in React, Fluent UI v9, and PCF.
+    Follow ADRs strictly.
+  </role>
+
+  <goal>
+    SpeDocumentViewer toolbar has an "Open in Web" button for Office files
+    (.docx, .xlsx, .pptx, etc.) that opens Office Online in a new tab.
+    Button is hidden for unsupported file types like .eml.
+  </goal>
+
+  <context>
+    <background>
+      SpeFileViewer has an "Open in Web" feature that SpeDocumentViewer lacks.
+      For feature parity before deprecating SpeFileViewer, this button must
+      be added. However, not all file types have Office Online viewers -
+      specifically .eml files (email) have no web viewer and the button
+      should be hidden for these files.
+
+      The BffClient already has getOpenLinks() which returns webUrl.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/SpeFileViewer/control/FilePreview.tsx</file>
+      <file>src/client/pcf/SpeDocumentViewer/control/SpeDocumentViewer.tsx</file>
+      <file>src/client/pcf/SpeDocumentViewer/control/components/Toolbar.tsx</file>
+      <file>src/client/pcf/SpeDocumentViewer/control/BffClient.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Button MUST be hidden for .eml files (no Office Online viewer)</constraint>
+    <constraint source="project">Button hidden for non-Office files (.pdf, .txt, .png, etc.)</constraint>
+    <constraint source="ADR-021">Use Fluent UI v9 components and icons</constraint>
+    <constraint source="ADR-021">Support dark mode theming</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/SpeFileViewer/control/FilePreview.tsx</file>
+      <file>.claude/adr/ADR-021-fluent-ui-v9-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read SpeFileViewer FilePreview.tsx to understand "Open in Web" implementation</step>
+    <step order="2">Read SpeDocumentViewer Toolbar.tsx to understand current toolbar structure</step>
+    <step order="3">Add supportsOpenInWeb computed value based on file extension</step>
+    <step order="4">Add handleOpenInWeb callback to SpeDocumentViewer.tsx</step>
+    <step order="5">Add isOpenInWebLoading state for loading indicator</step>
+    <step order="6">Add "Open in Web" button to Toolbar.tsx (conditionally rendered)</step>
+    <step order="7">Use GlobeRegular or similar Fluent icon for the button</step>
+    <step order="8">Add button props: onOpenInWeb, isOpenInWebLoading, supportsOpenInWeb</step>
+    <step order="9">Build to verify no TypeScript errors: npm run build</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/PCF projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/SpeDocumentViewer/control/SpeDocumentViewer.tsx (modified)</output>
+    <output type="code">src/client/pcf/SpeDocumentViewer/control/components/Toolbar.tsx (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">"Open in Web" button appears for Office files (.docx, .xlsx, .pptx)</criterion>
+    <criterion testable="true">Button opens Office Online in new tab with noopener,noreferrer</criterion>
+    <criterion testable="true">Button is hidden for .eml files</criterion>
+    <criterion testable="true">Button is hidden for non-Office files (.pdf, .txt, etc.)</criterion>
+    <criterion testable="true">Loading state shown while fetching URL</criterion>
+    <criterion testable="true">Button uses Fluent UI v9 styling</criterion>
+    <criterion testable="true">npm run build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Office file extensions to support: .docx, .doc, .xlsx, .xls, .pptx, .ppt
+    Non-Office extensions to hide button: .eml, .pdf, .txt, .png, .jpg, .gif, etc.
+
+    The button should appear in the toolbar near the "Open in Desktop" button.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, verify task 046 is complete and hook is using real-time endpoint.
+    </protocol>
+  </execution>
+</task>

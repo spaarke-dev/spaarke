@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="045" project="document-checkout-viewer">
+  <metadata>
+    <title>Add getViewUrl to SpeDocumentViewer BffClient</title>
+    <phase>5: Migration &amp; Integration</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>025</dependencies>
+    <blocks>046</blocks>
+    <tags>pcf, api, typescript</tags>
+  </metadata>
+
+  <prompt>
+    Add the getViewUrl() method to SpeDocumentViewer's BffClient to enable
+    real-time document preview without the 30-60 second cache delay that
+    getPreviewUrl() has. Port the implementation from SpeFileViewer.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in TypeScript and PCF development.
+    Follow ADRs strictly.
+  </role>
+
+  <goal>
+    SpeDocumentViewer BffClient has a getViewUrl() method that returns
+    real-time preview URLs with checkout status, matching the SpeFileViewer
+    implementation.
+  </goal>
+
+  <context>
+    <background>
+      SpeDocumentViewer currently uses getPreviewUrl() which calls the BFF
+      /api/documents/{id}/preview-url endpoint. This endpoint uses Graph's
+      Preview action which has a 30-60 second cache. SpeFileViewer uses
+      getViewUrl() which calls /api/documents/{id}/view-url - this uses
+      driveItem.webUrl for near real-time viewing without cache delay.
+
+      For email-to-document automation, newly created .eml files need to be
+      viewable immediately without waiting for cache to expire.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/SpeFileViewer/control/BffClient.ts</file>
+      <file>src/client/pcf/SpeDocumentViewer/control/BffClient.ts</file>
+      <file>src/client/pcf/SpeDocumentViewer/control/types.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Method signature must match SpeFileViewer implementation</constraint>
+    <constraint source="project">Return type must include checkoutStatus for lock indicators</constraint>
+    <constraint source="ADR-022">Use platform-provided React (already compliant)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/SpeFileViewer/control/BffClient.ts</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read SpeFileViewer BffClient.ts to understand getViewUrl() implementation (lines 308-349)</step>
+    <step order="2">Read SpeDocumentViewer BffClient.ts to understand current structure</step>
+    <step order="3">Verify FilePreviewResponse type in types.ts includes checkoutStatus</step>
+    <step order="4">Add getViewUrl() method to SpeDocumentViewer BffClient matching SpeFileViewer pattern</step>
+    <step order="5">Ensure method logs with [BffClient] prefix for consistency</step>
+    <step order="6">Build to verify no TypeScript errors: npm run build</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/PCF projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/SpeDocumentViewer/control/BffClient.ts (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">getViewUrl() method exists in SpeDocumentViewer BffClient</criterion>
+    <criterion testable="true">Method calls /api/documents/{id}/view-url endpoint</criterion>
+    <criterion testable="true">Method returns FilePreviewResponse with checkoutStatus</criterion>
+    <criterion testable="true">npm run build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is a prerequisite for task 046 which will switch the useDocumentPreview
+    hook to use this new method instead of getPreviewUrl().
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, verify the /api/documents/{id}/view-url endpoint exists in BFF.
+    </protocol>
+  </execution>
+</task>

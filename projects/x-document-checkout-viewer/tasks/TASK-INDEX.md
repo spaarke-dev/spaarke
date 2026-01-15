@@ -1,14 +1,14 @@
 # Task Index: Document Check-Out/Check-In Viewer
 
-> **Last Updated**: 2025-12-18
-> **Status**: Ready for Implementation
-> **Total Tasks**: 23
+> **Last Updated**: 2026-01-15
+> **Status**: Active - Phase 5 In Progress
+> **Total Tasks**: 26
 
 ## Quick Status
 
 | Status | Count |
 |--------|-------|
-| Not Started | 5 |
+| Not Started | 8 |
 | In Progress | 0 |
 | Completed | 18 |
 | Blocked | 0 |
@@ -55,12 +55,18 @@
 
 ### Phase 5: Migration & Integration
 
+> **UPDATED 2026-01-15**: Added tasks 045-047 for .eml file support (email-to-document automation).
+> Task 050 simplified - audit confirmed no forms use SpeFileViewer (fresh deployment, not migration).
+
 | ID | Title | Status | Dependencies | Est. Hours |
 |----|-------|--------|--------------|------------|
-| [050](050-migrate-spefileviewer.poml) | Migrate SpeFileViewer to SpeDocumentViewer | not-started | 025, 032 | 3 |
-| [051](051-migrate-sourcedocumentviewer.poml) | Migrate SourceDocumentViewer in Analysis Workspace | not-started | 050 | 3 |
-| [052](052-ai-integration.poml) | Integrate AI Analysis on Check-In | not-started | 051 | 3 |
-| [053](053-documentation.poml) | Update Documentation | not-started | 052 | 2 |
+| [045](045-add-getviewurl-to-bffclient.poml) | Add getViewUrl to BffClient | 🔲 not-started | 025 | 1 |
+| [046](046-switch-to-realtime-preview.poml) | Switch to Real-Time Preview | 🔲 not-started | 045 | 0.5 |
+| [047](047-add-open-in-web-button.poml) | Add Open in Web Button (Hidden for .eml) | 🔲 not-started | 046 | 1.5 |
+| [050](050-migrate-spefileviewer.poml) | Deploy SpeDocumentViewer to Document Form | 🔲 not-started | 047 | 2 |
+| [051](051-migrate-sourcedocumentviewer.poml) | Migrate SourceDocumentViewer in Analysis Workspace | 🔲 not-started | 050 | 4 |
+| [052](052-ai-integration.poml) | Integrate AI Analysis on Check-In | 🔲 not-started | 051 | 3 |
+| [053](053-documentation.poml) | Update Documentation | 🔲 not-started | 052 | 2 |
 
 ### Wrap-up
 
@@ -71,11 +77,11 @@
 ## Dependency Graph
 
 ```
-Phase 1 (Schema)
+Phase 1 (Schema) - COMPLETED
   001 → 002 → 003
                 │
                 ▼
-Phase 2 (BFF API)
+Phase 2 (BFF API) - COMPLETED
   ┌─────────────┴─────────────┐
   │                           │
 010 → 011                   013
@@ -85,34 +91,56 @@ Phase 2 (BFF API)
         │                 │   │
         └─────────────────┘   │
                               │
-Phase 3 (PCF)                 │
+Phase 3 (PCF) - COMPLETED     │
   015 → 020 → 021 → 022       │
                   │           │
                   ▼           │
               023 → 024 → 025 │
                           │   │
                           │   │
-Phase 4 (Delete)          │   │
+Phase 4 (Delete) - COMPLETED  │
   013 → 030 → 031 → 032   │   │
                       │   │   │
                       ▼   ▼   │
-Phase 5 (Integration)─────────┘
-  025 + 032 → 050 → 051 → 052 → 053 → 090
+Phase 5 (Integration) - ACTIVE (January 2026)
+  025 → 045 → 046 → 047 → 050 → 051 → 052 → 053 → 090
+        │     │     │
+        │     │     └── "Open in Web" button (hidden for .eml)
+        │     └── Switch hook to real-time preview
+        └── Add getViewUrl() to BffClient
 ```
 
 ## Execution Order
 
-**Recommended sequence:**
-1. Start with **001** (no dependencies)
-2. Phase 1: 001 → 002 → 003
-3. Phase 2: 010, 013, 014 can start in parallel after 003
-4. Phase 3: 020-025 sequential after 015
-5. Phase 4: 030-032 sequential after 013 (can run parallel with Phase 3)
-6. Phase 5: 050-053 after both Phase 3 and Phase 4 complete
-7. End with **090** (project wrap-up)
+**Current Status (January 2026):**
+- Phases 1-4: ✅ COMPLETED (18 tasks)
+- Phase 5: 🔲 IN PROGRESS (8 tasks remaining)
+
+**Phase 5 Execution Sequence:**
+1. **045**: Add getViewUrl to BffClient (P1 - real-time preview)
+2. **046**: Switch useDocumentPreview hook (P1 - use real-time endpoint)
+3. **047**: Add "Open in Web" button (P2 - hidden for .eml files)
+4. **050**: Deploy to Document form (P1 - version 1.0.13)
+5. **051**: Migrate SourceDocumentViewer in AnalysisWorkspace (P3)
+6. **052**: AI Analysis on Check-In (optional - defer if not in scope)
+7. **053**: Update Documentation
+8. **090**: Project Wrap-up
 
 ## Notes
 
 - Phase 4 (Delete & Ribbon) can run in parallel with Phase 3 (PCF) since they have independent dependencies
 - Task 013 (Delete Endpoint) is shared dependency for both Phase 3 and Phase 4
-- All deployment tasks (003, 015, 025, 032) use `dataverse-deploy` skill
+- All deployment tasks (003, 015, 025, 032, 050) use `dataverse-deploy` skill
+
+## January 2026 Update
+
+**Project Reactivated**: This project was 78% complete (Phases 1-4) in December 2025 but
+Phase 5 (Migration) was never started. Reactivated January 2026 for email-to-document automation.
+
+**Key Changes:**
+- Added tasks 045-047 for .eml file support
+- Task 050 simplified: No migration needed (audit confirmed no forms use SpeFileViewer)
+- Focus: Deploy SpeDocumentViewer to Document entity form for .eml preview/download
+
+**Related:** See `projects/email-to-document-automation-r2/notes/document-viewer-remediation-plan.md`
+for full context and requirements analysis.
