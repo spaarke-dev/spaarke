@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
@@ -26,6 +28,8 @@ public class EmailToDocumentJobHandler : IJobHandler
     private readonly IDataverseService _dataverseService;
     private readonly IIdempotencyService _idempotencyService;
     private readonly JobSubmissionService _jobSubmissionService;
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IConfiguration _configuration;
     private readonly EmailProcessingOptions _options;
     private readonly EmailTelemetry _telemetry;
     private readonly ILogger<EmailToDocumentJobHandler> _logger;
@@ -39,6 +43,12 @@ public class EmailToDocumentJobHandler : IJobHandler
     // Relationship type choice value for Email Attachment
     private const int RelationshipTypeEmailAttachment = 100000000;
 
+    // Email processing status choice values (sprk_documentprocessingstatus on email entity)
+    // These prevent infinite retry loops by marking emails as processed/failed
+    private const int ProcessingStatusInProgress = 100000000;
+    private const int ProcessingStatusCompleted = 100000001;
+    private const int ProcessingStatusFailed = 100000002;
+
     /// <summary>
     /// Job type constant - must match the JobType used by webhook and polling triggers.
     /// </summary>
@@ -51,6 +61,8 @@ public class EmailToDocumentJobHandler : IJobHandler
         IDataverseService dataverseService,
         IIdempotencyService idempotencyService,
         JobSubmissionService jobSubmissionService,
+        IHttpClientFactory httpClientFactory,
+        IConfiguration configuration,
         IOptions<EmailProcessingOptions> options,
         EmailTelemetry telemetry,
         ILogger<EmailToDocumentJobHandler> logger)
@@ -61,6 +73,8 @@ public class EmailToDocumentJobHandler : IJobHandler
         _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
         _idempotencyService = idempotencyService ?? throw new ArgumentNullException(nameof(idempotencyService));
         _jobSubmissionService = jobSubmissionService ?? throw new ArgumentNullException(nameof(jobSubmissionService));
+        _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
+        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -72,6 +86,9 @@ public class EmailToDocumentJobHandler : IJobHandler
     {
         var stopwatch = _telemetry.RecordJobStart();
         using var activity = _telemetry.StartActivity("EmailToDocument.ProcessJob", correlationId: job.CorrelationId);
+
+        // Track emailId at method scope for circuit breaker status update in catch block
+        var emailId = Guid.Empty;
 
         try
         {
@@ -88,7 +105,7 @@ public class EmailToDocumentJobHandler : IJobHandler
                 return JobOutcome.Poisoned(job.JobId, JobType, "Invalid job payload", job.Attempt, stopwatch.Elapsed);
             }
 
-            var emailId = payload.EmailId;
+            emailId = payload.EmailId;
             var triggerSource = payload.TriggerSource ?? "Unknown";
 
             _logger.LogDebug(
@@ -128,6 +145,13 @@ public class EmailToDocumentJobHandler : IJobHandler
 
             try
             {
+                // Circuit breaker: Mark email as "InProgress" to prevent polling service from picking it up again
+                // This is set on first attempt only - subsequent retries keep the status as InProgress
+                if (job.Attempt == 1)
+                {
+                    await UpdateEmailProcessingStatusAsync(emailId, ProcessingStatusInProgress, null, ct);
+                }
+
                 // Convert email to .eml format
                 var emlResult = await _emlConverter.ConvertToEmlAsync(emailId, includeAttachments: true, ct);
 
@@ -307,6 +331,9 @@ public class EmailToDocumentJobHandler : IJobHandler
                     "Email-to-document job {JobId} completed in {Duration}ms. Email {EmailId} -> Document {DocumentId}",
                     job.JobId, stopwatch.ElapsedMilliseconds, emailId, documentId);
 
+                // Circuit breaker: Mark email as "Completed" - polling service will never pick it up again
+                await UpdateEmailProcessingStatusAsync(emailId, ProcessingStatusCompleted, null, ct);
+
                 return JobOutcome.Success(job.JobId, JobType, stopwatch.Elapsed);
             }
             finally
@@ -323,12 +350,36 @@ public class EmailToDocumentJobHandler : IJobHandler
             var isRetryable = IsRetryableException(ex);
             _telemetry.RecordJobFailure(stopwatch, isRetryable ? "transient_error" : "permanent_error");
 
-            if (isRetryable)
+            // Circuit breaker: Check if this is the last retry attempt
+            var isLastAttempt = job.Attempt >= job.MaxAttempts;
+
+            if (isRetryable && !isLastAttempt)
             {
+                // Will retry - keep status as InProgress
+                _logger.LogWarning(
+                    "Email {EmailId} processing failed (attempt {Attempt}/{MaxAttempts}), will retry: {Error}",
+                    emailId, job.Attempt, job.MaxAttempts, ex.Message);
                 return JobOutcome.Failure(job.JobId, JobType, ex.Message, job.Attempt, stopwatch.Elapsed);
             }
 
-            // Permanent failure
+            // Circuit breaker: Mark email as "Failed" - stop all retries
+            // This happens when:
+            // 1. It's a permanent (non-retryable) failure, OR
+            // 2. It's the last retry attempt (exhausted all retries)
+            if (emailId != Guid.Empty)
+            {
+                var failureReason = isLastAttempt
+                    ? $"Max retries ({job.MaxAttempts}) exhausted: {ex.Message}"
+                    : $"Permanent failure: {ex.Message}";
+
+                await UpdateEmailProcessingStatusAsync(emailId, ProcessingStatusFailed, failureReason, ct);
+
+                _logger.LogError(
+                    "Email {EmailId} processing permanently failed after {Attempts} attempts: {Error}",
+                    emailId, job.Attempt, ex.Message);
+            }
+
+            // Permanent failure - no more retries
             return JobOutcome.Poisoned(job.JobId, JobType, ex.Message, job.Attempt, stopwatch.Elapsed);
         }
     }
@@ -366,6 +417,127 @@ public class EmailToDocumentJobHandler : IJobHandler
         return exceptionName.Contains("Throttling", StringComparison.OrdinalIgnoreCase) ||
                exceptionName.Contains("ServiceUnavailable", StringComparison.OrdinalIgnoreCase) ||
                exceptionName.Contains("Timeout", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Updates the email's sprk_documentprocessingstatus field to prevent infinite retry loops.
+    /// This is the circuit breaker - once an email is marked as Completed or Failed, the polling
+    /// service will stop picking it up (it queries for status eq null).
+    /// </summary>
+    /// <param name="emailId">The email activity ID</param>
+    /// <param name="status">Processing status: InProgress (100000000), Completed (100000001), Failed (100000002)</param>
+    /// <param name="errorMessage">Optional error message for failed status</param>
+    /// <param name="ct">Cancellation token</param>
+    private async Task UpdateEmailProcessingStatusAsync(
+        Guid emailId,
+        int status,
+        string? errorMessage,
+        CancellationToken ct)
+    {
+        try
+        {
+            var dataverseUrl = _configuration["Dataverse:ServiceUrl"]?.TrimEnd('/');
+            if (string.IsNullOrEmpty(dataverseUrl))
+            {
+                _logger.LogWarning("Dataverse:ServiceUrl not configured, cannot update email processing status");
+                return;
+            }
+
+            var accessToken = await GetDataverseAccessTokenAsync(ct);
+            if (string.IsNullOrEmpty(accessToken))
+            {
+                _logger.LogWarning("Failed to get Dataverse access token for status update");
+                return;
+            }
+
+            var client = _httpClientFactory.CreateClient("DataverseStatusUpdate");
+            client.BaseAddress = new Uri($"{dataverseUrl}/api/data/v9.2/");
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            client.DefaultRequestHeaders.Add("OData-MaxVersion", "4.0");
+            client.DefaultRequestHeaders.Add("OData-Version", "4.0");
+            client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+            // Build the PATCH payload - only update the processing status field
+            var updatePayload = new Dictionary<string, object?>
+            {
+                ["sprk_documentprocessingstatus"] = status
+            };
+
+            // If there's an error message and status is Failed, we could store it in a notes field
+            // For now, we just log it - the polling query filters by status, not error message
+
+            var jsonPayload = JsonSerializer.Serialize(updatePayload);
+            var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
+
+            // PATCH to emails(emailId)
+            var response = await client.PatchAsync($"emails({emailId})", content, ct);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var statusName = status switch
+                {
+                    ProcessingStatusInProgress => "InProgress",
+                    ProcessingStatusCompleted => "Completed",
+                    ProcessingStatusFailed => "Failed",
+                    _ => status.ToString()
+                };
+
+                _logger.LogInformation(
+                    "Updated email {EmailId} processing status to {Status}",
+                    emailId, statusName);
+            }
+            else
+            {
+                var errorContent = await response.Content.ReadAsStringAsync(ct);
+                _logger.LogWarning(
+                    "Failed to update email {EmailId} processing status: {StatusCode} - {Error}",
+                    emailId, response.StatusCode, errorContent);
+            }
+        }
+        catch (Exception ex)
+        {
+            // Don't fail the main job if status update fails - this is best-effort
+            _logger.LogWarning(ex,
+                "Error updating email {EmailId} processing status: {Error}",
+                emailId, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Gets an access token for Dataverse using client credentials flow.
+    /// </summary>
+    private async Task<string?> GetDataverseAccessTokenAsync(CancellationToken ct)
+    {
+        try
+        {
+            var tenantId = _configuration["AzureAd:TenantId"];
+            var clientId = _configuration["AzureAd:ClientId"];
+            var clientSecret = _configuration["AzureAd:ClientSecret"];
+            var dataverseUrl = _configuration["Dataverse:ServiceUrl"]?.TrimEnd('/');
+
+            if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(clientId) ||
+                string.IsNullOrEmpty(clientSecret) || string.IsNullOrEmpty(dataverseUrl))
+            {
+                _logger.LogWarning("Missing Azure AD or Dataverse configuration for status update");
+                return null;
+            }
+
+            var app = Microsoft.Identity.Client.ConfidentialClientApplicationBuilder
+                .Create(clientId)
+                .WithTenantId(tenantId)
+                .WithClientSecret(clientSecret)
+                .Build();
+
+            var scopes = new[] { $"{dataverseUrl}/.default" };
+            var result = await app.AcquireTokenForClient(scopes).ExecuteAsync(ct);
+
+            return result.AccessToken;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to acquire Dataverse access token for status update");
+            return null;
+        }
     }
 
     /// <summary>
