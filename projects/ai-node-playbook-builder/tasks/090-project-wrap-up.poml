@@ -3,7 +3,7 @@
   <metadata>
     <title>Project Wrap-up</title>
     <phase>6: Wrap-up</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <tags>documentation, cleanup</tags>
     <dependencies>049</dependencies>

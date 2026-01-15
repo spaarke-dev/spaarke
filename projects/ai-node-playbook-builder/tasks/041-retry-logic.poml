@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement Retry Logic</title>
     <phase>5: Production Hardening</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <tags>bff-api, resilience</tags>
     <dependencies>040</dependencies>
@@ -33,4 +33,17 @@
     <criterion testable="true">Exponential backoff applied</criterion>
     <criterion testable="true">Non-retryable errors fail immediately</criterion>
   </acceptance-criteria>
+  <notes>
+    <note date="2026-01-13">
+      Implemented NodeRetryPolicy using Polly v8 ResiliencePipeline:
+      - Created INodeRetryPolicy interface with ExecuteAsync methods
+      - Exponential backoff: 2s, 4s, 8s... up to 60s max with jitter
+      - Configurable retry count per node (via PlaybookNodeDto.RetryCount)
+      - Retryable errors: 429, 503, 502, 504, 408, network failures, NodeRetryableException
+      - Non-retryable errors: 400, 401, 403, 404, PlaybookExecutionException, OperationCanceledException
+      - Added NodeRetryableException with factory methods for common transient errors
+      - Integrated into PlaybookOrchestrationService, removed old manual retry logic
+      - 26 unit tests covering all scenarios
+    </note>
+  </notes>
 </task>

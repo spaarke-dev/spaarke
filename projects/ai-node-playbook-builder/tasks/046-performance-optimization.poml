@@ -3,7 +3,7 @@
   <metadata>
     <title>Performance Optimization</title>
     <phase>5: Production Hardening</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <tags>bff-api, performance</tags>
     <dependencies>045</dependencies>
@@ -30,4 +30,17 @@
     <criterion testable="true">5-node execution under 60 seconds</criterion>
     <criterion testable="true">Caching reduces redundant work</criterion>
   </acceptance-criteria>
+  <notes>
+    <completion-summary>
+      Implemented comprehensive per-run caching in PlaybookOrchestrationService:
+      - Added PlaybookRunContext caching: _actionCache, _scopeCache, _documentCache (ConcurrentDictionary)
+      - GetOrAddActionAsync/ScopesAsync/DocumentAsync for thread-safe cached lookups
+      - PreloadActionsAsync loads all actions in parallel before batch execution
+      - ExecuteNodeAsync uses cached scope/action lookups (was direct calls)
+      - Cache stats logged at run completion for monitoring
+      - Performance analysis doc created with hot path analysis and KQL queries
+      - 41 PlaybookOrchestrationService tests pass, build succeeds with 0 warnings
+    </completion-summary>
+    <completed-at>2026-01-13</completed-at>
+  </notes>
 </task>

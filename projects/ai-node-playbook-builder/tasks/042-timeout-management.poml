@@ -3,7 +3,7 @@
   <metadata>
     <title>Add Timeout Management</title>
     <phase>5: Production Hardening</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <tags>bff-api, resilience</tags>
     <dependencies>041</dependencies>
@@ -27,4 +27,18 @@
     <criterion testable="true">Timeout applied per node</criterion>
     <criterion testable="true">Timeout generates proper error</criterion>
   </acceptance-criteria>
+  <notes>
+    <note date="2026-01-13">
+      Implemented per-node timeout management in PlaybookOrchestrationService:
+      - Default timeout: 300 seconds (5 minutes)
+      - Min timeout: 10 seconds, Max timeout: 3600 seconds (1 hour)
+      - Reads timeout from node.TimeoutSeconds, falls back to default
+      - Creates linked CancellationTokenSource combining timeout + user cancellation
+      - Passes effectiveToken to scope resolver, action lookup, and executor
+      - Distinguishes timeout from user cancellation via exception filter
+      - Timeout returns NodeOutput.Error with NodeErrorCodes.Timeout
+      - 3 new unit tests covering timeout, custom timeout, and default timeout
+      - All 35 PlaybookOrchestrationService tests passing
+    </note>
+  </notes>
 </task>
