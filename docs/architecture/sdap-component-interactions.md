@@ -218,18 +218,60 @@ User → PCF (AnalysisWorkspace v1.2.7) → BFF API (AnalysisEndpoints) → Azur
 
 ### Pattern 5: Email-to-Document Conversion Flow
 
+**Full Documentation**: See [email-to-document-automation.md](email-to-document-automation.md) for complete architecture.
+
 ```
-Dataverse Email → Webhook → BFF API → Filter Rules → Job Queue → SPE + Dataverse
-                    │
-                    └─→ (Backup) Polling Service → Job Queue
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  Email Activity Created (Server-Side Sync / Outlook)                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+          │                                              │
+          │ Webhook (Real-time)                          │ Polling (Backup)
+          ↓                                              ↓
+┌─────────────────────────┐              ┌─────────────────────────────────────┐
+│ POST /api/v1/emails/    │              │ EmailPollingBackupService           │
+│   webhook-trigger       │              │ (BackgroundService, 5 min interval) │
+└─────────────────────────┘              └─────────────────────────────────────┘
+          │                                              │
+          └──────────────────────┬───────────────────────┘
+                                 ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│               EmailToDocumentJobHandler (Core Processing)                    │
+│  1. Idempotency check → 2. EML conversion (MimeKit) → 3. SPE upload         │
+│  4. Create sprk_document → 5. Update metadata → 6. Process attachments      │
+│  7. Enqueue AI analysis (Document Profile playbook)                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+          │                              │                              │
+          ↓                              ↓                              ↓
+┌─────────────────┐      ┌────────────────────────┐      ┌───────────────────┐
+│ SPE Container   │      │ Dataverse              │      │ AI Job Queue      │
+│ /emails/*.eml   │      │ sprk_document (parent) │      │ Document Profile  │
+│ /emails/attach/ │      │ sprk_document (child)  │      │ playbook          │
+└─────────────────┘      └────────────────────────┘      └───────────────────┘
 ```
 
 **Components involved:**
-1. `Dataverse Service Endpoint` — Webhook registration for email.Create
-2. `src/server/api/Sprk.Bff.Api/Api/EmailEndpoints.cs` — Webhook receiver, manual save
-3. `src/server/api/Sprk.Bff.Api/Services/Email/` — Converter, filter service, seed service
-4. `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/EmailToDocumentJobHandler.cs` — Async processing
-5. `src/server/api/Sprk.Bff.Api/Services/Jobs/EmailPollingBackupService.cs` — Backup polling
+
+| Component | File Location | Purpose |
+|-----------|---------------|---------|
+| Webhook Endpoint | `Api/EmailEndpoints.cs` | Receive Dataverse webhook, validate signature |
+| Polling Backup | `Services/Jobs/EmailPollingBackupService.cs` | Query missed emails, create jobs |
+| Job Handler | `Services/Jobs/Handlers/EmailToDocumentJobHandler.cs` | Core email-to-document processing |
+| EML Converter | `Services/Email/EmailToEmlConverter.cs` | RFC 5322 .eml generation with MimeKit |
+| Attachment Filter | `Services/Email/AttachmentFilterService.cs` | Filter noise (signatures, tracking pixels) |
+| Configuration | `Configuration/EmailProcessingOptions.cs` | All email processing settings |
+
+**Document Entity Relationships:**
+```
+sprk_document (Parent - Email .eml)
+├─ sprk_email → {email-activity-id}        ← Lookup to email entity
+├─ sprk_documenttype = 100000006 (Email)
+└─ [email metadata fields]
+
+  └─ sprk_document (Child - Attachment)
+     ├─ sprk_parentdocument → {parent-doc-id}  ← Lookup to parent
+     ├─ sprk_documenttype = 100000007 (Email Attachment)
+     └─ sprk_email = NULL                      ← NOT set (alternate key constraint)
+```
 
 **Change Impact:**
 | Change | Impact |
@@ -241,11 +283,14 @@ Dataverse Email → Webhook → BFF API → Filter Rules → Job Queue → SPE +
 | Modify EmailEndpoints signature | Update any UI callers (ribbon button, PCF) |
 | Add email fields to sprk_document | Update DataverseWebApiService mappings |
 | Change attachment filtering rules | Update EmailProcessingOptions config |
+| Modify attachment parent-child link | Update EmailToDocumentJobHandler |
+| Change AI playbook name | Update `EnqueueAiAnalysisJobAsync` constant |
 
 **Key Files:**
 - `EmailToEmlConverter.cs` — Uses MimeKit for RFC 5322 compliant .eml generation
 - `EmailEndpoints.cs` — POST /api/v1/emails/{emailId}/save-as-document, webhook receiver
 - `EmailProcessingOptions.cs` — Attachment size limits, blocked extensions, signature patterns
+- `AttachmentFilterService.cs` — Regex-based filtering for signature images, tracking pixels
 
 ### Pattern 6: Analysis Export Flow (R3 Phase 3)
 

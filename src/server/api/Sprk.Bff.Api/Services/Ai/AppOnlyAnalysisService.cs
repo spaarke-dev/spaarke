@@ -627,6 +627,402 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         var update = new UpdateDocumentRequest { SummaryStatus = status };
         await _dataverseService.UpdateDocumentAsync(documentId.ToString(), update, cancellationToken);
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Email Analysis (FR-11, FR-12)
+    // Combines email metadata + body + attachments for comprehensive AI analysis
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Default playbook name for Email Analysis.
+    /// </summary>
+    public const string EmailAnalysisPlaybookName = "Email Analysis";
+
+    /// <summary>
+    /// Maximum combined context size in characters (100KB per FR-12).
+    /// </summary>
+    private const int MaxEmailContextChars = 100_000;
+
+    /// <summary>
+    /// Analyze an email and its attachments as a combined context.
+    /// Combines email metadata + body + attachment text and executes the "Email Analysis" playbook.
+    /// Results are stored on the main .eml Document record.
+    /// </summary>
+    /// <param name="emailId">The Dataverse email activity ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Analysis result with success status. Results stored on the main .eml Document.</returns>
+    public async Task<EmailAnalysisResult> AnalyzeEmailAsync(
+        Guid emailId,
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation(
+            "Starting email analysis for email activity {EmailId} using playbook '{PlaybookName}'",
+            emailId, EmailAnalysisPlaybookName);
+
+        try
+        {
+            // 1. Find the main .eml Document record by email lookup
+            var mainDocument = await FindEmailDocumentAsync(emailId, cancellationToken);
+            if (mainDocument == null)
+            {
+                _logger.LogWarning(
+                    "No .eml Document found for email activity {EmailId}. Email may not have been converted yet.",
+                    emailId);
+                return EmailAnalysisResult.Failed(emailId, Guid.Empty, "No .eml document found for this email");
+            }
+
+            var mainDocumentId = Guid.Parse(mainDocument.Id);
+            _logger.LogDebug(
+                "Found main .eml document {DocumentId} for email {EmailId}",
+                mainDocumentId, emailId);
+
+            // Mark as pending before processing
+            await UpdateSummaryStatusAsync(mainDocumentId, SummaryStatusPending, cancellationToken);
+
+            // 2. Extract email metadata from the document record
+            var emailMetadata = ExtractEmailMetadataFromDocument(mainDocument);
+
+            // 3. Extract text from main .eml document
+            var mainDocText = await ExtractDocumentTextAsync(mainDocument, cancellationToken);
+            if (string.IsNullOrWhiteSpace(mainDocText))
+            {
+                _logger.LogWarning(
+                    "No text extracted from main .eml document {DocumentId}",
+                    mainDocumentId);
+                mainDocText = emailMetadata.Body ?? string.Empty;
+            }
+
+            // 4. Find and extract text from child documents (attachments)
+            var attachmentTexts = await ExtractAttachmentTextsAsync(mainDocumentId, cancellationToken);
+            _logger.LogInformation(
+                "Extracted text from {AttachmentCount} attachments for email {EmailId}",
+                attachmentTexts.Count, emailId);
+
+            // 5. Build combined context with size management
+            var combinedContext = BuildEmailContext(emailMetadata, mainDocText, attachmentTexts);
+            _logger.LogInformation(
+                "Built combined context for email {EmailId}: {CharCount} characters (max: {MaxChars})",
+                emailId, combinedContext.Length, MaxEmailContextChars);
+
+            // 6. Execute Email Analysis playbook
+            var analysisResult = await ExecuteEmailPlaybookAnalysisAsync(
+                mainDocumentId,
+                mainDocument.Name ?? "Email",
+                combinedContext,
+                cancellationToken);
+
+            if (!analysisResult.IsSuccess)
+            {
+                await UpdateSummaryStatusAsync(mainDocumentId, SummaryStatusFailed, cancellationToken);
+                return EmailAnalysisResult.Failed(emailId, mainDocumentId, analysisResult.ErrorMessage ?? "Playbook execution failed");
+            }
+
+            // 7. Update main document with AI results
+            if (analysisResult.ProfileUpdate != null)
+            {
+                analysisResult.ProfileUpdate.SummaryStatus = SummaryStatusCompleted;
+                await _dataverseService.UpdateDocumentAsync(mainDocumentId.ToString(), analysisResult.ProfileUpdate, cancellationToken);
+            }
+            else
+            {
+                await UpdateSummaryStatusAsync(mainDocumentId, SummaryStatusCompleted, cancellationToken);
+            }
+
+            _logger.LogInformation(
+                "Email analysis completed for email {EmailId} -> Document {DocumentId}",
+                emailId, mainDocumentId);
+
+            return EmailAnalysisResult.Success(emailId, mainDocumentId, attachmentTexts.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error analyzing email {EmailId}", emailId);
+            return EmailAnalysisResult.Failed(emailId, Guid.Empty, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Find the main .eml Document record associated with an email activity.
+    /// Uses the IDataverseService.GetDocumentByEmailLookupAsync method.
+    /// </summary>
+    private async Task<DocumentEntity?> FindEmailDocumentAsync(Guid emailId, CancellationToken cancellationToken)
+    {
+        _logger.LogDebug("Searching for .eml document with email lookup {EmailId}", emailId);
+        return await _dataverseService.GetDocumentByEmailLookupAsync(emailId, cancellationToken);
+    }
+
+    /// <summary>
+    /// Extract email metadata from the document record's email fields.
+    /// Uses fields populated by EmailToDocumentJobHandler.
+    /// </summary>
+    private static EmailMetadataForAnalysis ExtractEmailMetadataFromDocument(DocumentEntity document)
+    {
+        return new EmailMetadataForAnalysis
+        {
+            Subject = document.EmailSubject ?? document.Name ?? "No Subject",
+            From = document.EmailFrom ?? string.Empty,
+            To = document.EmailTo ?? string.Empty,
+            Cc = document.EmailCc ?? string.Empty,
+            Date = document.EmailDate ?? document.CreatedOn,
+            Body = document.EmailBody ?? document.Description ?? string.Empty
+        };
+    }
+
+    /// <summary>
+    /// Extract text content from a document.
+    /// </summary>
+    private async Task<string> ExtractDocumentTextAsync(DocumentEntity document, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(document.GraphDriveId) || string.IsNullOrEmpty(document.GraphItemId))
+        {
+            _logger.LogWarning("Document {DocumentId} has no SPE file reference", document.Id);
+            return string.Empty;
+        }
+
+        var fileName = document.FileName ?? document.Name ?? "unknown";
+        var extension = Path.GetExtension(fileName)?.ToLowerInvariant() ?? string.Empty;
+
+        if (!_textExtractor.IsSupported(extension))
+        {
+            _logger.LogWarning("File type {Extension} not supported for document {DocumentId}", extension, document.Id);
+            return string.Empty;
+        }
+
+        try
+        {
+            using var fileStream = await _speFileOperations.DownloadFileAsync(
+                document.GraphDriveId,
+                document.GraphItemId,
+                cancellationToken);
+
+            if (fileStream == null)
+            {
+                _logger.LogWarning("Failed to download document {DocumentId}", document.Id);
+                return string.Empty;
+            }
+
+            var result = await _textExtractor.ExtractAsync(fileStream, fileName, cancellationToken);
+            return result.Success ? result.Text ?? string.Empty : string.Empty;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error extracting text from document {DocumentId}", document.Id);
+            return string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// Extract text from all child documents (attachments) of the main .eml document.
+    /// </summary>
+    private async Task<List<AttachmentTextInfo>> ExtractAttachmentTextsAsync(
+        Guid parentDocumentId,
+        CancellationToken cancellationToken)
+    {
+        var attachmentTexts = new List<AttachmentTextInfo>();
+
+        // Query child documents by ParentDocumentLookup
+        _logger.LogDebug("Querying child documents for parent {ParentDocumentId}", parentDocumentId);
+
+        IEnumerable<DocumentEntity> childDocuments;
+        try
+        {
+            childDocuments = await _dataverseService.GetDocumentsByParentAsync(parentDocumentId, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to query child documents for {ParentDocumentId}", parentDocumentId);
+            return attachmentTexts;
+        }
+
+        var documentList = childDocuments.ToList();
+        _logger.LogDebug("Found {Count} child documents (attachments) for parent {ParentDocumentId}",
+            documentList.Count, parentDocumentId);
+
+        // Extract text from each attachment in parallel with limited concurrency
+        var extractionTasks = documentList.Select(async document =>
+        {
+            try
+            {
+                var extractedText = await ExtractDocumentTextAsync(document, cancellationToken);
+                if (!string.IsNullOrWhiteSpace(extractedText))
+                {
+                    return new AttachmentTextInfo
+                    {
+                        DocumentId = document.Id ?? string.Empty,
+                        FileName = document.FileName ?? document.Name ?? "unknown",
+                        ExtractedText = extractedText,
+                        ExtractedAt = DateTime.UtcNow
+                    };
+                }
+                _logger.LogDebug("No text extracted from attachment {FileName}", document.FileName);
+                return null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to extract text from attachment {DocumentId}", document.Id);
+                return null;
+            }
+        });
+
+        var results = await Task.WhenAll(extractionTasks);
+        attachmentTexts.AddRange(results.Where(r => r != null)!);
+
+        _logger.LogInformation("Extracted text from {Count} of {Total} attachments",
+            attachmentTexts.Count, documentList.Count);
+
+        return attachmentTexts;
+    }
+
+    /// <summary>
+    /// Build combined email context for AI analysis.
+    /// Implements FR-12 context size management with truncation.
+    /// </summary>
+    private string BuildEmailContext(
+        EmailMetadataForAnalysis metadata,
+        string emailBodyText,
+        List<AttachmentTextInfo> attachmentTexts)
+    {
+        var sb = new StringBuilder();
+
+        // Email metadata section
+        sb.AppendLine("===== EMAIL METADATA =====");
+        sb.AppendLine($"Subject: {metadata.Subject}");
+        if (!string.IsNullOrEmpty(metadata.From))
+            sb.AppendLine($"From: {metadata.From}");
+        if (!string.IsNullOrEmpty(metadata.To))
+            sb.AppendLine($"To: {metadata.To}");
+        if (!string.IsNullOrEmpty(metadata.Cc))
+            sb.AppendLine($"CC: {metadata.Cc}");
+        sb.AppendLine($"Date: {metadata.Date:u}");
+        sb.AppendLine();
+
+        // Email body section
+        sb.AppendLine("===== EMAIL BODY =====");
+        sb.AppendLine(emailBodyText);
+        sb.AppendLine();
+
+        // Calculate remaining budget for attachments
+        var headerAndBodyLength = sb.Length;
+        var remainingBudget = MaxEmailContextChars - headerAndBodyLength;
+
+        // Attachment sections (prioritize by size, most recent first)
+        foreach (var attachment in attachmentTexts.OrderByDescending(a => a.ExtractedAt))
+        {
+            var sectionHeader = $"===== ATTACHMENT: {attachment.FileName} =====\n";
+            var sectionFooter = "\n\n";
+            var availableForContent = remainingBudget - sectionHeader.Length - sectionFooter.Length;
+
+            if (availableForContent <= 100)
+            {
+                // Not enough space for meaningful content
+                _logger.LogDebug(
+                    "Skipping attachment {FileName} due to context budget constraints",
+                    attachment.FileName);
+                continue;
+            }
+
+            var attachmentContent = attachment.ExtractedText;
+            if (attachmentContent.Length > availableForContent)
+            {
+                // Truncate attachment content
+                attachmentContent = attachmentContent[..availableForContent] + "\n[... truncated ...]";
+                _logger.LogDebug(
+                    "Truncated attachment {FileName} from {Original} to {Truncated} chars",
+                    attachment.FileName, attachment.ExtractedText.Length, availableForContent);
+            }
+
+            sb.Append(sectionHeader);
+            sb.Append(attachmentContent);
+            sb.Append(sectionFooter);
+
+            remainingBudget -= (sectionHeader.Length + attachmentContent.Length + sectionFooter.Length);
+        }
+
+        var result = sb.ToString();
+
+        // Final truncation if still over budget (shouldn't happen with proper calculations)
+        if (result.Length > MaxEmailContextChars)
+        {
+            _logger.LogWarning(
+                "Combined context exceeded max ({Length} > {Max}), truncating",
+                result.Length, MaxEmailContextChars);
+            result = result[..MaxEmailContextChars];
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Execute Email Analysis playbook on the combined context.
+    /// </summary>
+    private async Task<DocumentAnalysisResult> ExecuteEmailPlaybookAnalysisAsync(
+        Guid documentId,
+        string documentName,
+        string combinedContext,
+        CancellationToken cancellationToken)
+    {
+        return await ExecutePlaybookAnalysisAsync(
+            documentId,
+            documentName,
+            "email-combined.eml",
+            combinedContext,
+            EmailAnalysisPlaybookName,
+            cancellationToken);
+    }
+}
+
+/// <summary>
+/// Result of an email analysis operation.
+/// </summary>
+public class EmailAnalysisResult
+{
+    public Guid EmailId { get; init; }
+    public Guid DocumentId { get; init; }
+    public bool IsSuccess { get; init; }
+    public string? ErrorMessage { get; init; }
+    public int AttachmentsAnalyzed { get; init; }
+
+    public static EmailAnalysisResult Success(Guid emailId, Guid documentId, int attachmentsAnalyzed)
+        => new()
+        {
+            EmailId = emailId,
+            DocumentId = documentId,
+            IsSuccess = true,
+            AttachmentsAnalyzed = attachmentsAnalyzed
+        };
+
+    public static EmailAnalysisResult Failed(Guid emailId, Guid documentId, string errorMessage)
+        => new()
+        {
+            EmailId = emailId,
+            DocumentId = documentId,
+            IsSuccess = false,
+            ErrorMessage = errorMessage
+        };
+}
+
+/// <summary>
+/// Email metadata extracted from document record for analysis context.
+/// </summary>
+internal class EmailMetadataForAnalysis
+{
+    public string Subject { get; init; } = string.Empty;
+    public string From { get; init; } = string.Empty;
+    public string To { get; init; } = string.Empty;
+    public string Cc { get; init; } = string.Empty;
+    public DateTime Date { get; init; }
+    public string? Body { get; init; }
+}
+
+/// <summary>
+/// Attachment text extraction info for context building.
+/// </summary>
+internal class AttachmentTextInfo
+{
+    public string DocumentId { get; init; } = string.Empty;
+    public string FileName { get; init; } = string.Empty;
+    public string ExtractedText { get; init; } = string.Empty;
+    public DateTime ExtractedAt { get; init; }
 }
 
 /// <summary>

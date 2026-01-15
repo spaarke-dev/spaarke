@@ -282,6 +282,179 @@ When updating ANY Kiota package, update ALL Kiota packages to the same version.
 
 ---
 
+## Email-to-Document Issues
+
+**Full Documentation**: See [email-to-document-automation.md](email-to-document-automation.md) for complete architecture.
+
+### Issue 7: Attachments Not Created as Child Documents
+
+#### Symptom
+Parent .eml document created successfully, but no child documents for attachments.
+
+#### Root Causes
+
+**A. Race Condition (webhook fires before attachments exist)**:
+Dataverse webhooks fire on email Create, but attachments are added via separate API calls.
+
+**Diagnosis**:
+```kusto
+traces
+| where message contains "[AttachmentProcessDebug]"
+| where message contains "No attachments found"
+| where timestamp > ago(1h)
+```
+
+**Resolution**: Retry logic implemented in `FetchAttachmentsAsync` (2-second delay + retry).
+
+**B. All Attachments Filtered Out**:
+Signature images, tracking pixels, and small images are filtered.
+
+**Diagnosis**:
+```kusto
+traces
+| where message contains "filtered out"
+| where timestamp > ago(1h)
+```
+
+**Resolution**: Check `AttachmentFilterService` rules and `EmailProcessingOptions` settings.
+
+---
+
+### Issue 8: Child Document SPE Fields Empty
+
+#### Symptom
+Child attachment documents created but `sprk_graphitemid`, `sprk_graphdriveid`, `sprk_filepath` are null.
+
+#### Error Message
+```
+Entity Key Email Activity Key violated. A record with the same value for Email already exists.
+```
+
+#### Root Cause
+The `sprk_document` entity has an alternate key on `sprk_email` field. When the code tried to set `EmailLookup = emailId` on child documents, it violated this constraint because the parent already uses that email lookup.
+
+#### Resolution
+Child documents must NOT set `EmailLookup`. They relate to the email through their `ParentDocumentLookup` instead.
+
+```csharp
+// CORRECT - in EmailToDocumentJobHandler.ProcessSingleAttachmentAsync
+var updateRequest = new UpdateDocumentRequest
+{
+    ParentDocumentLookup = parentDocumentId,
+    // EmailLookup is NOT set for child documents
+};
+```
+
+---
+
+### Issue 9: AI Analysis Not Running on Email Documents
+
+#### Symptom
+Documents created successfully, but AI analysis status (`sprk_aianalysisstatus`) remains empty.
+
+#### Error Message (in logs)
+```
+Warning: Playbook has no tools configured
+Warning: Playbook resolution not yet implemented, returning empty scopes
+```
+
+#### Root Cause
+`ScopeResolverService.ResolvePlaybookScopesAsync` is a placeholder that returns empty scopes. Manual analysis works because UI passes `ToolIds[]` directly.
+
+#### Workaround
+Users can manually trigger AI analysis from the Analysis Builder UI.
+
+#### Resolution
+See [ai-analysis-integration-issue.md](../../projects/email-to-document-automation-r2/notes/ai-analysis-integration-issue.md) for implementation plan.
+
+---
+
+### Issue 10: Webhook Validation Failing
+
+#### Symptom
+401 Unauthorized or 400 Bad Request on webhook endpoint.
+
+#### Root Causes
+
+**A. Secret Mismatch**:
+```kusto
+traces
+| where message contains "Webhook signature validation failed"
+| project timestamp, message
+```
+
+**Resolution**: Verify `EmailProcessing:WebhookSecret` matches Dataverse Service Endpoint.
+
+**B. Webhook Disabled**:
+```kusto
+traces
+| where message contains "Webhook processing is disabled"
+```
+
+**Resolution**: Set `EmailProcessing:EnableWebhook = true` in configuration.
+
+---
+
+### Issue 11: Continuous Document Creation (Polling Issue)
+
+#### Symptom
+Many duplicate test records being created continuously.
+
+#### Root Cause
+`EnablePolling = true` with unprocessed emails in lookback period. Polling service runs every 5 minutes.
+
+#### Resolution
+1. Set `EmailProcessing:EnablePolling = false` during testing
+2. Or increase `PollingIntervalMinutes`
+3. Or ensure `sprk_documentprocessingstatus` is set after processing
+
+---
+
+### Email Diagnostic Commands
+
+**View Email Job Logs**:
+```kusto
+traces
+| where message contains "[AttachmentProcessDebug]" or message contains "EmailToDocument"
+| where timestamp > ago(1h)
+| project timestamp, message
+| order by timestamp desc
+```
+
+**Check Job Queue Health**:
+```bash
+# View Service Bus queue metrics
+az servicebus queue show --name sdap-jobs \
+  --namespace-name {namespace} \
+  --resource-group {rg} \
+  --query "{ActiveMessages:countDetails.activeMessageCount, DeadLetter:countDetails.deadLetterMessageCount}"
+```
+
+**Test Email Processing Manually**:
+```bash
+# Trigger manual save-as-document
+curl -X POST "https://spe-api-dev-67e2xz.azurewebsites.net/api/v1/emails/{emailId}/save-as-document" \
+  -H "Authorization: Bearer {token}"
+```
+
+---
+
+## Email Post-Deployment Checklist
+
+- [ ] Webhook endpoint responds to test request
+- [ ] Service Bus queue receiving messages
+- [ ] EmailPollingBackupService running (if enabled)
+- [ ] Email-to-.eml conversion successful
+- [ ] Parent document created with email metadata
+- [ ] SPE fields populated (GraphItemId, GraphDriveId, FilePath)
+- [ ] Attachments filtered correctly
+- [ ] Child documents created for attachments
+- [ ] Parent-child relationship established
+- [ ] AI analysis job enqueued (if AutoEnqueueAi = true)
+- [ ] No duplicate processing (idempotency working)
+
+---
+
 ## Post-Deployment Checklist
 
 - [ ] Health endpoint returns 200
@@ -301,7 +474,9 @@ When updating ANY Kiota package, update ALL Kiota packages to the same version.
 - [sdap-auth-patterns.md](sdap-auth-patterns.md) - Authentication details
 - [sdap-pcf-patterns.md](sdap-pcf-patterns.md) - PCF control code
 - [sdap-bff-api-patterns.md](sdap-bff-api-patterns.md) - API code
+- [email-to-document-automation.md](email-to-document-automation.md) - Email-to-Document automation architecture
 
 ---
 
 *Condensed from troubleshooting sections of architecture guide*
+*Email-to-Document issues added January 2026*

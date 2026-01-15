@@ -3,7 +3,8 @@
   <metadata>
     <title>Create EmailAnalysis Job Handler</title>
     <phase>4: Email Analysis Playbook</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed-date>2026-01-14</completed-date>
     <estimated-hours>2</estimated-hours>
     <dependencies>031</dependencies>
     <blocks>033</blocks>
@@ -92,6 +93,25 @@
     This handler should run after document analysis jobs complete to ensure
     attachment text is available for the combined analysis.
   </notes>
+
+  <completion-notes>
+    <summary>
+      Created EmailAnalysisJobHandler that processes email analysis jobs from Service Bus.
+      Follows ADR-004 job contract patterns with idempotency key: emailanalysis-{emailId}.
+      Calls AppOnlyAnalysisService.AnalyzeEmailAsync for combined email+attachment analysis.
+    </summary>
+    <outputs>
+      - src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/EmailAnalysisJobHandler.cs (new)
+      - src/server/api/Sprk.Bff.Api/Program.cs (modified - DI registration)
+    </outputs>
+    <key-decisions>
+      - Job type: "EmailAnalysis"
+      - Idempotency key pattern: emailanalysis-{emailId}
+      - Reuses DocumentTelemetry metrics for consistency
+      - Processing lock timeout: 10 minutes (same as document analysis)
+      - Idempotency record TTL: 7 days
+    </key-decisions>
+  </completion-notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

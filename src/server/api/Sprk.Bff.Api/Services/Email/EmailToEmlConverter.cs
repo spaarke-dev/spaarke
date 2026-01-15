@@ -110,12 +110,20 @@ public class EmailToEmlConverter : IEmailToEmlConverter
             }
 
             // Build MimeMessage
+            _logger.LogWarning(
+                "[ConversionDebug] Building MimeMessage with {AttachmentCount} attachments for email {EmailId}",
+                attachments.Count, emailActivityId);
+
             var message = BuildMimeMessage(email, attachments);
 
             // Write to stream
             var stream = new MemoryStream();
             await message.WriteToAsync(stream, cancellationToken);
             stream.Position = 0;
+
+            _logger.LogWarning(
+                "[ConversionDebug] MimeMessage written to stream: {Size} bytes for email {EmailId}",
+                stream.Length, emailActivityId);
 
             var metadata = BuildMetadata(email, emailActivityId);
 
@@ -320,21 +328,78 @@ public class EmailToEmlConverter : IEmailToEmlConverter
         Guid emailActivityId,
         CancellationToken cancellationToken)
     {
+        // Retry logic to handle race condition: webhook fires on email Create,
+        // but attachments are added separately via activitymimeattachments.
+        // First query may return 0 if attachments haven't been created yet.
+        const int maxAttempts = 2;
+        const int retryDelayMs = 2000; // 2 seconds
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            var attachments = await FetchAttachmentsInternalAsync(emailActivityId, cancellationToken);
+
+            if (attachments.Count > 0 || attempt == maxAttempts)
+            {
+                if (attachments.Count == 0 && attempt == maxAttempts)
+                {
+                    _logger.LogWarning(
+                        "[FetchAttachmentDebug] No attachments found for email {EmailId} after {Attempts} attempts",
+                        emailActivityId, maxAttempts);
+                }
+                return attachments;
+            }
+
+            // No attachments found on first attempt - wait and retry
+            // This handles the race condition where webhook fires before attachments are created
+            _logger.LogWarning(
+                "[FetchAttachmentDebug] No attachments found for email {EmailId} on attempt {Attempt}, retrying in {Delay}ms...",
+                emailActivityId, attempt, retryDelayMs);
+
+            await Task.Delay(retryDelayMs, cancellationToken);
+        }
+
+        return []; // Should not reach here, but satisfies compiler
+    }
+
+    private async Task<List<EmailAttachmentInfo>> FetchAttachmentsInternalAsync(
+        Guid emailActivityId,
+        CancellationToken cancellationToken)
+    {
         var attachments = new List<EmailAttachmentInfo>();
 
         var url = $"activitymimeattachments?$filter=_objectid_value eq {emailActivityId}" +
                   "&$select=activitymimeattachmentid,filename,mimetype,filesize,body";
 
+        _logger.LogWarning(
+            "[FetchAttachmentDebug] Fetching attachments for email {EmailId} from URL: {Url}",
+            emailActivityId, url);
+
         var response = await _httpClient.GetAsync(url, cancellationToken);
         response.EnsureSuccessStatusCode();
+
+        _logger.LogWarning(
+            "[FetchAttachmentDebug] Dataverse response status: {StatusCode}",
+            response.StatusCode);
 
         var json = await response.Content.ReadAsStringAsync(cancellationToken);
         var data = JsonSerializer.Deserialize<JsonElement>(json);
 
+        _logger.LogWarning(
+            "[FetchAttachmentDebug] Dataverse returned JSON length: {Length} chars",
+            json.Length);
+
         if (!data.TryGetProperty("value", out var items))
         {
+            _logger.LogWarning(
+                "[FetchAttachmentDebug] No 'value' property found in response for email {EmailId}",
+                emailActivityId);
             return attachments;
         }
+
+        var itemCount = items.GetArrayLength();
+        _logger.LogWarning(
+            "[FetchAttachmentDebug] Found {Count} attachment records in Dataverse for email {EmailId}",
+            itemCount, emailActivityId);
 
         foreach (var item in items.EnumerateArray())
         {
@@ -344,6 +409,10 @@ public class EmailToEmlConverter : IEmailToEmlConverter
             var fileSize = item.TryGetProperty("filesize", out var fs) ? fs.GetInt64() : 0;
             var bodyBase64 = GetStringOrNull(item, "body");
 
+            _logger.LogWarning(
+                "[FetchAttachmentDebug] Processing attachment '{FileName}': fileSize={FileSize}, bodyBase64Length={BodyLength}, hasBody={HasBody}",
+                fileName, fileSize, bodyBase64?.Length ?? 0, !string.IsNullOrEmpty(bodyBase64));
+
             // Check if attachment should be skipped
             var (shouldCreate, skipReason) = EvaluateAttachment(fileName, mimeType, fileSize);
 
@@ -352,6 +421,15 @@ public class EmailToEmlConverter : IEmailToEmlConverter
             {
                 var bytes = Convert.FromBase64String(bodyBase64);
                 content = new MemoryStream(bytes);
+                _logger.LogWarning(
+                    "[FetchAttachmentDebug] Attachment '{FileName}' decoded to {ByteCount} bytes",
+                    fileName, bytes.Length);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "[FetchAttachmentDebug] Attachment '{FileName}' has NO body content - will be skipped in MIME message",
+                    fileName);
             }
 
             attachments.Add(new EmailAttachmentInfo
@@ -583,20 +661,45 @@ public class EmailToEmlConverter : IEmailToEmlConverter
             // Parse the .eml file using MimeKit
             var message = MimeMessage.Load(emlStream);
 
+            _logger.LogInformation(
+                "[ExtractDebug] Loaded MimeMessage. Body type: {BodyType}, Subject: {Subject}",
+                message.Body?.GetType().Name ?? "null", message.Subject);
+
+            var partCount = 0;
+
             // Iterate through all MIME parts to find attachments
             foreach (var part in IterateMimeParts(message.Body))
             {
+                partCount++;
+                _logger.LogInformation(
+                    "[ExtractDebug] Part {PartNum}: Type={PartType}, IsMimePart={IsMimePart}",
+                    partCount, part.GetType().Name, part is MimePart);
+
                 if (part is MimePart mimePart)
                 {
+                    var dispositionValue = mimePart.ContentDisposition?.Disposition;
+                    _logger.LogInformation(
+                        "[ExtractDebug] MimePart: FileName={FileName}, ContentType={ContentType}, IsAttachment={IsAttachment}, Disposition={Disposition}, HasContentId={HasContentId}",
+                        mimePart.FileName ?? "(null)",
+                        mimePart.ContentType?.MimeType ?? "(null)",
+                        mimePart.IsAttachment,
+                        dispositionValue ?? "(null)",
+                        !string.IsNullOrEmpty(mimePart.ContentId));
+
                     // Check if this is an attachment (either explicit attachment or inline with content)
                     var isAttachment = mimePart.IsAttachment ||
                                        mimePart.ContentDisposition?.Disposition == ContentDisposition.Attachment;
                     var isInline = mimePart.ContentDisposition?.Disposition == ContentDisposition.Inline &&
                                    !string.IsNullOrEmpty(mimePart.ContentId);
 
+                    _logger.LogInformation(
+                        "[ExtractDebug] Evaluation: isAttachment={IsAttachment}, isInline={IsInline}",
+                        isAttachment, isInline);
+
                     // Skip parts that are not attachments and not inline images with Content-ID
                     if (!isAttachment && !isInline)
                     {
+                        _logger.LogInformation("[ExtractDebug] Skipping part - not attachment or inline");
                         continue;
                     }
 
@@ -654,8 +757,9 @@ public class EmailToEmlConverter : IEmailToEmlConverter
                 }
             }
 
-            _logger.LogDebug(
-                "Extracted {Count} attachments from .eml stream, {InlineCount} inline, {SkipCount} will be skipped",
+            _logger.LogInformation(
+                "[ExtractDebug] Extraction complete: {PartCount} parts scanned, {AttachmentCount} attachments found, {InlineCount} inline, {SkipCount} will be skipped",
+                partCount,
                 attachments.Count,
                 attachments.Count(a => a.IsInline),
                 attachments.Count(a => !a.ShouldCreateDocument));

@@ -150,6 +150,72 @@
           "TL-005": "Risk Detector - Identify potential risks"
         }
       }
+    },
+    {
+      "id": "PB-012",
+      "sprk_name": "Email Analysis",
+      "sprk_description": "Comprehensive email analysis combining email metadata, body text, and attachment contents. Generates TL;DR, summary, keywords, entities, and classification for email-to-document automation workflows.",
+      "sprk_ispublic": true,
+      "estimatedTime": "~30 seconds",
+      "complexity": "Low",
+      "isSystemPlaybook": true,
+      "triggerContext": "email-to-document",
+      "scopes": {
+        "skills": ["SKL-008"],
+        "actions": ["ACT-001", "ACT-003", "ACT-004"],
+        "knowledge": ["KNW-005"],
+        "tools": ["TL-001", "TL-003", "TL-004"]
+      },
+      "scopeDescriptions": {
+        "skills": {
+          "SKL-008": "Executive Summary - High-level overview generation"
+        },
+        "actions": {
+          "ACT-001": "Extract Entities - Named entity extraction (parties, organizations, dates, amounts)",
+          "ACT-003": "Classify Document - Email type classification (correspondence, notification, request)",
+          "ACT-004": "Summarize Content - Generate TL;DR and summary from combined email+attachments"
+        },
+        "knowledge": {
+          "KNW-005": "Defined Terms - Standard definitions"
+        },
+        "tools": {
+          "TL-001": "Entity Extractor - Extract parties, organizations, dates, amounts from email context",
+          "TL-003": "Document Classifier - Classify email type and purpose",
+          "TL-004": "Summary Generator - Generate TL;DR and summary from email+attachments"
+        }
+      },
+      "inputFormat": {
+        "description": "Combined text input constructed by EmailAnalysisService",
+        "structure": [
+          "===== EMAIL METADATA =====",
+          "Subject: {subject}",
+          "From: {sender}",
+          "To: {recipients}",
+          "CC: {cc_recipients}",
+          "Date: {sent_date}",
+          "",
+          "===== EMAIL BODY =====",
+          "{email_body_text}",
+          "",
+          "===== ATTACHMENT: {filename} =====",
+          "{attachment_extracted_text}",
+          "(repeated for each attachment)"
+        ],
+        "maxInputSize": "100KB combined text"
+      },
+      "outputMapping": {
+        "tldr": "email.sprk_tldr or sprk_document.sprk_tldr",
+        "summary": "email.sprk_summary or sprk_document.sprk_summary",
+        "keywords": "email.sprk_keywords or sprk_document.sprk_keywords",
+        "documentType": "email.sprk_documenttype or sprk_document.sprk_documenttype",
+        "entities": "email.sprk_entities or sprk_document.sprk_entities"
+      },
+      "notes": [
+        "Uses same tools as Document Profile but with email-structured input",
+        "EmailAnalysisService prepends email metadata to extracted text",
+        "Attachment contents are concatenated with section headers",
+        "Output fields updated on both email entity and associated documents"
+      ]
     }
   ],
 
