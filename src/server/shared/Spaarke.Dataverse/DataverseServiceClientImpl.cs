@@ -300,15 +300,38 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         if (request.EmailBody != null)
             document["sprk_emailbody"] = request.EmailBody;
 
+        if (request.EmailCc != null)
+            document["sprk_emailcc"] = request.EmailCc;
+
+        if (request.EmailMessageId != null)
+            document["sprk_emailmessageid"] = request.EmailMessageId;
+
+        if (request.EmailDirection.HasValue)
+            document["sprk_emaildirection"] = new OptionSetValue(request.EmailDirection.Value);
+
+        if (request.EmailTrackingToken != null)
+            document["sprk_emailtrackingtoken"] = request.EmailTrackingToken;
+
+        if (request.EmailConversationIndex != null)
+            document["sprk_emailconversationindex"] = request.EmailConversationIndex;
+
+        if (request.IsEmailArchive.HasValue)
+            document["sprk_isemailarchive"] = request.IsEmailArchive.Value;
+
+        if (request.RelationshipType.HasValue)
+            document["sprk_relationshiptype"] = new OptionSetValue(request.RelationshipType.Value);
+
         if (request.Attachments != null)
             document["sprk_attachments"] = request.Attachments;
 
+        // Email activity lookup - links document to original email activity
+        if (request.EmailLookup.HasValue)
+            document["sprk_email"] = new EntityReference("email", request.EmailLookup.Value);
+
         // ═══════════════════════════════════════════════════════════════════════════
         // Parent Document Fields (for email attachments)
+        // Note: sprk_parentdocumentid was removed from schema - use ParentDocumentLookup instead
         // ═══════════════════════════════════════════════════════════════════════════
-        if (request.ParentDocumentId != null)
-            document["sprk_parentdocumentid"] = request.ParentDocumentId;
-
         if (request.ParentFileName != null)
             document["sprk_parentfilename"] = request.ParentFileName;
 
@@ -316,7 +339,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             document["sprk_parentgraphitemid"] = request.ParentGraphItemId;
 
         if (request.ParentDocumentLookup.HasValue)
-            document["sprk_parentdocumentname"] = new EntityReference("sprk_document", request.ParentDocumentLookup.Value);
+            document["sprk_parentdocument"] = new EntityReference("sprk_document", request.ParentDocumentLookup.Value);
 
         // ═══════════════════════════════════════════════════════════════════════════
         // Record Association Lookups (Phase 2 - Record Matching)
@@ -355,6 +378,97 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
         var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
         return results.Entities.Select(MapToDocumentEntity).ToList();
+    }
+
+    // ========================================
+    // Email-to-Document Operations (Phase 4)
+    // ========================================
+
+    public async Task<DocumentEntity?> GetDocumentByEmailLookupAsync(Guid emailId, CancellationToken ct = default)
+    {
+        _logger.LogDebug("Querying document by email lookup: {EmailId}", emailId);
+
+        var query = new QueryExpression("sprk_document")
+        {
+            ColumnSet = new ColumnSet(
+                "sprk_documentname", "sprk_documentdescription", "sprk_containerid",
+                "sprk_hasfile", "sprk_filename", "sprk_filesize", "sprk_mimetype",
+                "sprk_graphitemid", "sprk_graphdriveid", "sprk_filepath",
+                "sprk_emailsubject", "sprk_emailfrom", "sprk_emailto", "sprk_emailcc",
+                "sprk_emaildate", "sprk_emailbody", "sprk_isemailarchive",
+                "statuscode", "statecode", "createdon", "modifiedon"),
+            Criteria = new FilterExpression
+            {
+                Conditions =
+                {
+                    new ConditionExpression("sprk_email", ConditionOperator.Equal, emailId),
+                    new ConditionExpression("sprk_isemailarchive", ConditionOperator.Equal, true)
+                }
+            },
+            TopCount = 1
+        };
+
+        var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
+
+        if (results.Entities.Count == 0)
+        {
+            _logger.LogDebug("No document found for email {EmailId}", emailId);
+            return null;
+        }
+
+        return MapToDocumentEntityWithEmailFields(results.Entities[0]);
+    }
+
+    public async Task<IEnumerable<DocumentEntity>> GetDocumentsByParentAsync(Guid parentDocumentId, CancellationToken ct = default)
+    {
+        _logger.LogDebug("Querying child documents for parent: {ParentDocumentId}", parentDocumentId);
+
+        var query = new QueryExpression("sprk_document")
+        {
+            ColumnSet = new ColumnSet(
+                "sprk_documentname", "sprk_documentdescription", "sprk_containerid",
+                "sprk_hasfile", "sprk_filename", "sprk_filesize", "sprk_mimetype",
+                "sprk_graphitemid", "sprk_graphdriveid", "sprk_filepath",
+                "sprk_parentdocumentname",
+                "statuscode", "statecode", "createdon", "modifiedon"),
+            Criteria = new FilterExpression
+            {
+                Conditions =
+                {
+                    new ConditionExpression("sprk_parentdocumentname", ConditionOperator.Equal, parentDocumentId)
+                }
+            }
+        };
+
+        var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
+
+        _logger.LogDebug("Found {Count} child documents for parent {ParentDocumentId}",
+            results.Entities.Count, parentDocumentId);
+
+        return results.Entities.Select(MapToDocumentEntity).ToList();
+    }
+
+    private DocumentEntity MapToDocumentEntityWithEmailFields(Entity entity)
+    {
+        var doc = MapToDocumentEntity(entity);
+
+        // Add email-specific fields
+        doc.EmailSubject = entity.GetAttributeValue<string>("sprk_emailsubject");
+        doc.EmailFrom = entity.GetAttributeValue<string>("sprk_emailfrom");
+        doc.EmailTo = entity.GetAttributeValue<string>("sprk_emailto");
+        doc.EmailCc = entity.GetAttributeValue<string>("sprk_emailcc");
+        doc.EmailDate = entity.GetAttributeValue<DateTime?>("sprk_emaildate");
+        doc.EmailBody = entity.GetAttributeValue<string>("sprk_emailbody");
+        doc.IsEmailArchive = entity.GetAttributeValue<bool?>("sprk_isemailarchive");
+
+        // Handle parent document lookup
+        var parentRef = entity.GetAttributeValue<EntityReference>("sprk_parentdocumentname");
+        if (parentRef != null)
+        {
+            doc.ParentDocumentId = parentRef.Id.ToString();
+        }
+
+        return doc;
     }
 
     public async Task<bool> TestConnectionAsync()

@@ -39,4 +39,16 @@ public interface IAppOnlyAnalysisService
         Stream fileStream,
         string? playbookName = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Analyze an email and its attachments as a combined context.
+    /// Combines email metadata + body + attachment text and executes the "Email Analysis" playbook.
+    /// Results are stored on the main .eml Document record (FR-11, FR-12).
+    /// </summary>
+    /// <param name="emailId">The Dataverse email activity ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Analysis result with success status. Results stored on the main .eml Document.</returns>
+    Task<EmailAnalysisResult> AnalyzeEmailAsync(
+        Guid emailId,
+        CancellationToken cancellationToken = default);
 }

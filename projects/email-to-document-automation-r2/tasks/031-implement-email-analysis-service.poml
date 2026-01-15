@@ -3,7 +3,8 @@
   <metadata>
     <title>Implement Email Analysis in AppOnlyAnalysisService</title>
     <phase>4: Email Analysis Playbook</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed-date>2026-01-14</completed-date>
     <estimated-hours>4</estimated-hours>
     <dependencies>030</dependencies>
     <blocks>032</blocks>
@@ -101,6 +102,34 @@
     Consider token counting for precise context management.
     The email entity must have AI fields (may need to verify schema).
   </notes>
+
+  <completion-notes>
+    <summary>
+      Implemented AnalyzeEmailAsync in AppOnlyAnalysisService that combines email metadata,
+      body text, and attachment text for comprehensive AI analysis. Uses Email Analysis
+      playbook (PB-012) with context size management (100KB max per FR-12).
+    </summary>
+    <outputs>
+      - src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs: Added AnalyzeEmailAsync
+        method with helper methods for metadata extraction, document text extraction, attachment
+        processing, and context building with truncation
+      - src/server/api/Sprk.Bff.Api/Services/Ai/IAppOnlyAnalysisService.cs: Added interface
+        method signature and EmailAnalysisResult class
+      - src/server/shared/Spaarke.Dataverse/IDataverseService.cs: Added GetDocumentByEmailLookupAsync
+        and GetDocumentsByParentAsync for email-to-document queries
+      - src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs: Implemented email lookup
+        queries using OData filters on lookup fields
+      - src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs: Implemented email
+        lookup queries using QueryExpression
+      - src/server/shared/Spaarke.Dataverse/Models.cs: Added email fields to DocumentEntity
+    </outputs>
+    <key-decisions>
+      - Results stored on main .eml Document record (not email activity entity) for consistency
+      - Context combines: metadata header + email body + attachment texts with priority ordering
+      - Truncation applied per-attachment when exceeding budget, with most recent first
+      - Parallel text extraction for attachments using Task.WhenAll for performance
+    </key-decisions>
+  </completion-notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

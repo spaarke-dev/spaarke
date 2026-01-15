@@ -62,4 +62,27 @@ public interface IDataverseService
         string parentEntityLogicalName,
         string relationshipSchemaName,
         CancellationToken ct = default);
+
+    // ========================================
+    // Email-to-Document Operations (Phase 4)
+    // ========================================
+
+    /// <summary>
+    /// Get the main .eml document record by email activity lookup.
+    /// Returns the document where sprk_Email lookup equals the email activity ID
+    /// and sprk_isemailarchive is true.
+    /// </summary>
+    /// <param name="emailId">The Dataverse email activity ID</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>The main .eml document entity, or null if not found</returns>
+    Task<DocumentEntity?> GetDocumentByEmailLookupAsync(Guid emailId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Get child documents (attachments) by parent document lookup.
+    /// Returns documents where sprk_ParentDocumentName lookup equals the parent document ID.
+    /// </summary>
+    /// <param name="parentDocumentId">The parent document ID</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>List of child document entities</returns>
+    Task<IEnumerable<DocumentEntity>> GetDocumentsByParentAsync(Guid parentDocumentId, CancellationToken ct = default);
 }

@@ -412,6 +412,30 @@ public class EmailAttachmentExtractionTests
         result[0].SkipReason.Should().Contain(".bat");
     }
 
+    [Fact]
+    public void ExtractAttachments_TxtFile_IncludedForProcessing()
+    {
+        // Arrange - .txt files should NOT be blocked (test case for attachment bug investigation)
+        var textContent = "This is a test attachment file for attachment processing verification.";
+        var emlStream = CreateEmlWithAttachments(new[]
+        {
+            ("test-attachment-30.txt", "text/plain", Encoding.UTF8.GetBytes(textContent))
+        });
+
+        var converter = CreateConverter();
+
+        // Act
+        var result = converter.ExtractAttachments(emlStream);
+
+        // Assert - .txt should be allowed
+        result.Should().HaveCount(1);
+        result[0].FileName.Should().Be("test-attachment-30.txt");
+        result[0].MimeType.Should().Be("text/plain");
+        result[0].ShouldCreateDocument.Should().BeTrue("because .txt files are not in the blocked extensions list");
+        result[0].SkipReason.Should().BeNull();
+        result[0].SizeBytes.Should().Be(textContent.Length);
+    }
+
     #endregion
 
     #region Helper Methods

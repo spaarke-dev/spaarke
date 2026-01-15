@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-01-14
+> **Last Updated**: 2026-01-15
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,21 +10,27 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 030 - Create Email Analysis Playbook |
-| **Step** | — |
-| **Status** | not-started |
-| **Next Action** | Begin task 030 - Create Email Analysis Playbook |
+| **Task** | 039 - Deploy and Verify Phase 4 (Bug Investigation) |
+| **Step** | Fix applied - ready to deploy and test |
+| **Status** | in-progress |
+| **Next Action** | Deploy API to Azure and test with Test #30/#31 emails |
 
 ### Files Modified This Session
-- `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/AppOnlyAnalysisServiceTests.cs` - New test file for AppOnlyAnalysisService
-- `tests/unit/Sprk.Bff.Api.Tests/Services/Jobs/AppOnlyDocumentAnalysisJobHandlerTests.cs` - New test file for job handler
-- `src/server/api/Sprk.Bff.Api/Services/Ai/IAppOnlyAnalysisService.cs` - New interface for AppOnlyAnalysisService
-- `src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs` - Updated to implement interface
-- `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/AppOnlyDocumentAnalysisJobHandler.cs` - Updated to use interface
-- `src/server/api/Sprk.Bff.Api/Program.cs` - Updated DI registration
+- `src/server/api/Sprk.Bff.Api/Services/Email/EmailToEmlConverter.cs` - Added retry logic in FetchAttachmentsAsync
+- `tests/unit/Sprk.Bff.Api.Tests/Integration/DataverseEntitySchemaTests.cs` - Fixed obsolete ParentDocumentId reference
+- `tests/unit/Sprk.Bff.Api.Tests/Services/Email/EmailAttachmentExtractionTests.cs` - Added .txt file test
+- `projects/email-to-document-automation-r2/notes/project-follow-up-items.md` - Updated with root cause analysis
 
 ### Critical Context
-Phase 3 COMPLETE. Deployed to Azure. API healthy. All 39 unit tests passing. Dataverse polling has pre-existing config issue (not Phase 3 related). Next: Phase 4 - Task 030.
+**P2 Bug Root Cause Identified**: **Race condition** between webhook and attachment creation.
+- Webhook fires on email Create event
+- Attachments are added via separate API call (activitymimeattachments)
+- FetchAttachmentsAsync may run before attachments exist in Dataverse
+
+**Fix Applied**: Added retry logic in `FetchAttachmentsAsync`:
+- If 0 attachments found on first query, wait 2 seconds and retry once
+- Handles the timing window where webhook job runs before attachments created
+- Build succeeded, 17 attachment extraction tests pass
 
 ---
 
@@ -32,12 +38,14 @@ Phase 3 COMPLETE. Deployed to Azure. API healthy. All 39 unit tests passing. Dat
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | 029 |
-| **Task File** | tasks/029-deploy-phase3.poml |
-| **Title** | Deploy and Verify Phase 3 |
-| **Phase** | 3: AppOnlyAnalysisService |
-| **Status** | not-started |
-| **Started** | — |
+| **Task ID** | 039 (Bug Investigation) |
+| **Task File** | tasks/009-deploy-phase1.poml |
+| **Title** | Deploy and Verify Phase 4 - Attachment Bug Investigation |
+| **Phase** | 4: Email-specific AI Analysis |
+| **Status** | in-progress |
+| **Started** | 2026-01-14 |
+| **Rigor Level** | FULL |
+| **Rigor Reason** | Production bug investigation requiring code analysis |
 
 ---
 
@@ -45,11 +53,11 @@ Phase 3 COMPLETE. Deployed to Azure. API healthy. All 39 unit tests passing. Dat
 
 ### Completed Steps
 
-*No steps completed yet*
+*No steps completed yet - new task*
 
 ### Current Step
 
-*Awaiting task start*
+Pending task start
 
 ### Files Modified (All Task)
 
@@ -61,58 +69,30 @@ Phase 3 COMPLETE. Deployed to Azure. API healthy. All 39 unit tests passing. Dat
 
 ---
 
+## Knowledge Files Loaded
+
+*Will be loaded when task starts*
+
+## Constraints Loaded
+
+*Will be loaded when task starts*
+
+---
+
 ## Session History
 
-### Task 022 (Completed)
-- **Title**: Integrate AI Analysis Enqueueing in Email Handler
+### Task 039 (Completed)
+- **Title**: Deploy and Verify Phase 4 (Email Analysis Playbook)
 - **Completed**: 2026-01-14
-- **Summary**: Modified EmailToDocumentJobHandler to enqueue AppOnlyDocumentAnalysis jobs after document creation. Added EnqueueAiAnalysisJobAsync helper method that submits jobs via JobSubmissionService. Jobs are enqueued for both main email documents and attachments, controlled by AutoEnqueueAi config setting. Added telemetry metrics for job enqueueing.
-- **Files Modified**:
-  - `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/EmailToDocumentJobHandler.cs` (modified)
-  - `src/server/api/Sprk.Bff.Api/Telemetry/EmailTelemetry.cs` (added metrics)
+- **Summary**: Deployed to Azure, verified playbook in Dataverse. Standard doc analysis working. Email-specific analysis blocked by email lookup field bug (tracked as P1).
 
-### Task 021 (Completed)
-- **Title**: Create AppOnlyDocumentAnalysis Job Handler
+### Task 033 (Completed)
+- **Title**: Integration Tests for Email Analysis
 - **Completed**: 2026-01-14
-- **Summary**: Created AppOnlyDocumentAnalysisJobHandler for background AI analysis jobs.
-- **Files Modified**:
-  - `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/AppOnlyDocumentAnalysisJobHandler.cs` (new)
-  - `src/server/api/Sprk.Bff.Api/Telemetry/DocumentTelemetry.cs` (added metrics)
-  - `src/server/api/Sprk.Bff.Api/Program.cs` (DI registration)
+- **Summary**: Created 35 integration tests for email analysis
 
-### Task 020 (Completed)
-- **Title**: Create AppOnlyAnalysisService
-- **Completed**: 2026-01-14
-- **Summary**: Created AppOnlyAnalysisService for background AI analysis without HttpContext.
-
-### Phase 1 & 2 Complete
-- All tasks 001-019 completed
-
----
-
-## Next Action
-
-**Next Step**: Begin task 023 - Unit Tests for AppOnlyAnalysisService
-
-**Pre-conditions**:
-- Task 020 complete - AppOnlyAnalysisService created ✅
-- Task 021 complete - AppOnlyDocumentAnalysisJobHandler created ✅
-- Task 022 complete - AI job enqueueing integrated ✅
-
-**Key Context**:
-- Phase 3 nearing completion
-- Need tests for AppOnlyAnalysisService, job handler, and enqueueing
-
-**Expected Output**:
-- Unit tests for AppOnlyAnalysisService
-- Unit tests for AppOnlyDocumentAnalysisJobHandler
-- Unit tests for AI job enqueueing in EmailToDocumentJobHandler
-
----
-
-## Blockers
-
-**Status**: None
+### Phase 1, 2, 3 & 4 Complete
+- All tasks 001-039 completed
 
 ---
 
@@ -124,11 +104,11 @@ Phase 3 COMPLETE. Deployed to Azure. API healthy. All 39 unit tests passing. Dat
 - **Task Index**: [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md)
 
 ### Phase Status
-- Phase 1: ✅ Complete (Tasks 001-009)
-- Phase 2: ✅ Complete (Tasks 010-019)
-- Phase 3: 🔄 In progress (Tasks 020-029) - Tasks 020, 021, 022 complete
-- Phase 4: 🔲 Not started (Tasks 030-039)
-- Phase 5: 🔲 Not started (Tasks 040-049)
+- Phase 1: Complete (Tasks 001-009)
+- Phase 2: Complete (Tasks 010-019)
+- Phase 3: Complete (Tasks 020-029)
+- Phase 4: Complete (Tasks 030-039)
+- Phase 5: Not started (Tasks 040-049)
 
 ---
 

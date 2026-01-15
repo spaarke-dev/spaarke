@@ -526,6 +526,8 @@ var result = await _accessDataSource.GetUserAccessAsync(
 
 **When**: Email webhook triggers or background job handlers need to upload files to SPE and update Dataverse **without user context**.
 
+**Full Documentation**: See [email-to-document-automation.md](email-to-document-automation.md) for complete architecture.
+
 **Critical**: This pattern is **separate from OBO** because:
 1. Webhooks arrive from Dataverse with no user context
 2. Background job handlers run asynchronously without `HttpContext`
@@ -548,6 +550,93 @@ var result = await _accessDataSource.GetUserAccessAsync(
 │  ✅ Use for: User file operations  ❌ NOT for: AI analysis (needs OBO)  │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
+
+### Complete App-Only Authentication Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  Email Activity Created in Dataverse                                         │
+│  (via Server-Side Sync or Outgoing email)                                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+                    │
+        ┌───────────┴───────────┐
+        ↓                       ↓
+┌───────────────────────┐ ┌───────────────────────────────────────────────────┐
+│ Webhook Path          │ │ Polling Backup Path                               │
+│ ────────────────────  │ │ ────────────────────────────────────────────────  │
+│ POST /api/v1/emails/  │ │ EmailPollingBackupService (BackgroundService)     │
+│   webhook-trigger     │ │ Queries: emails where processingstatus = null     │
+│ AllowAnonymous +      │ │ Interval: configurable (default 5 min)            │
+│   Signature validation│ │                                                   │
+└───────────────────────┘ └───────────────────────────────────────────────────┘
+                    │                       │
+                    └───────────┬───────────┘
+                                ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  ServiceBusJobProcessor → EmailToDocumentJobHandler                          │
+│  ───────────────────────────────────────────────────                        │
+│  Job Type: "ProcessEmailToDocument"                                         │
+│  Idempotency Key: "Email:{emailId}:Archive"                                 │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                │
+                                ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  ClientSecretCredential (Azure.Identity)                                    │
+│  ─────────────────────────────────────────                                  │
+│  Configuration:                                                             │
+│    TENANT_ID:       {azure-ad-tenant-id}                                    │
+│    API_APP_ID:      1e40baad-e065-4aea-a8d4-4b7ab273458c                    │
+│    API_CLIENT_SECRET: {secret from Key Vault}                               │
+└─────────────────────────────────────────────────────────────────────────────┘
+                    │
+        ┌───────────┴───────────┐
+        ↓                       ↓
+┌───────────────────────┐ ┌───────────────────────────────────────────────────┐
+│  Dataverse Scope      │ │  Microsoft Graph Scope                            │
+│  ────────────────     │ │  ───────────────────                              │
+│  {orgUrl}/.default    │ │  https://graph.microsoft.com/.default             │
+│                       │ │                                                   │
+│  Operations:          │ │  Operations:                                      │
+│  • Fetch email data   │ │  • Resolve container → drive ID                   │
+│  • Fetch attachments  │ │  • Upload .eml file to SPE                        │
+│  • Create/Update      │ │  • Upload attachments to SPE                      │
+│    sprk_document      │ │  • Get file handle (ID, WebUrl)                   │
+└───────────────────────┘ └───────────────────────────────────────────────────┘
+```
+
+### Token Management Implementation
+
+**File**: `src/server/api/Sprk.Bff.Api/Services/Email/EmailToEmlConverter.cs`
+
+```csharp
+// Token caching and refresh (lines 492-518)
+private async Task EnsureAuthenticatedAsync(CancellationToken ct)
+{
+    // Check if current token is valid (with 5-minute buffer before expiry)
+    if (_currentToken == null || _currentToken.Value.ExpiresOn <= DateTimeOffset.UtcNow.AddMinutes(5))
+    {
+        // Build scope for Dataverse
+        var scope = $"{_apiUrl.Replace("/api/data/v9.2", "")}/.default";
+
+        // Acquire new token using client credentials
+        _currentToken = await _credential.GetTokenAsync(
+            new TokenRequestContext([scope]),
+            ct);
+
+        // Set on HttpClient for subsequent requests
+        _httpClient.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", _currentToken.Value.Token);
+
+        _logger.LogDebug("Refreshed Dataverse access token for EmailToEmlConverter");
+    }
+}
+```
+
+**Key Points**:
+- Token cached in `_currentToken` field (per-instance)
+- Refresh triggered 5 minutes before expiry
+- Single responsibility: Each service manages its own token lifecycle
+- No shared token cache between services (stateless design)
 
 ### App-Only SPE File Upload Pattern
 

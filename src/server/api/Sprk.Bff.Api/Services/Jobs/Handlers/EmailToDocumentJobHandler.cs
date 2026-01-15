@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Email;
 using Sprk.Bff.Api.Telemetry;
 
@@ -145,7 +146,21 @@ public class EmailToDocumentJobHandler : IJobHandler
                 }
 
                 var metadata = emlResult.Metadata;
-                var emlStream = emlResult.EmlStream;
+
+                // CRITICAL: Copy EML content to byte array immediately to avoid stream state issues
+                // after upload. The upload operation consumes the stream, and we need a fresh
+                // stream for attachment extraction.
+                byte[] emlContent;
+                using (var originalStream = emlResult.EmlStream)
+                {
+                    originalStream.Position = 0;
+                    emlContent = new byte[originalStream.Length];
+                    await originalStream.ReadExactlyAsync(emlContent, ct);
+                }
+
+                _logger.LogDebug(
+                    "[AttachmentDebug] Copied EML content to byte array: {Size} bytes",
+                    emlContent.Length);
 
                 // Generate filename for the .eml file
                 var fileName = await _emlConverter.GenerateEmlFileNameAsync(emailId, ct);
@@ -169,9 +184,13 @@ public class EmailToDocumentJobHandler : IJobHandler
                 // Resolve container to drive ID
                 var driveId = await _speFileStore.ResolveDriveIdAsync(containerId, ct);
 
-                // Upload .eml file to SPE
+                // Upload .eml file to SPE using a fresh stream from the byte array
                 var uploadPath = $"/emails/{fileName}";
-                var fileHandle = await _speFileStore.UploadSmallAsync(driveId, uploadPath, emlStream, ct);
+                FileHandleDto? fileHandle;
+                await using (var uploadStream = new MemoryStream(emlContent, writable: false))
+                {
+                    fileHandle = await _speFileStore.UploadSmallAsync(driveId, uploadPath, uploadStream, ct);
+                }
 
                 if (fileHandle == null)
                 {
@@ -253,8 +272,15 @@ public class EmailToDocumentJobHandler : IJobHandler
                 // Process attachments as child documents (FR-04)
                 // Attachment failures should not fail the main job
                 // Note: AI analysis is also enqueued for each attachment in ProcessSingleAttachmentAsync
+                // Optimization: Pass fetched attachments directly instead of re-extracting from .eml
+                // The attachment streams are still valid because BuildMimeMessage uses ToArray() which
+                // doesn't consume the MemoryStream position.
+                _logger.LogWarning(
+                    "[AttachmentProcessDebug] Processing {AttachmentCount} attachments for document {DocumentId}",
+                    emlResult.Attachments.Count, documentId);
+
                 var attachmentResults = await ProcessAttachmentsAsync(
-                    emlStream,
+                    emlResult.Attachments,
                     documentId,
                     fileName,
                     fileHandle.Id,
@@ -344,15 +370,16 @@ public class EmailToDocumentJobHandler : IJobHandler
 
     /// <summary>
     /// Process email attachments as child documents.
-    /// Extracts attachments from the .eml file, filters out noise (signatures, tracking pixels),
-    /// uploads meaningful attachments to SPE, and creates child Document records.
+    /// Filters out noise (signatures, tracking pixels), uploads meaningful attachments to SPE,
+    /// and creates child Document records.
     /// </summary>
     /// <remarks>
     /// Attachment failures are logged but do not fail the main job.
     /// Child documents are linked to the parent via sprk_ParentDocumentLookup.
+    /// Attachments are passed directly from FetchAttachmentsAsync to avoid redundant re-extraction from .eml.
     /// </remarks>
     private async Task<AttachmentProcessingResult> ProcessAttachmentsAsync(
-        Stream emlStream,
+        IReadOnlyList<EmailAttachmentInfo> fetchedAttachments,
         Guid parentDocumentId,
         string parentFileName,
         string parentGraphItemId,
@@ -363,50 +390,63 @@ public class EmailToDocumentJobHandler : IJobHandler
     {
         var result = new AttachmentProcessingResult();
 
+        _logger.LogWarning(
+            "[AttachmentProcessDebug] ProcessAttachmentsAsync: Processing {Count} attachments for parent document {ParentDoc}",
+            fetchedAttachments.Count, parentDocumentId);
+
         try
         {
-            // Reset stream position for extraction
-            if (emlStream.CanSeek)
-                emlStream.Position = 0;
-
-            // Extract all attachments from the .eml file
-            var allAttachments = _emlConverter.ExtractAttachments(emlStream);
+            // Use attachments directly from FetchAttachmentsAsync (already fetched during .eml conversion)
+            // This avoids redundant re-extraction from the .eml file
+            var allAttachments = fetchedAttachments.ToList();
             result.ExtractedCount = allAttachments.Count;
+
+            _logger.LogDebug(
+                "Processing {Count} attachments for parent {ParentDocumentId}",
+                allAttachments.Count, parentDocumentId);
 
             if (allAttachments.Count == 0)
             {
-                _logger.LogDebug("No attachments found in email for parent document {ParentDocumentId}", parentDocumentId);
+                _logger.LogWarning(
+                    "[AttachmentProcessDebug] No attachments to process for parent document {ParentDocumentId}",
+                    parentDocumentId);
                 return result;
             }
-
-            _logger.LogDebug(
-                "Extracted {AttachmentCount} attachments from email for parent document {ParentDocumentId}",
-                allAttachments.Count, parentDocumentId);
 
             // Filter out noise (signature images, tracking pixels, calendar files, etc.)
             var filteredAttachments = _attachmentFilterService.FilterAttachments(allAttachments);
             result.FilteredCount = allAttachments.Count - filteredAttachments.Count;
 
+            _logger.LogWarning(
+                "[AttachmentProcessDebug] Filtered attachments for parent {ParentDocumentId}: {RemainingCount} to process, {FilteredCount} filtered out. Remaining: [{FileList}]",
+                parentDocumentId, filteredAttachments.Count, result.FilteredCount, string.Join(", ", filteredAttachments.Select(a => a.FileName)));
+
             if (filteredAttachments.Count == 0)
             {
-                _logger.LogDebug(
-                    "All {AttachmentCount} attachments were filtered out for parent document {ParentDocumentId}",
-                    allAttachments.Count, parentDocumentId);
+                _logger.LogWarning(
+                    "[AttachmentProcessDebug] All {AttachmentCount} attachments were filtered out for parent {ParentDocumentId}. Filtered: [{FileList}]",
+                    allAttachments.Count, parentDocumentId, string.Join(", ", allAttachments.Select(a => a.FileName)));
 
-                // Dispose all attachment streams
+                // Dispose streams for filtered attachments
                 foreach (var att in allAttachments)
+                {
                     att.Content?.Dispose();
+                }
 
                 return result;
             }
 
             _logger.LogInformation(
-                "Processing {ProcessCount} of {TotalCount} attachments for parent document {ParentDocumentId} ({FilteredCount} filtered)",
-                filteredAttachments.Count, allAttachments.Count, parentDocumentId, result.FilteredCount);
+                "Processing {ProcessCount} of {TotalCount} attachments for parent document {ParentDocumentId}",
+                filteredAttachments.Count, allAttachments.Count, parentDocumentId);
 
             // Process each attachment (sequential to avoid overwhelming SPE)
             foreach (var attachment in filteredAttachments)
             {
+                _logger.LogWarning(
+                    "[AttachmentProcessDebug] Processing attachment '{FileName}' ({Size} bytes, ContentNull={ContentNull}, ContentLength={ContentLength}) for parent {ParentDocumentId}",
+                    attachment.FileName, attachment.SizeBytes, attachment.Content == null, attachment.Content?.Length ?? -1, parentDocumentId);
+
                 try
                 {
                     await ProcessSingleAttachmentAsync(
@@ -472,12 +512,13 @@ public class EmailToDocumentJobHandler : IJobHandler
             return;
         }
 
-        // Reset stream position
+        // Reset stream position (stream was already read during .eml building via ToArray())
         if (attachment.Content.CanSeek)
             attachment.Content.Position = 0;
 
         // Upload attachment to SPE in a subfolder of the parent email
         var attachmentPath = $"/emails/attachments/{parentDocumentId:N}/{attachment.FileName}";
+
         var fileHandle = await _speFileStore.UploadSmallAsync(driveId, attachmentPath, attachment.Content, ct);
 
         if (fileHandle == null)
@@ -485,9 +526,9 @@ public class EmailToDocumentJobHandler : IJobHandler
             throw new InvalidOperationException($"Failed to upload attachment '{attachment.FileName}' to SPE");
         }
 
-        _logger.LogDebug(
-            "Uploaded attachment '{AttachmentName}' to SPE: ItemId={ItemId}",
-            attachment.FileName, fileHandle.Id);
+        _logger.LogWarning(
+            "[AttachmentProcessDebug] Uploaded attachment '{AttachmentName}' to SPE: ItemId={ItemId}, WebUrl={WebUrl}",
+            attachment.FileName, fileHandle.Id, fileHandle.WebUrl);
 
         // Create child Document record in Dataverse
         var createRequest = new CreateDocumentRequest
@@ -516,21 +557,26 @@ public class EmailToDocumentJobHandler : IJobHandler
             HasFile = true,
             DocumentType = DocumentTypeEmailAttachment,
 
-            // Parent relationship
+            // Parent relationship (ParentDocumentLookup sets the lookup via @odata.bind)
             ParentDocumentLookup = parentDocumentId,
-            ParentDocumentId = parentDocumentId.ToString(),
             ParentFileName = parentFileName,
             ParentGraphItemId = parentGraphItemId,
-            RelationshipType = RelationshipTypeEmailAttachment,
+            RelationshipType = RelationshipTypeEmailAttachment
 
-            // Link to original email activity
-            EmailLookup = emailId
+            // Note: EmailLookup is NOT set for child documents because:
+            // 1. The sprk_document entity has an alternate key on sprk_email (Email Activity Key)
+            // 2. The parent .eml document already uses that email lookup
+            // 3. Child attachments relate to the email through their ParentDocumentLookup
         };
+
+        _logger.LogWarning(
+            "[AttachmentProcessDebug] Updating child document {ChildDocumentId} with: GraphItemId={GraphItemId}, GraphDriveId={GraphDriveId}, FilePath={FilePath}, HasFile={HasFile}, ParentDocumentLookup={ParentDocumentLookup}",
+            childDocumentIdStr, updateRequest.GraphItemId, updateRequest.GraphDriveId, updateRequest.FilePath, updateRequest.HasFile, updateRequest.ParentDocumentLookup);
 
         await _dataverseService.UpdateDocumentAsync(childDocumentIdStr, updateRequest, ct);
 
-        _logger.LogInformation(
-            "Created child document {ChildDocumentId} for attachment '{AttachmentName}' (parent: {ParentDocumentId})",
+        _logger.LogWarning(
+            "[AttachmentProcessDebug] Created child document {ChildDocumentId} for attachment '{AttachmentName}' (parent: {ParentDocumentId})",
             childDocumentId, attachment.FileName, parentDocumentId);
 
         // Enqueue AI analysis for attachment document (if enabled)

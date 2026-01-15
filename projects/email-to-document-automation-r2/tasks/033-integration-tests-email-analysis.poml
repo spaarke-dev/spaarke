@@ -3,7 +3,7 @@
   <metadata>
     <title>Integration Tests for Email Analysis</title>
     <phase>4: Email Analysis Playbook</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>032</dependencies>
     <blocks>039</blocks>
@@ -81,6 +81,28 @@
     Consider using test fixtures with known content for predictable AI responses.
     May need to mock AI service for deterministic testing.
   </notes>
+
+  <completion-notes>
+    <completed-date>2026-01-14</completed-date>
+    <summary>
+      Created comprehensive integration tests for email analysis in EmailAnalysisIntegrationTests.cs.
+      Tests cover both AppOnlyAnalysisService.AnalyzeEmailAsync and EmailAnalysisJobHandler.
+
+      Test coverage includes:
+      - Full email+attachment context combination (FR-11)
+      - Large email truncation handling (FR-12 - 100KB limit)
+      - Entity field population verification (FR-13)
+      - Error handling for attachment extraction failures
+      - Job handler idempotency and processing lock behavior
+      - Success and failure result structures
+
+      Total tests: 35 (17 for integration, 18 for job handler)
+      All tests pass.
+    </summary>
+    <files-created>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/EmailAnalysisIntegrationTests.cs</file>
+    </files-created>
+  </completion-notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

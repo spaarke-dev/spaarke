@@ -466,8 +466,8 @@ public class DataverseEntitySchemaTests
             document["sprk_attachments"] = request.Attachments;
 
         // Parent Document Fields
-        if (request.ParentDocumentId != null)
-            document["sprk_parentdocumentid"] = request.ParentDocumentId;
+        // Note: ParentDocumentId was removed - field doesn't exist in Dataverse
+        // Use ParentDocumentLookup for the actual lookup relationship
 
         if (request.ParentFileName != null)
             document["sprk_parentfilename"] = request.ParentFileName;
@@ -476,7 +476,7 @@ public class DataverseEntitySchemaTests
             document["sprk_parentgraphitemid"] = request.ParentGraphItemId;
 
         if (request.ParentDocumentLookup.HasValue)
-            document["sprk_parentdocumentname"] = new EntityReference("sprk_document", request.ParentDocumentLookup.Value);
+            document["sprk_parentdocument"] = new EntityReference("sprk_document", request.ParentDocumentLookup.Value);
 
         return document;
     }

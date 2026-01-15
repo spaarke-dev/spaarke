@@ -67,11 +67,11 @@
 
 | ID | Title | Status | Dependencies | Rigor |
 |----|-------|--------|--------------|-------|
-| 030 | [Create Email Analysis Playbook](030-create-email-analysis-playbook.poml) | 🔲 | 029 | FULL |
-| 031 | [Implement Email Analysis in AppOnlyAnalysisService](031-implement-email-analysis-service.poml) | 🔲 | 030 | FULL |
-| 032 | [Create EmailAnalysis Job Handler](032-create-email-analysis-job-handler.poml) | 🔲 | 031 | STANDARD |
-| 033 | [Integration Tests for Email Analysis](033-integration-tests-email-analysis.poml) | 🔲 | 032 | STANDARD |
-| 039 | [Deploy and Verify Phase 4](039-deploy-phase4.poml) | 🔲 | 033 | STANDARD |
+| 030 | [Create Email Analysis Playbook](030-create-email-analysis-playbook.poml) | ✅ | 029 | FULL |
+| 031 | [Implement Email Analysis in AppOnlyAnalysisService](031-implement-email-analysis-service.poml) | ✅ | 030 | FULL |
+| 032 | [Create EmailAnalysis Job Handler](032-create-email-analysis-job-handler.poml) | ✅ | 031 | STANDARD |
+| 033 | [Integration Tests for Email Analysis](033-integration-tests-email-analysis.poml) | ✅ | 032 | STANDARD |
+| 039 | [Deploy and Verify Phase 4](039-deploy-phase4.poml) | ✅ | 033 | STANDARD |
 
 ### Phase 5: UI/Ribbon Enhancements
 

@@ -389,12 +389,12 @@ public class DataverseWebApiService : IDataverseService
             payload["sprk_Email@odata.bind"] = $"/emails({request.EmailLookup.Value})";
 
         // Parent document fields (for email attachments)
-        if (request.ParentDocumentId != null) payload["sprk_parentdocumentid"] = request.ParentDocumentId;
+        // Note: sprk_parentdocumentid was removed from schema - use ParentDocumentLookup instead
         if (request.ParentFileName != null) payload["sprk_parentfilename"] = request.ParentFileName;
         if (request.ParentGraphItemId != null) payload["sprk_parentgraphitemid"] = request.ParentGraphItemId;
         // ParentDocumentLookup uses @odata.bind for lookup fields
         if (request.ParentDocumentLookup.HasValue)
-            payload["sprk_ParentDocumentName@odata.bind"] = $"/sprk_documents({request.ParentDocumentLookup.Value})";
+            payload["sprk_ParentDocument@odata.bind"] = $"/sprk_documents({request.ParentDocumentLookup.Value})";
 
         // Record association lookups (Phase 2 - Record Matching)
         if (request.MatterLookup.HasValue)
@@ -542,8 +542,28 @@ public class DataverseWebApiService : IDataverseService
                 ? (DocumentStatus)GetIntValue(data, "statuscode")!.Value
                 : DocumentStatus.Draft,
             CreatedOn = GetDateTimeValue(data, "createdon") ?? DateTime.UtcNow,
-            ModifiedOn = GetDateTimeValue(data, "modifiedon") ?? DateTime.UtcNow
+            ModifiedOn = GetDateTimeValue(data, "modifiedon") ?? DateTime.UtcNow,
+
+            // Email metadata fields
+            EmailSubject = GetStringValue(data, "sprk_emailsubject"),
+            EmailFrom = GetStringValue(data, "sprk_emailfrom"),
+            EmailTo = GetStringValue(data, "sprk_emailto"),
+            EmailCc = GetStringValue(data, "sprk_emailcc"),
+            EmailDate = GetDateTimeValue(data, "sprk_emaildate"),
+            EmailBody = GetStringValue(data, "sprk_emailbody"),
+            IsEmailArchive = GetNullableBoolValue(data, "sprk_isemailarchive"),
+            ParentDocumentId = GetStringValue(data, "sprk_parentdocumentid")
         };
+    }
+
+    private bool? GetNullableBoolValue(Dictionary<string, JsonElement> data, string key)
+    {
+        if (data.TryGetValue(key, out var element))
+        {
+            if (element.ValueKind == JsonValueKind.True) return true;
+            if (element.ValueKind == JsonValueKind.False) return false;
+        }
+        return null;
     }
 
     private string? GetStringValue(Dictionary<string, JsonElement> data, string key)
@@ -593,6 +613,97 @@ public class DataverseWebApiService : IDataverseService
             }
         }
         return null;
+    }
+
+    // ========================================
+    // Email-to-Document Operations (Phase 4)
+    // ========================================
+
+    /// <summary>
+    /// Get the main .eml document record by email activity lookup.
+    /// Queries: $filter=_sprk_email_value eq {emailId} and sprk_isemailarchive eq true
+    /// </summary>
+    public async Task<DocumentEntity?> GetDocumentByEmailLookupAsync(Guid emailId, CancellationToken ct = default)
+    {
+        await EnsureAuthenticatedAsync(ct);
+
+        // OData filter for email lookup (lookup value is stored as _sprk_email_value)
+        // and IsEmailArchive=true (main .eml document, not attachments)
+        var filter = $"_sprk_email_value eq {emailId} and sprk_isemailarchive eq true";
+        var url = $"{_entitySetName}?$filter={Uri.EscapeDataString(filter)}&$top=1";
+
+        _logger.LogDebug("Querying document by email lookup: {EmailId}", emailId);
+
+        try
+        {
+            var response = await _httpClient.GetAsync(url, ct);
+            response.EnsureSuccessStatusCode();
+
+            var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
+            if (result?.Value == null || result.Value.Count == 0)
+            {
+                _logger.LogDebug("No document found for email lookup {EmailId}", emailId);
+                return null;
+            }
+
+            var data = result.Value[0];
+            var id = data.TryGetValue("sprk_documentid", out var idElement)
+                ? idElement.GetString() ?? string.Empty
+                : string.Empty;
+
+            var document = MapToDocumentEntity(data, id);
+            _logger.LogDebug("Found document {DocumentId} for email lookup {EmailId}", document.Id, emailId);
+            return document;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error querying document by email lookup {EmailId}", emailId);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Get child documents (attachments) by parent document lookup.
+    /// Queries: $filter=_sprk_parentdocumentname_value eq {parentDocumentId}
+    /// </summary>
+    public async Task<IEnumerable<DocumentEntity>> GetDocumentsByParentAsync(Guid parentDocumentId, CancellationToken ct = default)
+    {
+        await EnsureAuthenticatedAsync(ct);
+
+        // OData filter for parent document lookup (lookup value is stored as _sprk_parentdocumentname_value)
+        var filter = $"_sprk_parentdocumentname_value eq {parentDocumentId}";
+        var url = $"{_entitySetName}?$filter={Uri.EscapeDataString(filter)}";
+
+        _logger.LogDebug("Querying child documents by parent: {ParentDocumentId}", parentDocumentId);
+
+        try
+        {
+            var response = await _httpClient.GetAsync(url, ct);
+            response.EnsureSuccessStatusCode();
+
+            var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
+            if (result?.Value == null || result.Value.Count == 0)
+            {
+                _logger.LogDebug("No child documents found for parent {ParentDocumentId}", parentDocumentId);
+                return Enumerable.Empty<DocumentEntity>();
+            }
+
+            var documents = result.Value.Select(data =>
+            {
+                var id = data.TryGetValue("sprk_documentid", out var idElement)
+                    ? idElement.GetString() ?? string.Empty
+                    : string.Empty;
+                return MapToDocumentEntity(data, id);
+            }).ToList();
+
+            _logger.LogDebug("Found {Count} child documents for parent {ParentDocumentId}", documents.Count, parentDocumentId);
+            return documents;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error querying child documents by parent {ParentDocumentId}", parentDocumentId);
+            throw;
+        }
     }
 
     // ========================================

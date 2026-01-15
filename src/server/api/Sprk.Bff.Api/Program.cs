@@ -515,6 +515,10 @@ builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.Handlers.EmailToDocumentJo
 // Uses AppOnlyAnalysisService with playbook-based analysis (FR-10)
 builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.AppOnlyDocumentAnalysisJobHandler>();
 
+// Email analysis job handler - for combined email+attachment AI analysis (FR-11, FR-12)
+// Uses AppOnlyAnalysisService.AnalyzeEmailAsync with Email Analysis playbook
+builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.EmailAnalysisJobHandler>();
+
 // Configure Service Bus job processing
 var serviceBusConnectionString = builder.Configuration.GetConnectionString("ServiceBus");
 if (string.IsNullOrWhiteSpace(serviceBusConnectionString))
