@@ -3,7 +3,7 @@
   <metadata>
     <title>Create JavaScript Web Resource for Ribbon Handler</title>
     <phase>5: UI/Ribbon Enhancements</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>040, 041</dependencies>
     <blocks>043</blocks>
@@ -99,6 +99,29 @@
     The API endpoint may need to be configured (environment variable for base URL).
     Consider error cases: already archived, processing failed, network error.
   </notes>
+
+  <completion-notes date="2026-01-15">
+    VERIFIED: Web resource ALREADY EXISTS at infrastructure/dataverse/ribbon/EmailRibbons/WebResources/sprk_emailactions.js
+
+    Implementation Details:
+    1. ✅ Sprk.Email namespace - Lines 16-21
+    2. ✅ saveToDocument(primaryControl) function - Line 343 (named "saveToDocument" not "archiveEmail")
+    3. ✅ Gets email ID - Line 352 via Utils.getEmailInfo
+    4. ✅ Progress indicator - Line 365 Xrm.Utility.showProgressIndicator
+    5. ✅ API call - Lines 371-387 POST /api/emails/convert-to-document with Bearer auth
+    6. ✅ Success handling - Lines 391-412 with option to open document
+    7. ✅ Error handling - Lines 414-443 (409 conflict, 404 not found, generic errors)
+    8. ✅ Progress closed - Lines 389, 448
+    9. ✅ Already in EmailRibbons solution
+
+    Acceptance Criteria Met:
+    1. Handler function exists (saveToDocument = archiveEmail equivalent)
+    2. Calls BFF API endpoint correctly with MSAL authentication
+    3. Shows progress during processing and result notification
+
+    NO CODE CHANGES REQUIRED - Implementation predates task creation (from Task 040).
+    Web resource is deployed as part of EmailRibbons v1.1.0 solution.
+  </completion-notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

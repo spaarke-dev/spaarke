@@ -3,7 +3,7 @@
   <metadata>
     <title>Manual Testing Checklist for Ribbon Buttons</title>
     <phase>5: UI/Ribbon Enhancements</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>042</dependencies>
     <blocks>049</blocks>
@@ -88,6 +88,31 @@
     Use dev environment for testing. Take screenshots of any issues.
     Consider testing with different user roles if applicable.
   </notes>
+
+  <completion-notes date="2026-01-15">
+    Created comprehensive manual testing checklist at:
+    projects/email-to-document-automation-r2/notes/ribbon-testing-checklist.md
+
+    Checklist includes:
+    1. TC-01 to TC-10: 10 test cases covering all scenarios
+    2. Pre-test setup instructions
+    3. Test summary table for tracking results
+    4. Issues tracking section
+    5. FR-14/FR-15 verification section
+    6. Sign-off section
+
+    Test Scenarios Covered:
+    - Received email button visibility and processing (TC-01, TC-02, TC-03)
+    - Sent email button visibility and processing (TC-04, TC-05)
+    - Already archived email button hidden (TC-06)
+    - Open/Draft email button disabled (TC-07)
+    - Network error handling (TC-08)
+    - 409 Conflict error handling (TC-09)
+    - Success dialog "Open Document" action (TC-10)
+
+    NOTE: Actual test execution requires human tester in Dataverse browser environment.
+    Checklist document is ready for test execution during Phase 5 deployment (Task 049).
+  </completion-notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

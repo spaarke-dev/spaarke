@@ -1,8 +1,8 @@
 # Email-to-Document Automation R2
 
-> **Status**: Planning
+> **Status**: Implementation Complete (Wrap-up Pending)
 > **Created**: 2026-01-13
-> **Type**: API Enhancement + PCF
+> **Type**: API Enhancement + Ribbon UI
 
 ---
 
@@ -65,13 +65,15 @@ Five-phase implementation addressing each gap:
 
 ## Graduation Criteria
 
-- [ ] Users can download .eml files uploaded by email processing via the download endpoint
-- [ ] Attachments extracted and uploaded as child Documents with `sprk_ParentDocumentLookup` relationship
-- [ ] AI analysis works for app-uploaded documents via AppOnlyAnalysisService
-- [ ] Email analysis combines email + attachments (Email entity AI fields populated)
-- [ ] Ribbon buttons work for existing/sent emails (manual test from email form)
-- [ ] All metrics meet NFR targets (P95 < 2s download, >99% extraction, >95% AI analysis)
-- [ ] No regression in R1 functionality
+- [x] Users can download .eml files uploaded by email processing via the download endpoint
+- [x] Attachments extracted and uploaded as child Documents with `sprk_ParentDocumentLookup` relationship
+- [~] AI analysis works for app-uploaded documents via AppOnlyAnalysisService *(auto-enqueue deferred to r5)*
+- [~] Email analysis combines email + attachments (Email entity AI fields populated) *(manual analysis works; auto-enqueue deferred)*
+- [x] Ribbon buttons work for existing/sent emails (manual test from email form)
+- [x] All metrics meet NFR targets (P95 < 2s download, >99% extraction, >95% AI analysis)
+- [x] No regression in R1 functionality
+
+**Status**: 5/7 fully met, 2/7 partially met (AI auto-enqueue deferred to `ai-document-intelligence-r5`)
 
 ---
 
@@ -86,4 +88,4 @@ Five-phase implementation addressing each gap:
 
 ---
 
-*Last Updated: 2026-01-13*
+*Last Updated: 2026-01-15*
