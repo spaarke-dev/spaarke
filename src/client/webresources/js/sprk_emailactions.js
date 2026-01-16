@@ -1,6 +1,6 @@
 /**
  * Spaarke Email Actions
- * Version: 1.0.0
+ * Version: 1.1.0
  * Description: Email form ribbon button handlers for Save to Document functionality
  *
  * ADR-006 Exception: Approved for ribbon button invocation
@@ -49,7 +49,7 @@ Spaarke.Email.Config = {
     },
 
     // Version
-    version: "1.0.0"
+    version: "1.1.0"
 };
 
 // =============================================================================
@@ -498,6 +498,95 @@ Spaarke.Email.canSaveToDocument = function(primaryControl) {
 
     // Default to disabled (hide button until we know email is completed)
     return false;
+};
+
+/**
+ * Check if email is already archived (has associated sprk_document)
+ * Used as DisplayRule - returns false to SHOW button, true to HIDE
+ * @param {object} [primaryControl] - Form context (optional)
+ * @returns {boolean} True if email is already archived (button should be hidden)
+ */
+Spaarke.Email.isEmailArchived = function(primaryControl) {
+    try {
+        var formContext = primaryControl;
+        if (!formContext || !formContext.data) {
+            // Fallback for ribbon rules that don't pass context
+            if (typeof Xrm !== 'undefined' && Xrm.Page && Xrm.Page.data) {
+                formContext = Xrm.Page;
+            }
+        }
+
+        if (!formContext || !formContext.data || !formContext.data.entity) {
+            console.log("[Spaarke.Email] isEmailArchived - No form context");
+            return false; // Show button if we can't determine
+        }
+
+        var emailId = formContext.data.entity.getId().replace(/[{}]/g, "").toLowerCase();
+        console.log("[Spaarke.Email] isEmailArchived - Checking email:", emailId);
+
+        // Check cache first (set by async check)
+        var cacheKey = "sprk_email_archived_" + emailId;
+        var cachedResult = sessionStorage.getItem(cacheKey);
+        if (cachedResult !== null) {
+            var isArchived = cachedResult === "true";
+            console.log("[Spaarke.Email] isEmailArchived - Cache hit:", isArchived);
+            return isArchived;
+        }
+
+        // Trigger async check and cache result for next ribbon refresh
+        Spaarke.Email._checkEmailArchivedAsync(emailId);
+
+        // Default to false (show button) - async check will update cache
+        return false;
+
+    } catch (e) {
+        console.error("[Spaarke.Email] isEmailArchived error:", e);
+        return false; // Show button on error
+    }
+};
+
+/**
+ * Async check if email has associated document
+ * @param {string} emailId - Email GUID
+ * @returns {Promise<boolean>}
+ */
+Spaarke.Email._checkEmailArchivedAsync = async function(emailId) {
+    var cacheKey = "sprk_email_archived_" + emailId;
+
+    try {
+        // Query Dataverse for sprk_document where _sprk_email_value = emailId
+        var query = "?$filter=_sprk_email_value eq '" + emailId + "'&$select=sprk_documentid&$top=1";
+        var result = await Xrm.WebApi.retrieveMultipleRecords("sprk_document", query);
+
+        var isArchived = result.entities && result.entities.length > 0;
+        console.log("[Spaarke.Email] _checkEmailArchivedAsync - Result:", isArchived, "for email:", emailId);
+
+        // Cache the result
+        sessionStorage.setItem(cacheKey, isArchived.toString());
+
+        // If archived, refresh ribbon to update button visibility
+        if (isArchived && typeof Xrm !== 'undefined' && Xrm.Page && Xrm.Page.ui) {
+            Xrm.Page.ui.refreshRibbon();
+        }
+
+        return isArchived;
+
+    } catch (e) {
+        console.error("[Spaarke.Email] _checkEmailArchivedAsync error:", e);
+        sessionStorage.setItem(cacheKey, "false");
+        return false;
+    }
+};
+
+/**
+ * Display rule for "Archive Email" button
+ * Returns true to SHOW button (email NOT archived)
+ * @param {object} [primaryControl] - Form context (optional)
+ * @returns {boolean}
+ */
+Spaarke.Email.canArchiveEmail = function(primaryControl) {
+    // Show button only if email is NOT already archived
+    return !Spaarke.Email.isEmailArchived(primaryControl);
 };
 
 // =============================================================================

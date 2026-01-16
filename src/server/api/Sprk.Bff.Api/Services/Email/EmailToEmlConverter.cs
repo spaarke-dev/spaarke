@@ -425,7 +425,33 @@ public class EmailToEmlConverter : IEmailToEmlConverter
                     "[FetchAttachmentDebug] Attachment '{FileName}' decoded to {ByteCount} bytes",
                     fileName, bytes.Length);
             }
-            else
+            else if (attachmentId != Guid.Empty)
+            {
+                // Body field was empty - try fetching it separately via $value endpoint
+                // This handles cases where Dataverse doesn't return inline body for large attachments
+                _logger.LogWarning(
+                    "[FetchAttachmentDebug] Attachment '{FileName}' body not inline, attempting $value fetch for {AttachmentId}",
+                    fileName, attachmentId);
+
+                try
+                {
+                    content = await FetchAttachmentBodyAsync(attachmentId, cancellationToken);
+                    if (content != null)
+                    {
+                        _logger.LogWarning(
+                            "[FetchAttachmentDebug] Attachment '{FileName}' fetched via $value: {ByteCount} bytes",
+                            fileName, content.Length);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "[FetchAttachmentDebug] Failed to fetch attachment '{FileName}' via $value endpoint",
+                        fileName);
+                }
+            }
+
+            if (content == null)
             {
                 _logger.LogWarning(
                     "[FetchAttachmentDebug] Attachment '{FileName}' has NO body content - will be skipped in MIME message",
@@ -449,6 +475,55 @@ public class EmailToEmlConverter : IEmailToEmlConverter
             attachments.Count, emailActivityId, attachments.Count(a => !a.ShouldCreateDocument));
 
         return attachments;
+    }
+
+    /// <summary>
+    /// Fetches attachment body content directly using the body field's $value endpoint.
+    /// This is a fallback when the body is not returned inline in the OData response.
+    /// </summary>
+    private async Task<MemoryStream?> FetchAttachmentBodyAsync(
+        Guid attachmentId,
+        CancellationToken cancellationToken)
+    {
+        // Fetch body directly using $value endpoint
+        var url = $"activitymimeattachments({attachmentId})/body/$value";
+
+        _logger.LogDebug("Fetching attachment body from: {Url}", url);
+
+        var response = await _httpClient.GetAsync(url, cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogWarning(
+                "Failed to fetch attachment body for {AttachmentId}: {StatusCode}",
+                attachmentId, response.StatusCode);
+            return null;
+        }
+
+        // Response is base64 encoded string (Dataverse returns binary as base64 for body fields)
+        var base64Content = await response.Content.ReadAsStringAsync(cancellationToken);
+
+        if (string.IsNullOrEmpty(base64Content))
+        {
+            _logger.LogWarning("Attachment {AttachmentId} body/$value returned empty content", attachmentId);
+            return null;
+        }
+
+        // Remove any JSON quotes if present (sometimes Dataverse wraps the response)
+        base64Content = base64Content.Trim('"');
+
+        try
+        {
+            var bytes = Convert.FromBase64String(base64Content);
+            return new MemoryStream(bytes);
+        }
+        catch (FormatException ex)
+        {
+            _logger.LogWarning(ex,
+                "Failed to decode base64 content for attachment {AttachmentId}",
+                attachmentId);
+            return null;
+        }
     }
 
     private (bool shouldCreate, string? skipReason) EvaluateAttachment(
