@@ -143,9 +143,9 @@ export function useDocumentPreview(
         }));
 
         try {
-            console.log(`[useDocumentPreview] Fetching preview for document: ${documentId}`);
+            console.log(`[useDocumentPreview] Fetching view URL for document: ${documentId}`);
 
-            const response: FilePreviewResponse = await bffClient.current.getPreviewUrl(
+            const response: FilePreviewResponse = await bffClient.current.getViewUrl(
                 documentId,
                 accessToken,
                 correlationId
@@ -153,7 +153,7 @@ export function useDocumentPreview(
 
             if (!isMounted.current) return;
 
-            console.log('[useDocumentPreview] Preview URL received:', {
+            console.log('[useDocumentPreview] View URL received (real-time):', {
                 hasUrl: !!response.previewUrl,
                 documentName: response.documentInfo?.name,
                 isCheckedOut: response.checkoutStatus?.isCheckedOut

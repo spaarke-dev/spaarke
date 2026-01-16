@@ -56,6 +56,14 @@ public static class DocumentOperationsEndpoints
             .ProducesProblem(404)
             .ProducesProblem(401);
 
+        // GET /api/documents/{documentId}/checkout-status
+        group.MapGet("/checkout-status", GetCheckoutStatus)
+            .WithName("GetCheckoutStatus")
+            .WithDescription("Gets the current checkout status of a document")
+            .Produces<CheckoutStatusResponse>(200)
+            .ProducesProblem(404)
+            .ProducesProblem(401);
+
         return app;
     }
 
@@ -329,6 +337,63 @@ public static class DocumentOperationsEndpoints
                 title: "Delete Failed",
                 detail: "An error occurred while deleting the document",
                 extensions: new Dictionary<string, object?> { ["correlationId"] = correlationId }
+            );
+        }
+    }
+
+    /// <summary>
+    /// GET /api/documents/{documentId}/checkout-status
+    /// Returns the current checkout status of a document.
+    /// </summary>
+    private static async Task<IResult> GetCheckoutStatus(
+        Guid documentId,
+        HttpContext httpContext,
+        [FromServices] DocumentCheckoutService checkoutService,
+        [FromServices] ILogger<Program> logger,
+        CancellationToken ct)
+    {
+        var correlationId = httpContext.TraceIdentifier;
+        var user = httpContext.User;
+
+        logger.LogInformation(
+            "GetCheckoutStatus endpoint called for document {DocumentId} [{CorrelationId}]",
+            documentId, correlationId);
+
+        try
+        {
+            var status = await checkoutService.GetCheckoutStatusAsync(documentId, user, ct);
+
+            if (status == null)
+            {
+                return TypedResults.Problem(
+                    statusCode: 404,
+                    title: "Document Not Found",
+                    detail: $"Document {documentId} was not found",
+                    extensions: new Dictionary<string, object?> { ["correlationId"] = correlationId }
+                );
+            }
+
+            return TypedResults.Ok(new CheckoutStatusResponse(
+                IsCheckedOut: status.IsCheckedOut,
+                CheckedOutBy: status.CheckedOutBy,
+                CheckedOutAt: status.CheckedOutAt,
+                IsCurrentUser: status.IsCurrentUser,
+                CorrelationId: correlationId
+            ));
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "GetCheckoutStatus failed for document {DocumentId}", documentId);
+
+            return TypedResults.Problem(
+                statusCode: 500,
+                title: "Get Checkout Status Failed",
+                detail: ex.Message,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["correlationId"] = correlationId,
+                    ["exceptionType"] = ex.GetType().Name
+                }
             );
         }
     }

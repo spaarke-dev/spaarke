@@ -104,6 +104,7 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
     private enableEdit = true;
     private enableDelete = false;
     private enableDownload = true;
+    private showToolbar = false;
 
     // Correlation ID
     private correlationId: string;
@@ -213,7 +214,7 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
                     Document preview will appear at runtime
                 </div>
                 <div style="margin-top: 4px; color: ${textColor}; opacity: 0.5; font-size: 11px;">
-                    v1.0.12
+                    v1.0.14
                 </div>
             </div>
         `;
@@ -233,14 +234,16 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
         this.transitionTo(DocumentViewerState.Loading);
         this.renderLoading();
 
-        // Apply responsive height styling (matches SpeFileViewer pattern)
-        // minHeight ensures minimum space, height: 100% allows expansion to fill container
+        // Apply height styling
+        // Use explicit height value instead of relying on parent height (Dataverse forms often don't set explicit height)
         const controlHeight = context.parameters.controlHeight?.raw ?? 600;
+        this.container.style.height = `${controlHeight}px`;
         this.container.style.minHeight = `${controlHeight}px`;
-        this.container.style.height = '100%';
+        this.container.style.maxHeight = `${controlHeight}px`;
         this.container.style.display = 'flex';
         this.container.style.flexDirection = 'column';
-        console.log(`[SpeDocumentViewer] Control height: ${controlHeight}px (min) with 100% responsive expansion`);
+        this.container.style.overflow = 'hidden';
+        console.log(`[SpeDocumentViewer] Control height: ${controlHeight}px`);
 
         console.log('[SpeDocumentViewer] Initializing control...');
 
@@ -262,6 +265,7 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
             this.enableEdit = context.parameters.enableEdit?.raw ?? true;
             this.enableDelete = context.parameters.enableDelete?.raw ?? false;
             this.enableDownload = context.parameters.enableDownload?.raw ?? true;
+            this.showToolbar = context.parameters.showToolbar?.raw ?? false;
 
             // Validate configuration
             if (!this.tenantId || !this.clientAppId || !this.bffAppId) {
@@ -275,7 +279,8 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
                 bffApiUrl: this.bffApiUrl,
                 enableEdit: this.enableEdit,
                 enableDelete: this.enableDelete,
-                enableDownload: this.enableDownload
+                enableDownload: this.enableDownload,
+                showToolbar: this.showToolbar
             });
 
             // Initialize MSAL
@@ -339,6 +344,7 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
         this.enableEdit = context.parameters.enableEdit?.raw ?? true;
         this.enableDelete = context.parameters.enableDelete?.raw ?? false;
         this.enableDownload = context.parameters.enableDownload?.raw ?? true;
+        this.showToolbar = context.parameters.showToolbar?.raw ?? false;
 
         // Check if document ID changed
         let currentDocumentId: string | null = null;
@@ -437,6 +443,7 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
                 enableEdit: this.enableEdit,
                 enableDelete: this.enableDelete,
                 enableDownload: this.enableDownload,
+                showToolbar: this.showToolbar,
                 onRefresh: () => {
                     console.log('[SpeDocumentViewer] Refresh requested');
                 },

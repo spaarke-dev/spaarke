@@ -3,7 +3,7 @@
   <metadata>
     <title>Switch useDocumentPreview to Real-Time Endpoint</title>
     <phase>5: Migration &amp; Integration</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>0.5</estimated-hours>
     <dependencies>045</dependencies>
     <blocks>047</blocks>

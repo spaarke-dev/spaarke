@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="048" project="document-checkout-viewer">
+  <metadata>
+    <title>Add Ribbon Buttons for Document Operations</title>
+    <phase>5: Migration &amp; Integration</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>047</dependencies>
+    <blocks>050</blocks>
+    <tags>ribbon, webresource, dataverse, form</tags>
+  </metadata>
+
+  <prompt>
+    Add ribbon buttons to the Document entity form for Refresh, Open in Web, and
+    Open in Desktop operations. These replace the PCF toolbar buttons for native
+    Dataverse UX, consistent with the existing Delete ribbon button pattern.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse ribbon customization.
+    Follow ADRs strictly.
+  </role>
+
+  <goal>
+    Document entity form ribbon includes buttons for Refresh, Open in Web (Office
+    files only), and Open in Desktop (Office files only). These buttons invoke
+    the functions added to sprk_DocumentOperations.js (v1.19.0) in earlier work.
+  </goal>
+
+  <context>
+    <background>
+      Decision made 2026-01-15: Move Refresh, Open in Web, and Open in Desktop
+      from PCF toolbar to Form Ribbon for native Dataverse UX. This is consistent
+      with the Delete button pattern implemented in Phase 4 (Tasks 030-032).
+
+      The JavaScript functions and enable rules are already implemented in
+      sprk_DocumentOperations.js v1.19.0:
+      - Spaarke.Document.refreshDocument() with canRefresh enable rule
+      - Spaarke.Document.openInWeb() with canOpenInWeb enable rule (Office files only)
+      - Spaarke.Document.openInDesktop() with canOpenInDesktop enable rule (Office files only)
+
+      PCF toolbar buttons were hidden with comments in SpeDocumentViewer v1.0.13.
+    </background>
+    <relevant-files>
+      <file>src/client/webresources/js/sprk_DocumentOperations.js</file>
+      <file>infrastructure/dataverse/ribbon/</file>
+      <file>docs/reference/articles/RIBBON-COMMAND-BAR-MODIFICATIONS.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use existing sprk_DocumentOperations.js functions</constraint>
+    <constraint source="project">Open in Web/Desktop buttons hidden for non-Office files</constraint>
+    <constraint source="ADR-006">Exception approved for ribbon button invocation</constraint>
+    <constraint source="ribbon-edit">All buttons must have Alt attribute</constraint>
+    <constraint source="ribbon-edit">Use SVG icons with fill="currentColor" for dark mode</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+      <file>docs/reference/articles/RIBBON-COMMAND-BAR-MODIFICATIONS.md</file>
+      <file>src/client/webresources/js/sprk_DocumentOperations.js</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">SKILL: Load ribbon-edit skill and follow its workflow</step>
+    <step order="2">Export DocumentRibbons solution (or create if not exists)</step>
+    <step order="3">Create SVG icons for ribbon buttons (if not available):
+      - sprk_RefreshIcon.svg (arrow circle)
+      - sprk_OpenInWebIcon.svg (globe)
+      - sprk_OpenInDesktopIcon.svg (desktop/monitor)
+    </step>
+    <step order="4">Deploy SVG icon web resources to Dataverse</step>
+    <step order="5">Deploy updated sprk_DocumentOperations.js v1.19.0 to Dataverse</step>
+    <step order="6">Edit RibbonDiffXml to add CustomActions for buttons:
+      - Refresh button (always visible via canRefresh enable rule)
+      - Open in Web button (visible for Office files via canOpenInWeb enable rule)
+      - Open in Desktop button (visible for Office files via canOpenInDesktop enable rule)
+    </step>
+    <step order="7">Add CommandDefinitions with JavaScriptFunction actions</step>
+    <step order="8">Add EnableRules referencing the canXxx functions</step>
+    <step order="9">Add LocLabels for button Alt text and tooltips</step>
+    <step order="10">Re-package and import solution</step>
+    <step order="11">Test: Open Document record with .docx file - verify all 3 buttons appear</step>
+    <step order="12">Test: Open Document record with .eml file - verify only Refresh appears</step>
+    <step order="13">Test: Click Refresh - form and ribbon should refresh</step>
+    <step order="14">Test: Click Open in Web - Office Online opens in new tab</step>
+    <step order="15">Test: Click Open in Desktop - Word/Excel/PowerPoint opens</step>
+    <step order="16">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI for solution export/import</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse">SVG icon web resources deployed</output>
+    <output type="dataverse">sprk_DocumentOperations.js v1.19.0 deployed</output>
+    <output type="dataverse">Document entity ribbon with new buttons</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Refresh button appears on Document form ribbon</criterion>
+    <criterion testable="true">Open in Web button appears for Office files (.docx, .xlsx, .pptx)</criterion>
+    <criterion testable="true">Open in Desktop button appears for Office files</criterion>
+    <criterion testable="true">Open in Web/Desktop buttons hidden for .eml, .pdf, .txt files</criterion>
+    <criterion testable="true">Refresh button refreshes form and clears checkout status cache</criterion>
+    <criterion testable="true">Open in Web opens Office Online in new browser tab</criterion>
+    <criterion testable="true">Open in Desktop triggers protocol handler (ms-word:, ms-excel:, etc.)</criterion>
+    <criterion testable="true">Icons display correctly in light and dark mode</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Ribbon button placement recommendation:
+    - Place in "Actions" group on form command bar
+    - Sequence order: Refresh (10), Open in Web (20), Open in Desktop (30)
+    - Existing Delete button should remain in separate location
+
+    Icon requirements per ribbon-edit skill:
+    - Use SVG with viewBox="0 0 20 20"
+    - Use fill="currentColor" for dark mode support
+    - No width/height attributes
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/ribbon-edit/SKILL.md</skill>
+    <protocol>
+      1. Load ribbon-edit skill FIRST - it defines the complete workflow
+      2. Verify sprk_DocumentOperations.js v1.19.0 has all required functions
+      3. Deploy web resources BEFORE importing ribbon solution
+      4. Follow ribbon-edit error handling for troubleshooting
+    </protocol>
+  </execution>
+</task>

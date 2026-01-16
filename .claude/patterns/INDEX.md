@@ -69,11 +69,13 @@ patterns/
 │   ├── analysis-scopes.md
 │   ├── streaming-endpoints.md
 │   └── text-extraction.md
-└── testing/              # Testing patterns
-    ├── INDEX.md
-    ├── integration-tests.md
-    ├── mocking-patterns.md
-    └── unit-test-structure.md
+├── testing/              # Testing patterns
+│   ├── INDEX.md
+│   ├── integration-tests.md
+│   ├── mocking-patterns.md
+│   └── unit-test-structure.md
+└── webresource/          # JavaScript web resource patterns
+    └── custom-dialogs-in-dataverse.md
 ```
 
 ---
@@ -144,6 +146,12 @@ patterns/
 | Mocking Patterns | [mocking-patterns.md](testing/mocking-patterns.md) | ADR-022 |
 | Unit Test Structure | [unit-test-structure.md](testing/unit-test-structure.md) | ADR-022 |
 
+### Web Resource Patterns (`webresource/`)
+
+| Pattern | File | Source ADRs |
+|---------|------|-------------|
+| Custom Dialogs in Dataverse | [custom-dialogs-in-dataverse.md](webresource/custom-dialogs-in-dataverse.md) | ADR-006, ADR-023 |
+
 ---
 
 ## Usage by AI Agents
@@ -159,6 +167,7 @@ patterns/
 | Adding caching | `caching/distributed-cache.md` |
 | Writing tests | `testing/unit-test-structure.md` + `testing/mocking-patterns.md` |
 | Background jobs | `api/background-workers.md` + `auth/service-principal.md` |
+| Custom dialogs in web resources | `webresource/custom-dialogs-in-dataverse.md` |
 
 ---
 

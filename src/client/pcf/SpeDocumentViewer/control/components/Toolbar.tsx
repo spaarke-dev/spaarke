@@ -33,7 +33,8 @@ import {
     FullScreenMaximize24Regular,
     Checkmark24Regular,
     Dismiss24Regular,
-    Desktop24Regular
+    Desktop24Regular,
+    Globe24Regular
 } from '@fluentui/react-icons';
 import { CheckoutStatus, DocumentInfo, ViewMode } from '../types';
 import { CheckoutStatusBadge } from './CheckoutStatusBadge';
@@ -120,6 +121,12 @@ export interface ToolbarProps {
     isCheckInLoading?: boolean;
     /** Delete operation loading */
     isDeleteLoading?: boolean;
+    /** Open in web operation loading */
+    isOpenInWebLoading?: boolean;
+
+    // Feature: Open in Web
+    /** Whether file type supports Office Online (hide for .eml, .pdf, etc.) */
+    supportsOpenInWeb?: boolean;
 
     // Callbacks - Preview Mode
     /** Refresh button clicked */
@@ -128,6 +135,8 @@ export interface ToolbarProps {
     onEdit?: () => void;
     /** Download button clicked */
     onDownload?: () => void;
+    /** Open in web button clicked */
+    onOpenInWeb?: () => void;
     /** Delete button clicked (after confirmation) */
     onDelete?: () => void;
     /** Expand/fullscreen button clicked */
@@ -167,9 +176,12 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     isEditLoading = false,
     isCheckInLoading = false,
     isDeleteLoading = false,
+    isOpenInWebLoading = false,
+    supportsOpenInWeb = false,
     onRefresh,
     onEdit,
     onDownload,
+    onOpenInWeb,
     onDelete,
     onFullscreen,
     onOpenDesktop,
@@ -228,7 +240,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             <div className={styles.rightSection}>
                 {viewMode === ViewMode.Preview && (
                     <>
-                        {/* Refresh Button - Always visible */}
+                        {/* Refresh Button - HIDDEN: Moved to ribbon button (2026-01-15)
                         <Tooltip content="Refresh preview" relationship="label">
                             <Button
                                 appearance="subtle"
@@ -239,6 +251,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                                 aria-label="Refresh"
                             />
                         </Tooltip>
+                        */}
 
                         {/* Edit Button - Visible when enableEdit=true */}
                         {enableEdit && (
@@ -267,6 +280,21 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                                 />
                             </Tooltip>
                         )}
+
+                        {/* Open in Web Button - HIDDEN: Moved to ribbon button (2026-01-15)
+                        {supportsOpenInWeb && (
+                            <Tooltip content="Open in Office Online" relationship="label">
+                                <Button
+                                    appearance="subtle"
+                                    size="small"
+                                    icon={isOpenInWebLoading ? <Spinner size="tiny" /> : <Globe24Regular />}
+                                    onClick={onOpenInWeb}
+                                    disabled={isLoading || isOpenInWebLoading}
+                                    aria-label="Open in Web"
+                                />
+                            </Tooltip>
+                        )}
+                        */}
 
                         {/* Delete Button - Visible when enableDelete=true */}
                         {enableDelete && (
@@ -328,7 +356,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
                 {viewMode === ViewMode.Edit && (
                     <>
-                        {/* Open in Desktop Button */}
+                        {/* Open in Desktop Button - HIDDEN: Moved to ribbon button (2026-01-15)
                         <Tooltip content="Open in desktop application" relationship="label">
                             <Button
                                 appearance="subtle"
@@ -340,8 +368,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                             />
                         </Tooltip>
 
-                        {/* Divider */}
                         <div className={styles.divider} />
+                        */}
 
                         {/* Check In Button - Primary action */}
                         <Tooltip content="Save changes and release lock" relationship="label">

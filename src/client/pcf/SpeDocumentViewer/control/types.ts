@@ -226,6 +226,8 @@ export interface DocumentViewerProps {
     enableDelete: boolean;
     /** Feature flag: enable download button */
     enableDownload: boolean;
+    /** Feature flag: show toolbar (false when ribbon buttons handle actions) */
+    showToolbar: boolean;
     /** Callback when refresh is requested */
     onRefresh?: () => void;
     /** Callback when document is deleted */
@@ -245,6 +247,7 @@ export interface ControlInputs {
     enableEdit: ComponentFramework.PropertyTypes.TwoOptionsProperty;
     enableDelete: ComponentFramework.PropertyTypes.TwoOptionsProperty;
     enableDownload: ComponentFramework.PropertyTypes.TwoOptionsProperty;
+    showToolbar: ComponentFramework.PropertyTypes.TwoOptionsProperty;
     controlHeight: ComponentFramework.PropertyTypes.WholeNumberProperty;
 }
 

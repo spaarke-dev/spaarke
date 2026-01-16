@@ -73,6 +73,17 @@ public record CheckoutStatusInfo(
 );
 
 /// <summary>
+/// Response returned from the checkout-status endpoint.
+/// </summary>
+public record CheckoutStatusResponse(
+    bool IsCheckedOut,
+    CheckoutUserInfo? CheckedOutBy,
+    DateTime? CheckedOutAt,
+    bool IsCurrentUser,
+    string CorrelationId
+);
+
+/// <summary>
 /// Version information included in preview-url response.
 /// </summary>
 public record VersionInfo(

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <manifest>
-  <control namespace="Spaarke" constructor="SpeDocumentViewer" version="1.0.12" display-name-key="SpeDocumentViewer" description-key="SpeDocumentViewer_Desc" control-type="standard" api-version="1.3.18">
+  <control namespace="Spaarke" constructor="SpeDocumentViewer" version="1.0.15" display-name-key="SpeDocumentViewer" description-key="SpeDocumentViewer_Desc" control-type="standard" api-version="1.3.18">
     <external-service-usage enabled="false"/>
     <property name="value" display-name-key="Value_Display_Key" description-key="Value_Desc_Key" of-type="SingleLine.Text" usage="bound" required="true"/>
     <property name="documentId" display-name-key="DocumentId_Display_Key" description-key="Document ID (GUID). If empty, uses form record ID." of-type="SingleLine.Text" usage="input" required="false"/>
@@ -11,6 +11,7 @@
     <property name="enableEdit" display-name-key="EnableEdit_Display_Key" description-key="Enable check-out/check-in editing workflow" of-type="TwoOptions" usage="input" required="false" default-value="true"/>
     <property name="enableDelete" display-name-key="EnableDelete_Display_Key" description-key="Enable delete document button" of-type="TwoOptions" usage="input" required="false" default-value="false"/>
     <property name="enableDownload" display-name-key="EnableDownload_Display_Key" description-key="Enable download document button" of-type="TwoOptions" usage="input" required="false" default-value="true"/>
+    <property name="showToolbar" display-name-key="ShowToolbar_Display_Key" description-key="Show toolbar with document actions (set false when using ribbon buttons)" of-type="TwoOptions" usage="input" required="false" default-value="false"/>
     <property name="controlHeight" display-name-key="ControlHeight_Display_Key" description-key="Minimum height in pixels (responsive)" of-type="Whole.None" usage="input" required="false" default-value="600"/>
     <resources>
       <code path="bundle.js" order="1"/>

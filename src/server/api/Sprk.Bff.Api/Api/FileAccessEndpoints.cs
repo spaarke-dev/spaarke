@@ -86,6 +86,16 @@ public static class FileAccessEndpoints
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status500InternalServerError);
 
+        docs.MapGet("/{documentId}/download", GetDownload)
+            .WithName("GetDocumentDownload")
+            .WithTags("File Access")
+            .WithDescription("Download document file using app-only authentication. " +
+                "Proxies SPE file downloads for files uploaded by background processing.")
+            .Produces(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status500InternalServerError);
+
         return app;
 
         // Static local functions (method groups)
@@ -733,6 +743,85 @@ public static class FileAccessEndpoints
                 } : null,
                 correlationId = context.TraceIdentifier
             });
+        }
+
+        /// <summary>
+        /// GET /api/documents/{documentId}/download
+        /// Downloads file content using app-only authentication via SpeFileStore.
+        /// This is necessary for files uploaded by email-to-document automation,
+        /// where users don't have direct SPE container permissions.
+        /// </summary>
+        static async Task<IResult> GetDownload(
+            string documentId,
+            IDataverseService dataverseService,
+            SpeFileStore speFileStore,
+            ILogger<Program> logger,
+            HttpContext context,
+            CancellationToken ct)
+        {
+            logger.LogInformation("GetDownload called | DocumentId: {DocumentId} | TraceId: {TraceId}",
+                documentId, context.TraceIdentifier);
+
+            // 1. Validate document ID format
+            if (!Guid.TryParse(documentId, out var docGuid))
+            {
+                throw new SdapProblemException(
+                    "invalid_id",
+                    "Invalid Document ID",
+                    $"Document ID '{documentId}' is not a valid GUID format",
+                    400
+                );
+            }
+
+            // 2. Get document entity from Dataverse (includes SPE pointers)
+            var document = await dataverseService.GetDocumentAsync(documentId, ct);
+
+            if (document == null)
+            {
+                throw new SdapProblemException(
+                    "document_not_found",
+                    "Document Not Found",
+                    $"Document with ID '{documentId}' does not exist",
+                    404
+                );
+            }
+
+            // 3. Validate SPE pointers (driveId, itemId)
+            ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId);
+
+            logger.LogInformation("SPE pointers validated | DriveId: {DriveId} | ItemId: {ItemId}",
+                document.GraphDriveId, document.GraphItemId);
+
+            // 4. Download file stream from SPE using app-only auth
+            var fileStream = await speFileStore.DownloadFileAsync(
+                document.GraphDriveId!,
+                document.GraphItemId!,
+                ct);
+
+            if (fileStream == null)
+            {
+                throw new SdapProblemException(
+                    "file_not_found",
+                    "File Not Found",
+                    $"File content not found in storage for document {documentId}",
+                    404
+                );
+            }
+
+            // 5. Determine content type and filename
+            var contentType = document.MimeType ?? "application/octet-stream";
+            var fileName = document.FileName ?? $"{documentId}.bin";
+
+            logger.LogInformation(
+                "Streaming download | DocumentId: {DocumentId} | FileName: {FileName} | ContentType: {ContentType} | TraceId: {TraceId}",
+                documentId, fileName, contentType, context.TraceIdentifier);
+
+            // 6. Return streaming file response with proper headers
+            return TypedResults.Stream(
+                fileStream,
+                contentType: contentType,
+                fileDownloadName: fileName,
+                enableRangeProcessing: true);
         }
     }
 

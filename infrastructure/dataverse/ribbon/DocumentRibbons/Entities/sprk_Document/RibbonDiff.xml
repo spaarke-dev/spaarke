@@ -61,6 +61,30 @@
         <Button Id="sprk.Document.Delete.Button" Command="sprk.Document.Delete.Command" Alt="$LocLabels:sprk.Document.Delete.LabelText" LabelText="$LocLabels:sprk.Document.Delete.LabelText" ToolTipTitle="$LocLabels:sprk.Document.Delete.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Document.Delete.ToolTipDescription" Image16by16="/_imgs/ribbon/Delete_16.png" Image32by32="/_imgs/ribbon/Delete_32.png" TemplateAlias="o1" Sequence="65" />
       </CommandUIDefinition>
     </CustomAction>
+    <!-- Form: Refresh Button (Sequence 70 - always visible) -->
+    <CustomAction Id="sprk.Document.Refresh.Button.CustomAction" Location="Mscrm.Form.sprk_document.MainTab.Save.Controls._children" Sequence="70">
+      <CommandUIDefinition>
+        <Button Id="sprk.Document.Refresh.Button" Command="sprk.Document.Refresh.Command" Alt="$LocLabels:sprk.Document.Refresh.LabelText" LabelText="$LocLabels:sprk.Document.Refresh.LabelText" ToolTipTitle="$LocLabels:sprk.Document.Refresh.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Document.Refresh.ToolTipDescription" Image16by16="/_imgs/ribbon/Refresh_16.png" Image32by32="/_imgs/ribbon/Refresh_32.png" TemplateAlias="o1" Sequence="70" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <!-- Form: Open in Web Button (Sequence 71 - visible only for Office files) -->
+    <CustomAction Id="sprk.Document.OpenInWeb.Button.CustomAction" Location="Mscrm.Form.sprk_document.MainTab.Save.Controls._children" Sequence="71">
+      <CommandUIDefinition>
+        <Button Id="sprk.Document.OpenInWeb.Button" Command="sprk.Document.OpenInWeb.Command" Alt="$LocLabels:sprk.Document.OpenInWeb.LabelText" LabelText="$LocLabels:sprk.Document.OpenInWeb.LabelText" ToolTipTitle="$LocLabels:sprk.Document.OpenInWeb.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Document.OpenInWeb.ToolTipDescription" Image16by16="/_imgs/ribbon/NewWindow_16.png" Image32by32="/_imgs/ribbon/NewWindow_32.png" TemplateAlias="o1" Sequence="71" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <!-- Form: Open in Desktop Button (Sequence 72 - visible only for Office files) -->
+    <CustomAction Id="sprk.Document.OpenInDesktop.Button.CustomAction" Location="Mscrm.Form.sprk_document.MainTab.Save.Controls._children" Sequence="72">
+      <CommandUIDefinition>
+        <Button Id="sprk.Document.OpenInDesktop.Button" Command="sprk.Document.OpenInDesktop.Command" Alt="$LocLabels:sprk.Document.OpenInDesktop.LabelText" LabelText="$LocLabels:sprk.Document.OpenInDesktop.LabelText" ToolTipTitle="$LocLabels:sprk.Document.OpenInDesktop.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Document.OpenInDesktop.ToolTipDescription" Image16by16="/_imgs/ribbon/OpenInNewWindow_16.png" Image32by32="/_imgs/ribbon/OpenInNewWindow_32.png" TemplateAlias="o1" Sequence="72" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <!-- Form: Download Button (Sequence 73 - always visible) -->
+    <CustomAction Id="sprk.Document.Download.Button.CustomAction" Location="Mscrm.Form.sprk_document.MainTab.Save.Controls._children" Sequence="73">
+      <CommandUIDefinition>
+        <Button Id="sprk.Document.Download.Button" Command="sprk.Document.Download.Command" Alt="$LocLabels:sprk.Document.Download.LabelText" LabelText="$LocLabels:sprk.Document.Download.LabelText" ToolTipTitle="$LocLabels:sprk.Document.Download.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Document.Download.ToolTipDescription" Image16by16="/_imgs/ribbon/Download_16.png" Image32by32="/_imgs/ribbon/Download_32.png" TemplateAlias="o1" Sequence="73" />
+      </CommandUIDefinition>
+    </CustomAction>
   </CustomActions>
   <Templates>
     <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>
@@ -167,6 +191,62 @@
         </JavaScriptFunction>
       </Actions>
     </CommandDefinition>
+    <!-- Document Refresh Command (always enabled) -->
+    <CommandDefinition Id="sprk.Document.Refresh.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Document.Refresh.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="sprk.Document.Form.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_DocumentOperations.js" FunctionName="Spaarke.Document.refreshDocument">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <!-- Document Open in Web Command (enabled for Office files only) -->
+    <CommandDefinition Id="sprk.Document.OpenInWeb.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Document.OpenInWeb.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="sprk.Document.Form.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_DocumentOperations.js" FunctionName="Spaarke.Document.openInWeb">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <!-- Document Open in Desktop Command (enabled for Office files only) -->
+    <CommandDefinition Id="sprk.Document.OpenInDesktop.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Document.OpenInDesktop.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="sprk.Document.Form.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_DocumentOperations.js" FunctionName="Spaarke.Document.openInDesktop">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <!-- Document Download Command (always enabled) -->
+    <CommandDefinition Id="sprk.Document.Download.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Document.Download.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="sprk.Document.Form.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_DocumentOperations.js" FunctionName="Spaarke.Document.downloadDocument">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
   </CommandDefinitions>
   <RuleDefinitions>
     <TabDisplayRules />
@@ -198,6 +278,22 @@
       <!-- Delete: enabled when document is NOT checked out -->
       <EnableRule Id="sprk.Document.Delete.EnableRule">
         <CustomRule FunctionName="Spaarke.Document.canDelete" Library="$webresource:sprk_DocumentOperations.js" Default="true" />
+      </EnableRule>
+      <!-- Refresh: always enabled -->
+      <EnableRule Id="sprk.Document.Refresh.EnableRule">
+        <CustomRule FunctionName="Spaarke.Document.canRefresh" Library="$webresource:sprk_DocumentOperations.js" Default="true" />
+      </EnableRule>
+      <!-- Open in Web: enabled for Office file types only -->
+      <EnableRule Id="sprk.Document.OpenInWeb.EnableRule">
+        <CustomRule FunctionName="Spaarke.Document.canOpenInWeb" Library="$webresource:sprk_DocumentOperations.js" Default="false" />
+      </EnableRule>
+      <!-- Open in Desktop: enabled for Office file types only -->
+      <EnableRule Id="sprk.Document.OpenInDesktop.EnableRule">
+        <CustomRule FunctionName="Spaarke.Document.canOpenInDesktop" Library="$webresource:sprk_DocumentOperations.js" Default="false" />
+      </EnableRule>
+      <!-- Download: always enabled -->
+      <EnableRule Id="sprk.Document.Download.EnableRule">
+        <CustomRule FunctionName="Spaarke.Document.canDownload" Library="$webresource:sprk_DocumentOperations.js" Default="true" />
       </EnableRule>
     </EnableRules>
   </RuleDefinitions>
@@ -284,6 +380,70 @@
     <LocLabel Id="sprk.Document.Delete.ToolTipDescription">
       <Titles>
         <Title description="Permanently delete this document and its file from storage. This action cannot be undone." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <!-- Refresh Labels -->
+    <LocLabel Id="sprk.Document.Refresh.LabelText">
+      <Titles>
+        <Title description="Refresh" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Refresh.ToolTipTitle">
+      <Titles>
+        <Title description="Refresh Document" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Refresh.ToolTipDescription">
+      <Titles>
+        <Title description="Refresh the form to show the latest document data and checkout status." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <!-- Open in Web Labels -->
+    <LocLabel Id="sprk.Document.OpenInWeb.LabelText">
+      <Titles>
+        <Title description="Open in Web" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.OpenInWeb.ToolTipTitle">
+      <Titles>
+        <Title description="Open in Office Online" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.OpenInWeb.ToolTipDescription">
+      <Titles>
+        <Title description="Open this document in Office Online in a new browser tab." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <!-- Open in Desktop Labels -->
+    <LocLabel Id="sprk.Document.OpenInDesktop.LabelText">
+      <Titles>
+        <Title description="Open in Desktop" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.OpenInDesktop.ToolTipTitle">
+      <Titles>
+        <Title description="Open in Desktop Application" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.OpenInDesktop.ToolTipDescription">
+      <Titles>
+        <Title description="Open this document in the desktop application (Word, Excel, or PowerPoint)." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <!-- Download Labels -->
+    <LocLabel Id="sprk.Document.Download.LabelText">
+      <Titles>
+        <Title description="Download" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Download.ToolTipTitle">
+      <Titles>
+        <Title description="Download Document" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.Download.ToolTipDescription">
+      <Titles>
+        <Title description="Download a copy of this document to your local computer." languagecode="1033" />
       </Titles>
     </LocLabel>
   </LocLabels>

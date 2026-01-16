@@ -29,7 +29,7 @@ import { BffClient } from './BffClient';
 import './css/SpeDocumentViewer.css';
 
 // Control version - update in all 4 locations per PCF-V9-PACKAGING.md
-const CONTROL_VERSION = '1.0.11';
+const CONTROL_VERSION = '1.0.15';
 const BUILD_DATE = '2026-01-15';
 
 /**
@@ -45,6 +45,7 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
     enableEdit,
     enableDelete,
     enableDownload,
+    showToolbar,
     onRefresh,
     onDeleted
 }) => {
@@ -55,6 +56,7 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
     const [isCheckInDialogOpen, setIsCheckInDialogOpen] = useState(false);
     const [isDiscardDialogOpen, setIsDiscardDialogOpen] = useState(false);
     const [isDeleteLoading, setIsDeleteLoading] = useState(false);
+    const [isOpenInWebLoading, setIsOpenInWebLoading] = useState(false);
 
     // Use the preview hook for state management
     const {
@@ -70,6 +72,24 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
         onIframeError,
         resetIframeState
     } = useDocumentPreview(documentId, bffApiUrl, accessToken, correlationId);
+
+    // Office file extensions that support Office Online viewing
+    // (matches SpeFileViewer's comprehensive list)
+    const OFFICE_EXTENSIONS = React.useMemo(() => [
+        // Word
+        '.docx', '.doc', '.docm', '.dot', '.dotx', '.dotm',
+        // Excel
+        '.xlsx', '.xls', '.xlsm', '.xlsb', '.xlt', '.xltx', '.xltm',
+        // PowerPoint
+        '.pptx', '.ppt', '.pptm', '.pot', '.potx', '.potm', '.pps', '.ppsx', '.ppsm'
+    ], []);
+
+    // Determine if file supports "Open in Web" (Office Online)
+    const supportsOpenInWeb = React.useMemo(() => {
+        const ext = documentInfo?.fileExtension?.toLowerCase();
+        if (!ext) return false;
+        return OFFICE_EXTENSIONS.includes(ext);
+    }, [documentInfo?.fileExtension, OFFICE_EXTENSIONS]);
 
     // Use the checkout flow hook
     const {
@@ -227,6 +247,31 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
     }, [documentId, accessToken, correlationId]);
 
     /**
+     * Handle open in web button click - opens Office Online in new tab
+     */
+    const handleOpenInWeb = useCallback(async () => {
+        if (!documentId) return;
+
+        setIsOpenInWebLoading(true);
+        console.log('[SpeDocumentViewer] Open in web clicked');
+
+        try {
+            const response = await bffClient.current.getOpenLinks(documentId, accessToken, correlationId);
+
+            if (response.webUrl) {
+                // Open Office Online in new tab with security attributes
+                window.open(response.webUrl, '_blank', 'noopener,noreferrer');
+            } else {
+                console.warn('[SpeDocumentViewer] No web URL available');
+            }
+        } catch (err) {
+            console.error('[SpeDocumentViewer] Get open links failed:', err);
+        } finally {
+            setIsOpenInWebLoading(false);
+        }
+    }, [documentId, accessToken, correlationId]);
+
+    /**
      * Handle download button click
      * Uses the BFF download endpoint which uses app-only auth.
      * This works for all documents including those uploaded by email-to-document.
@@ -276,10 +321,17 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
     // Theme
     const theme = isDarkTheme ? webDarkTheme : webLightTheme;
 
+    // Style for FluentProvider to ensure proper height inheritance
+    const fluentProviderStyle: React.CSSProperties = {
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column'
+    };
+
     // Render loading state (initial API call)
     if (isLoading) {
         return (
-            <FluentProvider theme={theme}>
+            <FluentProvider theme={theme} style={fluentProviderStyle}>
                 <div className="spe-document-viewer-container" data-theme={isDarkTheme ? 'dark' : 'light'}>
                     <div className="spe-document-viewer-loading">
                         <Spinner size="large" label="Loading document..." />
@@ -292,7 +344,7 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
     // Render error state (but not iframe timeout - that has special handling)
     if (error && !isIframeTimedOut) {
         return (
-            <FluentProvider theme={theme}>
+            <FluentProvider theme={theme} style={fluentProviderStyle}>
                 <div className="spe-document-viewer-container" data-theme={isDarkTheme ? 'dark' : 'light'}>
                     <div className="spe-document-viewer-error">
                         <MessageBar intent="error">
@@ -319,7 +371,7 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
     // Render no document ID state
     if (!documentId) {
         return (
-            <FluentProvider theme={theme}>
+            <FluentProvider theme={theme} style={fluentProviderStyle}>
                 <div className="spe-document-viewer-container" data-theme={isDarkTheme ? 'dark' : 'light'}>
                     <div className="spe-document-viewer-error">
                         <MessageBar intent="warning">
@@ -338,29 +390,34 @@ export const DocumentViewerApp: React.FC<DocumentViewerProps> = ({
     const iframeSrc = viewMode === 'edit' ? editUrl : previewUrl;
 
     return (
-        <FluentProvider theme={theme}>
+        <FluentProvider theme={theme} style={fluentProviderStyle}>
             <div className="spe-document-viewer-container" data-theme={isDarkTheme ? 'dark' : 'light'}>
-                {/* Toolbar */}
-                <Toolbar
-                    documentInfo={documentInfo}
-                    checkoutStatus={checkoutStatus}
-                    viewMode={viewMode}
-                    isDarkTheme={isDarkTheme}
-                    enableEdit={enableEdit}
-                    enableDownload={enableDownload}
-                    enableDelete={enableDelete}
-                    isLoading={isIframeLoading}
-                    isEditLoading={isCheckoutLoading}
-                    isCheckInLoading={isCheckInLoading}
-                    isDeleteLoading={isDeleteLoading}
-                    onRefresh={handleRefresh}
-                    onEdit={handleEdit}
-                    onDownload={handleDownload}
-                    onDelete={handleDelete}
-                    onOpenDesktop={handleOpenDesktop}
-                    onCheckIn={handleCheckInClick}
-                    onDiscard={handleDiscardClick}
-                />
+                {/* Toolbar - only shown when showToolbar is true */}
+                {showToolbar && (
+                    <Toolbar
+                        documentInfo={documentInfo}
+                        checkoutStatus={checkoutStatus}
+                        viewMode={viewMode}
+                        isDarkTheme={isDarkTheme}
+                        enableEdit={enableEdit}
+                        enableDownload={enableDownload}
+                        enableDelete={enableDelete}
+                        isLoading={isIframeLoading}
+                        isEditLoading={isCheckoutLoading}
+                        isCheckInLoading={isCheckInLoading}
+                        isDeleteLoading={isDeleteLoading}
+                        isOpenInWebLoading={isOpenInWebLoading}
+                        supportsOpenInWeb={supportsOpenInWeb}
+                        onRefresh={handleRefresh}
+                        onEdit={handleEdit}
+                        onDownload={handleDownload}
+                        onOpenInWeb={handleOpenInWeb}
+                        onDelete={handleDelete}
+                        onOpenDesktop={handleOpenDesktop}
+                        onCheckIn={handleCheckInClick}
+                        onDiscard={handleDiscardClick}
+                    />
+                )}
 
                 {/* Document lock error banner */}
                 {lockError && (

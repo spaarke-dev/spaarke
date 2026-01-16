@@ -1,6 +1,6 @@
 /**
  * Spaarke Document Operations
- * Version: 1.26.0
+ * Version: 1.23.0
  * Description: Document checkout/checkin operations via BFF API with MSAL authentication
  *
  * ADR-006 Exception: Approved for ribbon button invocation
@@ -50,7 +50,7 @@ Spaarke.Document.Config = {
     },
 
     // Version
-    version: "1.26.0",
+    version: "1.23.0",
 
     // Document Status Codes (statuscode field values)
     statusCode: {
@@ -373,31 +373,27 @@ Spaarke.Document.Utils = {
  */
 Spaarke.Document.showChoiceDialog = function(config) {
     return new Promise(function(resolve) {
-        // CRITICAL: Use top window's document to escape iframe context
-        // Dataverse runs web resources in iframes, so document.body would be wrong
-        var targetDoc = window.top ? window.top.document : document;
-
         // Create overlay
-        var overlay = targetDoc.createElement('div');
+        var overlay = document.createElement('div');
         overlay.className = 'sprk-choice-dialog-overlay';
         overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.4);' +
             'display:flex;align-items:center;justify-content:center;z-index:10000;font-family:"Segoe UI",sans-serif;';
 
         // Create dialog surface
-        var dialog = targetDoc.createElement('div');
+        var dialog = document.createElement('div');
         dialog.className = 'sprk-choice-dialog';
         dialog.style.cssText = 'background:#fff;border-radius:8px;box-shadow:0 25px 65px rgba(0,0,0,0.35);' +
             'max-width:480px;width:90%;max-height:90vh;overflow:auto;';
 
         // Dialog header
-        var header = targetDoc.createElement('div');
+        var header = document.createElement('div');
         header.style.cssText = 'padding:20px 24px 0;display:flex;justify-content:space-between;align-items:center;';
 
-        var title = targetDoc.createElement('h2');
+        var title = document.createElement('h2');
         title.style.cssText = 'margin:0;font-size:20px;font-weight:600;color:#242424;';
         title.textContent = config.title;
 
-        var closeBtn = targetDoc.createElement('button');
+        var closeBtn = document.createElement('button');
         closeBtn.style.cssText = 'background:none;border:none;font-size:20px;cursor:pointer;color:#616161;padding:4px;';
         closeBtn.innerHTML = '&times;';
         closeBtn.onclick = function() { cleanup(null); };
@@ -406,11 +402,11 @@ Spaarke.Document.showChoiceDialog = function(config) {
         header.appendChild(closeBtn);
 
         // Dialog content
-        var content = targetDoc.createElement('div');
+        var content = document.createElement('div');
         content.style.cssText = 'padding:16px 24px;';
 
         // Message
-        var messageDiv = targetDoc.createElement('div');
+        var messageDiv = document.createElement('div');
         messageDiv.style.cssText = 'color:#424242;font-size:14px;line-height:1.5;margin-bottom:16px;';
         if (typeof config.message === 'string') {
             messageDiv.innerHTML = config.message;
@@ -420,12 +416,12 @@ Spaarke.Document.showChoiceDialog = function(config) {
         content.appendChild(messageDiv);
 
         // Options container
-        var optionsDiv = targetDoc.createElement('div');
+        var optionsDiv = document.createElement('div');
         optionsDiv.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
 
         // Create option buttons (ADR-023 style: outline buttons with icon + title + description)
         config.options.forEach(function(option) {
-            var btn = targetDoc.createElement('button');
+            var btn = document.createElement('button');
             btn.style.cssText = 'display:flex;align-items:center;gap:12px;width:100%;padding:12px 16px;' +
                 'background:#fff;border:1px solid #d1d1d1;border-radius:4px;cursor:pointer;text-align:left;' +
                 'transition:all 0.1s ease;min-height:64px;';
@@ -434,21 +430,21 @@ Spaarke.Document.showChoiceDialog = function(config) {
             btn.onclick = function() { cleanup(option.id); };
 
             // Icon
-            var iconSpan = targetDoc.createElement('span');
+            var iconSpan = document.createElement('span');
             iconSpan.style.cssText = 'font-size:24px;color:#0078d4;flex-shrink:0;width:24px;text-align:center;';
             iconSpan.innerHTML = option.icon;
             btn.appendChild(iconSpan);
 
             // Text container
-            var textDiv = targetDoc.createElement('div');
+            var textDiv = document.createElement('div');
             textDiv.style.cssText = 'display:flex;flex-direction:column;gap:2px;overflow:hidden;';
 
-            var titleSpan = targetDoc.createElement('span');
+            var titleSpan = document.createElement('span');
             titleSpan.style.cssText = 'font-weight:600;color:#242424;font-size:14px;';
             titleSpan.textContent = option.title;
             textDiv.appendChild(titleSpan);
 
-            var descSpan = targetDoc.createElement('span');
+            var descSpan = document.createElement('span');
             descSpan.style.cssText = 'color:#616161;font-size:12px;line-height:1.4;';
             descSpan.textContent = option.description;
             textDiv.appendChild(descSpan);
@@ -460,10 +456,10 @@ Spaarke.Document.showChoiceDialog = function(config) {
         content.appendChild(optionsDiv);
 
         // Dialog footer with Cancel button
-        var footer = targetDoc.createElement('div');
+        var footer = document.createElement('div');
         footer.style.cssText = 'padding:16px 24px 20px;display:flex;justify-content:flex-end;border-top:1px solid #e0e0e0;margin-top:8px;';
 
-        var cancelBtn = targetDoc.createElement('button');
+        var cancelBtn = document.createElement('button');
         cancelBtn.style.cssText = 'padding:8px 20px;background:#fff;border:1px solid #d1d1d1;border-radius:4px;' +
             'cursor:pointer;font-size:14px;color:#242424;';
         cancelBtn.textContent = config.cancelText || 'Cancel';
@@ -480,8 +476,8 @@ Spaarke.Document.showChoiceDialog = function(config) {
 
         // Cleanup function
         function cleanup(result) {
-            targetDoc.body.removeChild(overlay);
-            targetDoc.removeEventListener('keydown', escHandler);
+            document.body.removeChild(overlay);
+            document.removeEventListener('keydown', escHandler);
             resolve(result);
         }
 
@@ -491,10 +487,10 @@ Spaarke.Document.showChoiceDialog = function(config) {
                 cleanup(null);
             }
         }
-        targetDoc.addEventListener('keydown', escHandler);
+        document.addEventListener('keydown', escHandler);
 
-        // Add to DOM - use top window's body to escape iframe
-        targetDoc.body.appendChild(overlay);
+        // Add to DOM
+        document.body.appendChild(overlay);
 
         // Focus first option button for accessibility
         var firstBtn = optionsDiv.querySelector('button');
@@ -1943,13 +1939,6 @@ Spaarke.Document.canRefresh = function(primaryControl) {
 // =============================================================================
 
 console.log("[Spaarke.Document] Operations module loaded v" + Spaarke.Document.Config.version);
-
-// v1.26.0 Changes:
-// - FIX: showChoiceDialog now uses window.top.document to escape iframe context
-// - Dataverse runs web resources in iframes, so document.body was wrong target
-// - All createElement and body references now use targetDoc (top window)
-// - Dialog now renders over the full page correctly
-// - Removed debug logging from v1.24.0/v1.25.0
 
 // v1.23.0 Changes:
 // - CRITICAL FIX: Pre-fetch MSAL token at start of openInWeb/openInDesktop
