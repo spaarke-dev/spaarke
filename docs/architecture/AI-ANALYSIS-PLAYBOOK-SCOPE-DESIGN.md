@@ -1,69 +1,129 @@
 # AI Analysis Playbook & Scope Design
 
-> **Version**: 1.1
-> **Date**: January 4, 2026
+> **Version**: 2.0
+> **Date**: January 16, 2026
 > **Status**: Draft
-> **Purpose**: Define the complete "recipes" for each Playbook including Actions, Skills, Knowledge, and Tools
-> **Related**: [AI-ANALYSIS-IMPLEMENTATION-DESIGN.md](AI-ANALYSIS-IMPLEMENTATION-DESIGN.md) - How to implement this design
+> **Purpose**: Define the scope definitions (Actions, Skills, Knowledge, Tools, Outputs) available for building Playbooks
+> **Related**:
+> - [AI-PLAYBOOK-ARCHITECTURE.md](AI-PLAYBOOK-ARCHITECTURE.md) - Node-based execution architecture (authoritative)
+> - [AI-ANALYSIS-IMPLEMENTATION-DESIGN.md](AI-ANALYSIS-IMPLEMENTATION-DESIGN.md) - How to implement this design
 
 ---
 
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [Dataverse Entity Model](#dataverse-entity-model)
-3. [Document Type Taxonomy](#document-type-taxonomy)
-4. [Matter Type Taxonomy](#matter-type-taxonomy)
-5. [Playbook Definitions](#playbook-definitions)
-6. [Scope Definitions](#scope-definitions)
-7. [Playbook-Scope Matrix](#playbook-scope-matrix)
-8. [Document Type → Suggested Playbooks](#document-type--suggested-playbooks)
-9. [Matter Type → Default Playbook](#matter-type--default-playbook)
+2. [Relationship to Node-Based Architecture](#relationship-to-node-based-architecture)
+3. [Dataverse Entity Model](#dataverse-entity-model)
+4. [Document Type Taxonomy](#document-type-taxonomy)
+5. [Matter Type Taxonomy](#matter-type-taxonomy)
+6. [Playbook Definitions](#playbook-definitions)
+7. [Scope Definitions](#scope-definitions)
+8. [Playbook-Scope Matrix](#playbook-scope-matrix)
+9. [Document Type → Suggested Playbooks](#document-type--suggested-playbooks)
+10. [Matter Type → Default Playbook](#matter-type--default-playbook)
 
 ---
 
 ## Overview
 
-The Playbook system enables no-code AI workflow composition. Each Playbook is a "recipe" that combines:
+The Playbook system enables no-code AI workflow composition. Playbooks are built visually using the **PlaybookBuilderHost PCF control** (a node-based canvas), where users:
 
-| Scope Type | Purpose | Example |
-|------------|---------|---------|
-| **Actions** | Individual AI operations | "Extract Entities", "Detect Risks" |
-| **Skills** | Reusable analysis bundles | "Contract Analysis", "NDA Review" |
-| **Knowledge** | RAG context sources | "Standard Contract Terms", "Risk Taxonomy" |
-| **Tools** | Handler implementations | EntityExtractorHandler, ClauseAnalyzerHandler |
+1. Drag nodes onto the canvas (AI Analysis, AI Completion, Condition, Deliver Output, etc.)
+2. Connect nodes with edges to define execution flow
+3. Configure each node with scopes (Actions, Skills, Knowledge, Tools)
+4. Save as a canvas JSON definition
+
+**This document defines the reusable "building blocks" (scopes) that nodes can reference:**
+
+| Scope Type | Purpose | Role in Nodes |
+|------------|---------|---------------|
+| **Actions** | System prompt templates | AI nodes reference an Action to define LLM behavior |
+| **Skills** | Prompt fragments | AI nodes reference Skills to add specialized instructions |
+| **Knowledge** | RAG context sources | AI nodes reference Knowledge for domain context |
+| **Tools** | Executable handlers | AI nodes use Tools to call LLM and process responses |
+| **Outputs** | Field mappings | Define where results are stored in Dataverse |
+
+### Architecture Diagram (Node-Based)
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                         PLAYBOOK                                 │
-│                    "Full NDA Analysis"                           │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│   SKILLS (What analysis workflows to run):                       │
-│   ┌─────────────┐  ┌─────────────┐  ┌─────────────┐            │
-│   │ NDA Review  │  │ Risk        │  │ Clause      │            │
-│   │             │  │ Assessment  │  │ Comparison  │            │
-│   └──────┬──────┘  └──────┬──────┘  └──────┬──────┘            │
-│          │                │                │                    │
-│   ACTIONS (What operations each skill performs):                 │
-│   ┌──────▼──────┐  ┌──────▼──────┐  ┌──────▼──────┐            │
-│   │ Extract     │  │ Detect      │  │ Analyze     │            │
-│   │ Entities    │  │ Risks       │  │ Clauses     │            │
-│   └─────────────┘  └─────────────┘  └─────────────┘            │
-│                                                                  │
-│   KNOWLEDGE (What context to retrieve via RAG):                  │
-│   ┌─────────────┐  ┌─────────────┐  ┌─────────────┐            │
-│   │ Standard    │  │ Risk        │  │ NDA Best    │            │
-│   │ NDA Terms   │  │ Categories  │  │ Practices   │            │
-│   └─────────────┘  └─────────────┘  └─────────────┘            │
-│                                                                  │
-│   TOOLS (What handlers execute the actions):                     │
-│   ┌─────────────┐  ┌─────────────┐  ┌─────────────┐            │
-│   │ Entity      │  │ Risk        │  │ Clause      │            │
-│   │ Extractor   │  │ Detector    │  │ Analyzer    │            │
-│   └─────────────┘  └─────────────┘  └─────────────┘            │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         PLAYBOOK CANVAS                                      │
+│                    (Visual Node-Based Builder)                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│    ┌──────────────┐         ┌──────────────┐         ┌──────────────┐      │
+│    │ AI Analysis  │────────▶│ AI Analysis  │────────▶│ Condition    │      │
+│    │   Node 1     │         │   Node 2     │         │   Node       │      │
+│    │              │         │              │         │              │      │
+│    │ • Action: A1 │         │ • Action: A2 │         │ riskScore>7? │      │
+│    │ • Skill: S1  │         │ • Skill: S2  │         └──────┬───────┘      │
+│    │ • Tool: T1   │         │ • Tool: T2   │                │              │
+│    │ • Knowledge: │         │ • Knowledge: │           ┌────┴────┐        │
+│    │   K1, K2     │         │   K3         │           │         │        │
+│    └──────────────┘         └──────────────┘           ▼         ▼        │
+│                                                    ┌──────┐  ┌──────┐    │
+│    Edges define execution ORDER                    │ High │  │ Low  │    │
+│    (not data restrictions)                         │ Risk │  │ Risk │    │
+│                                                    │ Path │  │ Path │    │
+│    All node outputs accumulate in                  └──────┘  └──────┘    │
+│    shared nodeOutputs dictionary                                          │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Stored as Canvas JSON in sprk_analysisplaybook.sprk_canvaslayoutjson
+```
+
+---
+
+## Relationship to Node-Based Architecture
+
+> **Important**: The authoritative architecture is defined in [AI-PLAYBOOK-ARCHITECTURE.md](AI-PLAYBOOK-ARCHITECTURE.md).
+
+### How Scopes Relate to Nodes
+
+| Component | Where Defined | How Used in Nodes |
+|-----------|---------------|-------------------|
+| **Actions** | This document (ACT-001, ACT-002...) | Node property: Selected action provides system prompt |
+| **Skills** | This document (SKL-001, SKL-002...) | Node property: `skillIds[]` adds prompt fragments |
+| **Knowledge** | This document (KNW-001, KNW-002...) | Node property: `knowledgeIds[]` for RAG context |
+| **Tools** | This document (TL-001, TL-002...) | Node property: `toolId` specifies execution handler |
+
+### Key Clarifications
+
+1. **Actions are NOT executable** - They provide system prompts that instruct the LLM
+2. **Skills are prompt fragments** - They enhance Actions, not containers of Actions
+3. **Tools execute** - C# handlers that call Azure OpenAI and process responses
+4. **Edges define order, not data flow** - All node outputs accessible to all subsequent nodes
+
+### Prompt Composition Formula
+
+```
+Final Prompt = Action.SystemPrompt + Skill.PromptFragment(s) + Document Text + Knowledge (RAG)
+```
+
+### Canvas JSON Example (How Scopes Are Referenced)
+
+```json
+{
+  "nodes": [
+    {
+      "id": "node_entity_extract",
+      "type": "aiAnalysis",
+      "data": {
+        "label": "Extract Entities",
+        "actionId": "ACT-001",
+        "skillIds": ["SKL-001", "SKL-008"],
+        "knowledgeIds": ["KNW-001"],
+        "toolId": "TL-001",
+        "outputVariable": "entities"
+      }
+    }
+  ],
+  "edges": [
+    { "source": "node_entity_extract", "target": "node_summarize" }
+  ]
+}
 ```
 
 ---
@@ -263,6 +323,10 @@ Matters (legal cases/projects) have types that influence which Playbooks apply:
 
 ## Playbook Definitions
 
+> **Note**: Each Playbook is implemented as a **Canvas JSON** defining nodes and edges.
+> The Skills, Actions, Knowledge, and Tools listed below are referenced BY nodes, not executed directly.
+> Execution order is determined by edge connections on the canvas.
+
 ### PB-001: Quick Document Review
 
 **Purpose**: Fast, high-level overview of any document. Good starting point for triage.
@@ -277,23 +341,23 @@ Matters (legal cases/projects) have types that influence which Playbooks apply:
 | **Estimated Time** | 30-60 seconds |
 | **Complexity** | Low |
 
-**Skills**:
-| Skill | Purpose | Sequence |
-|-------|---------|----------|
-| Executive Summary | Generate 3-5 sentence overview | 1 |
-| Entity Extraction | Pull key parties, dates, amounts | 2 |
+**Canvas Structure** (simplified):
+```
+[AI: Classify] ──▶ [AI: Extract Entities] ──▶ [AI: Summarize] ──▶ [Deliver Output]
+```
 
-**Actions**:
-| Action | Tool Handler | Parameters |
-|--------|--------------|------------|
-| Summarize Content | SummaryHandler | `length: "brief"`, `format: "paragraph"` |
-| Extract Entities | EntityExtractorHandler | `entity_types: ["party", "date", "amount"]` |
-| Classify Document | DocumentClassifierHandler | `taxonomy: "standard"` |
+**Nodes and Their Scope References**:
+| Node | Type | Action | Skills | Tool | Output Variable |
+|------|------|--------|--------|------|-----------------|
+| Classify Document | aiAnalysis | ACT-003 | — | TL-003 | `documentType` |
+| Extract Entities | aiAnalysis | ACT-001 | SKL-008 | TL-001 | `entities` |
+| Summarize | aiAnalysis | ACT-004 | SKL-008 | TL-004 | `summary` |
+| Deliver Report | deliverOutput | — | — | — | `finalReport` |
 
-**Knowledge Sources**:
-| Source | Purpose |
-|--------|---------|
-| Document Type Definitions | Help classify document accurately |
+**Knowledge Sources** (attached to relevant nodes):
+| Source | Attached To Node |
+|--------|------------------|
+| KNW-005 Document Type Definitions | Classify Document |
 
 **Output Structure**:
 ```json
@@ -326,28 +390,29 @@ Matters (legal cases/projects) have types that influence which Playbooks apply:
 | **Estimated Time** | 3-5 minutes |
 | **Complexity** | High |
 
-**Skills**:
-| Skill | Purpose | Sequence |
-|-------|---------|----------|
-| Contract Analysis | Full contract review workflow | 1 |
-| Risk Assessment | Identify risks and compliance issues | 2 |
-| Clause Comparison | Compare to standard terms | 3 |
+**Canvas Structure** (simplified):
+```
+                              ┌──▶ [AI: Analyze Clauses] ──┐
+[AI: Extract Entities] ──────┤                             ├──▶ [AI: Compare to Standards] ──▶ [Deliver]
+                              └──▶ [AI: Detect Risks]  ────┘
+```
 
-**Actions**:
-| Action | Tool Handler | Parameters |
-|--------|--------------|------------|
-| Summarize Content | SummaryHandler | `length: "detailed"`, `sections: true` |
-| Extract Entities | EntityExtractorHandler | `entity_types: ["party", "date", "amount", "obligation", "deliverable"]` |
-| Analyze Clauses | ClauseAnalyzerHandler | `clause_categories: ["payment", "termination", "liability", "IP", "confidentiality"]` |
-| Detect Risks | RiskDetectorHandler | `risk_threshold: 0.6`, `categories: ["financial", "legal", "operational"]` |
-| Compare Clauses | ClauseComparisonHandler | `comparison_source: "standard_terms"` |
+**Nodes and Their Scope References**:
+| Node | Type | Action | Skills | Tool | Knowledge | Output Variable |
+|------|------|--------|--------|------|-----------|-----------------|
+| Extract Entities | aiAnalysis | ACT-001 | SKL-001 | TL-001 | — | `entities` |
+| Analyze Clauses | aiAnalysis | ACT-002 | SKL-001, SKL-010 | TL-002 | KNW-001 | `clauses` |
+| Detect Risks | aiAnalysis | ACT-005 | SKL-009 | TL-005 | KNW-004 | `risks` |
+| Compare to Standards | aiAnalysis | ACT-006 | SKL-010 | TL-006 | KNW-001, KNW-003 | `comparison` |
+| Generate Summary | aiAnalysis | ACT-004 | SKL-001, SKL-008 | TL-004 | — | `summary` |
+| Deliver Report | deliverOutput | — | — | — | — | `finalReport` |
 
-**Knowledge Sources**:
-| Source | Purpose |
-|--------|---------|
-| Standard Contract Terms | Compare clauses to organization standards |
-| Risk Categories | Risk classification taxonomy |
-| Best Practices | Legal review best practices |
+**Knowledge Sources** (attached to relevant nodes):
+| ID | Source | Purpose |
+|----|--------|---------|
+| KNW-001 | Standard Contract Terms | Compare clauses to organization standards |
+| KNW-003 | Best Practices | Legal review best practices |
+| KNW-004 | Risk Categories | Risk classification taxonomy |
 
 **Output Structure**:
 ```json
@@ -412,25 +477,25 @@ Matters (legal cases/projects) have types that influence which Playbooks apply:
 | **Estimated Time** | 2-3 minutes |
 | **Complexity** | Medium |
 
-**Skills**:
-| Skill | Purpose | Sequence |
-|-------|---------|----------|
-| NDA Review | NDA-specific analysis | 1 |
-| Risk Assessment | Identify confidentiality risks | 2 |
+**Canvas Structure** (simplified):
+```
+[AI: Extract Parties/Type] ──▶ [AI: Analyze Scope] ──▶ [AI: Identify Risks] ──▶ [Deliver]
+```
 
-**Actions**:
-| Action | Tool Handler | Parameters |
-|--------|--------------|------------|
-| Summarize Content | SummaryHandler | `length: "standard"`, `focus: "nda"` |
-| Extract Entities | EntityExtractorHandler | `entity_types: ["party", "date", "confidential_info_definition"]` |
-| Analyze Clauses | ClauseAnalyzerHandler | `clause_categories: ["definition_of_confidential", "exclusions", "term", "return_of_materials", "injunctive_relief"]` |
-| Detect Risks | RiskDetectorHandler | `risk_categories: ["scope_too_broad", "term_too_long", "missing_exclusions", "unilateral_vs_mutual"]` |
+**Nodes and Their Scope References**:
+| Node | Type | Action | Skills | Tool | Knowledge | Output Variable |
+|------|------|--------|--------|------|-----------|-----------------|
+| Extract Parties | aiAnalysis | ACT-001 | SKL-003 | TL-001 | — | `ndaParties` |
+| Analyze Scope | aiAnalysis | ACT-002 | SKL-003 | TL-002 | KNW-006 | `scopeAnalysis` |
+| Identify Risks | aiAnalysis | ACT-005 | SKL-003, SKL-009 | TL-005 | KNW-004, KNW-006 | `risks` |
+| Generate Summary | aiAnalysis | ACT-004 | SKL-003, SKL-008 | TL-004 | — | `summary` |
+| Deliver Report | deliverOutput | — | — | — | — | `finalReport` |
 
-**Knowledge Sources**:
-| Source | Purpose |
-|--------|---------|
-| Standard NDA Terms | Organization's preferred NDA language |
-| NDA Best Practices | Industry standards for NDAs |
+**Knowledge Sources** (attached to relevant nodes):
+| ID | Source | Purpose |
+|----|--------|---------|
+| KNW-004 | Risk Categories | Risk classification taxonomy |
+| KNW-006 | Standard NDA Terms | Organization's preferred NDA language |
 
 **NDA-Specific Extractions**:
 | Field | Description | Example |
@@ -496,25 +561,29 @@ Matters (legal cases/projects) have types that influence which Playbooks apply:
 | **Estimated Time** | 3-4 minutes |
 | **Complexity** | High |
 
-**Skills**:
-| Skill | Purpose | Sequence |
-|-------|---------|----------|
-| Lease Review | Lease-specific analysis | 1 |
-| Risk Assessment | Property and financial risks | 2 |
+**Canvas Structure** (simplified):
+```
+[AI: Extract Terms] ──▶ [AI: Analyze Clauses] ──▶ [AI: Assess Risks] ──▶ [Deliver]
+                             │
+                             ▼
+                   [AI: Extract Key Dates]
+```
 
-**Actions**:
-| Action | Tool Handler | Parameters |
-|--------|--------------|------------|
-| Summarize Content | SummaryHandler | `length: "detailed"`, `focus: "lease"` |
-| Extract Entities | EntityExtractorHandler | `entity_types: ["landlord", "tenant", "property_address", "rent_amount", "dates"]` |
-| Analyze Clauses | ClauseAnalyzerHandler | `clause_categories: ["rent", "term", "renewal", "maintenance", "insurance", "assignment", "default"]` |
-| Detect Risks | RiskDetectorHandler | `risk_categories: ["rent_escalation", "CAM_charges", "personal_guarantee", "early_termination"]` |
+**Nodes and Their Scope References**:
+| Node | Type | Action | Skills | Tool | Knowledge | Output Variable |
+|------|------|--------|--------|------|-----------|-----------------|
+| Extract Terms | aiAnalysis | ACT-001 | SKL-004 | TL-001 | — | `leaseTerms` |
+| Analyze Clauses | aiAnalysis | ACT-002 | SKL-004 | TL-002 | KNW-007 | `clauses` |
+| Extract Key Dates | aiAnalysis | ACT-007 | SKL-004 | TL-007 | — | `keyDates` |
+| Assess Risks | aiAnalysis | ACT-005 | SKL-004, SKL-009 | TL-005 | KNW-004 | `risks` |
+| Generate Summary | aiAnalysis | ACT-004 | SKL-004, SKL-008 | TL-004 | — | `summary` |
+| Deliver Report | deliverOutput | — | — | — | — | `finalReport` |
 
-**Knowledge Sources**:
-| Source | Purpose |
-|--------|---------|
-| Standard Lease Terms | Market-standard lease provisions |
-| Local Regulations | Jurisdiction-specific requirements |
+**Knowledge Sources** (attached to relevant nodes):
+| ID | Source | Purpose |
+|----|--------|---------|
+| KNW-004 | Risk Categories | Risk classification taxonomy |
+| KNW-007 | Standard Lease Terms | Market-standard lease provisions |
 
 **Lease-Specific Extractions**:
 | Field | Description | Example |
@@ -1129,33 +1198,69 @@ Matters (legal cases/projects) have types that influence which Playbooks apply:
 
 ## Scope Definitions
 
-### Actions (Individual AI Operations)
+### Actions (System Prompt Templates)
 
-| ID | Name | Description | Handler |
-|----|------|-------------|---------|
-| `ACT-001` | Extract Entities | Extract key entities (parties, dates, amounts) | `EntityExtractorHandler` |
-| `ACT-002` | Analyze Clauses | Identify and analyze contract clauses | `ClauseAnalyzerHandler` |
-| `ACT-003` | Classify Document | Determine document type and category | `DocumentClassifierHandler` |
-| `ACT-004` | Summarize Content | Generate executive summary | `SummaryHandler` |
-| `ACT-005` | Detect Risks | Identify potential risks and issues | `RiskDetectorHandler` |
-| `ACT-006` | Compare Clauses | Compare clauses to standard terms | `ClauseComparisonHandler` |
-| `ACT-007` | Extract Dates | Extract and normalize all dates | `DateExtractorHandler` |
-| `ACT-008` | Calculate Values | Sum and validate monetary amounts | `FinancialCalculatorHandler` |
+> **Important**: Actions are **system prompt templates** that instruct the LLM on how to behave.
+> Actions do NOT execute directly - they provide the "persona" and instructions for AI nodes.
+> **Tools** (not Actions) contain the executable handlers that call Azure OpenAI.
 
-### Skills (Reusable Analysis Bundles)
+| ID | Name | Description | Prompt Focus |
+|----|------|-------------|--------------|
+| `ACT-001` | Extract Entities | System prompt for entity extraction specialist | "You are an entity extraction specialist..." |
+| `ACT-002` | Analyze Clauses | System prompt for clause analysis specialist | "You are a contract clause analyzer..." |
+| `ACT-003` | Classify Document | System prompt for document classification | "You are a document classification specialist..." |
+| `ACT-004` | Summarize Content | System prompt for summarization specialist | "You are a document summarization specialist..." |
+| `ACT-005` | Detect Risks | System prompt for risk detection specialist | "You are a risk identification specialist..." |
+| `ACT-006` | Compare Clauses | System prompt for comparative analysis | "You are a clause comparison specialist..." |
+| `ACT-007` | Extract Dates | System prompt for date extraction | "You are a date extraction specialist..." |
+| `ACT-008` | Calculate Values | System prompt for financial analysis | "You are a financial calculation specialist..." |
 
-| ID | Name | Included Actions | Applicable Document Types |
-|----|------|------------------|---------------------------|
-| `SKL-001` | Contract Analysis | ACT-001, ACT-002, ACT-004, ACT-005 | CONTRACT, AMENDMENT |
-| `SKL-002` | Invoice Processing | ACT-001, ACT-003, ACT-008 | INVOICE |
-| `SKL-003` | NDA Review | ACT-001, ACT-002, ACT-004, ACT-005 | NDA |
-| `SKL-004` | Lease Review | ACT-001, ACT-002, ACT-004, ACT-005, ACT-007 | LEASE |
-| `SKL-005` | Employment Contract | ACT-001, ACT-002, ACT-004, ACT-005 | EMPLOYMENT |
-| `SKL-006` | SLA Analysis | ACT-001, ACT-002, ACT-004 | SLA |
-| `SKL-007` | Compliance Check | ACT-002, ACT-005 | ANY |
-| `SKL-008` | Executive Summary | ACT-003, ACT-004 | ANY |
-| `SKL-009` | Risk Assessment | ACT-005, ACT-006 | CONTRACT, NDA, LEASE |
-| `SKL-010` | Clause Comparison | ACT-002, ACT-006 | CONTRACT, NDA |
+**Example Action System Prompt (ACT-004 Summarize Content)**:
+```
+You are a document summarization specialist. Your task is to generate a clear,
+concise summary that captures the essential information in the document.
+
+## Summary Structure
+1. Executive Summary (1-2 paragraphs)
+2. Key Points (bullet list)
+3. Critical Information (dates, amounts, parties)
+
+## Guidelines
+- Use professional, neutral language
+- Be specific and avoid vague statements
+- Include all material facts
+- Organize information logically
+```
+
+### Skills (Prompt Fragments)
+
+> **Note**: Skills are **prompt fragments** that add specialized instructions to the base Action prompt.
+> They do NOT "contain" or "execute" Actions. Use Skills to customize AI node behavior for specific domains.
+>
+> **Composition**: `Final Prompt = Action.SystemPrompt + Skill.PromptFragment(s)`
+
+| ID | Name | Description | Applicable Document Types |
+|----|------|-------------|---------------------------|
+| `SKL-001` | Contract Analysis | Specialized prompt for comprehensive contract examination | CONTRACT, AMENDMENT |
+| `SKL-002` | Invoice Processing | Prompt guidance for invoice data extraction and validation | INVOICE |
+| `SKL-003` | NDA Review | NDA-specific analysis instructions (scope, term, exclusions) | NDA |
+| `SKL-004` | Lease Review | Lease-focused extraction (rent, term, obligations, CAM) | LEASE |
+| `SKL-005` | Employment Contract | Employment agreement analysis (compensation, restrictive covenants) | EMPLOYMENT |
+| `SKL-006` | SLA Analysis | SLA metric extraction and evaluation guidance | SLA |
+| `SKL-007` | Compliance Check | Regulatory compliance identification instructions | ANY |
+| `SKL-008` | Executive Summary | High-level summary generation guidance | ANY |
+| `SKL-009` | Risk Assessment | Risk identification and severity assessment instructions | CONTRACT, NDA, LEASE |
+| `SKL-010` | Clause Comparison | Instructions for comparing clauses to standard terms | CONTRACT, NDA |
+
+**Example Skill Prompt Fragment (SKL-008 Executive Summary)**:
+```
+## Executive Summary Instructions
+
+1. One-Paragraph Overview: Start with a single paragraph summarizing the document
+2. Key Points: Highlight the 3-5 most important takeaways
+3. Critical Dates: List any deadlines or key dates
+4. Recommended Actions: Suggest next steps if applicable
+```
 
 ### Knowledge Sources (RAG Context)
 
@@ -1172,7 +1277,14 @@ Matters (legal cases/projects) have types that influence which Playbooks apply:
 | `KNW-009` | SLA Benchmarks | Industry SLA standards | SLAs |
 | `KNW-010` | Due Diligence Checklist | M&A DD requirements | Due diligence |
 
-### Tools (Handler Implementations)
+### Tools (Executable Handlers)
+
+> **Important**: Tools are the **executable components** that perform AI operations.
+> Each Tool has a C# handler class that:
+> 1. Builds the prompt (Action + Skills + Document + Knowledge)
+> 2. Calls Azure OpenAI via `IOpenAiClient.GetCompletionAsync()`
+> 3. Parses the LLM response into structured output
+> 4. Returns a `ToolResult` with Data (JSON) and Summary (text)
 
 | ID | Handler Class | Purpose | Parameters |
 |----|---------------|---------|------------|
@@ -1185,9 +1297,28 @@ Matters (legal cases/projects) have types that influence which Playbooks apply:
 | `TL-007` | `DateExtractorHandler` | Extract and normalize dates | `date_format`, `include_relative` |
 | `TL-008` | `FinancialCalculatorHandler` | Financial calculations | `operations[]`, `currency` |
 
+**Handler Location**: `src/server/api/Sprk.Bff.Api/Services/Ai/Tools/*.cs`
+
+**Handler Interface**:
+```csharp
+public interface IAnalysisToolHandler
+{
+    string HandlerId { get; }
+    ToolHandlerMetadata Metadata { get; }
+    IReadOnlyList<ToolType> SupportedToolTypes { get; }
+
+    ToolValidationResult Validate(ToolExecutionContext context, AnalysisTool tool);
+    Task<ToolResult> ExecuteAsync(ToolExecutionContext context, AnalysisTool tool, CancellationToken ct);
+}
+```
+
 ---
 
 ## Playbook-Scope Matrix
+
+> **Note**: In the node-based architecture, these scope associations are expressed through
+> individual node configurations in the canvas JSON. This matrix shows which scopes are
+> typically used across ALL nodes in each playbook.
 
 Quick reference showing which scopes are used by each Playbook:
 
@@ -1244,4 +1375,5 @@ For new matters, suggest a default playbook:
 
 | Date | Change |
 |------|--------|
+| 2026-01-16 | **v2.0**: Aligned with node-based architecture (AI-PLAYBOOK-ARCHITECTURE.md). Updated Overview to show canvas-based execution. Clarified Skills are prompt fragments (not action containers). Clarified Actions are system prompts (not executable). Updated playbook definitions to show node/edge structure. Added cross-references to authoritative architecture doc. |
 | 2026-01-04 | Initial design document created |
