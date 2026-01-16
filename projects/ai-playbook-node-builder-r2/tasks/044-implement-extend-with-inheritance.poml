@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="044" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Implement "Extend" with inheritance</title>
+    <phase>5</phase>
+    <tags>bff-api, scopes</tags>
+    <estimate>1d</estimate>
+    <dependencies>041</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Implement Extend functionality that creates scopes inheriting from a parent.</goal>
+    <context>
+      Extend behavior:
+      - Creates new CUST- scope linked to parent
+      - Child can override specific fields
+      - Non-overridden fields inherit from parent
+      - Parent changes propagate to children
+      - Use parentid lookup field
+    </context>
+    <constraints>
+      - Single-level inheritance only (no grandchildren)
+      - Prevent circular references
+      - Handle parent deletion gracefully
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/spec.md" reason="Extend requirements" />
+      <file path="src/server/api/Sprk.Bff.Api/Services/Scopes/ScopeDataverseService.cs" reason="Existing service" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add ExtendScope method to service</step>
+    <step order="2">Create child scope with parent link</step>
+    <step order="3">Implement GetEffectiveScope for inheritance</step>
+    <step order="4">Add override tracking fields</step>
+    <step order="5">Handle parent deletion</step>
+    <step order="6">Add API endpoint</step>
+    <step order="7">Integration test inheritance</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">Add methods to existing service</tool>
+    <tool name="Edit">Add endpoint</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">Updated src/server/api/Sprk.Bff.Api/Services/Scopes/ScopeDataverseService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Child scope created with parent link</criterion>
+    <criterion>Non-overridden fields inherit</criterion>
+    <criterion>Overridden fields use child value</criterion>
+    <criterion>Parent changes propagate</criterion>
+    <criterion>No circular references allowed</criterion>
+  </acceptance-criteria>
+</task>

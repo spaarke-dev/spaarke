@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Implement entity resolution with confidence</title>
+    <phase>3</phase>
+    <tags>ai, entity-resolution</tags>
+    <estimate>1d</estimate>
+    <dependencies>021</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Implement entity resolution to map user references to actual node/scope IDs.</goal>
+    <context>
+      Resolves references like:
+      - "the TL;DR node" → node_001
+      - "compliance check" → node_003
+      - "standard compliance skill" → SKL-004
+    </context>
+    <constraints>
+      - Return confidence score
+      - Show options when confidence &lt; 80%
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md" reason="Entity resolution spec" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create EntityResolutionService</step>
+    <step order="2">Implement node name matching</step>
+    <step order="3">Implement scope name matching</step>
+    <step order="4">Return confidence scores</step>
+    <step order="5">Return multiple matches when ambiguous</step>
+    <step order="6">Write unit tests</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create resolution service</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Ai/EntityResolutionService.cs</output>
+    <output type="file">src/server/api/Sprk.Bff.Api/Models/Ai/EntityResolutionResult.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Nodes resolved by label/ID</criterion>
+    <criterion>Scopes resolved by name/ID</criterion>
+    <criterion>Multiple matches returned for ambiguous</criterion>
+    <criterion>Confidence scores accurate</criterion>
+  </acceptance-criteria>
+</task>

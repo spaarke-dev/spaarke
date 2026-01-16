@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="028" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Create KNW-BUILDER-001 through KNW-BUILDER-004 content</title>
+    <phase>3</phase>
+    <tags>dataverse, scopes</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>none</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create the 4 Builder Knowledge scope records in Dataverse.</goal>
+    <context>
+      Builder Knowledge:
+      - KNW-BUILDER-001: Scope Catalog
+      - KNW-BUILDER-002: Reference Playbooks
+      - KNW-BUILDER-003: Node Schema
+      - KNW-BUILDER-004: Best Practices
+    </context>
+    <constraints>
+      - SYS- ownership
+      - Include content or references
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md" reason="Knowledge definitions" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Compile scope catalog content</step>
+    <step order="2">Define reference playbook examples</step>
+    <step order="3">Document node schema</step>
+    <step order="4">Write best practices</step>
+    <step order="5">Create Dataverse records</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Create Dataverse records</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse">4 sprk_aianalysisknowledge records</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>4 Knowledge records created</criterion>
+    <criterion>Content populated</criterion>
+    <criterion>All have SYS- prefix</criterion>
+  </acceptance-criteria>
+</task>

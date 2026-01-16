@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="008" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Implement incremental canvas update streaming</title>
+    <phase>1</phase>
+    <tags>bff-api, sse, streaming</tags>
+    <estimate>1d</estimate>
+    <dependencies>002, 006</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Implement the SSE event streaming for canvas patches and operation feedback.</goal>
+    <context>
+      The endpoint needs to stream multiple event types:
+      - thinking: AI processing status
+      - dataverse_operation: Dataverse record changes
+      - canvas_patch: Canvas node/edge changes
+      - message: AI response text
+      - done: Completion signal
+    </context>
+    <constraints>
+      - Follow existing SSE patterns
+      - Proper event formatting with event: and data: lines
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/patterns/ai/streaming-endpoints.md" reason="SSE pattern" />
+      <file path="src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs" reason="Reference" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define SSE event record types (ThinkingEvent, CanvasPatchEvent, etc.)</step>
+    <step order="2">Create ServerSentEventWriter utility</step>
+    <step order="3">Implement streaming in endpoint handler</step>
+    <step order="4">Wire service results to SSE events</step>
+    <step order="5">Test streaming with curl</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Examine existing SSE code</tool>
+    <tool name="Edit">Update endpoint implementation</tool>
+    <tool name="Bash">Test with curl</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Models/Ai/SseEvents.cs</output>
+    <output type="modification">src/server/api/Sprk.Bff.Api/Api/Ai/AiPlaybookBuilderEndpoints.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All 5 event types properly formatted</criterion>
+    <criterion>Events stream incrementally (not buffered)</criterion>
+    <criterion>Client can parse events correctly</criterion>
+    <criterion>Manual curl test confirms streaming</criterion>
+  </acceptance-criteria>
+</task>

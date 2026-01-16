@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Design system prompt for canvas building</title>
+    <phase>3</phase>
+    <tags>ai, prompt-engineering</tags>
+    <estimate>1d</estimate>
+    <dependencies>none</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Design the system prompt that guides the AI in building playbook canvases.</goal>
+    <context>
+      The system prompt must:
+      - Define all 11 intent categories
+      - Explain available tools and when to use them
+      - Set confidence thresholds for clarification
+      - Include canvas state awareness
+    </context>
+    <constraints>
+      - Constrained output format for reliable parsing
+      - Include validation rules
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md" reason="Intent categories" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define system prompt structure</step>
+    <step order="2">Document all 11 intent categories</step>
+    <step order="3">Define tool usage guidelines</step>
+    <step order="4">Add canvas state context section</step>
+    <step order="5">Add output format specification</step>
+    <step order="6">Test prompt with sample inputs</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create prompt files</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Ai/Prompts/PlaybookBuilderSystemPrompt.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>System prompt covers all 11 intents</criterion>
+    <criterion>Tool usage clearly documented</criterion>
+    <criterion>Output format is parseable</criterion>
+    <criterion>Test inputs produce expected outputs</criterion>
+  </acceptance-criteria>
+</task>

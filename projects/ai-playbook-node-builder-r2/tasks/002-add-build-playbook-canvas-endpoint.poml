@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Add /api/ai/build-playbook-canvas SSE endpoint</title>
+    <phase>1</phase>
+    <tags>bff-api, ai, sse, endpoint</tags>
+    <estimate>1d</estimate>
+    <dependencies>001</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create the SSE streaming endpoint that receives user messages and streams canvas operations back to the client.</goal>
+    <context>
+      This endpoint is the main API surface for the AI Chat Playbook Builder. It:
+      - Accepts POST requests with user message + current canvas state
+      - Streams SSE events: thinking, dataverse_operation, canvas_patch, message, done
+      - Returns real-time updates as the AI processes the request
+    </context>
+    <constraints>
+      - Follow ADR-001: Minimal API patterns
+      - Follow ADR-008: Use endpoint filters for authorization
+      - Follow existing SSE pattern from AnalysisEndpoints.cs
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-001-minimal-api.md" reason="API patterns" />
+      <file path=".claude/adr/ADR-008-endpoint-filters.md" reason="Authorization" />
+      <file path=".claude/patterns/ai/streaming-endpoints.md" reason="SSE pattern" />
+      <file path="src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs" reason="Reference implementation" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create Api/Ai/AiPlaybookBuilderEndpoints.cs</step>
+    <step order="2">Define BuildPlaybookCanvasRequest record</step>
+    <step order="3">Implement MapPost for /api/ai/build-playbook-canvas</step>
+    <step order="4">Configure SSE response headers</step>
+    <step order="5">Wire up to AiPlaybookBuilderService</step>
+    <step order="6">Add endpoint registration in Program.cs</step>
+    <step order="7">Test endpoint with curl/Postman</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Examine AnalysisEndpoints.cs</tool>
+    <tool name="Write">Create endpoint file</tool>
+    <tool name="Edit">Update Program.cs for endpoint registration</tool>
+    <tool name="Bash">Test endpoint</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Api/Ai/AiPlaybookBuilderEndpoints.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Endpoint registered at /api/ai/build-playbook-canvas</criterion>
+    <criterion>Request model includes playbookId, currentCanvas, message, conversationHistory</criterion>
+    <criterion>Response streams SSE events</criterion>
+    <criterion>Authorization filter applied</criterion>
+    <criterion>Manual test confirms SSE streaming works</criterion>
+  </acceptance-criteria>
+</task>

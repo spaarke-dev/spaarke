@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Implement intent classification (11 categories)</title>
+    <phase>3</phase>
+    <tags>ai, classification</tags>
+    <estimate>1d</estimate>
+    <dependencies>020</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Implement the intent classification system for user messages.</goal>
+    <context>
+      11 intent categories:
+      CREATE_PLAYBOOK, ADD_NODE, REMOVE_NODE, CONNECT_NODES, CONFIGURE_NODE,
+      LINK_SCOPE, CREATE_SCOPE, QUERY_STATUS, MODIFY_LAYOUT, UNDO, UNCLEAR
+    </context>
+    <constraints>
+      - Return confidence score
+      - Trigger clarification when confidence &lt; 75%
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md" reason="Classification spec" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define IntentCategory enum</step>
+    <step order="2">Create IntentClassificationResult record</step>
+    <step order="3">Implement ClassifyIntentAsync method</step>
+    <step order="4">Use GPT-4o-mini for fast classification</step>
+    <step order="5">Parse structured response</step>
+    <step order="6">Write unit tests for each intent</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create classification code</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Ai/IntentClassificationService.cs</output>
+    <output type="file">src/server/api/Sprk.Bff.Api/Models/Ai/IntentClassificationResult.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All 11 intents correctly identified</criterion>
+    <criterion>Confidence scores returned</criterion>
+    <criterion>Low confidence triggers UNCLEAR</criterion>
+    <criterion>Unit tests pass</criterion>
+  </acceptance-criteria>
+</task>

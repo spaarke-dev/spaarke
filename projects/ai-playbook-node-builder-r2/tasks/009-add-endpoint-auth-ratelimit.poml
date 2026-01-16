@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="009" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Add endpoint authorization and rate limiting</title>
+    <phase>1</phase>
+    <tags>bff-api, auth, rate-limiting</tags>
+    <estimate>1d</estimate>
+    <dependencies>002</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Apply authorization filter and rate limiting to the builder endpoint.</goal>
+    <context>
+      Per ADR-008 and ADR-016:
+      - Use endpoint filters for authorization
+      - Apply rate limiting (~200 messages/hour per user)
+      - Return 429 ProblemDetails when limits exceeded
+    </context>
+    <constraints>
+      - Follow ADR-008 endpoint filter pattern
+      - Follow ADR-016 rate limiting pattern
+      - Generous limits (don't block users)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-008-endpoint-filters.md" reason="Auth filters" />
+      <file path=".claude/adr/ADR-016-ai-rate-limits.md" reason="Rate limiting" />
+      <file path=".claude/adr/ADR-019-problemdetails.md" reason="Error responses" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create/update endpoint authorization filter</step>
+    <step order="2">Configure rate limiting policy "ai-builder"</step>
+    <step order="3">Apply filter and rate limit to endpoint</step>
+    <step order="4">Implement 429 ProblemDetails response</step>
+    <step order="5">Test authorization rejection</step>
+    <step order="6">Test rate limit exceeded response</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">Update endpoint and configuration</tool>
+    <tool name="Bash">Test scenarios</tool>
+  </tools>
+
+  <outputs>
+    <output type="modification">src/server/api/Sprk.Bff.Api/Api/Ai/AiPlaybookBuilderEndpoints.cs</output>
+    <output type="modification">src/server/api/Sprk.Bff.Api/Program.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Unauthorized requests return 401</criterion>
+    <criterion>Rate limited requests return 429 with ProblemDetails</criterion>
+    <criterion>Rate limit set to ~200/hour per user</criterion>
+    <criterion>Authorized requests within limits succeed</criterion>
+  </acceptance-criteria>
+</task>

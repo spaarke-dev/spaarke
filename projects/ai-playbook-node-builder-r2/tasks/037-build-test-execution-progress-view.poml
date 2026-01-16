@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="037" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Build test execution progress view</title>
+    <phase>4</phase>
+    <tags>pcf, fluent-ui, testing</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>036</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create a progress view component showing test execution status and node-by-node results.</goal>
+    <context>
+      Progress view requirements:
+      - Show overall progress (percentage/steps)
+      - Display current node being executed
+      - Show node results as they complete
+      - Handle errors gracefully
+      - Cancelable execution
+    </context>
+    <constraints>
+      - Use Fluent UI v9 ProgressBar and Spinner
+      - Stream updates from SSE
+      - Follow ADR-021 theming
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md" reason="Progress UI design" />
+      <file path="src/client/pcf/PlaybookBuilderHost/components/" reason="Existing components" />
+      <file path=".claude/adr/ADR-021.md" reason="Fluent UI theming" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create TestProgressView component</step>
+    <step order="2">Add progress bar with percentage</step>
+    <step order="3">Add current step indicator</step>
+    <step order="4">Add node results list</step>
+    <step order="5">Add cancel button</step>
+    <step order="6">Wire to SSE stream</step>
+    <step order="7">Add error state display</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create progress component</tool>
+    <tool name="Edit">Integrate with dialog</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/client/pcf/PlaybookBuilderHost/components/AiAssistant/TestProgressView.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Progress bar updates in real-time</criterion>
+    <criterion>Current step shown</criterion>
+    <criterion>Node results display as completed</criterion>
+    <criterion>Cancel button stops execution</criterion>
+    <criterion>Errors displayed clearly</criterion>
+  </acceptance-criteria>
+</task>

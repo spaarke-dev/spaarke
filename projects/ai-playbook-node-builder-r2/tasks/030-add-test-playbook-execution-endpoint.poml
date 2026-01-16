@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Add /api/ai/test-playbook-execution endpoint</title>
+    <phase>4</phase>
+    <tags>bff-api, testing, ai</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>Phase 1</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create the test-playbook-execution endpoint for validating playbook configurations.</goal>
+    <context>
+      Endpoint structure:
+      - POST /api/ai/test-playbook-execution
+      - Accepts: PlaybookId, TestMode (mock/quick/production), TestDocument (optional)
+      - Returns: SSE stream with execution progress and results
+      - Requires authorization filter
+    </context>
+    <constraints>
+      - Follow ADR-001 minimal API patterns
+      - Use endpoint authorization filter per ADR-008
+      - Return ProblemDetails for errors per ADR-019
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md" reason="Test execution design" />
+      <file path="src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs" reason="Streaming endpoint pattern" />
+      <file path=".claude/adr/ADR-001.md" reason="Minimal API patterns" />
+      <file path=".claude/adr/ADR-008.md" reason="Endpoint authorization" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create TestPlaybookRequest model</step>
+    <step order="2">Create TestMode enum (Mock, Quick, Production)</step>
+    <step order="3">Add POST endpoint to AiPlaybookBuilderEndpoints.cs</step>
+    <step order="4">Implement SSE streaming response</step>
+    <step order="5">Add authorization filter</step>
+    <step order="6">Add request validation</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">Add endpoint to existing file</tool>
+    <tool name="Write">Create request/response models</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Models/Ai/TestPlaybookRequest.cs</output>
+    <output type="file">src/server/api/Sprk.Bff.Api/Models/Ai/TestMode.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Endpoint accepts POST with test configuration</criterion>
+    <criterion>Returns SSE stream</criterion>
+    <criterion>Authorization filter applied</criterion>
+    <criterion>Request validation works</criterion>
+  </acceptance-criteria>
+</task>

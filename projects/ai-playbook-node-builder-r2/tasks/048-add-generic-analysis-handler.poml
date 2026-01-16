@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="048" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Add GenericAnalysisHandler for configurable tools</title>
+    <phase>5</phase>
+    <tags>bff-api, ai, tools</tags>
+    <estimate>1d</estimate>
+    <dependencies>none</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create a generic tool handler that executes based on Tool scope configuration.</goal>
+    <context>
+      GenericAnalysisHandler:
+      - Reads tool definition from Dataverse
+      - Executes tool based on parameter schema
+      - Supports custom tools without code deployment
+      - Uses prompt from Tool scope for AI calls
+    </context>
+    <constraints>
+      - Must be secure (no arbitrary code execution)
+      - Validate parameters against schema
+      - Support standard operations: extract, classify, validate
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md" reason="Tool framework design" />
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/" reason="Existing handlers" />
+      <file path=".claude/adr/ADR-013.md" reason="AI architecture" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create GenericAnalysisHandler class</step>
+    <step order="2">Implement tool definition loading</step>
+    <step order="3">Implement parameter validation</step>
+    <step order="4">Implement prompt-based execution</step>
+    <step order="5">Add supported operations</step>
+    <step order="6">Register as default handler</step>
+    <step order="7">Integration test with custom tool</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create handler class</tool>
+    <tool name="Edit">Register in DI</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GenericAnalysisHandler.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Handler loads tool definition from Dataverse</criterion>
+    <criterion>Parameters validated against schema</criterion>
+    <criterion>AI called with tool prompt</criterion>
+    <criterion>Works with custom tools</criterion>
+    <criterion>Secure - no code injection</criterion>
+  </acceptance-criteria>
+</task>

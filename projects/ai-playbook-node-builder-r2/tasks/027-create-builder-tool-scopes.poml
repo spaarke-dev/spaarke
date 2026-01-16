@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="027" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Create TL-BUILDER-001 through TL-BUILDER-009 definitions</title>
+    <phase>3</phase>
+    <tags>dataverse, scopes</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>none</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create the 9 Builder Tool scope records in Dataverse.</goal>
+    <context>
+      Builder Tools:
+      TL-BUILDER-001: addNode
+      TL-BUILDER-002: removeNode
+      TL-BUILDER-003: createEdge
+      TL-BUILDER-004: updateNodeConfig
+      TL-BUILDER-005: linkScope
+      TL-BUILDER-006: createScope
+      TL-BUILDER-007: searchScopes
+      TL-BUILDER-008: autoLayout
+      TL-BUILDER-009: validateCanvas
+    </context>
+    <constraints>
+      - SYS- ownership
+      - Include parameter schemas
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md" reason="Tool definitions" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define tool parameter schemas</step>
+    <step order="2">Create Dataverse records</step>
+    <step order="3">Verify records</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Create Dataverse records</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse">9 sprk_aianalysistool records</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>9 Tool records created</criterion>
+    <criterion>Parameter schemas defined</criterion>
+    <criterion>All have SYS- prefix</criterion>
+  </acceptance-criteria>
+</task>

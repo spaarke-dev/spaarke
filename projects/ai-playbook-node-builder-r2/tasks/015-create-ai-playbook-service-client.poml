@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Create AiPlaybookService API client</title>
+    <phase>2</phase>
+    <tags>pcf, api-client, sse</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>Phase 1</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create the TypeScript API client for calling /api/ai/build-playbook-canvas.</goal>
+    <context>
+      Client service that:
+      - Makes POST request to BFF endpoint
+      - Handles SSE event stream
+      - Parses different event types
+      - Returns typed results
+    </context>
+    <constraints>
+      - Use EventSource or fetch with stream reading
+      - Type-safe event parsing
+      - Handle connection errors
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/client/pcf/PlaybookBuilderHost/control/hooks/useExecutionStream.ts" reason="SSE pattern" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create services/AiPlaybookService.ts</step>
+    <step order="2">Define request/response types</step>
+    <step order="3">Implement buildPlaybookCanvas method</step>
+    <step order="4">Handle SSE stream parsing</step>
+    <step order="5">Add error handling</step>
+    <step order="6">Export service</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Examine existing SSE hooks</tool>
+    <tool name="Write">Create service file</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/client/pcf/PlaybookBuilderHost/control/services/AiPlaybookService.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Service makes POST request to correct endpoint</criterion>
+    <criterion>SSE events parsed by type</criterion>
+    <criterion>Typed responses for each event</criterion>
+    <criterion>Connection errors handled</criterion>
+  </acceptance-criteria>
+</task>

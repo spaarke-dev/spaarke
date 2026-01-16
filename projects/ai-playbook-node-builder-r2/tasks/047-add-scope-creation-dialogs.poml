@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="047" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Add scope creation dialogs</title>
+    <phase>5</phase>
+    <tags>pcf, fluent-ui, scopes</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>046</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create dialogs for creating and editing customer scopes.</goal>
+    <context>
+      Dialog requirements:
+      - Create new CUST- scope dialog
+      - Edit existing CUST- scope dialog
+      - View-only dialog for SYS- scopes
+      - Form fields vary by scope type
+      - Validation before save
+    </context>
+    <constraints>
+      - Use Fluent UI v9 Dialog and Form components
+      - Disable editing for SYS- scopes
+      - Follow ADR-021 theming
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md" reason="Scope management UI" />
+      <file path="src/client/pcf/PlaybookBuilderHost/components/" reason="Existing components" />
+      <file path=".claude/adr/ADR-021.md" reason="Fluent UI theming" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create ScopeFormDialog component</step>
+    <step order="2">Add form fields for Action scope</step>
+    <step order="3">Add form fields for Skill scope</step>
+    <step order="4">Add form fields for Tool scope</step>
+    <step order="5">Add form fields for Knowledge scope</step>
+    <step order="6">Implement validation</step>
+    <step order="7">Wire save/cancel to API</step>
+    <step order="8">Add read-only mode for SYS-</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create dialog components</tool>
+    <tool name="Edit">Wire to ScopeBrowser</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/client/pcf/PlaybookBuilderHost/components/ScopeBrowser/ScopeFormDialog.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Create dialog works for all scope types</criterion>
+    <criterion>Edit dialog pre-populates fields</criterion>
+    <criterion>SYS- scopes are read-only</criterion>
+    <criterion>Validation prevents invalid saves</criterion>
+    <criterion>Dark mode compatible</criterion>
+  </acceptance-criteria>
+</task>

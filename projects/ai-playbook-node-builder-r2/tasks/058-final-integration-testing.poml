@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="058" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Final integration testing</title>
+    <phase>6</phase>
+    <tags>testing, integration</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>All phases</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Perform comprehensive end-to-end integration testing of the complete feature.</goal>
+    <context>
+      Test scenarios:
+      1. Create playbook from scratch via chat
+      2. Modify existing playbook via chat
+      3. Execute all three test modes
+      4. Manage custom scopes
+      5. Error handling flows
+      6. Rate limiting behavior
+    </context>
+    <constraints>
+      - Test in dev environment
+      - Document all test results
+      - File bugs for issues
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/spec.md" reason="Success criteria" />
+      <file path="projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md" reason="Feature design" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Deploy to dev environment</step>
+    <step order="2">Test playbook creation scenario</step>
+    <step order="3">Test playbook modification scenario</step>
+    <step order="4">Test mock execution mode</step>
+    <step order="5">Test quick execution mode</step>
+    <step order="6">Test production execution mode</step>
+    <step order="7">Test scope management</step>
+    <step order="8">Test error scenarios</step>
+    <step order="9">Document results</step>
+    <step order="10">File bugs for issues</step>
+  </steps>
+
+  <tools>
+    <tool name="Skill">/dataverse-deploy</tool>
+    <tool name="Bash">Manual testing commands</tool>
+    <tool name="Write">Test results document</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">projects/ai-playbook-node-builder-r2/notes/testing/integration-test-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All scenarios tested</criterion>
+    <criterion>Results documented</criterion>
+    <criterion>Critical bugs filed</criterion>
+    <criterion>Success criteria verified</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="End-to-End Playbook Creation">
+      <url>https://spaarkedev1.crm.dynamics.com/main.aspx?appid={appid}&amp;pagetype=entityrecord&amp;etn=sprk_aiplaybook</url>
+      <steps>
+        <step>Create new playbook record</step>
+        <step>Open AI assistant (Ctrl+K)</step>
+        <step>Say "Create a lease analysis playbook"</step>
+        <step>Verify canvas updates with nodes</step>
+        <step>Say "Add a clause extraction step"</step>
+        <step>Verify new node added</step>
+        <step>Run mock test</step>
+        <step>Verify test results displayed</step>
+      </steps>
+      <expected>Full playbook created and tested via conversational UI</expected>
+    </test>
+  </ui-tests>
+</task>

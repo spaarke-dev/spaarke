@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Define canvas patch schema</title>
+    <phase>1</phase>
+    <tags>bff-api, models, schema</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>none</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Define the CanvasPatch schema for add/remove/update operations on nodes and edges.</goal>
+    <context>
+      The canvas patch schema describes incremental changes to the playbook canvas.
+      It supports:
+      - Adding new nodes with full configuration
+      - Removing nodes by ID
+      - Updating existing node properties
+      - Adding/removing edges between nodes
+    </context>
+    <constraints>
+      - Match PCF canvasStore types
+      - JSON-serializable for SSE streaming
+      - Nullable properties for partial updates
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/client/pcf/PlaybookBuilderHost/control/stores/canvasStore.ts" reason="Client-side types" />
+      <file path="projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md" reason="Design spec" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review canvasStore.ts for PlaybookNode and PlaybookEdge types</step>
+    <step order="2">Create Models/Ai/CanvasPatch.cs with C# records</step>
+    <step order="3">Define CanvasPatch, PlaybookNode, PlaybookEdge records</step>
+    <step order="4">Add JSON serialization attributes</step>
+    <step order="5">Add validation attributes where needed</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Examine TypeScript types</tool>
+    <tool name="Write">Create C# model files</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Models/Ai/CanvasPatch.cs</output>
+    <output type="file">src/server/api/Sprk.Bff.Api/Models/Ai/PlaybookNode.cs</output>
+    <output type="file">src/server/api/Sprk.Bff.Api/Models/Ai/PlaybookEdge.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>CanvasPatch has addNodes, removeNodeIds, updateNodes, addEdges, removeEdgeIds</criterion>
+    <criterion>PlaybookNode matches TypeScript PlaybookNode structure</criterion>
+    <criterion>All records are JSON-serializable</criterion>
+    <criterion>Build succeeds</criterion>
+  </acceptance-criteria>
+</task>
