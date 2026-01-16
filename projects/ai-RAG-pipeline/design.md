@@ -848,6 +848,40 @@ async function indexDocumentToRag(
 
 ## Implementation Tasks
 
+### Phase 0: Analysis Workflow Alignment (Priority: CRITICAL - Prerequisite)
+
+**Issue Identified (2026-01-14)**: `AppOnlyAnalysisService` does NOT create `sprk_analysis` or `sprk_analysisoutput` records like `AnalysisOrchestrationService`. This creates inconsistency in how analysis results are stored.
+
+**Current State**:
+| Service | Creates `sprk_analysis` | Creates `sprk_analysisoutput` | Updates Document Fields |
+|---------|------------------------|-------------------------------|------------------------|
+| `AnalysisOrchestrationService` (OBO) | ✅ Yes | ✅ Yes | ✅ Yes |
+| `AppOnlyAnalysisService` (Background) | ❌ No | ❌ No | ✅ Yes |
+
+**Target State**: Both services should create Analysis records for consistency.
+
+| Task | Description | Files |
+|------|-------------|-------|
+| 0.1 | Add `IDataverseService` dependency to `AppOnlyAnalysisService` | 1 modified |
+| 0.2 | Call `CreateAnalysisAsync()` before running playbook tools | 1 modified |
+| 0.3 | Call `CreateAnalysisOutputAsync()` for each tool output | 1 modified |
+| 0.4 | Ensure dual-write: outputs to `sprk_analysisoutput` AND Document fields | 1 modified |
+| 0.5 | Update `AppOnlyDocumentAnalysisJobHandler` to pass AnalysisId to telemetry | 1 modified |
+| 0.6 | Unit tests for Analysis record creation in app-only flow | 1 new |
+
+**Files Modified**:
+- `Services/Ai/AppOnlyAnalysisService.cs` - Add Analysis record creation
+- `Services/Jobs/Handlers/AppOnlyDocumentAnalysisJobHandler.cs` - Pass AnalysisId
+- `Telemetry/DocumentTelemetry.cs` - Track AnalysisId
+
+**Why This Matters**:
+1. Analysis records provide audit trail of all document analyses
+2. Enables "Analysis Workspace" to show background analyses
+3. Consistent behavior regardless of trigger source (user vs automation)
+4. Required before RAG integration since both need unified approach
+
+---
+
 ### Phase 1: Core Pipeline (Priority: HIGH)
 
 | Task | Description | Files |
@@ -959,15 +993,22 @@ src/server/api/Sprk.Bff.Api/
 
 ## Success Criteria
 
-1. [ ] `POST /api/ai/rag/index-file` indexes documents via OBO auth
-2. [ ] `RagIndexingJobHandler` indexes documents via app-only auth
-3. [ ] Both paths produce **identical** indexed results
-4. [ ] Email archives are automatically indexed when `AutoIndexToRag=true`
-5. [ ] Works for Documents (with documentId) and orphan files (without)
-6. [ ] Indexed documents are searchable via `/api/ai/rag/search`
-7. [ ] Performance within targets
-8. [ ] All existing tests continue to pass
-9. [ ] Duplicate `ChunkText()` methods removed from tool handlers
+### Phase 0: Analysis Alignment
+1. [ ] `AppOnlyAnalysisService` creates `sprk_analysis` records
+2. [ ] `AppOnlyAnalysisService` creates `sprk_analysisoutput` records for each tool
+3. [ ] Analysis records are visible in Dataverse for background-processed documents
+4. [ ] Document fields AND Analysis records updated consistently
+
+### Phase 1-4: RAG Pipeline
+5. [ ] `POST /api/ai/rag/index-file` indexes documents via OBO auth
+6. [ ] `RagIndexingJobHandler` indexes documents via app-only auth
+7. [ ] Both paths produce **identical** indexed results
+8. [ ] Email archives are automatically indexed when `AutoIndexToRag=true`
+9. [ ] Works for Documents (with documentId) and orphan files (without)
+10. [ ] Indexed documents are searchable via `/api/ai/rag/search`
+11. [ ] Performance within targets
+12. [ ] All existing tests continue to pass
+13. [ ] Duplicate `ChunkText()` methods removed from tool handlers
 
 ---
 
@@ -975,6 +1016,7 @@ src/server/api/Sprk.Bff.Api/
 
 | Category | Status | Notes |
 |----------|--------|-------|
+| **Analysis Workflow Alignment** | ❌ Phase 0 | AppOnlyAnalysisService must create sprk_analysis records |
 | **Core RAG Components** | ✅ Complete | RagService, TextExtractor, EmbeddingCache |
 | **Text Chunking Service** | ❌ To Create | Extract from tool handlers |
 | **File Indexing Service** | ❌ To Create | Unified pipeline with 3 entry points |
@@ -984,10 +1026,11 @@ src/server/api/Sprk.Bff.Api/
 | **Event Handler** | ⚠️ Phase 4 | Placeholder stubs exist |
 
 **Bottom Line**:
-1. All indexing paths converge to `FileIndexingService.IndexTextInternalAsync()`
-2. Same chunking, embedding, and indexing regardless of source
-3. Job-based approach for email aligns with existing AI analysis pattern
-4. Complete email-to-document-r2 first, then implement RAG pipeline
+1. **Phase 0 first**: Align AppOnlyAnalysisService to create Analysis records (consistency)
+2. All indexing paths converge to `FileIndexingService.IndexTextInternalAsync()`
+3. Same chunking, embedding, and indexing regardless of source
+4. Job-based approach for email aligns with existing AI analysis pattern
+5. Complete email-to-document-r2 first, then implement RAG pipeline
 
 ---
 
