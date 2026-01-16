@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Implement "Save As" for scopes</title>
+    <phase>5</phase>
+    <tags>bff-api, scopes</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>041</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Implement Save As functionality to create customer copies of scopes.</goal>
+    <context>
+      Save As behavior:
+      - Creates new scope with CUST- prefix
+      - Copies all content (prompts, schemas, etc.)
+      - Sets Customer ownership
+      - Auto-increments display name if duplicate
+      - Applicable to: Actions, Skills, Tools, Knowledge
+    </context>
+    <constraints>
+      - Preserve original scope unchanged
+      - New scope has unique logical name (GUID)
+      - Display name gets (1) suffix if duplicate
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/spec.md" reason="Save As requirements" />
+      <file path="src/server/api/Sprk.Bff.Api/Services/Scopes/ScopeDataverseService.cs" reason="Existing service" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add SaveScopeAs method to service</step>
+    <step order="2">Implement content copy per scope type</step>
+    <step order="3">Generate new GUID for logical name</step>
+    <step order="4">Set CUST- prefix and Customer ownership</step>
+    <step order="5">Handle duplicate display name</step>
+    <step order="6">Add API endpoint</step>
+    <step order="7">Unit test for each scope type</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">Add method to existing service</tool>
+    <tool name="Edit">Add endpoint</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">Updated src/server/api/Sprk.Bff.Api/Services/Scopes/ScopeDataverseService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>New scope created with CUST- prefix</criterion>
+    <criterion>All content copied</criterion>
+    <criterion>Unique logical name generated</criterion>
+    <criterion>Duplicate display name handled with suffix</criterion>
+    <criterion>Works for all scope types</criterion>
+  </acceptance-criteria>
+</task>

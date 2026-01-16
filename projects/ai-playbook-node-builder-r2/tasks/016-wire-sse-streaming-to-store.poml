@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Wire SSE streaming to store</title>
+    <phase>2</phase>
+    <tags>pcf, sse, integration</tags>
+    <estimate>1d</estimate>
+    <dependencies>010, 015</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Connect the API client SSE stream to the Zustand store for real-time updates.</goal>
+    <context>
+      When sendMessage is called:
+      - Call API service
+      - Process incoming SSE events
+      - Update store state (messages, operations)
+      - Apply canvas patches to canvasStore
+    </context>
+    <constraints>
+      - Coordinate between aiAssistantStore and canvasStore
+      - Handle streaming state properly
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/client/pcf/PlaybookBuilderHost/control/stores/canvasStore.ts" reason="Canvas state" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Update aiAssistantStore.sendMessage to call API</step>
+    <step order="2">Process SSE events and update messages</step>
+    <step order="3">On canvas_patch event, call canvasStore actions</step>
+    <step order="4">Handle streaming state (isStreaming)</step>
+    <step order="5">Handle errors gracefully</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">Update store implementation</tool>
+  </tools>
+
+  <outputs>
+    <output type="modification">src/client/pcf/PlaybookBuilderHost/control/stores/aiAssistantStore.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>sendMessage triggers API call</criterion>
+    <criterion>SSE events update chat messages</criterion>
+    <criterion>Canvas patches apply to canvasStore</criterion>
+    <criterion>isStreaming state accurate</criterion>
+    <criterion>Errors shown in UI</criterion>
+  </acceptance-criteria>
+</task>

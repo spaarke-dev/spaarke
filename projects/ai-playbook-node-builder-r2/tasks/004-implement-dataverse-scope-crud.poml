@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Implement Dataverse scope CRUD operations</title>
+    <phase>1</phase>
+    <tags>bff-api, dataverse, crud</tags>
+    <estimate>1.5d</estimate>
+    <dependencies>none</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Implement CRUD operations for Dataverse scope entities (Actions, Skills, Knowledge, Tools, Outputs).</goal>
+    <context>
+      The AI builder needs to create, read, update, and delete scope records in Dataverse.
+      Scope entities: sprk_aianalysisaction, sprk_aianalysisskill, sprk_aianalysisknowledge,
+      sprk_aianalysistool, sprk_aianalysisoutput
+    </context>
+    <constraints>
+      - Use existing Dataverse service patterns
+      - Include ownership field handling (SYS- vs CUST-)
+      - Handle duplicate name detection
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/spec.md" reason="Scope requirements" />
+      <file path=".claude/patterns/ai/analysis-scopes.md" reason="Scope definitions" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create Services/Dataverse/IScopeManagementService.cs interface</step>
+    <step order="2">Define CRUD methods for each scope type</step>
+    <step order="3">Implement ScopeManagementService with Dataverse Web API calls</step>
+    <step order="4">Add ownership validation (reject edits to SYS- scopes)</step>
+    <step order="5">Add duplicate name handling with suffix (1), (2)</step>
+    <step order="6">Register service in DI</step>
+    <step order="7">Write unit tests</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create service files</tool>
+    <tool name="Edit">Update DI registration</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Dataverse/IScopeManagementService.cs</output>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Dataverse/ScopeManagementService.cs</output>
+    <output type="file">tests/unit/Sprk.Bff.Api.Tests/Services/Dataverse/ScopeManagementServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Create, Read, Update, Delete operations for all 5 scope types</criterion>
+    <criterion>Ownership validation prevents editing SYS- scopes</criterion>
+    <criterion>Duplicate names get suffix (1), (2), etc.</criterion>
+    <criterion>Unit tests cover CRUD and validation</criterion>
+  </acceptance-criteria>
+</task>

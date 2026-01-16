@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Build OperationFeedback component</title>
+    <phase>2</phase>
+    <tags>pcf, fluent-ui, component</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>010</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Build component showing real-time operation feedback during AI processing.</goal>
+    <context>
+      Shows progress indicators like:
+      - "Analyzing your request..."
+      - "Creating node: TL;DR Summary"
+      - "Linking scope: ACT-001"
+    </context>
+    <constraints>
+      - Fluent UI Spinner and text
+      - Non-blocking (doesn't prevent other UI)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-021-fluent-design-system.md" reason="Spinner component" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create OperationFeedback.tsx component</step>
+    <step order="2">Show spinner during processing</step>
+    <step order="3">Display current operation text</step>
+    <step order="4">Update based on SSE events</step>
+    <step order="5">Hide when operation complete</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create component</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/client/pcf/PlaybookBuilderHost/control/components/AiAssistant/OperationFeedback.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Shows spinner during processing</criterion>
+    <criterion>Displays operation status text</criterion>
+    <criterion>Updates in real-time from SSE</criterion>
+    <criterion>Hides when complete</criterion>
+  </acceptance-criteria>
+</task>

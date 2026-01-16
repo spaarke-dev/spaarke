@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="057" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Code review and cleanup</title>
+    <phase>6</phase>
+    <tags>code-review, cleanup</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>All phases</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Perform comprehensive code review and cleanup of all project code.</goal>
+    <context>
+      Review checklist:
+      - Unused imports/variables removed
+      - Console.log/debug statements removed
+      - Code formatted (dotnet format, prettier)
+      - ADR compliance verified
+      - Security review (no secrets, XSS, etc.)
+      - Performance review
+    </context>
+    <constraints>
+      - Use /code-review skill
+      - Check all modified files
+      - Document findings
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/skills/code-review/SKILL.md" reason="Review process" />
+      <file path=".claude/adr/" reason="ADR compliance" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">List all project files</step>
+    <step order="2">Run dotnet format on API code</step>
+    <step order="3">Run prettier on PCF code</step>
+    <step order="4">Remove unused code</step>
+    <step order="5">Run /code-review skill</step>
+    <step order="6">Fix issues found</step>
+    <step order="7">Verify ADR compliance</step>
+    <step order="8">Security review</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">dotnet format, npm run lint</tool>
+    <tool name="Skill">/code-review</tool>
+    <tool name="Edit">Fix issues</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">Clean, formatted code</output>
+    <output type="file">Code review report</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>No unused code</criterion>
+    <criterion>Code formatted</criterion>
+    <criterion>ADR compliant</criterion>
+    <criterion>No security issues</criterion>
+    <criterion>Code review passed</criterion>
+  </acceptance-criteria>
+</task>

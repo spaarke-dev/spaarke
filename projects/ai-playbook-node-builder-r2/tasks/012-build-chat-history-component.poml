@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Build ChatHistory component</title>
+    <phase>2</phase>
+    <tags>pcf, fluent-ui, component</tags>
+    <estimate>1d</estimate>
+    <dependencies>010</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Build the chat history display component showing user and AI messages.</goal>
+    <context>
+      Displays conversation history with:
+      - User messages (right-aligned)
+      - AI messages (left-aligned)
+      - Operation indicators (what changes were made)
+      - Auto-scroll to latest message
+    </context>
+    <constraints>
+      - Fluent UI v9 only
+      - Accessible (proper ARIA roles)
+      - Design tokens for colors
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-021-fluent-design-system.md" reason="UI requirements" />
+      <file path="projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md" reason="Message format" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create ChatHistory.tsx component</step>
+    <step order="2">Implement message list with scroll container</step>
+    <step order="3">Style user vs AI messages differently</step>
+    <step order="4">Add auto-scroll to bottom on new messages</step>
+    <step order="5">Show operation indicators for canvas changes</step>
+    <step order="6">Add loading indicator for streaming</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create component</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/client/pcf/PlaybookBuilderHost/control/components/AiAssistant/ChatHistory.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Messages render with correct alignment</criterion>
+    <criterion>Auto-scrolls to latest message</criterion>
+    <criterion>Operation badges show canvas changes</criterion>
+    <criterion>Streaming indicator shows during AI response</criterion>
+    <criterion>Accessible with proper roles</criterion>
+  </acceptance-criteria>
+</task>

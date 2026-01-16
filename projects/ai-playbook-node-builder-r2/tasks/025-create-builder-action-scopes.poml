@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Create ACT-BUILDER-001 through ACT-BUILDER-005</title>
+    <phase>3</phase>
+    <tags>dataverse, scopes</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>none</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create the 5 Builder Action scope records in Dataverse.</goal>
+    <context>
+      Builder Actions:
+      - ACT-BUILDER-001: Intent Classification
+      - ACT-BUILDER-002: Node Configuration
+      - ACT-BUILDER-003: Scope Selection
+      - ACT-BUILDER-004: Scope Creation
+      - ACT-BUILDER-005: Build Plan Generation
+    </context>
+    <constraints>
+      - SYS- ownership (immutable)
+      - Include system prompts
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md" reason="Scope definitions" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define prompt content for each Action</step>
+    <step order="2">Create Dataverse records via script or API</step>
+    <step order="3">Set ownership to System</step>
+    <step order="4">Verify records created</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Create Dataverse records</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse">5 sprk_aianalysisaction records</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>5 Action records created</criterion>
+    <criterion>All have SYS- prefix</criterion>
+    <criterion>Prompt content populated</criterion>
+    <criterion>Records are immutable</criterion>
+  </acceptance-criteria>
+</task>

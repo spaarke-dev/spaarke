@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="056" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Write user documentation</title>
+    <phase>6</phase>
+    <tags>documentation</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>All phases</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Write user-facing documentation for the AI Chat Playbook Builder feature.</goal>
+    <context>
+      Documentation needed:
+      - Feature overview
+      - Getting started guide
+      - Available commands/intents
+      - Test execution modes
+      - Scope management
+      - Troubleshooting
+    </context>
+    <constraints>
+      - Clear, non-technical language
+      - Include screenshots
+      - Follow existing doc format
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md" reason="Feature design" />
+      <file path="docs/product-documentation/" reason="Existing docs format" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Outline documentation sections</step>
+    <step order="2">Write feature overview</step>
+    <step order="3">Write getting started guide</step>
+    <step order="4">Document available commands</step>
+    <step order="5">Document test modes</step>
+    <step order="6">Write troubleshooting guide</step>
+    <step order="7">Add screenshots</step>
+    <step order="8">Review and polish</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create documentation files</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">docs/product-documentation/ai-playbook-builder-guide.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All features documented</criterion>
+    <criterion>Clear non-technical language</criterion>
+    <criterion>Screenshots included</criterion>
+    <criterion>Follows existing format</criterion>
+  </acceptance-criteria>
+</task>

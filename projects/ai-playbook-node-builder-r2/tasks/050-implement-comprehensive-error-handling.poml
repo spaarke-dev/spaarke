@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Implement comprehensive error handling</title>
+    <phase>6</phase>
+    <tags>bff-api, pcf, error-handling</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>All phases</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Implement comprehensive error handling across API and PCF components.</goal>
+    <context>
+      Error handling requirements:
+      - API: ProblemDetails for all errors (ADR-019)
+      - PCF: User-friendly error messages
+      - SSE: Error events in stream
+      - Logging: Correlation IDs for tracing
+      - Categories: Validation, Auth, AI, Network
+    </context>
+    <constraints>
+      - Never expose stack traces to users
+      - Always log full error details server-side
+      - Maintain correlation IDs across API/PCF
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/spec.md" reason="Error handling requirements" />
+      <file path=".claude/adr/ADR-019.md" reason="ProblemDetails pattern" />
+      <file path="src/server/api/Sprk.Bff.Api/Api/" reason="Existing patterns" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Audit existing error handling</step>
+    <step order="2">Create error categories enum</step>
+    <step order="3">Implement ProblemDetails for all endpoints</step>
+    <step order="4">Add SSE error event handling</step>
+    <step order="5">Add PCF error display components</step>
+    <step order="6">Add correlation ID propagation</step>
+    <step order="7">Test error scenarios</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">Update error handling across files</tool>
+    <tool name="Write">Create error utilities</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Infrastructure/ErrorHandling/AiBuilderErrors.cs</output>
+    <output type="file">src/client/pcf/PlaybookBuilderHost/components/AiAssistant/ErrorDisplay.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All API errors return ProblemDetails</criterion>
+    <criterion>PCF shows user-friendly messages</criterion>
+    <criterion>SSE errors handled gracefully</criterion>
+    <criterion>Correlation IDs in all logs</criterion>
+  </acceptance-criteria>
+</task>
