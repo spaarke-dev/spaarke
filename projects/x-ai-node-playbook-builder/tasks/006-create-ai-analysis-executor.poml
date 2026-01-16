@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="006" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Create AiAnalysisNodeExecutor</title>
+    <phase>1: Foundation</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <tags>bff-api, executor</tags>
+    <dependencies>004, 005</dependencies>
+    <blocks>007</blocks>
+  </metadata>
+
+  <prompt>
+    Create the node executor infrastructure and the first executor: AiAnalysisNodeExecutor.
+    This executor bridges the node-based system to the existing IAnalysisToolHandler
+    pipeline, allowing existing tool handlers to be used within nodes.
+  </prompt>
+
+  <role>Senior .NET developer with Spaarke AI expertise</role>
+
+  <goal>
+    INodeExecutor interface, INodeExecutorRegistry, and AiAnalysisNodeExecutor
+    implemented, bridging to existing tool handler infrastructure.
+  </goal>
+
+  <context>
+    <background>
+      The AiAnalysisNodeExecutor is the first and most important executor as it
+      reuses the existing tool handler infrastructure. It should receive a
+      NodeExecutionContext and produce a NodeOutput by delegating to the
+      appropriate IAnalysisToolHandler.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ToolHandlerRegistry.cs</file>
+      <file>projects/ai-node-playbook-builder/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Reuse existing tool handler infrastructure</constraint>
+    <constraint source="project">Do not duplicate analysis logic</constraint>
+    <constraint source="ADR-010">Keep DI minimal - use registry pattern</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+    </files>
+    <patterns>
+      <pattern name="Tool Handler">src/server/api/Sprk.Bff.Api/Services/Ai/Tools/</pattern>
+      <pattern name="Handler Registry">src/server/api/Sprk.Bff.Api/Services/Ai/ToolHandlerRegistry.cs</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing tool handler infrastructure</step>
+    <step order="2">Create INodeExecutor interface</step>
+    <step order="3">Create NodeExecutionContext model</step>
+    <step order="4">Create NodeOutput model</step>
+    <step order="5">Create INodeExecutorRegistry interface</step>
+    <step order="6">Create NodeExecutorRegistry implementation</step>
+    <step order="7">Create AiAnalysisNodeExecutor</step>
+    <step order="8">Implement ExecuteAsync that delegates to IAnalysisToolHandler</step>
+    <step order="9">Handle tool output conversion to NodeOutput</step>
+    <step order="10">Track metrics (tokensIn, tokensOut, duration)</step>
+    <step order="11">Register executor in registry</step>
+    <step order="12">Write unit tests</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing handlers</tool>
+    <tool name="Write">Create executor files</tool>
+    <tool name="Bash">Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutorRegistry.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/NodeExecutorRegistry.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/NodeExecutionContext.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/NodeOutputDto.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Services/AiAnalysisNodeExecutorTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">INodeExecutor interface defines ExecuteAsync method</criterion>
+    <criterion testable="true">AiAnalysisNodeExecutor successfully calls tool handler</criterion>
+    <criterion testable="true">NodeOutput contains structured data and metrics</criterion>
+    <criterion testable="true">Registry maps ActionType to correct executor</criterion>
+    <criterion testable="true">Unit tests pass</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The existing IAnalysisToolHandler.ExecuteAsync returns ToolResult.
+    AiAnalysisNodeExecutor converts ToolResult to NodeOutput format.
+
+    Completed 2026-01-09. Implemented node executor infrastructure:
+    - INodeExecutor interface with ExecuteAsync and Validate methods
+    - ActionType enum with all 14 action types from design
+    - NodeExecutionContext with node, action, scopes, document, previous outputs
+    - NodeOutput with structured data, metrics, and ToolResult conversion
+    - NodeExecutionMetrics with token tracking and duration
+    - INodeExecutorRegistry interface following ToolHandlerRegistry pattern
+    - NodeExecutorRegistry implementation with ActionType-based dispatch
+    - AiAnalysisNodeExecutor bridging to existing IAnalysisToolHandler pipeline
+    - 39 unit tests covering all acceptance criteria
+  </notes>
+</task>

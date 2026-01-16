@@ -103,4 +103,51 @@ public interface IPlaybookService
     Task<PlaybookResponse> GetByNameAsync(
         string name,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Get canvas layout for a playbook.
+    /// </summary>
+    /// <param name="playbookId">Playbook ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Canvas layout response with layout data, or null layout if not set.</returns>
+    Task<CanvasLayoutResponse?> GetCanvasLayoutAsync(
+        Guid playbookId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Save canvas layout for a playbook.
+    /// </summary>
+    /// <param name="playbookId">Playbook ID.</param>
+    /// <param name="layout">Canvas layout to save.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Updated canvas layout response.</returns>
+    Task<CanvasLayoutResponse> SaveCanvasLayoutAsync(
+        Guid playbookId,
+        CanvasLayoutDto layout,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// List template playbooks available for cloning.
+    /// Templates are standard playbooks marked with IsTemplate = true.
+    /// </summary>
+    /// <param name="query">Query parameters for filtering and pagination.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Paginated list of template playbook summaries.</returns>
+    Task<PlaybookListResponse> ListTemplatesAsync(
+        PlaybookQueryParameters query,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Clone a playbook (typically a template) to create a new playbook owned by the user.
+    /// </summary>
+    /// <param name="sourcePlaybookId">ID of the playbook to clone.</param>
+    /// <param name="userId">ID of the user who will own the cloned playbook.</param>
+    /// <param name="newName">Optional new name for the cloned playbook. If null, uses "[SourceName] (Copy)".</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The newly created cloned playbook.</returns>
+    Task<PlaybookResponse> ClonePlaybookAsync(
+        Guid sourcePlaybookId,
+        Guid userId,
+        string? newName = null,
+        CancellationToken cancellationToken = default);
 }

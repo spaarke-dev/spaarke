@@ -9,7 +9,8 @@ alwaysApply: false
 # Dataverse Deploy
 
 > **Category**: Operations
-> **Last Updated**: December 2025
+> **Last Updated**: January 15, 2026
+> **Primary Guide**: [`docs/guides/PCF-DEPLOYMENT-GUIDE.md`](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md)
 
 ---
 
@@ -61,11 +62,11 @@ pac solution import --path obj/PowerAppsToolsTemp_sprk/bin/Debug/PowerAppsToolsT
 If the zip file doesn't exist after `pac pcf push` fails, build the solution wrapper manually:
 
 ```bash
-# 1. Copy build output to solution folder
+# 1. Copy build output to solution folder (ALL 3 files required)
 mkdir -p obj/PowerAppsToolsTemp_sprk/bin/net462/control
 cp out/controls/*/bundle.js obj/PowerAppsToolsTemp_sprk/bin/net462/control/
 cp out/controls/*/ControlManifest.xml obj/PowerAppsToolsTemp_sprk/bin/net462/control/
-cp control/css/styles.css obj/PowerAppsToolsTemp_sprk/bin/net462/control/ 2>/dev/null || true
+cp control/css/styles.css obj/PowerAppsToolsTemp_sprk/bin/net462/control/  # CRITICAL: Don't forget styles.css!
 
 # 2. Build solution wrapper (creates the zip)
 cd obj/PowerAppsToolsTemp_sprk
@@ -75,6 +76,17 @@ dotnet build *.cdsproj --configuration Debug
 # 3. Import the solution
 pac solution import --path bin/Debug/PowerAppsToolsTemp_sprk.zip --publish-changes
 ```
+
+> **⚠️ CRITICAL**: The Manual Pack Fallback requires **all three files**: `bundle.js`, `ControlManifest.xml`, AND `styles.css`. Missing styles.css will cause solution import to fail with "CustomControls Source File resource path styles.css does not exist".
+
+### Why Use Manual Pack Fallback?
+
+`pac pcf push` ALWAYS rebuilds in development mode (`--buildMode development`), ignoring your production build optimizations. This means:
+- Tree-shaking optimizations are lost
+- Bundle size increases significantly (e.g., 240KB → 8MB)
+- Icon libraries like `@fluentui/react-icons` are fully bundled
+
+**Use Manual Pack Fallback** when you need to preserve production build optimizations.
 
 ---
 
@@ -88,11 +100,7 @@ Is this a production release with version tracking?
     └── NO → Use "Quick Dev Deploy" above
 ```
 
-**Related Guides:**
-- `docs/ai-knowledge/guides/PCF-QUICK-DEPLOY.md` - Streamlined dev workflow
-- `docs/ai-knowledge/guides/PCF-PRODUCTION-RELEASE.md` - Version management
-- `docs/ai-knowledge/guides/PCF-CUSTOM-PAGE-DEPLOY.md` - Custom Page complexity
-- `docs/ai-knowledge/guides/PCF-TROUBLESHOOTING.md` - Error resolution
+**Primary Guide:** [`docs/guides/PCF-DEPLOYMENT-GUIDE.md`](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md) - Consolidated deployment workflow with critical rules, version management, and troubleshooting.
 
 ---
 
@@ -104,7 +112,7 @@ Automate deployment of Dataverse components using PAC CLI. This skill handles th
 
 ## Critical Constraints
 
-### ⚠️ UNMANAGED SOLUTIONS ONLY
+### ⚠️ UNMANAGED SOLUTIONS ONLY (STRICT POLICY)
 
 **ALWAYS use unmanaged solutions for all deployments.** Managed solutions have caused issues in past projects and should NEVER be used unless the user explicitly instructs otherwise.
 
@@ -118,6 +126,15 @@ Automate deployment of Dataverse components using PAC CLI. This skill handles th
 - No solution layering complexity
 - Easier troubleshooting and rollback
 - Consistent behavior across environments
+
+> **🚨 CRITICAL WARNING**: If you encounter a managed solution (shows `IsManaged: True` in `pac solution list`), you MUST delete it before deploying:
+> ```bash
+> # Check if solution is managed
+> pac solution list | grep -i "{SolutionName}"
+> # If IsManaged = True, delete it first:
+> pac solution delete --solution-name {SolutionName}
+> ```
+> Managed solutions block unmanaged deployments and cause orphaned component issues.
 
 **Commands that default to unmanaged:**
 - `pac pcf push` → Creates unmanaged temp solution
@@ -150,7 +167,7 @@ pac solution pack --managed
 - **Development Testing:** Use `pac pcf push` for quick iteration. Creates a **temporary solution** - does NOT update named solution version.
 - **Production Releases:** Use full solution workflow (build → pack → import). This is the ONLY way to update named solution version.
 - **Version Locations:** Update ALL four: (1) ControlManifest.Input.xml, (2) UI footer, (3) Solution.xml, (4) extracted ControlManifest.xml
-- **Full Guide:** See `docs/ai-knowledge/guides/PCF-V9-PACKAGING.md` Part B for detailed workflow
+- **Full Guide:** See [`docs/guides/PCF-DEPLOYMENT-GUIDE.md`](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md) for complete workflow
 
 ---
 
@@ -291,6 +308,47 @@ pcf-scripts requires a feature flag to externalize ReactDOM:
 
 Without this file, React is externalized but ReactDOM is still bundled, causing React version mismatch errors at runtime.
 
+#### Enable Custom Webpack for Icon Tree-Shaking (CRITICAL for large bundles)
+
+If your bundle is still large (>500KB) after adding platform libraries, `@fluentui/react-icons` is likely not tree-shaking. The full icon library is ~6.8MB.
+
+**Solution**: Enable custom webpack with `sideEffects: false` for icons:
+
+1. **Update featureconfig.json** (add `pcfAllowCustomWebpack`):
+```json
+{
+  "pcfReactPlatformLibraries": "on",
+  "pcfAllowCustomWebpack": "on"
+}
+```
+
+2. **Create webpack.config.js** in control root:
+```javascript
+// Custom webpack configuration for PCF
+// Enables tree-shaking for @fluentui/react-icons
+module.exports = {
+  optimization: {
+    usedExports: true,
+    sideEffects: true,
+    innerGraph: true,
+    providedExports: true
+  },
+  module: {
+    rules: [
+      {
+        // Mark @fluentui/react-icons as side-effect-free
+        test: /[\\/]node_modules[\\/]@fluentui[\\/]react-icons[\\/]/,
+        sideEffects: false
+      }
+    ]
+  }
+};
+```
+
+**Result**: Bundle size typically drops from 5-9MB to 200-400KB.
+
+> **⚠️ NOTE**: `pac pcf push` rebuilds in development mode, ignoring these optimizations. Use Manual Pack Fallback (above) to preserve production build.
+
 #### Fix package.json
 
 Move React/Fluent to `devDependencies` (type-checking only):
@@ -306,7 +364,7 @@ Move React/Fluent to `devDependencies` (type-checking only):
 
 **Remove** from `dependencies`: `react`, `react-dom`, any `@fluentui/react-*` packages.
 
-> **Full details**: See `docs/ai-knowledge/guides/PCF-V9-PACKAGING.md`
+> **Full details**: See [`docs/guides/PCF-DEPLOYMENT-GUIDE.md`](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md)
 
 ---
 
@@ -316,7 +374,7 @@ Move React/Fluent to `devDependencies` (type-checking only):
 
 > **⚠️ WARNING**: This is the most complex deployment scenario. When a PCF is used inside a Custom Page, THREE version locations must stay synchronized.
 
-**See detailed guide**: `docs/ai-knowledge/guides/PCF-CUSTOM-PAGE-DEPLOY.md`
+**See detailed guide**: [`docs/guides/PCF-DEPLOYMENT-GUIDE.md`](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md) (Custom Page section)
 
 #### Quick Summary
 
@@ -344,7 +402,7 @@ When you open a Custom Page in Power Apps Studio, it may **downgrade** your PCF 
 
 > **⚠️ CRITICAL**: `pac pcf push` does NOT update your named solution's version. Use this workflow for production releases.
 
-**See detailed guide**: `docs/ai-knowledge/guides/PCF-PRODUCTION-RELEASE.md`
+**See detailed guide**: [`docs/guides/PCF-DEPLOYMENT-GUIDE.md`](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md)
 
 #### Why This Workflow?
 
@@ -486,6 +544,36 @@ pac solution publish-all
 | `Cannot create property '_updatedFibers'` | Using React 18 APIs with React 16 runtime | Use `ReactDOM.render()`, not `createRoot()` - see ADR-022 |
 | `createRoot is not a function` | Importing from `react-dom/client` | Import from `react-dom` instead |
 | Solution zip not created | `pac pcf push` failed before packing | Use Manual Pack Fallback (above) |
+| `Orphaned component blocking deployment` | Namespace changed or old controls exist | Delete orphaned controls via Web API (see below) |
+| `CustomControls Source File styles.css does not exist` | styles.css not copied to solution folder | Copy styles.css in Manual Pack Fallback |
+
+### Orphaned Control Cleanup
+
+When namespace changes (e.g., `Spaarke.PCF` → `Spaarke.Controls`) or old deployments exist, orphaned controls can block new deployments.
+
+**Symptoms:**
+- Deployment fails with duplicate component errors
+- Multiple versions of same control in solution list
+- "Component with same name already exists" errors
+
+**Solution - Delete via Web API:**
+
+```bash
+# 1. Find the orphaned control's ID
+# Use Dataverse Web API or Advanced Find
+
+# 2. Delete using PAC CLI or Web API
+pac org fetch --filter "customcontrolid eq 'GUID-HERE'"
+
+# 3. Or use Power Platform Admin Center:
+# - Go to Environments → Your Environment → Settings → Solutions
+# - Find and delete orphaned components
+```
+
+**Prevention:**
+- Always use consistent namespace (e.g., `Spaarke.Controls`)
+- Delete old solutions before changing namespace
+- Use `pac solution delete` to cleanly remove old solutions
 
 ---
 
@@ -597,8 +685,4 @@ gh workflow run deploy-staging.yml -f deploy_plugins=true
 
 | Resource | Purpose |
 |----------|---------|
-| `docs/ai-knowledge/guides/PCF-QUICK-DEPLOY.md` | Streamlined dev workflow |
-| `docs/ai-knowledge/guides/PCF-PRODUCTION-RELEASE.md` | Version management |
-| `docs/ai-knowledge/guides/PCF-CUSTOM-PAGE-DEPLOY.md` | Custom Page complexity |
-| `docs/ai-knowledge/guides/PCF-TROUBLESHOOTING.md` | Error resolution |
-| `docs/ai-knowledge/guides/PCF-V9-PACKAGING.md` | Platform library setup |
+| [`docs/guides/PCF-DEPLOYMENT-GUIDE.md`](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md) | **Primary guide** - Consolidated PCF deployment workflow |

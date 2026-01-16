@@ -110,12 +110,20 @@ public class EmailToEmlConverter : IEmailToEmlConverter
             }
 
             // Build MimeMessage
+            _logger.LogWarning(
+                "[ConversionDebug] Building MimeMessage with {AttachmentCount} attachments for email {EmailId}",
+                attachments.Count, emailActivityId);
+
             var message = BuildMimeMessage(email, attachments);
 
             // Write to stream
             var stream = new MemoryStream();
             await message.WriteToAsync(stream, cancellationToken);
             stream.Position = 0;
+
+            _logger.LogWarning(
+                "[ConversionDebug] MimeMessage written to stream: {Size} bytes for email {EmailId}",
+                stream.Length, emailActivityId);
 
             var metadata = BuildMetadata(email, emailActivityId);
 
@@ -320,21 +328,78 @@ public class EmailToEmlConverter : IEmailToEmlConverter
         Guid emailActivityId,
         CancellationToken cancellationToken)
     {
+        // Retry logic to handle race condition: webhook fires on email Create,
+        // but attachments are added separately via activitymimeattachments.
+        // First query may return 0 if attachments haven't been created yet.
+        const int maxAttempts = 2;
+        const int retryDelayMs = 2000; // 2 seconds
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            var attachments = await FetchAttachmentsInternalAsync(emailActivityId, cancellationToken);
+
+            if (attachments.Count > 0 || attempt == maxAttempts)
+            {
+                if (attachments.Count == 0 && attempt == maxAttempts)
+                {
+                    _logger.LogWarning(
+                        "[FetchAttachmentDebug] No attachments found for email {EmailId} after {Attempts} attempts",
+                        emailActivityId, maxAttempts);
+                }
+                return attachments;
+            }
+
+            // No attachments found on first attempt - wait and retry
+            // This handles the race condition where webhook fires before attachments are created
+            _logger.LogWarning(
+                "[FetchAttachmentDebug] No attachments found for email {EmailId} on attempt {Attempt}, retrying in {Delay}ms...",
+                emailActivityId, attempt, retryDelayMs);
+
+            await Task.Delay(retryDelayMs, cancellationToken);
+        }
+
+        return []; // Should not reach here, but satisfies compiler
+    }
+
+    private async Task<List<EmailAttachmentInfo>> FetchAttachmentsInternalAsync(
+        Guid emailActivityId,
+        CancellationToken cancellationToken)
+    {
         var attachments = new List<EmailAttachmentInfo>();
 
         var url = $"activitymimeattachments?$filter=_objectid_value eq {emailActivityId}" +
                   "&$select=activitymimeattachmentid,filename,mimetype,filesize,body";
 
+        _logger.LogWarning(
+            "[FetchAttachmentDebug] Fetching attachments for email {EmailId} from URL: {Url}",
+            emailActivityId, url);
+
         var response = await _httpClient.GetAsync(url, cancellationToken);
         response.EnsureSuccessStatusCode();
+
+        _logger.LogWarning(
+            "[FetchAttachmentDebug] Dataverse response status: {StatusCode}",
+            response.StatusCode);
 
         var json = await response.Content.ReadAsStringAsync(cancellationToken);
         var data = JsonSerializer.Deserialize<JsonElement>(json);
 
+        _logger.LogWarning(
+            "[FetchAttachmentDebug] Dataverse returned JSON length: {Length} chars",
+            json.Length);
+
         if (!data.TryGetProperty("value", out var items))
         {
+            _logger.LogWarning(
+                "[FetchAttachmentDebug] No 'value' property found in response for email {EmailId}",
+                emailActivityId);
             return attachments;
         }
+
+        var itemCount = items.GetArrayLength();
+        _logger.LogWarning(
+            "[FetchAttachmentDebug] Found {Count} attachment records in Dataverse for email {EmailId}",
+            itemCount, emailActivityId);
 
         foreach (var item in items.EnumerateArray())
         {
@@ -344,6 +409,10 @@ public class EmailToEmlConverter : IEmailToEmlConverter
             var fileSize = item.TryGetProperty("filesize", out var fs) ? fs.GetInt64() : 0;
             var bodyBase64 = GetStringOrNull(item, "body");
 
+            _logger.LogWarning(
+                "[FetchAttachmentDebug] Processing attachment '{FileName}': fileSize={FileSize}, bodyBase64Length={BodyLength}, hasBody={HasBody}",
+                fileName, fileSize, bodyBase64?.Length ?? 0, !string.IsNullOrEmpty(bodyBase64));
+
             // Check if attachment should be skipped
             var (shouldCreate, skipReason) = EvaluateAttachment(fileName, mimeType, fileSize);
 
@@ -352,6 +421,15 @@ public class EmailToEmlConverter : IEmailToEmlConverter
             {
                 var bytes = Convert.FromBase64String(bodyBase64);
                 content = new MemoryStream(bytes);
+                _logger.LogWarning(
+                    "[FetchAttachmentDebug] Attachment '{FileName}' decoded to {ByteCount} bytes",
+                    fileName, bytes.Length);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "[FetchAttachmentDebug] Attachment '{FileName}' has NO body content - will be skipped in MIME message",
+                    fileName);
             }
 
             attachments.Add(new EmailAttachmentInfo
@@ -558,6 +636,202 @@ public class EmailToEmlConverter : IEmailToEmlConverter
                 return guid;
         }
         return null;
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<EmailAttachmentInfo> ExtractAttachments(Stream emlStream)
+    {
+        ArgumentNullException.ThrowIfNull(emlStream);
+
+        if (!emlStream.CanRead)
+        {
+            throw new ArgumentException("Stream must be readable", nameof(emlStream));
+        }
+
+        // Reset stream position if possible
+        if (emlStream.CanSeek)
+        {
+            emlStream.Position = 0;
+        }
+
+        var attachments = new List<EmailAttachmentInfo>();
+
+        try
+        {
+            // Parse the .eml file using MimeKit
+            var message = MimeMessage.Load(emlStream);
+
+            _logger.LogInformation(
+                "[ExtractDebug] Loaded MimeMessage. Body type: {BodyType}, Subject: {Subject}",
+                message.Body?.GetType().Name ?? "null", message.Subject);
+
+            var partCount = 0;
+
+            // Iterate through all MIME parts to find attachments
+            foreach (var part in IterateMimeParts(message.Body))
+            {
+                partCount++;
+                _logger.LogInformation(
+                    "[ExtractDebug] Part {PartNum}: Type={PartType}, IsMimePart={IsMimePart}",
+                    partCount, part.GetType().Name, part is MimePart);
+
+                if (part is MimePart mimePart)
+                {
+                    var dispositionValue = mimePart.ContentDisposition?.Disposition;
+                    _logger.LogInformation(
+                        "[ExtractDebug] MimePart: FileName={FileName}, ContentType={ContentType}, IsAttachment={IsAttachment}, Disposition={Disposition}, HasContentId={HasContentId}",
+                        mimePart.FileName ?? "(null)",
+                        mimePart.ContentType?.MimeType ?? "(null)",
+                        mimePart.IsAttachment,
+                        dispositionValue ?? "(null)",
+                        !string.IsNullOrEmpty(mimePart.ContentId));
+
+                    // Check if this is an attachment (either explicit attachment or inline with content)
+                    var isAttachment = mimePart.IsAttachment ||
+                                       mimePart.ContentDisposition?.Disposition == ContentDisposition.Attachment;
+                    var isInline = mimePart.ContentDisposition?.Disposition == ContentDisposition.Inline &&
+                                   !string.IsNullOrEmpty(mimePart.ContentId);
+
+                    _logger.LogInformation(
+                        "[ExtractDebug] Evaluation: isAttachment={IsAttachment}, isInline={IsInline}",
+                        isAttachment, isInline);
+
+                    // Skip parts that are not attachments and not inline images with Content-ID
+                    if (!isAttachment && !isInline)
+                    {
+                        _logger.LogInformation("[ExtractDebug] Skipping part - not attachment or inline");
+                        continue;
+                    }
+
+                    // Get content to memory stream
+                    var contentStream = new MemoryStream();
+                    mimePart.Content.DecodeTo(contentStream);
+                    contentStream.Position = 0;
+
+                    var sizeBytes = contentStream.Length;
+
+                    // Check max size (NFR-05: 250MB)
+                    if (sizeBytes > _options.MaxAttachmentSizeBytes)
+                    {
+                        _logger.LogWarning(
+                            "Attachment '{FileName}' exceeds max size ({Size} bytes > {MaxSize} bytes), skipping",
+                            mimePart.FileName ?? "unknown", sizeBytes, _options.MaxAttachmentSizeBytes);
+                        contentStream.Dispose();
+                        continue;
+                    }
+
+                    // Determine filename
+                    var fileName = mimePart.FileName;
+                    if (string.IsNullOrEmpty(fileName))
+                    {
+                        // Generate a filename based on content type
+                        var mimeType = mimePart.ContentType?.MimeType ?? "application/octet-stream";
+                        var extension = GetExtensionForMimeType(mimeType);
+                        fileName = $"attachment_{attachments.Count + 1}{extension}";
+                    }
+
+                    // Get content ID (strip angle brackets if present)
+                    var contentId = mimePart.ContentId;
+                    if (!string.IsNullOrEmpty(contentId))
+                    {
+                        contentId = contentId.Trim('<', '>');
+                    }
+
+                    // Evaluate if this attachment should be processed as a document
+                    var attachmentMimeType = mimePart.ContentType?.MimeType ?? "application/octet-stream";
+                    var (shouldCreate, skipReason) = EvaluateAttachment(
+                        fileName,
+                        attachmentMimeType,
+                        sizeBytes);
+
+                    attachments.Add(new EmailAttachmentInfo
+                    {
+                        AttachmentId = Guid.Empty, // No Dataverse ID for extracted attachments
+                        FileName = fileName,
+                        MimeType = attachmentMimeType,
+                        Content = contentStream,
+                        SizeBytes = sizeBytes,
+                        IsInline = isInline,
+                        ContentId = contentId,
+                        ShouldCreateDocument = shouldCreate,
+                        SkipReason = skipReason
+                    });
+                }
+            }
+
+            _logger.LogInformation(
+                "[ExtractDebug] Extraction complete: {PartCount} parts scanned, {AttachmentCount} attachments found, {InlineCount} inline, {SkipCount} will be skipped",
+                partCount,
+                attachments.Count,
+                attachments.Count(a => a.IsInline),
+                attachments.Count(a => !a.ShouldCreateDocument));
+
+            return attachments;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to extract attachments from .eml stream");
+
+            // Dispose any already-extracted streams on error
+            foreach (var attachment in attachments)
+            {
+                attachment.Content?.Dispose();
+            }
+
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Recursively iterate through all MIME parts in a message body.
+    /// </summary>
+    private static IEnumerable<MimeEntity> IterateMimeParts(MimeEntity? entity)
+    {
+        if (entity == null)
+            yield break;
+
+        if (entity is Multipart multipart)
+        {
+            foreach (var child in multipart)
+            {
+                foreach (var part in IterateMimeParts(child))
+                {
+                    yield return part;
+                }
+            }
+        }
+        else
+        {
+            yield return entity;
+        }
+    }
+
+    /// <summary>
+    /// Get a file extension for a MIME type.
+    /// </summary>
+    private static string GetExtensionForMimeType(string mimeType)
+    {
+        return mimeType.ToLowerInvariant() switch
+        {
+            "image/png" => ".png",
+            "image/jpeg" => ".jpg",
+            "image/gif" => ".gif",
+            "image/bmp" => ".bmp",
+            "image/webp" => ".webp",
+            "application/pdf" => ".pdf",
+            "application/msword" => ".doc",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => ".docx",
+            "application/vnd.ms-excel" => ".xls",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => ".xlsx",
+            "application/vnd.ms-powerpoint" => ".ppt",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation" => ".pptx",
+            "text/plain" => ".txt",
+            "text/html" => ".html",
+            "text/csv" => ".csv",
+            "application/zip" => ".zip",
+            "application/x-zip-compressed" => ".zip",
+            _ => ".bin"
+        };
     }
 
     /// <summary>

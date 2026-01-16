@@ -104,6 +104,7 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
     private enableEdit = true;
     private enableDelete = false;
     private enableDownload = true;
+    private showToolbar = false;
 
     // Correlation ID
     private correlationId: string;
@@ -121,6 +122,104 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
         console.log(`[SpeDocumentViewer] Control instance created. Correlation ID: ${this.correlationId}`);
     }
 
+    /**
+     * Detect if we're running in the form designer (design mode).
+     * In design mode, we should show a placeholder instead of trying to authenticate.
+     */
+    private isDesignMode(context: ComponentFramework.Context<IInputs>): boolean {
+        // Check 1: URL contains form designer indicators
+        const url = window.location.href.toLowerCase();
+        if (url.includes('/designer/') ||
+            url.includes('formtype=main') ||
+            url.includes('pagetype=entityrecord&cmdbar=false') ||
+            url.includes('/edit/')) {
+            // Could be form designer - check other indicators
+        }
+
+        // Check 2: No entity ID available (new record or design mode)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const contextInfo = (context.mode as any).contextInfo;
+        const entityId = contextInfo?.entityId;
+
+        // Check 3: Check if we're in a frame with design-related parent
+        try {
+            if (window.parent !== window) {
+                const parentUrl = window.parent.location.href.toLowerCase();
+                if (parentUrl.includes('/designer/') ||
+                    parentUrl.includes('/formeditor/') ||
+                    parentUrl.includes('appdesigner')) {
+                    console.log('[SpeDocumentViewer] Design mode detected via parent URL');
+                    return true;
+                }
+            }
+        } catch {
+            // Cross-origin - can't access parent URL, continue with other checks
+        }
+
+        // Check 4: Form designer often renders controls in a preview iframe
+        // where the control is disabled but we still try to render
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const isAuthoringMode = (context as any).mode?.isAuthoringMode;
+        if (isAuthoringMode === true) {
+            console.log('[SpeDocumentViewer] Design mode detected via isAuthoringMode');
+            return true;
+        }
+
+        // Check 5: Designer preview - allocated dimensions are often 0 or very small
+        const allocatedHeight = context.mode.allocatedHeight;
+        const allocatedWidth = context.mode.allocatedWidth;
+        if ((allocatedHeight === 0 || allocatedHeight === -1) &&
+            (allocatedWidth === 0 || allocatedWidth === -1)) {
+            console.log('[SpeDocumentViewer] Design mode suspected via zero dimensions');
+            // Don't return true yet - could be legitimate zero dimensions
+        }
+
+        return false;
+    }
+
+    /**
+     * Render a placeholder for design mode (form editor preview)
+     */
+    private renderDesignModePlaceholder(): void {
+        const isDark = getEffectiveDarkMode(this._context ?? undefined);
+        const bgColor = isDark ? '#1f1f1f' : '#f5f5f5';
+        const textColor = isDark ? '#ffffff' : '#333333';
+        const borderColor = isDark ? '#444444' : '#cccccc';
+
+        this.container.innerHTML = `
+            <div style="
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                height: 100%;
+                min-height: 200px;
+                background-color: ${bgColor};
+                border: 2px dashed ${borderColor};
+                border-radius: 8px;
+                padding: 20px;
+                text-align: center;
+            ">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="${textColor}" stroke-width="1.5">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14,2 14,8 20,8"/>
+                    <line x1="16" y1="13" x2="8" y2="13"/>
+                    <line x1="16" y1="17" x2="8" y2="17"/>
+                    <polyline points="10,9 9,9 8,9"/>
+                </svg>
+                <div style="margin-top: 16px; color: ${textColor}; font-weight: 600; font-size: 14px;">
+                    SPE Document Viewer
+                </div>
+                <div style="margin-top: 8px; color: ${textColor}; opacity: 0.7; font-size: 12px;">
+                    Document preview will appear at runtime
+                </div>
+                <div style="margin-top: 4px; color: ${textColor}; opacity: 0.5; font-size: 11px;">
+                    v1.0.14
+                </div>
+            </div>
+        `;
+    }
+
     public async init(
         context: ComponentFramework.Context<IInputs>,
         notifyOutputChanged: () => void,
@@ -135,16 +234,25 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
         this.transitionTo(DocumentViewerState.Loading);
         this.renderLoading();
 
-        // Apply responsive height styling (matches SpeFileViewer pattern)
-        // minHeight ensures minimum space, height: 100% allows expansion to fill container
+        // Apply height styling
+        // Use explicit height value instead of relying on parent height (Dataverse forms often don't set explicit height)
         const controlHeight = context.parameters.controlHeight?.raw ?? 600;
+        this.container.style.height = `${controlHeight}px`;
         this.container.style.minHeight = `${controlHeight}px`;
-        this.container.style.height = '100%';
+        this.container.style.maxHeight = `${controlHeight}px`;
         this.container.style.display = 'flex';
         this.container.style.flexDirection = 'column';
-        console.log(`[SpeDocumentViewer] Control height: ${controlHeight}px (min) with 100% responsive expansion`);
+        this.container.style.overflow = 'hidden';
+        console.log(`[SpeDocumentViewer] Control height: ${controlHeight}px`);
 
         console.log('[SpeDocumentViewer] Initializing control...');
+
+        // Check for design mode FIRST - before any authentication
+        if (this.isDesignMode(context)) {
+            console.log('[SpeDocumentViewer] Running in design mode - showing placeholder');
+            this.renderDesignModePlaceholder();
+            return;
+        }
 
         try {
             // Extract configuration
@@ -157,6 +265,7 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
             this.enableEdit = context.parameters.enableEdit?.raw ?? true;
             this.enableDelete = context.parameters.enableDelete?.raw ?? false;
             this.enableDownload = context.parameters.enableDownload?.raw ?? true;
+            this.showToolbar = context.parameters.showToolbar?.raw ?? false;
 
             // Validate configuration
             if (!this.tenantId || !this.clientAppId || !this.bffAppId) {
@@ -170,7 +279,8 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
                 bffApiUrl: this.bffApiUrl,
                 enableEdit: this.enableEdit,
                 enableDelete: this.enableDelete,
-                enableDownload: this.enableDownload
+                enableDownload: this.enableDownload,
+                showToolbar: this.showToolbar
             });
 
             // Initialize MSAL
@@ -206,7 +316,18 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
 
         } catch (error) {
             console.error('[SpeDocumentViewer] Initialization failed:', error);
-            this._errorMessage = error instanceof Error ? error.message : String(error);
+            const errorMessage = error instanceof Error ? error.message : String(error);
+
+            // Check if this is a popup-blocked error (likely in form designer)
+            if (errorMessage.toLowerCase().includes('popup') ||
+                errorMessage.toLowerCase().includes('blocked') ||
+                errorMessage.toLowerCase().includes('interaction_required')) {
+                console.log('[SpeDocumentViewer] Popup blocked - likely in design mode, showing placeholder');
+                this.renderDesignModePlaceholder();
+                return;
+            }
+
+            this._errorMessage = errorMessage;
             this.transitionTo(DocumentViewerState.Error);
             this.renderError(this._errorMessage);
         }
@@ -223,6 +344,7 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
         this.enableEdit = context.parameters.enableEdit?.raw ?? true;
         this.enableDelete = context.parameters.enableDelete?.raw ?? false;
         this.enableDownload = context.parameters.enableDownload?.raw ?? true;
+        this.showToolbar = context.parameters.showToolbar?.raw ?? false;
 
         // Check if document ID changed
         let currentDocumentId: string | null = null;
@@ -321,6 +443,7 @@ export class SpeDocumentViewer implements ComponentFramework.StandardControl<IIn
                 enableEdit: this.enableEdit,
                 enableDelete: this.enableDelete,
                 enableDownload: this.enableDownload,
+                showToolbar: this.showToolbar,
                 onRefresh: () => {
                     console.log('[SpeDocumentViewer] Refresh requested');
                 },

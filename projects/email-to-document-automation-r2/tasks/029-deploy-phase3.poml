@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="029" project="email-to-document-automation-r2">
+  <metadata>
+    <title>Deploy and Verify Phase 3 (AppOnlyAnalysisService)</title>
+    <phase>3: AppOnlyAnalysisService</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>023</dependencies>
+    <blocks>030</blocks>
+    <tags>deploy, azure, bff-api, ai</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task with verification steps</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Deploy AppOnlyAnalysisService to Azure and verify end-to-end. Trigger email processing
+    and verify AI analysis jobs are processed, creating Document Profiles for email and attachments.
+    Verify NFR-03: AI analysis success rate &gt; 95%.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Azure deployment and AI service verification.
+  </role>
+
+  <goal>
+    Phase 3 deployed and verified:
+    1. AppOnlyDocumentAnalysis jobs processed successfully
+    2. Document Profiles created for .eml and attachment Documents
+    3. NFR-03: AI analysis success &gt; 95%
+    4. Job telemetry in Application Insights
+  </goal>
+
+  <context>
+    <background>
+      This phase completes the app-only AI analysis capability. Verification ensures
+      documents uploaded by email processing can be analyzed without user context.
+    </background>
+    <relevant-files>
+      <file>infrastructure/</file>
+      <file>scripts/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">MUST verify FR-08: Document Profile created</constraint>
+    <constraint source="project">MUST verify NFR-03: &gt;95% success rate</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+      <file>docs/guides/EMAIL-TO-DOCUMENT-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Ensure all Phase 3 tests pass locally</step>
+    <step order="2">Deploy to Azure App Service</step>
+    <step order="3">Verify health check and worker started</step>
+    <step order="4">Trigger email processing for new email with attachments</step>
+    <step order="5">Monitor Service Bus queue for AppOnlyDocumentAnalysis jobs</step>
+    <step order="6">Wait for jobs to complete</step>
+    <step order="7">Query Dataverse for Document Profile on .eml Document</step>
+    <step order="8">Query Dataverse for Document Profile on attachment Documents</step>
+    <step order="9">Check Application Insights for job success/failure metrics</step>
+    <step order="10">Document any issues in notes/phase3-deployment-notes.md</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET project</tool>
+    <tool name="az">Azure CLI</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/email-to-document-automation-r2/notes/phase3-deployment-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Document Profiles created for email document and attachments.
+    </criterion>
+    <criterion testable="true">
+      AI analysis job success rate &gt; 95% (check telemetry).
+    </criterion>
+    <criterion testable="true">
+      No errors in Application Insights related to analysis service.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Allow time for AI jobs to process - they may take 30-60 seconds each.
+    Check Azure OpenAI quotas if jobs fail with rate limit errors.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

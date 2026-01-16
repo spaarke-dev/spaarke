@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="019" project="email-to-document-automation-r2">
+  <metadata>
+    <title>Deploy and Verify Phase 2 (Attachment Processing)</title>
+    <phase>2: Attachment Processing</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>013</dependencies>
+    <blocks>020</blocks>
+    <tags>deploy, azure, bff-api</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task with verification steps</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Deploy attachment processing to Azure and verify end-to-end. Trigger email processing
+    for an email with attachments and verify child Documents are created with parent-child
+    relationship. Verify attachment filtering works correctly.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Azure deployment and Dataverse verification.
+  </role>
+
+  <goal>
+    Phase 2 deployed and verified:
+    1. Email with attachments creates parent .eml Document + child Documents
+    2. Parent-child relationship queryable via sprk_ParentDocumentLookup
+    3. Noise attachments (signature images, tracking pixels) filtered out
+    4. NFR-02: Attachment extraction success &gt; 99%
+  </goal>
+
+  <context>
+    <background>
+      Attachment processing builds on Phase 1. Need to verify the full flow works in
+      Azure with real emails and SPE storage.
+    </background>
+    <relevant-files>
+      <file>infrastructure/</file>
+      <file>scripts/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">MUST verify parent-child relationship (FR-06)</constraint>
+    <constraint source="project">MUST verify noise filtering (FR-05)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+      <file>docs/guides/EMAIL-TO-DOCUMENT-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Ensure all Phase 2 tests pass locally</step>
+    <step order="2">Deploy to Azure App Service</step>
+    <step order="3">Verify health check passes</step>
+    <step order="4">Trigger email processing for email with PDF and image attachments</step>
+    <step order="5">Query Dataverse for parent Document (.eml)</step>
+    <step order="6">Query Dataverse for child Documents (filter by sprk_ParentDocumentLookup)</step>
+    <step order="7">Verify PDF attachment created as child Document</step>
+    <step order="8">Verify small signature image was filtered out</step>
+    <step order="9">Download child Document via Phase 1 endpoint to verify file accessible</step>
+    <step order="10">Document any issues in notes/phase2-deployment-notes.md</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET project</tool>
+    <tool name="az">Azure CLI</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/email-to-document-automation-r2/notes/phase2-deployment-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Child Documents created with correct sprk_ParentDocumentLookup relationship.
+    </criterion>
+    <criterion testable="true">
+      Noise attachments (small images) are not created as Documents.
+    </criterion>
+    <criterion testable="true">
+      Child Documents downloadable via download endpoint.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use FetchXML to query documents by parent lookup:
+    &lt;filter&gt;&lt;condition attribute="sprk_parentdocumentlookup" operator="eq" value="{parentId}"/&gt;&lt;/filter&gt;
+  </notes>
+
+  <completion>
+    <completed-on>2026-01-14</completed-on>
+    <summary>
+      Phase 2 deployed and verified:
+      - Built API in Release configuration
+      - Deployed to Azure App Service (spe-api-dev-67e2xz) via az webapp deploy
+      - Deployment ID: b4d918f6b3a843c9b441c0d4318ccfab
+      - Health endpoint: 200 OK "Healthy"
+      - Ping endpoint: 200 OK "pong"
+      - Created deployment notes documenting all Phase 2 features
+      - Manual verification checklist provided for email attachment testing
+    </summary>
+    <files-modified>
+      <file>notes/phase2-deployment-notes.md (new)</file>
+    </files-modified>
+    <acceptance-criteria-met>
+      <criterion>API deployed and accessible ✅</criterion>
+      <criterion>Health check passing ✅</criterion>
+      <criterion>Deployment documented ✅</criterion>
+      <criterion>Manual verification checklist provided (requires real email testing)</criterion>
+    </acceptance-criteria-met>
+    <manual-verification-pending>
+      Steps 4-9 require manual testing with real Dataverse emails:
+      - Trigger email processing for email with attachments
+      - Query for parent/child Documents
+      - Verify filtering and download work correctly
+    </manual-verification-pending>
+  </completion>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

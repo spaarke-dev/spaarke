@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="email-to-document-automation-r2">
+  <metadata>
+    <title>Create AppOnlyDocumentAnalysis Job Handler</title>
+    <phase>3: AppOnlyAnalysisService</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>022</blocks>
+    <tags>bff-api, api, worker, job</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task creates new job handler for background processing</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create AppOnlyDocumentAnalysisJobHandler that processes app-only AI analysis jobs from
+    Service Bus. This handler receives document IDs, calls AppOnlyAnalysisService, and
+    updates the document with analysis results. Follow ADR-004 job contract schema.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Service Bus job handlers and idempotent processing.
+    Follow existing job handler patterns.
+  </role>
+
+  <goal>
+    Job handler that:
+    1. Handles job type "AppOnlyDocumentAnalysis"
+    2. Validates job contract
+    3. Calls AppOnlyAnalysisService.AnalyzeDocumentAsync
+    4. Handles errors with appropriate retry/DLQ behavior
+    5. Updates telemetry metrics
+  </goal>
+
+  <context>
+    <background>
+      FR-10 requires job handler integration via Service Bus. This enables the email processing
+      job handler to enqueue AI analysis jobs for each document (including attachments).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/EmailToDocumentJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Analysis/AppOnlyAnalysisService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">MUST use standard JobContract schema</constraint>
+    <constraint source="ADR-004">MUST be idempotent (safe under at-least-once delivery)</constraint>
+    <constraint source="ADR-004">MUST emit JobOutcome events</constraint>
+    <constraint source="project">Idempotency key: analysis-{docId}-documentprofile</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>docs/guides/EMAIL-TO-DOCUMENT-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read EmailToDocumentJobHandler.cs for job handler pattern</step>
+    <step order="2">Read ServiceBusJobProcessor.cs for job routing pattern</step>
+    <step order="3">Create AppOnlyDocumentAnalysisJobHandler.cs in Services/Jobs/Handlers/</step>
+    <step order="4">Implement IJobHandler interface</step>
+    <step order="5">Define job type constant "AppOnlyDocumentAnalysis"</step>
+    <step order="6">Implement HandleAsync with idempotency check</step>
+    <step order="7">Call AppOnlyAnalysisService.AnalyzeDocumentAsync</step>
+    <step order="8">Handle success: mark as processed, emit JobOutcome.Completed</step>
+    <step order="9">Handle failure: emit JobOutcome.Failed with error details</step>
+    <step order="10">Register handler in job processor routing</step>
+    <step order="11">Verify solution builds</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and verify .NET project</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/AppOnlyDocumentAnalysisJobHandler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs (modified - add routing)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Job handler registered for type "AppOnlyDocumentAnalysis".
+    </criterion>
+    <criterion testable="true">
+      Handler calls AppOnlyAnalysisService.AnalyzeDocumentAsync.
+    </criterion>
+    <criterion testable="true">
+      Idempotency check prevents duplicate analysis.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Follow the existing job handler registration pattern in ServiceBusJobProcessor.
+    Consider whether to reuse existing analysis job type or create new one.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

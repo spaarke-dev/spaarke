@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="009" project="email-to-document-automation-r2">
+  <metadata>
+    <title>Deploy and Verify Phase 1 (Download Endpoint)</title>
+    <phase>1: Download Endpoint</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>005</dependencies>
+    <blocks>010</blocks>
+    <tags>deploy, azure, bff-api</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task with explicit verification steps</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Deploy the download endpoint to Azure App Service and verify it works end-to-end.
+    Test with actual .eml files uploaded by email processing. Verify NFR requirements (latency, streaming).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Azure App Service deployment and BFF API verification.
+  </role>
+
+  <goal>
+    Phase 1 deployed and verified:
+    1. BFF API deployed with download endpoint
+    2. End-to-end test: user can download .eml file via new endpoint
+    3. NFR-01 verified: P95 latency &lt; 2s
+    4. Audit logs appear in Application Insights
+  </goal>
+
+  <context>
+    <background>
+      After implementing and testing the download endpoint locally, it needs to be deployed to
+      Azure for integration testing with real SPE files and Dataverse authorization.
+    </background>
+    <relevant-files>
+      <file>infrastructure/</file>
+      <file>scripts/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">MUST verify NFR-01: P95 download latency &lt; 2 seconds</constraint>
+    <constraint source="project">MUST verify FR-03: audit events in Application Insights</constraint>
+    <constraint source="project">MUST test with real email document from R1 processing</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+      <file>docs/guides/EMAIL-TO-DOCUMENT-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Ensure all Phase 1 tests pass locally (dotnet test)</step>
+    <step order="2">Build release configuration (dotnet build -c Release)</step>
+    <step order="3">Deploy to Azure App Service (use existing deployment script or az webapp deploy)</step>
+    <step order="4">Verify deployment health check passes (/healthz)</step>
+    <step order="5">Find an existing email document in Dataverse created by R1</step>
+    <step order="6">Test download endpoint with the document ID</step>
+    <step order="7">Verify file downloads correctly with proper headers</step>
+    <step order="8">Check Application Insights for download audit event</step>
+    <step order="9">Test unauthorized access returns 403</step>
+    <step order="10">Document any issues in notes/phase1-deployment-notes.md</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET project</tool>
+    <tool name="az">Azure CLI for deployment</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/email-to-document-automation-r2/notes/phase1-deployment-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Users can download .eml files uploaded by email processing via the new endpoint.
+    </criterion>
+    <criterion testable="true">
+      Download audit events appear in Application Insights.
+    </criterion>
+    <criterion testable="true">
+      Unauthorized access returns 403 Forbidden.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use the existing email document from R1 testing. If none exists, trigger email processing first.
+    Check Azure App Service logs if deployment fails.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

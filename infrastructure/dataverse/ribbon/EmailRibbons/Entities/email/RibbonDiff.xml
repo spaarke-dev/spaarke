@@ -1,30 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Email Ribbons - Save to Document Button
-  Version: 1.0.0
+  Email Ribbons - Archive Email Button
+  Version: 1.1.0
 
-  Adds "Save to Document" button to Email form command bar.
-  Button is only enabled for completed emails (statecode = 1).
+  Adds "Archive Email" button to Email form command bar.
+  Button is only enabled for completed emails (statecode = 1) AND
+  is hidden if email is already archived (has sprk_document record).
 
   Calls: Spaarke.Email.saveToDocument(primaryControl)
   Web Resource: sprk_emailactions.js
 
-  Project: Email-to-Document Automation
-  Task: 031
+  Project: Email-to-Document Automation R2
+  Task: 040
 -->
 <RibbonDiffXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <CustomActions>
-    <!-- Add "Save to Document" button to Email form command bar -->
-    <CustomAction Id="sprk.Email.SaveToDocument.CustomAction"
+    <!-- Add "Archive Email" button to Email form command bar -->
+    <CustomAction Id="sprk.Email.ArchiveEmail.CustomAction"
                   Location="Mscrm.Form.email.MainTab.ExportData.Controls._children"
                   Sequence="10">
       <CommandUIDefinition>
-        <Button Id="sprk.Email.SaveToDocument.Button"
-                Command="sprk.Email.SaveToDocument.Command"
-                Alt="$LocLabels:sprk.Email.SaveToDocument.Button.Alt"
-                LabelText="$LocLabels:sprk.Email.SaveToDocument.Button.LabelText"
-                ToolTipTitle="$LocLabels:sprk.Email.SaveToDocument.Button.ToolTipTitle"
-                ToolTipDescription="$LocLabels:sprk.Email.SaveToDocument.Button.ToolTipDescription"
+        <Button Id="sprk.Email.ArchiveEmail.Button"
+                Command="sprk.Email.ArchiveEmail.Command"
+                Alt="$LocLabels:sprk.Email.ArchiveEmail.Button.Alt"
+                LabelText="$LocLabels:sprk.Email.ArchiveEmail.Button.LabelText"
+                ToolTipTitle="$LocLabels:sprk.Email.ArchiveEmail.Button.ToolTipTitle"
+                ToolTipDescription="$LocLabels:sprk.Email.ArchiveEmail.Button.ToolTipDescription"
                 TemplateAlias="o1"
                 Image16by16="/_imgs/ribbon/FileSave_16.png"
                 Image32by32="/_imgs/ribbon/FileSave_32.png"
@@ -38,13 +39,14 @@
   </Templates>
 
   <CommandDefinitions>
-    <!-- Command for Save to Document button -->
-    <CommandDefinition Id="sprk.Email.SaveToDocument.Command">
+    <!-- Command for Archive Email button -->
+    <CommandDefinition Id="sprk.Email.ArchiveEmail.Command">
       <EnableRules>
-        <EnableRule Id="sprk.Email.SaveToDocument.EnableRule" />
+        <EnableRule Id="sprk.Email.ArchiveEmail.EnableRule" />
       </EnableRules>
       <DisplayRules>
-        <DisplayRule Id="sprk.Email.SaveToDocument.DisplayRule" />
+        <DisplayRule Id="sprk.Email.ArchiveEmail.DisplayRule.Web" />
+        <DisplayRule Id="sprk.Email.ArchiveEmail.DisplayRule.NotArchived" />
       </DisplayRules>
       <Actions>
         <JavaScriptFunction Library="$webresource:sprk_emailactions.js"
@@ -60,14 +62,22 @@
 
     <DisplayRules>
       <!-- Display only on Web client (not mobile) -->
-      <DisplayRule Id="sprk.Email.SaveToDocument.DisplayRule">
+      <DisplayRule Id="sprk.Email.ArchiveEmail.DisplayRule.Web">
         <CrmClientTypeRule Type="Web" />
+      </DisplayRule>
+      <!-- Display only if email is NOT already archived (no sprk_document exists) -->
+      <DisplayRule Id="sprk.Email.ArchiveEmail.DisplayRule.NotArchived">
+        <CustomRule Library="$webresource:sprk_emailactions.js"
+                    FunctionName="Spaarke.Email.canArchiveEmail"
+                    Default="true">
+          <CrmParameter Value="PrimaryControl" />
+        </CustomRule>
       </DisplayRule>
     </DisplayRules>
 
     <EnableRules>
       <!-- Enable only for completed emails (statecode = 1) -->
-      <EnableRule Id="sprk.Email.SaveToDocument.EnableRule">
+      <EnableRule Id="sprk.Email.ArchiveEmail.EnableRule">
         <CustomRule Library="$webresource:sprk_emailactions.js"
                     FunctionName="Spaarke.Email.canSaveToDocument"
                     Default="false">
@@ -78,24 +88,24 @@
   </RuleDefinitions>
 
   <LocLabels>
-    <LocLabel Id="sprk.Email.SaveToDocument.Button.Alt">
+    <LocLabel Id="sprk.Email.ArchiveEmail.Button.Alt">
       <Titles>
-        <Title description="Save to Document" languagecode="1033" />
+        <Title description="Archive Email" languagecode="1033" />
       </Titles>
     </LocLabel>
-    <LocLabel Id="sprk.Email.SaveToDocument.Button.LabelText">
+    <LocLabel Id="sprk.Email.ArchiveEmail.Button.LabelText">
       <Titles>
-        <Title description="Save to Document" languagecode="1033" />
+        <Title description="Archive Email" languagecode="1033" />
       </Titles>
     </LocLabel>
-    <LocLabel Id="sprk.Email.SaveToDocument.Button.ToolTipTitle">
+    <LocLabel Id="sprk.Email.ArchiveEmail.Button.ToolTipTitle">
       <Titles>
-        <Title description="Save Email to SDAP Document" languagecode="1033" />
+        <Title description="Archive Email to SDAP" languagecode="1033" />
       </Titles>
     </LocLabel>
-    <LocLabel Id="sprk.Email.SaveToDocument.Button.ToolTipDescription">
+    <LocLabel Id="sprk.Email.ArchiveEmail.Button.ToolTipDescription">
       <Titles>
-        <Title description="Convert this email to an SDAP document with .eml file for archival and AI processing. Attachments will be saved as separate documents." languagecode="1033" />
+        <Title description="Archive this email as an SDAP document with .eml file. Attachments will be saved as separate documents. AI analysis will be triggered automatically." languagecode="1033" />
       </Titles>
     </LocLabel>
   </LocLabels>

@@ -62,6 +62,64 @@ export class BffClient {
     }
 
     /**
+     * Get view URL for a document (real-time, no cache delay)
+     *
+     * GET /api/documents/{documentId}/view-url
+     *
+     * Unlike getPreviewUrl() which uses Graph's Preview action (30-60s cache),
+     * this uses driveItem.webUrl for near real-time viewing without cache delay.
+     * Includes checkout status for showing lock indicators.
+     *
+     * @param documentId Document GUID
+     * @param accessToken Bearer token from MSAL
+     * @param correlationId Correlation ID for distributed tracing
+     * @returns FilePreviewResponse with view URL, metadata, and checkout status
+     * @throws Error if API call fails
+     */
+    public async getViewUrl(
+        documentId: string,
+        accessToken: string,
+        correlationId: string
+    ): Promise<FilePreviewResponse> {
+        const url = `${this.baseUrl}/api/documents/${documentId}/view-url`;
+
+        console.log(`[BffClient] GET ${url} (View URL - real-time)`);
+        console.log(`[BffClient] Correlation ID: ${correlationId}`);
+
+        try {
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'X-Correlation-Id': correlationId,
+                    'Accept': 'application/json'
+                },
+                mode: 'cors',
+                credentials: 'omit'
+            });
+
+            // Handle non-2xx responses
+            if (!response.ok) {
+                await this.handleErrorResponse(response, correlationId);
+            }
+
+            // Parse successful response
+            const data = await response.json() as FilePreviewResponse;
+
+            console.log(`[BffClient] View URL acquired for document: ${data.documentInfo?.name}`);
+            if (data.checkoutStatus?.isCheckedOut) {
+                console.log(`[BffClient] Document is checked out by: ${data.checkoutStatus.checkedOutBy?.name}`);
+            }
+
+            return data;
+
+        } catch (error) {
+            console.error('[BffClient] Request failed:', error);
+            throw new Error(`Failed to get view URL: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
+    /**
      * Check out a document for editing
      *
      * POST /api/documents/{documentId}/checkout
@@ -234,6 +292,85 @@ export class BffClient {
         }
 
         return await response.json() as OpenLinksResponse;
+    }
+
+    /**
+     * Get download URL for a document (uses app-only auth on server)
+     *
+     * Returns the URL to the download endpoint that proxies the file through
+     * the BFF using app-only authentication. This works for all documents,
+     * including those uploaded by background processes (email-to-document).
+     *
+     * Note: The caller should append the access token as a query parameter
+     * or use this URL with proper Authorization header.
+     */
+    public getDownloadUrl(documentId: string): string {
+        // Use the v1 documents API which has the download endpoint
+        return `${this.baseUrl}/api/v1/documents/${documentId}/download`;
+    }
+
+    /**
+     * Download a document through the BFF proxy (app-only auth)
+     *
+     * This method triggers a download by creating a temporary anchor element.
+     * The BFF endpoint uses app-only auth, so it works for documents
+     * that users don't have direct SPE permissions for.
+     *
+     * GET /api/v1/documents/{documentId}/download
+     */
+    public async downloadDocument(
+        documentId: string,
+        accessToken: string,
+        correlationId: string,
+        filename?: string
+    ): Promise<void> {
+        const url = this.getDownloadUrl(documentId);
+
+        console.log(`[BffClient] Download via ${url}`);
+
+        // Fetch the file as a blob
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'X-Correlation-Id': correlationId
+            },
+            mode: 'cors',
+            credentials: 'omit'
+        });
+
+        if (!response.ok) {
+            await this.handleErrorResponse(response, correlationId);
+        }
+
+        // Get filename from Content-Disposition header if not provided
+        const contentDisposition = response.headers.get('Content-Disposition');
+        let downloadFilename = filename;
+        if (!downloadFilename && contentDisposition) {
+            const match = contentDisposition.match(/filename[*]?=['"]?(?:UTF-8'')?([^'";]+)['"]?/i);
+            if (match) {
+                downloadFilename = decodeURIComponent(match[1]);
+            }
+        }
+        downloadFilename = downloadFilename || 'document';
+
+        // Convert to blob and trigger download
+        const blob = await response.blob();
+        const blobUrl = URL.createObjectURL(blob);
+
+        // Create temporary anchor to trigger download
+        const anchor = document.createElement('a');
+        anchor.href = blobUrl;
+        anchor.download = downloadFilename;
+        anchor.style.display = 'none';
+        document.body.appendChild(anchor);
+        anchor.click();
+
+        // Cleanup
+        document.body.removeChild(anchor);
+        URL.revokeObjectURL(blobUrl);
+
+        console.log(`[BffClient] Download triggered for ${downloadFilename}`);
     }
 
     /**

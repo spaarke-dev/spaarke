@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="email-to-document-automation-r2">
+  <metadata>
+    <title>Unit Tests for AppOnlyAnalysisService</title>
+    <phase>3: AppOnlyAnalysisService</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>022</dependencies>
+    <blocks>029</blocks>
+    <tags>testing, unit-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task tags include 'testing', 'unit-test'</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Write unit tests for AppOnlyAnalysisService and the job handler. Mock dependencies
+    and verify the analysis flow works correctly. Test error handling and idempotency.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in xUnit testing with dependency mocking.
+  </role>
+
+  <goal>
+    Unit tests for:
+    1. AppOnlyAnalysisService.AnalyzeDocumentAsync
+    2. AppOnlyDocumentAnalysisJobHandler idempotency
+    3. Job handler error scenarios
+  </goal>
+
+  <context>
+    <background>
+      FR-08 requires app-only analysis to work correctly. Tests ensure the service
+      and job handler behave correctly with mocked AI and storage dependencies.
+    </background>
+    <relevant-files>
+      <file>tests/Sprk.Bff.Api.Tests/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Analysis/AppOnlyAnalysisService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/AppOnlyDocumentAnalysisJobHandler.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">MUST mock OpenAiClient and SpeFileStore</constraint>
+    <constraint source="project">MUST test idempotency behavior</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create test file AppOnlyAnalysisServiceTests.cs</step>
+    <step order="2">Write test: AnalyzeDocument_ValidDocument_CreatesProfile</step>
+    <step order="3">Write test: AnalyzeDocument_DocumentNotFound_ThrowsException</step>
+    <step order="4">Write test: AnalyzeDocument_NoFileInSpe_ThrowsException</step>
+    <step order="5">Create test file AppOnlyDocumentAnalysisJobHandlerTests.cs</step>
+    <step order="6">Write test: HandleAsync_NewJob_CallsAnalysisService</step>
+    <step order="7">Write test: HandleAsync_DuplicateJob_SkipsProcessing</step>
+    <step order="8">Write test: HandleAsync_AnalysisFails_EmitsFailedOutcome</step>
+    <step order="9">Run all tests and verify they pass</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Run dotnet test</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Services/Analysis/AppOnlyAnalysisServiceTests.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Services/Jobs/AppOnlyDocumentAnalysisJobHandlerTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All tests pass when running dotnet test.</criterion>
+    <criterion testable="true">Tests verify analysis service creates Document Profile.</criterion>
+    <criterion testable="true">Tests verify job handler idempotency.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Mock OpenAiClient to return predictable analysis results.
+    Mock SpeFileStore to return test file stream.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

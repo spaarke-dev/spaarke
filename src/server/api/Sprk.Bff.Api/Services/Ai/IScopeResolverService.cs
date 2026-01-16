@@ -31,6 +31,18 @@ public interface IScopeResolverService
         CancellationToken cancellationToken);
 
     /// <summary>
+    /// Load scopes from a PlaybookNode configuration.
+    /// Resolves node-level N:N relationships for skills and knowledge,
+    /// plus the single tool lookup.
+    /// </summary>
+    /// <param name="nodeId">PlaybookNode entity ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Resolved scopes from node relationships and tool lookup.</returns>
+    Task<ResolvedScopes> ResolveNodeScopesAsync(
+        Guid nodeId,
+        CancellationToken cancellationToken);
+
+    /// <summary>
     /// Get action definition by ID.
     /// </summary>
     /// <param name="actionId">Action entity ID.</param>
@@ -113,6 +125,12 @@ public record AnalysisAction
     public string? Description { get; init; }
     public string SystemPrompt { get; init; } = string.Empty;
     public int SortOrder { get; init; }
+
+    /// <summary>
+    /// Action type for executor routing.
+    /// Maps to sprk_analysisaction.sprk_actiontype choice value.
+    /// </summary>
+    public Sprk.Bff.Api.Services.Ai.Nodes.ActionType ActionType { get; init; } = Sprk.Bff.Api.Services.Ai.Nodes.ActionType.AiAnalysis;
 }
 
 /// <summary>

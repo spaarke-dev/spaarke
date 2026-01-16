@@ -345,8 +345,36 @@ if (analysisEnabled && documentIntelligenceEnabled)
 
     builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IAnalysisOrchestrationService, Sprk.Bff.Api.Services.Ai.AnalysisOrchestrationService>();
 
+    // App-only analysis service for background jobs (email-to-document automation)
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IAppOnlyAnalysisService, Sprk.Bff.Api.Services.Ai.AppOnlyAnalysisService>();
+
     // Playbook Service - CRUD operations for analysis playbooks (R3 Phase 3)
     builder.Services.AddHttpClient<Sprk.Bff.Api.Services.Ai.IPlaybookService, Sprk.Bff.Api.Services.Ai.PlaybookService>();
+
+    // Node Service - CRUD operations for playbook nodes (ai-node-playbook-builder project)
+    builder.Services.AddHttpClient<Sprk.Bff.Api.Services.Ai.INodeService, Sprk.Bff.Api.Services.Ai.NodeService>();
+
+    // Node Executor Registry - manages node type executors (ai-node-playbook-builder project)
+    builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutorRegistry, Sprk.Bff.Api.Services.Ai.Nodes.NodeExecutorRegistry>();
+
+    // Playbook Orchestration Service - multi-node playbook execution (ai-node-playbook-builder project)
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IPlaybookOrchestrationService, Sprk.Bff.Api.Services.Ai.PlaybookOrchestrationService>();
+
+    // Template Engine - Handlebars.NET for variable substitution in prompts and delivery templates
+    builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.ITemplateEngine, Sprk.Bff.Api.Services.Ai.TemplateEngine>();
+
+    // Power Apps Template Services - Word document and Email template integration (Task 026)
+    builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Delivery.IWordTemplateService, Sprk.Bff.Api.Services.Ai.Delivery.WordTemplateService>();
+    builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Delivery.IEmailTemplateService, Sprk.Bff.Api.Services.Ai.Delivery.EmailTemplateService>();
+
+    // Delivery Node Executors - Phase 3 delivery actions (CreateTask, SendEmail, UpdateRecord, DeliverOutput)
+    builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.CreateTaskNodeExecutor>();
+    builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.SendEmailNodeExecutor>();
+    builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.UpdateRecordNodeExecutor>();
+    builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.DeliverOutputNodeExecutor>();
+
+    // Condition Node Executor - Phase 4 conditional branching (Task 030)
+    builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.ConditionNodeExecutor>();
 
     // Playbook Sharing Service - team/organization sharing for playbooks (R3 Phase 3 Task 023)
     builder.Services.AddHttpClient<Sprk.Bff.Api.Services.Ai.IPlaybookSharingService, Sprk.Bff.Api.Services.Ai.PlaybookSharingService>();
@@ -433,6 +461,9 @@ builder.Services.AddSingleton<Sprk.Bff.Api.Services.Email.EmailProcessingStatsSe
 builder.Services.AddSingleton<Sprk.Bff.Api.Telemetry.EmailTelemetry>(sp =>
     new Sprk.Bff.Api.Telemetry.EmailTelemetry(sp.GetService<Sprk.Bff.Api.Services.Email.EmailProcessingStatsService>()));
 
+// Document telemetry - OpenTelemetry-compatible metrics for document downloads (FR-03 audit logging)
+builder.Services.AddSingleton<Sprk.Bff.Api.Telemetry.DocumentTelemetry>();
+
 // Register Email Processing configuration
 builder.Services.Configure<Sprk.Bff.Api.Configuration.EmailProcessingOptions>(
     builder.Configuration.GetSection(Sprk.Bff.Api.Configuration.EmailProcessingOptions.SectionName));
@@ -457,6 +488,9 @@ builder.Services.AddScoped<Sprk.Bff.Api.Services.Email.IEmailAssociationService,
 builder.Services.AddScoped<Sprk.Bff.Api.Services.Email.IEmailAttachmentProcessor,
     Sprk.Bff.Api.Services.Email.EmailAttachmentProcessor>();
 
+// Attachment filter service - filters out noise attachments (signatures, tracking pixels, etc.)
+builder.Services.AddScoped<Sprk.Bff.Api.Services.Email.AttachmentFilterService>();
+
 // HttpClient for email polling backup service (Dataverse queries)
 builder.Services.AddHttpClient("DataversePolling")
     .ConfigureHttpClient(client =>
@@ -476,7 +510,14 @@ builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.
 builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.BatchProcessEmailsJobHandler>();
 // Also register EmailToDocumentJobHandler as concrete type for BatchProcessEmailsJobHandler dependency
 builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.Handlers.EmailToDocumentJobHandler>();
-// DocumentAnalysisJobHandler removed - background AI analysis is now triggered from PCF (requires user context)
+
+// App-only document analysis job handler - for background AI analysis without user context
+// Uses AppOnlyAnalysisService with playbook-based analysis (FR-10)
+builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.AppOnlyDocumentAnalysisJobHandler>();
+
+// Email analysis job handler - for combined email+attachment AI analysis (FR-11, FR-12)
+// Uses AppOnlyAnalysisService.AnalyzeEmailAsync with Email Analysis playbook
+builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.EmailAnalysisJobHandler>();
 
 // Configure Service Bus job processing
 var serviceBusConnectionString = builder.Configuration.GetConnectionString("ServiceBus");
@@ -926,6 +967,28 @@ app.UseCors();
 app.UseMiddleware<Sprk.Bff.Api.Api.SecurityHeadersMiddleware>();
 
 // ============================================================================
+// STATIC FILES - Serve playbook-builder SPA from wwwroot
+// ============================================================================
+// Serves static files from wwwroot/ directory. The playbook-builder React app
+// is deployed to wwwroot/playbook-builder/ and accessed at /playbook-builder/
+//
+// Note: dotnet publish creates a wwwroot/ folder in the output, but Azure App Service
+// deploys to site/wwwroot/ which IS the web root. This results in files being at
+// site/wwwroot/wwwroot/ instead of site/wwwroot/. We handle this by adding a second
+// static file provider that looks in the nested wwwroot folder.
+app.UseStaticFiles();
+
+// Handle Azure deployment where static files end up in nested wwwroot/wwwroot/
+var nestedWwwroot = Path.Combine(app.Environment.ContentRootPath, "wwwroot");
+if (Directory.Exists(nestedWwwroot))
+{
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(nestedWwwroot)
+    });
+}
+
+// ============================================================================
 // GLOBAL EXCEPTION HANDLER - RFC 7807 Problem Details
 // ============================================================================
 // Catches all unhandled exceptions and converts them to structured Problem Details JSON
@@ -1078,6 +1141,9 @@ if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
     app.MapAnalysisEndpoints();
     app.MapPlaybookEndpoints();
     app.MapScopeEndpoints();
+    app.MapNodeEndpoints();
+    app.MapPlaybookRunEndpoints();
+    app.MapModelEndpoints();
 }
 
 // RAG endpoints for knowledge base operations (R3)
@@ -1085,6 +1151,33 @@ app.MapRagEndpoints();
 
 // Visualization endpoints for document relationship discovery
 app.MapVisualizationEndpoints();
+
+// ============================================================================
+// PLAYBOOK BUILDER SPA FALLBACK - Client-side routing support
+// ============================================================================
+// Catch-all for /playbook-builder/* routes that don't match static files.
+// IMPORTANT: MapFallbackToFile creates a route that matches the pattern, so we need to
+// ensure it doesn't match requests for static assets (.js, .css, .map, .svg, etc).
+// The fallback only triggers for non-file paths (client-side routes).
+app.MapFallback(context =>
+{
+    var path = context.Request.Path.Value ?? "";
+    // Only serve index.html for /playbook-builder/* paths that are NOT static files
+    if (path.StartsWith("/playbook-builder/", StringComparison.OrdinalIgnoreCase) &&
+        !Path.HasExtension(path))
+    {
+        context.Request.Path = "/playbook-builder/index.html";
+        return context.RequestServices.GetRequiredService<IWebHostEnvironment>()
+            .WebRootFileProvider
+            .GetFileInfo("playbook-builder/index.html")
+            .Exists
+            ? Results.File(
+                Path.Combine(context.RequestServices.GetRequiredService<IWebHostEnvironment>().WebRootPath!, "playbook-builder/index.html"),
+                "text/html").ExecuteAsync(context)
+            : Results.NotFound().ExecuteAsync(context);
+    }
+    return Results.NotFound().ExecuteAsync(context);
+});
 
 // Resilience monitoring endpoints (circuit breaker status)
 app.MapResilienceEndpoints();

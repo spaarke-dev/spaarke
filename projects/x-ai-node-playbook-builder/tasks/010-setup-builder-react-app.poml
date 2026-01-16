@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Setup Builder React App</title>
+    <phase>2: Visual Builder</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <tags>frontend, react</tags>
+    <dependencies>009</dependencies>
+    <blocks>011, 015</blocks>
+  </metadata>
+
+  <prompt>
+    Create the React 18 playbook builder application project structure. Set up
+    TypeScript, Vite, React Flow, Zustand, and Fluent UI v9. Configure for
+    production build to App Service wwwroot.
+  </prompt>
+
+  <role>Senior frontend developer with React expertise</role>
+
+  <goal>
+    React 18 application scaffolded with all dependencies, folder structure,
+    and build configuration ready for development.
+  </goal>
+
+  <context>
+    <background>
+      The builder is a standalone React 18 app that will be embedded in an
+      iframe within the PCF host control. It uses React Flow for the canvas
+      and Zustand for state management.
+    </background>
+    <relevant-files>
+      <file>projects/ai-node-playbook-builder/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use React 18 (isolated in iframe from PCF)</constraint>
+    <constraint source="ADR-021">Use Fluent UI v9 for all UI components</constraint>
+    <constraint source="project">Build output goes to wwwroot/playbook-builder/</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>projects/ai-node-playbook-builder/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create directory: src/client/playbook-builder/</step>
+    <step order="2">Initialize Vite React TypeScript project</step>
+    <step order="3">Install dependencies: react@18, react-dom@18</step>
+    <step order="4">Install @reactflow/core, @reactflow/node-toolbar</step>
+    <step order="5">Install zustand for state management</step>
+    <step order="6">Install @fluentui/react-components v9</step>
+    <step order="7">Create folder structure: components/, hooks/, services/, stores/, types/</step>
+    <step order="8">Configure vite.config.ts for base path /playbook-builder/</step>
+    <step order="9">Configure TypeScript with strict mode</step>
+    <step order="10">Create App.tsx with FluentProvider and theme</step>
+    <step order="11">Create basic layout component</step>
+    <step order="12">Add build script to copy output to wwwroot</step>
+    <step order="13">Verify dev server starts and renders</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">npm/pnpm commands</tool>
+    <tool name="Write">Create project files</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/playbook-builder/package.json</output>
+    <output type="code">src/client/playbook-builder/vite.config.ts</output>
+    <output type="code">src/client/playbook-builder/tsconfig.json</output>
+    <output type="code">src/client/playbook-builder/src/App.tsx</output>
+    <output type="code">src/client/playbook-builder/src/main.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run dev starts without errors</criterion>
+    <criterion testable="true">App renders with Fluent UI theme</criterion>
+    <criterion testable="true">React Flow imported successfully</criterion>
+    <criterion testable="true">Build produces files in dist/</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2026-01-09">
+      Task completed successfully. Created React 18 + Vite + TypeScript project
+      at src/client/playbook-builder/ with all required dependencies:
+      - @xyflow/react v12 for canvas
+      - zustand v4 for state management
+      - @fluentui/react-components v9 for UI
+
+      Project structure includes components, hooks, services, stores, types.
+      Build outputs to dist/ with proper code splitting (react-vendor, fluent-vendor, flow-vendor).
+      Total bundle size ~132KB gzipped.
+    </note>
+  </notes>
+</task>

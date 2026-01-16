@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="email-to-document-automation-r2">
+  <metadata>
+    <title>Create Ribbon Button for Sent Emails</title>
+    <phase>5: UI/Ribbon Enhancements</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>040</dependencies>
+    <blocks>042</blocks>
+    <tags>dataverse, ribbon, frontend</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task follows pattern established in task 040</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Add ribbon button for processing sent emails. This extends the "Archive Email" button
+    to work with outbound emails (directioncode = Outgoing). The button should be available
+    on sent emails that haven't been archived.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse ribbon customization.
+  </role>
+
+  <goal>
+    Extended ribbon functionality:
+    1. Button works for both received and sent emails
+    2. DisplayRule accounts for email direction
+    3. Same JavaScript handler (with direction parameter if needed)
+  </goal>
+
+  <context>
+    <background>
+      FR-15 requires processing sent emails. Users may want to archive outbound correspondence
+      for legal or compliance purposes. The button should work similarly to received emails.
+    </background>
+    <relevant-files>
+      <file>src/solutions/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-002">MUST NOT make HTTP calls from plugin</constraint>
+    <constraint source="project">Reuse same handler as existing emails if possible</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+      <file>docs/guides/RIBBON-WORKBENCH-HOW-TO-ADD-BUTTON.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review task 040 implementation for button on received emails</step>
+    <step order="2">Verify button DisplayRule allows sent emails (directioncode = 1)</step>
+    <step order="3">Update DisplayRule if needed to include both directions</step>
+    <step order="4">OR create separate button for sent emails if display logic differs</step>
+    <step order="5">Test button appears on sent email form</step>
+    <step order="6">Verify visibility rules work correctly</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">PAC CLI for solution operations</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeEmail/RibbonDiffXml modifications</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      "Archive Email" button appears on sent email form.
+    </criterion>
+    <criterion testable="true">
+      Button hidden for already-archived sent emails.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Email direction: 0 = Incoming, 1 = Outgoing.
+    May be able to reuse same button with updated DisplayRule.
+  </notes>
+
+  <completion-notes date="2026-01-15">
+    VERIFIED: Task 040 implementation is ALREADY direction-agnostic.
+
+    Analysis of existing EmailRibbons solution:
+    1. canArchiveEmail() - Only checks sprk_document existence, NO direction filter
+    2. canSaveToDocument() - Only checks statecode === 1, NO direction filter
+    3. RibbonDiff.xml - No direction-based DisplayRules or EnableRules
+
+    Result: The "Archive Email" button from Task 040 already works for:
+    - ✅ Received emails (directioncode = 0)
+    - ✅ Sent emails (directioncode = 1)
+    - ✅ Any email that is completed and not already archived
+
+    NO CODE CHANGES REQUIRED - Task 040's implementation satisfies all acceptance criteria.
+
+    Acceptance Criteria Verification:
+    1. "Archive Email" button appears on sent email form → ✅ YES (direction-agnostic)
+    2. Button hidden for already-archived sent emails → ✅ YES (canArchiveEmail checks sprk_document)
+  </completion-notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

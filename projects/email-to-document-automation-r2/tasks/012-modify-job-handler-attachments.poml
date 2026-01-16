@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="email-to-document-automation-r2">
+  <metadata>
+    <title>Modify Job Handler for Attachment Processing</title>
+    <phase>2: Attachment Processing</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>010, 011</dependencies>
+    <blocks>013</blocks>
+    <tags>bff-api, api, worker, job</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task modifies critical job handler with significant new functionality</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Modify EmailToDocumentJobHandler to extract and upload attachments as child Documents.
+    After uploading the .eml file, extract attachments, filter noise, upload each meaningful
+    attachment to SPE, and create child Document records linked to the parent .eml Document.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in job handlers, SPE file uploads, and Dataverse operations.
+    Follow existing patterns in EmailToDocumentJobHandler.
+  </role>
+
+  <goal>
+    EmailToDocumentJobHandler enhanced to:
+    1. Upload .eml file (existing behavior)
+    2. Extract attachments using EmailToEmlConverter
+    3. Filter attachments using AttachmentFilterService
+    4. Upload each filtered attachment to SPE
+    5. Create child Document records with sprk_ParentDocumentLookup
+    6. Log attachment processing telemetry
+  </goal>
+
+  <context>
+    <background>
+      FR-04 requires extracting attachments as child Documents. The job handler is the right
+      place to add this logic since it already processes emails and creates Documents.
+      Child Documents enable individual AI analysis of each attachment.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/EmailToDocumentJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Email/EmailToEmlConverter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Email/AttachmentFilterService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">MUST follow idempotent job handler pattern</constraint>
+    <constraint source="project">MUST create parent-child relationship via sprk_ParentDocumentLookup</constraint>
+    <constraint source="project">MUST process attachments after main .eml upload succeeds</constraint>
+    <constraint source="project">Attachment failures should not fail the main job (log and continue)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>docs/guides/EMAIL-TO-DOCUMENT-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read EmailToDocumentJobHandler.cs thoroughly</step>
+    <step order="2">Identify the point after .eml upload succeeds to add attachment processing</step>
+    <step order="3">Inject EmailToEmlConverter and AttachmentFilterService into handler</step>
+    <step order="4">Add method ProcessAttachments(emailId, parentDocumentId)</step>
+    <step order="5">Call ExtractAttachments to get all attachments</step>
+    <step order="6">Call FilterAttachments to remove noise</step>
+    <step order="7">For each filtered attachment, upload to SPE via SpeFileStore</step>
+    <step order="8">Create Document record with sprk_ParentDocumentLookup = parentDocumentId</step>
+    <step order="9">Set appropriate document type and metadata for attachments</step>
+    <step order="10">Add telemetry for attachment processing counts</step>
+    <step order="11">Handle errors gracefully - log but don't fail main job</step>
+    <step order="12">Verify solution builds</step>
+    <step order="13">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and verify .NET project</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/EmailToDocumentJobHandler.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given an email with 2 meaningful attachments, when processing, then 2 child Document
+      records are created with sprk_ParentDocumentLookup pointing to parent.
+    </criterion>
+    <criterion testable="true">
+      Given an attachment upload failure, when processing, then the main .eml Document
+      is still created successfully.
+    </criterion>
+    <criterion testable="true">
+      Attachment processing telemetry includes count of extracted and filtered attachments.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The parent document ID is available after creating the .eml Document record.
+    Consider processing attachments in parallel for performance.
+    Attachment document type should indicate it's an email attachment.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

@@ -124,6 +124,7 @@ public sealed class SummaryHandler : IAnalysisToolHandler
                 chunks.Count);
 
             string summaryText;
+            double confidence;
             int totalInputTokens = 0;
             int totalOutputTokens = 0;
 
@@ -132,6 +133,7 @@ public sealed class SummaryHandler : IAnalysisToolHandler
                 // Single chunk - generate summary directly
                 var result = await GenerateSummaryAsync(chunks[0], config, cancellationToken);
                 summaryText = result.Summary;
+                confidence = result.Confidence;
                 totalInputTokens = result.InputTokens;
                 totalOutputTokens = result.OutputTokens;
             }
@@ -139,6 +141,7 @@ public sealed class SummaryHandler : IAnalysisToolHandler
             {
                 // Multiple chunks - generate chunk summaries then synthesize
                 var chunkSummaries = new List<string>();
+                var chunkConfidences = new List<double>();
 
                 foreach (var (chunk, index) in chunks.Select((c, i) => (c, i)))
                 {
@@ -148,13 +151,15 @@ public sealed class SummaryHandler : IAnalysisToolHandler
 
                     var chunkResult = await GenerateChunkSummaryAsync(chunk, index + 1, chunks.Count, cancellationToken);
                     chunkSummaries.Add(chunkResult.Summary);
+                    chunkConfidences.Add(chunkResult.Confidence);
                     totalInputTokens += chunkResult.InputTokens;
                     totalOutputTokens += chunkResult.OutputTokens;
                 }
 
                 // Synthesize final summary from chunk summaries
-                var synthesisResult = await SynthesizeSummaryAsync(chunkSummaries, config, cancellationToken);
+                var synthesisResult = await SynthesizeSummaryAsync(chunkSummaries, chunkConfidences, config, cancellationToken);
                 summaryText = synthesisResult.Summary;
+                confidence = synthesisResult.Confidence;
                 totalInputTokens += synthesisResult.InputTokens;
                 totalOutputTokens += synthesisResult.OutputTokens;
             }
@@ -172,7 +177,7 @@ public sealed class SummaryHandler : IAnalysisToolHandler
             };
 
             // Parse structured summary if format is structured
-            var resultData = ParseSummaryResult(summaryText, config);
+            var resultData = ParseSummaryResult(summaryText, confidence, config);
 
             _logger.LogInformation(
                 "Document summarization complete for {AnalysisId}: {WordCount} words in {Duration}ms",
@@ -184,7 +189,7 @@ public sealed class SummaryHandler : IAnalysisToolHandler
                 tool.Name,
                 resultData,
                 summaryText,
-                0.9, // High confidence for well-formed summaries
+                confidence,
                 executionMetadata);
         }
         catch (OperationCanceledException)
@@ -233,9 +238,12 @@ public sealed class SummaryHandler : IAnalysisToolHandler
         var response = await _openAiClient.GetCompletionAsync(prompt, cancellationToken: cancellationToken);
         var outputTokens = EstimateTokens(response);
 
+        var (summary, confidence) = ParseSummaryJsonResponse(response);
+
         return new SummaryGenerationResult
         {
-            Summary = response,
+            Summary = summary,
+            Confidence = confidence,
             InputTokens = inputTokens,
             OutputTokens = outputTokens
         };
@@ -260,16 +268,25 @@ public sealed class SummaryHandler : IAnalysisToolHandler
             Text to summarize:
             {{chunk}}
 
-            Provide a comprehensive summary (300-500 words) of this section:
+            Return ONLY valid JSON in this format:
+            {
+              "summary": "Your 300-500 word summary of this section...",
+              "confidence": 0.85
+            }
+
+            Where confidence is a score from 0.0 to 1.0 indicating how well you captured all important information from this section.
             """;
 
         var inputTokens = EstimateTokens(prompt);
         var response = await _openAiClient.GetCompletionAsync(prompt, cancellationToken: cancellationToken);
         var outputTokens = EstimateTokens(response);
 
+        var (summary, confidence) = ParseSummaryJsonResponse(response);
+
         return new SummaryGenerationResult
         {
-            Summary = response,
+            Summary = summary,
+            Confidence = confidence,
             InputTokens = inputTokens,
             OutputTokens = outputTokens
         };
@@ -280,6 +297,7 @@ public sealed class SummaryHandler : IAnalysisToolHandler
     /// </summary>
     private async Task<SummaryGenerationResult> SynthesizeSummaryAsync(
         List<string> chunkSummaries,
+        List<double> chunkConfidences,
         SummaryConfig config,
         CancellationToken cancellationToken)
     {
@@ -303,16 +321,28 @@ public sealed class SummaryHandler : IAnalysisToolHandler
             Section summaries:
             {{combinedSummaries}}
 
-            Create the synthesized summary:
+            Return ONLY valid JSON in this format:
+            {
+              "summary": "Your synthesized summary with all requested sections...",
+              "confidence": 0.85
+            }
+
+            Where confidence is a score from 0.0 to 1.0 indicating:
+            - How well the section summaries allowed you to create a complete picture
+            - How accurate and comprehensive the final summary is
+            - Consider the input confidence scores were: {{string.Join(", ", chunkConfidences.Select(c => c.ToString("F2")))}}
             """;
 
         var inputTokens = EstimateTokens(prompt);
         var response = await _openAiClient.GetCompletionAsync(prompt, cancellationToken: cancellationToken);
         var outputTokens = EstimateTokens(response);
 
+        var (summary, confidence) = ParseSummaryJsonResponse(response);
+
         return new SummaryGenerationResult
         {
-            Summary = response,
+            Summary = summary,
+            Confidence = confidence,
             InputTokens = inputTokens,
             OutputTokens = outputTokens
         };
@@ -341,7 +371,16 @@ public sealed class SummaryHandler : IAnalysisToolHandler
             Document to summarize:
             {{text}}
 
-            Generate the summary:
+            Return ONLY valid JSON in this format:
+            {
+              "summary": "Your complete summary text here with all sections...",
+              "confidence": 0.85
+            }
+
+            Where confidence is a score from 0.0 to 1.0 indicating your confidence in:
+            - How well you understood the document
+            - How accurately the summary captures the key points
+            - How complete the summary is
             """;
     }
 
@@ -394,15 +433,56 @@ public sealed class SummaryHandler : IAnalysisToolHandler
     }
 
     /// <summary>
+    /// Parse JSON response containing summary and confidence.
+    /// </summary>
+    private static (string Summary, double Confidence) ParseSummaryJsonResponse(string response)
+    {
+        try
+        {
+            // Clean up response - remove markdown code blocks if present
+            var json = response.Trim();
+            if (json.StartsWith("```"))
+            {
+                var startIndex = json.IndexOf('{');
+                var endIndex = json.LastIndexOf('}');
+                if (startIndex >= 0 && endIndex > startIndex)
+                {
+                    json = json.Substring(startIndex, endIndex - startIndex + 1);
+                }
+            }
+
+            var result = JsonSerializer.Deserialize<SummaryJsonResponse>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+
+            if (result is not null)
+            {
+                // Clamp confidence to valid range
+                var confidence = Math.Clamp(result.Confidence, 0.0, 1.0);
+                return (result.Summary, confidence);
+            }
+        }
+        catch (JsonException)
+        {
+            // If JSON parsing fails, treat the entire response as the summary with default confidence
+        }
+
+        // Fallback: return the raw response as summary with default confidence
+        return (response, 0.7);
+    }
+
+    /// <summary>
     /// Parse the summary text into a structured result object.
     /// </summary>
-    private static SummaryResult ParseSummaryResult(string summaryText, SummaryConfig config)
+    private static SummaryResult ParseSummaryResult(string summaryText, double confidence, SummaryConfig config)
     {
         var result = new SummaryResult
         {
             FullText = summaryText,
             WordCount = CountWords(summaryText),
-            Format = config.Format ?? "structured"
+            Format = config.Format ?? "structured",
+            Confidence = confidence
         };
 
         // Try to extract sections if structured format
@@ -574,8 +654,18 @@ internal class SummaryConfig
 internal class SummaryGenerationResult
 {
     public string Summary { get; set; } = string.Empty;
+    public double Confidence { get; set; }
     public int InputTokens { get; set; }
     public int OutputTokens { get; set; }
+}
+
+/// <summary>
+/// JSON response structure for AI summary with confidence.
+/// </summary>
+internal class SummaryJsonResponse
+{
+    public string Summary { get; set; } = string.Empty;
+    public double Confidence { get; set; }
 }
 
 /// <summary>
@@ -591,6 +681,9 @@ public class SummaryResult
 
     /// <summary>Format used (paragraph, bullets, structured).</summary>
     public string Format { get; set; } = "structured";
+
+    /// <summary>Confidence score (0.0-1.0) for the summary accuracy and completeness.</summary>
+    public double Confidence { get; set; }
 
     /// <summary>Extracted sections if structured format.</summary>
     public Dictionary<string, string>? Sections { get; set; }

@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="049" project="email-to-document-automation-r2">
+  <metadata>
+    <title>Deploy and Verify Phase 5 (UI/Ribbon)</title>
+    <phase>5: UI/Ribbon Enhancements</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>043</dependencies>
+    <blocks>090</blocks>
+    <tags>deploy, dataverse</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task with verification steps</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Deploy ribbon customizations and web resource to Dataverse environment. Perform final
+    end-to-end verification of the complete R2 feature set.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse solution deployment.
+  </role>
+
+  <goal>
+    Phase 5 deployed and all R2 features verified:
+    1. Ribbon buttons deployed and functional
+    2. Full end-to-end flow: manual trigger → document creation → AI analysis
+    3. All graduation criteria met
+  </goal>
+
+  <context>
+    <background>
+      Final deployment and verification of R2 features. This completes the implementation.
+    </background>
+    <relevant-files>
+      <file>src/solutions/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">MUST verify all graduation criteria</constraint>
+    <constraint source="project">MUST deploy via dataverse-deploy skill</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Deploy solution with ribbon customizations</step>
+    <step order="2">Deploy web resource sprk_EmailActions.js</step>
+    <step order="3">Publish all customizations</step>
+    <step order="4">Clear browser cache and refresh Dataverse</step>
+    <step order="5">Verify ribbon button appears on email forms</step>
+    <step order="6">End-to-end test: click button, verify document created</step>
+    <step order="7">Verify attachments extracted as child documents</step>
+    <step order="8">Verify AI analysis completes</step>
+    <step order="9">Review all graduation criteria from README.md</step>
+    <step order="10">Document final status in notes/phase5-deployment-notes.md</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">PAC CLI for deployment</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/email-to-document-automation-r2/notes/phase5-deployment-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Ribbon buttons functional for existing and sent emails.
+    </criterion>
+    <criterion testable="true">
+      Manual trigger creates document and processes attachments.
+    </criterion>
+    <criterion testable="true">
+      All graduation criteria verified.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is the final deployment. Ensure all previous phases work together correctly.
+  </notes>
+
+  <completion-notes date="2026-01-15">
+    PHASE 5 DEPLOYMENT COMPLETE
+
+    Deployment Summary:
+    - EmailRibbons v1.1.0 deployed to SPAARKE DEV 1 (Task 040)
+    - sprk_emailactions.js web resource deployed (in solution)
+    - Publish All Customizations completed
+
+    Verification Results:
+    1. ✅ Ribbon button visible on received emails
+    2. ✅ Ribbon button visible on sent emails (direction-agnostic)
+    3. ✅ Button hidden for archived emails
+    4. ✅ Button disabled for draft/open emails
+    5. ✅ Click triggers document creation
+    6. ✅ Attachments extracted as child documents
+    7. ⚠️ AI analysis enqueued but blocked (deferred to r5)
+
+    Graduation Criteria:
+    - 5/7 fully met
+    - 2/7 partially met (AI auto-enqueue deferred to ai-document-intelligence-r5)
+    - Manual AI analysis workaround available
+
+    Documentation: notes/phase5-deployment-notes.md
+    Testing Checklist: notes/ribbon-testing-checklist.md (ready for QA)
+  </completion-notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

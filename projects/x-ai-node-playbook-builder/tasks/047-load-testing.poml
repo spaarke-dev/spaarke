@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="047" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Load Testing</title>
+    <phase>5: Production Hardening</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <tags>testing, performance</tags>
+    <dependencies>046</dependencies>
+    <blocks>048</blocks>
+  </metadata>
+  <prompt>Perform load testing to verify system handles concurrent executions.</prompt>
+  <role>Performance engineer</role>
+  <goal>System handles concurrent playbook executions without degradation.</goal>
+  <steps>
+    <step order="1">Create load test playbook</step>
+    <step order="2">Configure concurrent execution scenarios</step>
+    <step order="3">Run load tests</step>
+    <step order="4">Monitor resource usage</step>
+    <step order="5">Identify and fix bottlenecks</step>
+    <step order="6">Document results</step>
+  </steps>
+  <outputs>
+    <output type="docs">projects/ai-node-playbook-builder/notes/load-test-results.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Handles 10 concurrent executions</criterion>
+    <criterion testable="true">Response times remain acceptable</criterion>
+    <criterion testable="true">No errors under load</criterion>
+  </acceptance-criteria>
+  <notes>
+    <completion-summary>
+      Created comprehensive load test suite (PlaybookConcurrencyLoadTests.cs) with 6 tests:
+      - ConcurrentPlaybookExecution_10Runs_AllComplete: 10/10 successful, avg 360ms
+      - ConcurrentPlaybookExecution_10Runs_ResponseTimesAcceptable: P95 558ms (target &lt;10s)
+      - ConcurrentPlaybookExecution_10Runs_NoErrorsUnderLoad: 0 errors
+      - ConcurrentPlaybookExecution_HighLoad_GracefulDegradation: 20 concurrent, 100% success
+      - ConcurrentExecution_ThreadSafety_NoDataCorruption: All node counts correct
+      - ConcurrentExecution_CachingReducesLatency: Task 046 caching validated
+
+      All acceptance criteria met. System handles 2x target load with 100% success rate.
+      Documentation: notes/load-test-results.md with KQL queries for production monitoring.
+    </completion-summary>
+    <completed-at>2026-01-13</completed-at>
+  </notes>
+</task>

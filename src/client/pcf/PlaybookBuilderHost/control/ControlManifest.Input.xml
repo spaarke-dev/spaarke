@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest>
+  <control namespace="Spaarke.Controls"
+           constructor="PlaybookBuilderHost"
+           version="2.13.1"
+           display-name-key="Playbook Builder Host"
+           description-key="Node-based Playbook Builder with visual canvas for AI workflow design"
+           control-type="standard">
+
+    <external-service-usage enabled="false" />
+
+    <!--
+      PLAYBOOK BUILDER HOST PCF CONTROL v2.0.0
+
+      Purpose: Visual node-based builder for AI analysis playbooks.
+      - Drag-and-drop node placement from palette
+      - Edge connections between nodes for workflow
+      - Properties panel for node configuration
+      - Zustand state management for canvas
+
+      Entity: sprk_analysisplaybook (Analysis Playbook)
+
+      Architecture (v2.0 - Direct PCF Rendering):
+      - Uses React 16 APIs (platform-provided) per ADR-022
+      - Uses react-flow-renderer v10 (React 16 compatible)
+      - No iframe - direct rendering in PCF control
+      - Fluent UI v9 components
+
+      Migration from v1.x:
+      - Removed iframe architecture
+      - Removed builderBaseUrl property (no longer needed)
+      - Moved from @xyflow/react v12 to react-flow-renderer v10
+      - All UI now renders directly in PCF control
+
+      Note: The playbook ID is automatically obtained from the form context
+      (context.mode.contextInfo.entityId). The playbookId property below is
+      only used as a fallback if contextInfo is not available.
+    -->
+
+    <!-- Playbook ID (OPTIONAL - auto-detected from form context) -->
+    <property name="playbookId"
+              display-name-key="Playbook ID"
+              description-key="Optional fallback - record ID is auto-detected from form context"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false" />
+
+    <!-- Playbook Name (BOUND - sprk_name field) -->
+    <property name="playbookName"
+              display-name-key="Playbook Name"
+              description-key="Name of the playbook (sprk_name)"
+              of-type="SingleLine.Text"
+              usage="bound"
+              required="false" />
+
+    <!-- Playbook Description (BOUND - sprk_description field) -->
+    <property name="playbookDescription"
+              display-name-key="Playbook Description"
+              description-key="Description of the playbook (sprk_description)"
+              of-type="Multiple"
+              usage="bound"
+              required="false" />
+
+    <!-- Canvas JSON (BOUND - serialized node graph) -->
+    <property name="canvasJson"
+              display-name-key="Canvas JSON"
+              description-key="Serialized JSON of the canvas nodes and edges"
+              of-type="Multiple"
+              usage="bound"
+              required="false" />
+
+    <!-- API Base URL (for BFF API calls) -->
+    <property name="apiBaseUrl"
+              display-name-key="API Base URL"
+              description-key="Base URL for BFF API (e.g., https://spe-api-dev.azurewebsites.net)"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false" />
+
+    <!-- Is Dirty (OUTPUT - indicates unsaved changes) -->
+    <property name="isDirty"
+              display-name-key="Is Dirty"
+              description-key="True when canvas has unsaved changes"
+              of-type="TwoOptions"
+              usage="output"
+              required="false" />
+
+    <resources>
+      <code path="index.ts" order="1" />
+      <css path="styles.css" order="2" />
+      <!-- Host-provided libraries (Dataverse runtime provides these) -->
+      <platform-library name="React" version="16.14.0" />
+      <platform-library name="Fluent" version="9.46.2" />
+    </resources>
+
+    <feature-usage>
+      <uses-feature name="WebAPI" required="true" />
+      <uses-feature name="Utility" required="true" />
+    </feature-usage>
+  </control>
+</manifest>

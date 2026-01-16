@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Implement Confidence Scores</title>
+    <phase>4: Advanced Features</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <tags>bff-api, ai</tags>
+    <dependencies>029</dependencies>
+    <blocks>035</blocks>
+  </metadata>
+  <prompt>Update tool handlers to request confidence scores from AI and include in NodeOutput.</prompt>
+  <role>Senior .NET developer with AI expertise</role>
+  <goal>AI outputs include confidence scores for extracted data.</goal>
+  <steps>
+    <step order="1">Update tool handler prompts to request confidence</step>
+    <step order="2">Add confidence field to output schema</step>
+    <step order="3">Parse confidence from AI response</step>
+    <step order="4">Include in NodeOutput.StructuredData</step>
+    <step order="5">Add overallConfidence to _meta</step>
+    <step order="6">Update tests</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Tools/*.cs (modified)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Confidence scores in AI output</criterion>
+    <criterion testable="true">Overall confidence in _meta</criterion>
+  </acceptance-criteria>
+  <notes>
+    <note date="2026-01-12">
+      Implementation complete:
+      - Updated SummaryHandler prompts to request JSON with confidence scores
+      - Added SummaryJsonResponse class for parsing AI responses
+      - Added Confidence property to SummaryResult and SummaryGenerationResult
+      - Added ParseSummaryJsonResponse method with fallback for non-JSON responses
+      - Updated DeliverOutputNodeExecutor to include overallConfidence in _metadata
+      - Overall confidence calculated as average of all node output confidences
+      - Updated 41 unit tests to use JSON responses with confidence
+      - All tests passing
+
+      Note: Analysis found 7 of 8 tool handlers already properly implement confidence.
+      Only SummaryHandler needed updating (was hardcoded 0.9).
+    </note>
+  </notes>
+</task>

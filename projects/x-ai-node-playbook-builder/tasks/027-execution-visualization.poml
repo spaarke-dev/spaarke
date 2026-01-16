@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="027" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Add Execution Visualization</title>
+    <phase>3: Parallel Execution + Delivery</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <tags>frontend, react</tags>
+    <dependencies>020</dependencies>
+    <blocks>028</blocks>
+  </metadata>
+  <prompt>Add real-time execution visualization overlay to builder showing node status during playbook execution.</prompt>
+  <role>Senior frontend developer</role>
+  <goal>Execution overlay shows node status (pending, running, completed, failed) during playbook run.</goal>
+  <steps>
+    <step order="1">Create ExecutionOverlay component</step>
+    <step order="2">Subscribe to SSE stream from execution endpoint</step>
+    <step order="3">Update node visual state based on events</step>
+    <step order="4">Show progress indicators on running nodes</step>
+    <step order="5">Show success/error badges on completed nodes</step>
+    <step order="6">Display token usage metrics</step>
+    <step order="7">Add execution controls (stop button)</step>
+  </steps>
+  <outputs>
+    <output type="code">src/client/playbook-builder/src/components/Execution/ExecutionOverlay.tsx</output>
+    <output type="code">src/client/playbook-builder/src/hooks/useExecutionStream.ts</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">SSE events update node status</criterion>
+    <criterion testable="true">Visual indicators show node state</criterion>
+    <criterion testable="true">Metrics displayed after completion</criterion>
+  </acceptance-criteria>
+</task>

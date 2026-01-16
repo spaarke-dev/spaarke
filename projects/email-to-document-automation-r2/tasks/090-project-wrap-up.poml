@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="email-to-document-automation-r2">
+  <metadata>
+    <title>Project Wrap-up</title>
+    <phase>Wrap-up</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>049</dependencies>
+    <blocks>none</blocks>
+    <tags>documentation</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Final task requires code-review + adr-check + repo-cleanup per protocol</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Complete project wrap-up: run final quality gates, update documentation, archive notes,
+    and mark project complete. Follow the mandatory wrap-up procedure from task-create skill.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Complete all wrap-up procedures per project standards.
+  </role>
+
+  <goal>
+    Project properly closed:
+    1. All quality gates passed (code-review, adr-check)
+    2. Repository cleaned (repo-cleanup skill)
+    3. README.md updated to Complete status
+    4. Lessons learned documented
+    5. All tasks marked complete in TASK-INDEX.md
+  </goal>
+
+  <context>
+    <background>
+      This is the mandatory final task for all projects. It ensures proper closure,
+      documentation updates, and repository hygiene.
+    </background>
+    <relevant-files>
+      <file>projects/email-to-document-automation-r2/README.md</file>
+      <file>projects/email-to-document-automation-r2/plan.md</file>
+      <file>projects/email-to-document-automation-r2/tasks/TASK-INDEX.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">MUST run /code-review on all project code</constraint>
+    <constraint source="project">MUST run /adr-check on all project code</constraint>
+    <constraint source="project">MUST run /repo-cleanup</constraint>
+    <constraint source="project">MUST update README status to Complete</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run /code-review on all R2 code changes</step>
+    <step order="2">Fix any critical issues identified</step>
+    <step order="3">Run /adr-check to validate architecture compliance</step>
+    <step order="4">Fix any ADR violations</step>
+    <step order="5">Run /repo-cleanup projects/email-to-document-automation-r2</step>
+    <step order="6">Review cleanup recommendations and approve</step>
+    <step order="7">Update README.md: Status → Complete, check all graduation criteria</step>
+    <step order="8">Update plan.md: Status → Complete</step>
+    <step order="9">Create lessons-learned.md with project insights</step>
+    <step order="10">Verify all tasks in TASK-INDEX.md are ✅ completed</step>
+    <step order="11">Final commit with wrap-up changes</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/email-to-document-automation-r2/README.md (status updated)</output>
+    <output type="docs">projects/email-to-document-automation-r2/plan.md (status updated)</output>
+    <output type="docs">projects/email-to-document-automation-r2/lessons-learned.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      /code-review passes with no critical issues.
+    </criterion>
+    <criterion testable="true">
+      /adr-check passes with no violations.
+    </criterion>
+    <criterion testable="true">
+      README.md shows Status: Complete with all criteria checked.
+    </criterion>
+    <criterion testable="true">
+      All tasks in TASK-INDEX.md show ✅ status.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task is mandatory per task-create skill Step 3.7.
+    Do not skip quality gates even if in a hurry.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

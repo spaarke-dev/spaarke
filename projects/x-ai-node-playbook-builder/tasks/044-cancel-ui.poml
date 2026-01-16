@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="044" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Add Cancel UI</title>
+    <phase>5: Production Hardening</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <tags>frontend, react</tags>
+    <dependencies>043</dependencies>
+    <blocks>049</blocks>
+  </metadata>
+  <prompt>Add cancel button to execution overlay for stopping running playbooks.</prompt>
+  <role>Senior frontend developer</role>
+  <goal>Cancel button stops running playbook execution.</goal>
+  <steps>
+    <step order="1">Add Cancel button to ExecutionOverlay</step>
+    <step order="2">Call cancel API endpoint</step>
+    <step order="3">Update UI to show cancelling state</step>
+    <step order="4">Handle cancellation response</step>
+  </steps>
+  <outputs>
+    <output type="code">src/client/playbook-builder/src/components/Execution/ExecutionOverlay.tsx (modified)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Cancel button visible during execution</criterion>
+    <criterion testable="true">Click stops execution</criterion>
+  </acceptance-criteria>
+  <notes>
+    <completion-summary>
+      Implemented full cancel UI flow. ExecutionOverlay already had Stop button - enhanced to call
+      cancel API endpoint via useExecutionStream hook. Added 'cancelling' and 'cancelled' states
+      to executionStore with proper SSE event handling for 'execution_cancelled'. UI shows
+      'Cancelling...' state with disabled button during cancellation, transitions to 'Execution Cancelled'
+      when confirmed. Files modified: executionStore.ts, useExecutionStream.ts, ExecutionOverlay.tsx.
+      PCF build succeeds.
+    </completion-summary>
+    <completed-at>2026-01-13</completed-at>
+  </notes>
+</task>

@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Create Properties Panel</title>
+    <phase>2: Visual Builder</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <tags>frontend, react</tags>
+    <dependencies>012</dependencies>
+    <blocks>014</blocks>
+  </metadata>
+
+  <prompt>
+    Create the properties panel component that displays and edits node configuration
+    when a node is selected. Include fields for name, action, output variable,
+    timeout, and retry settings.
+  </prompt>
+
+  <role>Senior frontend developer with React expertise</role>
+
+  <goal>Properties panel implemented with dynamic form based on selected node type.</goal>
+
+  <context>
+    <background>
+      When a node is selected on the canvas, the properties panel shows editable
+      configuration. Different action types may have different configuration options.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent UI v9 form components</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create Properties/ component directory</step>
+    <step order="2">Create PropertiesPanel.tsx shell component</step>
+    <step order="3">Add "no selection" empty state</step>
+    <step order="4">Create NodePropertiesForm component</step>
+    <step order="5">Add name field (text input)</step>
+    <step order="6">Add output variable field</step>
+    <step order="7">Add action dropdown (read-only after creation)</step>
+    <step order="8">Add timeout field (number input)</step>
+    <step order="9">Add retry count field</step>
+    <step order="10">Add condition JSON editor (for condition nodes)</step>
+    <step order="11">Wire form to Zustand store for updates</step>
+    <step order="12">Add save/cancel buttons or auto-save</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/playbook-builder/src/components/Properties/PropertiesPanel.tsx</output>
+    <output type="code">src/client/playbook-builder/src/components/Properties/NodePropertiesForm.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Panel shows empty state when no node selected</criterion>
+    <criterion testable="true">Panel shows form when node selected</criterion>
+    <criterion testable="true">Form fields update node data</criterion>
+    <criterion testable="true">Different fields shown based on action type</criterion>
+  </acceptance-criteria>
+</task>

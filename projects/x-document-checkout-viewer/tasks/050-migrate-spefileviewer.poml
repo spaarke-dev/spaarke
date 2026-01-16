@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="document-checkout-viewer">
+  <metadata>
+    <title>Deploy SpeDocumentViewer to Document Form</title>
+    <phase>5: Migration &amp; Integration</phase>
+    <status>in-progress</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>048</dependencies>
+    <blocks>051</blocks>
+    <tags>deployment, pcf, dataverse, form</tags>
+  </metadata>
+
+  <prompt>
+    Deploy SpeDocumentViewer v1.0.13 to Dataverse and add the control to the
+    Document entity main form. Configure for .eml file viewing with download
+    enabled but edit disabled (email files are read-only).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse form customization.
+    Follow ADRs strictly.
+  </role>
+
+  <goal>
+    Document entity main form displays SpeDocumentViewer control for previewing
+    and downloading .eml files created by email-to-document automation.
+  </goal>
+
+  <context>
+    <background>
+      UPDATED January 2026: Audit confirmed NO forms currently use SpeFileViewer
+      or SpeDocumentViewer. This is a fresh deployment, not a migration.
+
+      SpeDocumentViewer was built in December 2025 but never added to any forms.
+      The control is already deployed to Dataverse (v1.0.12) but needs:
+      1. Version bump to 1.0.13 (includes getViewUrl and Open in Web from tasks 045-047)
+      2. Solution import with updated control
+      3. Form binding on Document entity
+
+      For .eml files from email-to-document automation:
+      - enableEdit=false (email files are read-only)
+      - enableDelete=false (use ribbon button instead)
+      - enableDownload=true (users need to download .eml files)
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/SpeDocumentViewer/</file>
+      <file>src/client/pcf/SpeDocumentViewer/solution/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Version must be 1.0.13 in all 4 locations</constraint>
+    <constraint source="project">enableEdit=false for .eml files (read-only)</constraint>
+    <constraint source="project">enableDownload=true for .eml files</constraint>
+    <constraint source="ADR-006">Use PCF controls on forms</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/ai-knowledge/guides/PCF-V9-PACKAGING.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Bump version to 1.0.13 in all 4 locations per PCF-V9-PACKAGING.md</step>
+    <step order="2">Build the control: cd src/client/pcf/SpeDocumentViewer &amp;&amp; npm run build</step>
+    <step order="3">Build the solution: cd solution &amp;&amp; dotnet build</step>
+    <step order="4">Import solution to Dataverse using pac solution import</step>
+    <step order="5">Open Document entity main form in form designer</step>
+    <step order="6">Add SpeDocumentViewer control bound to sprk_name column</step>
+    <step order="7">Configure control properties:
+      - clientAppId: [from environment]
+      - bffAppId: [from environment]
+      - tenantId: [from environment]
+      - enableEdit: false
+      - enableDelete: false
+      - enableDownload: true
+    </step>
+    <step order="8">Save and publish form</step>
+    <step order="9">Test: Open a Document record with .eml file</step>
+    <step order="10">Verify: Preview loads without cache delay (real-time)</step>
+    <step order="11">Verify: Download button works for .eml files</step>
+    <step order="12">Verify: "Open in Web" button is hidden for .eml</step>
+    <step order="13">Verify: Version 1.0.13 shown in control footer</step>
+    <step order="14">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI for solution management</tool>
+    <tool name="npm">Build TypeScript/PCF projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse">SpeDocumentViewer solution v1.0.13 imported</output>
+    <output type="dataverse">Document entity form with SpeDocumentViewer control</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SpeDocumentViewer v1.0.13 displays on Document form</criterion>
+    <criterion testable="true">.eml files preview correctly (real-time, no cache delay)</criterion>
+    <criterion testable="true">Download button works for .eml files</criterion>
+    <criterion testable="true">"Open in Web" button is hidden for .eml files</criterion>
+    <criterion testable="true">No errors in form designer (design mode detection working)</criterion>
+    <criterion testable="true">Version footer shows 1.0.13</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    SIMPLIFIED from original task: No migration needed since audit confirmed
+    no forms currently use SpeFileViewer or SpeDocumentViewer.
+
+    For editable document types (Word, Excel), enableEdit can be set to true
+    on other forms. This task focuses on .eml files for email-to-document.
+
+    EXECUTION LOG (2026-01-15):
+    - Steps 1-4 COMPLETE: SpeDocumentViewer v1.0.13 deployed to Dataverse
+    - Fixed TypeScript error: moved supportsOpenInWeb after useDocumentPreview hook
+    - Fixed build: Added PlaybookBuilderHost to tsconfig.json exclude list
+    - Solution import successful via pac solution import
+    - Steps 5-8 PENDING: Manual form configuration required in Power Apps
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, verify tasks 045-047 are complete and build succeeds.
+    </protocol>
+  </execution>
+</task>

@@ -105,7 +105,9 @@ public class DocumentAuthorizationFilter : IEndpointFilter
         var routeValues = context.HttpContext.Request.RouteValues;
 
         // Try different possible resource ID parameter names
-        return routeValues.TryGetValue("documentId", out var documentId) ? documentId?.ToString() :
+        // Note: "id" added for endpoints like /api/v1/documents/{id}/download
+        return routeValues.TryGetValue("id", out var id) ? id?.ToString() :
+               routeValues.TryGetValue("documentId", out var documentId) ? documentId?.ToString() :
                routeValues.TryGetValue("containerId", out var containerId) ? containerId?.ToString() :
                routeValues.TryGetValue("driveId", out var driveId) ? driveId?.ToString() :
                routeValues.TryGetValue("itemId", out var itemId) ? itemId?.ToString() :

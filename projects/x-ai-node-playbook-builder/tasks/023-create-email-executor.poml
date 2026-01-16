@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Create SendEmailNodeExecutor</title>
+    <phase>3: Parallel Execution + Delivery</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <tags>bff-api, executor</tags>
+    <dependencies>021</dependencies>
+    <blocks>028</blocks>
+  </metadata>
+  <prompt>Create SendEmailNodeExecutor for sending emails via Microsoft Graph with template-rendered content.</prompt>
+  <role>Senior .NET developer with Graph API expertise</role>
+  <goal>SendEmailNodeExecutor sends emails via Graph with template substitution.</goal>
+  <knowledge>
+    <files>
+      <file>.claude/patterns/auth/obo-flow.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Create SendEmailNodeExecutor class</step>
+    <step order="2">Read email config from node configJson</step>
+    <step order="3">Render to, subject, body using TemplateEngine</step>
+    <step order="4">Send via Graph API using OBO token</step>
+    <step order="5">Handle delivery errors</step>
+    <step order="6">Return NodeOutput with send status</step>
+    <step order="7">Write unit tests</step>
+  </steps>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/SendEmailNodeExecutor.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Email sent via Graph API</criterion>
+    <criterion testable="true">Template variables resolved</criterion>
+    <criterion testable="true">OBO authentication works</criterion>
+  </acceptance-criteria>
+</task>

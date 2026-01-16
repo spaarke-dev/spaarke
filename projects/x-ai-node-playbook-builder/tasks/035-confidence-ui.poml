@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Add Confidence UI Display</title>
+    <phase>4: Advanced Features</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <tags>frontend, react</tags>
+    <dependencies>034</dependencies>
+    <blocks>039</blocks>
+  </metadata>
+  <prompt>Display confidence badges in execution results and output viewer.</prompt>
+  <role>Senior frontend developer</role>
+  <goal>Confidence scores displayed with color-coded badges.</goal>
+  <steps>
+    <step order="1">Create ConfidenceBadge component</step>
+    <step order="2">Color: green >=0.9, yellow 0.7-0.9, red less than 0.7</step>
+    <step order="3">Show on node output in results panel</step>
+    <step order="4">Show per-field confidence in details</step>
+    <step order="5">Add tooltip with explanation</step>
+  </steps>
+  <outputs>
+    <output type="code">src/client/pcf/PlaybookBuilderHost/control/components/Execution/ConfidenceBadge.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Badges show correct colors</criterion>
+    <criterion testable="true">Confidence visible in results</criterion>
+  </acceptance-criteria>
+  <notes>
+    <note date="2026-01-12">
+      Implementation complete:
+      - Created ConfidenceBadge component with color-coded badges (green >=0.9, yellow 0.7-0.9, red &lt;0.7)
+      - Created ConfidenceNodeBadge variant for node status display
+      - Added getConfidenceLevel and getConfidenceDescription helper functions
+      - Updated executionStore with confidence field on NodeExecutionState
+      - Added overallConfidence to ExecutionState
+      - Updated ExecutionEvent interface to accept confidence from backend
+      - Updated ExecutionOverlay metrics panel to show overall confidence
+      - Updated NodeExecutionBadge to show per-node confidence with color-coded badge
+      - All badges include tooltips with human-readable confidence explanation
+      - Build verified successfully
+    </note>
+  </notes>
+</task>

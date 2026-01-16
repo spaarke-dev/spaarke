@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="email-to-document-automation-r2">
+  <metadata>
+    <title>Enhance EmailToEmlConverter with Attachment Extraction</title>
+    <phase>2: Attachment Processing</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>009</dependencies>
+    <blocks>011, 012</blocks>
+    <tags>bff-api, api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task implements new extraction functionality in existing service</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Enhance EmailToEmlConverter to extract email attachments as separate streams with metadata.
+    Create a new method that returns attachment info (filename, content type, size, stream) for
+    each attachment in an email. Use MimeKit which is already a project dependency.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in MimeKit library and email MIME parsing.
+    Follow existing patterns in EmailToEmlConverter.
+  </role>
+
+  <goal>
+    New method in EmailToEmlConverter:
+    ExtractAttachments(emailId) returns IEnumerable&lt;EmailAttachment&gt; where EmailAttachment contains:
+    - Filename
+    - ContentType (MIME type)
+    - Size (bytes)
+    - ContentStream
+    - IsInline (for embedded images)
+  </goal>
+
+  <context>
+    <background>
+      Email attachments embedded in .eml files need to be extracted as separate documents for
+      individual AI analysis. MimeKit can parse the MIME structure and extract attachments.
+      Azure Document Intelligence supports PDFs, images, and Office documents but not .eml.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Email/EmailToEmlConverter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Email/EmailAttachmentProcessor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Email/EmailConversionModels.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">MUST use MimeKit for attachment extraction (existing dependency)</constraint>
+    <constraint source="project">MUST preserve original filename and content type</constraint>
+    <constraint source="project">MUST support max 250MB attachments (NFR-05)</constraint>
+    <constraint source="project">MUST identify inline vs regular attachments</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>docs/guides/EMAIL-TO-DOCUMENT-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing EmailToEmlConverter.cs to understand the structure</step>
+    <step order="2">Read EmailAttachmentProcessor.cs for any existing attachment handling</step>
+    <step order="3">Create EmailAttachmentInfo model class in EmailConversionModels.cs</step>
+    <step order="4">Add ExtractAttachments method to EmailToEmlConverter</step>
+    <step order="5">Use MimeKit to parse email and iterate MimePart attachments</step>
+    <step order="6">For each attachment, extract stream, filename, content type, and size</step>
+    <step order="7">Flag inline attachments (Content-Disposition: inline) for later filtering</step>
+    <step order="8">Verify solution builds without errors</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and verify .NET project</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Email/EmailToEmlConverter.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Email/EmailConversionModels.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given an email with 3 attachments, when calling ExtractAttachments, then 3 EmailAttachmentInfo
+      objects are returned.
+    </criterion>
+    <criterion testable="true">
+      Each EmailAttachmentInfo contains valid filename, content type, and readable stream.
+    </criterion>
+    <criterion testable="true">
+      Inline images are flagged with IsInline=true.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    MimeKit usage: MimeMessage.Load(stream), then iterate message.Attachments and message.BodyParts.
+    Use ContentDisposition.IsAttachment vs ContentDisposition.Inline to distinguish.
+    Consider memory management - don't load large attachments entirely into memory.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

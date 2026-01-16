@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="037" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Add Template Library UI</title>
+    <phase>4: Advanced Features</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <tags>frontend, react</tags>
+    <dependencies>036</dependencies>
+    <blocks>039</blocks>
+  </metadata>
+  <prompt>Add template library UI for browsing and cloning playbook templates.</prompt>
+  <role>Senior frontend developer</role>
+  <goal>Template library shows available templates with clone action.</goal>
+  <steps>
+    <step order="1">Create TemplateLibrary component</step>
+    <step order="2">Fetch templates from API</step>
+    <step order="3">Display template cards with description</step>
+    <step order="4">Add Clone button on each card</step>
+    <step order="5">Navigate to cloned playbook after clone</step>
+    <step order="6">Add template library access from toolbar</step>
+  </steps>
+  <outputs>
+    <output type="code">src/client/pcf/PlaybookBuilderHost/control/stores/templateStore.ts</output>
+    <output type="code">src/client/pcf/PlaybookBuilderHost/control/components/Templates/TemplateLibraryDialog.tsx</output>
+    <output type="code">src/client/pcf/PlaybookBuilderHost/control/components/Templates/index.ts</output>
+    <output type="code">src/client/pcf/PlaybookBuilderHost/control/PlaybookBuilderHost.tsx (modified)</output>
+    <output type="code">src/client/pcf/PlaybookBuilderHost/control/index.ts (modified)</output>
+    <output type="code">src/client/pcf/PlaybookBuilderHost/control/ControlManifest.Input.xml (modified)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Templates displayed in grid</criterion>
+    <criterion testable="true">Clone creates new playbook</criterion>
+  </acceptance-criteria>
+  <notes>
+    <note timestamp="2026-01-12T16:23:00Z">
+      Implementation complete:
+      - Created templateStore.ts with Zustand state management for template API calls
+      - Created TemplateLibraryDialog component with search, template card grid, and clone functionality
+      - Added apiBaseUrl property to ControlManifest.Input.xml for BFF API configuration
+      - Added Templates button to PlaybookBuilderHost header (only shown when apiBaseUrl is set)
+      - Clone success handler navigates to cloned playbook using Xrm.Navigation.openForm
+      - Updated version to 2.7.0
+      - Build verified successfully
+      Note: Output paths updated to post-refactor location (src/client/pcf/PlaybookBuilderHost/control/)
+    </note>
+  </notes>
+</task>

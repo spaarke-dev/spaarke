@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="email-to-document-automation-r2">
+  <metadata>
+    <title>Implement Email Analysis in AppOnlyAnalysisService</title>
+    <phase>4: Email Analysis Playbook</phase>
+    <status>completed</status>
+    <completed-date>2026-01-14</completed-date>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>032</blocks>
+    <tags>bff-api, api, ai, azure-openai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task implements new AI analysis functionality</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Add email analysis capability to AppOnlyAnalysisService that combines email + attachments
+    and executes the Email Analysis Playbook. Implement FR-12 context size management and
+    populate email entity AI fields.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in AI integration and context management.
+    Follow existing analysis patterns.
+  </role>
+
+  <goal>
+    New method AnalyzeEmailAsync(emailId) that:
+    1. Loads email metadata from Dataverse
+    2. Loads .eml Document text
+    3. Loads all attachment Document texts
+    4. Combines into single context (with size management)
+    5. Executes Email Analysis Playbook
+    6. Updates email entity AI fields (TL;DR, Summary, Keywords, Entities)
+  </goal>
+
+  <context>
+    <background>
+      FR-11 and FR-12 require combining email + attachments for analysis while managing
+      context size. Large emails may need truncation or summarization to fit AI context windows.
+      Results are stored on the email activity record, not the document record.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Analysis/AppOnlyAnalysisService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Analysis/TextExtractorService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">MUST handle emails with combined text up to 100KB (FR-12)</constraint>
+    <constraint source="project">MUST populate email entity fields, not document fields</constraint>
+    <constraint source="ADR-013">Follow AI Tool Framework patterns</constraint>
+    <constraint source="project">Email analysis completion &lt; 5 min (NFR-04)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>docs/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add AnalyzeEmailAsync method signature to AppOnlyAnalysisService</step>
+    <step order="2">Implement: fetch email metadata from Dataverse (subject, from, to, date)</step>
+    <step order="3">Implement: fetch .eml Document and extract text</step>
+    <step order="4">Implement: fetch all child Documents (attachments) and extract text</step>
+    <step order="5">Implement context combining with size management (truncation strategy)</step>
+    <step order="6">Load Email Analysis Playbook from Dataverse</step>
+    <step order="7">Execute playbook via OpenAiClient</step>
+    <step order="8">Parse AI response into TL;DR, Summary, Keywords, Entities</step>
+    <step order="9">Update email entity with AI analysis fields</step>
+    <step order="10">Add telemetry for email analysis</step>
+    <step order="11">Verify solution builds</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and verify .NET project</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Analysis/AppOnlyAnalysisService.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      AnalyzeEmailAsync method combines email + attachment text.
+    </criterion>
+    <criterion testable="true">
+      Large emails are handled via truncation without error.
+    </criterion>
+    <criterion testable="true">
+      Email entity AI fields are updated after analysis.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Truncation strategy: prioritize email body, then most recent attachments.
+    Consider token counting for precise context management.
+    The email entity must have AI fields (may need to verify schema).
+  </notes>
+
+  <completion-notes>
+    <summary>
+      Implemented AnalyzeEmailAsync in AppOnlyAnalysisService that combines email metadata,
+      body text, and attachment text for comprehensive AI analysis. Uses Email Analysis
+      playbook (PB-012) with context size management (100KB max per FR-12).
+    </summary>
+    <outputs>
+      - src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs: Added AnalyzeEmailAsync
+        method with helper methods for metadata extraction, document text extraction, attachment
+        processing, and context building with truncation
+      - src/server/api/Sprk.Bff.Api/Services/Ai/IAppOnlyAnalysisService.cs: Added interface
+        method signature and EmailAnalysisResult class
+      - src/server/shared/Spaarke.Dataverse/IDataverseService.cs: Added GetDocumentByEmailLookupAsync
+        and GetDocumentsByParentAsync for email-to-document queries
+      - src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs: Implemented email lookup
+        queries using OData filters on lookup fields
+      - src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs: Implemented email
+        lookup queries using QueryExpression
+      - src/server/shared/Spaarke.Dataverse/Models.cs: Added email fields to DocumentEntity
+    </outputs>
+    <key-decisions>
+      - Results stored on main .eml Document record (not email activity entity) for consistency
+      - Context combines: metadata header + email body + attachment texts with priority ordering
+      - Truncation applied per-attachment when exceeding budget, with most recent first
+      - Parallel text extraction for attachments using Task.WhenAll for performance
+    </key-decisions>
+  </completion-notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

@@ -108,6 +108,41 @@ public class EmailProcessingOptions
     public int MinImageSizeKB { get; set; } = 5;
 
     /// <summary>
+    /// Whether to filter out calendar attachments (.ics, .vcs).
+    /// Default: true (exclude calendar files from document creation).
+    /// </summary>
+    public bool FilterCalendarFiles { get; set; } = true;
+
+    /// <summary>
+    /// Calendar file extensions to filter when FilterCalendarFiles is true.
+    /// </summary>
+    public List<string> CalendarFileExtensions { get; set; } =
+    [
+        ".ics", ".vcs"
+    ];
+
+    /// <summary>
+    /// Whether to filter inline attachments (embedded in HTML body).
+    /// When true, inline images are excluded from document creation.
+    /// </summary>
+    public bool FilterInlineAttachments { get; set; } = true;
+
+    /// <summary>
+    /// Known tracking pixel patterns (domains or filenames).
+    /// These are filtered out regardless of size.
+    /// </summary>
+    public List<string> TrackingPixelPatterns { get; set; } =
+    [
+        @"\.gif\?.*tracking",
+        @"pixel\.(gif|png)",
+        @"^spacer\d*\.(gif|png)$",
+        @"beacon\.(gif|png)",
+        @"^1x1\.(gif|png)$",
+        @"tracker\.(gif|png)",
+        @"open\.(gif|png)"
+    ];
+
+    /// <summary>
     /// Maximum filename length for generated .eml files.
     /// </summary>
     public int MaxEmlFileNameLength { get; set; } = 100;

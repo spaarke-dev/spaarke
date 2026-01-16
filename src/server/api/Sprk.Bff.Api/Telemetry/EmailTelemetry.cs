@@ -58,6 +58,10 @@ public class EmailTelemetry : IDisposable
     private readonly Histogram<long> _emlFileSize;
     private readonly Counter<long> _attachmentsProcessed;
 
+    // AI job enqueueing metrics
+    private readonly Counter<long> _aiJobsEnqueued;
+    private readonly Counter<long> _aiJobEnqueueFailures;
+
     // DLQ metrics
     private readonly Counter<long> _dlqListOperations;
     private readonly Counter<long> _dlqRedriveAttempts;
@@ -197,6 +201,19 @@ public class EmailTelemetry : IDisposable
             name: "email.attachments.processed",
             unit: "{attachment}",
             description: "Total attachments processed");
+
+        // ═══════════════════════════════════════════════════════════════════════════
+        // AI Job Enqueueing Metrics
+        // ═══════════════════════════════════════════════════════════════════════════
+        _aiJobsEnqueued = _meter.CreateCounter<long>(
+            name: "email.ai_job.enqueued",
+            unit: "{job}",
+            description: "AI analysis jobs enqueued for email documents");
+
+        _aiJobEnqueueFailures = _meter.CreateCounter<long>(
+            name: "email.ai_job.enqueue_failures",
+            unit: "{failure}",
+            description: "Failed attempts to enqueue AI analysis jobs");
 
         // ═══════════════════════════════════════════════════════════════════════════
         // DLQ Metrics
@@ -488,6 +505,42 @@ public class EmailTelemetry : IDisposable
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // Attachment Processing Methods (FR-04)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Record detailed attachment processing metrics.
+    /// Tracks extraction, filtering, upload success, and failures separately.
+    /// </summary>
+    public void RecordAttachmentProcessing(int extractedCount, int filteredCount, int uploadedCount, int failedCount)
+    {
+        if (extractedCount > 0)
+        {
+            _attachmentsProcessed.Add(extractedCount,
+                new KeyValuePair<string, object?>("email.attachment.operation", "extracted"));
+        }
+
+        if (filteredCount > 0)
+        {
+            _attachmentsProcessed.Add(filteredCount,
+                new KeyValuePair<string, object?>("email.attachment.operation", "filtered"));
+        }
+
+        if (uploadedCount > 0)
+        {
+            _attachmentsProcessed.Add(uploadedCount,
+                new KeyValuePair<string, object?>("email.attachment.operation", "uploaded"));
+            _statsService?.RecordAttachmentsProcessed(uploadedCount);
+        }
+
+        if (failedCount > 0)
+        {
+            _attachmentsProcessed.Add(failedCount,
+                new KeyValuePair<string, object?>("email.attachment.operation", "failed"));
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // DLQ Methods
     // ═══════════════════════════════════════════════════════════════════════════
 
@@ -516,6 +569,32 @@ public class EmailTelemetry : IDisposable
         {
             _dlqRedriveFailures.Add(failureCount);
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // AI Job Enqueueing Methods
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Record AI analysis job successfully enqueued for an email document.
+    /// </summary>
+    /// <param name="documentType">Type of document: "email" or "attachment"</param>
+    public void RecordAiJobEnqueued(string documentType)
+    {
+        _aiJobsEnqueued.Add(1,
+            new KeyValuePair<string, object?>("email.document_type", documentType));
+    }
+
+    /// <summary>
+    /// Record failed attempt to enqueue AI analysis job.
+    /// </summary>
+    /// <param name="documentType">Type of document: "email" or "attachment"</param>
+    /// <param name="errorCode">Error category</param>
+    public void RecordAiJobEnqueueFailure(string documentType, string errorCode)
+    {
+        _aiJobEnqueueFailures.Add(1,
+            new KeyValuePair<string, object?>("email.document_type", documentType),
+            new KeyValuePair<string, object?>("email.error_code", errorCode));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

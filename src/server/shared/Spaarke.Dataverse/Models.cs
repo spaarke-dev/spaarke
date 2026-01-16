@@ -121,10 +121,14 @@ public class UpdateDocumentRequest
     /// <summary>JSON array of attachment metadata. Maps to sprk_Attachments.</summary>
     public string? Attachments { get; set; }
 
-    /// <summary>Parent document GUID (for attachments). Maps to sprk_ParentDocumentId.</summary>
+    /// <summary>
+    /// DEPRECATED: This field does not exist in Dataverse schema.
+    /// Use ParentDocumentLookup instead (sets sprk_ParentDocumentName lookup via @odata.bind).
+    /// </summary>
+    [Obsolete("Use ParentDocumentLookup instead - sprk_parentdocumentid does not exist in Dataverse")]
     public string? ParentDocumentId { get; set; }
 
-    /// <summary>Parent document lookup. Maps to sprk_ParentDocumentName.</summary>
+    /// <summary>Parent document lookup. Maps to sprk_ParentDocument@odata.bind.</summary>
     public Guid? ParentDocumentLookup { get; set; }
 
     /// <summary>Parent file name (for attachments). Maps to sprk_ParentFileName.</summary>
@@ -181,6 +185,31 @@ public class DocumentEntity
 
     /// <summary>Extracted entities in JSON format (parties, dates, amounts). Maps to sprk_entities.</summary>
     public string? Entities { get; set; }
+
+    // Email metadata fields (for .eml documents)
+    /// <summary>Email subject. Maps to sprk_emailsubject.</summary>
+    public string? EmailSubject { get; set; }
+
+    /// <summary>Email sender. Maps to sprk_emailfrom.</summary>
+    public string? EmailFrom { get; set; }
+
+    /// <summary>Email recipients. Maps to sprk_emailto.</summary>
+    public string? EmailTo { get; set; }
+
+    /// <summary>Email CC recipients. Maps to sprk_emailcc.</summary>
+    public string? EmailCc { get; set; }
+
+    /// <summary>Email sent date. Maps to sprk_emaildate.</summary>
+    public DateTime? EmailDate { get; set; }
+
+    /// <summary>Email body text (truncated). Maps to sprk_emailbody.</summary>
+    public string? EmailBody { get; set; }
+
+    /// <summary>Is this document an email archive (.eml). Maps to sprk_isemailarchive.</summary>
+    public bool? IsEmailArchive { get; set; }
+
+    /// <summary>Parent document ID for attachments. Maps to sprk_parentdocumentid.</summary>
+    public string? ParentDocumentId { get; set; }
 }
 
 /// <summary>

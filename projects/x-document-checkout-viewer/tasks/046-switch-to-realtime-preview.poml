@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="046" project="document-checkout-viewer">
+  <metadata>
+    <title>Switch useDocumentPreview to Real-Time Endpoint</title>
+    <phase>5: Migration &amp; Integration</phase>
+    <status>completed</status>
+    <estimated-hours>0.5</estimated-hours>
+    <dependencies>045</dependencies>
+    <blocks>047</blocks>
+    <tags>pcf, react, hooks</tags>
+  </metadata>
+
+  <prompt>
+    Update the useDocumentPreview hook to call getViewUrl() instead of
+    getPreviewUrl() for real-time document preview without cache delay.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in React hooks and TypeScript.
+    Follow ADRs strictly.
+  </role>
+
+  <goal>
+    useDocumentPreview hook uses the real-time getViewUrl() method, enabling
+    immediate preview of newly created documents like .eml files from
+    email-to-document automation.
+  </goal>
+
+  <context>
+    <background>
+      The useDocumentPreview hook currently calls bffClient.getPreviewUrl()
+      at line 148. This method has a 30-60 second cache delay. Task 045 added
+      the getViewUrl() method which provides real-time preview. This task
+      switches the hook to use the new method.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/SpeDocumentViewer/control/hooks/useDocumentPreview.ts</file>
+      <file>src/client/pcf/SpeDocumentViewer/control/BffClient.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Preserve all existing hook behavior (loading states, timeout, error handling)</constraint>
+    <constraint source="project">Checkout status must still be returned and processed</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/SpeDocumentViewer/control/hooks/useDocumentPreview.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read useDocumentPreview.ts to understand current implementation</step>
+    <step order="2">Locate the getPreviewUrl() call (around line 148)</step>
+    <step order="3">Change bffClient.current.getPreviewUrl() to bffClient.current.getViewUrl()</step>
+    <step order="4">Update console.log message to reflect view-url instead of preview</step>
+    <step order="5">Verify response handling still works (previewUrl, documentInfo, checkoutStatus)</step>
+    <step order="6">Build to verify no TypeScript errors: npm run build</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status to completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript/PCF projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/SpeDocumentViewer/control/hooks/useDocumentPreview.ts (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Hook calls getViewUrl() instead of getPreviewUrl()</criterion>
+    <criterion testable="true">Preview loads without 30-60 second cache delay</criterion>
+    <criterion testable="true">Checkout status still displayed correctly</criterion>
+    <criterion testable="true">Loading states and error handling preserved</criterion>
+    <criterion testable="true">npm run build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is a simple one-line change plus log message update. The behavior
+    should be identical except for the elimination of cache delay.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, verify task 045 is complete and getViewUrl() exists.
+    </protocol>
+  </execution>
+</task>

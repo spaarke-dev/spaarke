@@ -1,0 +1,33 @@
+{
+  "name": "playbook-builder-host-pcf",
+  "version": "2.0.0",
+  "description": "Playbook Builder PCF Control - Direct React Flow v10 integration",
+  "scripts": {
+    "build": "pcf-scripts build",
+    "build:dev": "pcf-scripts build --buildMode development",
+    "build:prod": "pcf-scripts build --buildMode production",
+    "clean": "pcf-scripts clean",
+    "lint": "pcf-scripts lint",
+    "lint:fix": "pcf-scripts lint fix",
+    "rebuild": "pcf-scripts rebuild",
+    "start": "pcf-scripts start",
+    "start:watch": "pcf-scripts start watch",
+    "refreshTypes": "pcf-scripts refreshTypes"
+  },
+  "dependencies": {
+    "react-flow-renderer": "10.3.17",
+    "zustand": "^4.5.0"
+  },
+  "devDependencies": {
+    "@fluentui/react-components": "^9.54.0",
+    "@types/node": "^18.19.86",
+    "@types/powerapps-component-framework": "^1.3.16",
+    "@types/react": "^16.14.0",
+    "@types/react-dom": "^16.9.0",
+    "pcf-scripts": "^1",
+    "pcf-start": "^1",
+    "react": "^16.14.0",
+    "react-dom": "^16.14.0",
+    "typescript": "^5.8.3"
+  }
+}

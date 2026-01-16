@@ -3,13 +3,21 @@
  * Fluent UI v9 compatible
  */
 
-/* Container */
+/* Container - inherits height from parent PCF container */
 .spe-document-viewer-container {
     display: flex;
     flex-direction: column;
     height: 100%;
+    min-height: inherit;
     width: 100%;
     font-family: var(--fontFamilyBase, 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif);
+}
+
+/* Ensure FluentProvider passes through height */
+.spe-document-viewer-container > :first-child {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
 }
 
 /* Loading overlay */

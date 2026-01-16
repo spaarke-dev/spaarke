@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="ai-node-playbook-builder">
+  <metadata>
+    <title>Implement Host-Builder Communication</title>
+    <phase>2: Visual Builder</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <tags>pcf, frontend</tags>
+    <dependencies>015</dependencies>
+    <blocks>018</blocks>
+  </metadata>
+
+  <prompt>
+    Implement the postMessage communication protocol between PCF host and builder
+    iframe. Handle INIT, SAVE_REQUEST, SAVE_SUCCESS/ERROR, AUTH_TOKEN, and
+    DIRTY_STATE messages.
+  </prompt>
+
+  <role>Full-stack developer with iframe communication expertise</role>
+
+  <goal>Bidirectional postMessage communication working between host and builder.</goal>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-node-playbook-builder/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define message types in shared types file</step>
+    <step order="2">Create HostBridge service in builder</step>
+    <step order="3">Implement message listener in builder</step>
+    <step order="4">Handle INIT message: store playbook data, auth token</step>
+    <step order="5">Handle AUTH_TOKEN message: refresh token</step>
+    <step order="6">Implement sendMessage to parent</step>
+    <step order="7">Send READY message on load</step>
+    <step order="8">Send DIRTY_STATE on changes</step>
+    <step order="9">Send SAVE_REQUEST when save clicked</step>
+    <step order="10">Update host to handle builder messages</step>
+    <step order="11">Host sends SAVE_SUCCESS/ERROR after API call</step>
+    <step order="12">Test full save flow</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/playbook-builder/src/services/hostBridge.ts</output>
+    <output type="code">src/client/playbook-builder/src/types/messages.ts</output>
+    <output type="code">src/client/pcf/PlaybookBuilderHost/messageHandlers.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Builder receives INIT with playbook data</criterion>
+    <criterion testable="true">Host receives DIRTY_STATE on changes</criterion>
+    <criterion testable="true">Save flow completes successfully</criterion>
+    <criterion testable="true">Token refresh works</criterion>
+  </acceptance-criteria>
+</task>

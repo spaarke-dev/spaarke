@@ -96,6 +96,9 @@
   <data name="EnableDownload_Display_Key" xml:space="preserve">
     <value>Enable Download</value>
   </data>
+  <data name="ShowToolbar_Display_Key" xml:space="preserve">
+    <value>Show Toolbar</value>
+  </data>
   <data name="ControlHeight_Display_Key" xml:space="preserve">
     <value>Control Height</value>
   </data>

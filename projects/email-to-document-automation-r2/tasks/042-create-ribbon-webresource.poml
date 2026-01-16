@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="email-to-document-automation-r2">
+  <metadata>
+    <title>Create JavaScript Web Resource for Ribbon Handler</title>
+    <phase>5: UI/Ribbon Enhancements</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>040, 041</dependencies>
+    <blocks>043</blocks>
+    <tags>frontend, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task creates new JavaScript web resource with API integration</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create JavaScript web resource sprk_EmailActions.js that implements the ribbon button
+    handlers. The handler calls the BFF API endpoint to trigger email processing, shows
+    progress, and handles success/error feedback.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse web resources and JavaScript.
+    Follow ADR-006 (no new legacy web resources - but this is button handler, not UI component).
+  </role>
+
+  <goal>
+    Web resource sprk_EmailActions.js with:
+    1. Sprk.Email namespace
+    2. archiveEmail(primaryControl) function
+    3. API call to POST /api/v1/emails/{id}/save-as-document
+    4. Progress notification during processing
+    5. Success/error feedback to user
+  </goal>
+
+  <context>
+    <background>
+      The ribbon button triggers JavaScript that calls the BFF API to process the email.
+      The existing endpoint POST /api/v1/emails/{id}/save-as-document from R1 can be reused.
+      This web resource handles the UI interaction and API communication.
+    </background>
+    <relevant-files>
+      <file>src/client/webresources/</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/EmailEndpoints.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">Keep web resource minimal - only button handler logic</constraint>
+    <constraint source="project">MUST call existing save-as-document endpoint</constraint>
+    <constraint source="project">MUST provide user feedback (progress, success, error)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>docs/guides/EMAIL-TO-DOCUMENT-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create sprk_EmailActions.js file</step>
+    <step order="2">Implement Sprk.Email namespace</step>
+    <step order="3">Implement archiveEmail(primaryControl) function</step>
+    <step order="4">Get email ID from primaryControl.data.entity.getId()</step>
+    <step order="5">Show progress notification using Xrm.Utility.showProgressIndicator</step>
+    <step order="6">Call API: POST /api/v1/emails/{id}/save-as-document</step>
+    <step order="7">Handle success: show success notification, refresh form</step>
+    <step order="8">Handle error: show error notification with message</step>
+    <step order="9">Close progress indicator</step>
+    <step order="10">Add web resource to solution</step>
+    <step order="11">Verify solution builds and web resource is valid</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Run shell commands</tool>
+    <tool name="pac">PAC CLI for solution operations</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/webresources/sprk_EmailActions.js</output>
+    <output type="code">src/solutions/SpaarkeEmail/ (web resource added)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Web resource contains Sprk.Email.archiveEmail function.
+    </criterion>
+    <criterion testable="true">
+      Function calls BFF API endpoint correctly.
+    </criterion>
+    <criterion testable="true">
+      User sees progress during processing and result notification.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use Xrm.WebApi for making authenticated API calls from Dataverse context.
+    The API endpoint may need to be configured (environment variable for base URL).
+    Consider error cases: already archived, processing failed, network error.
+  </notes>
+
+  <completion-notes date="2026-01-15">
+    VERIFIED: Web resource ALREADY EXISTS at infrastructure/dataverse/ribbon/EmailRibbons/WebResources/sprk_emailactions.js
+
+    Implementation Details:
+    1. ✅ Sprk.Email namespace - Lines 16-21
+    2. ✅ saveToDocument(primaryControl) function - Line 343 (named "saveToDocument" not "archiveEmail")
+    3. ✅ Gets email ID - Line 352 via Utils.getEmailInfo
+    4. ✅ Progress indicator - Line 365 Xrm.Utility.showProgressIndicator
+    5. ✅ API call - Lines 371-387 POST /api/emails/convert-to-document with Bearer auth
+    6. ✅ Success handling - Lines 391-412 with option to open document
+    7. ✅ Error handling - Lines 414-443 (409 conflict, 404 not found, generic errors)
+    8. ✅ Progress closed - Lines 389, 448
+    9. ✅ Already in EmailRibbons solution
+
+    Acceptance Criteria Met:
+    1. Handler function exists (saveToDocument = archiveEmail equivalent)
+    2. Calls BFF API endpoint correctly with MSAL authentication
+    3. Shows progress during processing and result notification
+
+    NO CODE CHANGES REQUIRED - Implementation predates task creation (from Task 040).
+    Web resource is deployed as part of EmailRibbons v1.1.0 solution.
+  </completion-notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>
