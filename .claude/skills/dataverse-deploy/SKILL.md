@@ -9,144 +9,112 @@ alwaysApply: false
 # Dataverse Deploy
 
 > **Category**: Operations
-> **Last Updated**: January 15, 2026
+> **Last Updated**: January 16, 2026
 > **Primary Guide**: [`docs/guides/PCF-DEPLOYMENT-GUIDE.md`](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md)
 
 ---
 
-## Quick Dev Deploy (90% of Use Cases)
+## Critical Rules
 
-**Use this workflow for iterative PCF development.** Takes ~60 seconds.
+**These rules are MANDATORY. See [PCF-DEPLOYMENT-GUIDE.md](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md) for full details.**
+
+### MUST:
+- ✅ **MUST** use unmanaged solution unless explicitly told to use managed (ADR-022)
+- ✅ **MUST** use Dataverse publisher `Spaarke` with prefix `sprk_`
+- ✅ **MUST** rebuild fresh every deployment (`npm run build:prod`)
+- ✅ **MUST** copy ALL 3 files to Solution folder (bundle.js, ControlManifest.xml, styles.css)
+- ✅ **MUST** update version in ALL 5 locations
+- ✅ **MUST** include `.js` and `.css` entries in `[Content_Types].xml`
+- ✅ **MUST** use `pack.ps1` script (creates forward slashes in ZIP)
+- ✅ **MUST** disable/restore CPM around PAC commands
+
+### NEVER:
+- ❌ **NEVER** use managed solution unless explicitly told - unmanaged is the default
+- ❌ **NEVER** use or create a new publisher - always use `Spaarke` (`sprk_`)
+- ❌ **NEVER** reuse old solution ZIPs - always pack fresh
+- ❌ **NEVER** use `pac pcf push` - creates temp solutions, rebuilds in dev mode
+- ❌ **NEVER** use `Compress-Archive` - creates backslashes, breaks import
+- ❌ **NEVER** skip copying files - stale bundles cause silent failures
+
+---
+
+## Deployment Workflow
+
+**Follow [PCF-DEPLOYMENT-GUIDE.md](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md) for complete details.**
+
+### Step 1: Build Fresh
 
 ```bash
-# 1. Navigate to control directory
-cd /c/code_files/spaarke/src/client/pcf/{ControlName}
-
-# 2. Build for production
+cd src/client/pcf/{ControlName}
+rm -rf out/ bin/
 npm run build:prod
 
-# 3. Disable Central Package Management (REQUIRED)
-mv /c/code_files/spaarke/Directory.Packages.props /c/code_files/spaarke/Directory.Packages.props.disabled
-
-# 4. Deploy to Dataverse
-pac pcf push --publisher-prefix sprk
-
-# 5. If file lock error occurs (common), import the already-packed solution:
-# pac solution import --path obj/PowerAppsToolsTemp_sprk/bin/Debug/PowerAppsToolsTemp_sprk.zip --publish-changes
-
-# 6. Restore Central Package Management (REQUIRED)
-mv /c/code_files/spaarke/Directory.Packages.props.disabled /c/code_files/spaarke/Directory.Packages.props
+# Verify size (~200-400KB, NOT 8MB)
+ls -la out/controls/control/bundle.js
 ```
 
-### One-Liner (copy-paste ready)
+### Step 2: Update Version (5 Locations)
+
+| # | File | Update |
+|---|------|--------|
+| 1 | `control/ControlManifest.Input.xml` | `version="X.Y.Z"` |
+| 2 | `control/{Component}.tsx` | UI version footer |
+| 3 | `Solution/solution.xml` | `<Version>X.Y.Z</Version>` |
+| 4 | `Solution/Controls/.../ControlManifest.xml` | `version="X.Y.Z"` |
+| 5 | `Solution/pack.ps1` | `$version = "X.Y.Z"` |
+
+### Step 3: Copy Fresh Build to Solution
 
 ```bash
-cd /c/code_files/spaarke/src/client/pcf/{ControlName} && npm run build:prod && mv /c/code_files/spaarke/Directory.Packages.props{,.disabled} && pac pcf push --publisher-prefix sprk; mv /c/code_files/spaarke/Directory.Packages.props{.disabled,}
+cp out/controls/control/bundle.js \
+   out/controls/control/ControlManifest.xml \
+   out/controls/control/styles.css \
+   Solution/Controls/sprk_Spaarke.Controls.{ControlName}/
 ```
 
-### File Lock Workaround
-
-The `pac pcf push` command often fails with:
-```
-Unable to remove directory "obj\Debug\Metadata"
-```
-
-**This is harmless** - the solution IS already packed. Import it directly:
+### Step 4: Pack and Import
 
 ```bash
-pac solution import --path obj/PowerAppsToolsTemp_sprk/bin/Debug/PowerAppsToolsTemp_sprk.zip --publish-changes
+# Disable CPM
+mv /c/code_files/spaarke-wt-ai-rag-pipeline/Directory.Packages.props{,.disabled}
+
+# Pack (creates fresh ZIP with forward slashes)
+cd Solution && powershell -ExecutionPolicy Bypass -File pack.ps1
+
+# Import
+pac solution import --path bin/{SolutionName}_vX.Y.Z.zip --publish-changes
+
+# Restore CPM
+mv /c/code_files/spaarke-wt-ai-rag-pipeline/Directory.Packages.props{.disabled,}
 ```
 
-### Manual Pack Fallback
-
-If the zip file doesn't exist after `pac pcf push` fails, build the solution wrapper manually:
+### Step 5: Verify
 
 ```bash
-# 1. Copy build output to solution folder (ALL 3 files required)
-mkdir -p obj/PowerAppsToolsTemp_sprk/bin/net462/control
-cp out/controls/*/bundle.js obj/PowerAppsToolsTemp_sprk/bin/net462/control/
-cp out/controls/*/ControlManifest.xml obj/PowerAppsToolsTemp_sprk/bin/net462/control/
-cp control/css/styles.css obj/PowerAppsToolsTemp_sprk/bin/net462/control/  # CRITICAL: Don't forget styles.css!
-
-# 2. Build solution wrapper (creates the zip)
-cd obj/PowerAppsToolsTemp_sprk
-dotnet build *.cdsproj --configuration Debug
-# Ignore the file lock error at the end - zip is created
-
-# 3. Import the solution
-pac solution import --path bin/Debug/PowerAppsToolsTemp_sprk.zip --publish-changes
+pac solution list | grep -i "{SolutionName}"
 ```
 
-> **⚠️ CRITICAL**: The Manual Pack Fallback requires **all three files**: `bundle.js`, `ControlManifest.xml`, AND `styles.css`. Missing styles.css will cause solution import to fail with "CustomControls Source File resource path styles.css does not exist".
+Hard refresh browser (`Ctrl+Shift+R`) and verify version footer.
 
-### Why Use Manual Pack Fallback?
-
-`pac pcf push` ALWAYS rebuilds in development mode (`--buildMode development`), ignoring your production build optimizations. This means:
-- Tree-shaking optimizations are lost
-- Bundle size increases significantly (e.g., 240KB → 8MB)
-- Icon libraries like `@fluentui/react-icons` are fully bundled
-
-**Use Manual Pack Fallback** when you need to preserve production build optimizations.
+> **⚠️ Why NOT `pac pcf push`?** It ALWAYS rebuilds in development mode, ignoring production optimizations. Bundle size increases from ~300KB to 8MB. Tree-shaking is lost. Use the pack.ps1 workflow instead.
 
 ---
 
 ## Decision Tree: Which Workflow?
 
 ```
-Is this a production release with version tracking?
-├── YES → Use "PCF Production Release" (Scenario 1d)
-└── NO → Is the PCF embedded in a Custom Page?
-    ├── YES → Use "PCF Custom Page Deploy" (Scenario 1c)
-    └── NO → Use "Quick Dev Deploy" above
+Is the PCF embedded in a Custom Page?
+├── YES → See "Custom Page Deployment" section in guide
+└── NO → Use "Deployment Workflow" above (build → copy → pack.ps1 → import)
 ```
 
-**Primary Guide:** [`docs/guides/PCF-DEPLOYMENT-GUIDE.md`](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md) - Consolidated deployment workflow with critical rules, version management, and troubleshooting.
+**Primary Guide:** [`docs/guides/PCF-DEPLOYMENT-GUIDE.md`](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md) - Complete workflow with version management and troubleshooting.
 
 ---
 
 ## Purpose
 
-Automate deployment of Dataverse components using PAC CLI. This skill handles the common pitfalls and environment-specific quirks that cause deployment failures, including authentication, Central Package Management conflicts, and solution import issues.
-
----
-
-## Critical Constraints
-
-### ⚠️ UNMANAGED SOLUTIONS ONLY (STRICT POLICY)
-
-**ALWAYS use unmanaged solutions for all deployments.** Managed solutions have caused issues in past projects and should NEVER be used unless the user explicitly instructs otherwise.
-
-| Solution Type | When to Use | Default? |
-|---------------|-------------|----------|
-| **Unmanaged** | All development, testing, and production | ✅ YES - ALWAYS |
-| **Managed** | NEVER - unless user explicitly requests | ❌ NO |
-
-**Why unmanaged:**
-- Allows components to be modified/removed freely
-- No solution layering complexity
-- Easier troubleshooting and rollback
-- Consistent behavior across environments
-
-> **🚨 CRITICAL WARNING**: If you encounter a managed solution (shows `IsManaged: True` in `pac solution list`), you MUST delete it before deploying:
-> ```bash
-> # Check if solution is managed
-> pac solution list | grep -i "{SolutionName}"
-> # If IsManaged = True, delete it first:
-> pac solution delete --solution-name {SolutionName}
-> ```
-> Managed solutions block unmanaged deployments and cause orphaned component issues.
-
-**Commands that default to unmanaged:**
-- `pac pcf push` → Creates unmanaged temp solution
-- `pac solution pack --zipfile X --folder Y` → Unmanaged by default
-- `pac solution export --name X --path Y` → Add `--managed false` explicitly
-
-**NEVER run:**
-```bash
-# ❌ NEVER use managed unless explicitly instructed
-pac solution export --managed true
-pac solution pack --managed
-```
+Deploy Dataverse components using PAC CLI following the [PCF-DEPLOYMENT-GUIDE.md](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md). This skill handles authentication, Central Package Management conflicts, and solution import issues.
 
 ---
 
@@ -155,18 +123,19 @@ pac solution pack --managed
 | Practice | Implementation |
 |----------|----------------|
 | **Always use unmanaged** | Never export/pack as managed unless user explicitly requests |
-| **Always build fresh** | Never import from bin/ or obj/ without building first |
-| **Delete old artifacts** | Run `npm run clean` or delete bin/obj before building |
+| **Always use Spaarke publisher** | Never create a new publisher - use `Spaarke` (`sprk_`) |
+| **Always build fresh** | Run `npm run build:prod`, never reuse old artifacts |
+| **Always use pack.ps1** | Never use `Compress-Archive` (creates backslashes) |
 | **Version footer** | Every PCF MUST display `vX.Y.Z • Built YYYY-MM-DD` in the UI |
-| **Version bumping** | Increment version in 4 locations (see Scenario 1d) |
+| **Version bumping** | Increment version in ALL 5 locations |
 | **Verify deployment** | ALWAYS run `pac solution list` after import to confirm version |
 | **Use React 16 APIs** | Dataverse provides React 16.14.0 - see ADR-022 |
 
 ### Key Guidance
 
-- **Development Testing:** Use `pac pcf push` for quick iteration. Creates a **temporary solution** - does NOT update named solution version.
-- **Production Releases:** Use full solution workflow (build → pack → import). This is the ONLY way to update named solution version.
-- **Version Locations:** Update ALL four: (1) ControlManifest.Input.xml, (2) UI footer, (3) Solution.xml, (4) extracted ControlManifest.xml
+- **Always use the pack.ps1 workflow** - build → copy files → pack.ps1 → import
+- **Never use `pac pcf push`** - it rebuilds in dev mode, ignoring production optimizations
+- **Version Locations:** Update ALL 5: (1) ControlManifest.Input.xml, (2) UI footer, (3) Solution.xml, (4) extracted ControlManifest.xml, (5) pack.ps1
 - **Full Guide:** See [`docs/guides/PCF-DEPLOYMENT-GUIDE.md`](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md) for complete workflow
 
 ---
@@ -204,69 +173,18 @@ pac auth select --index 1
 
 ---
 
-## Deployment Scenarios
+## Additional Scenarios
 
-### Scenario 1: PCF Control Deployment (Standard)
+### Scenario 1: PCF Control Deployment
 
-**Use when**: Deploying a new or updated PCF control to Dataverse for development testing.
+**Use the "Deployment Workflow" section above.** Follow [PCF-DEPLOYMENT-GUIDE.md](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md) for the complete workflow:
 
-#### Step 1: Build the Control
-
-```bash
-# Navigate to control directory (contains .pcfproj file)
-cd /c/code_files/spaarke/src/client/pcf/{ControlName}
-
-# Install dependencies if needed
-npm install
-
-# Build for production
-npm run build:prod
-```
-
-#### Step 2: Disable Central Package Management (CRITICAL)
-
-The workspace uses Central Package Management (Directory.Packages.props). PAC CLI conflicts with this.
-
-```bash
-# Disable CPM
-if [ -f "/c/code_files/spaarke/Directory.Packages.props" ]; then
-    mv /c/code_files/spaarke/Directory.Packages.props /c/code_files/spaarke/Directory.Packages.props.disabled
-    echo "✓ Disabled Directory.Packages.props"
-fi
-```
-
-#### Step 3: Deploy Control
-
-```bash
-# Push to Dataverse with Spaarke publisher prefix
-pac pcf push --publisher-prefix sprk
-```
-
-**If file lock error occurs** (common on Windows):
-```bash
-# The solution is already packed - import directly
-pac solution import --path obj/PowerAppsToolsTemp_sprk/bin/Debug/PowerAppsToolsTemp_sprk.zip --publish-changes
-```
-
-#### Step 4: Restore Central Package Management
-
-```bash
-# ALWAYS restore after deployment
-if [ -f "/c/code_files/spaarke/Directory.Packages.props.disabled" ]; then
-    mv /c/code_files/spaarke/Directory.Packages.props.disabled /c/code_files/spaarke/Directory.Packages.props
-    echo "✓ Restored Directory.Packages.props"
-fi
-```
-
-#### Step 5: Add to Solution (Manual Step - First Time Only)
-
-PCF controls deploy to "Default Solution" first. To add to a specific solution:
-
-1. Go to Power Apps maker portal (make.powerapps.com)
-2. Open target solution
-3. Click **Add existing** → **More** → **Developer** → **Custom control**
-4. Search for the control name
-5. Select and click **Add**
+1. Build fresh (`npm run build:prod`)
+2. Update version in ALL 5 locations
+3. Copy ALL 3 files to Solution folder
+4. Pack with `pack.ps1` (NOT `Compress-Archive`)
+5. Import with `pac solution import`
+6. Verify with `pac solution list`
 
 ---
 
@@ -347,7 +265,7 @@ module.exports = {
 
 **Result**: Bundle size typically drops from 5-9MB to 200-400KB.
 
-> **⚠️ NOTE**: `pac pcf push` rebuilds in development mode, ignoring these optimizations. Use Manual Pack Fallback (above) to preserve production build.
+> **⚠️ NOTE**: `pac pcf push` rebuilds in development mode, ignoring these optimizations. Use the pack.ps1 workflow instead to preserve production build.
 
 #### Fix package.json
 
@@ -509,10 +427,18 @@ pac solution publish-all
 
 ## Conventions
 
-### Publisher Prefix
+### Publisher
 
-**Always use `sprk`** for Spaarke components:
-- `pac pcf push --publisher-prefix sprk`
+**Always use `Spaarke` publisher with prefix `sprk_`** - NEVER create a new publisher.
+
+| Setting | Value |
+|---------|-------|
+| Unique Name | `Spaarke` |
+| Prefix | `sprk` |
+| Option Value Prefix | `65949` |
+
+**Naming examples:**
+- PCF controls: `sprk_Spaarke.Controls.{ControlName}`
 - Web resources: `sprk_FileName.js`
 - Entities: `sprk_entityname`
 - Fields: `sprk_fieldname`
@@ -533,8 +459,8 @@ pac solution publish-all
 | Error | Cause | Solution |
 |-------|-------|----------|
 | `No active authentication profile` | Not logged in | Run `pac auth create --environment "URL"` |
-| `NU1008: Projects that use central package version management` | Directory.Packages.props conflict | Disable CPM before `pac pcf push` |
-| `Unable to remove directory "obj\Debug\Metadata"` | File lock during cleanup | **Harmless** - import the packed solution directly (see Quick Dev Deploy) |
+| `NU1008: Projects that use central package version management` | Directory.Packages.props conflict | Disable CPM before PAC commands |
+| `Unable to remove directory "obj\Debug\Metadata"` | File lock during cleanup | **Harmless** - import the packed solution directly |
 | `Solution not found` | Wrong solution name | Run `pac solution list` to find exact name |
 | `Publisher not found` | Wrong publisher prefix | Use `--publisher-prefix sprk` |
 | `Import failed: Dependency not found` | Missing dependent solution | Import dependencies first |
@@ -543,9 +469,9 @@ pac solution publish-all
 | `PowerAppsToolsTemp` solutions appear | Created by `pac pcf push` | Delete after deployment if needed |
 | `Cannot create property '_updatedFibers'` | Using React 18 APIs with React 16 runtime | Use `ReactDOM.render()`, not `createRoot()` - see ADR-022 |
 | `createRoot is not a function` | Importing from `react-dom/client` | Import from `react-dom` instead |
-| Solution zip not created | `pac pcf push` failed before packing | Use Manual Pack Fallback (above) |
+| Solution zip not created | pack.ps1 failed | Check pack.ps1 script exists and run manually |
 | `Orphaned component blocking deployment` | Namespace changed or old controls exist | Delete orphaned controls via Web API (see below) |
-| `CustomControls Source File styles.css does not exist` | styles.css not copied to solution folder | Copy styles.css in Manual Pack Fallback |
+| `CustomControls Source File styles.css does not exist` | styles.css not copied to solution folder | Copy ALL 3 files to Solution folder |
 
 ### Orphaned Control Cleanup
 
@@ -587,12 +513,14 @@ pac auth select --index N               # Switch profile
 
 # Solutions
 pac solution list                       # List all solutions
-pac solution export --name X --path Y   # Export solution
+pac solution export --name X --path Y   # Export solution (add --managed false)
 pac solution import --path Y            # Import solution
 pac solution publish                    # Publish customizations
 
-# PCF Controls
-pac pcf push --publisher-prefix sprk    # Deploy control (from control folder)
+# PCF Controls - Use pack.ps1 workflow (see Deployment Workflow above)
+npm run build:prod                      # Build control
+powershell -File Solution/pack.ps1      # Pack solution (NOT Compress-Archive)
+pac solution import --path bin/X.zip    # Import solution
 
 # Troubleshooting
 pac org who                             # Show current org info

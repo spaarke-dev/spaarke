@@ -9,6 +9,8 @@
 ## Critical Rules
 
 ### MUST:
+- ✅ **MUST** use unmanaged solution unless explicitly told to use managed (ADR-022)
+- ✅ **MUST** use Dataverse publisher `Spaarke` with prefix `sprk_`
 - ✅ **MUST** rebuild fresh every deployment (`npm run build:prod`)
 - ✅ **MUST** copy ALL 3 files to Solution folder (bundle.js, ControlManifest.xml, styles.css)
 - ✅ **MUST** update version in ALL 5 locations
@@ -17,6 +19,8 @@
 - ✅ **MUST** disable/restore CPM around PAC commands
 
 ### NEVER:
+- ❌ **NEVER** use managed solution unless explicitly told - unmanaged is the default
+- ❌ **NEVER** use or create a new publisher - always use `Spaarke` (`sprk_`)
 - ❌ **NEVER** reuse old solution ZIPs - always pack fresh
 - ❌ **NEVER** use `pac pcf push` - creates temp solutions, rebuilds in dev mode
 - ❌ **NEVER** use `Compress-Archive` - creates backslashes, breaks import
