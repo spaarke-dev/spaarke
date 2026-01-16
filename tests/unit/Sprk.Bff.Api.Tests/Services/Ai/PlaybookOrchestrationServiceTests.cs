@@ -55,15 +55,15 @@ public class PlaybookOrchestrationServiceTests
         string? outputVariable = null,
         int order = 1,
         params Guid[] dependsOn) => new()
-    {
-        Id = Guid.NewGuid(),
-        Name = name,
-        ActionId = actionId ?? Guid.NewGuid(),
-        OutputVariable = outputVariable ?? name.ToLowerInvariant().Replace(" ", "_"),
-        ExecutionOrder = order,
-        DependsOn = dependsOn,
-        IsActive = true
-    };
+        {
+            Id = Guid.NewGuid(),
+            Name = name,
+            ActionId = actionId ?? Guid.NewGuid(),
+            OutputVariable = outputVariable ?? name.ToLowerInvariant().Replace(" ", "_"),
+            ExecutionOrder = order,
+            DependsOn = dependsOn,
+            IsActive = true
+        };
 
     private static AnalysisAction CreateAction(Guid? id = null, string? name = null) => new()
     {

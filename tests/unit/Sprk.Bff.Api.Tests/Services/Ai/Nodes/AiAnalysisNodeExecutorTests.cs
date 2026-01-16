@@ -1,10 +1,10 @@
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Nodes;
-using System.Text.Json;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Nodes;
