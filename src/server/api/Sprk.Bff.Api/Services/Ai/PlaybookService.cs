@@ -96,12 +96,12 @@ public class PlaybookService : IPlaybookService
         _logger.LogInformation("Creating playbook: {Name}", request.Name);
 
         // Create playbook entity
+        // NOTE: sprk_istemplate removed until Dataverse schema is updated (causes 400 if column doesn't exist)
         var payload = new Dictionary<string, object?>
         {
             ["sprk_name"] = request.Name,
             ["sprk_description"] = request.Description,
-            ["sprk_ispublic"] = request.IsPublic,
-            ["sprk_istemplate"] = request.IsTemplate
+            ["sprk_ispublic"] = request.IsPublic
         };
 
         // Add output type lookup if provided
@@ -140,12 +140,12 @@ public class PlaybookService : IPlaybookService
         _logger.LogInformation("Updating playbook {Id}: {Name}", playbookId, request.Name);
 
         // Update playbook entity
+        // NOTE: sprk_istemplate removed until Dataverse schema is updated (causes 400 if column doesn't exist)
         var payload = new Dictionary<string, object?>
         {
             ["sprk_name"] = request.Name,
             ["sprk_description"] = request.Description,
-            ["sprk_ispublic"] = request.IsPublic,
-            ["sprk_istemplate"] = request.IsTemplate
+            ["sprk_ispublic"] = request.IsPublic
         };
 
         // Add output type lookup if provided
@@ -177,7 +177,8 @@ public class PlaybookService : IPlaybookService
         await EnsureAuthenticatedAsync(cancellationToken);
 
         // NOTE: OutputTypeId field removed - output types are N:N relationship, not lookup
-        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,sprk_istemplate,_ownerid_value,createdon,modifiedon";
+        // NOTE: sprk_istemplate removed until Dataverse schema is updated
+        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_ownerid_value,createdon,modifiedon";
         var url = $"{EntitySetName}({playbookId})?$select={select}";
 
         var response = await _httpClient.GetAsync(url, cancellationToken);
@@ -365,7 +366,8 @@ public class PlaybookService : IPlaybookService
 
         // Query by name - exact match, case-insensitive per Dataverse default
         // NOTE: OutputTypeId field removed - output types are N:N relationship, not lookup
-        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,sprk_istemplate,_ownerid_value,createdon,modifiedon";
+        // NOTE: sprk_istemplate removed until Dataverse schema is updated (causes 400 if column doesn't exist)
+        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_ownerid_value,createdon,modifiedon";
         var filter = $"sprk_name eq '{EscapeODataString(name)}'";
         var url = $"{EntitySetName}?$select={select}&$filter={Uri.EscapeDataString(filter)}&$top=1";
 
@@ -468,7 +470,8 @@ public class PlaybookService : IPlaybookService
 
         // Get paginated results
         // NOTE: OutputTypeId field removed - output types are N:N relationship, not lookup
-        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,sprk_istemplate,_ownerid_value,modifiedon";
+        // NOTE: sprk_istemplate removed until Dataverse schema is updated
+        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_ownerid_value,modifiedon";
         var url = $"{EntitySetName}?$select={select}&$filter={Uri.EscapeDataString(filter)}&$orderby={orderBy}&$top={pageSize}&$skip={skip}";
 
         var response = await _httpClient.GetAsync(url, cancellationToken);
@@ -614,21 +617,20 @@ public class PlaybookService : IPlaybookService
         PlaybookQueryParameters query,
         CancellationToken cancellationToken = default)
     {
-        await EnsureAuthenticatedAsync(cancellationToken);
+        // NOTE: sprk_istemplate column doesn't exist in Dataverse yet
+        // Return empty list until schema is updated to add the column
+        // Original filter was: sprk_istemplate eq true
+        _logger.LogWarning("ListTemplatesAsync called but sprk_istemplate column not in Dataverse schema - returning empty list");
 
-        var pageSize = query.GetNormalizedPageSize();
-        var skip = query.GetSkip();
+        await Task.CompletedTask; // Suppress async warning
 
-        // Build OData filter for template playbooks
-        var filter = "sprk_istemplate eq true";
-        if (!string.IsNullOrWhiteSpace(query.NameFilter))
+        return new PlaybookListResponse
         {
-            filter += $" and contains(sprk_name, '{EscapeODataString(query.NameFilter)}')";
-        }
-
-        _logger.LogInformation("Listing template playbooks with filter: {Filter}", filter);
-
-        return await ExecuteListQueryAsync(filter, query, pageSize, skip, cancellationToken);
+            Items = [],
+            TotalCount = 0,
+            Page = query.Page,
+            PageSize = query.GetNormalizedPageSize()
+        };
     }
 
     /// <inheritdoc />
