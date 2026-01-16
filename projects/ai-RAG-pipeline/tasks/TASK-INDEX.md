@@ -11,9 +11,9 @@
 | Metric | Value |
 |--------|-------|
 | Total Tasks | 27 |
-| Completed | 0 |
+| Completed | 5 |
 | In Progress | 0 |
-| Pending | 27 |
+| Pending | 22 |
 
 ---
 
@@ -35,11 +35,11 @@
 
 | ID | Title | Status | Dependencies | Rigor |
 |----|-------|--------|--------------|-------|
-| 001 | Add IDataverseService dependency to AppOnlyAnalysisService | 🔲 | none | FULL |
-| 002 | Create Analysis record before running playbook tools | 🔲 | 001 | FULL |
-| 003 | Create AnalysisOutput records for tool outputs | 🔲 | 002 | FULL |
-| 004 | Update AppOnlyDocumentAnalysisJobHandler telemetry | 🔲 | 003 | STANDARD |
-| 005 | Unit tests for Phase 0 changes | 🔲 | 003 | STANDARD |
+| 001 | Add IDataverseService dependency to AppOnlyAnalysisService | ✅ | none | FULL |
+| 002 | Create Analysis record before running playbook tools | ✅ | 001 | FULL |
+| 003 | Create AnalysisOutput records for tool outputs | ✅ | 002 | FULL |
+| 004 | Update AppOnlyDocumentAnalysisJobHandler telemetry | ✅ | 003 | STANDARD |
+| 005 | Unit tests for Phase 0 changes | ✅ | 003 | STANDARD |
 
 ### Phase 1: Core Pipeline
 

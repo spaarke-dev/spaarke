@@ -3,7 +3,7 @@
   <metadata>
     <title>Add IDataverseService dependency to AppOnlyAnalysisService</title>
     <phase>0: Analysis Workflow Alignment</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>002</blocks>

@@ -150,6 +150,27 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
                 "Extracted {CharCount} characters from document {DocumentId}",
                 extractionResult.Text.Length, documentId);
 
+            // 5a. Create Analysis record in Dataverse (best effort - don't block on failure)
+            Guid? dataverseAnalysisId = null;
+            try
+            {
+                dataverseAnalysisId = await _dataverseService.CreateAnalysisAsync(
+                    documentId,
+                    $"Document Profile - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
+                    cancellationToken);
+
+                _logger.LogInformation(
+                    "Created Analysis record {AnalysisId} for document {DocumentId}",
+                    dataverseAnalysisId, documentId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Failed to create Analysis record for document {DocumentId}. Continuing with analysis.",
+                    documentId);
+                // Continue with analysis even if Dataverse write fails
+            }
+
             // 6. Execute playbook-based analysis
             var analysisResult = await ExecutePlaybookAnalysisAsync(
                 documentId,
@@ -157,6 +178,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
                 fileName,
                 extractionResult.Text,
                 effectivePlaybookName,
+                dataverseAnalysisId,
                 cancellationToken);
 
             if (!analysisResult.IsSuccess)
@@ -250,13 +272,14 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
                 "Extracted {CharCount} characters from document {DocumentId}",
                 extractionResult.Text.Length, documentId);
 
-            // Execute playbook-based analysis
+            // Execute playbook-based analysis (no Analysis record for stream-based analysis)
             var analysisResult = await ExecutePlaybookAnalysisAsync(
                 documentId,
                 fileName,
                 fileName,
                 extractionResult.Text,
                 effectivePlaybookName,
+                dataverseAnalysisId: null,
                 cancellationToken);
 
             if (!analysisResult.IsSuccess)
@@ -287,12 +310,20 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
     /// <summary>
     /// Execute playbook-based analysis using tools from the specified playbook.
     /// </summary>
+    /// <param name="documentId">The Dataverse Document ID.</param>
+    /// <param name="documentName">The document name for display.</param>
+    /// <param name="fileName">The file name for extension detection.</param>
+    /// <param name="documentText">The extracted document text.</param>
+    /// <param name="playbookName">The playbook name to execute.</param>
+    /// <param name="dataverseAnalysisId">The Dataverse Analysis record ID (for linking outputs in task 003).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     private async Task<DocumentAnalysisResult> ExecutePlaybookAnalysisAsync(
         Guid documentId,
         string documentName,
         string fileName,
         string documentText,
         string playbookName,
+        Guid? dataverseAnalysisId,
         CancellationToken cancellationToken)
     {
         // 1. Load playbook by name
@@ -402,14 +433,53 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
             return DocumentAnalysisResult.Failed(documentId, "No tools executed successfully");
         }
 
-        // 5. Build profile update from structured outputs
+        // 5. Create AnalysisOutput records in Dataverse (best effort - dual-write pattern)
+        if (dataverseAnalysisId.HasValue)
+        {
+            try
+            {
+                var sortOrder = 0;
+                foreach (var (outputTypeName, value) in structuredOutputs)
+                {
+                    if (string.IsNullOrWhiteSpace(value))
+                    {
+                        continue;
+                    }
+
+                    var output = new AnalysisOutputEntity
+                    {
+                        Name = outputTypeName,
+                        Value = value,
+                        AnalysisId = dataverseAnalysisId.Value,
+                        OutputTypeId = null, // Output type lookup optional for Phase 1
+                        SortOrder = sortOrder++
+                    };
+
+                    await _dataverseService.CreateAnalysisOutputAsync(output, cancellationToken);
+                    _logger.LogDebug("Stored output {OutputType} in sprk_analysisoutput", outputTypeName);
+                }
+
+                _logger.LogInformation(
+                    "Created {OutputCount} AnalysisOutput records for Analysis {AnalysisId}",
+                    sortOrder, dataverseAnalysisId.Value);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Failed to create AnalysisOutput records for Analysis {AnalysisId}. Continuing with Document update.",
+                    dataverseAnalysisId.Value);
+                // Continue with Document field update even if AnalysisOutput creation fails
+            }
+        }
+
+        // 6. Build profile update from structured outputs (for Document entity dual-write)
         var profileUpdate = BuildProfileUpdateFromOutputs(structuredOutputs);
 
         _logger.LogInformation(
             "Playbook analysis completed for {DocumentId}: {ToolCount} tools executed, {OutputCount} outputs extracted",
             documentId, toolResults.Count, structuredOutputs.Count);
 
-        return DocumentAnalysisResult.Success(documentId, profileUpdate);
+        return DocumentAnalysisResult.Success(documentId, profileUpdate, dataverseAnalysisId);
     }
 
     /// <summary>
@@ -704,11 +774,33 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
                 "Built combined context for email {EmailId}: {CharCount} characters (max: {MaxChars})",
                 emailId, combinedContext.Length, MaxEmailContextChars);
 
+            // 5a. Create Analysis record in Dataverse (best effort - don't block on failure)
+            Guid? dataverseAnalysisId = null;
+            try
+            {
+                dataverseAnalysisId = await _dataverseService.CreateAnalysisAsync(
+                    mainDocumentId,
+                    $"Email Analysis - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
+                    cancellationToken);
+
+                _logger.LogInformation(
+                    "Created Analysis record {AnalysisId} for email document {DocumentId}",
+                    dataverseAnalysisId, mainDocumentId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Failed to create Analysis record for email document {DocumentId}. Continuing with analysis.",
+                    mainDocumentId);
+                // Continue with analysis even if Dataverse write fails
+            }
+
             // 6. Execute Email Analysis playbook
             var analysisResult = await ExecuteEmailPlaybookAnalysisAsync(
                 mainDocumentId,
                 mainDocument.Name ?? "Email",
                 combinedContext,
+                dataverseAnalysisId,
                 cancellationToken);
 
             if (!analysisResult.IsSuccess)
@@ -959,6 +1051,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         Guid documentId,
         string documentName,
         string combinedContext,
+        Guid? dataverseAnalysisId,
         CancellationToken cancellationToken)
     {
         return await ExecutePlaybookAnalysisAsync(
@@ -967,6 +1060,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
             "email-combined.eml",
             combinedContext,
             EmailAnalysisPlaybookName,
+            dataverseAnalysisId,
             cancellationToken);
     }
 }
@@ -1035,12 +1129,19 @@ public class DocumentAnalysisResult
     public string? ErrorMessage { get; init; }
     public UpdateDocumentRequest? ProfileUpdate { get; init; }
 
-    public static DocumentAnalysisResult Success(Guid documentId, UpdateDocumentRequest profileUpdate)
+    /// <summary>
+    /// The Dataverse Analysis record ID, if one was created.
+    /// Used for telemetry correlation and Analysis Workspace visibility.
+    /// </summary>
+    public Guid? AnalysisId { get; init; }
+
+    public static DocumentAnalysisResult Success(Guid documentId, UpdateDocumentRequest profileUpdate, Guid? analysisId = null)
         => new()
         {
             DocumentId = documentId,
             IsSuccess = true,
-            ProfileUpdate = profileUpdate
+            ProfileUpdate = profileUpdate,
+            AnalysisId = analysisId
         };
 
     public static DocumentAnalysisResult Failed(Guid documentId, string errorMessage)

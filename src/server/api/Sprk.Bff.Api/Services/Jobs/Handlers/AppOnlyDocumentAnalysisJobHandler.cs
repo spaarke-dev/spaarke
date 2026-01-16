@@ -118,7 +118,7 @@ public class AppOnlyDocumentAnalysisJobHandler : IJobHandler
                     // Check if this is a permanent or transient failure
                     if (IsPermanentFailure(result.ErrorMessage))
                     {
-                        _telemetry.RecordAnalysisJobFailure("permanent_failure");
+                        _telemetry.RecordAnalysisJobFailure("permanent_failure", result.AnalysisId);
                         return JobOutcome.Poisoned(
                             job.JobId, JobType,
                             $"Analysis failed: {result.ErrorMessage}",
@@ -126,7 +126,7 @@ public class AppOnlyDocumentAnalysisJobHandler : IJobHandler
                     }
 
                     // Transient failure - allow retry
-                    _telemetry.RecordAnalysisJobFailure("transient_failure");
+                    _telemetry.RecordAnalysisJobFailure("transient_failure", result.AnalysisId);
                     return JobOutcome.Failure(
                         job.JobId, JobType,
                         result.ErrorMessage ?? "Analysis failed",
@@ -139,11 +139,11 @@ public class AppOnlyDocumentAnalysisJobHandler : IJobHandler
                     TimeSpan.FromDays(7), // Keep record for 7 days
                     ct);
 
-                _telemetry.RecordAnalysisJobSuccess(stopwatch.Elapsed);
+                _telemetry.RecordAnalysisJobSuccess(stopwatch.Elapsed, result.AnalysisId);
 
                 _logger.LogInformation(
-                    "App-only document analysis job {JobId} completed in {Duration}ms for document {DocumentId}",
-                    job.JobId, stopwatch.ElapsedMilliseconds, documentId);
+                    "App-only document analysis job {JobId} completed in {Duration}ms for document {DocumentId}, AnalysisId {AnalysisId}",
+                    job.JobId, stopwatch.ElapsedMilliseconds, documentId, result.AnalysisId);
 
                 return JobOutcome.Success(job.JobId, JobType, stopwatch.Elapsed);
             }

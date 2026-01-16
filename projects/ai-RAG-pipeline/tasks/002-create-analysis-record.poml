@@ -3,7 +3,7 @@
   <metadata>
     <title>Create Analysis record before running playbook tools</title>
     <phase>0: Analysis Workflow Alignment</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>001</dependencies>
     <blocks>003</blocks>
@@ -91,6 +91,19 @@
     The Analysis record creation should be "best effort" - if it fails, log a warning but
     proceed with the analysis. This ensures existing functionality isn't broken by Dataverse issues.
   </notes>
+
+  <completion-notes>
+    <completed-date>2026-01-15</completed-date>
+    <summary>
+      Added Analysis record creation before playbook execution in both AnalyzeDocumentAsync and
+      AnalyzeEmailAsync methods. The dataverseAnalysisId is passed to ExecutePlaybookAnalysisAsync
+      and ExecuteEmailPlaybookAnalysisAsync for linking AnalysisOutput records in task 003.
+      Used best-effort pattern with try-catch and LogWarning to not block analysis on Dataverse failures.
+    </summary>
+    <files-modified>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs</file>
+    </files-modified>
+  </completion-notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

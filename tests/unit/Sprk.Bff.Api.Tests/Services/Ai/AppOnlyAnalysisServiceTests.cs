@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -593,6 +594,302 @@ public class AppOnlyAnalysisServiceTests
         result.DocumentId.Should().Be(documentId);
         result.ErrorMessage.Should().Be(errorMessage);
         result.ProfileUpdate.Should().BeNull();
+    }
+
+    [Fact]
+    public void DocumentAnalysisResult_Success_WithAnalysisId_IncludesAnalysisId()
+    {
+        // Arrange
+        var documentId = Guid.NewGuid();
+        var analysisId = Guid.NewGuid();
+        var profileUpdate = new UpdateDocumentRequest { Summary = "Test summary" };
+
+        // Act
+        var result = Sprk.Bff.Api.Services.Ai.DocumentAnalysisResult.Success(documentId, profileUpdate, analysisId);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.DocumentId.Should().Be(documentId);
+        result.AnalysisId.Should().Be(analysisId);
+        result.ProfileUpdate.Should().Be(profileUpdate);
+    }
+
+    #endregion
+
+    #region Phase 0 - Analysis Record Creation Tests
+
+    [Fact]
+    public async Task AnalyzeDocumentAsync_ValidDocument_CreatesAnalysisRecord()
+    {
+        // Arrange
+        var documentId = Guid.NewGuid();
+        var analysisId = Guid.NewGuid();
+        var document = CreateDocument(documentId);
+        SetupSuccessfulAnalysisFlowWithToolOutputs(documentId, document);
+
+        _dataverseServiceMock
+            .Setup(x => x.CreateAnalysisAsync(documentId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(analysisId);
+
+        _dataverseServiceMock
+            .Setup(x => x.CreateAnalysisOutputAsync(It.IsAny<AnalysisOutputEntity>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Guid.NewGuid());
+
+        // Act
+        var result = await _service.AnalyzeDocumentAsync(documentId);
+
+        // Assert
+        _dataverseServiceMock.Verify(
+            x => x.CreateAnalysisAsync(documentId, It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task AnalyzeDocumentAsync_AnalysisCreationFails_ContinuesWithAnalysis()
+    {
+        // Arrange
+        var documentId = Guid.NewGuid();
+        var document = CreateDocument(documentId);
+        SetupSuccessfulAnalysisFlowWithToolOutputs(documentId, document);
+
+        // Setup CreateAnalysisAsync to throw
+        _dataverseServiceMock
+            .Setup(x => x.CreateAnalysisAsync(documentId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new Exception("Dataverse unavailable"));
+
+        // Act
+        var result = await _service.AnalyzeDocumentAsync(documentId);
+
+        // Assert - Analysis should still succeed (best-effort pattern)
+        result.IsSuccess.Should().BeTrue();
+
+        // Document should still be updated
+        _dataverseServiceMock.Verify(
+            x => x.UpdateDocumentAsync(
+                documentId.ToString(),
+                It.IsAny<UpdateDocumentRequest>(),
+                It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public async Task AnalyzeDocumentAsync_ValidDocument_ReturnsAnalysisIdInResult()
+    {
+        // Arrange
+        var documentId = Guid.NewGuid();
+        var analysisId = Guid.NewGuid();
+        var document = CreateDocument(documentId);
+        SetupSuccessfulAnalysisFlowWithToolOutputs(documentId, document);
+
+        _dataverseServiceMock
+            .Setup(x => x.CreateAnalysisAsync(documentId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(analysisId);
+
+        _dataverseServiceMock
+            .Setup(x => x.CreateAnalysisOutputAsync(It.IsAny<AnalysisOutputEntity>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Guid.NewGuid());
+
+        // Act
+        var result = await _service.AnalyzeDocumentAsync(documentId);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.AnalysisId.Should().Be(analysisId);
+    }
+
+    [Fact]
+    public async Task AnalyzeDocumentAsync_AnalysisCreationFails_ResultHasNoAnalysisId()
+    {
+        // Arrange
+        var documentId = Guid.NewGuid();
+        var document = CreateDocument(documentId);
+        SetupSuccessfulAnalysisFlowWithToolOutputs(documentId, document);
+
+        // Setup CreateAnalysisAsync to throw
+        _dataverseServiceMock
+            .Setup(x => x.CreateAnalysisAsync(documentId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new Exception("Dataverse unavailable"));
+
+        // Act
+        var result = await _service.AnalyzeDocumentAsync(documentId);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+        result.AnalysisId.Should().BeNull();
+    }
+
+    #endregion
+
+    #region Phase 0 - AnalysisOutput Creation Tests
+
+    [Fact]
+    public async Task AnalyzeDocumentAsync_WithToolOutputs_CreatesAnalysisOutputRecords()
+    {
+        // Arrange
+        var documentId = Guid.NewGuid();
+        var analysisId = Guid.NewGuid();
+        var document = CreateDocument(documentId);
+        SetupSuccessfulAnalysisFlowWithToolOutputs(documentId, document);
+
+        _dataverseServiceMock
+            .Setup(x => x.CreateAnalysisAsync(documentId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(analysisId);
+
+        _dataverseServiceMock
+            .Setup(x => x.CreateAnalysisOutputAsync(It.IsAny<AnalysisOutputEntity>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Guid.NewGuid());
+
+        // Act
+        var result = await _service.AnalyzeDocumentAsync(documentId);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+
+        // Verify CreateAnalysisOutputAsync was called at least once
+        _dataverseServiceMock.Verify(
+            x => x.CreateAnalysisOutputAsync(
+                It.Is<AnalysisOutputEntity>(o => o.AnalysisId == analysisId),
+                It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public async Task AnalyzeDocumentAsync_AnalysisOutputCreationFails_ContinuesAndUpdatesDocument()
+    {
+        // Arrange
+        var documentId = Guid.NewGuid();
+        var analysisId = Guid.NewGuid();
+        var document = CreateDocument(documentId);
+        SetupSuccessfulAnalysisFlowWithToolOutputs(documentId, document);
+
+        _dataverseServiceMock
+            .Setup(x => x.CreateAnalysisAsync(documentId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(analysisId);
+
+        // Setup CreateAnalysisOutputAsync to throw
+        _dataverseServiceMock
+            .Setup(x => x.CreateAnalysisOutputAsync(It.IsAny<AnalysisOutputEntity>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new Exception("Dataverse unavailable"));
+
+        // Act
+        var result = await _service.AnalyzeDocumentAsync(documentId);
+
+        // Assert - Analysis should still succeed (best-effort pattern)
+        result.IsSuccess.Should().BeTrue();
+
+        // Document should still be updated (dual-write pattern)
+        _dataverseServiceMock.Verify(
+            x => x.UpdateDocumentAsync(
+                documentId.ToString(),
+                It.IsAny<UpdateDocumentRequest>(),
+                It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public async Task AnalyzeDocumentAsync_NoAnalysisRecord_DoesNotAttemptAnalysisOutputCreation()
+    {
+        // Arrange
+        var documentId = Guid.NewGuid();
+        var document = CreateDocument(documentId);
+        SetupSuccessfulAnalysisFlowWithToolOutputs(documentId, document);
+
+        // Setup CreateAnalysisAsync to throw (so no analysisId is available)
+        _dataverseServiceMock
+            .Setup(x => x.CreateAnalysisAsync(documentId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new Exception("Dataverse unavailable"));
+
+        // Act
+        var result = await _service.AnalyzeDocumentAsync(documentId);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue();
+
+        // Verify CreateAnalysisOutputAsync was never called (no analysisId to link to)
+        _dataverseServiceMock.Verify(
+            x => x.CreateAnalysisOutputAsync(It.IsAny<AnalysisOutputEntity>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    #endregion
+
+    #region Helper Methods for Phase 0 Tests
+
+    private static Mock<IAnalysisToolHandler> CreateMockSummaryHandler()
+    {
+        var handlerMock = new Mock<IAnalysisToolHandler>();
+        var toolId = Guid.NewGuid();
+
+        handlerMock.Setup(h => h.HandlerId).Returns("SummaryHandler");
+
+        handlerMock.Setup(h => h.Validate(It.IsAny<ToolExecutionContext>(), It.IsAny<AnalysisTool>()))
+            .Returns(ToolValidationResult.Success());
+
+        var summaryResult = ToolResult.Ok(
+            handlerId: "SummaryHandler",
+            toolId: toolId,
+            toolName: "Summary",
+            data: new
+            {
+                FullText = "This is a test summary of the document.",
+                Keywords = "test, document, summary"
+            },
+            summary: "Test document summary");
+
+        handlerMock.Setup(h => h.ExecuteAsync(
+                It.IsAny<ToolExecutionContext>(),
+                It.IsAny<AnalysisTool>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(summaryResult);
+
+        return handlerMock;
+    }
+
+    private void SetupSuccessfulAnalysisFlowWithToolOutputs(Guid documentId, DocumentEntity document)
+    {
+        // Base setup
+        _dataverseServiceMock
+            .Setup(x => x.GetDocumentAsync(documentId.ToString(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(document);
+
+        _textExtractorMock
+            .Setup(x => x.IsSupported(It.IsAny<string>()))
+            .Returns(true);
+
+        var testStream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes("Test document content"));
+        _speFileOperationsMock
+            .Setup(x => x.DownloadFileAsync(document.GraphDriveId!, document.GraphItemId!, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(testStream);
+
+        _textExtractorMock
+            .Setup(x => x.ExtractAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new TextExtractionResult
+            {
+                Success = true,
+                Text = "Extracted text content from the document."
+            });
+
+        var playbook = CreatePlaybook();
+        _playbookServiceMock
+            .Setup(x => x.GetByNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(playbook);
+
+        // Setup scopes with a Summary tool
+        var scopes = CreateScopesWithTools();
+        _scopeResolverMock
+            .Setup(x => x.ResolvePlaybookScopesAsync(playbook.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(scopes);
+
+        // Setup tool handler that returns actual outputs
+        var mockHandler = CreateMockSummaryHandler();
+        _toolHandlerRegistryMock
+            .Setup(x => x.GetHandlersByType(ToolType.Summary))
+            .Returns(new[] { mockHandler.Object });
+
+        // Setup document update
+        _dataverseServiceMock
+            .Setup(x => x.UpdateDocumentAsync(It.IsAny<string>(), It.IsAny<UpdateDocumentRequest>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
     }
 
     #endregion

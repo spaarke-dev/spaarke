@@ -3,7 +3,7 @@
   <metadata>
     <title>Update AppOnlyDocumentAnalysisJobHandler telemetry</title>
     <phase>0: Analysis Workflow Alignment</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>003</dependencies>
     <blocks>none</blocks>
@@ -81,6 +81,22 @@
     The Analysis ID should be added as an optional parameter with default null to maintain
     backward compatibility with any other callers of DocumentTelemetry.
   </notes>
+
+  <completion-notes>
+    <completed-date>2026-01-15</completed-date>
+    <summary>
+      Added AnalysisId to DocumentAnalysisResult class and updated Success factory method.
+      Added optional analysisId parameter to RecordAnalysisJobSuccess and RecordAnalysisJobFailure.
+      Updated job handler to pass result.AnalysisId to telemetry for correlation.
+      Added AnalysisId to success log message for easier debugging.
+    </summary>
+    <files-modified>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Telemetry/DocumentTelemetry.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/AppOnlyDocumentAnalysisJobHandler.cs</file>
+    </files-modified>
+    <tests-passed>22 AppOnlyDocumentAnalysisJobHandler tests passed</tests-passed>
+  </completion-notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

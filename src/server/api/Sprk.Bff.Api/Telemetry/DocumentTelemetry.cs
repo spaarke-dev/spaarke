@@ -256,12 +256,19 @@ public class DocumentTelemetry : IDisposable
     /// <summary>
     /// Record successful app-only analysis job completion.
     /// </summary>
-    public void RecordAnalysisJobSuccess(TimeSpan duration)
+    /// <param name="duration">Job execution duration.</param>
+    /// <param name="analysisId">Optional Dataverse Analysis record ID for correlation.</param>
+    public void RecordAnalysisJobSuccess(TimeSpan duration, Guid? analysisId = null)
     {
         var tags = new TagList
         {
             { "job.status", "success" }
         };
+
+        if (analysisId.HasValue)
+        {
+            tags.Add("analysis.id", analysisId.Value.ToString());
+        }
 
         _analysisJobSuccesses.Add(1, tags);
         _analysisJobDuration.Record(duration.TotalMilliseconds, tags);
@@ -270,13 +277,20 @@ public class DocumentTelemetry : IDisposable
     /// <summary>
     /// Record app-only analysis job failure.
     /// </summary>
-    public void RecordAnalysisJobFailure(string errorCode)
+    /// <param name="errorCode">Error code describing the failure type.</param>
+    /// <param name="analysisId">Optional Dataverse Analysis record ID for correlation (if created before failure).</param>
+    public void RecordAnalysisJobFailure(string errorCode, Guid? analysisId = null)
     {
         var tags = new TagList
         {
             { "job.status", "failed" },
             { "job.error_code", errorCode }
         };
+
+        if (analysisId.HasValue)
+        {
+            tags.Add("analysis.id", analysisId.Value.ToString());
+        }
 
         _analysisJobFailures.Add(1, tags);
     }

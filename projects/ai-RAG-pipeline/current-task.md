@@ -13,19 +13,21 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | None - Project initialized, ready for task 001 |
+| **Task** | Phase 0 Complete - Ready for Phase 1 |
 | **Step** | N/A |
-| **Status** | none |
-| **Next Action** | Say "work on task 001" to start first task |
+| **Status** | completed |
+| **Next Action** | Say "work on task 010" to start Phase 1 (Core Pipeline) |
 
 ### Files Modified This Session
-- `README.md` - Created - Project overview
-- `plan.md` - Created - Implementation plan
-- `CLAUDE.md` - Created - AI context
-- `spec.md` - Created - AI specification
+- `src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs` - Added Analysis record creation (task 002), AnalysisOutput creation (task 003), AnalysisId in result (task 004)
+- `src/server/api/Sprk.Bff.Api/Telemetry/DocumentTelemetry.cs` - Added optional analysisId parameter (task 004)
+- `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/AppOnlyDocumentAnalysisJobHandler.cs` - Pass AnalysisId to telemetry (task 004)
+- `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/AppOnlyAnalysisServiceTests.cs` - Added 7 Phase 0 unit tests (task 005)
+- `projects/ai-RAG-pipeline/tasks/TASK-INDEX.md` - Updated task statuses
+- `projects/ai-RAG-pipeline/tasks/001-005*.poml` - Marked completed
 
 ### Critical Context
-Project initialization complete. Ready to execute first task (001) which will be part of Phase 0: Analysis Workflow Alignment.
+Phase 0 (Analysis Workflow Alignment) is COMPLETE. All 5 tasks finished. Analysis record created before playbook, AnalysisOutput records created for each tool output, AnalysisId flows through to telemetry. Ready for Phase 1 (Core Pipeline) starting with task 010.
 
 ---
 
@@ -33,56 +35,58 @@ Project initialization complete. Ready to execute first task (001) which will be
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | none |
-| **Task File** | N/A |
-| **Title** | N/A |
-| **Phase** | 0: Analysis Workflow Alignment (pending) |
-| **Status** | none |
-| **Started** | — |
+| **Task ID** | Phase 0 Complete |
+| **Task File** | N/A - Phase complete |
+| **Title** | Phase 0: Analysis Workflow Alignment (COMPLETE) |
+| **Phase** | 0 → 1 transition |
+| **Status** | completed |
+| **Started** | 2026-01-15 |
 
 ---
 
 ## Progress
 
-### Completed Steps
+### Completed Steps (Phase 0)
 
-*No steps completed yet - project just initialized*
+- [x] Task 001: Add IDataverseService dependency (already existed)
+- [x] Task 002: Create Analysis record before playbook execution
+- [x] Task 003: Create AnalysisOutput records for tool outputs (dual-write)
+- [x] Task 004: Update telemetry with AnalysisId correlation
+- [x] Task 005: Unit tests for Phase 0 changes (7 new tests, all pass)
 
 ### Current Step
 
-**Step N/A**: Project initialization complete
+**Phase 0 Complete**: All 5 tasks finished
 
-**What this step involves**:
-- Project artifacts created (README, plan, CLAUDE.md, spec.md)
-- Task files to be created
-- Ready to begin Phase 0
+### Files Modified (Phase 0 Complete)
 
-### Files Modified (All Task)
-
-*No task files modified yet*
+- `src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs` - Analysis/AnalysisOutput creation
+- `src/server/api/Sprk.Bff.Api/Telemetry/DocumentTelemetry.cs` - AnalysisId correlation
+- `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/AppOnlyDocumentAnalysisJobHandler.cs` - Pass AnalysisId to telemetry
+- `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/AppOnlyAnalysisServiceTests.cs` - 7 new Phase 0 tests
 
 ### Decisions Made
 
 - 2026-01-15: Include PCF integration (Phase 5) — Reason: Owner confirmed scope
 - 2026-01-15: Include Document Events (Phase 4) — Reason: Owner confirmed scope
 - 2026-01-15: RAG failures use silent warning — Reason: Not critical path
+- 2026-01-15: Best-effort pattern for Analysis creation — Reason: Don't block analysis on Dataverse failures
+- 2026-01-15: Best-effort pattern for AnalysisOutput creation — Reason: Don't block Document field updates on Dataverse failures
 
 ---
 
 ## Next Action
 
-**Next Step**: Start task 001 via task-execute skill
+**Next Phase**: Phase 1 - Core Pipeline
 
-**Pre-conditions**:
-- Task files must be created (pending)
-- TASK-INDEX.md must exist (pending)
+**First Task**: 010 - Create ITextChunkingService interface
 
-**Key Context**:
-- Refer to `plan.md` for phase structure
-- ADR-013, ADR-004 apply to implementation
+**To Start**: Say "work on task 010"
 
-**Expected Output**:
-- First task of Phase 0 executed
+**Phase 1 Overview**:
+- Tasks 010-019 (10 tasks)
+- Core RAG pipeline implementation
+- Text chunking, file indexing, job handler, API endpoint
 
 ---
 
@@ -96,19 +100,23 @@ Project initialization complete. Ready to execute first task (001) which will be
 
 ### Current Session
 - Started: 2026-01-15
-- Focus: Project initialization via project-pipeline
+- Focus: Phase 0 - Analysis Workflow Alignment
 
 ### Key Learnings
 
-*None yet*
+- Task 001 was already complete (IDataverseService already injected)
+- CreateAnalysisAsync pattern found in AnalysisOrchestrationService (lines 1066-1069)
+- CreateAnalysisOutputAsync loops through structuredOutputs dictionary
 
 ### Handoff Notes
 
 Project initialized with:
 - 6 phases planned (Phase 0-5)
-- ~25-35 tasks expected
+- 27 tasks created
 - All prerequisites complete (email-to-document-r2, RAG infrastructure)
 - Branch: work/ai-rag-pipeline
+- 3 tasks completed, 24 remaining
+- Phase 0: 3 of 5 tasks complete
 
 ---
 
@@ -117,16 +125,18 @@ Project initialized with:
 ### Project Context
 - **Project**: ai-RAG-pipeline
 - **Project CLAUDE.md**: [`CLAUDE.md`](./CLAUDE.md)
-- **Task Index**: [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md) (pending creation)
+- **Task Index**: [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md)
 
 ### Applicable ADRs
 - ADR-001: Minimal API - API endpoint patterns
 - ADR-004: Job Contract - Job handler pattern
 - ADR-013: AI Architecture - Extend BFF, no separate service
+- ADR-015: AI Data Governance - Log only identifiers
 
 ### Knowledge Files Loaded
 - `.claude/adr/ADR-013-ai-architecture.md` - AI architecture constraints
-- `.claude/patterns/api/background-workers.md` - Job handler pattern
+- `.claude/adr/ADR-015-ai-data-governance.md` - Data governance (logging)
+- `.claude/constraints/ai.md` - AI constraints summary
 
 ---
 

@@ -3,7 +3,7 @@
   <metadata>
     <title>Unit tests for Phase 0 changes</title>
     <phase>0: Analysis Workflow Alignment</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>003</dependencies>
     <blocks>none</blocks>
@@ -90,6 +90,22 @@
     Verify both happy path and error scenarios.
     Existing tests should continue to pass.
   </notes>
+
+  <completion-notes>
+    <completed-at>2026-01-15</completed-at>
+    <summary>
+      Added 7 new unit tests to AppOnlyAnalysisServiceTests.cs covering Phase 0 functionality:
+      - AnalyzeDocumentAsync_ValidDocument_CreatesAnalysisRecord
+      - AnalyzeDocumentAsync_AnalysisCreationFails_ContinuesWithAnalysis
+      - AnalyzeDocumentAsync_ValidDocument_ReturnsAnalysisIdInResult
+      - AnalyzeDocumentAsync_AnalysisCreationFails_ResultHasNoAnalysisId
+      - AnalyzeDocumentAsync_WithToolOutputs_CreatesAnalysisOutputRecords
+      - AnalyzeDocumentAsync_AnalysisOutputCreationFails_ContinuesAndUpdatesDocument
+      - AnalyzeDocumentAsync_NoAnalysisRecord_DoesNotAttemptAnalysisOutputCreation
+      - DocumentAnalysisResult_Success_WithAnalysisId_IncludesAnalysisId
+      All 25 tests pass. Tests verify best-effort pattern, dual-write, and AnalysisId flow.
+    </summary>
+  </completion-notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

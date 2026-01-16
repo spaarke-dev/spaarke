@@ -3,7 +3,7 @@
   <metadata>
     <title>Create AnalysisOutput records for tool outputs</title>
     <phase>0: Analysis Workflow Alignment</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>002</dependencies>
     <blocks>004, 005</blocks>
@@ -95,6 +95,20 @@
     2. Document entity has summary/fields (existing behavior preserved)
     Both writes should be attempted; failures logged but not blocking.
   </notes>
+
+  <completion-notes>
+    <completed-date>2026-01-15</completed-date>
+    <summary>
+      Added AnalysisOutput creation in ExecutePlaybookAnalysisAsync after tool execution.
+      Uses structuredOutputs dictionary to create one AnalysisOutputEntity per output type.
+      Best-effort pattern: try-catch with LogWarning so Dataverse failures don't block
+      Document field updates. Both document and email analysis flows now use dual-write.
+    </summary>
+    <files-modified>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs</file>
+    </files-modified>
+    <tests-passed>17 AppOnlyAnalysisService tests passed</tests-passed>
+  </completion-notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
