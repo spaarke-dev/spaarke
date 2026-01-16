@@ -381,6 +381,13 @@ public class PlaybookService : IPlaybookService
         _logger.LogInformation("[PLAYBOOK] Query response: StatusCode={StatusCode}, ReasonPhrase={ReasonPhrase}",
             response.StatusCode, response.ReasonPhrase);
 
+        // Log full response body on error to diagnose Dataverse issues
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            _logger.LogError("[PLAYBOOK] Dataverse error response: {StatusCode} - {Body}", response.StatusCode, errorBody);
+        }
+
         response.EnsureSuccessStatusCode();
 
         var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(JsonOptions, cancellationToken);
