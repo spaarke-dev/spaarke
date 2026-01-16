@@ -572,7 +572,7 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
             {/* Footer */}
             <div className={styles.footer}>
                 <span className={styles.versionText}>
-                    v3.10.0 • Built 2026-01-07
+                    v3.10.1 • Built 2026-01-16
                 </span>
                 <div className={styles.footerButtons}>
                     <Button

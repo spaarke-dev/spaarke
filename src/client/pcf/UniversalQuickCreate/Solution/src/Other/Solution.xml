@@ -8,9 +8,9 @@
       <LocalizedName description="Universal Quick Create" languagecode="1033" />
     </LocalizedNames>
     <Descriptions />
-    <Version>3.10.0</Version>
+    <Version>3.10.1</Version>
     <!-- Solution Package Type: Unmanaged(0)/Managed(1)/Both(2)-->
-    <Managed>2</Managed>
+    <Managed>0</Managed>
     <Publisher>
       <!-- Unique Publisher Name of Cds Solution -->
       <UniqueName>Spaarke</UniqueName>
