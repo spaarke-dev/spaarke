@@ -9,7 +9,8 @@ alwaysApply: false
 # Dataverse Deploy
 
 > **Category**: Operations
-> **Last Updated**: December 2025
+> **Last Updated**: January 15, 2026
+> **Primary Guide**: [`docs/guides/PCF-DEPLOYMENT-GUIDE.md`](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md)
 
 ---
 
@@ -99,11 +100,7 @@ Is this a production release with version tracking?
     └── NO → Use "Quick Dev Deploy" above
 ```
 
-**Related Guides:**
-- `docs/ai-knowledge/guides/PCF-QUICK-DEPLOY.md` - Streamlined dev workflow
-- `docs/ai-knowledge/guides/PCF-PRODUCTION-RELEASE.md` - Version management
-- `docs/ai-knowledge/guides/PCF-CUSTOM-PAGE-DEPLOY.md` - Custom Page complexity
-- `docs/ai-knowledge/guides/PCF-TROUBLESHOOTING.md` - Error resolution
+**Primary Guide:** [`docs/guides/PCF-DEPLOYMENT-GUIDE.md`](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md) - Consolidated deployment workflow with critical rules, version management, and troubleshooting.
 
 ---
 
@@ -170,7 +167,7 @@ pac solution pack --managed
 - **Development Testing:** Use `pac pcf push` for quick iteration. Creates a **temporary solution** - does NOT update named solution version.
 - **Production Releases:** Use full solution workflow (build → pack → import). This is the ONLY way to update named solution version.
 - **Version Locations:** Update ALL four: (1) ControlManifest.Input.xml, (2) UI footer, (3) Solution.xml, (4) extracted ControlManifest.xml
-- **Full Guide:** See `docs/ai-knowledge/guides/PCF-V9-PACKAGING.md` Part B for detailed workflow
+- **Full Guide:** See [`docs/guides/PCF-DEPLOYMENT-GUIDE.md`](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md) for complete workflow
 
 ---
 
@@ -367,7 +364,7 @@ Move React/Fluent to `devDependencies` (type-checking only):
 
 **Remove** from `dependencies`: `react`, `react-dom`, any `@fluentui/react-*` packages.
 
-> **Full details**: See `docs/ai-knowledge/guides/PCF-V9-PACKAGING.md`
+> **Full details**: See [`docs/guides/PCF-DEPLOYMENT-GUIDE.md`](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md)
 
 ---
 
@@ -377,7 +374,7 @@ Move React/Fluent to `devDependencies` (type-checking only):
 
 > **⚠️ WARNING**: This is the most complex deployment scenario. When a PCF is used inside a Custom Page, THREE version locations must stay synchronized.
 
-**See detailed guide**: `docs/ai-knowledge/guides/PCF-CUSTOM-PAGE-DEPLOY.md`
+**See detailed guide**: [`docs/guides/PCF-DEPLOYMENT-GUIDE.md`](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md) (Custom Page section)
 
 #### Quick Summary
 
@@ -405,7 +402,7 @@ When you open a Custom Page in Power Apps Studio, it may **downgrade** your PCF 
 
 > **⚠️ CRITICAL**: `pac pcf push` does NOT update your named solution's version. Use this workflow for production releases.
 
-**See detailed guide**: `docs/ai-knowledge/guides/PCF-PRODUCTION-RELEASE.md`
+**See detailed guide**: [`docs/guides/PCF-DEPLOYMENT-GUIDE.md`](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md)
 
 #### Why This Workflow?
 
@@ -688,8 +685,4 @@ gh workflow run deploy-staging.yml -f deploy_plugins=true
 
 | Resource | Purpose |
 |----------|---------|
-| `docs/ai-knowledge/guides/PCF-QUICK-DEPLOY.md` | Streamlined dev workflow |
-| `docs/ai-knowledge/guides/PCF-PRODUCTION-RELEASE.md` | Version management |
-| `docs/ai-knowledge/guides/PCF-CUSTOM-PAGE-DEPLOY.md` | Custom Page complexity |
-| `docs/ai-knowledge/guides/PCF-TROUBLESHOOTING.md` | Error resolution |
-| `docs/ai-knowledge/guides/PCF-V9-PACKAGING.md` | Platform library setup |
+| [`docs/guides/PCF-DEPLOYMENT-GUIDE.md`](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md) | **Primary guide** - Consolidated PCF deployment workflow |
