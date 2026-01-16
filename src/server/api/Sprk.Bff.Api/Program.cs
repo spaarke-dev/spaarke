@@ -401,9 +401,6 @@ if (analysisEnabled && documentIntelligenceEnabled)
         // RagService - Hybrid search service for RAG retrieval (keyword + vector + semantic ranking)
         builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.IRagService, Sprk.Bff.Api.Services.Ai.RagService>();
 
-        // TextChunkingService - Splits documents into chunks for RAG indexing
-        builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.ITextChunkingService, Sprk.Bff.Api.Services.Ai.TextChunkingService>();
-
         // FileIndexingService - Unified RAG indexing pipeline (download → extract → chunk → embed → index)
         builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.IFileIndexingService, Sprk.Bff.Api.Services.Ai.FileIndexingService>();
 
@@ -415,6 +412,10 @@ if (analysisEnabled && documentIntelligenceEnabled)
     {
         Console.WriteLine("⚠ RAG services disabled (requires DocumentIntelligence:AiSearchEndpoint/Key)");
     }
+
+    // TextChunkingService - Splits documents into chunks for RAG indexing and AI tool handlers
+    // Registered outside AI Search block because tool handlers depend on it regardless of RAG config
+    builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.ITextChunkingService, Sprk.Bff.Api.Services.Ai.TextChunkingService>();
 
     // Tool Framework - Dynamic tool loading for AI analysis tools
     var toolFrameworkOptions = builder.Configuration.GetSection(Sprk.Bff.Api.Configuration.ToolFrameworkOptions.SectionName);
