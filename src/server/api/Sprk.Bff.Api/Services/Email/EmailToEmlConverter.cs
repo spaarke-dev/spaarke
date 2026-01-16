@@ -725,7 +725,8 @@ public class EmailToEmlConverter : IEmailToEmlConverter
                     if (string.IsNullOrEmpty(fileName))
                     {
                         // Generate a filename based on content type
-                        var extension = GetExtensionForMimeType(mimePart.ContentType.MimeType);
+                        var mimeType = mimePart.ContentType?.MimeType ?? "application/octet-stream";
+                        var extension = GetExtensionForMimeType(mimeType);
                         fileName = $"attachment_{attachments.Count + 1}{extension}";
                     }
 
@@ -737,16 +738,17 @@ public class EmailToEmlConverter : IEmailToEmlConverter
                     }
 
                     // Evaluate if this attachment should be processed as a document
+                    var attachmentMimeType = mimePart.ContentType?.MimeType ?? "application/octet-stream";
                     var (shouldCreate, skipReason) = EvaluateAttachment(
                         fileName,
-                        mimePart.ContentType.MimeType,
+                        attachmentMimeType,
                         sizeBytes);
 
                     attachments.Add(new EmailAttachmentInfo
                     {
                         AttachmentId = Guid.Empty, // No Dataverse ID for extracted attachments
                         FileName = fileName,
-                        MimeType = mimePart.ContentType.MimeType,
+                        MimeType = attachmentMimeType,
                         Content = contentStream,
                         SizeBytes = sizeBytes,
                         IsInline = isInline,
