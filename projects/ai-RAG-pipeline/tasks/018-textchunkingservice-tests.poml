@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="018" project="ai-RAG-pipeline">
+  <metadata>
+    <title>Unit tests for TextChunkingService</title>
+    <phase>1: Core Pipeline</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>011</dependencies>
+    <blocks>none</blocks>
+    <tags>testing, unit-test, bff-api</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task tags include 'testing', creates new test files</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create comprehensive unit tests for TextChunkingService. Tests should cover:
+    chunk size boundaries, overlap handling, sentence boundary preservation,
+    edge cases (empty text, short text, no sentence boundaries).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in xUnit testing and text processing algorithms.
+    Follow testing constraints for consistent test structure.
+  </role>
+
+  <goal>
+    Comprehensive unit tests for TextChunkingService covering all chunking scenarios.
+    Tests verify correct behavior for all configuration options.
+  </goal>
+
+  <context>
+    <background>
+      TextChunkingService is the single source of truth for text chunking. Thorough
+      testing ensures the algorithm handles all edge cases correctly and won't regress.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/TextChunkingService.cs</file>
+      <file>tests/Sprk.Bff.Api.Tests/Services/Ai/TextChunkingServiceTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="testing">Use xUnit</constraint>
+    <constraint source="testing">Follow Arrange-Act-Assert pattern</constraint>
+    <constraint source="testing">Test names: Method_Scenario_ExpectedResult</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create TextChunkingServiceTests.cs in tests/Sprk.Bff.Api.Tests/Services/Ai/</step>
+    <step order="2">Add test: ChunkTextAsync_EmptyText_ReturnsEmptyList</step>
+    <step order="3">Add test: ChunkTextAsync_TextShorterThanChunkSize_ReturnsSingleChunk</step>
+    <step order="4">Add test: ChunkTextAsync_TextLongerThanChunkSize_ReturnsMultipleChunks</step>
+    <step order="5">Add test: ChunkTextAsync_WithOverlap_ChunksHaveOverlappingContent</step>
+    <step order="6">Add test: ChunkTextAsync_PreserveSentenceBoundaries_ChunksEndAtSentences</step>
+    <step order="7">Add test: ChunkTextAsync_NoSentenceBoundaries_FallsBackToCharacterSplit</step>
+    <step order="8">Add test: ChunkTextAsync_CustomChunkSize_RespectsConfiguration</step>
+    <step order="9">Run tests: dotnet test --filter "TextChunkingService"</step>
+    <step order="10">Update TASK-INDEX.md: change task 018 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Services/Ai/TextChunkingServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">At least 7 unit tests for TextChunkingService</criterion>
+    <criterion testable="true">Tests cover empty, short, and long text scenarios</criterion>
+    <criterion testable="true">Tests verify overlap behavior</criterion>
+    <criterion testable="true">Tests verify sentence boundary preservation</criterion>
+    <criterion testable="true">All tests pass: dotnet test succeeds</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Test data should include:
+    - Empty string
+    - Text shorter than default chunk size (4000)
+    - Text with clear sentence boundaries (periods)
+    - Text without sentence boundaries (one long run)
+    - Various chunk sizes and overlaps
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

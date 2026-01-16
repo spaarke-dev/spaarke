@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="019" project="ai-RAG-pipeline">
+  <metadata>
+    <title>Unit tests for FileIndexingService and RagIndexingJobHandler</title>
+    <phase>1: Core Pipeline</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>014</dependencies>
+    <blocks>none</blocks>
+    <tags>testing, unit-test, bff-api</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task tags include 'testing', creates new test files</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create unit tests for FileIndexingService and RagIndexingJobHandler. Tests should
+    verify correct integration with dependencies (SpeFileStore, TextExtractor, RagService)
+    and proper error handling. Mock external dependencies to isolate unit behavior.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in xUnit testing and mocking patterns.
+    Follow testing constraints for consistent test structure.
+  </role>
+
+  <goal>
+    Comprehensive unit tests for FileIndexingService and RagIndexingJobHandler.
+    Tests verify all three entry points and job handler idempotency.
+  </goal>
+
+  <context>
+    <background>
+      FileIndexingService has three entry points that need testing. RagIndexingJobHandler
+      needs tests for idempotency, error handling, and successful processing.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/FileIndexingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/RagIndexingJobHandler.cs</file>
+      <file>tests/Sprk.Bff.Api.Tests/Services/Ai/FileIndexingServiceTests.cs</file>
+      <file>tests/Sprk.Bff.Api.Tests/Services/Jobs/RagIndexingJobHandlerTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="testing">Use xUnit with Moq for mocking</constraint>
+    <constraint source="testing">Follow Arrange-Act-Assert pattern</constraint>
+    <constraint source="testing">Mock SpeFileStore, TextExtractor, RagService</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create FileIndexingServiceTests.cs</step>
+    <step order="2">Add test: IndexFileAsync_ValidFile_IndexesSuccessfully</step>
+    <step order="3">Add test: IndexFileAppOnlyAsync_ValidFile_IndexesSuccessfully</step>
+    <step order="4">Add test: IndexContentAsync_ValidContent_IndexesSuccessfully</step>
+    <step order="5">Add test: IndexFileAsync_DownloadFails_ReturnsFailure</step>
+    <step order="6">Create RagIndexingJobHandlerTests.cs</step>
+    <step order="7">Add test: ProcessAsync_ValidJob_IndexesAndReturnsSuccess</step>
+    <step order="8">Add test: ProcessAsync_DuplicateJob_SkipsAndReturnsSuccess</step>
+    <step order="9">Add test: ProcessAsync_IndexingFails_ReturnsFailure</step>
+    <step order="10">Run tests: dotnet test --filter "FileIndexingService|RagIndexingJobHandler"</step>
+    <step order="11">Update TASK-INDEX.md: change task 019 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Services/Ai/FileIndexingServiceTests.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Services/Jobs/RagIndexingJobHandlerTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">At least 4 tests for FileIndexingService</criterion>
+    <criterion testable="true">At least 3 tests for RagIndexingJobHandler</criterion>
+    <criterion testable="true">Tests mock external dependencies</criterion>
+    <criterion testable="true">Tests verify idempotency handling in job handler</criterion>
+    <criterion testable="true">All tests pass: dotnet test succeeds</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    For FileIndexingService, mock:
+    - SpeFileStore.DownloadFileAsUserAsync / DownloadFileAsync
+    - ITextExtractor.ExtractTextAsync
+    - ITextChunkingService.ChunkTextAsync
+    - IRagService.IndexDocumentsBatchAsync
+
+    For RagIndexingJobHandler, mock:
+    - IFileIndexingService.IndexFileAppOnlyAsync
+    - IIdempotencyService methods
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

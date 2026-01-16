@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="ai-RAG-pipeline">
+  <metadata>
+    <title>Add EnqueueRagIndexingJobAsync to EmailToDocumentJobHandler</title>
+    <phase>2: Email Integration</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>023</blocks>
+    <tags>bff-api, jobs, worker</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task modifies job handler, integrates with job queue</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Add EnqueueRagIndexingJobAsync method to EmailToDocumentJobHandler that enqueues a
+    RAG indexing job after document creation. The method should be non-blocking - failures
+    are logged as warnings per owner clarification (RAG is enhancement, not critical).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in job processing and the email automation workflow.
+    Follow ADR-004 for job contract patterns.
+  </role>
+
+  <goal>
+    EmailToDocumentJobHandler can enqueue RAG indexing jobs when AutoIndexToRag is enabled.
+    Failures do not block email processing.
+  </goal>
+
+  <context>
+    <background>
+      Email-to-document automation creates documents from email attachments. When
+      AutoIndexToRag is enabled, we should also enqueue a RAG indexing job for the
+      created document so it becomes searchable. Per owner clarification, RAG indexing
+      failures should not fail the email processing job.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/EmailToDocumentJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/JobSubmissionService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/RagIndexingJobHandler.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">Use JobSubmissionService to enqueue jobs</constraint>
+    <constraint source="ADR-004">Create valid JobContract with idempotency key</constraint>
+    <constraint source="project">RAG failures must not block email processing (silent warning)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/constraints/jobs.md</file>
+    </files>
+    <patterns>
+      <pattern name="Job Submission" location="src/server/api/Sprk.Bff.Api/Services/Jobs/JobSubmissionService.cs">
+        Pattern for submitting jobs to Service Bus
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read EmailToDocumentJobHandler.cs to understand where document creation happens</step>
+    <step order="2">Add JobSubmissionService dependency if not already present</step>
+    <step order="3">Add EmailProcessingOptions dependency for AutoIndexToRag flag</step>
+    <step order="4">Create private EnqueueRagIndexingJobAsync method</step>
+    <step order="5">Build RagIndexingPayload with DriveId, ItemId, TenantId, DocumentId, Source="EmailAttachment"</step>
+    <step order="6">Create JobContract with JobType = RagIndexingJobHandler.JobTypeName</step>
+    <step order="7">Wrap in try/catch - log warning on failure, don't throw</step>
+    <step order="8">Call EnqueueRagIndexingJobAsync after document creation if AutoIndexToRag is true</step>
+    <step order="9">Run dotnet build to verify compilation</step>
+    <step order="10">Update TASK-INDEX.md: change task 021 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/EmailToDocumentJobHandler.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">EnqueueRagIndexingJobAsync method exists</criterion>
+    <criterion testable="true">Method is called after document creation when AutoIndexToRag=true</criterion>
+    <criterion testable="true">Method is NOT called when AutoIndexToRag=false</criterion>
+    <criterion testable="true">Errors are caught and logged as warnings, not thrown</criterion>
+    <criterion testable="true">JobContract has correct JobType and idempotency key</criterion>
+    <criterion testable="true">dotnet build succeeds</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Pattern for non-blocking RAG indexing:
+    ```csharp
+    if (_options.AutoIndexToRag)
+    {
+        try
+        {
+            await EnqueueRagIndexingJobAsync(driveId, itemId, tenantId, documentId, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to enqueue RAG indexing job - continuing email processing");
+        }
+    }
+    ```
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

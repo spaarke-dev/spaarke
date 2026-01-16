@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="ai-RAG-pipeline">
+  <metadata>
+    <title>Verify no duplicate ChunkText methods remain</title>
+    <phase>3: Cleanup</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>031</dependencies>
+    <blocks>none</blocks>
+    <tags>verification, documentation</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation/verification task, no code implementation</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Verify that all duplicate ChunkText methods have been removed from the codebase.
+    Search for any remaining instances and document the cleanup completion.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Quality assurance verification.
+  </role>
+
+  <goal>
+    Confirmation that no duplicate ChunkText methods remain.
+    Documentation of cleanup completion.
+  </goal>
+
+  <context>
+    <background>
+      After tasks 030-031, all ChunkText methods should be removed except for the
+      canonical implementation in TextChunkingService. This task verifies completion.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/</file>
+    </relevant-files>
+  </context>
+
+  <steps>
+    <step order="1">Search entire codebase for "ChunkText": grep -r "ChunkText" src/</step>
+    <step order="2">Verify only TextChunkingService contains ChunkText implementation</step>
+    <step order="3">If duplicates found, list them and create follow-up task</step>
+    <step order="4">Document cleanup in projects/ai-RAG-pipeline/notes/cleanup-verification.md</step>
+    <step order="5">Update TASK-INDEX.md: change task 032 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-RAG-pipeline/notes/cleanup-verification.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep confirms only TextChunkingService has ChunkText</criterion>
+    <criterion testable="true">Cleanup documented</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

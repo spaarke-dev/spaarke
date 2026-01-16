@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="ai-RAG-pipeline">
+  <metadata>
+    <title>Add IDataverseService dependency to AppOnlyAnalysisService</title>
+    <phase>0: Analysis Workflow Alignment</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>002</blocks>
+    <tags>bff-api, ai, services, di</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task tags include 'bff-api', modifies service implementation</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Add IDataverseService as a constructor dependency to AppOnlyAnalysisService so it can create
+    Analysis records in Dataverse. This aligns the app-only flow with the OBO flow which already
+    creates these records via AnalysisOrchestrationService.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core dependency injection and the BFF API
+    service architecture. Follow ADR-010 for DI minimalism.
+  </role>
+
+  <goal>
+    AppOnlyAnalysisService has IDataverseService injected and available for use in subsequent tasks.
+    Service compiles and existing tests pass.
+  </goal>
+
+  <context>
+    <background>
+      The AppOnlyAnalysisService currently performs document analysis but does not create
+      sprk_analysis records in Dataverse. This means background analyses are invisible in the
+      Analysis Workspace. Phase 0 aligns this service with the OBO flow by adding Analysis
+      record creation.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IAppOnlyAnalysisService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">Keep DI registrations minimal; prefer concrete types unless seam needed</constraint>
+    <constraint source="ADR-013">Extend BFF API, no separate AI microservice</constraint>
+    <constraint source="project">Must not break existing AnalyzeDocumentAsync functionality</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+    <patterns>
+      <pattern name="Service Registration" location=".claude/patterns/api/service-registration.md">
+        Follow existing service registration patterns in AiModule.cs
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read AppOnlyAnalysisService.cs to understand current constructor dependencies</step>
+    <step order="2">Read AnalysisOrchestrationService.cs to see how it uses IDataverseService for Analysis creation</step>
+    <step order="3">Add IDataverseService parameter to AppOnlyAnalysisService constructor</step>
+    <step order="4">Store as private readonly field _dataverseService</step>
+    <step order="5">Verify AiModule.cs already registers IDataverseService (should be registered)</step>
+    <step order="6">Run dotnet build to verify compilation</step>
+    <step order="7">Run existing tests: dotnet test --filter "AppOnlyAnalysis"</step>
+    <step order="8">Update TASK-INDEX.md: change task 001 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AppOnlyAnalysisService constructor accepts IDataverseService parameter</criterion>
+    <criterion testable="true">Private field _dataverseService is initialized from constructor</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+    <criterion testable="true">Existing AppOnlyAnalysisService tests pass</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference AnalysisOrchestrationService.cs for how IDataverseService is used.
+    The actual Analysis creation logic comes in task 002.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

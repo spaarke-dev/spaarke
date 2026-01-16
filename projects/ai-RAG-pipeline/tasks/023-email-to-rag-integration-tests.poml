@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="ai-RAG-pipeline">
+  <metadata>
+    <title>Integration tests for email-to-RAG flow</title>
+    <phase>2: Email Integration</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>021, 022</dependencies>
+    <blocks>none</blocks>
+    <tags>testing, integration-test, bff-api</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task tags include 'integration-test', creates new test files</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create integration tests for the email-to-RAG flow. Tests should verify that
+    EmailToDocumentJobHandler correctly enqueues RAG indexing jobs when AutoIndexToRag
+    is enabled, and skips when disabled. Mock the job submission service.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in integration testing and the email workflow.
+    Follow testing constraints for consistent test structure.
+  </role>
+
+  <goal>
+    Integration tests verify email-to-RAG flow works correctly with configuration enabled/disabled.
+  </goal>
+
+  <context>
+    <background>
+      The email-to-RAG integration needs integration tests to verify the flow from
+      email processing to RAG job enqueueing. Tests should cover both enabled and
+      disabled scenarios.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/EmailToDocumentJobHandler.cs</file>
+      <file>tests/Sprk.Bff.Api.Tests/Services/Jobs/EmailToDocumentJobHandlerTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="testing">Use xUnit with Moq</constraint>
+    <constraint source="testing">Mock JobSubmissionService</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Check if EmailToDocumentJobHandlerTests.cs exists, extend if so</step>
+    <step order="2">Add test: ProcessAsync_AutoIndexToRagEnabled_EnqueuesRagJob</step>
+    <step order="3">Add test: ProcessAsync_AutoIndexToRagDisabled_DoesNotEnqueueRagJob</step>
+    <step order="4">Add test: ProcessAsync_RagEnqueueFails_ContinuesProcessing</step>
+    <step order="5">Verify JobContract has correct JobType and payload</step>
+    <step order="6">Run tests: dotnet test --filter "EmailToDocument"</step>
+    <step order="7">Update TASK-INDEX.md: change task 023 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Services/Jobs/EmailToDocumentJobHandlerTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">At least 3 integration tests for email-to-RAG flow</criterion>
+    <criterion testable="true">Tests verify job enqueueing when enabled</criterion>
+    <criterion testable="true">Tests verify job NOT enqueued when disabled</criterion>
+    <criterion testable="true">Tests verify failure handling (continues processing)</criterion>
+    <criterion testable="true">All tests pass: dotnet test succeeds</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

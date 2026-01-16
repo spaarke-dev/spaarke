@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="017" project="ai-RAG-pipeline">
+  <metadata>
+    <title>Register services in AiModule.cs</title>
+    <phase>1: Core Pipeline</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>014, 016</dependencies>
+    <blocks>020, 030, 040</blocks>
+    <tags>bff-api, di, config</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task modifies DI configuration, follows established patterns</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Register the new services (TextChunkingService, FileIndexingService, RagIndexingJobHandler,
+    RagTelemetry) in AiModule.cs following ADR-010 DI minimalism patterns. Use appropriate
+    service lifetimes (Scoped for services, Scoped for handlers, Singleton for telemetry).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core dependency injection.
+    Follow ADR-010 for DI minimalism.
+  </role>
+
+  <goal>
+    All new services registered in AiModule.cs with appropriate lifetimes.
+    Application starts successfully with new registrations.
+  </goal>
+
+  <context>
+    <background>
+      Phase 1 created several new services that need to be registered in DI. AiModule.cs
+      handles AI-related service registrations. Job handlers are registered separately
+      in the Workers module but may need coordination.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/WorkersModule.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">Keep registrations minimal; ≤15 non-framework registrations</constraint>
+    <constraint source="ADR-010">Use concrete types unless a seam is required</constraint>
+    <constraint source="project">TextChunkingService: Scoped, FileIndexingService: Scoped</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/api.md</file>
+    </files>
+    <patterns>
+      <pattern name="Service Registration" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs">
+        Existing AI service registrations to follow
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read AiModule.cs to understand current registration patterns</step>
+    <step order="2">Read WorkersModule.cs to see how job handlers are registered</step>
+    <step order="3">Add registration for ITextChunkingService → TextChunkingService (Scoped)</step>
+    <step order="4">Add registration for IFileIndexingService → FileIndexingService (Scoped)</step>
+    <step order="5">Add registration for RagTelemetry (Singleton)</step>
+    <step order="6">Add registration for RagIndexingJobHandler as IJobHandler (Scoped) in WorkersModule</step>
+    <step order="7">Run dotnet build to verify compilation</step>
+    <step order="8">Run dotnet run to verify application starts</step>
+    <step order="9">Update TASK-INDEX.md: change task 017 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/WorkersModule.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ITextChunkingService registered in AiModule.cs</criterion>
+    <criterion testable="true">IFileIndexingService registered in AiModule.cs</criterion>
+    <criterion testable="true">RagTelemetry registered in AiModule.cs</criterion>
+    <criterion testable="true">RagIndexingJobHandler registered in WorkersModule.cs</criterion>
+    <criterion testable="true">dotnet build succeeds</criterion>
+    <criterion testable="true">Application starts without DI errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Service lifetimes:
+    - Scoped: TextChunkingService, FileIndexingService (per-request)
+    - Singleton: RagTelemetry (stateless, shared)
+    - Scoped: RagIndexingJobHandler (per-job execution)
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

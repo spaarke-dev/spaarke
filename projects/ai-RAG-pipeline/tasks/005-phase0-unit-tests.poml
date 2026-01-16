@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="ai-RAG-pipeline">
+  <metadata>
+    <title>Unit tests for Phase 0 changes</title>
+    <phase>0: Analysis Workflow Alignment</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>003</dependencies>
+    <blocks>none</blocks>
+    <tags>testing, unit-test, bff-api</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task tags include 'testing', creates new test files</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create unit tests for the Phase 0 changes to AppOnlyAnalysisService. Tests should verify:
+    1. IDataverseService is called to create Analysis record
+    2. AnalysisOutput records are created for tool outputs
+    3. Document fields are still updated (dual-write)
+    4. Errors in Analysis/AnalysisOutput creation don't block analysis
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in xUnit testing and mocking patterns.
+    Follow testing constraints for consistent test structure.
+  </role>
+
+  <goal>
+    Comprehensive unit tests for AppOnlyAnalysisService Phase 0 changes.
+    Tests verify Analysis record creation, dual-write, and error handling.
+  </goal>
+
+  <context>
+    <background>
+      Phase 0 added significant new behavior to AppOnlyAnalysisService. Unit tests ensure
+      this behavior is correct and won't regress. Focus on mocking IDataverseService to
+      verify the correct methods are called with expected parameters.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs</file>
+      <file>tests/Sprk.Bff.Api.Tests/Services/Ai/AppOnlyAnalysisServiceTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="testing">Use xUnit with Moq for mocking</constraint>
+    <constraint source="testing">Follow Arrange-Act-Assert pattern</constraint>
+    <constraint source="testing">Test names follow: Method_Scenario_ExpectedResult</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Check if AppOnlyAnalysisServiceTests.cs exists; create if not</step>
+    <step order="2">Add test: AnalyzeDocumentAsync_ValidDocument_CreatesAnalysisRecord</step>
+    <step order="3">Add test: AnalyzeDocumentAsync_ValidDocument_CreatesAnalysisOutputRecords</step>
+    <step order="4">Add test: AnalyzeDocumentAsync_ValidDocument_UpdatesDocumentFields (dual-write)</step>
+    <step order="5">Add test: AnalyzeDocumentAsync_AnalysisCreationFails_ContinuesWithAnalysis</step>
+    <step order="6">Add test: AnalyzeDocumentAsync_AnalysisOutputCreationFails_ContinuesAndUpdatesDocument</step>
+    <step order="7">Run tests: dotnet test --filter "AppOnlyAnalysisService"</step>
+    <step order="8">Update TASK-INDEX.md: change task 005 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Services/Ai/AppOnlyAnalysisServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">At least 5 new unit tests for Phase 0 behavior</criterion>
+    <criterion testable="true">Tests verify CreateAnalysisAsync is called</criterion>
+    <criterion testable="true">Tests verify CreateAnalysisOutputAsync is called for outputs</criterion>
+    <criterion testable="true">Tests verify Document fields are updated</criterion>
+    <criterion testable="true">Tests verify error handling doesn't block analysis</criterion>
+    <criterion testable="true">All tests pass: dotnet test succeeds</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Mock IDataverseService to return success/failure as needed.
+    Verify both happy path and error scenarios.
+    Existing tests should continue to pass.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

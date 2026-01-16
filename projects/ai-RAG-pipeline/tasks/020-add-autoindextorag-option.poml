@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="ai-RAG-pipeline">
+  <metadata>
+    <title>Add AutoIndexToRag to EmailProcessingOptions</title>
+    <phase>2: Email Integration</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>017</dependencies>
+    <blocks>021</blocks>
+    <tags>bff-api, config</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task adds configuration option, follows established patterns</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Add AutoIndexToRag boolean property to EmailProcessingOptions configuration class.
+    Default to false for safety - RAG indexing will be opt-in initially. Add corresponding
+    configuration in appsettings.json.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core configuration patterns.
+  </role>
+
+  <goal>
+    AutoIndexToRag configuration option available for email processing.
+    Default is false, can be enabled via configuration.
+  </goal>
+
+  <context>
+    <background>
+      Email-to-document automation needs a configuration flag to enable/disable automatic
+      RAG indexing. This allows controlled rollout - start with indexing disabled, enable
+      after testing in production.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/EmailProcessingOptions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Default to false for safety</constraint>
+    <constraint source="project">Must be configurable via appsettings.json</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read EmailProcessingOptions.cs to understand existing structure</step>
+    <step order="2">Add AutoIndexToRag boolean property with default = false</step>
+    <step order="3">Add XML documentation for the property</step>
+    <step order="4">Update appsettings.json with new configuration (in EmailProcessing section)</step>
+    <step order="5">Run dotnet build to verify compilation</step>
+    <step order="6">Update TASK-INDEX.md: change task 020 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Configuration/EmailProcessingOptions.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/appsettings.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AutoIndexToRag property exists in EmailProcessingOptions</criterion>
+    <criterion testable="true">Default value is false</criterion>
+    <criterion testable="true">Configuration is present in appsettings.json</criterion>
+    <criterion testable="true">dotnet build succeeds</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

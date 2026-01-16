@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="ai-RAG-pipeline">
+  <metadata>
+    <title>Implement DocumentEventHandler.HandleDocumentCreatedAsync</title>
+    <phase>4: Event-Driven</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>017</dependencies>
+    <blocks>041</blocks>
+    <tags>bff-api, events, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task implements event handler with RAG integration</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement DocumentEventHandler.HandleDocumentCreatedAsync to trigger RAG indexing when
+    documents are created outside the email flow. Use FileIndexingService.IndexFileAppOnlyAsync
+    for the actual indexing.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in event handling and document lifecycle.
+  </role>
+
+  <goal>
+    Document creation events trigger RAG indexing via DocumentEventHandler.
+    Documents created via any path become searchable.
+  </goal>
+
+  <context>
+    <background>
+      Documents can be created through various paths (email, direct upload, sync, etc.).
+      The DocumentEventHandler provides a central point to trigger RAG indexing for any
+      document creation. The handler stub already exists; we need to implement it.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/DocumentEventHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/IDocumentEventHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IFileIndexingService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use FileIndexingService.IndexFileAppOnlyAsync for indexing</constraint>
+    <constraint source="project">Handle errors gracefully - don't fail document operations</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read DocumentEventHandler.cs to understand existing structure</step>
+    <step order="2">Read IDocumentEventHandler.cs for the interface contract</step>
+    <step order="3">Add IFileIndexingService dependency to DocumentEventHandler</step>
+    <step order="4">Implement HandleDocumentCreatedAsync: extract driveId, itemId, tenantId from event</step>
+    <step order="5">Call FileIndexingService.IndexFileAppOnlyAsync</step>
+    <step order="6">Handle errors gracefully - log warning, don't throw</step>
+    <step order="7">Add appropriate telemetry</step>
+    <step order="8">Run dotnet build to verify compilation</step>
+    <step order="9">Update TASK-INDEX.md: change task 040 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/DocumentEventHandler.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">HandleDocumentCreatedAsync is implemented</criterion>
+    <criterion testable="true">Method calls FileIndexingService.IndexFileAppOnlyAsync</criterion>
+    <criterion testable="true">Errors are caught and logged, not thrown</criterion>
+    <criterion testable="true">dotnet build succeeds</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The document event should contain:
+    - DriveId and ItemId (for file download)
+    - TenantId (for index routing)
+    - DocumentId (optional, for metadata)
+
+    If any required field is missing, log warning and skip indexing.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

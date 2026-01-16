@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="ai-RAG-pipeline">
+  <metadata>
+    <title>Add POST /api/ai/rag/index-file endpoint</title>
+    <phase>1: Core Pipeline</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>013</dependencies>
+    <blocks>050</blocks>
+    <tags>bff-api, api, endpoints, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task creates new API endpoint per ADR-001/ADR-008</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Add POST /api/ai/rag/index-file endpoint to RagEndpoints.cs for user-triggered RAG indexing.
+    The endpoint should use OBO authentication, accept driveId/itemId parameters, and call
+    FileIndexingService.IndexFileAsync. Follow ADR-008 for endpoint filter authorization.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in ASP.NET Core Minimal API patterns.
+    Follow ADR-001 for Minimal API and ADR-008 for endpoint filters.
+  </role>
+
+  <goal>
+    POST /api/ai/rag/index-file endpoint added with proper authorization, rate limiting,
+    and integration with FileIndexingService.
+  </goal>
+
+  <context>
+    <background>
+      This endpoint enables users (via PCF) to trigger RAG indexing after uploading a file.
+      It uses OBO authentication to download the file on behalf of the user, then indexes
+      the content to Azure AI Search.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/RagEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IFileIndexingService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API pattern with MapPost</constraint>
+    <constraint source="ADR-008">Use endpoint filter for authorization, not global middleware</constraint>
+    <constraint source="ADR-016">Apply rate limiting to AI endpoints</constraint>
+    <constraint source="ADR-019">Return ProblemDetails for errors</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+    </files>
+    <patterns>
+      <pattern name="RAG Endpoints" location="src/server/api/Sprk.Bff.Api/Api/Ai/RagEndpoints.cs">
+        Existing RAG endpoints to follow pattern from
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read RagEndpoints.cs to understand existing endpoint patterns</step>
+    <step order="2">Create IndexFileRequest record with DriveId, ItemId, DocumentId (optional), TenantId</step>
+    <step order="3">Add MapPost("/index-file") to the RAG endpoint group</step>
+    <step order="4">Add .RequireAuthorization() for authenticated access</step>
+    <step order="5">Add .RequireRateLimiting("ai-indexing") policy</step>
+    <step order="6">Implement handler: parse request, create options, call FileIndexingService.IndexFileAsync</step>
+    <step order="7">Return Ok(FileIndexingResult) on success, ProblemDetails on failure</step>
+    <step order="8">Add OpenAPI documentation (.WithName, .WithSummary, .Produces, .ProducesProblem)</step>
+    <step order="9">Run dotnet build to verify compilation</step>
+    <step order="10">Update TASK-INDEX.md: change task 016 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/RagEndpoints.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">POST /api/ai/rag/index-file endpoint exists</criterion>
+    <criterion testable="true">Endpoint requires authentication</criterion>
+    <criterion testable="true">Endpoint has rate limiting applied</criterion>
+    <criterion testable="true">Endpoint calls FileIndexingService.IndexFileAsync with HttpContext</criterion>
+    <criterion testable="true">Returns FileIndexingResult on success</criterion>
+    <criterion testable="true">Returns ProblemDetails on failure</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The endpoint must pass HttpContext to FileIndexingService.IndexFileAsync for OBO
+    token exchange. This enables the service to download the file using the user's
+    delegated permissions via SpeFileStore.DownloadFileAsUserAsync.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

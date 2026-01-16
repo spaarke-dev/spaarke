@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="ai-RAG-pipeline">
+  <metadata>
+    <title>Create RagTelemetry class</title>
+    <phase>1: Core Pipeline</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>022</blocks>
+    <tags>bff-api, telemetry</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task creates telemetry class, follows established patterns</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create RagTelemetry class for RAG-specific telemetry events. Include methods for
+    job success/failure, indexing metrics (chunk count, duration), and search operations.
+    Follow the pattern established by DocumentTelemetry and EmailTelemetry.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in telemetry and observability patterns.
+    Follow ADR-015 for data governance in telemetry.
+  </role>
+
+  <goal>
+    RagTelemetry class created with methods for RAG indexing and search telemetry.
+    Follows existing telemetry class patterns.
+  </goal>
+
+  <context>
+    <background>
+      RAG operations need dedicated telemetry for monitoring indexing jobs, tracking
+      chunk counts, and measuring performance. This telemetry class follows the pattern
+      of DocumentTelemetry and EmailTelemetry.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Telemetry/RagTelemetry.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Telemetry/DocumentTelemetry.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Telemetry/EmailTelemetry.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-015">Log only identifiers, sizes, timings - never document content</constraint>
+    <constraint source="project">Follow existing telemetry class patterns</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+    </files>
+    <patterns>
+      <pattern name="Telemetry Class" location="src/server/api/Sprk.Bff.Api/Telemetry/DocumentTelemetry.cs">
+        Reference pattern for telemetry class structure
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read DocumentTelemetry.cs to understand existing telemetry patterns</step>
+    <step order="2">Create RagTelemetry.cs in Telemetry/</step>
+    <step order="3">Add constructor with ILogger dependency</step>
+    <step order="4">Add RecordRagIndexingJobSuccess(duration, chunkCount)</step>
+    <step order="5">Add RecordRagIndexingJobFailure(errorCode)</step>
+    <step order="6">Add RecordRagIndexingJobSkippedDuplicate()</step>
+    <step order="7">Add RecordRagSearchSuccess(duration, resultCount)</step>
+    <step order="8">Add RecordRagSearchFailure(errorCode)</step>
+    <step order="9">Run dotnet build to verify compilation</step>
+    <step order="10">Update TASK-INDEX.md: change task 015 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Telemetry/RagTelemetry.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">RagTelemetry.cs exists in Telemetry/</criterion>
+    <criterion testable="true">Has methods for job success, failure, skip</criterion>
+    <criterion testable="true">Has methods for search success, failure</criterion>
+    <criterion testable="true">No document content logged (only metrics)</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Telemetry should include:
+    - Operation name (e.g., "RagIndexing", "RagSearch")
+    - Duration in milliseconds
+    - Counts (chunks indexed, results returned)
+    - Error codes for failures
+    - No PII or document content
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

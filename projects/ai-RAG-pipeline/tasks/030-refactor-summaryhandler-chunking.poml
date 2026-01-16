@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="ai-RAG-pipeline">
+  <metadata>
+    <title>Refactor SummaryHandler to use ITextChunkingService</title>
+    <phase>3: Cleanup</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>017</dependencies>
+    <blocks>031</blocks>
+    <tags>bff-api, refactoring, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task modifies core tool handler, removes duplicate code</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Refactor SummaryHandler to use ITextChunkingService instead of its local ChunkText method.
+    This is the first handler to refactor - the pattern established here will be followed
+    for the remaining 6 handlers in task 031.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in refactoring and the AI tool framework.
+  </role>
+
+  <goal>
+    SummaryHandler uses ITextChunkingService for chunking.
+    Local ChunkText method is removed.
+    Existing behavior is preserved.
+  </goal>
+
+  <context>
+    <background>
+      SummaryHandler contains the original ChunkText implementation (lines 479-517) that
+      was extracted to create TextChunkingService. Now we refactor to use the shared service.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/SummaryHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ITextChunkingService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Preserve existing chunking behavior (4000/200 defaults)</constraint>
+    <constraint source="project">Remove duplicate ChunkText method after refactor</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read SummaryHandler.cs to find ChunkText usage locations</step>
+    <step order="2">Add ITextChunkingService to constructor dependencies</step>
+    <step order="3">Replace calls to local ChunkText with _textChunkingService.ChunkTextAsync</step>
+    <step order="4">Update ChunkingOptions to match existing defaults (4000, 200, true)</step>
+    <step order="5">Remove the local ChunkText method (lines 479-517)</step>
+    <step order="6">Run dotnet build to verify compilation</step>
+    <step order="7">Run tests: dotnet test --filter "Summary"</step>
+    <step order="8">Update TASK-INDEX.md: change task 030 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Tools/SummaryHandler.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SummaryHandler constructor accepts ITextChunkingService</criterion>
+    <criterion testable="true">ChunkText calls replaced with ITextChunkingService.ChunkTextAsync</criterion>
+    <criterion testable="true">Local ChunkText method is removed</criterion>
+    <criterion testable="true">dotnet build succeeds</criterion>
+    <criterion testable="true">Existing tests pass</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This establishes the refactoring pattern for task 031.
+    Document any issues encountered for the remaining handlers.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

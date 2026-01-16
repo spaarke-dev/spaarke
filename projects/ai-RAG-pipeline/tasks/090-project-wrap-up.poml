@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="ai-RAG-pipeline">
+  <metadata>
+    <title>Project wrap-up</title>
+    <phase>6: Project Wrap-up</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>005, 019, 023, 032, 041, 051</dependencies>
+    <blocks>none</blocks>
+    <tags>documentation, cleanup</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task runs code-review + adr-check + repo-cleanup quality gates</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Complete project wrap-up: run quality gates (code-review, adr-check), update project
+    status to Complete, create lessons-learned document, and run repo-cleanup to archive
+    ephemeral files.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Project completion and documentation.
+  </role>
+
+  <goal>
+    Project marked complete with all quality gates passed.
+    README updated, lessons documented, repository cleaned.
+  </goal>
+
+  <context>
+    <background>
+      This is the mandatory final task for all projects. It ensures quality gates
+      are passed, documentation is updated, and the repository is cleaned up.
+    </background>
+    <relevant-files>
+      <file>projects/ai-RAG-pipeline/README.md</file>
+      <file>projects/ai-RAG-pipeline/plan.md</file>
+      <file>projects/ai-RAG-pipeline/CLAUDE.md</file>
+      <file>projects/ai-RAG-pipeline/notes/</file>
+    </relevant-files>
+  </context>
+
+  <steps>
+    <step order="1">Run /code-review on all project code files</step>
+    <step order="2">Fix any critical issues identified by code review</step>
+    <step order="3">Run /adr-check to validate architecture compliance</step>
+    <step order="4">Fix any ADR violations</step>
+    <step order="5">Update README.md: set Status to "Complete", update Last Updated date</step>
+    <step order="6">Check all Graduation Criteria checkboxes in README.md</step>
+    <step order="7">Update plan.md: set Status to "Complete"</step>
+    <step order="8">Update CLAUDE.md: set Phase to "Complete", Current Task to "None"</step>
+    <step order="9">Create projects/ai-RAG-pipeline/notes/lessons-learned.md with key insights</step>
+    <step order="10">Run /repo-cleanup projects/ai-RAG-pipeline</step>
+    <step order="11">Review cleanup report and approve removals</step>
+    <step order="12">Verify all task files marked completed in TASK-INDEX.md</step>
+    <step order="13">Final verification: dotnet build and dotnet test pass</step>
+    <step order="14">Update TASK-INDEX.md: change task 090 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-RAG-pipeline/README.md</output>
+    <output type="docs">projects/ai-RAG-pipeline/plan.md</output>
+    <output type="docs">projects/ai-RAG-pipeline/CLAUDE.md</output>
+    <output type="docs">projects/ai-RAG-pipeline/notes/lessons-learned.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">code-review passes with no critical issues</criterion>
+    <criterion testable="true">adr-check passes with no violations</criterion>
+    <criterion testable="true">README.md shows Status: Complete</criterion>
+    <criterion testable="true">All Graduation Criteria checked</criterion>
+    <criterion testable="true">repo-cleanup completed</criterion>
+    <criterion testable="true">All tasks marked ✅ in TASK-INDEX.md</criterion>
+    <criterion testable="true">dotnet build and dotnet test pass</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Lessons learned should capture:
+    - What went well
+    - What could be improved
+    - Key decisions and their outcomes
+    - Any gotchas or warnings for similar work
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

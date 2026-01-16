@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="ai-RAG-pipeline">
+  <metadata>
+    <title>Create AnalysisOutput records for tool outputs</title>
+    <phase>0: Analysis Workflow Alignment</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>004, 005</blocks>
+    <tags>bff-api, ai, dataverse, services</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task modifies core service logic, creates Dataverse records</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Modify AppOnlyAnalysisService to create sprk_analysisoutput records for each tool output,
+    linked to the Analysis record created in task 002. Implement dual-write pattern: outputs
+    go to both AnalysisOutput records AND Document fields (for backward compatibility).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse integration and dual-write patterns.
+    Follow ADR-013 for AI architecture and ADR-015 for data governance.
+  </role>
+
+  <goal>
+    Tool outputs from playbook execution create AnalysisOutput records linked to the Analysis.
+    Document entity fields are also updated (dual-write for backward compatibility).
+  </goal>
+
+  <context>
+    <background>
+      The OBO flow creates AnalysisOutput records that appear in the Analysis Workspace.
+      The app-only flow currently only updates Document fields. We need dual-write to maintain
+      backward compatibility while adding Analysis Workspace visibility.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Dataverse/IDataverseService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Follow existing AI architecture patterns</constraint>
+    <constraint source="ADR-015">Do not log document content in telemetry</constraint>
+    <constraint source="project">Must dual-write: AnalysisOutput AND Document fields</constraint>
+    <constraint source="project">Must link AnalysisOutput to Analysis record from task 002</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+    <patterns>
+      <pattern name="AnalysisOutput Creation" location="src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs">
+        See CreateAnalysisOutputAsync call pattern after tool execution
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read AnalysisOrchestrationService.cs to understand AnalysisOutput creation pattern</step>
+    <step order="2">Identify where tool outputs are processed in AppOnlyAnalysisService</step>
+    <step order="3">Add call to CreateAnalysisOutputAsync for each tool output, using Analysis ID from task 002</step>
+    <step order="4">Preserve existing Document field updates (sprk_summary, sprk_aifields, etc.)</step>
+    <step order="5">Ensure dual-write: both AnalysisOutput and Document fields updated</step>
+    <step order="6">Add appropriate error handling - AnalysisOutput failure should not block Document update</step>
+    <step order="7">Run dotnet build to verify compilation</step>
+    <step order="8">Update TASK-INDEX.md: change task 003 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Each tool output creates an AnalysisOutput record</criterion>
+    <criterion testable="true">AnalysisOutput records are linked to Analysis via sprk_analysisid</criterion>
+    <criterion testable="true">Document fields (sprk_summary, etc.) continue to be updated</criterion>
+    <criterion testable="true">Failure to create AnalysisOutput does not block Document update</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The dual-write pattern ensures:
+    1. Analysis Workspace shows the analysis (new behavior)
+    2. Document entity has summary/fields (existing behavior preserved)
+    Both writes should be attempted; failures logged but not blocking.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="ai-RAG-pipeline">
+  <metadata>
+    <title>Create ITextChunkingService interface</title>
+    <phase>1: Core Pipeline</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>011</blocks>
+    <tags>bff-api, ai, services</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task creates new service interface, foundational for RAG pipeline</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create ITextChunkingService interface that defines the contract for text chunking operations.
+    The interface should support configurable chunk size, overlap, and sentence boundary preservation.
+    This will be the single source of truth for chunking logic across the codebase.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in interface design and the AI tool framework.
+    Follow ADR-010 for DI patterns and ADR-013 for AI architecture.
+  </role>
+
+  <goal>
+    ITextChunkingService interface created with clear contract for chunking operations.
+    Supporting types (ChunkingOptions, TextChunk) defined.
+  </goal>
+
+  <context>
+    <background>
+      Currently, chunking logic is duplicated across 7+ tool handlers (SummaryHandler, etc.).
+      This interface defines the contract for a shared chunking service that will consolidate
+      this logic. See spec.md for chunking defaults (4000 chars, 200 overlap).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/SummaryHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ITextChunkingService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">Interface should be minimal; don't over-abstract</constraint>
+    <constraint source="ADR-013">Part of AI services within BFF API</constraint>
+    <constraint source="project">Defaults: 4000 char chunks, 200 char overlap, preserve sentence boundaries</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>projects/ai-RAG-pipeline/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing Chunking" location="src/server/api/Sprk.Bff.Api/Services/Ai/Tools/SummaryHandler.cs:479-517">
+        Current chunking implementation to extract interface from
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read SummaryHandler.cs ChunkText method (lines 479-517) to understand current logic</step>
+    <step order="2">Create ITextChunkingService.cs in Services/Ai/</step>
+    <step order="3">Define ChunkingOptions record with ChunkSize, Overlap, PreserveSentenceBoundaries</step>
+    <step order="4">Define TextChunk record with Content, Index, StartPosition, EndPosition</step>
+    <step order="5">Define ITextChunkingService interface with ChunkTextAsync method</step>
+    <step order="6">Add XML documentation for all public members</step>
+    <step order="7">Run dotnet build to verify compilation</step>
+    <step order="8">Update TASK-INDEX.md: change task 010 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ITextChunkingService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ITextChunkingService.cs exists in Services/Ai/</criterion>
+    <criterion testable="true">Interface defines ChunkTextAsync method</criterion>
+    <criterion testable="true">ChunkingOptions record defined with configurable parameters</criterion>
+    <criterion testable="true">TextChunk record defined with chunk metadata</criterion>
+    <criterion testable="true">XML documentation present on all public members</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The interface should be simple - just one method for chunking.
+    Configuration is via ChunkingOptions parameter, with sensible defaults.
+    Reference spec.md for the default values (4000/200/true).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

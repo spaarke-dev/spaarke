@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="ai-RAG-pipeline">
+  <metadata>
+    <title>Add RAG telemetry to EmailTelemetry</title>
+    <phase>2: Email Integration</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>015</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, telemetry</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task updates telemetry class, follows established patterns</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Add RAG-related telemetry methods to EmailTelemetry class for tracking RAG job
+    enqueueing from email processing. Include methods for success and failure scenarios.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in telemetry patterns.
+    Follow ADR-015 for data governance in telemetry.
+  </role>
+
+  <goal>
+    EmailTelemetry has methods for RAG job enqueueing telemetry.
+    Email-to-RAG flow is observable via telemetry.
+  </goal>
+
+  <context>
+    <background>
+      When email processing enqueues RAG indexing jobs, we need telemetry to track
+      success/failure rates. This helps monitor the email-to-RAG integration.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Telemetry/EmailTelemetry.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-015">Log only identifiers, not content</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read EmailTelemetry.cs to understand existing structure</step>
+    <step order="2">Add RecordRagJobEnqueued() method</step>
+    <step order="3">Add RecordRagJobEnqueueFailure(errorCode) method</step>
+    <step order="4">Add RecordRagJobSkipped(reason) method for when AutoIndexToRag=false</step>
+    <step order="5">Run dotnet build to verify compilation</step>
+    <step order="6">Update TASK-INDEX.md: change task 022 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Telemetry/EmailTelemetry.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">RecordRagJobEnqueued method exists</criterion>
+    <criterion testable="true">RecordRagJobEnqueueFailure method exists</criterion>
+    <criterion testable="true">Methods log appropriate telemetry events</criterion>
+    <criterion testable="true">dotnet build succeeds</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

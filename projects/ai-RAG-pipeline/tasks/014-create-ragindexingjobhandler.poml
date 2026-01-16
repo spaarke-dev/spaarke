@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="ai-RAG-pipeline">
+  <metadata>
+    <title>Create RagIndexingJobHandler</title>
+    <phase>1: Core Pipeline</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>013</dependencies>
+    <blocks>017, 019</blocks>
+    <tags>bff-api, jobs, worker, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task creates job handler with idempotency requirements per ADR-004</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create RagIndexingJobHandler implementing IJobHandler for background RAG indexing jobs.
+    Follow ADR-004 for job contract patterns, implement idempotency, and integrate with
+    FileIndexingService.IndexFileAppOnlyAsync for the actual indexing work.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in background job processing and the job contract
+    pattern. Follow ADR-004 for job patterns and ADR-017 for status persistence.
+  </role>
+
+  <goal>
+    RagIndexingJobHandler created following the AppOnlyDocumentAnalysisJobHandler pattern.
+    Handler implements idempotency, telemetry, and proper error handling.
+  </goal>
+
+  <context>
+    <background>
+      This job handler processes RAG indexing requests from the Service Bus queue. It's used
+      by email automation and document events to trigger background indexing. The handler
+      must be idempotent to handle message replays safely.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/RagIndexingJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/AppOnlyDocumentAnalysisJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/IJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IFileIndexingService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">Implement IJobHandler interface, use Job Contract schema</constraint>
+    <constraint source="ADR-004">Handler must be idempotent - safe under message replays</constraint>
+    <constraint source="ADR-004">Propagate CorrelationId from job to downstream calls</constraint>
+    <constraint source="ADR-017">Record job status transitions</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-017-job-status.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/patterns/api/background-workers.md</file>
+    </files>
+    <patterns>
+      <pattern name="Job Handler" location="src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/AppOnlyDocumentAnalysisJobHandler.cs">
+        Reference implementation for job handler pattern
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read AppOnlyDocumentAnalysisJobHandler.cs as reference pattern</step>
+    <step order="2">Create RagIndexingJobHandler.cs in Services/Jobs/Handlers/</step>
+    <step order="3">Define RagIndexingPayload record with DriveId, ItemId, TenantId, DocumentId (optional), Source</step>
+    <step order="4">Implement IJobHandler interface with JobType = "RagIndexing"</step>
+    <step order="5">Add constructor dependencies: IFileIndexingService, IIdempotencyService, RagTelemetry (task 015), ILogger</step>
+    <step order="6">Implement ProcessAsync: parse payload, check idempotency, call FileIndexingService.IndexFileAppOnlyAsync</step>
+    <step order="7">Idempotency key pattern: rag-index-{driveId}-{itemId}</step>
+    <step order="8">Add telemetry calls for success/failure</step>
+    <step order="9">Handle permanent vs transient failures (return Poisoned vs Failure)</step>
+    <step order="10">Run dotnet build to verify compilation</step>
+    <step order="11">Update TASK-INDEX.md: change task 014 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/RagIndexingJobHandler.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">RagIndexingJobHandler.cs exists in Services/Jobs/Handlers/</criterion>
+    <criterion testable="true">Handler implements IJobHandler interface</criterion>
+    <criterion testable="true">JobType constant is "RagIndexing"</criterion>
+    <criterion testable="true">Idempotency check prevents duplicate processing</criterion>
+    <criterion testable="true">Handler calls FileIndexingService.IndexFileAppOnlyAsync</criterion>
+    <criterion testable="true">Telemetry records success/failure</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Follow the exact pattern from AppOnlyDocumentAnalysisJobHandler:
+    1. Parse payload
+    2. Check idempotency (already processed?)
+    3. Try to acquire processing lock
+    4. Do work (call FileIndexingService)
+    5. Mark as processed
+    6. Release lock
+    7. Return appropriate JobOutcome
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

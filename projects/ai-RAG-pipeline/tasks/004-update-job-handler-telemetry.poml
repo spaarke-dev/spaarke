@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="ai-RAG-pipeline">
+  <metadata>
+    <title>Update AppOnlyDocumentAnalysisJobHandler telemetry</title>
+    <phase>0: Analysis Workflow Alignment</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>003</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, telemetry, jobs</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task updates telemetry only, no core logic changes</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Update AppOnlyDocumentAnalysisJobHandler and DocumentTelemetry to include the Analysis ID
+    in telemetry events. This enables tracing from job to Analysis record in Dataverse.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in telemetry and observability patterns.
+    Follow ADR-015 for data governance in telemetry.
+  </role>
+
+  <goal>
+    Job handler telemetry includes Analysis ID for correlation.
+    Operators can trace job execution to specific Analysis records.
+  </goal>
+
+  <context>
+    <background>
+      With Analysis records now being created (tasks 002-003), we need telemetry to include
+      the Analysis ID so operators can correlate job executions with Analysis Workspace entries.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/AppOnlyDocumentAnalysisJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Telemetry/DocumentTelemetry.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-015">Log only identifiers (Analysis ID), not content</constraint>
+    <constraint source="project">Analysis ID may be null if creation failed - handle gracefully</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/constraints/jobs.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read AppOnlyDocumentAnalysisJobHandler.cs to understand current telemetry calls</step>
+    <step order="2">Read DocumentTelemetry.cs to understand existing telemetry methods</step>
+    <step order="3">Add AnalysisId parameter to relevant RecordAnalysisJob* methods in DocumentTelemetry</step>
+    <step order="4">Update job handler to pass Analysis ID (from AnalyzeDocumentAsync result) to telemetry</step>
+    <step order="5">Handle null Analysis ID gracefully (if creation failed in task 002)</step>
+    <step order="6">Run dotnet build to verify compilation</step>
+    <step order="7">Update TASK-INDEX.md: change task 004 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/AppOnlyDocumentAnalysisJobHandler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Telemetry/DocumentTelemetry.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">DocumentTelemetry methods accept optional AnalysisId parameter</criterion>
+    <criterion testable="true">Job handler passes Analysis ID to telemetry when available</criterion>
+    <criterion testable="true">Null Analysis ID is handled without errors</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The Analysis ID should be added as an optional parameter with default null to maintain
+    backward compatibility with any other callers of DocumentTelemetry.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

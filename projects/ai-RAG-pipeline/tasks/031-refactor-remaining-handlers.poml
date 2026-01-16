@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="ai-RAG-pipeline">
+  <metadata>
+    <title>Refactor remaining tool handlers (6 handlers)</title>
+    <phase>3: Cleanup</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>032</blocks>
+    <tags>bff-api, refactoring, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task modifies multiple core files, bulk refactoring</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Refactor the remaining 6 tool handlers that have duplicate ChunkText methods to use
+    ITextChunkingService. Follow the pattern established in task 030 with SummaryHandler.
+    Remove all duplicate ChunkText methods.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in refactoring and the AI tool framework.
+  </role>
+
+  <goal>
+    All tool handlers use ITextChunkingService for chunking.
+    No duplicate ChunkText methods remain in the codebase.
+  </goal>
+
+  <context>
+    <background>
+      Multiple tool handlers have copied the ChunkText logic. This task consolidates
+      them all to use the shared service.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Follow pattern from task 030</constraint>
+    <constraint source="project">All handlers must use shared service when complete</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Search for all files with ChunkText methods: grep -r "ChunkText" Services/Ai/Tools/</step>
+    <step order="2">For each handler with ChunkText (approximately 6): repeat refactoring pattern from task 030</step>
+    <step order="3">Add ITextChunkingService dependency to each handler</step>
+    <step order="4">Replace ChunkText calls with ITextChunkingService.ChunkTextAsync</step>
+    <step order="5">Remove local ChunkText methods</step>
+    <step order="6">Run dotnet build after each handler to catch issues early</step>
+    <step order="7">Run full test suite: dotnet test</step>
+    <step order="8">Update TASK-INDEX.md: change task 031 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Tools/*.cs (multiple files)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All handlers use ITextChunkingService</criterion>
+    <criterion testable="true">No ChunkText methods remain in Tools/ directory</criterion>
+    <criterion testable="true">dotnet build succeeds</criterion>
+    <criterion testable="true">All tests pass</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Handlers likely to have ChunkText:
+    - Various analysis handlers
+    - Document profile handlers
+    - Any handler that processes large text
+
+    Use grep to find all instances and track which ones are refactored.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

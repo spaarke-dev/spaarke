@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="ai-RAG-pipeline">
+  <metadata>
+    <title>E2E tests for document event to RAG flow</title>
+    <phase>4: Event-Driven</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>040</dependencies>
+    <blocks>none</blocks>
+    <tags>testing, integration-test, bff-api</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task tags include 'integration-test', creates new test files</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create E2E tests for the document event to RAG flow. Tests should verify that
+    DocumentEventHandler correctly triggers RAG indexing when documents are created.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in integration testing and event handling.
+    Follow testing constraints for consistent test structure.
+  </role>
+
+  <goal>
+    E2E tests verify document event → RAG indexing flow works correctly.
+  </goal>
+
+  <context>
+    <background>
+      The document event flow needs E2E testing to ensure events correctly trigger
+      RAG indexing. Mock the FileIndexingService to verify it's called correctly.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/DocumentEventHandler.cs</file>
+      <file>tests/Sprk.Bff.Api.Tests/Services/Jobs/DocumentEventHandlerTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="testing">Use xUnit with Moq</constraint>
+    <constraint source="testing">Mock FileIndexingService</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create or extend DocumentEventHandlerTests.cs</step>
+    <step order="2">Add test: HandleDocumentCreatedAsync_ValidEvent_CallsFileIndexingService</step>
+    <step order="3">Add test: HandleDocumentCreatedAsync_MissingDriveId_SkipsIndexing</step>
+    <step order="4">Add test: HandleDocumentCreatedAsync_IndexingFails_DoesNotThrow</step>
+    <step order="5">Run tests: dotnet test --filter "DocumentEventHandler"</step>
+    <step order="6">Update TASK-INDEX.md: change task 041 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Services/Jobs/DocumentEventHandlerTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">At least 3 tests for document event → RAG flow</criterion>
+    <criterion testable="true">Tests verify FileIndexingService is called correctly</criterion>
+    <criterion testable="true">Tests verify error handling</criterion>
+    <criterion testable="true">All tests pass: dotnet test succeeds</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

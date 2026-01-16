@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="ai-RAG-pipeline">
+  <metadata>
+    <title>Implement FileIndexingService</title>
+    <phase>1: Core Pipeline</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>011, 012</dependencies>
+    <blocks>014, 016</blocks>
+    <tags>bff-api, ai, services, azure-openai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task implements core RAG pipeline with multiple integrations</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement FileIndexingService with three entry points converging to a shared pipeline.
+    The service should: download file (OBO or app-only), extract text, chunk text using
+    ITextChunkingService, generate embeddings, and index via IRagService.IndexDocumentsBatchAsync.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in RAG pipelines, Azure OpenAI embeddings, and
+    Azure AI Search indexing. Follow ADR-007 for file access and ADR-013 for AI architecture.
+  </role>
+
+  <goal>
+    FileIndexingService fully implemented with three entry points producing identical results.
+    Service integrates with TextExtractor, TextChunkingService, EmbeddingCache, and RagService.
+  </goal>
+
+  <context>
+    <background>
+      This is the core RAG indexing implementation. Three entry points handle different
+      scenarios (OBO API call, app-only background job, pre-extracted content) but all
+      converge to the same pipeline: chunk → build KnowledgeDocument → embed → batch index.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IFileIndexingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/FileIndexingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IRagService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ITextExtractor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ITextChunkingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IEmbeddingCache.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Spe/SpeFileStore.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-007">Use SpeFileStore for file download (DownloadFileAsUserAsync or DownloadFileAsync)</constraint>
+    <constraint source="ADR-013">Extend BFF API, integrate with existing AI services</constraint>
+    <constraint source="ADR-014">Use EmbeddingCache for embedding results</constraint>
+    <constraint source="ADR-015">Do not log document content</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/ai/text-extraction.md</file>
+    </files>
+    <patterns>
+      <pattern name="Text Extraction" location="src/server/api/Sprk.Bff.Api/Services/Ai/TextExtractorService.cs">
+        Use ITextExtractor.ExtractTextAsync for file content extraction
+      </pattern>
+      <pattern name="RAG Indexing" location="src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs">
+        Use IRagService.IndexDocumentsBatchAsync for bulk indexing
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create FileIndexingService.cs in Services/Ai/</step>
+    <step order="2">Add constructor dependencies: SpeFileStore, ITextExtractor, ITextChunkingService, IRagService, IEmbeddingCache, ILogger</step>
+    <step order="3">Implement private SharedPipelineAsync(text, fileName, options) - shared chunking/indexing logic</step>
+    <step order="4">Implement IndexFileAsync - download via OBO, extract text, call shared pipeline</step>
+    <step order="5">Implement IndexFileAppOnlyAsync - download via app-only, extract text, call shared pipeline</step>
+    <step order="6">Implement IndexContentAsync - skip download, use provided content, call shared pipeline</step>
+    <step order="7">Build KnowledgeDocument objects with: tenantId, documentId, fileName, chunkIndex, content, embedding</step>
+    <step order="8">Add telemetry for chunk count, indexing duration (no content per ADR-015)</step>
+    <step order="9">Handle errors gracefully with appropriate FileIndexingResult</step>
+    <step order="10">Run dotnet build to verify compilation</step>
+    <step order="11">Update TASK-INDEX.md: change task 013 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/FileIndexingService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FileIndexingService.cs exists and implements IFileIndexingService</criterion>
+    <criterion testable="true">IndexFileAsync downloads file via SpeFileStore.DownloadFileAsUserAsync</criterion>
+    <criterion testable="true">IndexFileAppOnlyAsync downloads file via SpeFileStore.DownloadFileAsync</criterion>
+    <criterion testable="true">IndexContentAsync accepts pre-extracted content</criterion>
+    <criterion testable="true">All three methods use the same shared pipeline</criterion>
+    <criterion testable="true">KnowledgeDocuments are created with embeddings and indexed via RagService</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Pipeline flow:
+    1. Download file (entry point specific) or use provided content
+    2. Extract text via ITextExtractor
+    3. Chunk text via ITextChunkingService
+    4. For each chunk: create KnowledgeDocument, get embedding from cache or generate
+    5. Batch index via IRagService.IndexDocumentsBatchAsync
+    6. Return FileIndexingResult with statistics
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

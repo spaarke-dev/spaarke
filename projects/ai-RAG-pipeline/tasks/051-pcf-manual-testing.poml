@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="ai-RAG-pipeline">
+  <metadata>
+    <title>Manual UI testing for PCF to RAG flow</title>
+    <phase>5: PCF Integration</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>050</dependencies>
+    <blocks>none</blocks>
+    <tags>testing, manual-test, pcf</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Manual testing task, no code implementation</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Perform manual UI testing to verify the PCF to RAG flow works correctly. Upload a
+    file via the PCF control and verify it gets indexed to Azure AI Search.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Quality assurance testing.
+  </role>
+
+  <goal>
+    Manual verification that PCF upload → RAG indexing flow works end-to-end.
+    Document test results.
+  </goal>
+
+  <context>
+    <background>
+      After implementing the PCF RAG integration, we need manual testing to verify
+      the end-to-end flow works correctly in a real Dataverse environment.
+    </background>
+    <relevant-files>
+      <file>projects/ai-RAG-pipeline/notes/manual-testing.md</file>
+    </relevant-files>
+  </context>
+
+  <steps>
+    <step order="1">Deploy PCF control to Dataverse dev environment</step>
+    <step order="2">Navigate to form with upload control</step>
+    <step order="3">Upload a test document (PDF or DOCX)</step>
+    <step order="4">Check browser console for RAG indexing log messages</step>
+    <step order="5">Wait 30 seconds for indexing to complete</step>
+    <step order="6">Test search via /api/ai/rag/search for content from uploaded document</step>
+    <step order="7">Document results in projects/ai-RAG-pipeline/notes/manual-testing.md</step>
+    <step order="8">Update TASK-INDEX.md: change task 051 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-RAG-pipeline/notes/manual-testing.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">File upload succeeds</criterion>
+    <criterion testable="true">RAG indexing call is made (visible in console or network tab)</criterion>
+    <criterion testable="true">Indexed document is searchable</criterion>
+    <criterion testable="true">Test results documented</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Test checklist:
+    - [ ] Upload small PDF (<1MB)
+    - [ ] Upload medium DOCX (1-5MB)
+    - [ ] Verify console shows no errors
+    - [ ] Verify document searchable via RAG search
+    - [ ] Test with RAG endpoint unavailable (should not block upload)
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>
