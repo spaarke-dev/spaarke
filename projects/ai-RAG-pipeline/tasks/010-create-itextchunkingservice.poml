@@ -3,7 +3,7 @@
   <metadata>
     <title>Create ITextChunkingService interface</title>
     <phase>1: Core Pipeline</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>011</blocks>
@@ -94,6 +94,21 @@
     Configuration is via ChunkingOptions parameter, with sensible defaults.
     Reference spec.md for the default values (4000/200/true).
   </notes>
+
+  <completion-notes>
+    <completed-at>2026-01-15</completed-at>
+    <summary>
+      Created ITextChunkingService.cs with:
+      - ITextChunkingService interface with ChunkTextAsync method
+      - ChunkingOptions record (ChunkSize=4000, Overlap=200, PreserveSentenceBoundaries=true)
+      - TextChunk record (Content, Index, StartPosition, EndPosition)
+      - Full XML documentation on all public members
+      Build succeeded with 0 warnings, 0 errors.
+    </summary>
+    <files-created>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ITextChunkingService.cs</file>
+    </files-created>
+  </completion-notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

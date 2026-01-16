@@ -62,6 +62,11 @@ public class EmailTelemetry : IDisposable
     private readonly Counter<long> _aiJobsEnqueued;
     private readonly Counter<long> _aiJobEnqueueFailures;
 
+    // RAG job enqueueing metrics
+    private readonly Counter<long> _ragJobsEnqueued;
+    private readonly Counter<long> _ragJobEnqueueFailures;
+    private readonly Counter<long> _ragJobsSkipped;
+
     // DLQ metrics
     private readonly Counter<long> _dlqListOperations;
     private readonly Counter<long> _dlqRedriveAttempts;
@@ -214,6 +219,24 @@ public class EmailTelemetry : IDisposable
             name: "email.ai_job.enqueue_failures",
             unit: "{failure}",
             description: "Failed attempts to enqueue AI analysis jobs");
+
+        // ═══════════════════════════════════════════════════════════════════════════
+        // RAG Job Enqueueing Metrics
+        // ═══════════════════════════════════════════════════════════════════════════
+        _ragJobsEnqueued = _meter.CreateCounter<long>(
+            name: "email.rag_job.enqueued",
+            unit: "{job}",
+            description: "RAG indexing jobs enqueued for email documents");
+
+        _ragJobEnqueueFailures = _meter.CreateCounter<long>(
+            name: "email.rag_job.enqueue_failures",
+            unit: "{failure}",
+            description: "Failed attempts to enqueue RAG indexing jobs");
+
+        _ragJobsSkipped = _meter.CreateCounter<long>(
+            name: "email.rag_job.skipped",
+            unit: "{job}",
+            description: "RAG indexing jobs skipped (disabled or already indexed)");
 
         // ═══════════════════════════════════════════════════════════════════════════
         // DLQ Metrics
@@ -595,6 +618,38 @@ public class EmailTelemetry : IDisposable
         _aiJobEnqueueFailures.Add(1,
             new KeyValuePair<string, object?>("email.document_type", documentType),
             new KeyValuePair<string, object?>("email.error_code", errorCode));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // RAG Job Enqueueing Methods
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Record RAG indexing job successfully enqueued for an email document.
+    /// </summary>
+    public void RecordRagJobEnqueued()
+    {
+        _ragJobsEnqueued.Add(1);
+    }
+
+    /// <summary>
+    /// Record failed attempt to enqueue RAG indexing job.
+    /// </summary>
+    /// <param name="errorCode">Error category (e.g., "enqueue_error", "validation_error")</param>
+    public void RecordRagJobEnqueueFailure(string errorCode)
+    {
+        _ragJobEnqueueFailures.Add(1,
+            new KeyValuePair<string, object?>("email.error_code", errorCode));
+    }
+
+    /// <summary>
+    /// Record RAG indexing job skipped.
+    /// </summary>
+    /// <param name="reason">Reason for skipping (e.g., "config_disabled", "already_indexed")</param>
+    public void RecordRagJobSkipped(string reason)
+    {
+        _ragJobsSkipped.Add(1,
+            new KeyValuePair<string, object?>("email.skip_reason", reason));
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

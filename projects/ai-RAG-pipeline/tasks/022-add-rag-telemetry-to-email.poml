@@ -3,7 +3,7 @@
   <metadata>
     <title>Add RAG telemetry to EmailTelemetry</title>
     <phase>2: Email Integration</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1</estimated-hours>
     <dependencies>015</dependencies>
     <blocks>none</blocks>

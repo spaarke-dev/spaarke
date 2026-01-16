@@ -13,21 +13,24 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Phase 0 Complete - Ready for Phase 1 |
+| **Task** | 017 Complete - Phase 1 Core Done |
 | **Step** | N/A |
 | **Status** | completed |
-| **Next Action** | Say "work on task 010" to start Phase 1 (Core Pipeline) |
+| **Next Action** | Say "continue" to start task 018 (Unit tests for TextChunkingService) |
 
 ### Files Modified This Session
-- `src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs` - Added Analysis record creation (task 002), AnalysisOutput creation (task 003), AnalysisId in result (task 004)
-- `src/server/api/Sprk.Bff.Api/Telemetry/DocumentTelemetry.cs` - Added optional analysisId parameter (task 004)
-- `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/AppOnlyDocumentAnalysisJobHandler.cs` - Pass AnalysisId to telemetry (task 004)
-- `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/AppOnlyAnalysisServiceTests.cs` - Added 7 Phase 0 unit tests (task 005)
+- `src/server/api/Sprk.Bff.Api/Services/Ai/ITextChunkingService.cs` - Created interface (task 010)
+- `src/server/api/Sprk.Bff.Api/Services/Ai/TextChunkingService.cs` - Created implementation (task 011)
+- `src/server/api/Sprk.Bff.Api/Services/Ai/IFileIndexingService.cs` - Created interface (task 012)
+- `src/server/api/Sprk.Bff.Api/Services/Ai/FileIndexingService.cs` - Created implementation (task 013)
+- `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/RagIndexingJobHandler.cs` - Created job handler (task 014)
+- `src/server/api/Sprk.Bff.Api/Telemetry/RagTelemetry.cs` - Created telemetry (task 015)
+- `src/server/api/Sprk.Bff.Api/Api/Ai/RagEndpoints.cs` - Added /index-file endpoint (task 016)
+- `src/server/api/Sprk.Bff.Api/Program.cs` - Registered services (task 017)
 - `projects/ai-RAG-pipeline/tasks/TASK-INDEX.md` - Updated task statuses
-- `projects/ai-RAG-pipeline/tasks/001-005*.poml` - Marked completed
 
 ### Critical Context
-Phase 0 (Analysis Workflow Alignment) is COMPLETE. All 5 tasks finished. Analysis record created before playbook, AnalysisOutput records created for each tool output, AnalysisId flows through to telemetry. Ready for Phase 1 (Core Pipeline) starting with task 010.
+**Phase 1 Core Pipeline COMPLETE** (tasks 010-017). All RAG services created and registered: TextChunkingService, FileIndexingService, RagIndexingJobHandler, RagTelemetry. API endpoint POST /api/ai/rag/index-file ready. Phases 2-4 can now proceed in parallel.
 
 ---
 
@@ -35,35 +38,39 @@ Phase 0 (Analysis Workflow Alignment) is COMPLETE. All 5 tasks finished. Analysi
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | Phase 0 Complete |
-| **Task File** | N/A - Phase complete |
-| **Title** | Phase 0: Analysis Workflow Alignment (COMPLETE) |
-| **Phase** | 0 → 1 transition |
+| **Task ID** | 017 (completed) |
+| **Task File** | tasks/017-register-services-aimodule.poml |
+| **Title** | Register services in AiModule.cs |
+| **Phase** | 1: Core Pipeline |
 | **Status** | completed |
-| **Started** | 2026-01-15 |
+| **Started** | 2026-01-16 |
+| **Rigor Level** | STANDARD |
 
 ---
 
 ## Progress
 
-### Completed Steps (Phase 0)
+### Completed Steps (Task 013)
 
-- [x] Task 001: Add IDataverseService dependency (already existed)
-- [x] Task 002: Create Analysis record before playbook execution
-- [x] Task 003: Create AnalysisOutput records for tool outputs (dual-write)
-- [x] Task 004: Update telemetry with AnalysisId correlation
-- [x] Task 005: Unit tests for Phase 0 changes (7 new tests, all pass)
+- [x] Step 1: Create FileIndexingService.cs in Services/Ai/
+- [x] Step 2: Add constructor dependencies (ISpeFileOperations, ITextExtractor, etc.)
+- [x] Step 3: Implement IndexTextInternalAsync (shared pipeline)
+- [x] Step 4: Implement IndexFileAsync (OBO)
+- [x] Step 5: Implement IndexFileAppOnlyAsync
+- [x] Step 6: Implement IndexContentAsync
+- [x] Step 7: Build KnowledgeDocument objects for batch indexing
+- [x] Step 8: Add telemetry logging (metrics only per ADR-015)
+- [x] Step 9: Handle errors with FileIndexingResult
+- [x] Step 10: Run dotnet build (passed)
+- [x] Step 11: Update TASK-INDEX.md
 
 ### Current Step
 
-**Phase 0 Complete**: All 5 tasks finished
+**Task 013 Complete**
 
-### Files Modified (Phase 0 Complete)
+### Files Modified (Task 013)
 
-- `src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs` - Analysis/AnalysisOutput creation
-- `src/server/api/Sprk.Bff.Api/Telemetry/DocumentTelemetry.cs` - AnalysisId correlation
-- `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/AppOnlyDocumentAnalysisJobHandler.cs` - Pass AnalysisId to telemetry
-- `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/AppOnlyAnalysisServiceTests.cs` - 7 new Phase 0 tests
+- `src/server/api/Sprk.Bff.Api/Services/Ai/FileIndexingService.cs` - Created
 
 ### Decisions Made
 
@@ -77,16 +84,27 @@ Phase 0 (Analysis Workflow Alignment) is COMPLETE. All 5 tasks finished. Analysi
 
 ## Next Action
 
-**Next Phase**: Phase 1 - Core Pipeline
+**Current Phase**: Phase 1 Complete - Ready for Phases 2-4
 
-**First Task**: 010 - Create ITextChunkingService interface
+**Next Task**: 018 - Unit tests for TextChunkingService (or parallel: 020, 030, 040)
 
-**To Start**: Say "work on task 010"
+**To Start**: Say "continue" or "work on task 018"
 
-**Phase 1 Overview**:
-- Tasks 010-019 (10 tasks)
-- Core RAG pipeline implementation
-- Text chunking, file indexing, job handler, API endpoint
+**Phase 1 Progress** (COMPLETE):
+- ✅ Task 010 - ITextChunkingService interface
+- ✅ Task 011 - TextChunkingService implementation
+- ✅ Task 012 - IFileIndexingService interface
+- ✅ Task 013 - FileIndexingService implementation
+- ✅ Task 014 - RagIndexingJobHandler
+- ✅ Task 015 - RagTelemetry
+- ✅ Task 016 - POST /api/ai/rag/index-file endpoint
+- ✅ Task 017 - Service registrations
+- 🔲 Tasks 018-019 - Unit tests (optional, can parallel with other phases)
+
+**Now Unblocked**:
+- Phase 2 (Email Integration): Tasks 020-023
+- Phase 3 (Cleanup): Tasks 030-032
+- Phase 4 (Event-Driven): Tasks 040-041
 
 ---
 

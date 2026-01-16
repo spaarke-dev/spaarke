@@ -1,10 +1,10 @@
 # RAG Architecture Guide
 
-> **Version**: 1.1
+> **Version**: 1.2
 > **Created**: 2025-12-29
-> **Updated**: 2026-01-02
-> **Project**: AI Document Intelligence R3
-> **Status**: R3 Phases 1-5 Complete
+> **Updated**: 2026-01-16
+> **Project**: AI Document Intelligence R3 + RAG Pipeline R1
+> **Status**: R3 Phases 1-5 Complete, RAG Pipeline Phase 1 Complete
 
 ---
 
@@ -12,14 +12,16 @@
 
 1. [Overview](#overview)
 2. [Architecture Components](#architecture-components)
-3. [Deployment Models](#deployment-models)
-4. [Hybrid Search Pipeline](#hybrid-search-pipeline)
-5. [Index Schema](#index-schema)
-6. [Service Architecture](#service-architecture)
-7. [Embedding Cache](#embedding-cache)
-8. [Security and Isolation](#security-and-isolation)
-9. [Performance Characteristics](#performance-characteristics)
-10. [Integration Points](#integration-points)
+3. [File Indexing Pipeline](#file-indexing-pipeline)
+4. [Deployment Models](#deployment-models)
+5. [Hybrid Search Pipeline](#hybrid-search-pipeline)
+6. [Index Schema](#index-schema)
+7. [Service Architecture](#service-architecture)
+8. [Job Processing](#job-processing)
+9. [Embedding Cache](#embedding-cache)
+10. [Security and Isolation](#security-and-isolation)
+11. [Performance Characteristics](#performance-characteristics)
+12. [Integration Points](#integration-points)
 
 ---
 
@@ -62,11 +64,19 @@ The Spaarke RAG (Retrieval-Augmented Generation) system provides knowledge retri
 ┌─────────────────────────────────────────────────────────────────┐
 │                      Service Layer                              │
 ├─────────────────────────────────────────────────────────────────┤
+│  IFileIndexingService (FileIndexingService.cs)                  │
+│  ├── IndexFileAsync()         → Index file (OBO/user context)   │
+│  ├── IndexFileAppOnlyAsync()  → Index file (app-only/background)│
+│  └── IndexContentAsync()      → Index pre-extracted content     │
+│                                                                 │
 │  IRagService (RagService.cs)                                    │
 │  ├── SearchAsync()         → Hybrid search with semantic ranking│
 │  ├── IndexDocumentAsync()  → Index single document chunk        │
 │  ├── DeleteDocumentAsync() → Delete by document ID              │
 │  └── GetEmbeddingAsync()   → Generate/cache embedding           │
+│                                                                 │
+│  ITextChunkingService (TextChunkingService.cs)                  │
+│  └── ChunkTextAsync()      → Split text into indexed chunks     │
 │                                                                 │
 │  IKnowledgeDeploymentService (KnowledgeDeploymentService.cs)    │
 │  ├── GetDeploymentConfigAsync() → Get/create tenant config      │
@@ -97,10 +107,115 @@ The Spaarke RAG (Retrieval-Augmented Generation) system provides knowledge retri
 | Component | Responsibility | DI Lifetime |
 |-----------|---------------|-------------|
 | `RagEndpoints` | HTTP endpoint definitions, request validation | N/A (static) |
+| `IFileIndexingService` | End-to-end file indexing orchestration | Scoped |
 | `IRagService` | Search, indexing, embedding orchestration | Scoped |
+| `ITextChunkingService` | Text chunking with configurable strategies | Singleton |
+| `ITextExtractor` | Text extraction from documents (PDF, Office, etc.) | Singleton |
 | `IKnowledgeDeploymentService` | Tenant config, SearchClient routing | Singleton |
 | `IEmbeddingCache` | Redis-based embedding caching | Singleton |
 | `IOpenAiClient` | Azure OpenAI API calls (embeddings + chat) | Singleton |
+| `RagIndexingJobHandler` | Async job processing with idempotency | Scoped |
+| `IIdempotencyService` | Duplicate detection and processing locks | Singleton |
+
+---
+
+## File Indexing Pipeline
+
+The RAG indexing pipeline provides end-to-end file indexing with three entry points:
+
+### Pipeline Flow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    File Indexing Service                         │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  Entry Points:                                                   │
+│  ├── IndexFileAsync()         → OBO (user context, real-time)   │
+│  ├── IndexFileAppOnlyAsync()  → App-only (background jobs)      │
+│  └── IndexContentAsync()      → Pre-extracted content           │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Step 1: File Download (for file-based entry points)            │
+├─────────────────────────────────────────────────────────────────┤
+│  ISpeFileOperations                                              │
+│  ├── DownloadFileAsync()        → App-only download             │
+│  └── DownloadFileAsUserAsync()  → OBO download (user context)   │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Step 2: Text Extraction                                         │
+├─────────────────────────────────────────────────────────────────┤
+│  ITextExtractor                                                  │
+│  ├── ExtractAsync()  → Route to appropriate extractor           │
+│  │                                                               │
+│  │  ┌──────────────────────────────────────────────────────┐    │
+│  │  │ Extractors by File Type:                              │    │
+│  │  │ ├── PDF, DOCX, DOC → Document Intelligence           │    │
+│  │  │ ├── TXT, MD, JSON  → Native text read                 │    │
+│  │  │ ├── PNG, JPG       → Vision OCR                       │    │
+│  │  │ └── EML, MSG       → Email parser                     │    │
+│  │  └──────────────────────────────────────────────────────┘    │
+│  │                                                               │
+│  └── Returns: TextExtractionResult (text, method, email metadata)│
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Step 3: Text Chunking                                           │
+├─────────────────────────────────────────────────────────────────┤
+│  ITextChunkingService                                            │
+│  ├── ChunkTextAsync()  → Split text into indexable chunks       │
+│  │                                                               │
+│  │  Chunking Strategy:                                          │
+│  │  ├── Target chunk size: ~1000 tokens                         │
+│  │  ├── Overlap: 100 tokens (context preservation)              │
+│  │  ├── Boundary-aware: Sentence/paragraph splitting            │
+│  │  └── Returns: List<TextChunk> with position metadata         │
+│  │                                                               │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Step 4: Batch Indexing                                          │
+├─────────────────────────────────────────────────────────────────┤
+│  IRagService.IndexDocumentsBatchAsync()                          │
+│  ├── Generate embeddings for each chunk                         │
+│  ├── Create KnowledgeDocument records                           │
+│  └── Upload to Azure AI Search                                  │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Result: FileIndexingResult                                      │
+├─────────────────────────────────────────────────────────────────┤
+│  ├── Success: bool                                               │
+│  ├── ChunksIndexed: int                                          │
+│  ├── SpeFileId: string                                           │
+│  └── ErrorMessage: string?                                       │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Entry Point Comparison
+
+| Entry Point | Auth Context | Use Case | Download Required |
+|-------------|--------------|----------|-------------------|
+| `IndexFileAsync` | OBO (user token) | Real-time indexing from UI | Yes |
+| `IndexFileAppOnlyAsync` | App-only | Background job processing | Yes |
+| `IndexContentAsync` | N/A | Pre-extracted text (emails, etc.) | No |
+
+### FileIndexingResult
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `Success` | bool | Whether indexing completed successfully |
+| `ChunksIndexed` | int | Number of chunks successfully indexed |
+| `SpeFileId` | string | SharePoint Embedded file ID |
+| `ErrorMessage` | string? | Error description if failed |
 
 ---
 
@@ -413,6 +528,90 @@ public interface IRagService
 
 ---
 
+## Job Processing
+
+The RAG pipeline supports async job processing via `RagIndexingJobHandler` for background file indexing.
+
+### Job Handler Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  RagIndexingJobHandler                                           │
+├─────────────────────────────────────────────────────────────────┤
+│  Implements: IJobHandler<RagIndexingJobPayload>                  │
+│  Job Type: "RagIndexing"                                         │
+│                                                                  │
+│  Processing Flow:                                                │
+│  ├── 1. Check idempotency (already processed?)                  │
+│  ├── 2. Acquire processing lock                                  │
+│  ├── 3. Execute FileIndexingService.IndexFileAppOnlyAsync()     │
+│  ├── 4. Mark as processed (on success)                          │
+│  └── 5. Release lock (always)                                   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Idempotency
+
+All job processing is idempotent via `IIdempotencyService`:
+
+| Operation | Purpose | TTL |
+|-----------|---------|-----|
+| `IsEventProcessedAsync` | Check if job already completed | N/A |
+| `TryAcquireProcessingLockAsync` | Prevent concurrent processing | Lock duration |
+| `MarkEventAsProcessedAsync` | Record successful completion | 7 days |
+| `ReleaseProcessingLockAsync` | Allow retries on failure | Immediate |
+
+### Job Contract
+
+```csharp
+public class RagIndexingJobPayload
+{
+    public string TenantId { get; set; }
+    public string DriveId { get; set; }
+    public string ItemId { get; set; }
+    public string FileName { get; set; }
+    public string? DocumentId { get; set; }
+}
+```
+
+### Job Status Flow
+
+```
+JobStatus.Pending
+    │
+    ▼ (handler picks up)
+JobStatus.Processing
+    │
+    ├── Success → JobStatus.Completed
+    │              └── Marked as processed in idempotency store
+    │
+    ├── Transient Failure → JobStatus.Failed
+    │                        └── Retry with exponential backoff
+    │
+    └── Permanent Failure → JobStatus.Poisoned
+                             └── Moved to poison queue
+```
+
+### Error Classification
+
+| Error Type | Example | Status | Action |
+|------------|---------|--------|--------|
+| Transient | HTTP timeout, service unavailable | Failed | Retry |
+| Permanent | File not found, invalid payload | Poisoned | No retry |
+| Lock conflict | Another instance processing | Completed | Skip (idempotent) |
+
+### Telemetry
+
+The `RagTelemetry` class tracks:
+
+| Metric | Description |
+|--------|-------------|
+| `rag_indexing_duration_seconds` | Time to index a file |
+| `rag_indexing_chunks_total` | Number of chunks indexed |
+| `rag_indexing_errors_total` | Indexing failures by type |
+
+---
+
 ## Embedding Cache
 
 ### Cache Strategy
@@ -627,5 +826,6 @@ When the circuit is open, returns `503 Service Unavailable` with error code `ai_
 ---
 
 *Document created: 2025-12-29*
-*Updated: 2026-01-02*
+*Updated: 2026-01-16*
 *AI Document Intelligence R3 - Phases 1-5 Complete*
+*RAG Pipeline R1 - Phase 1 Complete*

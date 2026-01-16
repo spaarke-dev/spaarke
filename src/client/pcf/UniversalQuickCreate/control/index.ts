@@ -593,7 +593,8 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
                     documentRecordService: this.documentRecordService,
                     onClose: this.closeDialog.bind(this), // Use closeDialog for both Custom Page and Quick Create Form
                     apiBaseUrl: this.apiBaseUrl, // Enable AI Summary section
-                    getAuthToken: this.getAuthToken.bind(this) // Pass token getter for AI Summary auth
+                    getAuthToken: this.getAuthToken.bind(this), // Pass token getter for AI Summary auth
+                    getTenantId: this.getTenantId.bind(this) // Pass tenant ID getter for RAG indexing
                 })
             )
         );
@@ -632,6 +633,14 @@ export class UniversalDocumentUpload implements ComponentFramework.StandardContr
         logInfo('UniversalDocumentUpload', 'Acquiring auth token for AI Summary');
         const token = await this.authProvider.getToken(['api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation']);
         return token;
+    }
+
+    /**
+     * Get tenant ID for RAG indexing
+     * Returns the Azure AD tenant ID from the authenticated user
+     */
+    private getTenantId(): string | null {
+        return this.authProvider.getTenantId();
     }
 
     /**

@@ -293,6 +293,10 @@ public class EmailToDocumentJobHandler : IJobHandler
                 // Uses AppOnlyAnalysisService which runs without user context
                 await EnqueueAiAnalysisJobAsync(documentId, "Email", ct);
 
+                // Enqueue RAG indexing for main email document (if enabled via AutoIndexToRag)
+                // RAG indexing failures are non-blocking per owner clarification
+                await EnqueueRagIndexingJobAsync(driveId, fileHandle.Id, documentId, fileName, ct);
+
                 // Process attachments as child documents (FR-04)
                 // Attachment failures should not fail the main job
                 // Note: AI analysis is also enqueued for each attachment in ProcessSingleAttachmentAsync
@@ -753,6 +757,9 @@ public class EmailToDocumentJobHandler : IJobHandler
 
         // Enqueue AI analysis for attachment document (if enabled)
         await EnqueueAiAnalysisJobAsync(childDocumentId, "EmailAttachment", ct);
+
+        // Enqueue RAG indexing for attachment document (if enabled via AutoIndexToRag)
+        await EnqueueRagIndexingJobAsync(driveId, fileHandle.Id, childDocumentId, attachment.FileName, ct);
     }
 
     /// <summary>
@@ -810,6 +817,77 @@ public class EmailToDocumentJobHandler : IJobHandler
             _logger.LogWarning(ex,
                 "Failed to enqueue AI analysis job for {Source} document {DocumentId}: {Error}. Email processing will continue.",
                 source, documentId, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Enqueues a RAG indexing job for a document if AutoIndexToRag is enabled.
+    /// Uses try/catch to ensure enqueueing failures don't fail the main processing.
+    /// RAG indexing is non-blocking per owner clarification - it's an enhancement, not critical path.
+    /// </summary>
+    /// <param name="driveId">The SPE drive ID where the file is stored</param>
+    /// <param name="itemId">The SPE item ID of the file</param>
+    /// <param name="documentId">The Dataverse document ID</param>
+    /// <param name="fileName">The file name for logging and metadata</param>
+    /// <param name="ct">Cancellation token</param>
+    private async Task EnqueueRagIndexingJobAsync(
+        string driveId,
+        string itemId,
+        Guid documentId,
+        string fileName,
+        CancellationToken ct)
+    {
+        if (!_options.AutoIndexToRag)
+        {
+            _telemetry.RecordRagJobSkipped("config_disabled");
+            _logger.LogDebug(
+                "AutoIndexToRag disabled, skipping RAG indexing job for document {DocumentId}",
+                documentId);
+            return;
+        }
+
+        try
+        {
+            var tenantId = _configuration["TENANT_ID"] ?? _configuration["AzureAd:TenantId"] ?? "";
+
+            var ragJob = new JobContract
+            {
+                JobId = Guid.NewGuid(),
+                JobType = RagIndexingJobHandler.JobTypeName,
+                SubjectId = documentId.ToString(),
+                CorrelationId = Activity.Current?.Id ?? Guid.NewGuid().ToString(),
+                IdempotencyKey = $"rag-index-{driveId}-{itemId}",
+                Attempt = 1,
+                MaxAttempts = 3,
+                CreatedAt = DateTimeOffset.UtcNow,
+                Payload = JsonDocument.Parse(JsonSerializer.Serialize(new RagIndexingJobPayload
+                {
+                    TenantId = tenantId,
+                    DriveId = driveId,
+                    ItemId = itemId,
+                    FileName = fileName,
+                    DocumentId = documentId.ToString(),
+                    Source = "EmailAttachment",
+                    EnqueuedAt = DateTimeOffset.UtcNow
+                }))
+            };
+
+            await _jobSubmissionService.SubmitJobAsync(ragJob, ct);
+
+            _telemetry.RecordRagJobEnqueued();
+
+            _logger.LogInformation(
+                "Enqueued RAG indexing job {JobId} for document {DocumentId} (file: {FileName})",
+                ragJob.JobId, documentId, fileName);
+        }
+        catch (Exception ex)
+        {
+            // Log but don't fail - RAG indexing is non-critical
+            _telemetry.RecordRagJobEnqueueFailure("enqueue_error");
+
+            _logger.LogWarning(ex,
+                "Failed to enqueue RAG indexing job for document {DocumentId}: {Error}. Email processing will continue.",
+                documentId, ex.Message);
         }
     }
 }

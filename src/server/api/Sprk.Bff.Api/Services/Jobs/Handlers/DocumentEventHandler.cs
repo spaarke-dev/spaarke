@@ -1,5 +1,8 @@
+using System.Diagnostics;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
 
 #pragma warning disable IDE0060 // Remove unused parameter - many placeholder methods in this handler await future implementation
@@ -14,15 +17,24 @@ public class DocumentEventHandler : IDocumentEventHandler
 {
     private readonly IDataverseService _dataverseService;
     private readonly SpeFileStore _speFileStore;
+    private readonly JobSubmissionService _jobSubmissionService;
+    private readonly EmailProcessingOptions _options;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<DocumentEventHandler> _logger;
 
     public DocumentEventHandler(
         IDataverseService dataverseService,
         SpeFileStore speFileStore,
+        JobSubmissionService jobSubmissionService,
+        IOptions<EmailProcessingOptions> options,
+        IConfiguration configuration,
         ILogger<DocumentEventHandler> logger)
     {
         _dataverseService = dataverseService;
         _speFileStore = speFileStore;
+        _jobSubmissionService = jobSubmissionService;
+        _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
+        _configuration = configuration;
         _logger = logger;
     }
 
@@ -72,6 +84,10 @@ public class DocumentEventHandler : IDocumentEventHandler
             hasFileObj is bool hasFile && hasFile)
         {
             await ProcessInitialFileUploadAsync(documentEvent, cancellationToken);
+
+            // Enqueue RAG indexing for documents with files (if enabled via AutoIndexToRag)
+            // RAG indexing failures are non-blocking - document creation continues regardless
+            await EnqueueRagIndexingJobAsync(documentEvent, cancellationToken);
         }
 
         // Update document status to Active if initialization successful
@@ -483,5 +499,110 @@ public class DocumentEventHandler : IDocumentEventHandler
         _logger.LogInformation("Handling file container movement for document {DocumentId} from {OldContainer} to {NewContainer}",
             documentEvent.DocumentId, oldContainerId, newContainerId);
         await Task.CompletedTask;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // RAG Indexing Integration (Phase 4)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Extracts the Graph drive ID from a document event's entity data.
+    /// </summary>
+    private string? ExtractGraphDriveId(DocumentEvent documentEvent)
+    {
+        if (documentEvent.EntityData.TryGetValue("sprk_graphdriveid", out var value))
+        {
+            if (value is JsonElement element && element.ValueKind == JsonValueKind.String)
+            {
+                return element.GetString();
+            }
+            return value?.ToString();
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Extracts the Graph item ID from a document event's entity data.
+    /// </summary>
+    private string? ExtractGraphItemId(DocumentEvent documentEvent)
+    {
+        if (documentEvent.EntityData.TryGetValue("sprk_graphitemid", out var value))
+        {
+            if (value is JsonElement element && element.ValueKind == JsonValueKind.String)
+            {
+                return element.GetString();
+            }
+            return value?.ToString();
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Enqueues a RAG indexing job for a document if AutoIndexToRag is enabled.
+    /// Uses try/catch to ensure enqueueing failures don't fail the main document processing.
+    /// RAG indexing is non-blocking per owner clarification - it's an enhancement, not critical path.
+    /// </summary>
+    private async Task EnqueueRagIndexingJobAsync(DocumentEvent documentEvent, CancellationToken cancellationToken)
+    {
+        if (!_options.AutoIndexToRag)
+        {
+            _logger.LogDebug(
+                "AutoIndexToRag disabled, skipping RAG indexing job for document {DocumentId}",
+                documentEvent.DocumentId);
+            return;
+        }
+
+        try
+        {
+            // Extract SPE file location from document event
+            var driveId = ExtractGraphDriveId(documentEvent);
+            var itemId = ExtractGraphItemId(documentEvent);
+            var fileName = ExtractFileName(documentEvent);
+
+            if (string.IsNullOrEmpty(driveId) || string.IsNullOrEmpty(itemId))
+            {
+                _logger.LogWarning(
+                    "Cannot enqueue RAG indexing for document {DocumentId}: missing driveId or itemId",
+                    documentEvent.DocumentId);
+                return;
+            }
+
+            var tenantId = _configuration["TENANT_ID"] ?? _configuration["AzureAd:TenantId"] ?? "";
+
+            var ragJob = new JobContract
+            {
+                JobId = Guid.NewGuid(),
+                JobType = RagIndexingJobHandler.JobTypeName,
+                SubjectId = documentEvent.DocumentId,
+                CorrelationId = Activity.Current?.Id ?? documentEvent.CorrelationId ?? Guid.NewGuid().ToString(),
+                IdempotencyKey = $"rag-index-{driveId}-{itemId}",
+                Attempt = 1,
+                MaxAttempts = 3,
+                CreatedAt = DateTimeOffset.UtcNow,
+                Payload = JsonDocument.Parse(JsonSerializer.Serialize(new RagIndexingJobPayload
+                {
+                    TenantId = tenantId,
+                    DriveId = driveId,
+                    ItemId = itemId,
+                    FileName = fileName ?? "unknown",
+                    DocumentId = documentEvent.DocumentId,
+                    Source = "DocumentEvent",
+                    EnqueuedAt = DateTimeOffset.UtcNow
+                }))
+            };
+
+            await _jobSubmissionService.SubmitJobAsync(ragJob, cancellationToken);
+
+            _logger.LogInformation(
+                "Enqueued RAG indexing job {JobId} for document {DocumentId} (file: {FileName})",
+                ragJob.JobId, documentEvent.DocumentId, fileName);
+        }
+        catch (Exception ex)
+        {
+            // Log but don't fail - RAG indexing is non-critical
+            _logger.LogWarning(ex,
+                "Failed to enqueue RAG indexing job for document {DocumentId}: {Error}. Document event processing will continue.",
+                documentEvent.DocumentId, ex.Message);
+        }
     }
 }

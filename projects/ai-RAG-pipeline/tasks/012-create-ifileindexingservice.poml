@@ -3,7 +3,7 @@
   <metadata>
     <title>Create IFileIndexingService interface</title>
     <phase>1: Core Pipeline</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>013</blocks>
@@ -110,4 +110,24 @@
       Follow the task-execute skill for mandatory pre-execution checklist.
     </protocol>
   </execution>
+
+  <completion-notes>
+    <completed-at>2026-01-15</completed-at>
+    <summary>
+      Created IFileIndexingService.cs with unified RAG indexing interface:
+      - IFileIndexingService interface with three entry points
+      - IndexFileAsync (OBO) - user-triggered via API
+      - IndexFileAppOnlyAsync - background job with app-only auth
+      - IndexContentAsync - pre-extracted content (most efficient)
+      - FileIndexRequest record for file-based indexing
+      - ContentIndexRequest record for pre-extracted content
+      - FileIndexingResult record with Success, ChunksIndexed, Duration, ErrorMessage
+      - Static factory methods: Failed() and Succeeded()
+      - Full XML documentation on all public members
+      Build succeeded with 0 warnings, 0 errors.
+    </summary>
+    <files-created>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IFileIndexingService.cs</file>
+    </files-created>
+  </completion-notes>
 </task>

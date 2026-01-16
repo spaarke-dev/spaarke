@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement FileIndexingService</title>
     <phase>1: Core Pipeline</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>011, 012</dependencies>
     <blocks>014, 016</blocks>
@@ -121,4 +121,23 @@
       Follow the task-execute skill for mandatory pre-execution checklist.
     </protocol>
   </execution>
+
+  <completion-notes>
+    <completed-at>2026-01-15</completed-at>
+    <summary>
+      Created FileIndexingService.cs implementing IFileIndexingService:
+      - Three entry points converging to shared pipeline:
+        - IndexFileAsync (OBO) - downloads via user token
+        - IndexFileAppOnlyAsync - downloads via app-only auth
+        - IndexContentAsync - uses pre-extracted content
+      - Shared pipeline (IndexTextInternalAsync): chunk → build KnowledgeDocument → batch index
+      - Integration with ISpeFileOperations, ITextExtractor, ITextChunkingService, IRagService
+      - Error handling with appropriate FileIndexingResult
+      - Logging for metrics only (no content per ADR-015)
+      Build succeeded with 0 warnings, 0 errors.
+    </summary>
+    <files-created>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/FileIndexingService.cs</file>
+    </files-created>
+  </completion-notes>
 </task>

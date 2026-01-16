@@ -9,14 +9,16 @@ namespace Sprk.Bff.Api.Tests.Services.Ai;
 public class EntityExtractorHandlerTests
 {
     private readonly Mock<IOpenAiClient> _openAiClientMock;
+    private readonly Mock<ITextChunkingService> _textChunkingServiceMock;
     private readonly Mock<ILogger<EntityExtractorHandler>> _loggerMock;
     private readonly EntityExtractorHandler _handler;
 
     public EntityExtractorHandlerTests()
     {
         _openAiClientMock = new Mock<IOpenAiClient>();
+        _textChunkingServiceMock = new Mock<ITextChunkingService>();
         _loggerMock = new Mock<ILogger<EntityExtractorHandler>>();
-        _handler = new EntityExtractorHandler(_openAiClientMock.Object, _loggerMock.Object);
+        _handler = new EntityExtractorHandler(_openAiClientMock.Object, _textChunkingServiceMock.Object, _loggerMock.Object);
     }
 
     #region Handler Properties Tests

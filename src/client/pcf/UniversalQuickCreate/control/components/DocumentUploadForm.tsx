@@ -61,6 +61,9 @@ export interface DocumentUploadFormProps {
 
     /** Function to get auth token for AI services (optional) */
     getAuthToken?: () => Promise<string>;
+
+    /** Function to get tenant ID for RAG indexing (optional) */
+    getTenantId?: () => string | null;
 }
 
 /**
@@ -176,7 +179,8 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
     documentRecordService,
     onClose,
     apiBaseUrl = '',
-    getAuthToken
+    getAuthToken,
+    getTenantId
 }) => {
     const styles = useStyles();
 
@@ -213,6 +217,59 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
 
     // Determine if AI processing is complete
     const aiComplete = uploadCompleted && runAiSummary && aiSummary.documents.length > 0 && !aiSummary.isProcessing;
+
+    /**
+     * Index documents to RAG for semantic search.
+     * Non-blocking: failures are logged as warnings, not shown to users.
+     *
+     * @param documents Documents to index (with driveId, itemId, fileName, documentId)
+     */
+    const indexDocumentsToRag = React.useCallback(async (
+        documents: Array<{ driveId: string; itemId: string; fileName: string; documentId?: string }>
+    ) => {
+        if (!apiBaseUrl || !getAuthToken || !getTenantId) {
+            logInfo('DocumentUploadForm', 'RAG indexing skipped: missing apiBaseUrl, getAuthToken, or getTenantId');
+            return;
+        }
+
+        const tenantId = getTenantId();
+        if (!tenantId) {
+            logInfo('DocumentUploadForm', 'RAG indexing skipped: no tenantId available');
+            return;
+        }
+
+        // Index each document independently (non-blocking, fire-and-forget)
+        for (const doc of documents) {
+            // Fire and forget - don't await, don't block on failures
+            (async () => {
+                try {
+                    const token = await getAuthToken();
+                    const response = await fetch(`${apiBaseUrl}/api/ai/rag/index-file`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify({
+                            driveId: doc.driveId,
+                            itemId: doc.itemId,
+                            fileName: doc.fileName,
+                            tenantId: tenantId,
+                            documentId: doc.documentId
+                        })
+                    });
+
+                    if (!response.ok) {
+                        console.warn(`RAG indexing failed for ${doc.fileName}: ${response.status} ${response.statusText}`);
+                    } else {
+                        logInfo('DocumentUploadForm', 'RAG indexing enqueued', { fileName: doc.fileName });
+                    }
+                } catch (err) {
+                    console.warn(`RAG indexing failed for ${doc.fileName}:`, err);
+                }
+            })();
+        }
+    }, [apiBaseUrl, getAuthToken, getTenantId]);
 
     // Auto-switch to Summary tab when upload completes with AI summaries
     React.useEffect(() => {
@@ -326,6 +383,27 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
                     });
                     aiSummary.addDocuments(summaryDocs);
                 }
+            }
+
+            // Phase 4: Index documents to RAG for semantic search (non-blocking)
+            // Runs in background - failures logged as warnings, not shown to users
+            const ragDocs = successRecords
+                .filter(r => r.driveId && r.itemId)
+                .map(r => ({
+                    driveId: r.driveId!,
+                    itemId: r.itemId!,
+                    fileName: r.fileName,
+                    documentId: r.documentId
+                }));
+
+            if (ragDocs.length > 0) {
+                logInfo('DocumentUploadForm', 'Starting RAG indexing', {
+                    documentCount: ragDocs.length
+                });
+                // Fire and forget - don't await, let it run in background
+                indexDocumentsToRag(ragDocs).catch(err => {
+                    console.warn('RAG indexing batch failed:', err);
+                });
             }
 
             setIsUploading(false);

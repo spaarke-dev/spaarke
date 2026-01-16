@@ -1,9 +1,9 @@
 # AI Azure Resources
 
-> **Last Updated**: January 12, 2026
+> **Last Updated**: January 16, 2026
 > **Purpose**: Quick reference for AI-related Azure resource IDs and configuration.
 > **Secrets**: Actual secrets stored in `config/ai-config.local.json` (gitignored)
-> **Verified**: AI Search & Visualization Module (2026-01-12)
+> **Verified**: AI Search & Visualization Module (2026-01-12), RAG Pipeline R1 (2026-01-16)
 
 ---
 
@@ -353,12 +353,30 @@ See [SPAARKE-AI-ARCHITECTURE.md](../guides/SPAARKE-AI-ARCHITECTURE.md#5-entity-e
 
 ---
 
+## RAG Pipeline Services (R1)
+
+The RAG Pipeline (Phase 1 Complete) adds file indexing capabilities:
+
+| Service | Purpose | Entry Points |
+|---------|---------|--------------|
+| `IFileIndexingService` | End-to-end file indexing | `IndexFileAsync`, `IndexFileAppOnlyAsync`, `IndexContentAsync` |
+| `ITextChunkingService` | Text chunking with overlap | `ChunkTextAsync` |
+| `IIdempotencyService` | Duplicate prevention | Locks, processed markers |
+| `RagIndexingJobHandler` | Background job processing | `ProcessAsync` |
+
+**Documentation**: See [RAG-ARCHITECTURE.md](../guides/RAG-ARCHITECTURE.md) for full pipeline details.
+
+---
+
 ## Related Documents
 
 - [auth-azure-resources.md](auth-azure-resources.md) - All Azure resource inventory
 - [../guides/ai-document-summary.md](../guides/ai-document-summary.md) - AI feature documentation
+- [../guides/RAG-ARCHITECTURE.md](../guides/RAG-ARCHITECTURE.md) - RAG architecture and file indexing pipeline
+- [../guides/RAG-CONFIGURATION.md](../guides/RAG-CONFIGURATION.md) - RAG configuration reference
 - [../../reference/adr/ADR-013-ai-architecture.md](../../reference/adr/ADR-013-ai-architecture.md) - AI architecture decisions
 
 ---
 
 *Created: December 9, 2025*
+*Updated: January 16, 2026 (RAG Pipeline R1)*

@@ -401,9 +401,15 @@ if (analysisEnabled && documentIntelligenceEnabled)
         // RagService - Hybrid search service for RAG retrieval (keyword + vector + semantic ranking)
         builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.IRagService, Sprk.Bff.Api.Services.Ai.RagService>();
 
+        // TextChunkingService - Splits documents into chunks for RAG indexing
+        builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.ITextChunkingService, Sprk.Bff.Api.Services.Ai.TextChunkingService>();
+
+        // FileIndexingService - Unified RAG indexing pipeline (download → extract → chunk → embed → index)
+        builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.IFileIndexingService, Sprk.Bff.Api.Services.Ai.FileIndexingService>();
+
         // VisualizationService - Document relationship visualization using vector similarity
         builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Visualization.IVisualizationService, Sprk.Bff.Api.Services.Ai.Visualization.VisualizationService>();
-        Console.WriteLine("✓ RAG services enabled (hybrid search + embedding cache + visualization)");
+        Console.WriteLine("✓ RAG services enabled (hybrid search + embedding cache + visualization + file indexing)");
     }
     else
     {
@@ -464,6 +470,9 @@ builder.Services.AddSingleton<Sprk.Bff.Api.Telemetry.EmailTelemetry>(sp =>
 // Document telemetry - OpenTelemetry-compatible metrics for document downloads (FR-03 audit logging)
 builder.Services.AddSingleton<Sprk.Bff.Api.Telemetry.DocumentTelemetry>();
 
+// RAG telemetry - OpenTelemetry-compatible metrics for RAG indexing and search operations
+builder.Services.AddSingleton<Sprk.Bff.Api.Telemetry.RagTelemetry>();
+
 // Register Email Processing configuration
 builder.Services.Configure<Sprk.Bff.Api.Configuration.EmailProcessingOptions>(
     builder.Configuration.GetSection(Sprk.Bff.Api.Configuration.EmailProcessingOptions.SectionName));
@@ -518,6 +527,10 @@ builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.
 // Email analysis job handler - for combined email+attachment AI analysis (FR-11, FR-12)
 // Uses AppOnlyAnalysisService.AnalyzeEmailAsync with Email Analysis playbook
 builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.EmailAnalysisJobHandler>();
+
+// RAG indexing job handler - for background document indexing to Azure AI Search
+// Uses FileIndexingService with app-only authentication (idempotency: rag-index-{driveId}-{itemId})
+builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.RagIndexingJobHandler>();
 
 // Configure Service Bus job processing
 var serviceBusConnectionString = builder.Configuration.GetConnectionString("ServiceBus");

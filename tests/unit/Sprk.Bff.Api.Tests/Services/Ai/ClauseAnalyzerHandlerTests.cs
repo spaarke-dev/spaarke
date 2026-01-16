@@ -9,14 +9,16 @@ namespace Sprk.Bff.Api.Tests.Services.Ai;
 public class ClauseAnalyzerHandlerTests
 {
     private readonly Mock<IOpenAiClient> _openAiClientMock;
+    private readonly Mock<ITextChunkingService> _textChunkingServiceMock;
     private readonly Mock<ILogger<ClauseAnalyzerHandler>> _loggerMock;
     private readonly ClauseAnalyzerHandler _handler;
 
     public ClauseAnalyzerHandlerTests()
     {
         _openAiClientMock = new Mock<IOpenAiClient>();
+        _textChunkingServiceMock = new Mock<ITextChunkingService>();
         _loggerMock = new Mock<ILogger<ClauseAnalyzerHandler>>();
-        _handler = new ClauseAnalyzerHandler(_openAiClientMock.Object, _loggerMock.Object);
+        _handler = new ClauseAnalyzerHandler(_openAiClientMock.Object, _textChunkingServiceMock.Object, _loggerMock.Object);
     }
 
     #region Handler Properties Tests

@@ -13,14 +13,25 @@ namespace Sprk.Bff.Api.Tests.Services.Ai;
 public class SummaryHandlerTests
 {
     private readonly Mock<IOpenAiClient> _openAiClientMock;
+    private readonly Mock<ITextChunkingService> _textChunkingServiceMock;
     private readonly Mock<ILogger<SummaryHandler>> _loggerMock;
     private readonly SummaryHandler _handler;
 
     public SummaryHandlerTests()
     {
         _openAiClientMock = new Mock<IOpenAiClient>();
+        _textChunkingServiceMock = new Mock<ITextChunkingService>();
         _loggerMock = new Mock<ILogger<SummaryHandler>>();
-        _handler = new SummaryHandler(_openAiClientMock.Object, _loggerMock.Object);
+
+        // Default mock: return the input text as a single chunk
+        _textChunkingServiceMock
+            .Setup(x => x.ChunkTextAsync(It.IsAny<string?>(), It.IsAny<ChunkingOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string? text, ChunkingOptions? _, CancellationToken _) =>
+                string.IsNullOrEmpty(text)
+                    ? Array.Empty<TextChunk>()
+                    : new List<TextChunk> { new() { Content = text, Index = 0, StartPosition = 0, EndPosition = text.Length } });
+
+        _handler = new SummaryHandler(_openAiClientMock.Object, _textChunkingServiceMock.Object, _loggerMock.Object);
     }
 
     #region Handler Properties Tests

@@ -29,13 +29,16 @@ public sealed class SummaryHandler : IAnalysisToolHandler
     private const int DefaultMaxLength = 500;
 
     private readonly IOpenAiClient _openAiClient;
+    private readonly ITextChunkingService _textChunkingService;
     private readonly ILogger<SummaryHandler> _logger;
 
     public SummaryHandler(
         IOpenAiClient openAiClient,
+        ITextChunkingService textChunkingService,
         ILogger<SummaryHandler> logger)
     {
         _openAiClient = openAiClient;
+        _textChunkingService = textChunkingService;
         _logger = logger;
     }
 
@@ -117,8 +120,17 @@ public sealed class SummaryHandler : IAnalysisToolHandler
             var config = ParseConfiguration(tool.Configuration);
             var documentText = context.Document.ExtractedText;
 
-            // Chunk document if needed
-            var chunks = ChunkText(documentText, DefaultChunkSize);
+            // Chunk document if needed using the consolidated chunking service
+            // SummaryHandler uses 8000 char chunks with 200 overlap (different from RAG defaults)
+            var chunkingOptions = new ChunkingOptions
+            {
+                ChunkSize = DefaultChunkSize,
+                Overlap = ChunkOverlap,
+                PreserveSentenceBoundaries = true
+            };
+            var textChunks = await _textChunkingService.ChunkTextAsync(documentText, chunkingOptions, cancellationToken);
+            var chunks = textChunks.Select(c => c.Content).ToList();
+
             _logger.LogDebug(
                 "Document split into {ChunkCount} chunks for summarization",
                 chunks.Count);
@@ -551,49 +563,6 @@ public sealed class SummaryHandler : IAnalysisToolHandler
             return 0;
 
         return text.Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries).Length;
-    }
-
-    /// <summary>
-    /// Chunk text for processing large documents.
-    /// </summary>
-    private static List<string> ChunkText(string text, int chunkSize)
-    {
-        if (string.IsNullOrEmpty(text) || text.Length <= chunkSize)
-            return new List<string> { text };
-
-        var chunks = new List<string>();
-        var position = 0;
-
-        while (position < text.Length)
-        {
-            var length = Math.Min(chunkSize, text.Length - position);
-            var chunk = text.Substring(position, length);
-
-            // Try to break at sentence boundary
-            if (position + length < text.Length)
-            {
-                var lastPeriod = chunk.LastIndexOf(". ");
-                if (lastPeriod > chunkSize / 2)
-                {
-                    chunk = chunk.Substring(0, lastPeriod + 1);
-                    length = chunk.Length;
-                }
-            }
-
-            chunks.Add(chunk);
-
-            var advance = length - ChunkOverlap;
-            if (advance <= 0)
-            {
-                position += length;
-            }
-            else
-            {
-                position += advance;
-            }
-        }
-
-        return chunks;
     }
 
     /// <summary>

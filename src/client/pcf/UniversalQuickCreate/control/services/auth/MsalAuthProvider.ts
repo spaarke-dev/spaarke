@@ -771,6 +771,18 @@ export class MsalAuthProvider implements IAuthProvider {
   }
 
   /**
+   * Get the tenant ID of the current authenticated user.
+   *
+   * Returns the Azure AD tenant ID from the current account,
+   * or null if not authenticated.
+   *
+   * @returns Tenant ID or null
+   */
+  public getTenantId(): string | null {
+    return this.currentAccount?.tenantId ?? null;
+  }
+
+  /**
    * Get account info for logging (sanitized)
    *
    * Returns sanitized account info safe to log (no tokens).

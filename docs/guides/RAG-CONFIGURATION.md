@@ -1,8 +1,9 @@
 # RAG Configuration Reference
 
-> **Version**: 1.0
+> **Version**: 1.1
 > **Created**: 2025-12-29
-> **Project**: AI Document Intelligence R3
+> **Updated**: 2026-01-16
+> **Project**: AI Document Intelligence R3 + RAG Pipeline R1
 
 ---
 
@@ -373,6 +374,18 @@ if (!string.IsNullOrEmpty(docIntelOptions.AiSearchEndpoint))
 
     // Register RAG service
     builder.Services.AddScoped<IRagService, RagService>();
+
+    // Register text chunking service (RAG Pipeline R1)
+    builder.Services.AddSingleton<ITextChunkingService, TextChunkingService>();
+
+    // Register file indexing service (RAG Pipeline R1)
+    builder.Services.AddScoped<IFileIndexingService, FileIndexingService>();
+
+    // Register idempotency service for job processing (RAG Pipeline R1)
+    builder.Services.AddSingleton<IIdempotencyService, IdempotencyService>();
+
+    // Register RAG indexing job handler (RAG Pipeline R1)
+    builder.Services.AddScoped<RagIndexingJobHandler>();
 }
 ```
 
@@ -416,4 +429,6 @@ public async Task SetupEnterpriseCustomer(string tenantId)
 ---
 
 *Document created: 2025-12-29*
+*Updated: 2026-01-16*
 *AI Document Intelligence R3 - Phase 1 Complete*
+*RAG Pipeline R1 - Phase 1 Complete*

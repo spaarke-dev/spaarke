@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement TextChunkingService</title>
     <phase>1: Core Pipeline</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>010</dependencies>
     <blocks>013, 018</blocks>
@@ -100,6 +100,23 @@
     5. Move start to (adjusted position - overlap)
     6. Repeat until end of text
   </notes>
+
+  <completion-notes>
+    <completed-at>2026-01-15</completed-at>
+    <summary>
+      Created TextChunkingService.cs implementing ITextChunkingService:
+      - ChunkTextAsync method with configurable options
+      - Sentence boundary detection for ., !, ? followed by whitespace
+      - Overlap handling between consecutive chunks
+      - Position tracking (StartPosition, EndPosition) per chunk
+      - Edge case handling: null/empty text, text shorter than chunk size
+      - Logging for metrics only (no content per ADR-015)
+      Build succeeded with 0 warnings, 0 errors.
+    </summary>
+    <files-created>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/TextChunkingService.cs</file>
+    </files-created>
+  </completion-notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

@@ -3,7 +3,7 @@
   <metadata>
     <title>E2E tests for document event to RAG flow</title>
     <phase>4: Event-Driven</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>040</dependencies>
     <blocks>none</blocks>

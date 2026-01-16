@@ -153,6 +153,13 @@ public class EmailProcessingOptions
     public bool AutoEnqueueAi { get; set; } = true;
 
     /// <summary>
+    /// Whether to automatically index email documents to RAG knowledge base.
+    /// When enabled, processed emails are queued for RAG indexing after document creation.
+    /// Default is false for safety - RAG indexing is opt-in.
+    /// </summary>
+    public bool AutoIndexToRag { get; set; } = false;
+
+    /// <summary>
     /// Shared secret for Dataverse webhook validation.
     /// Must match the secret configured in Dataverse Service Endpoint.
     /// </summary>

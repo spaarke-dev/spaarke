@@ -93,6 +93,18 @@ public static class RagEndpoints
             .ProducesProblem(401)
             .ProducesProblem(500);
 
+        // POST /api/ai/rag/index-file - Index a file via unified pipeline
+        group.MapPost("/index-file", IndexFile)
+            .AddTenantAuthorizationFilter()
+            .RequireRateLimiting("ai-batch")
+            .WithName("RagIndexFile")
+            .WithSummary("Index a file into the knowledge base via unified pipeline")
+            .WithDescription("Downloads file via OBO authentication, extracts text, chunks, generates embeddings, and indexes to Azure AI Search.")
+            .Produces<FileIndexingResult>()
+            .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(500);
+
         return app;
     }
 
@@ -321,6 +333,79 @@ public static class RagEndpoints
         {
             return Results.Problem(
                 title: "Embedding Generation Failed",
+                detail: ex.Message,
+                statusCode: 500);
+        }
+    }
+
+    /// <summary>
+    /// Index a file into the knowledge base via unified pipeline.
+    /// Uses OBO authentication to access user's files.
+    /// </summary>
+    private static async Task<IResult> IndexFile(
+        FileIndexRequest request,
+        IFileIndexingService fileIndexingService,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.TenantId))
+        {
+            return Results.BadRequest(new ProblemDetails
+            {
+                Title = "Invalid Request",
+                Detail = "TenantId is required",
+                Status = 400
+            });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.DriveId))
+        {
+            return Results.BadRequest(new ProblemDetails
+            {
+                Title = "Invalid Request",
+                Detail = "DriveId is required",
+                Status = 400
+            });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ItemId))
+        {
+            return Results.BadRequest(new ProblemDetails
+            {
+                Title = "Invalid Request",
+                Detail = "ItemId is required",
+                Status = 400
+            });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.FileName))
+        {
+            return Results.BadRequest(new ProblemDetails
+            {
+                Title = "Invalid Request",
+                Detail = "FileName is required",
+                Status = 400
+            });
+        }
+
+        try
+        {
+            var result = await fileIndexingService.IndexFileAsync(request, httpContext, cancellationToken);
+
+            if (!result.Success)
+            {
+                return Results.Problem(
+                    title: "Indexing Failed",
+                    detail: result.ErrorMessage,
+                    statusCode: 500);
+            }
+
+            return Results.Ok(result);
+        }
+        catch (Exception ex)
+        {
+            return Results.Problem(
+                title: "Indexing Failed",
                 detail: ex.Message,
                 statusCode: 500);
         }

@@ -28,13 +28,16 @@ public sealed class EntityExtractorHandler : IAnalysisToolHandler
     private const double DefaultMinConfidence = 0.5;
 
     private readonly IOpenAiClient _openAiClient;
+    private readonly ITextChunkingService _textChunkingService;
     private readonly ILogger<EntityExtractorHandler> _logger;
 
     public EntityExtractorHandler(
         IOpenAiClient openAiClient,
+        ITextChunkingService textChunkingService,
         ILogger<EntityExtractorHandler> logger)
     {
         _openAiClient = openAiClient;
+        _textChunkingService = textChunkingService;
         _logger = logger;
     }
 
@@ -115,7 +118,14 @@ public sealed class EntityExtractorHandler : IAnalysisToolHandler
             var documentText = context.Document.ExtractedText;
 
             // Chunk document if needed
-            var chunks = ChunkText(documentText, config.ChunkSize);
+            var chunkingOptions = new ChunkingOptions
+            {
+                ChunkSize = config.ChunkSize,
+                Overlap = ChunkOverlap,
+                PreserveSentenceBoundaries = true
+            };
+            var textChunks = await _textChunkingService.ChunkTextAsync(documentText, chunkingOptions, cancellationToken);
+            var chunks = textChunks.Select(c => c.Content).ToList();
             _logger.LogDebug(
                 "Document split into {ChunkCount} chunks (size: {ChunkSize})",
                 chunks.Count, config.ChunkSize);
@@ -380,51 +390,6 @@ public sealed class EntityExtractorHandler : IAnalysisToolHandler
             return 0;
 
         return Math.Round(entities.Average(e => e.Confidence), 2);
-    }
-
-    /// <summary>
-    /// Chunk text for processing large documents.
-    /// </summary>
-    private static List<string> ChunkText(string text, int chunkSize)
-    {
-        if (string.IsNullOrEmpty(text) || text.Length <= chunkSize)
-            return new List<string> { text };
-
-        var chunks = new List<string>();
-        var position = 0;
-
-        while (position < text.Length)
-        {
-            var length = Math.Min(chunkSize, text.Length - position);
-            var chunk = text.Substring(position, length);
-
-            // Try to break at sentence boundary (but not for the last chunk)
-            if (position + length < text.Length)
-            {
-                var lastPeriod = chunk.LastIndexOf(". ");
-                if (lastPeriod > chunkSize / 2)
-                {
-                    chunk = chunk.Substring(0, lastPeriod + 1);
-                    length = chunk.Length;
-                }
-            }
-
-            chunks.Add(chunk);
-
-            // Calculate next position with overlap, ensuring forward progress
-            var advance = length - ChunkOverlap;
-            if (advance <= 0)
-            {
-                // If chunk is smaller than overlap, just move past it
-                position += length;
-            }
-            else
-            {
-                position += advance;
-            }
-        }
-
-        return chunks;
     }
 
     /// <summary>

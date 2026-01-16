@@ -3,7 +3,7 @@
   <metadata>
     <title>Refactor SummaryHandler to use ITextChunkingService</title>
     <phase>3: Cleanup</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>017</dependencies>
     <blocks>031</blocks>

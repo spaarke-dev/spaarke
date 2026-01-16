@@ -3,7 +3,7 @@
   <metadata>
     <title>Refactor remaining tool handlers (6 handlers)</title>
     <phase>3: Cleanup</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>030</dependencies>
     <blocks>032</blocks>

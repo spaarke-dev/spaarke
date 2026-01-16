@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement DocumentEventHandler.HandleDocumentCreatedAsync</title>
     <phase>4: Event-Driven</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>017</dependencies>
     <blocks>041</blocks>

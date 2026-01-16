@@ -13,14 +13,16 @@ namespace Sprk.Bff.Api.Tests.Services.Ai;
 public class ClauseComparisonHandlerTests
 {
     private readonly Mock<IOpenAiClient> _openAiClientMock;
+    private readonly Mock<ITextChunkingService> _textChunkingServiceMock;
     private readonly Mock<ILogger<ClauseComparisonHandler>> _loggerMock;
     private readonly ClauseComparisonHandler _handler;
 
     public ClauseComparisonHandlerTests()
     {
         _openAiClientMock = new Mock<IOpenAiClient>();
+        _textChunkingServiceMock = new Mock<ITextChunkingService>();
         _loggerMock = new Mock<ILogger<ClauseComparisonHandler>>();
-        _handler = new ClauseComparisonHandler(_openAiClientMock.Object, _loggerMock.Object);
+        _handler = new ClauseComparisonHandler(_openAiClientMock.Object, _textChunkingServiceMock.Object, _loggerMock.Object);
     }
 
     #region Handler Properties Tests

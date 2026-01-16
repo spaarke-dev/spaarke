@@ -2,7 +2,7 @@
 
 > **Auto-updated by task-execute skill**
 > **Project**: ai-RAG-pipeline
-> **Last Updated**: 2026-01-15
+> **Last Updated**: 2026-01-16
 
 ---
 
@@ -11,9 +11,9 @@
 | Metric | Value |
 |--------|-------|
 | Total Tasks | 27 |
-| Completed | 5 |
+| Completed | 25 |
 | In Progress | 0 |
-| Pending | 22 |
+| Pending | 2 |
 
 ---
 
@@ -45,46 +45,46 @@
 
 | ID | Title | Status | Dependencies | Rigor |
 |----|-------|--------|--------------|-------|
-| 010 | Create ITextChunkingService interface | 🔲 | none | FULL |
-| 011 | Implement TextChunkingService | 🔲 | 010 | FULL |
-| 012 | Create IFileIndexingService interface | 🔲 | none | FULL |
-| 013 | Implement FileIndexingService | 🔲 | 011, 012 | FULL |
-| 014 | Create RagIndexingJobHandler | 🔲 | 013 | FULL |
-| 015 | Create RagTelemetry class | 🔲 | none | STANDARD |
-| 016 | Add POST /api/ai/rag/index-file endpoint | 🔲 | 013 | FULL |
-| 017 | Register services in AiModule.cs | 🔲 | 014, 016 | STANDARD |
-| 018 | Unit tests for TextChunkingService | 🔲 | 011 | STANDARD |
-| 019 | Unit tests for FileIndexingService and RagIndexingJobHandler | 🔲 | 014 | STANDARD |
+| 010 | Create ITextChunkingService interface | ✅ | none | FULL |
+| 011 | Implement TextChunkingService | ✅ | 010 | FULL |
+| 012 | Create IFileIndexingService interface | ✅ | none | FULL |
+| 013 | Implement FileIndexingService | ✅ | 011, 012 | FULL |
+| 014 | Create RagIndexingJobHandler | ✅ | 013 | FULL |
+| 015 | Create RagTelemetry class | ✅ | none | STANDARD |
+| 016 | Add POST /api/ai/rag/index-file endpoint | ✅ | 013 | FULL |
+| 017 | Register services in AiModule.cs | ✅ | 014, 016 | STANDARD |
+| 018 | Unit tests for TextChunkingService | ✅ | 011 | STANDARD |
+| 019 | Unit tests for FileIndexingService and RagIndexingJobHandler | ✅ | 014 | STANDARD |
 
 ### Phase 2: Email Integration
 
 | ID | Title | Status | Dependencies | Rigor |
 |----|-------|--------|--------------|-------|
-| 020 | Add AutoIndexToRag to EmailProcessingOptions | 🔲 | 017 | STANDARD |
-| 021 | Add EnqueueRagIndexingJobAsync to EmailToDocumentJobHandler | 🔲 | 020 | FULL |
-| 022 | Add RAG telemetry to EmailTelemetry | 🔲 | 015 | STANDARD |
-| 023 | Integration tests for email-to-RAG flow | 🔲 | 021, 022 | STANDARD |
+| 020 | Add AutoIndexToRag to EmailProcessingOptions | ✅ | 017 | STANDARD |
+| 021 | Add EnqueueRagIndexingJobAsync to EmailToDocumentJobHandler | ✅ | 020 | FULL |
+| 022 | Add RAG telemetry to EmailTelemetry | ✅ | 015 | STANDARD |
+| 023 | Integration tests for email-to-RAG flow | ✅ | 021, 022 | STANDARD |
 
 ### Phase 3: Cleanup
 
 | ID | Title | Status | Dependencies | Rigor |
 |----|-------|--------|--------------|-------|
-| 030 | Refactor SummaryHandler to use ITextChunkingService | 🔲 | 017 | FULL |
-| 031 | Refactor remaining tool handlers (6 handlers) | 🔲 | 030 | FULL |
-| 032 | Verify no duplicate ChunkText methods remain | 🔲 | 031 | MINIMAL |
+| 030 | Refactor SummaryHandler to use ITextChunkingService | ✅ | 017 | FULL |
+| 031 | Refactor remaining tool handlers (6 handlers) | ✅ | 030 | FULL |
+| 032 | Verify no duplicate ChunkText methods remain | ✅ | 031 | MINIMAL |
 
 ### Phase 4: Event-Driven
 
 | ID | Title | Status | Dependencies | Rigor |
 |----|-------|--------|--------------|-------|
-| 040 | Implement DocumentEventHandler.HandleDocumentCreatedAsync | 🔲 | 017 | FULL |
-| 041 | E2E tests for document event to RAG flow | 🔲 | 040 | STANDARD |
+| 040 | Implement DocumentEventHandler.HandleDocumentCreatedAsync | ✅ | 017 | FULL |
+| 041 | E2E tests for document event to RAG flow | ✅ | 040 | STANDARD |
 
 ### Phase 5: PCF Integration
 
 | ID | Title | Status | Dependencies | Rigor |
 |----|-------|--------|--------------|-------|
-| 050 | Implement PCF RAG indexing call after upload | 🔲 | 016 | FULL |
+| 050 | Implement PCF RAG indexing call after upload | ✅ | 016 | FULL |
 | 051 | Manual UI testing for PCF to RAG flow | 🔲 | 050 | MINIMAL |
 
 ### Phase 6: Project Wrap-up

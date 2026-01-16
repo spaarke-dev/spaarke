@@ -28,13 +28,16 @@ public sealed class RiskDetectorHandler : IAnalysisToolHandler
     private const int DefaultMaxRisks = 20;
 
     private readonly IOpenAiClient _openAiClient;
+    private readonly ITextChunkingService _textChunkingService;
     private readonly ILogger<RiskDetectorHandler> _logger;
 
     public RiskDetectorHandler(
         IOpenAiClient openAiClient,
+        ITextChunkingService textChunkingService,
         ILogger<RiskDetectorHandler> logger)
     {
         _openAiClient = openAiClient;
+        _textChunkingService = textChunkingService;
         _logger = logger;
     }
 
@@ -116,7 +119,14 @@ public sealed class RiskDetectorHandler : IAnalysisToolHandler
             var documentText = context.Document.ExtractedText;
 
             // Chunk document if needed
-            var chunks = ChunkText(documentText, DefaultChunkSize);
+            var chunkingOptions = new ChunkingOptions
+            {
+                ChunkSize = DefaultChunkSize,
+                Overlap = ChunkOverlap,
+                PreserveSentenceBoundaries = true
+            };
+            var textChunks = await _textChunkingService.ChunkTextAsync(documentText, chunkingOptions, cancellationToken);
+            var chunks = textChunks.Select(c => c.Content).ToList();
             _logger.LogDebug(
                 "Document split into {ChunkCount} chunks for risk detection",
                 chunks.Count);
@@ -413,49 +423,6 @@ public sealed class RiskDetectorHandler : IAnalysisToolHandler
             return "general";
 
         return category.ToLowerInvariant().Trim();
-    }
-
-    /// <summary>
-    /// Chunk text for processing large documents.
-    /// </summary>
-    private static List<string> ChunkText(string text, int chunkSize)
-    {
-        if (string.IsNullOrEmpty(text) || text.Length <= chunkSize)
-            return new List<string> { text };
-
-        var chunks = new List<string>();
-        var position = 0;
-
-        while (position < text.Length)
-        {
-            var length = Math.Min(chunkSize, text.Length - position);
-            var chunk = text.Substring(position, length);
-
-            // Try to break at sentence boundary
-            if (position + length < text.Length)
-            {
-                var lastPeriod = chunk.LastIndexOf(". ");
-                if (lastPeriod > chunkSize / 2)
-                {
-                    chunk = chunk.Substring(0, lastPeriod + 1);
-                    length = chunk.Length;
-                }
-            }
-
-            chunks.Add(chunk);
-
-            var advance = length - ChunkOverlap;
-            if (advance <= 0)
-            {
-                position += length;
-            }
-            else
-            {
-                position += advance;
-            }
-        }
-
-        return chunks;
     }
 
     /// <summary>
