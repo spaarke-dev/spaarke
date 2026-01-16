@@ -164,7 +164,7 @@ function Spaarke_OpenAnalysisWorkspace(analysisId, documentId) {
 
         const pageInput = {
             pageType: "custom",
-            name: "sprk_analysisworkspace_xxxxx",  // Custom Page logical name (update with actual suffix)
+            name: "sprk_analysisworkspace_8bc0b",
             recordId: dataPayload  // Pass data via recordId (dialog workaround)
         };
 
@@ -527,7 +527,7 @@ RIBBON CONFIGURATION:
 
 CUSTOM PAGE NAMES:
 - Analysis Builder: sprk_analysisbuilder_40af8
-- Analysis Workspace: sprk_analysisworkspace_xxxxx (TODO: update after creation)
+- Analysis Workspace: sprk_analysisworkspace_8bc0b
 
 VERSION HISTORY:
 - 1.0.0: Initial release for AI Document Intelligence Phase 2
