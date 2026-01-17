@@ -48,6 +48,45 @@ Configure these in Azure App Service > Configuration > Application Settings:
 | `Redis__Enabled` | Yes | `false` | Enable Redis caching |
 | `Redis__ConnectionString` | Yes | - | Redis connection string |
 
+### RAG Indexing API Key (Job Queue Pattern)
+
+| Setting | Required | Default | Description |
+|---------|----------|---------|-------------|
+| `Rag__ApiKey` | Yes | - | API key for `/api/ai/rag/enqueue-indexing` endpoint |
+
+**Security Notes:**
+- This API key authenticates background jobs, scripts, and automated indexing operations
+- The key is validated via `X-Api-Key` HTTP header
+- For production, migrate to Key Vault: `@Microsoft.KeyVault(SecretUri=https://vault.vault.azure.net/secrets/rag-api-key/)`
+- Rotate the key periodically (recommended: every 90 days)
+
+**Setting the API Key:**
+
+```bash
+# Azure App Service
+az webapp config appsettings set \
+  --name spe-api-dev-67e2xz \
+  --resource-group spe-infrastructure-westus2 \
+  --settings "Rag__ApiKey=rag-key-{guid}"
+
+# Local development (PowerShell)
+$env:Rag__ApiKey = "rag-key-{guid}"
+```
+
+**Using the API Key in Scripts:**
+
+```powershell
+# Set environment variable (don't commit to source control!)
+$env:RAG_API_KEY = "rag-key-{guid}"
+
+# Use in API calls
+$headers = @{
+    "X-Api-Key" = $env:RAG_API_KEY
+    "Content-Type" = "application/json"
+}
+Invoke-WebRequest -Uri "$bffApiUrl/api/ai/rag/enqueue-indexing" -Headers $headers -Method Post -Body $json
+```
+
 ### Example App Settings (appsettings.json)
 
 ```json
@@ -68,6 +107,9 @@ Configure these in Azure App Service > Configuration > Application Settings:
   "Redis": {
     "Enabled": true,
     "ConnectionString": "<redis-connection-string>"
+  },
+  "Rag": {
+    "ApiKey": "<from-key-vault-or-secure-storage>"
   }
 }
 ```
@@ -79,6 +121,7 @@ For production environments, use Key Vault references instead of plain text secr
 ```
 DocumentIntelligence__AiSearchKey=@Microsoft.KeyVault(SecretUri=https://spaarke-spekvcert.vault.azure.net/secrets/ai-search-key/)
 Ai__OpenAiKey=@Microsoft.KeyVault(SecretUri=https://spaarke-spekvcert.vault.azure.net/secrets/ai-openai-key/)
+Rag__ApiKey=@Microsoft.KeyVault(SecretUri=https://spaarke-spekvcert.vault.azure.net/secrets/rag-api-key/)
 ```
 
 ---

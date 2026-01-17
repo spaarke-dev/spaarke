@@ -439,13 +439,14 @@ public static class RagEndpoints
     /// Returns 202 Accepted with job tracking information for async processing.
     /// </remarks>
     private static async Task<IResult> EnqueueIndexing(
-        FileIndexRequest request,
+        [FromBody] FileIndexRequest request,
         HttpRequest httpRequest,
         JobSubmissionService jobSubmissionService,
         IConfiguration configuration,
-        ILogger<Program> logger,
+        ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
+        var logger = loggerFactory.CreateLogger("RagEndpoints");
         var traceId = httpRequest.HttpContext.TraceIdentifier;
         var correlationId = httpRequest.Headers["X-Correlation-Id"].FirstOrDefault() ?? traceId;
 

@@ -573,62 +573,117 @@ User → PCF (DocumentRelationshipViewer) → BFF API (VisualizationEndpoints) �
 
 ### Pattern 9: RAG File Indexing Flow (2026-01-16)
 
-RAG file indexing supports two authentication paths that share the same underlying infrastructure:
+RAG file indexing uses a **job queue pattern** with API key validation for background/automated operations:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                      RAG FILE INDEXING ARCHITECTURE                          │
 │                                                                              │
 │  ┌─────────────────────────────────────────────────────────────────────────┐│
-│  │                      GraphClientFactory                                 ││
+│  │                        ENTRY POINTS                                     ││
 │  │  ─────────────────────────────────────────────────────────────────────  ││
-│  │  ForApp()           → ClientSecretCredential (app-only)                 ││
-│  │  ForUserAsync(ctx)  → OBO token exchange (delegated)                    ││
+│  │                                                                          ││
+│  │  POST /api/ai/rag/index-file        → OBO token (user-initiated)        ││
+│  │  POST /api/ai/rag/enqueue-indexing  → X-Api-Key header (jobs/scripts)   ││
+│  │                                                                          ││
 │  └─────────────────────────────────────────────────────────────────────────┘│
-│                                      │                                       │
-│                      ┌───────────────┴───────────────┐                      │
-│                      ▼                               ▼                      │
-│          ┌─────────────────────────┐    ┌─────────────────────────┐        │
-│          │  DriveItemOperations    │    │  UploadSessionManager   │        │
-│          │  DownloadFileAsync()    │    │  UploadSmallAsync()     │        │
-│          │  DownloadFileAsUserAsync│    │  (email-to-document)    │        │
-│          └─────────────────────────┘    └─────────────────────────┘        │
-│                      │                               │                      │
+│                      │                               │                       │
+│                      │ Immediate                     │ Async                 │
+│                      ▼                               ▼                       │
+│  ┌─────────────────────────────┐    ┌─────────────────────────────────────┐ │
+│  │    FileIndexingService      │    │     JobSubmissionService            │ │
+│  │  ───────────────────────────│    │  ───────────────────────────────────│ │
+│  │  IndexFileAsync() [OBO]     │    │  Submit to Azure Service Bus        │ │
+│  │  (reads & indexes inline)   │    │  JobTypeName = "RagIndexing"        │ │
+│  └─────────────────────────────┘    └─────────────────────────────────────┘ │
+│                      │                               │                       │
+│                      │                               ▼                       │
+│                      │              ┌─────────────────────────────────────┐ │
+│                      │              │   RagIndexingJobHandler             │ │
+│                      │              │  ───────────────────────────────────│ │
+│                      │              │  IndexFileAppOnlyAsync() [app-only] │ │
+│                      │              │  (processes from Service Bus queue) │ │
+│                      │              └─────────────────────────────────────┘ │
+│                      │                               │                       │
 │                      └───────────────┬───────────────┘                      │
 │                                      ▼                                      │
+│  ┌─────────────────────────────────────────────────────────────────────────┐│
+│  │                      GraphClientFactory                                 ││
+│  │  ─────────────────────────────────────────────────────────────────────  ││
+│  │  ForApp()           → ClientSecretCredential (app-only for jobs)        ││
+│  │  ForUserAsync(ctx)  → OBO token exchange (delegated for user-initiated) ││
+│  └─────────────────────────────────────────────────────────────────────────┘│
+│                                      │                                       │
+│                                      ▼                                       │
 │                     ┌─────────────────────────────┐                         │
 │                     │       SpeFileStore          │                         │
 │                     │   (ISpeFileOperations)      │                         │
 │                     └─────────────────────────────┘                         │
 │                                      │                                      │
-│              ┌───────────────────────┴───────────────────────┐              │
-│              ▼                                               ▼              │
-│  ┌─────────────────────────────┐          ┌─────────────────────────────┐  │
-│  │    FileIndexingService      │          │  EmailToDocumentJobHandler  │  │
-│  │  ───────────────────────────│          │  ───────────────────────────│  │
-│  │  IndexFileAsync() [OBO]     │          │  UploadSmallAsync()         │  │
-│  │  IndexFileAppOnlyAsync()    │          │  (writes .eml to SPE)       │  │
-│  │  (reads files from SPE)     │          │                             │  │
-│  └─────────────────────────────┘          └─────────────────────────────┘  │
+│                                      ▼                                      │
+│                     ┌─────────────────────────────┐                         │
+│                     │  DriveItemOperations        │                         │
+│                     │  DownloadFileAsync()        │                         │
+│                     └─────────────────────────────┘                         │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Dual Entry Points for RAG Indexing:**
+**Entry Points for RAG Indexing:**
 
-| Endpoint | Auth Pattern | Use Case | Service Method |
-|----------|-------------|----------|----------------|
-| `POST /api/ai/rag/index-file` | OBO (Pattern 4) | User-initiated via PCF | `IndexFileAsync(request, httpContext)` |
-| `POST /api/ai/rag/index-file-background` | App-only (Pattern 6) | Background jobs, scheduled indexing, bulk ops | `IndexFileAppOnlyAsync(request)` |
+| Endpoint | Auth Pattern | Use Case | Processing |
+|----------|-------------|----------|------------|
+| `POST /api/ai/rag/index-file` | OBO (Pattern 7) | User-initiated via PCF | Synchronous, inline indexing |
+| `POST /api/ai/rag/enqueue-indexing` | X-Api-Key header | Background jobs, scheduled indexing, bulk ops, scripts | Async via Service Bus job queue |
 
 **Components involved:**
 1. `src/server/api/Sprk.Bff.Api/Api/Ai/RagEndpoints.cs` — Both endpoints defined here
-2. `src/server/api/Sprk.Bff.Api/Services/Ai/IFileIndexingService.cs` — Interface with 3 entry points
+2. `src/server/api/Sprk.Bff.Api/Services/Ai/IFileIndexingService.cs` — Interface with entry points
 3. `src/server/api/Sprk.Bff.Api/Services/Ai/FileIndexingService.cs` — Unified pipeline implementation
-4. `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs` — Auth factory (shared)
-5. `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/DriveItemOperations.cs` — File download operations
-6. `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs` — SPE facade (ISpeFileOperations)
+4. `src/server/api/Sprk.Bff.Api/Services/Jobs/JobSubmissionService.cs` — Service Bus job submission
+5. `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/RagIndexingJobHandler.cs` — Async job processor
+6. `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs` — Auth factory (shared)
+7. `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/DriveItemOperations.cs` — File download operations
+8. `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs` — SPE facade (ISpeFileOperations)
 
-**Unified Pipeline (all entry points converge):**
+**API Key Authentication (enqueue-indexing endpoint):**
+
+The `/api/ai/rag/enqueue-indexing` endpoint uses API key validation similar to the email webhook pattern:
+
+```
+Request Header: X-Api-Key: {api-key}
+Server Config:  Rag:ApiKey (App Service setting: Rag__ApiKey)
+
+Validation Flow:
+1. Extract X-Api-Key from request headers
+2. Compare against Rag:ApiKey from configuration
+3. If missing or mismatch → 401 Unauthorized
+4. If match → Submit job to Service Bus queue
+```
+
+**Configuration (App Service Settings):**
+
+| Setting | Description | Example |
+|---------|-------------|---------|
+| `Rag__ApiKey` | API key for enqueue-indexing endpoint | `rag-key-{guid}` |
+
+**Security Notes:**
+- API key is stored in App Service configuration (should migrate to Key Vault)
+- API key should be rotated periodically
+- Scripts/jobs should retrieve from environment variable `RAG_API_KEY`
+
+**Job Queue Processing:**
+```
+1. POST /api/ai/rag/enqueue-indexing with X-Api-Key header
+2. Validate API key against Rag:ApiKey config
+3. Create JobContract with JobTypeName="RagIndexing" and FileIndexRequest payload
+4. Submit to Azure Service Bus via JobSubmissionService
+5. Return 202 Accepted with JobId, CorrelationId, IdempotencyKey
+6. RagIndexingJobHandler picks up job from queue
+7. Calls FileIndexingService.IndexFileAppOnlyAsync() with app-only auth
+8. Job completes with indexing result
+```
+
+**Unified Pipeline (all paths converge):**
 ```
 1. Download file (OBO or app-only based on entry point)
 2. Extract text via ITextExtractor
@@ -642,9 +697,10 @@ RAG file indexing supports two authentication paths that share the same underlyi
 
 | Component | RAG Indexing | Email-to-Document |
 |-----------|-------------|-------------------|
-| `GraphClientFactory.ForApp()` | ✅ Downloads | ✅ Uploads |
+| `GraphClientFactory.ForApp()` | ✅ Downloads (job handler) | ✅ Uploads |
 | `SpeFileStore` | ✅ Via ISpeFileOperations | ✅ Direct |
 | `DriveItemOperations` | ✅ DownloadFileAsync | — |
+| `JobSubmissionService` | ✅ Enqueue indexing jobs | ✅ Enqueue email jobs |
 | `UploadSessionManager` | — | ✅ UploadSmallAsync |
 
 **Change Impact:**
@@ -654,12 +710,17 @@ RAG file indexing supports two authentication paths that share the same underlyi
 | Change GraphClientFactory auth | All SPE operations (email, RAG, visualization) affected |
 | Update ISpeFileOperations interface | SpeFileStore + all consumers affected |
 | Modify chunking/embedding strategy | IRagService, ITextChunkingService affected |
+| Change Rag:ApiKey | Update App Service config + all calling scripts |
+| Modify job queue payload | Update RagEndpoints + RagIndexingJobHandler |
 
 **Key Files:**
-- `RagEndpoints.cs` — POST /api/ai/rag/index-file (OBO), POST /api/ai/rag/index-file-background (app-only)
-- `FileIndexingService.cs` — Unified pipeline with 3 entry points
+- `RagEndpoints.cs` — POST /api/ai/rag/index-file (OBO), POST /api/ai/rag/enqueue-indexing (API key)
+- `RagIndexingJobHandler.cs` — Service Bus job handler, calls `IndexFileAppOnlyAsync()`
+- `JobSubmissionService.cs` — Submits `JobContract` to Service Bus
+- `FileIndexingService.cs` — Unified pipeline with entry points for OBO and app-only
 - `IFileIndexingService.cs` — Interface: `FileIndexRequest`, `ContentIndexRequest`, `FileIndexingResult`
 - `GraphClientFactory.cs` — `ForApp()` and `ForUserAsync()` for auth
+- `index-docs.ps1` — Example script using enqueue-indexing endpoint with X-Api-Key header
 
 ---
 
@@ -800,6 +861,7 @@ src/ ─────────────✗────→ tests/ (no test c
 | **Visualization Endpoints** | `src/server/api/Sprk.Bff.Api/Api/Ai/VisualizationEndpoints.cs` | Same test project |
 | **Visualization Service** | `src/server/api/Sprk.Bff.Api/Services/Ai/VisualizationService.cs` | Same test project (27 tests) |
 | **RAG Endpoints** | `src/server/api/Sprk.Bff.Api/Api/Ai/RagEndpoints.cs` | Same test project |
+| **RAG Indexing Job Handler** | `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/RagIndexingJobHandler.cs` | Same test project |
 | **File Indexing Service** | `src/server/api/Sprk.Bff.Api/Services/Ai/FileIndexingService.cs` | Same test project |
 | PCF Shared Auth | `src/client/pcf/*/services/auth/` | — |
 | Bicep Modules | `infrastructure/bicep/modules/` | `what-if` validation |
