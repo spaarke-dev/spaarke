@@ -6,8 +6,25 @@
     <tags>pcf, fluent-ui, scopes</tags>
     <estimate>0.5d</estimate>
     <dependencies>046</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
+
+  <notes>
+    <completed-date>2026-01-17</completed-date>
+    <summary>
+      Created ScopeFormDialog.tsx with Fluent UI v9 Dialog component.
+      Supports create/edit/view modes for all 4 scope types.
+      Form fields vary by scope type (Actions, Skills, Tools, Knowledge).
+      Read-only mode for SYS- scopes with info banner.
+      Validation before save with per-field error messages.
+    </summary>
+    <files-created>
+      - src/client/pcf/PlaybookBuilderHost/control/components/ScopeBrowser/ScopeFormDialog.tsx
+    </files-created>
+    <files-modified>
+      - src/client/pcf/PlaybookBuilderHost/control/components/ScopeBrowser/index.ts (exports)
+    </files-modified>
+  </notes>
 
   <prompt>
     <goal>Create dialogs for creating and editing customer scopes.</goal>

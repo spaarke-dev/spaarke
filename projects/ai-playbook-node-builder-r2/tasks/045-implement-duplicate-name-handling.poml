@@ -6,8 +6,22 @@
     <tags>bff-api, scopes</tags>
     <estimate>0.5d</estimate>
     <dependencies>043</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
+
+  <notes>
+    <completed-date>2026-01-17</completed-date>
+    <summary>
+      Implemented GenerateUniqueNameAsync in ScopeCopyService.cs.
+      Queries existing names and adds (1), (2), etc. suffix for duplicates.
+      Strips existing suffixes before checking uniqueness.
+      Max suffix of 999, fallback to timestamp if exceeded.
+      Used by both SaveScopeAs and ExtendScope operations.
+    </summary>
+    <files-created>
+      - src/server/api/Sprk.Bff.Api/Services/Scopes/ScopeCopyService.cs (shared with 042, 043)
+    </files-created>
+  </notes>
 
   <prompt>
     <goal>Implement automatic suffix handling for duplicate display names.</goal>

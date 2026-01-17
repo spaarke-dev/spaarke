@@ -6,7 +6,7 @@
     <tags>bff-api, storage, azure</tags>
     <estimate>1d</estimate>
     <dependencies>none</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>

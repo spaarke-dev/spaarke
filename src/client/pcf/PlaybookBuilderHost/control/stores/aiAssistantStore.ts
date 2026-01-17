@@ -1,11 +1,12 @@
 /**
  * AI Assistant Store - Zustand state management for AI chat modal
  *
- * Manages the AI assistant modal state, chat history, and streaming state.
+ * Manages the AI assistant modal state, chat history, streaming state, and test execution.
  * Integrates with canvasStore for applying canvas patches from AI responses.
  * Wires SSE streaming from AiPlaybookService to update store state.
+ * Supports test execution modes: Mock, Quick, and Production.
  *
- * @version 2.0.0
+ * @version 2.1.0
  */
 
 import { create } from 'zustand';
@@ -149,6 +150,48 @@ export interface StreamingState {
   operationCount: number;
 }
 
+/**
+ * Test execution mode (matches server TestMode enum).
+ */
+export type TestMode = 'mock' | 'quick' | 'production';
+
+/**
+ * Test options selected by the user.
+ */
+export interface TestOptions {
+  mode: TestMode;
+  documentFile?: File;
+  documentId?: string;
+  driveId?: string;
+  itemId?: string;
+}
+
+/**
+ * Test node execution progress.
+ */
+export interface TestNodeProgress {
+  nodeId: string;
+  label: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+  output?: Record<string, unknown>;
+  durationMs?: number;
+  error?: string;
+}
+
+/**
+ * Test execution state for tracking test progress.
+ */
+export interface TestExecutionState {
+  isActive: boolean;
+  mode: TestMode | null;
+  currentNodeId: string | null;
+  nodesProgress: TestNodeProgress[];
+  totalDurationMs: number;
+  analysisId: string | null;
+  reportUrl: string | null;
+  error: string | null;
+}
+
 // ============================================================================
 // Store State Interface
 // ============================================================================
@@ -162,6 +205,10 @@ interface AiAssistantState {
   currentPlaybookId: string | null;
   sessionId: string | null;
   error: string | null;
+
+  // Test execution state
+  isTestDialogOpen: boolean;
+  testExecution: TestExecutionState;
 
   // Modal actions
   openModal: () => void;
@@ -197,6 +244,15 @@ interface AiAssistantState {
     serviceConfig: AiPlaybookServiceConfig
   ) => Promise<void>;
   abortStream: () => void;
+
+  // Test execution actions
+  openTestDialog: () => void;
+  closeTestDialog: () => void;
+  startTestExecution: (options: TestOptions) => void;
+  updateTestNodeProgress: (nodeId: string, progress: Partial<TestNodeProgress>) => void;
+  completeTestExecution: (result: { analysisId?: string; reportUrl?: string; totalDurationMs: number }) => void;
+  failTestExecution: (error: string) => void;
+  resetTestExecution: () => void;
 
   // Reset
   reset: () => void;
@@ -263,6 +319,17 @@ const patchNodeToPlaybookNode = (
 // Initial State
 // ============================================================================
 
+const initialTestExecutionState: TestExecutionState = {
+  isActive: false,
+  mode: null,
+  currentNodeId: null,
+  nodesProgress: [],
+  totalDurationMs: 0,
+  analysisId: null,
+  reportUrl: null,
+  error: null,
+};
+
 const initialState = {
   isOpen: false,
   messages: [] as ChatMessage[],
@@ -274,6 +341,8 @@ const initialState = {
   currentPlaybookId: null as string | null,
   sessionId: null as string | null,
   error: null as string | null,
+  isTestDialogOpen: false,
+  testExecution: initialTestExecutionState,
 };
 
 // ============================================================================
@@ -747,6 +816,87 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
       streamingState: { isActive: false, operationCount: get().streamingState.operationCount },
     });
   },
+
+  // Test execution actions
+  openTestDialog: () => set({ isTestDialogOpen: true }),
+
+  closeTestDialog: () => set({ isTestDialogOpen: false }),
+
+  startTestExecution: (options: TestOptions) =>
+    set({
+      isTestDialogOpen: false,
+      testExecution: {
+        isActive: true,
+        mode: options.mode,
+        currentNodeId: null,
+        nodesProgress: [],
+        totalDurationMs: 0,
+        analysisId: null,
+        reportUrl: null,
+        error: null,
+      },
+    }),
+
+  updateTestNodeProgress: (nodeId: string, progress: Partial<TestNodeProgress>) =>
+    set((state) => {
+      const existingIndex = state.testExecution.nodesProgress.findIndex(
+        (n) => n.nodeId === nodeId
+      );
+
+      let updatedProgress: TestNodeProgress[];
+      if (existingIndex >= 0) {
+        // Update existing node progress
+        updatedProgress = state.testExecution.nodesProgress.map((n, i) =>
+          i === existingIndex ? { ...n, ...progress } : n
+        );
+      } else {
+        // Add new node progress
+        updatedProgress = [
+          ...state.testExecution.nodesProgress,
+          {
+            nodeId,
+            label: progress.label ?? nodeId,
+            status: progress.status ?? 'pending',
+            ...progress,
+          },
+        ];
+      }
+
+      return {
+        testExecution: {
+          ...state.testExecution,
+          currentNodeId: progress.status === 'running' ? nodeId : state.testExecution.currentNodeId,
+          nodesProgress: updatedProgress,
+        },
+      };
+    }),
+
+  completeTestExecution: (result) =>
+    set((state) => ({
+      testExecution: {
+        ...state.testExecution,
+        isActive: false,
+        currentNodeId: null,
+        analysisId: result.analysisId ?? null,
+        reportUrl: result.reportUrl ?? null,
+        totalDurationMs: result.totalDurationMs,
+      },
+    })),
+
+  failTestExecution: (error: string) =>
+    set((state) => ({
+      testExecution: {
+        ...state.testExecution,
+        isActive: false,
+        currentNodeId: null,
+        error,
+      },
+    })),
+
+  resetTestExecution: () =>
+    set({
+      testExecution: initialTestExecutionState,
+    }),
 
   // Reset
   reset: () => set(initialState),

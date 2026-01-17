@@ -6,7 +6,8 @@
     <tags>pcf, fluent-ui, scopes</tags>
     <estimate>1d</estimate>
     <dependencies>Phase 2</dependencies>
-    <status>pending</status>
+    <status>completed</status>
+    <completed>2026-01-17</completed>
   </metadata>
 
   <prompt>
@@ -66,4 +67,21 @@
     <criterion>Drag to canvas works</criterion>
     <criterion>Dark mode compatible</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <note date="2026-01-17">
+      Implementation complete:
+      - Created ScopeBrowser.tsx container component
+      - Fluent UI v9 TabList for scope types: Actions, Skills, Tools, Knowledge
+      - Search input with real-time filtering
+      - Lazy loading of scope lists per tab
+      - Created ScopeList.tsx with DataGrid component
+      - Ownership badges: SYS (blue) / CUST (green) with lock icon for immutable
+      - Action menu per row: View, Save As, Extend, Delete (CUST only)
+      - Drag-to-canvas support with dataTransfer
+      - All styling uses Fluent UI tokens (ADR-021 compliant)
+      - Exported types: ScopeItem, ScopeType, OwnershipType, ScopeBrowserProps, ScopeListProps
+      - Build passes with 0 errors, 0 warnings
+    </note>
+  </notes>
 </task>

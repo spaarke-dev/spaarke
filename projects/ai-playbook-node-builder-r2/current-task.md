@@ -9,13 +9,13 @@
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | 024 |
-| **Task File** | tasks/024-implement-build-plan-generation.poml |
-| **Title** | Implement build plan generation |
-| **Phase** | 3 - AI Integration + Builder Scopes |
-| **Status** | completed |
-| **Started** | 2026-01-16 |
-| **Rigor Level** | FULL |
+| **Task ID** | 033 |
+| **Task File** | tasks/033-implement-quick-test-temp-blob.poml |
+| **Title** | Implement quick test with temp blob |
+| **Phase** | 4 - Test Execution |
+| **Status** | not-started |
+| **Started** | — |
+| **Rigor Level** | — |
 
 ---
 
@@ -23,35 +23,22 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 024 - Implement build plan generation |
-| **Step** | 6 of 6: All steps complete |
-| **Status** | completed |
-| **Next Action** | Task complete - ready for next task |
+| **Task** | 033 - Implement quick test with temp blob |
+| **Step** | 0 of N: Not started |
+| **Status** | not-started |
+| **Next Action** | Begin task 033 when ready |
 
 ---
 
 ## Completed Steps
 
-- [x] Step 1: Define BuildPlan model - Created BuildPlanModels.cs with all types
-- [x] Step 2: Define ExecutionStep model - Included in BuildPlanModels.cs
-- [x] Step 3: Implement GenerateBuildPlanAsync - Created BuildPlanGenerationService
-- [x] Step 4: Use o1-mini for reasoning - Uses IModelSelector.SelectModel(OperationType.PlanGeneration)
-- [x] Step 5: Parse and validate plan - Comprehensive validation implemented
-- [x] Step 6: Test with lease analysis scenario - 50 unit tests all passing
+*(Cleared - ready for task 033)*
 
 ---
 
 ## Files Modified
 
-| File | Purpose |
-|------|---------|
-| src/server/api/Sprk.Bff.Api/Models/Ai/BuildPlanModels.cs | Created - All build plan related models |
-| src/server/api/Sprk.Bff.Api/Services/Ai/BuildPlanGenerationService.cs | Created - Plan generation service |
-| tests/unit/Sprk.Bff.Api.Tests/Services/Ai/BuildPlanGenerationServiceTests.cs | Created - 50 unit tests |
-| src/server/api/Sprk.Bff.Api/Services/Ai/AiPlaybookBuilderService.cs | Updated - Uses new BuildPlan types |
-| src/server/api/Sprk.Bff.Api/Infrastructure/Streaming/ServerSentEventWriter.cs | Updated - Uses Models.Ai.BuildPlan |
-| tests/unit/Sprk.Bff.Api.Tests/Infrastructure/Streaming/ServerSentEventWriterTests.cs | Updated - Fixed BuildPlan usage |
-| tests/unit/Sprk.Bff.Api.Tests/Models/Ai/BuilderSseEventsTests.cs | Updated - Fixed BuildPlan usage |
+*(Cleared - ready for task 033)*
 
 ---
 
@@ -85,6 +72,33 @@
 ---
 
 ## Session Notes
+
+### Tasks 031 & 032 Completed ✅ (Parallel)
+
+- **Task 031**: Implement mock test with sample data generation ✅
+  - Created `MockDataGenerator.cs` - Generates sample data based on scope definitions
+  - Created `MockTestExecutor.cs` - Executes playbook tests in mock mode using generated data
+  - Generates mock outputs for all node types (aiAnalysis, aiCompletion, condition, etc.)
+  - Uses dictionary-based config access for CanvasNode.Config
+  - Registered IMockDataGenerator and IMockTestExecutor in DI
+
+- **Task 032**: Implement temp blob storage service (24hr TTL) ✅
+  - Created `TempBlobStorageService.cs` - Manages test documents in Azure Blob Storage
+  - Upload with 50MB max file size validation
+  - Generate read-only SAS URLs with 24hr expiry
+  - Session-based document cleanup
+  - Created `temp-blob-lifecycle.bicep` for Azure lifecycle policy
+  - Registered ITempBlobStorageService in DI with BlobServiceClient
+
+### Task 030 Completed ✅
+
+- **Task 030**: Add /api/ai/test-playbook-execution endpoint ✅
+- Created `TestPlaybookModels.cs` with TestMode enum, TestPlaybookRequest, TestOptions, TestExecutionEvent
+- Added POST `/api/ai/playbook-builder/test-execution` endpoint with SSE streaming
+- Added `ExecuteTestAsync` to IAiPlaybookBuilderService and implemented in AiPlaybookBuilderService
+- Added generic `WriteEventAsync` to ServerSentEventWriter for custom event types
+- Request validation for PlaybookId, CanvasJson, TimeoutSeconds, MaxNodes
+- All acceptance criteria met, build successful
 
 ### Task 024 Completed ✅
 
@@ -152,7 +166,7 @@ All Phase 1 Infrastructure tasks complete (001-009)
 
 ## Next Action
 
-Task 024 complete. Ready for next task.
+Tasks 031 and 032 complete. Next pending task: 033 - Implement quick test with temp blob.
 
 ---
 

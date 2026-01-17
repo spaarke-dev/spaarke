@@ -44,6 +44,17 @@ public interface IAiPlaybookBuilderService
         string message,
         CanvasContext? canvasContext,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Execute a playbook test with streaming progress.
+    /// Supports Mock, Quick, and Production test modes.
+    /// </summary>
+    /// <param name="request">Test execution request with mode and playbook configuration.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Async enumerable of test execution events for SSE streaming.</returns>
+    IAsyncEnumerable<Models.Ai.TestExecutionEvent> ExecuteTestAsync(
+        Models.Ai.TestPlaybookRequest request,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>

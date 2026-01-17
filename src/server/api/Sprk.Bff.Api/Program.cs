@@ -386,6 +386,24 @@ if (analysisEnabled && documentIntelligenceEnabled)
     // Clarification Service - generates clarification prompts for low-confidence intent/entity resolution (ai-playbook-node-builder-r2 project)
     builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IClarificationService, Sprk.Bff.Api.Services.Ai.ClarificationService>();
 
+    // Testing Services - Mock and Quick test execution for playbook validation (ai-playbook-node-builder-r2 Phase 4)
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.Testing.IMockDataGenerator, Sprk.Bff.Api.Services.Ai.Testing.MockDataGenerator>();
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.Testing.IMockTestExecutor, Sprk.Bff.Api.Services.Ai.Testing.MockTestExecutor>();
+
+    // Temp Blob Storage - 24hr TTL storage for Quick Test documents (ai-playbook-node-builder-r2 Phase 4)
+    var storageConnectionString = builder.Configuration.GetConnectionString("BlobStorage")
+        ?? builder.Configuration["AzureStorage:ConnectionString"];
+    if (!string.IsNullOrEmpty(storageConnectionString))
+    {
+        builder.Services.AddSingleton(sp => new Azure.Storage.Blobs.BlobServiceClient(storageConnectionString));
+        builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Testing.ITempBlobStorageService, Sprk.Bff.Api.Services.Ai.Testing.TempBlobStorageService>();
+        // Quick Test Executor - requires temp blob storage and text extraction (Task 033)
+        builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.Testing.IQuickTestExecutor, Sprk.Bff.Api.Services.Ai.Testing.QuickTestExecutor>();
+    }
+
+    // Production Test Executor - uses SPE file operations for real document testing (Task 035)
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.Testing.IProductionTestExecutor, Sprk.Bff.Api.Services.Ai.Testing.ProductionTestExecutor>();
+
     // Template Engine - Handlebars.NET for variable substitution in prompts and delivery templates
     builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.ITemplateEngine, Sprk.Bff.Api.Services.Ai.TemplateEngine>();
 

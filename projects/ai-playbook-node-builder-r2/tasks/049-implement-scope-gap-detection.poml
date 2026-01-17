@@ -6,8 +6,23 @@
     <tags>bff-api, ai, scopes</tags>
     <estimate>0.5d</estimate>
     <dependencies>046</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
+
+  <notes>
+    <completed-date>2026-01-17</completed-date>
+    <summary>
+      Created ScopeGapDetector.cs with IScopeGapDetector interface.
+      Implements keyword-based intent detection for quick analysis.
+      Maps intents to tool types (extraction → EntityExtractor, etc.).
+      Uses AI for nuanced suggestions when keyword analysis insufficient.
+      Compares against available scope catalog to find gaps.
+      Returns prioritized ScopeSuggestion list (max 5).
+    </summary>
+    <files-created>
+      - src/server/api/Sprk.Bff.Api/Services/Ai/ScopeGapDetector.cs
+    </files-created>
+  </notes>
 
   <prompt>
     <goal>Implement proactive detection of missing scopes based on user's playbook intent.</goal>
