@@ -6,8 +6,25 @@
     <tags>bff-api, ai, sse, endpoint</tags>
     <estimate>1d</estimate>
     <dependencies>001</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
+
+  <notes>
+    <completion-date>2026-01-16</completion-date>
+    <summary>Created SSE streaming endpoint with 3 routes following ADR-001/ADR-008 patterns.</summary>
+    <files-created>
+      - AiPlaybookBuilderEndpoints.cs (3 endpoints: process, generate-plan, classify-intent)
+    </files-created>
+    <files-modified>
+      - Program.cs (added endpoint registration)
+    </files-modified>
+    <decisions>
+      - Used /api/ai/playbook-builder path prefix (consistent with existing AI endpoints)
+      - Added ClassifyIntentRequest record in endpoint file for co-location
+      - Reused BuilderRequest from task 001 (no new request model needed)
+      - Applied rate limiting: ai-stream for SSE, ai-batch for non-streaming
+    </decisions>
+  </notes>
 
   <prompt>
     <goal>Create the SSE streaming endpoint that receives user messages and streams canvas operations back to the client.</goal>

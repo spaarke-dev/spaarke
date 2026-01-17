@@ -6,7 +6,7 @@
     <tags>bff-api, dataverse, crud</tags>
     <estimate>1.5d</estimate>
     <dependencies>none</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -57,4 +57,25 @@
     <criterion>Duplicate names get suffix (1), (2), etc.</criterion>
     <criterion>Unit tests cover CRUD and validation</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <completed>2026-01-16</completed>
+    <summary>
+      Created IScopeManagementService interface and ScopeManagementService implementation
+      for CRUD operations on Dataverse scope entities. Key decisions:
+      - Placed in Services/Ai folder alongside IScopeResolverService (not Services/Dataverse)
+      - IScopeResolverService handles reads, IScopeManagementService handles writes
+      - Ownership validation: SYS- prefix = immutable system scopes, CUST- prefix = customer editable
+      - Auto-prefix: Names without CUST- prefix get it added automatically
+      - Duplicate handling: GenerateUniqueNameAsync adds (1), (2) suffix
+      - ScopeOwnershipException thrown when attempting to modify SYS- scopes
+    </summary>
+    <files-modified>
+      - src/server/api/Sprk.Bff.Api/Services/Ai/IScopeManagementService.cs (created)
+      - src/server/api/Sprk.Bff.Api/Services/Ai/ScopeManagementService.cs (created)
+      - src/server/api/Sprk.Bff.Api/Program.cs (DI registration)
+      - tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ScopeManagementServiceTests.cs (created)
+    </files-modified>
+    <tests>19 unit tests covering ownership validation, prefix handling, duplicate names, CRUD operations</tests>
+  </notes>
 </task>

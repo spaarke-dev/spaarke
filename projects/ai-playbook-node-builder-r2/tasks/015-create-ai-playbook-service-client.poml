@@ -6,7 +6,7 @@
     <tags>pcf, api-client, sse</tags>
     <estimate>0.5d</estimate>
     <dependencies>Phase 1</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -55,4 +55,56 @@
     <criterion>Typed responses for each event</criterion>
     <criterion>Connection errors handled</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <completed-date>2026-01-16</completed-date>
+    <summary>
+      Created AiPlaybookService API client for SSE streaming:
+
+      1. REQUEST TYPES:
+         - BuildPlaybookCanvasRequest: playbookId, currentCanvas, message, conversationHistory
+         - CanvasState: nodes, edges arrays
+         - ConversationMessage: role, content
+
+      2. RESPONSE TYPES (SSE Events):
+         - ThinkingEventData: message, step
+         - DataverseOperationEventData: operation, entity, record, id
+         - CanvasPatchEventData: extends CanvasPatch from store
+         - MessageEventData: content, isPartial
+         - ClarificationEventData: question, options, context
+         - PlanPreviewEventData: summary, steps, estimatedNodes
+         - ErrorEventData: message, code, details
+         - DoneEventData: success, summary
+
+      3. SERVICE CLASS:
+         - Constructor takes config (apiBaseUrl, accessToken, timeout)
+         - buildPlaybookCanvas(request, handlers) - main streaming method
+         - abort() - cancel current request
+         - isStreaming() - check if request in progress
+         - setAccessToken() - update token for refresh
+
+      4. SSE STREAM PROCESSING:
+         - Uses fetch with ReadableStream (not EventSource, since POST)
+         - TextDecoder for chunk decoding
+         - Buffer for incomplete events
+         - Regex parsing for event: + data: format
+         - Dispatches to typed event handlers
+
+      5. ERROR HANDLING:
+         - AbortController with timeout
+         - HTTP error status handling
+         - Connection error callback
+         - Parse error warnings
+
+      6. FILES CREATED:
+         - services/AiPlaybookService.ts (330 lines)
+         - services/index.ts (barrel export)
+
+      7. ACCEPTANCE CRITERIA MET:
+         - ✅ Service makes POST request to /api/ai/build-playbook-canvas
+         - ✅ SSE events parsed by type (8 event types supported)
+         - ✅ Typed responses for each event (full TypeScript types)
+         - ✅ Connection errors handled (timeout, abort, fetch errors)
+    </summary>
+  </notes>
 </task>
