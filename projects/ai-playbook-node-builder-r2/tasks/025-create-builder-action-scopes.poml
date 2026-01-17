@@ -6,8 +6,21 @@
     <tags>dataverse, scopes</tags>
     <estimate>0.5d</estimate>
     <dependencies>none</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
+
+  <notes>
+    <note date="2026-01-16">
+      Created 5 Builder Action records via Create-BuilderScopes.ps1:
+      - ACT-BUILDER-001: Intent Classification (47811a31-60f3-f011-8406-7c1e520aa4df)
+      - ACT-BUILDER-002: Node Configuration (77f5242f-60f3-f011-8406-7ced8d1dc988)
+      - ACT-BUILDER-003: Scope Selection (48811a31-60f3-f011-8406-7c1e520aa4df)
+      - ACT-BUILDER-004: Scope Creation (49811a31-60f3-f011-8406-7c1e520aa4df)
+      - ACT-BUILDER-005: Build Plan Generation (7bf5242f-60f3-f011-8406-7ced8d1dc988)
+
+      Each action includes full system prompts for the AI Builder pipeline.
+    </note>
+  </notes>
 
   <prompt>
     <goal>Create the 5 Builder Action scope records in Dataverse.</goal>
