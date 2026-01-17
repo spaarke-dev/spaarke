@@ -681,10 +681,12 @@ public static class EmailEndpoints
         IDataverseService dataverseService,
         CancellationToken cancellationToken)
     {
-        // TODO: Implement query to check for existing document with sprk_Email = emailId
-        // This will be implemented when the alternate key (Task 003) is in place
-        // For now, return null (no duplicate check)
-        await Task.CompletedTask;
+        // Query for existing document with sprk_Email = emailId
+        var existingDoc = await dataverseService.GetDocumentByEmailLookupAsync(emailId, cancellationToken);
+        if (existingDoc?.Id != null && Guid.TryParse(existingDoc.Id, out var docId))
+        {
+            return docId;
+        }
         return null;
     }
 

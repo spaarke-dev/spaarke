@@ -1,9 +1,9 @@
 # AI Document Intelligence - Deployment Guide
 
-> **Version**: 2.2
+> **Version**: 2.3
 > **Created**: 2025-12-28
-> **Updated**: 2026-01-03
-> **Projects**: AI Document Intelligence R1 + R2 + R3
+> **Updated**: 2026-01-16
+> **Projects**: AI Document Intelligence R1 + R2 + R3 + Email-to-Document R2 + RAG Pipeline R1
 
 ---
 
@@ -17,11 +17,14 @@
 6. [Phase 4: Custom Pages (R2)](#phase-4-custom-pages-r2)
 7. [Phase 5: Form Integration (R2)](#phase-5-form-integration-r2)
 8. [Phase 6: RAG Infrastructure (R3)](#phase-6-rag-infrastructure-r3)
-9. [Environment Configuration](#environment-configuration)
-10. [Verification Procedures](#verification-procedures)
-11. [Known Issues](#known-issues)
-12. [Troubleshooting](#troubleshooting)
-13. [Reference](#reference)
+9. [Phase 7: Email-to-Document Automation](#phase-7-email-to-document-automation)
+10. [Phase 8: RAG Document Indexing Pipeline](#phase-8-rag-document-indexing-pipeline)
+11. [Azure Services Reference](#azure-services-reference)
+12. [Complete App Service Configuration](#complete-app-service-configuration)
+13. [Verification Procedures](#verification-procedures)
+14. [Known Issues](#known-issues)
+15. [Troubleshooting](#troubleshooting)
+16. [Reference](#reference)
 
 ---
 
@@ -44,18 +47,30 @@ This guide covers the complete deployment of AI Document Intelligence for the Sp
 - Document form integration (Analysis tab, subgrid, ribbon button)
 
 **R3 Scope (RAG Infrastructure)** *(Phase 1 Complete)*:
-- RAG knowledge index (`spaarke-knowledge-index`) with hybrid search
+- RAG knowledge index (`spaarke-knowledge-index-v2`) with hybrid search (3072-dim vectors)
 - Multi-tenant deployment models (Shared, Dedicated, CustomerOwned)
 - `IKnowledgeDeploymentService` for SearchClient routing
 - `IRagService` for hybrid search with semantic ranking
 - Redis caching for embeddings
+
+**Email-to-Document R2 Scope**:
+- Automated email archival to SharePoint Embedded
+- Email attachment processing
+- Auto-enqueue for AI analysis
+- Optional RAG indexing for emails and attachments
+
+**RAG Pipeline R1 Scope**:
+- `IFileIndexingService` for unified file indexing
+- Text extraction, chunking, embedding, indexing pipeline
+- `RagIndexingJobHandler` for background processing
+- Idempotency with Redis-based locks
 
 ### Architecture Components
 
 | Component | Purpose | Version/Status |
 |-----------|---------|----------------|
 | BFF API | Backend-for-Frontend serving PCF controls | Deployed |
-| Azure OpenAI | LLM for summarization and analysis | gpt-4o-mini |
+| Azure OpenAI | LLM for summarization and analysis | gpt-4o-mini, text-embedding-3-large |
 | AI Search | RAG knowledge retrieval | spaarke-search-dev |
 | Document Intelligence | Document parsing | westus2 |
 | AI Foundry | Prompt Flow orchestration | sprkspaarkedev-aif-hub |
@@ -63,8 +78,12 @@ This guide covers the complete deployment of AI Document Intelligence for the Sp
 | AnalysisBuilder PCF | Analysis configuration dialog | v1.12.0 |
 | AnalysisWorkspace PCF | Analysis workspace with chat | v1.0.29 |
 | Custom Pages | Power Apps hosts for PCF controls | Deployed |
-| KnowledgeDeploymentService | Multi-tenant RAG deployment routing | R3 (New) |
-| spaarke-knowledge-index | RAG vector index (1536 dims) | R3 (Deployed) |
+| KnowledgeDeploymentService | Multi-tenant RAG deployment routing | R3 (Active) |
+| FileIndexingService | Unified RAG file indexing pipeline | R3+RAG-R1 (Active) |
+| spaarke-knowledge-index-v2 | RAG vector index (3072 dims) | **Primary** |
+| spaarke-records-index | Record matching index | Active |
+| Service Bus | Async job processing | Active |
+| Redis | Caching (embeddings, idempotency) | Active |
 
 ---
 
@@ -468,7 +487,7 @@ Phase 6 adds multi-tenant RAG (Retrieval-Augmented Generation) infrastructure wi
 
 ### 6.1 Deploy RAG Knowledge Index
 
-The `spaarke-knowledge-index` was deployed in Task 002 of R3:
+The `spaarke-knowledge-index-v2` is the primary RAG index with 3072-dimensional vectors:
 
 ```bash
 # Verify index exists
@@ -477,10 +496,24 @@ az search index list \
   --resource-group spe-infrastructure-westus2 \
   -o table
 
-# Expected output should include: spaarke-knowledge-index
+# Expected output should include: spaarke-knowledge-index-v2
 ```
 
-**Index Definition**: [`infrastructure/ai-search/spaarke-knowledge-index.json`](../../infrastructure/ai-search/spaarke-knowledge-index.json)
+**Index Definition**: [`infrastructure/ai-search/spaarke-knowledge-index-v2.json`](../../infrastructure/ai-search/spaarke-knowledge-index-v2.json)
+
+#### Index Schema
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `id` | Edm.String | Unique chunk ID |
+| `tenantId` | Edm.String | Multi-tenant isolation |
+| `content` | Edm.String | Chunk text content |
+| `contentVector3072` | Collection(Edm.Single) | 3072-dim embedding (text-embedding-3-large) |
+| `documentVector3072` | Collection(Edm.Single) | Document-level embedding |
+| `speFileId` | Edm.String | SharePoint Embedded file ID |
+| `fileName` | Edm.String | Original file name |
+| `deploymentId` | Edm.String | Deployment model ID |
+| `deploymentModel` | Edm.String | Shared/Dedicated/CustomerOwned |
 
 ### 6.2 RAG Services Registration
 
@@ -490,7 +523,15 @@ The following services are registered in `Program.cs` when AI Search is configur
 |---------|--------------|---------|
 | `SearchIndexClient` | Singleton | Azure SDK client for index management |
 | `IKnowledgeDeploymentService` | Singleton | Multi-tenant SearchClient routing |
-| `IRagService` | Scoped | Hybrid search with semantic ranking (Task 004) |
+| `IRagService` | Singleton | Hybrid search with semantic ranking |
+| `IFileIndexingService` | Singleton | Unified RAG indexing pipeline |
+| `IEmbeddingCache` | Singleton | Redis-based embedding cache |
+| `IVisualizationService` | Singleton | Document similarity visualization |
+
+**Required Configuration**: These services only register if `DocumentIntelligence:AiSearchEndpoint` and `DocumentIntelligence:AiSearchKey` are both configured. If missing, the console logs:
+```
+⚠ RAG services disabled (requires DocumentIntelligence:AiSearchEndpoint/Key)
+```
 
 ### 6.3 Deployment Models
 
@@ -498,26 +539,28 @@ The RAG system supports 3 deployment models configured per tenant:
 
 | Model | Index Location | Configuration |
 |-------|---------------|---------------|
-| **Shared** | `spaarke-knowledge-index` | Default, `tenantId` filter for isolation |
+| **Shared** | `spaarke-knowledge-index-v2` | Default, `tenantId` filter for isolation |
 | **Dedicated** | `{tenantId}-knowledge` | Per-customer index, requires index creation |
 | **CustomerOwned** | Customer Azure AI Search | Requires Key Vault secret for API key |
+
+**Default Shared Index**: Configure via `Analysis__SharedIndexName` in App Service. Default: `spaarke-knowledge-index-v2`.
 
 ### 6.4 Verify RAG Infrastructure
 
 ```bash
 # 1. Check index is accessible
-curl -X GET "https://spaarke-search-dev.search.windows.net/indexes/spaarke-knowledge-index/docs/\$count?api-version=2024-07-01" \
+curl -X GET "https://spaarke-search-dev.search.windows.net/indexes/spaarke-knowledge-index-v2/docs/\$count?api-version=2024-07-01" \
   -H "api-key: <your-api-key>"
 
 # 2. Verify service is registered (check API startup logs)
-# Look for: "✓ RAG Knowledge Deployment service enabled (index: spaarke-knowledge-index)"
+# Look for: "✓ RAG services enabled (hybrid search + embedding cache + visualization + file indexing)"
 
 # 3. Test embeddings model deployment
 az cognitiveservices account deployment list \
   --name spaarke-openai-dev \
   --resource-group spe-infrastructure-westus2 \
   -o table
-# Should show: text-embedding-3-small
+# Should show: text-embedding-3-large (primary for 3072-dim vectors)
 ```
 
 ### 6.5 R3 Phase 1 Status (Complete)
@@ -560,42 +603,292 @@ The embedding cache uses Redis (ADR-009) to reduce Azure OpenAI API costs and la
 
 ---
 
-## Environment Configuration
+## Phase 7: Email-to-Document Automation
 
-### BFF API App Settings
+### 7.1 Overview
 
-Configure the following in Azure App Service > Configuration:
+Email-to-Document automation converts Dataverse email records to documents stored in SharePoint Embedded.
 
-#### AI Services
+### 7.2 Required App Service Settings
 
-| Setting | Example Value |
-|---------|---------------|
-| `Ai__Enabled` | `true` |
-| `Ai__OpenAiEndpoint` | `https://spaarke-openai-dev.openai.azure.com/` |
-| `Ai__OpenAiKey` | `{from Azure OpenAI Keys}` |
-| `Ai__SummarizeModel` | `gpt-4o-mini` |
-| `Ai__DocIntelEndpoint` | `https://westus2.api.cognitive.microsoft.com/` |
-| `Ai__DocIntelKey` | `{from Document Intelligence Keys}` |
+| Setting | Required | Description | Default |
+|---------|----------|-------------|---------|
+| `EmailProcessing__EnableWebhook` | Yes | Enable Dataverse webhook triggers | `true` |
+| `EmailProcessing__WebhookSecret` | Yes | Shared secret for webhook validation | — |
+| `EmailProcessing__DefaultContainerId` | Yes | SPE Container ID for email storage | — |
+| `EmailProcessing__EnablePolling` | No | Enable backup polling for missed emails | `true` |
+| `EmailProcessing__AutoIndexToRag` | No | Auto-queue emails for RAG indexing | `false` |
 
-#### Document Intelligence Feature
+### 7.3 RAG Integration
 
-| Setting | Example Value |
-|---------|---------------|
-| `DocumentIntelligence__Enabled` | `true` |
-| `DocumentIntelligence__AiSearchEndpoint` | `https://spaarke-search-dev.search.windows.net` |
-| `DocumentIntelligence__AiSearchKey` | `{from AI Search Keys}` |
-| `DocumentIntelligence__AiSearchIndexName` | `spaarke-records-index` |
-| `DocumentIntelligence__RecordMatchingEnabled` | `true` |
+When `EmailProcessing__AutoIndexToRag=true`:
+- Archived emails (.eml files) are queued for RAG indexing
+- Email attachments are separately indexed
+- Both use the `RagIndexingJobHandler` via Service Bus
+
+### 7.4 Verify Email Processing
+
+```bash
+# Check Service Bus queue for pending jobs
+az servicebus queue show \
+  --namespace-name spaarke-servicebus-dev \
+  --name spaarke-jobs \
+  --resource-group spe-infrastructure-westus2 \
+  --query "countDetails"
+```
+
+---
+
+## Phase 8: RAG Document Indexing Pipeline
+
+### 8.1 Overview
+
+The RAG Document Indexing Pipeline provides end-to-end file indexing:
+
+```
+File → Download → Extract Text → Chunk → Generate Embeddings → Index to AI Search
+```
+
+### 8.2 Pipeline Components
+
+| Component | Purpose |
+|-----------|---------|
+| `IFileIndexingService` | Orchestrates the full pipeline |
+| `ITextChunkingService` | Splits text with configurable overlap |
+| `IRagService` | Generates embeddings and indexes chunks |
+| `RagIndexingJobHandler` | Background job processing via Service Bus |
+| `IIdempotencyService` | Prevents duplicate processing |
+
+### 8.3 Entry Points
+
+| Method | Auth Mode | Use Case |
+|--------|-----------|----------|
+| `IndexFileAsync` | OBO (user token) | User-initiated indexing |
+| `IndexFileAppOnlyAsync` | App-only | Background jobs, automation |
+| `IndexContentAsync` | N/A | Direct content indexing |
+
+### 8.4 API Endpoints
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/ai/rag/index-file` | POST | Index a file (OBO) |
+| `/api/ai/rag/search` | POST | Hybrid search |
+| `/api/ai/rag/index` | POST | Index document chunks |
+| `/api/ai/rag/index/batch` | POST | Batch index chunks |
+
+### 8.5 Required Configuration
+
+**Critical**: RAG endpoints require both settings or services won't register:
+- `DocumentIntelligence__AiSearchEndpoint`
+- `DocumentIntelligence__AiSearchKey`
+
+Without these, you'll see: `⚠ RAG services disabled (requires DocumentIntelligence:AiSearchEndpoint/Key)`
+
+---
+
+## Azure Services Reference
+
+### Quick Reference - All Endpoints (Dev Environment)
+
+| Service | Endpoint |
+|---------|----------|
+| BFF API | `https://spe-api-dev-67e2xz.azurewebsites.net` |
+| Azure OpenAI | `https://spaarke-openai-dev.openai.azure.com/` |
+| Document Intelligence | `https://westus2.api.cognitive.microsoft.com/` |
+| Azure AI Search | `https://spaarke-search-dev.search.windows.net/` |
+| Redis Cache | (internal - managed by App Service) |
+| Service Bus | `spaarke-servicebus-dev.servicebus.windows.net` |
+| Key Vault | `https://spaarke-spekvcert.vault.azure.net/` |
+
+### Azure OpenAI
+
+| Property | Value |
+|----------|-------|
+| **Resource Name** | `spaarke-openai-dev` |
+| **Resource Group** | `spe-infrastructure-westus2` |
+| **Region** | West US 2 |
+| **Endpoint** | `https://spaarke-openai-dev.openai.azure.com/` |
+
+#### Model Deployments
+
+| Deployment Name | Model | Purpose |
+|-----------------|-------|---------|
+| `gpt-4o-mini` | gpt-4o-mini | Document analysis, chat |
+| `text-embedding-3-large` | text-embedding-3-large | **Primary** - RAG embeddings (3072 dims) |
+| `text-embedding-3-small` | text-embedding-3-small | Deprecated (1536 dims) |
+
+### Azure AI Search
+
+| Property | Value |
+|----------|-------|
+| **Resource Name** | `spaarke-search-dev` |
+| **Resource Group** | `spe-infrastructure-westus2` |
+| **Endpoint** | `https://spaarke-search-dev.search.windows.net/` |
+
+#### Indexes
+
+| Index Name | Purpose | Status |
+|------------|---------|--------|
+| `spaarke-knowledge-index-v2` | RAG knowledge (3072-dim vectors) | **Primary** |
+| `spaarke-records-index` | Record matching (Matters, Projects) | Active |
+| `spaarke-knowledge-index` | Legacy RAG (1536-dim) | Deprecated |
+
+### Azure Document Intelligence
+
+| Property | Value |
+|----------|-------|
+| **Resource Name** | `spaarke-docintel-dev` |
+| **Region** | West US 2 |
+| **Endpoint** | `https://westus2.api.cognitive.microsoft.com/` |
+
+### Dataverse
+
+| Property | Value |
+|----------|-------|
+| **Environment** | `spaarkedev1.crm.dynamics.com` |
+| **Primary Entities** | `sprk_document`, `sprk_analysis`, `email` |
+
+---
+
+## Complete App Service Configuration
+
+**App Service Name**: `spe-api-dev-67e2xz`
+
+### Core Settings
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| `ASPNETCORE_ENVIRONMENT` | `Development` | Environment name |
+| `TENANT_ID` | (configured) | Azure AD Tenant ID |
+| `API_APP_ID` | (configured) | App Registration ID |
+| `API_CLIENT_SECRET` | (configured) | App Registration Secret |
+
+### Azure AD Authentication
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| `AzureAd__Instance` | `https://login.microsoftonline.com/` | Azure AD instance |
+| `AzureAd__TenantId` | (configured) | Tenant ID |
+| `AzureAd__ClientId` | (configured) | App Registration Client ID |
+| `AzureAd__ClientSecret` | (configured) | Client secret for OBO flow |
+| `AzureAd__Audience` | `api://spe-api-dev` | API audience |
+
+### Microsoft Graph
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| `Graph__TenantId` | (configured) | Tenant ID |
+| `Graph__ClientId` | (configured) | Graph client ID |
+| `Graph__CertificateSource` | `KeyVault` | Certificate location |
+| `Graph__KeyVaultUrl` | (configured) | Key Vault URL |
+| `Graph__KeyVaultCertName` | (configured) | Certificate name |
+| `Graph__ManagedIdentity__Enabled` | `true` | Use managed identity |
+| `Graph__ManagedIdentity__ClientId` | (configured) | UAMI Client ID |
+| `Graph__Scopes__0` | `.default` | Default scope |
+
+### SharePoint Embedded
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| `SharePointEmbedded__ContainerTypeId` | (configured) | SPE Container Type ID |
+| `DEFAULT_CT_ID` | (configured) | Default Container Type |
+
+### AI Services (Legacy Ai__ namespace)
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| `Ai__Enabled` | `true` | Enable AI features |
+| `Ai__OpenAiEndpoint` | `https://spaarke-openai-dev.openai.azure.com/` | OpenAI endpoint |
+| `Ai__OpenAiKey` | (configured) | OpenAI API key |
+| `Ai__SummarizeModel` | `gpt-4o-mini` | Summarization model |
+| `Ai__DocIntelEndpoint` | `https://westus2.api.cognitive.microsoft.com/` | Document Intelligence |
+| `Ai__DocIntelKey` | (configured) | Document Intelligence key |
+
+### Document Intelligence Feature
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| `DocumentIntelligence__Enabled` | `true` | Enable analysis features |
+| `DocumentIntelligence__OpenAiEndpoint` | `https://spaarke-openai-dev.openai.azure.com/` | OpenAI endpoint |
+| `DocumentIntelligence__OpenAiKey` | (configured) | OpenAI API key |
+| `DocumentIntelligence__SummarizeModel` | `gpt-4o-mini` | Summarization model |
+| `DocumentIntelligence__DocIntelEndpoint` | `https://westus2.api.cognitive.microsoft.com/` | Doc Intel endpoint |
+| `DocumentIntelligence__DocIntelKey` | (configured) | Doc Intel key |
+| `DocumentIntelligence__AiSearchEndpoint` | `https://spaarke-search-dev.search.windows.net/` | **REQUIRED for RAG** |
+| `DocumentIntelligence__AiSearchKey` | (configured) | **REQUIRED for RAG** |
+| `DocumentIntelligence__AiSearchIndexName` | `spaarke-records-index` | Record matching index |
+| `DocumentIntelligence__RecordMatchingEnabled` | `true` | Enable record matching |
+
+### Analysis Services (RAG)
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| `Analysis__SharedIndexName` | `spaarke-knowledge-index-v2` | **Primary RAG index** |
+
+### Email Processing
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| `EmailProcessing__EnableWebhook` | `true` | Enable webhook processing |
+| `EmailProcessing__WebhookSecret` | (configured) | Webhook validation secret |
+| `EmailProcessing__DefaultContainerId` | (configured) | SPE Container for emails |
+| `EmailProcessing__EnablePolling` | `true` | Enable backup polling |
+| `EmailProcessing__AutoIndexToRag` | `false` | Auto-queue for RAG (set to `true` for testing) |
+
+### Dataverse
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| `Dataverse__EnvironmentUrl` | `https://spaarkedev1.crm.dynamics.com` | Dataverse URL |
+| `Dataverse__ServiceUrl` | `https://spaarkedev1.crm.dynamics.com` | Service URL |
+| `Dataverse__ClientId` | (configured) | App Registration |
+| `Dataverse__ClientSecret` | (configured) | App secret |
+| `Dataverse__TenantId` | (configured) | Tenant ID |
+
+### Service Bus
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| `ServiceBus__ConnectionString` | (configured) | Service Bus connection string |
+| `ServiceBus__QueueName` | `spaarke-jobs` | Job queue name |
+
+### Redis
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| `Redis__Enabled` | `true` | Enable Redis caching |
+
+### Logging
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| `Logging__LogLevel__Default` | `Information` | Default log level |
+| `Logging__LogLevel__Microsoft.AspNetCore` | `Warning` | ASP.NET Core log level |
+
+### Managed Identity
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| `ManagedIdentity__ClientId` | (configured) | UAMI Client ID |
+| `UAMI_CLIENT_ID` | (configured) | UAMI Client ID (alternate) |
+
+### Application Insights
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| `APPLICATIONINSIGHTS_CONNECTION_STRING` | (configured) | App Insights connection |
+| `APPINSIGHTS_INSTRUMENTATIONKEY` | (configured) | Instrumentation key |
+| `ApplicationInsightsAgent_EXTENSION_VERSION` | `~3` | Agent version |
 
 ### Dataverse Environment Variables
 
-Configure in Power Platform Admin Center > Solutions > Spaarke Document Intelligence:
+Configure in Power Platform > Solutions > Spaarke Document Intelligence:
 
 | Variable | Description |
 |----------|-------------|
-| `sprk_BffApiBaseUrl` | BFF API URL (e.g., `https://spe-api-dev-67e2xz.azurewebsites.net/api`) |
+| `sprk_BffApiBaseUrl` | `https://spe-api-dev-67e2xz.azurewebsites.net/api` |
 | `sprk_OpenAiEndpoint` | Azure OpenAI endpoint |
-| `sprk_OpenAiDeploymentName` | Deployment name (gpt-4o-mini) |
+| `sprk_OpenAiDeploymentName` | `gpt-4o-mini` |
 | `sprk_AiSearchEndpoint` | AI Search endpoint |
 | `sprk_AiSearchIndexName` | Index name |
 
@@ -816,5 +1109,5 @@ See [SDAP Auth Patterns - Pattern 4](../architecture/sdap-auth-patterns.md#patte
 ---
 
 *Document created: 2025-12-28*
-*Last updated: 2025-12-29*
-*Projects: AI Document Intelligence R1 + R2 + R3 (Phase 1 Complete)*
+*Last updated: 2026-01-16*
+*Projects: AI Document Intelligence R1 + R2 + R3 + Email-to-Document R2 + RAG Pipeline R1*
