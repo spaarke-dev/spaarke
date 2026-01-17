@@ -243,8 +243,8 @@ public class BuilderSseEventsTests
     {
         var plan = new BuildPlan
         {
-            Id = Guid.NewGuid(),
-            Summary = "Create document analysis playbook"
+            Summary = "Create document analysis playbook",
+            Steps = []
         };
         var evt = PlanPreviewEvent.Create(plan);
 
@@ -257,8 +257,8 @@ public class BuilderSseEventsTests
     {
         var plan = new BuildPlan
         {
-            Id = Guid.NewGuid(),
-            Summary = "Test plan"
+            Summary = "Test plan",
+            Steps = []
         };
         var evt = PlanPreviewEvent.Create(plan);
 

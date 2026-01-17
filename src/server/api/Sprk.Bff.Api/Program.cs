@@ -69,6 +69,15 @@ builder.Services
     .ValidateDataAnnotations()
     .ValidateOnStart();
 
+// Model Selector Options - Tiered AI model selection for cost optimization
+// Maps operation types (IntentClassification, PlanGeneration, etc.) to specific models
+// Defaults: gpt-4o-mini for fast ops, o1-mini for reasoning, gpt-4o for generation
+builder.Services
+    .AddOptions<ModelSelectorOptions>()
+    .Bind(builder.Configuration.GetSection(ModelSelectorOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+
 // Custom validation for conditional requirements
 builder.Services.AddSingleton<IValidateOptions<GraphOptions>, GraphOptionsValidator>();
 builder.Services.AddSingleton<IValidateOptions<DocumentIntelligenceOptions>, DocumentIntelligenceOptionsValidator>();
@@ -363,6 +372,19 @@ if (analysisEnabled && documentIntelligenceEnabled)
 
     // AI Playbook Builder Service - conversational AI assistance for playbook building (ai-playbook-node-builder-r2 project)
     builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IAiPlaybookBuilderService, Sprk.Bff.Api.Services.Ai.AiPlaybookBuilderService>();
+
+    // Model Selector - tiered AI model selection for cost optimization (ai-playbook-node-builder-r2 project)
+    // Maps operation types to optimal models: mini for fast ops, o1-mini for reasoning, gpt-4o for generation
+    builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.IModelSelector, Sprk.Bff.Api.Services.Ai.ModelSelector>();
+
+    // Intent Classification - classifies user messages into 11 intent categories (ai-playbook-node-builder-r2 project)
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IIntentClassificationService, Sprk.Bff.Api.Services.Ai.IntentClassificationService>();
+
+    // Entity Resolution - resolves user references to node/scope IDs with confidence scoring (ai-playbook-node-builder-r2 project)
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IEntityResolutionService, Sprk.Bff.Api.Services.Ai.EntityResolutionService>();
+
+    // Clarification Service - generates clarification prompts for low-confidence intent/entity resolution (ai-playbook-node-builder-r2 project)
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IClarificationService, Sprk.Bff.Api.Services.Ai.ClarificationService>();
 
     // Template Engine - Handlebars.NET for variable substitution in prompts and delivery templates
     builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.ITemplateEngine, Sprk.Bff.Api.Services.Ai.TemplateEngine>();

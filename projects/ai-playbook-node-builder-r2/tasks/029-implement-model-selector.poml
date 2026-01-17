@@ -6,7 +6,7 @@
     <tags>ai, configuration</tags>
     <estimate>0.5d</estimate>
     <dependencies>none</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -52,4 +52,16 @@
     <criterion>Configuration overridable</criterion>
     <criterion>Service registered in DI</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <note date="2026-01-16">
+      Implemented ModelSelector with:
+      - OperationType enum: IntentClassification, EntityResolution, PlanGeneration, ScopeGeneration, Validation, Explanation
+      - ModelSelectorOptions class for IOptions pattern configuration (section: "ModelSelector")
+      - IModelSelector interface and ModelSelector concrete implementation
+      - Registered in Program.cs as Singleton
+      - Added Explanation operation type (from design doc) for user query explanations
+      - Build verified successfully
+    </note>
+  </notes>
 </task>

@@ -6,8 +6,24 @@
     <tags>ai, classification</tags>
     <estimate>1d</estimate>
     <dependencies>020</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
+
+  <notes>
+    <note date="2026-01-16">
+      Implemented intent classification with:
+      - BuilderIntentCategory enum with all 11 categories (JsonPropertyName for serialization)
+      - IntentClassificationResult record with Intent, Confidence, Entities, NeedsClarification, etc.
+      - IntentEntities record for nodeType, sourceNode, targetNode, position, scopeType, etc.
+      - ClassificationCanvasContext record for canvas state awareness
+      - IntentClassificationService using GPT-4o-mini for fast classification
+      - Confidence threshold (0.75) forces clarification when confidence too low
+      - Fallback rule-based classification when JSON parsing fails
+      - Markdown code block stripping for AI responses
+      - 31 unit tests covering all intents, entity extraction, clarification scenarios
+      - All tests pass, build succeeds with 0 warnings
+    </note>
+  </notes>
 
   <prompt>
     <goal>Implement the intent classification system for user messages.</goal>

@@ -6,8 +6,29 @@
     <tags>ai, ux</tags>
     <estimate>0.5d</estimate>
     <dependencies>021, 022</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
+
+  <notes>
+    <note date="2026-01-16">
+      Implemented ClarificationService with:
+      - IClarificationService interface for generating clarification prompts
+      - GenerateIntentClarification: Creates prompts when intent confidence &lt; 75%
+      - GenerateEntityClarification: Creates prompts for ambiguous node/scope references
+      - GenerateScopeClarification: Creates prompts with "Create new" option when confidence &lt; 70%
+      - GetLikelyAlternatives: Infers alternative intents from message keywords
+      - FormatForStreaming: Converts clarification to SSE-ready BuilderStreamChunk
+
+      Models created:
+      - ClarificationRequest: Type, Question, Options, AllowFreeText, ScopeCategory
+      - ClarifyOption: Id, Label, Description, Confidence
+      - ClarificationType enum (Intent, Entity, Scope)
+      - IntentAlternative: Intent category with confidence
+      - ClarificationOptionIds constants (CreateNew, Cancel, FreeText)
+
+      All 23 unit tests pass.
+    </note>
+  </notes>
 
   <prompt>
     <goal>Implement clarification prompts when intent or entities are ambiguous.</goal>

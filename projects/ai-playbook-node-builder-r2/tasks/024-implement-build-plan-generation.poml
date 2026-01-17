@@ -6,8 +6,29 @@
     <tags>ai, planning</tags>
     <estimate>1d</estimate>
     <dependencies>021</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
+
+  <notes>
+    <note date="2026-01-16">
+      Implemented BuildPlanModels.cs with:
+      - BuildPlan: Id, Summary, Steps[], EstimatedNodeCount, Confidence, Pattern
+      - ExecutionStep: Order, Action, Description, Parameters, DependsOn[], NodeSpec, ScopeReference, EdgeSpec
+      - NodeSpec, BuildPlanNodePosition, NodeConfiguration
+      - ScopeReference, EdgeSpec
+      - ScopeRequirements, ScopeRequirement
+      - BuildPlanGenerationContext, BuildPlanGenerationResult
+      - Helper classes: ExecutionStepActions, PlaybookNodeTypes, ScopeTypes
+
+      Created BuildPlanGenerationService with:
+      - GenerateBuildPlanAsync using IOpenAiClient and IModelSelector
+      - o1-mini model selection via OperationType.PlanGeneration
+      - Comprehensive validation (step order, dependencies, action types, required specs)
+      - Confirmation logic based on confidence threshold and node count
+
+      All 50 unit tests pass including lease analysis scenario.
+    </note>
+  </notes>
 
   <prompt>
     <goal>Implement build plan generation for CREATE_PLAYBOOK intent.</goal>
