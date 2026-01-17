@@ -210,8 +210,8 @@ public class ServerSentEventWriterTests
     {
         var plan = new BuildPlan
         {
-            Id = Guid.NewGuid(),
-            Summary = "Build a playbook"
+            Summary = "Build a playbook",
+            Steps = []
         };
 
         await ServerSentEventWriter.WritePlanPreviewAsync(Response, plan);

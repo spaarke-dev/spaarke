@@ -9,13 +9,13 @@
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | 021 |
-| **Task File** | tasks/021-implement-intent-classification.poml |
-| **Title** | Implement intent classification (11 categories) |
+| **Task ID** | 024 |
+| **Task File** | tasks/024-implement-build-plan-generation.poml |
+| **Title** | Implement build plan generation |
 | **Phase** | 3 - AI Integration + Builder Scopes |
-| **Status** | not-started |
-| **Started** | — |
-| **Rigor Level** | TBD |
+| **Status** | completed |
+| **Started** | 2026-01-16 |
+| **Rigor Level** | FULL |
 
 ---
 
@@ -23,46 +23,93 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 021 - Implement intent classification (11 categories) |
-| **Step** | Not started |
-| **Status** | pending |
-| **Next Action** | Begin task 021 execution |
+| **Task** | 024 - Implement build plan generation |
+| **Step** | 6 of 6: All steps complete |
+| **Status** | completed |
+| **Next Action** | Task complete - ready for next task |
 
 ---
 
 ## Completed Steps
 
-*Task not started yet*
+- [x] Step 1: Define BuildPlan model - Created BuildPlanModels.cs with all types
+- [x] Step 2: Define ExecutionStep model - Included in BuildPlanModels.cs
+- [x] Step 3: Implement GenerateBuildPlanAsync - Created BuildPlanGenerationService
+- [x] Step 4: Use o1-mini for reasoning - Uses IModelSelector.SelectModel(OperationType.PlanGeneration)
+- [x] Step 5: Parse and validate plan - Comprehensive validation implemented
+- [x] Step 6: Test with lease analysis scenario - 50 unit tests all passing
 
 ---
 
 ## Files Modified
 
-*Task not started yet*
+| File | Purpose |
+|------|---------|
+| src/server/api/Sprk.Bff.Api/Models/Ai/BuildPlanModels.cs | Created - All build plan related models |
+| src/server/api/Sprk.Bff.Api/Services/Ai/BuildPlanGenerationService.cs | Created - Plan generation service |
+| tests/unit/Sprk.Bff.Api.Tests/Services/Ai/BuildPlanGenerationServiceTests.cs | Created - 50 unit tests |
+| src/server/api/Sprk.Bff.Api/Services/Ai/AiPlaybookBuilderService.cs | Updated - Uses new BuildPlan types |
+| src/server/api/Sprk.Bff.Api/Infrastructure/Streaming/ServerSentEventWriter.cs | Updated - Uses Models.Ai.BuildPlan |
+| tests/unit/Sprk.Bff.Api.Tests/Infrastructure/Streaming/ServerSentEventWriterTests.cs | Updated - Fixed BuildPlan usage |
+| tests/unit/Sprk.Bff.Api.Tests/Models/Ai/BuilderSseEventsTests.cs | Updated - Fixed BuildPlan usage |
 
 ---
 
 ## Key Decisions Made
 
-*No decisions yet*
+1. **BuildPlan.Id as string**: Used string instead of Guid for flexibility with AI-generated IDs
+2. **Renamed NodePosition to BuildPlanNodePosition**: Avoided conflict with existing NodePosition in IAiPlaybookBuilderService
+3. **Comprehensive validation**: Plan validation checks action types, step dependencies, required specs
+4. **Confirmation threshold at 0.75**: Matches spec design for user confirmation on low-confidence plans
 
 ---
 
 ## Knowledge Files Loaded
 
-*To be loaded when task starts*
+- projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md
+- .claude/constraints/ai.md
+- .claude/constraints/api.md
 
 ## Constraints Loaded
 
-*To be loaded when task starts*
+- ADR-001: Minimal API patterns
+- ADR-013: AI Architecture (extend BFF)
 
 ## Applicable ADRs
 
-*To be determined based on task tags*
+| ADR | Relevance |
+|-----|-----------|
+| ADR-001 | BFF orchestration pattern |
+| ADR-013 | AI service architecture |
 
 ---
 
 ## Session Notes
+
+### Task 024 Completed ✅
+
+- **Task 024**: Implement build plan generation ✅
+- Created `BuildPlanModels.cs` with BuildPlan, ExecutionStep, NodeSpec, ScopeReference, etc.
+- Created `BuildPlanGenerationService.cs` using IModelSelector for o1-mini model
+- Comprehensive plan validation (step order, dependencies, action types, required specs)
+- Confirmation logic based on confidence threshold (0.75) and node count (>10)
+- 50 unit tests all passing, including lease analysis scenario
+
+### Task 021 Completed ✅
+
+- **Task 021**: Implement intent classification (11 categories) ✅
+- Created `IntentClassificationModels.cs` with BuilderIntentCategory enum and entity records
+- Created `IntentClassificationService.cs` with GPT-4o-mini classification
+- Confidence threshold (0.75) forces clarification when too low
+- Fallback rule-based classification when JSON parsing fails
+- 31 unit tests, all passing
+
+### Task 029 Completed ✅ (Parallel)
+
+- **Task 029**: Implement ModelSelector for tiered selection ✅
+- Created `ModelSelector.cs` with OperationType enum
+- GPT-4o-mini for fast classification, o1-mini for plan generation
+- Registered in Program.cs as Singleton
 
 ### Task 020 Completed ✅
 
@@ -105,7 +152,7 @@ All Phase 1 Infrastructure tasks complete (001-009)
 
 ## Next Action
 
-Begin task 021 - Implement intent classification (11 categories) (Phase 3)
+Task 024 complete. Ready for next task.
 
 ---
 

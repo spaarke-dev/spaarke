@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Sprk.Bff.Api.Models.Ai;
+using BuildPlan = Sprk.Bff.Api.Models.Ai.BuildPlan;
 
 namespace Sprk.Bff.Api.Infrastructure.Streaming;
 
@@ -127,7 +128,7 @@ public static class ServerSentEventWriter
     /// </summary>
     public static Task WritePlanPreviewAsync(
         HttpResponse response,
-        Services.Ai.BuildPlan plan,
+        BuildPlan plan,
         CancellationToken cancellationToken = default) =>
         WriteEventAsync(response, PlanPreviewEvent.Create(plan), cancellationToken);
 

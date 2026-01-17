@@ -6,8 +6,28 @@
     <tags>ai, entity-resolution</tags>
     <estimate>1d</estimate>
     <dependencies>021</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
+
+  <notes>
+    <note date="2026-01-16">
+      Implemented EntityResolutionModels.cs with:
+      - EntityType enum (Node, Scope)
+      - ScopeCategory enum (Action, Skill, Knowledge, Tool)
+      - EntityResolutionResult with confidence scoring and candidate matches
+      - EntityMatch for individual match results
+      - NodeResolutionRequest, ScopeResolutionRequest models
+
+      Created EntityResolutionService with:
+      - ResolveNodeAsync: Matches user references to canvas nodes by label, ID, or selected node
+      - ResolveScopeAsync: Matches references to scopes using IScopeResolverService
+      - Local fuzzy matching with AI fallback for ambiguous cases
+      - Selected node detection ("this node", "the selected node")
+      - Confidence thresholds: 80% for resolution
+
+      All 16 unit tests pass (exact match, partial match, selected node, empty canvas, scope resolution).
+    </note>
+  </notes>
 
   <prompt>
     <goal>Implement entity resolution to map user references to actual node/scope IDs.</goal>

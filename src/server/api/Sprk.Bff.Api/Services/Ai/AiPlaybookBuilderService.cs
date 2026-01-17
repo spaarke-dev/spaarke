@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Models.Ai;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -105,16 +106,20 @@ public class AiPlaybookBuilderService : IAiPlaybookBuilderService
         // Full implementation will parse structured JSON response
         var plan = new BuildPlan
         {
-            Id = Guid.NewGuid(),
             Summary = $"Build plan for: {request.Goal}",
             Steps =
             [
-                new BuildPlanStep
+                new ExecutionStep
                 {
                     Order = 1,
-                    Action = "addNode",
+                    Action = ExecutionStepActions.AddNode,
                     Description = "Add input node for document processing",
-                    Parameters = new Dictionary<string, object?> { ["type"] = "input" }
+                    NodeSpec = new NodeSpec
+                    {
+                        Type = PlaybookNodeTypes.AiAnalysis,
+                        Label = "Document Analysis",
+                        Position = new BuildPlanNodePosition { X = 200, Y = 100 }
+                    }
                 }
             ],
             EstimatedNodeCount = 5,

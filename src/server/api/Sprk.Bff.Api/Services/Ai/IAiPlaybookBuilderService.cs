@@ -239,44 +239,8 @@ public record BuildPlanRequest
     public Guid[]? ReferencePlaybookIds { get; init; }
 }
 
-/// <summary>
-/// A generated build plan with steps.
-/// </summary>
-public record BuildPlan
-{
-    /// <summary>Plan ID.</summary>
-    public Guid Id { get; init; }
-
-    /// <summary>Summary of what will be built.</summary>
-    public required string Summary { get; init; }
-
-    /// <summary>Ordered steps to build the playbook.</summary>
-    public BuildPlanStep[] Steps { get; init; } = [];
-
-    /// <summary>Estimated total nodes to be created.</summary>
-    public int EstimatedNodeCount { get; init; }
-
-    /// <summary>Confidence score for the plan (0-1).</summary>
-    public double Confidence { get; init; }
-}
-
-/// <summary>
-/// A step in a build plan.
-/// </summary>
-public record BuildPlanStep
-{
-    /// <summary>Step order (1-based).</summary>
-    public int Order { get; init; }
-
-    /// <summary>Action to take (addNode, createEdge, etc.).</summary>
-    public required string Action { get; init; }
-
-    /// <summary>Human-readable description.</summary>
-    public required string Description { get; init; }
-
-    /// <summary>Parameters for the action.</summary>
-    public Dictionary<string, object?>? Parameters { get; init; }
-}
+// NOTE: BuildPlan and related types have been moved to Sprk.Bff.Api.Models.Ai.BuildPlanModels
+// with enhanced functionality. Use the Models.Ai versions for all new code.
 
 /// <summary>
 /// Result of intent classification.
