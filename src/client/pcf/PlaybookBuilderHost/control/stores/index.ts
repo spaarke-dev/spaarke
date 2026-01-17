@@ -40,3 +40,16 @@ export {
   type TemplateListResponse,
   type ClonedPlaybook,
 } from './templateStore';
+
+export {
+  useAiAssistantStore,
+  type ChatMessageRole,
+  type ChatMessage,
+  type CanvasOperation,
+  type CanvasPatch,
+  type CanvasPatchOperation,
+  type CanvasPatchNode,
+  type CanvasPatchEdge,
+  type SseEventType,
+  type StreamingState,
+} from './aiAssistantStore';

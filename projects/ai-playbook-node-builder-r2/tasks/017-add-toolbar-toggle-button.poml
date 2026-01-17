@@ -6,7 +6,7 @@
     <tags>pcf, fluent-ui, toolbar</tags>
     <estimate>0.5d</estimate>
     <dependencies>011</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -63,4 +63,41 @@
       <expected>Button toggles modal visibility</expected>
     </test>
   </ui-tests>
+
+  <notes>
+    <completed-date>2026-01-16</completed-date>
+    <summary>
+      Added AI assistant toolbar button to PlaybookBuilderHost:
+
+      1. IMPORTS ADDED:
+         - Sparkle20Regular icon for AI button
+         - Tooltip component for button tooltip
+         - useAiAssistantStore for toggle state
+         - AiAssistantModal component
+
+      2. STYLES ADDED:
+         - aiAssistantToggle: Positioned at right:48px (next to properties toggle)
+         - aiAssistantActive: Brand color styling when modal is open
+
+      3. BUTTON IMPLEMENTATION:
+         - Fluent UI Button with Sparkle20Regular icon
+         - Tooltip with "AI Assistant" label
+         - Wired to toggleAiAssistant from aiAssistantStore
+         - Visual feedback when active (brand color background)
+         - aria-pressed for accessibility
+
+      4. MODAL RENDERING:
+         - AiAssistantModal rendered at end of component
+         - Uses Drawer from Fluent UI (positioned as overlay)
+
+      5. FILES MODIFIED:
+         - components/BuilderLayout.tsx
+
+      6. ACCEPTANCE CRITERIA MET:
+         - ✅ Button visible in toolbar (positioned at right:48px, top:8px)
+         - ✅ Click toggles modal open/closed (wired to toggleModal)
+         - ✅ Icon and tooltip present (Sparkle20Regular + Tooltip)
+         - ✅ Matches existing toolbar style (same sidebarToggle class)
+    </summary>
+  </notes>
 </task>

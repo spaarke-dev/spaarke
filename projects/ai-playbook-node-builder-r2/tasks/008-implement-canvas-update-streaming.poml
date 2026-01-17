@@ -6,7 +6,7 @@
     <tags>bff-api, sse, streaming</tags>
     <estimate>1d</estimate>
     <dependencies>002, 006</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -57,4 +57,27 @@
     <criterion>Client can parse events correctly</criterion>
     <criterion>Manual curl test confirms streaming</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <completed>2026-01-16</completed>
+    <summary>
+      Implemented SSE streaming with 8 event types for the AI Playbook Builder endpoint.
+      Key deliverables:
+      - BuilderSseEvents.cs: 8 event record types (thinking, dataverse_operation, canvas_patch,
+        message, done, error, clarification, plan_preview) with factory methods
+      - ServerSentEventWriter.cs: Utility for writing SSE events with proper format
+        (event: {type}\ndata: {json}\n\n) and convenience methods for each event type
+      - Updated AiPlaybookBuilderEndpoints.cs to use new SSE writer and map
+        BuilderStreamChunk to typed SSE events
+      All events use proper SSE format with event: and data: lines, flushing after each.
+    </summary>
+    <files-modified>
+      - src/server/api/Sprk.Bff.Api/Models/Ai/BuilderSseEvents.cs (new - event types)
+      - src/server/api/Sprk.Bff.Api/Infrastructure/Streaming/ServerSentEventWriter.cs (new - utility)
+      - src/server/api/Sprk.Bff.Api/Api/Ai/AiPlaybookBuilderEndpoints.cs (updated streaming)
+      - tests/unit/Sprk.Bff.Api.Tests/Models/Ai/BuilderSseEventsTests.cs (new - 18 tests)
+      - tests/unit/Sprk.Bff.Api.Tests/Infrastructure/Streaming/ServerSentEventWriterTests.cs (new - 12 tests)
+    </files-modified>
+    <tests>77 tests pass (including 30 new tests for SSE event types and writer)</tests>
+  </notes>
 </task>

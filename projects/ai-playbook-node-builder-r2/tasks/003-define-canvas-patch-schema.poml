@@ -6,8 +6,23 @@
     <tags>bff-api, models, schema</tags>
     <estimate>0.5d</estimate>
     <dependencies>none</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
+
+  <notes>
+    <completion-date>2026-01-16</completion-date>
+    <summary>Enhanced existing CanvasPatch, CanvasNode, CanvasEdge types in IAiPlaybookBuilderService.cs (co-located with interface from task 001).</summary>
+    <files-modified>
+      - IAiPlaybookBuilderService.cs (enhanced CanvasNode, CanvasEdge, CanvasPatch)
+    </files-modified>
+    <decisions>
+      - Kept types co-located with interface (task 001 decision) instead of separate files
+      - CanvasPatch supports BOTH individual operations (streaming) AND batch operations (spec)
+      - CanvasNode enhanced with 9 new properties from PlaybookNodeData (actionId, outputVariable, timeoutSeconds, retryCount, conditionJson, skillIds, knowledgeIds, toolId, modelDeploymentId)
+      - CanvasEdge enhanced with EdgeType and Animated properties
+      - Made CanvasPatch.Operation nullable to support batch-only patches
+    </decisions>
+  </notes>
 
   <prompt>
     <goal>Define the CanvasPatch schema for add/remove/update operations on nodes and edges.</goal>

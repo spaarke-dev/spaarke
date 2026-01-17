@@ -19,15 +19,15 @@
 
 | Task | Title | Status | Dependencies | Estimate |
 |------|-------|--------|--------------|----------|
-| 001 | Create AiPlaybookBuilderService class | 🔲 | none | 1d |
-| 002 | Add /api/ai/build-playbook-canvas SSE endpoint | 🔲 | 001 | 1d |
-| 003 | Define canvas patch schema | 🔲 | none | 0.5d |
-| 004 | Implement Dataverse scope CRUD operations | 🔲 | none | 1.5d |
-| 005 | Implement N:N link table operations | 🔲 | 004 | 1d |
-| 006 | Extend PlaybookExecutionEngine with conversational mode | 🔲 | none | 1.5d |
-| 007 | Add ConversationContext and CanvasState models | 🔲 | 006 | 0.5d |
-| 008 | Add endpoint authorization filter | 🔲 | 002 | 0.5d |
-| 009 | Add rate limiting middleware | 🔲 | 002 | 0.5d |
+| 001 | Create AiPlaybookBuilderService class | ✅ | none | 1d |
+| 002 | Add /api/ai/build-playbook-canvas SSE endpoint | ✅ | 001 | 1d |
+| 003 | Define canvas patch schema | ✅ | none | 0.5d |
+| 004 | Implement Dataverse scope CRUD operations | ✅ | none | 1.5d |
+| 005 | Implement N:N link table operations | ✅ | 004 | 1d |
+| 006 | Extend PlaybookExecutionEngine with conversational mode | ✅ | none | 1.5d |
+| 007 | Add ConversationContext and CanvasState models | ✅ | 006 | 0.5d |
+| 008 | Implement incremental canvas update streaming | ✅ | 002, 006 | 1d |
+| 009 | Add rate limiting middleware | ✅ | 002 | 0.5d |
 
 **Phase 1 Deliverables**:
 - `AiPlaybookBuilderEndpoints.cs`
@@ -41,15 +41,15 @@
 
 | Task | Title | Status | Dependencies | Estimate |
 |------|-------|--------|--------------|----------|
-| 010 | Create aiAssistantStore (Zustand) | 🔲 | none | 0.5d |
-| 011 | Build AiAssistantModal container component | 🔲 | 010 | 1d |
-| 012 | Build ChatHistory component | 🔲 | 010 | 1d |
-| 013 | Build ChatInput component | 🔲 | 010 | 0.5d |
-| 014 | Build OperationFeedback component | 🔲 | 010 | 0.5d |
-| 015 | Create AiPlaybookService API client | 🔲 | Phase 1 | 0.5d |
-| 016 | Wire SSE streaming to store | 🔲 | 010, 015 | 1d |
-| 017 | Add toolbar button to toggle modal | 🔲 | 011 | 0.5d |
-| 018 | Apply canvas patches from stream | 🔲 | 016 | 0.5d |
+| 010 | Create aiAssistantStore (Zustand) | ✅ | none | 0.5d |
+| 011 | Build AiAssistantModal container component | ✅ | 010 | 1d |
+| 012 | Build ChatHistory component | ✅ | 010 | 1d |
+| 013 | Build ChatInput component | ✅ | 010 | 0.5d |
+| 014 | Build OperationFeedback component | ✅ | 010 | 0.5d |
+| 015 | Create AiPlaybookService API client | ✅ | Phase 1 | 0.5d |
+| 016 | Wire SSE streaming to store | ✅ | 010, 015 | 1d |
+| 017 | Add toolbar button to toggle modal | ✅ | 011 | 0.5d |
+| 018 | Apply canvas patches from stream | ✅ | 016 | 0.5d |
 
 **Phase 2 Deliverables**:
 - `aiAssistantStore.ts`
@@ -63,7 +63,7 @@
 
 | Task | Title | Status | Dependencies | Estimate |
 |------|-------|--------|--------------|----------|
-| 020 | Design system prompt for canvas building | 🔲 | none | 1d |
+| 020 | Design system prompt for canvas building | ✅ | none | 1d |
 | 021 | Implement intent classification (11 categories) | 🔲 | 020 | 1d |
 | 022 | Implement entity resolution with confidence | 🔲 | 021 | 1d |
 | 023 | Implement clarification loop for ambiguous input | 🔲 | 021 | 0.5d |

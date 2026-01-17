@@ -6,7 +6,7 @@
     <tags>bff-api, models</tags>
     <estimate>0.5d</estimate>
     <dependencies>006</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -51,4 +51,22 @@
     <criterion>ChatMessage has Id, Role, Content, Timestamp, CanvasOperations</criterion>
     <criterion>All models JSON-serializable</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <completed>2026-01-16</completed>
+    <summary>
+      Models were mostly created in task 006. This task completed the missing fields:
+      - ConversationContext: Already complete (History, CurrentMessage, SessionState)
+      - CanvasState: Added LinkedScopes (Dictionary&lt;string, Guid[]&gt;)
+      - ConversationMessage: Added Id field (auto-generated GUID)
+      - All models use C# record types with standard property types (JSON-serializable)
+      Note: Models remain in interface files (IPlaybookExecutionEngine.cs, IAiPlaybookBuilderService.cs)
+      rather than separate Model files - this follows the existing codebase pattern.
+    </summary>
+    <files-modified>
+      - src/server/api/Sprk.Bff.Api/Services/Ai/IAiPlaybookBuilderService.cs (added LinkedScopes to CanvasState)
+      - src/server/api/Sprk.Bff.Api/Services/Ai/IPlaybookExecutionEngine.cs (added Id to ConversationMessage)
+    </files-modified>
+    <tests>Existing 22 tests pass - no new tests needed as models are simple data records</tests>
+  </notes>
 </task>

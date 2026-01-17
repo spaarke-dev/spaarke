@@ -6,7 +6,7 @@
     <tags>pcf, fluent-ui, component</tags>
     <estimate>1d</estimate>
     <dependencies>010</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -81,4 +81,48 @@
       <expected>All colors use semantic tokens per ADR-021</expected>
     </test>
   </ui-tests>
+
+  <notes>
+    <completed-date>2026-01-16</completed-date>
+    <summary>
+      Created AiAssistantModal floating draggable panel component:
+
+      1. COMPONENT STRUCTURE:
+         - Floating absolute-positioned container
+         - Draggable header (Bot icon + "AI Assistant" title)
+         - Resizable via bottom-right corner handle
+         - Minimize button (collapses to header-only)
+         - Close button (calls store.closeModal)
+
+      2. STYLING (ADR-021 COMPLIANT):
+         - All colors use Fluent tokens (no hard-coded values)
+         - tokens.colorNeutralBackground1 for body
+         - tokens.colorBrandBackground for header
+         - tokens.colorNeutralForegroundOnBrand for header text
+         - tokens.shadow16 for floating shadow
+         - Supports light/dark mode automatically
+
+      3. DRAG/RESIZE BEHAVIOR:
+         - Custom mouse event handlers for drag
+         - Window-level event listeners for smooth drag/resize
+         - Configurable min/max width/height constraints
+         - Position and size state tracked locally
+
+      4. STORE INTEGRATION:
+         - Uses useAiAssistantStore for isOpen state
+         - Calls closeModal() on close button click
+         - Visibility controlled via isOpen state
+
+      5. FILES CREATED:
+         - components/AiAssistant/AiAssistantModal.tsx (290 lines)
+         - components/AiAssistant/index.ts (barrel export)
+
+      6. ACCEPTANCE CRITERIA MET:
+         - ✅ Modal renders with Fluent UI components (Card, Button, Text)
+         - ✅ Can be opened/closed via store
+         - ✅ Uses design tokens (no hard-coded colors)
+         - ✅ Works in dark mode (all colors are token-based)
+         - ✅ TypeScript compiles without errors
+    </summary>
+  </notes>
 </task>

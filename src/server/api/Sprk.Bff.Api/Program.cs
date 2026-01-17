@@ -331,6 +331,7 @@ if (analysisEnabled && documentIntelligenceEnabled)
 
     // Analysis services - all scoped due to SpeFileStore dependency
     builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IScopeResolverService, Sprk.Bff.Api.Services.Ai.ScopeResolverService>();
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IScopeManagementService, Sprk.Bff.Api.Services.Ai.ScopeManagementService>();
     builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IAnalysisContextBuilder, Sprk.Bff.Api.Services.Ai.AnalysisContextBuilder>();
     builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IWorkingDocumentService, Sprk.Bff.Api.Services.Ai.WorkingDocumentService>();
 
@@ -359,6 +360,9 @@ if (analysisEnabled && documentIntelligenceEnabled)
 
     // Playbook Orchestration Service - multi-node playbook execution (ai-node-playbook-builder project)
     builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IPlaybookOrchestrationService, Sprk.Bff.Api.Services.Ai.PlaybookOrchestrationService>();
+
+    // AI Playbook Builder Service - conversational AI assistance for playbook building (ai-playbook-node-builder-r2 project)
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IAiPlaybookBuilderService, Sprk.Bff.Api.Services.Ai.AiPlaybookBuilderService>();
 
     // Template Engine - Handlebars.NET for variable substitution in prompts and delivery templates
     builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.ITemplateEngine, Sprk.Bff.Api.Services.Ai.TemplateEngine>();
@@ -1220,6 +1224,7 @@ if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
 {
     app.MapAnalysisEndpoints();
     app.MapPlaybookEndpoints();
+    app.MapAiPlaybookBuilderEndpoints(); // AI Chat Playbook Builder (ai-playbook-node-builder-r2 project)
     app.MapScopeEndpoints();
     app.MapNodeEndpoints();
     app.MapPlaybookRunEndpoints();

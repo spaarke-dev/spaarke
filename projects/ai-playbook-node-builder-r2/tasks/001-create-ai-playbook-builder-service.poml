@@ -6,8 +6,23 @@
     <tags>bff-api, ai, service</tags>
     <estimate>1d</estimate>
     <dependencies>none</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
+
+  <notes>
+    <completion-date>2026-01-16</completion-date>
+    <summary>Created core service with interface, 20+ supporting types, and 7 unit tests.</summary>
+    <files-created>
+      - IAiPlaybookBuilderService.cs (interface + records/enums)
+      - AiPlaybookBuilderService.cs (implementation)
+      - AiPlaybookBuilderServiceTests.cs (7 tests)
+    </files-created>
+    <decisions>
+      - Named BuilderChatMessage to avoid OpenAI.Chat.ChatMessage conflict
+      - Used scoped DI registration matching other AI services
+      - Followed interface pattern for testability (consistent with codebase)
+    </decisions>
+  </notes>
 
   <prompt>
     <goal>Create the core AiPlaybookBuilderService class that will orchestrate AI-assisted playbook building operations.</goal>

@@ -6,7 +6,7 @@
     <tags>pcf, fluent-ui, component</tags>
     <estimate>1d</estimate>
     <dependencies>010</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -56,4 +56,61 @@
     <criterion>Streaming indicator shows during AI response</criterion>
     <criterion>Accessible with proper roles</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <completed-date>2026-01-16</completed-date>
+    <summary>
+      Created ChatHistory component for displaying AI chat conversation:
+
+      1. MESSAGE DISPLAY:
+         - User messages right-aligned with brand background
+         - Assistant messages left-aligned with neutral background
+         - System messages centered with subtle styling
+         - Role icons (Person for user, Bot for assistant)
+
+      2. STYLING (ADR-021 COMPLIANT):
+         - All colors use Fluent UI v9 tokens (no hard-coded values)
+         - tokens.colorBrandBackground for user bubbles
+         - tokens.colorNeutralBackground1 for assistant bubbles
+         - tokens.colorNeutralBackground2 for container
+         - Supports light/dark mode automatically
+
+      3. AUTO-SCROLL:
+         - useRef for message list container
+         - useEffect triggers scroll on messages.length or isStreaming change
+         - scrollTop = scrollHeight for smooth bottom anchoring
+
+      4. OPERATION BADGES:
+         - Fluent Badge component with color per operation type
+         - add_node = success (green)
+         - remove_node = danger (red)
+         - update_node = warning (yellow)
+         - add_edge = informative (blue)
+         - remove_edge = subtle (gray)
+         - Icons for each operation type
+
+      5. STREAMING INDICATOR:
+         - Spinner + text showing "AI is thinking..."
+         - Displays current step and operation count
+         - Uses streamingState from aiAssistantStore
+
+      6. ACCESSIBILITY:
+         - role="log" on container
+         - role="list" on message list
+         - role="listitem" on each message
+         - aria-live="polite" for updates
+         - aria-label on all major sections
+
+      7. FILES MODIFIED:
+         - components/AiAssistant/ChatHistory.tsx (275 lines)
+         - components/AiAssistant/index.ts (added export)
+
+      8. ACCEPTANCE CRITERIA MET:
+         - ✅ Messages render with correct alignment
+         - ✅ Auto-scrolls to latest message
+         - ✅ Operation badges show canvas changes
+         - ✅ Streaming indicator shows during AI response
+         - ✅ Accessible with proper ARIA roles
+    </summary>
+  </notes>
 </task>

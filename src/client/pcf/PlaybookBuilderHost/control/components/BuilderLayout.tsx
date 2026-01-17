@@ -26,12 +26,16 @@ import {
   DocumentArrowRight20Regular,
   TaskListSquareLtr20Regular,
   Clock20Regular,
+  Sparkle20Regular,
 } from '@fluentui/react-icons';
+import { Tooltip } from '@fluentui/react-components';
 import { Canvas } from './Canvas';
 import { PropertiesPanel } from './Properties';
 import { ExecutionOverlay } from './Execution';
 import { useCanvasStore, type PlaybookNodeType } from '../stores/canvasStore';
 import { useExecutionStore } from '../stores/executionStore';
+import { useAiAssistantStore } from '../stores/aiAssistantStore';
+import { AiAssistantModal } from './AiAssistant';
 
 const useStyles = makeStyles({
   container: {
@@ -55,6 +59,18 @@ const useStyles = makeStyles({
   rightToggle: {
     right: '8px',
     top: '8px',
+  },
+  aiAssistantToggle: {
+    right: '48px',
+    top: '8px',
+  },
+  aiAssistantActive: {
+    backgroundColor: tokens.colorBrandBackground,
+    color: tokens.colorNeutralForegroundOnBrand,
+    ':hover': {
+      backgroundColor: tokens.colorBrandBackgroundHover,
+      color: tokens.colorNeutralForegroundOnBrand,
+    },
   },
   // Sidebar styles
   sidebar: {
@@ -203,6 +219,10 @@ export const BuilderLayout = React.memo(function BuilderLayout() {
   // Execution state
   const stopExecution = useExecutionStore((state) => state.stopExecution);
 
+  // AI Assistant state
+  const isAiAssistantOpen = useAiAssistantStore((state) => state.isOpen);
+  const toggleAiAssistant = useAiAssistantStore((state) => state.toggleModal);
+
   // Auto-open properties panel when a node is selected
   useEffect(() => {
     if (selectedNodeId) {
@@ -269,6 +289,23 @@ export const BuilderLayout = React.memo(function BuilderLayout() {
           aria-label={leftPanelOpen ? 'Hide palette' : 'Show palette'}
         />
 
+        {/* AI Assistant Toggle Button */}
+        <Tooltip content="AI Assistant" relationship="label" positioning="below">
+          <Button
+            className={mergeClasses(
+              styles.sidebarToggle,
+              styles.aiAssistantToggle,
+              isAiAssistantOpen && styles.aiAssistantActive
+            )}
+            icon={<Sparkle20Regular />}
+            appearance="subtle"
+            size="small"
+            onClick={toggleAiAssistant}
+            aria-label="AI Assistant"
+            aria-pressed={isAiAssistantOpen}
+          />
+        </Tooltip>
+
         {/* Right Toggle Button */}
         <Button
           className={mergeClasses(styles.sidebarToggle, styles.rightToggle)}
@@ -296,6 +333,9 @@ export const BuilderLayout = React.memo(function BuilderLayout() {
       >
         <PropertiesPanel />
       </aside>
+
+      {/* AI Assistant Modal */}
+      <AiAssistantModal />
     </div>
   );
 });
