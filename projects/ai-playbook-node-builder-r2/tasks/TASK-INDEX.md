@@ -68,10 +68,10 @@
 | 022 | Implement entity resolution with confidence | ✅ | 021 | 1d |
 | 023 | Implement clarification loop for ambiguous input | ✅ | 021 | 0.5d |
 | 024 | Implement build plan generation | ✅ | 021 | 1d |
-| 025 | Create ACT-BUILDER-001 through ACT-BUILDER-005 | 🔲 | none | 0.5d |
-| 026 | Create SKL-BUILDER-001 through SKL-BUILDER-005 | 🔲 | none | 0.5d |
-| 027 | Create TL-BUILDER-001 through TL-BUILDER-009 definitions | 🔲 | none | 0.5d |
-| 028 | Create KNW-BUILDER-001 through KNW-BUILDER-004 content | 🔲 | none | 0.5d |
+| 025 | Create ACT-BUILDER-001 through ACT-BUILDER-005 | ✅ | none | 0.5d |
+| 026 | Create SKL-BUILDER-001 through SKL-BUILDER-005 | ✅ | none | 0.5d |
+| 027 | Create TL-BUILDER-001 through TL-BUILDER-009 definitions | ✅ | none | 0.5d |
+| 028 | Create KNW-BUILDER-001 through KNW-BUILDER-004 content | ✅ | none | 0.5d |
 | 029 | Implement ModelSelector for tiered selection | ✅ | none | 0.5d |
 
 **Phase 3 Deliverables**:

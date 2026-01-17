@@ -6,8 +6,20 @@
     <tags>dataverse, scopes</tags>
     <estimate>0.5d</estimate>
     <dependencies>none</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
+
+  <notes>
+    <note date="2026-01-16">
+      Created 4 Builder Knowledge records via Create-BuilderScopes.ps1:
+      - KNW-BUILDER-001: Scope Catalog (94f5242f-60f3-f011-8406-7ced8d1dc988)
+      - KNW-BUILDER-002: Reference Playbooks (52811a31-60f3-f011-8406-7c1e520aa4df)
+      - KNW-BUILDER-003: Node Schema (99f5242f-60f3-f011-8406-7ced8d1dc988)
+      - KNW-BUILDER-004: Best Practices (9af5242f-60f3-f011-8406-7ced8d1dc988)
+
+      All knowledge sources include comprehensive content for AI guidance.
+    </note>
+  </notes>
 
   <prompt>
     <goal>Create the 4 Builder Knowledge scope records in Dataverse.</goal>
