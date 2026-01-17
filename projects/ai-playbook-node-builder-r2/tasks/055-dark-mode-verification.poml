@@ -6,7 +6,7 @@
     <tags>pcf, fluent-ui, theming</tags>
     <estimate>0.5d</estimate>
     <dependencies>Phase 2</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -72,4 +72,26 @@
       <expected>All components adapt to dark theme with proper contrast</expected>
     </test>
   </ui-tests>
+
+  <notes>
+    <completion-date>2026-01-17</completion-date>
+    <summary>
+      Verified dark mode compatibility and documented theming approach.
+      Created docs/guides/ai-assistant-theming.md with:
+      - ADR-021 compliance documentation
+      - Token category reference (background, foreground, border, shadow)
+      - Component theming examples
+      - Spacing and typography token tables
+      - Border radius tokens
+      - Dark mode testing checklist
+      - Common issues and solutions
+      - FluentProvider setup guidance
+
+      All new components (ErrorDisplay, TypingIndicator) use semantic tokens
+      throughout, ensuring automatic dark mode support.
+    </summary>
+    <files-created>
+      <file>docs/guides/ai-assistant-theming.md</file>
+    </files-created>
+  </notes>
 </task>

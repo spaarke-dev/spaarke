@@ -107,13 +107,13 @@ public record DataverseOperationEvent : BuilderSseEvent
         string entityType,
         Guid? recordId = null,
         string? description = null) => new()
-    {
-        Type = BuilderSseEventTypes.DataverseOperation,
-        Operation = operation,
-        EntityType = entityType,
-        RecordId = recordId,
-        Description = description
-    };
+        {
+            Type = BuilderSseEventTypes.DataverseOperation,
+            Operation = operation,
+            EntityType = entityType,
+            RecordId = recordId,
+            Description = description
+        };
 }
 
 /// <summary>
@@ -214,13 +214,13 @@ public record ErrorEvent : BuilderSseEvent
         string? code = null,
         bool isRecoverable = true,
         string? suggestedAction = null) => new()
-    {
-        Type = BuilderSseEventTypes.Error,
-        Message = message,
-        Code = code,
-        IsRecoverable = isRecoverable,
-        SuggestedAction = suggestedAction
-    };
+        {
+            Type = BuilderSseEventTypes.Error,
+            Message = message,
+            Code = code,
+            IsRecoverable = isRecoverable,
+            SuggestedAction = suggestedAction
+        };
 }
 
 /// <summary>

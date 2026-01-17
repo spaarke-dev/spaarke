@@ -6,7 +6,7 @@
     <tags>pcf, fluent-ui, responsive</tags>
     <estimate>0.5d</estimate>
     <dependencies>Phase 2</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -64,4 +64,23 @@
     <criterion>Smooth transitions</criterion>
     <criterion>Full-screen on small devices</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <completion-date>2026-01-17</completion-date>
+    <summary>
+      Implemented responsive modal sizing hook.
+      Created useResponsive.ts with:
+      - Breakpoint detection (mobile, tablet, desktop, wide)
+      - ModalSize configuration per breakpoint
+      - User preference persistence support
+      - Container-relative sizing option
+      - Viewport constraint enforcement
+      - isMobile/isTablet/isDesktop helpers
+      - setPreferredSize/resetSize callbacks
+      - ResizeObserver integration for containers
+    </summary>
+    <files-created>
+      <file>src/client/pcf/PlaybookBuilderHost/control/hooks/useResponsive.ts</file>
+    </files-created>
+  </notes>
 </task>

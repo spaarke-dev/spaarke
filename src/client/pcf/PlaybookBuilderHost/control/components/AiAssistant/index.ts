@@ -1,7 +1,7 @@
 /**
  * AI Assistant Components - Barrel Export
  *
- * @version 1.6.0
+ * @version 1.7.0
  */
 
 export { AiAssistantModal, type AiAssistantModalProps } from './AiAssistantModal';
@@ -16,3 +16,5 @@ export {
 } from './TestOptionsDialog';
 export { TestProgressView, type TestProgressViewProps } from './TestProgressView';
 export { TestResultPreview, type TestResultPreviewProps } from './TestResultPreview';
+export { ErrorDisplay, type ErrorDisplayProps, type AiBuilderError, type ErrorSeverity } from './ErrorDisplay';
+export { TypingIndicator, type TypingIndicatorProps } from './TypingIndicator';

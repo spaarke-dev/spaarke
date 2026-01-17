@@ -6,7 +6,7 @@
     <tags>bff-api, resilience</tags>
     <estimate>0.5d</estimate>
     <dependencies>050</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -64,4 +64,29 @@
     <criterion>Retry attempts logged</criterion>
     <criterion>No retry on client errors</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <completion-date>2026-01-17</completion-date>
+    <summary>
+      Implemented retry logic with exponential backoff using Polly.
+      Created RetryPolicies.cs with:
+      - HTTP retry policies for Azure OpenAI, Dataverse, Document Intelligence
+      - Exponential backoff (1s, 2s, 4s...) capped at 30s
+      - Jitter factor (±50%) for distributed load balancing
+      - MaxRetries: 3
+      - Handles 429 (rate limit), 503 (unavailable), transient errors
+      - Does NOT retry 4xx client errors (except 429)
+      - Logging for all retry attempts with correlation
+
+      Additional features:
+      - Generic CreateRetryPolicy for any exception type
+      - Result-based retry policies
+      - RetryPolicyExtensions for IHttpClientBuilder
+      - RetryableResult wrapper for operations
+      - Context factory with correlation ID support
+    </summary>
+    <files-created>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Resilience/RetryPolicies.cs</file>
+    </files-created>
+  </notes>
 </task>
