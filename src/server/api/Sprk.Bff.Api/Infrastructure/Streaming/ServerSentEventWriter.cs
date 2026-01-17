@@ -142,4 +142,31 @@ public static class ServerSentEventWriter
         response.Headers.CacheControl = "no-cache";
         response.Headers.Connection = "keep-alive";
     }
+
+    /// <summary>
+    /// Write an SSE event with custom event type and data object.
+    /// Format: "event: {type}\ndata: {json}\n\n"
+    /// </summary>
+    /// <remarks>
+    /// Generic version that accepts any object as data.
+    /// Use for test execution events and other non-BuilderSseEvent types.
+    /// </remarks>
+    /// <param name="response">The HTTP response to write to.</param>
+    /// <param name="eventType">The event type (e.g., "test_started", "node_complete").</param>
+    /// <param name="data">The data object to serialize.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public static async Task WriteEventAsync(
+        HttpResponse response,
+        string eventType,
+        object data,
+        CancellationToken cancellationToken)
+    {
+        var json = JsonSerializer.Serialize(data, JsonOptions);
+
+        // SSE format with event type: "event: {type}\ndata: {json}\n\n"
+        var sseData = $"event: {eventType}\ndata: {json}\n\n";
+
+        await response.WriteAsync(sseData, cancellationToken);
+        await response.Body.FlushAsync(cancellationToken);
+    }
 }

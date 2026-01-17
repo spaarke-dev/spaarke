@@ -6,7 +6,8 @@
     <tags>dataverse, schema</tags>
     <estimate>0.5d</estimate>
     <dependencies>none</dependencies>
-    <status>pending</status>
+    <status>completed</status>
+    <completed>2026-01-17</completed>
   </metadata>
 
   <prompt>
@@ -64,4 +65,20 @@
     <criterion>Migration script works</criterion>
     <criterion>Solution exports cleanly</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <note date="2026-01-17">
+      Implementation complete:
+      - Created Migrate-OwnershipFields.ps1 migration script
+      - Documents schema changes for ownership fields:
+        - sprk_ownershiptype (Global Choice): System (100000000) / Customer (100000001)
+        - sprk_isimmutable (Boolean): For SYS- prefixed scopes
+        - sprk_parentid (Lookup): Self-referential for extended scopes
+      - Affected entities documented: sprk_aiplaybook, sprk_aianalysisaction,
+        sprk_aianalysisskill, sprk_aianalysistool, sprk_aianalysisknowledge
+      - Script generates solution XML snippets for import
+      - Data migration sets existing records to Customer ownership
+      - Supports -WhatIf for preview mode
+    </note>
+  </notes>
 </task>

@@ -6,7 +6,7 @@
     <tags>bff-api, testing, ai</tags>
     <estimate>1d</estimate>
     <dependencies>030</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>

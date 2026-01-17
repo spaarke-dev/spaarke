@@ -6,8 +6,21 @@
     <tags>bff-api, scopes</tags>
     <estimate>0.5d</estimate>
     <dependencies>041</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
+
+  <notes>
+    <completed-date>2026-01-17</completed-date>
+    <summary>
+      Implemented SaveScopeAsAsync in ScopeCopyService.cs.
+      Supports all four scope types: Action, Skill, Tool, Knowledge.
+      Copies all content fields and sets CUST- prefix.
+      Generates new GUID for logical name.
+    </summary>
+    <files-created>
+      - src/server/api/Sprk.Bff.Api/Services/Scopes/ScopeCopyService.cs (shared with 042)
+    </files-created>
+  </notes>
 
   <prompt>
     <goal>Implement Save As functionality to create customer copies of scopes.</goal>

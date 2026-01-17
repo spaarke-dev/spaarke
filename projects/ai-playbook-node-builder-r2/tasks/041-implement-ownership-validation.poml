@@ -6,8 +6,21 @@
     <tags>bff-api, validation</tags>
     <estimate>0.5d</estimate>
     <dependencies>040</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
+
+  <notes>
+    <completed-date>2026-01-17</completed-date>
+    <summary>
+      Created OwnershipValidator.cs with IOwnershipValidator interface.
+      Implements SYS-/CUST- prefix validation, CanModify, CanDelete checks.
+      Returns ProblemDetails for API error responses.
+      Supports EnsureCustomerPrefix and StripPrefix helper methods.
+    </summary>
+    <files-created>
+      - src/server/api/Sprk.Bff.Api/Services/Scopes/OwnershipValidator.cs
+    </files-created>
+  </notes>
 
   <prompt>
     <goal>Implement server-side validation to prevent modification of SYS- owned scopes.</goal>

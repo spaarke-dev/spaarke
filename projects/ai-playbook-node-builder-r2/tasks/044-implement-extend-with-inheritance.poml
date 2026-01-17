@@ -6,8 +6,22 @@
     <tags>bff-api, scopes</tags>
     <estimate>1d</estimate>
     <dependencies>041</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
+
+  <notes>
+    <completed-date>2026-01-17</completed-date>
+    <summary>
+      Created ScopeInheritanceService.cs with IScopeInheritanceService interface.
+      Implements ExtendScopeAsync for creating child scopes with parent link.
+      GetEffectiveScopeAsync merges inherited and overridden values.
+      Single-level inheritance enforced (no grandchildren).
+      HandleParentDeletionAsync supports multiple strategies: Promote, Cascade, Prevent.
+    </summary>
+    <files-created>
+      - src/server/api/Sprk.Bff.Api/Services/Scopes/ScopeInheritanceService.cs
+    </files-created>
+  </notes>
 
   <prompt>
     <goal>Implement Extend functionality that creates scopes inheriting from a parent.</goal>

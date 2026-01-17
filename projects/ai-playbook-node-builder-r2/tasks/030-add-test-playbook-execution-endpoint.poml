@@ -6,8 +6,28 @@
     <tags>bff-api, testing, ai</tags>
     <estimate>0.5d</estimate>
     <dependencies>Phase 1</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
+
+  <notes>
+    <note date="2026-01-17">
+      Created test playbook execution endpoint with full SSE streaming support.
+
+      Files created:
+      - src/server/api/Sprk.Bff.Api/Models/Ai/TestPlaybookModels.cs
+        - TestMode enum (Mock, Quick, Production)
+        - TestPlaybookRequest model with PlaybookId, CanvasJson, Mode, Options
+        - TestOptions, TestExecutionEvent, and node data records
+
+      Files modified:
+      - AiPlaybookBuilderEndpoints.cs: Added POST /test-execution endpoint
+      - IAiPlaybookBuilderService.cs: Added ExecuteTestAsync method
+      - AiPlaybookBuilderService.cs: Implemented ExecuteTestAsync
+      - ServerSentEventWriter.cs: Added generic WriteEventAsync
+
+      All acceptance criteria met.
+    </note>
+  </notes>
 
   <prompt>
     <goal>Create the test-playbook-execution endpoint for validating playbook configurations.</goal>

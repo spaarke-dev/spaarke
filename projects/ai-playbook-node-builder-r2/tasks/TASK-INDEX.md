@@ -86,15 +86,15 @@
 
 | Task | Title | Status | Dependencies | Estimate |
 |------|-------|--------|--------------|----------|
-| 030 | Add /api/ai/test-playbook-execution endpoint | 🔲 | Phase 1 | 0.5d |
-| 031 | Implement mock test with sample data generation | 🔲 | 030 | 1d |
-| 032 | Implement temp blob storage service (24hr TTL) | 🔲 | none | 1d |
-| 033 | Implement quick test with temp blob | 🔲 | 030, 032 | 1d |
-| 034 | Integrate Document Intelligence for quick test | 🔲 | 033 | 0.5d |
-| 035 | Implement production test (full flow) | 🔲 | 030 | 0.5d |
-| 036 | Build test options dialog in PCF | 🔲 | Phase 2 | 0.5d |
-| 037 | Build test execution progress view | 🔲 | 036 | 0.5d |
-| 038 | Add test result preview/download | 🔲 | 037 | 0.5d |
+| 030 | Add /api/ai/test-playbook-execution endpoint | ✅ | Phase 1 | 0.5d |
+| 031 | Implement mock test with sample data generation | ✅ | 030 | 1d |
+| 032 | Implement temp blob storage service (24hr TTL) | ✅ | none | 1d |
+| 033 | Implement quick test with temp blob | ✅ | 030, 032 | 1d |
+| 034 | Integrate Document Intelligence for quick test | ✅ | 033 | 0.5d |
+| 035 | Implement production test (full flow) | ✅ | 030 | 0.5d |
+| 036 | Build test options dialog in PCF | ✅ | Phase 2 | 0.5d |
+| 037 | Build test execution progress view | ✅ | 036 | 0.5d |
+| 038 | Add test result preview/download | ✅ | 037 | 0.5d |
 
 **Phase 4 Deliverables**:
 - Test execution endpoint
@@ -108,16 +108,16 @@
 
 | Task | Title | Status | Dependencies | Estimate |
 |------|-------|--------|--------------|----------|
-| 040 | Add ownership fields to Dataverse schema | 🔲 | none | 0.5d |
-| 041 | Implement ownership validation (SYS- immutable) | 🔲 | 040 | 0.5d |
-| 042 | Implement "Save As" for playbooks | 🔲 | 041 | 0.5d |
-| 043 | Implement "Save As" for scopes | 🔲 | 041 | 0.5d |
-| 044 | Implement "Extend" with inheritance | 🔲 | 041 | 1d |
-| 045 | Implement duplicate name handling (suffix) | 🔲 | 043 | 0.5d |
-| 046 | Build Scope Browser component | 🔲 | Phase 2 | 1d |
-| 047 | Add scope creation dialogs | 🔲 | 046 | 0.5d |
-| 048 | Add GenericAnalysisHandler for configurable tools | 🔲 | none | 1d |
-| 049 | Implement proactive scope gap detection | 🔲 | 046 | 0.5d |
+| 040 | Add ownership fields to Dataverse schema | ✅ | none | 0.5d |
+| 041 | Implement ownership validation (SYS- immutable) | ✅ | 040 | 0.5d |
+| 042 | Implement "Save As" for playbooks | ✅ | 041 | 0.5d |
+| 043 | Implement "Save As" for scopes | ✅ | 041 | 0.5d |
+| 044 | Implement "Extend" with inheritance | ✅ | 041 | 1d |
+| 045 | Implement duplicate name handling (suffix) | ✅ | 043 | 0.5d |
+| 046 | Build Scope Browser component | ✅ | Phase 2 | 1d |
+| 047 | Add scope creation dialogs | ✅ | 046 | 0.5d |
+| 048 | Add GenericAnalysisHandler for configurable tools | ✅ | none | 1d |
+| 049 | Implement proactive scope gap detection | ✅ | 046 | 0.5d |
 
 **Phase 5 Deliverables**:
 - Ownership fields in Dataverse

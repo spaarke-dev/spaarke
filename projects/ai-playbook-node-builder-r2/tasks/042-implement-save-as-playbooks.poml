@@ -6,8 +6,21 @@
     <tags>bff-api, playbooks</tags>
     <estimate>0.5d</estimate>
     <dependencies>041</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
+
+  <notes>
+    <completed-date>2026-01-17</completed-date>
+    <summary>
+      Created ScopeCopyService.cs with IScopeCopyService interface.
+      Implements SavePlaybookAsAsync for creating customer copies of playbooks.
+      Integrates with IPlaybookService.ClonePlaybookAsync pattern.
+      Applies CUST- prefix and Customer ownership automatically.
+    </summary>
+    <files-created>
+      - src/server/api/Sprk.Bff.Api/Services/Scopes/ScopeCopyService.cs
+    </files-created>
+  </notes>
 
   <prompt>
     <goal>Implement Save As functionality to create customer copies of playbooks.</goal>

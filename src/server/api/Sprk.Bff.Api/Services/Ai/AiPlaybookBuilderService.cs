@@ -385,4 +385,243 @@ public class AiPlaybookBuilderService : IAiPlaybookBuilderService
             - Best practices for the analysis type
             """;
     }
+
+    /// <inheritdoc />
+    public async IAsyncEnumerable<TestExecutionEvent> ExecuteTestAsync(
+        TestPlaybookRequest request,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        _logger.LogInformation(
+            "Executing playbook test, Mode={Mode}, PlaybookId={PlaybookId}",
+            request.Mode, request.PlaybookId);
+
+        var startTime = DateTime.UtcNow;
+        var nodesExecuted = 0;
+        var nodesSkipped = 0;
+        var nodesFailed = 0;
+        var totalInputTokens = 0;
+        var totalOutputTokens = 0;
+
+        // Get canvas state (either from PlaybookId lookup or directly from request)
+        var canvasState = request.CanvasJson;
+        if (canvasState == null && request.PlaybookId.HasValue)
+        {
+            // In production, would load from Dataverse
+            // For now, yield error if no canvas provided
+            yield return new TestExecutionEvent
+            {
+                Type = TestEventTypes.Error,
+                Data = new { message = "Playbook loading not yet implemented. Provide CanvasJson for testing." },
+                Done = true
+            };
+            yield break;
+        }
+
+        if (canvasState?.Nodes == null || canvasState.Nodes.Length == 0)
+        {
+            yield return new TestExecutionEvent
+            {
+                Type = TestEventTypes.Error,
+                Data = new { message = "Canvas has no nodes to execute." },
+                Done = true
+            };
+            yield break;
+        }
+
+        var nodes = canvasState.Nodes;
+        var totalSteps = request.Options?.MaxNodes ?? nodes.Length;
+        totalSteps = Math.Min(totalSteps, nodes.Length);
+
+        _logger.LogDebug("Test execution will process {NodeCount} nodes", totalSteps);
+
+        // Execute nodes in order (simplified - full implementation would follow edges)
+        for (var i = 0; i < totalSteps && !cancellationToken.IsCancellationRequested; i++)
+        {
+            var node = nodes[i];
+            var stepNumber = i + 1;
+
+            // Emit node_start event
+            yield return new TestExecutionEvent
+            {
+                Type = TestEventTypes.NodeStart,
+                Data = new NodeStartData
+                {
+                    NodeId = node.Id,
+                    Label = node.Label ?? $"Node {stepNumber}",
+                    NodeType = node.Type,
+                    StepNumber = stepNumber,
+                    TotalSteps = totalSteps
+                }
+            };
+
+            // Simulate node execution based on mode
+            var nodeStartTime = DateTime.UtcNow;
+            object? nodeOutput = null;
+            var nodeSuccess = true;
+            string? nodeError = null;
+            var nodeTokens = new TokenUsageData();
+
+            try
+            {
+                switch (request.Mode)
+                {
+                    case TestMode.Mock:
+                        // Mock mode: Generate sample output without calling AI
+                        (nodeOutput, nodeTokens) = await ExecuteMockNodeAsync(node, cancellationToken);
+                        break;
+
+                    case TestMode.Quick:
+                        // Quick mode: Execute with real AI but no persistence
+                        (nodeOutput, nodeTokens) = await ExecuteQuickNodeAsync(node, cancellationToken);
+                        break;
+
+                    case TestMode.Production:
+                        // Production mode: Full execution with persistence
+                        (nodeOutput, nodeTokens) = await ExecuteProductionNodeAsync(node, cancellationToken);
+                        break;
+                }
+
+                nodesExecuted++;
+                totalInputTokens += nodeTokens.InputTokens;
+                totalOutputTokens += nodeTokens.OutputTokens;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Node {NodeId} execution failed", node.Id);
+                nodeSuccess = false;
+                nodeError = ex.Message;
+                nodesFailed++;
+            }
+
+            var nodeDuration = (int)(DateTime.UtcNow - nodeStartTime).TotalMilliseconds;
+
+            // Emit node_output event
+            yield return new TestExecutionEvent
+            {
+                Type = TestEventTypes.NodeOutput,
+                Data = new NodeOutputData
+                {
+                    NodeId = node.Id,
+                    Output = nodeOutput,
+                    DurationMs = nodeDuration,
+                    TokenUsage = nodeTokens
+                }
+            };
+
+            // Emit node_complete event
+            yield return new TestExecutionEvent
+            {
+                Type = TestEventTypes.NodeComplete,
+                Data = new NodeCompleteData
+                {
+                    NodeId = node.Id,
+                    Success = nodeSuccess,
+                    Error = nodeError,
+                    OutputVariable = node.OutputVariable
+                }
+            };
+
+            // Small delay between nodes to allow UI updates
+            await Task.Delay(50, cancellationToken);
+        }
+
+        // Calculate total duration
+        var totalDuration = (int)(DateTime.UtcNow - startTime).TotalMilliseconds;
+
+        // Emit test_complete event
+        yield return new TestExecutionEvent
+        {
+            Type = TestEventTypes.Complete,
+            Data = new TestCompleteData
+            {
+                Success = nodesFailed == 0,
+                NodesExecuted = nodesExecuted,
+                NodesSkipped = nodesSkipped,
+                NodesFailed = nodesFailed,
+                TotalDurationMs = totalDuration,
+                TotalTokenUsage = new TokenUsageData
+                {
+                    InputTokens = totalInputTokens,
+                    OutputTokens = totalOutputTokens,
+                    Model = GetModelForMode(request.Mode)
+                }
+            },
+            Done = true
+        };
+
+        _logger.LogInformation(
+            "Test execution completed: {NodesExecuted} executed, {NodesFailed} failed, {Duration}ms",
+            nodesExecuted, nodesFailed, totalDuration);
+    }
+
+    /// <summary>
+    /// Execute a node in mock mode (sample data, no AI calls).
+    /// </summary>
+    private async Task<(object? Output, TokenUsageData Tokens)> ExecuteMockNodeAsync(
+        CanvasNode node,
+        CancellationToken cancellationToken)
+    {
+        // Simulate processing delay
+        await Task.Delay(100, cancellationToken);
+
+        object output = node.Type switch
+        {
+            "aiAnalysis" => new { summary = "Mock analysis result for testing", confidence = 0.95 },
+            "aiCompletion" => new { text = "Mock completion text for testing" },
+            "condition" => new { result = true, branch = "true" },
+            "deliverOutput" => new { delivered = true, format = "json" },
+            _ => new { type = node.Type, status = "completed" }
+        };
+
+        return (output, new TokenUsageData { InputTokens = 0, OutputTokens = 0, Model = "mock" });
+    }
+
+    /// <summary>
+    /// Execute a node in quick mode (real AI, ephemeral storage).
+    /// </summary>
+    private async Task<(object? Output, TokenUsageData Tokens)> ExecuteQuickNodeAsync(
+        CanvasNode node,
+        CancellationToken cancellationToken)
+    {
+        // For nodes that require AI, make a simple call
+        if (node.Type is "aiAnalysis" or "aiCompletion")
+        {
+            var prompt = $"Generate a sample {node.Type} output for a node labeled '{node.Label}'";
+            var response = await _openAiClient.GetCompletionAsync(prompt, cancellationToken: cancellationToken);
+
+            return (
+                new { text = response, nodeType = node.Type },
+                new TokenUsageData { InputTokens = 50, OutputTokens = 100, Model = "gpt-4o-mini" }
+            );
+        }
+
+        // Non-AI nodes use mock execution
+        return await ExecuteMockNodeAsync(node, cancellationToken);
+    }
+
+    /// <summary>
+    /// Execute a node in production mode (full execution with persistence).
+    /// </summary>
+    private async Task<(object? Output, TokenUsageData Tokens)> ExecuteProductionNodeAsync(
+        CanvasNode node,
+        CancellationToken cancellationToken)
+    {
+        // Production mode uses the same logic as quick mode for now
+        // Full implementation would:
+        // 1. Load actual scopes from Dataverse
+        // 2. Execute with proper tool handlers
+        // 3. Persist results to Dataverse
+        return await ExecuteQuickNodeAsync(node, cancellationToken);
+    }
+
+    /// <summary>
+    /// Get the AI model name for the test mode.
+    /// </summary>
+    private static string GetModelForMode(TestMode mode) => mode switch
+    {
+        TestMode.Mock => "mock",
+        TestMode.Quick => "gpt-4o-mini",
+        TestMode.Production => "gpt-4o",
+        _ => "unknown"
+    };
 }

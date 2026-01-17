@@ -1,0 +1,22 @@
+{
+  "rules": [
+    {
+      "name": "delete-test-documents-after-24hrs",
+      "enabled": true,
+      "type": "Lifecycle",
+      "definition": {
+        "filters": {
+          "blobTypes": ["blockBlob"],
+          "prefixMatch": ["test-documents/"]
+        },
+        "actions": {
+          "baseBlob": {
+            "delete": {
+              "daysAfterCreationGreaterThan": 1
+            }
+          }
+        }
+      }
+    }
+  ]
+}

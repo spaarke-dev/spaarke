@@ -6,7 +6,8 @@
     <tags>pcf, fluent-ui, testing</tags>
     <estimate>0.5d</estimate>
     <dependencies>Phase 2</dependencies>
-    <status>pending</status>
+    <status>completed</status>
+    <completed>2026-01-17</completed>
   </metadata>
 
   <prompt>
@@ -59,4 +60,21 @@
     <criterion>Document picker works for Production mode</criterion>
     <criterion>Dark mode compatible</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <note date="2026-01-17">
+      Implementation complete:
+      - Created TestOptionsDialog.tsx component with Fluent UI v9 Dialog
+      - Three test modes (Mock, Quick, Production) displayed as selectable cards
+      - Mock mode: No document required, uses sample data (~5s)
+      - Quick mode: File upload with 50MB limit, supports PDF/DOCX/XLSX/PNG/JPG
+      - Production mode: Requires saved playbook and Document ID input
+      - Extended aiAssistantStore with test execution state:
+        - TestMode, TestOptions, TestNodeProgress, TestExecutionState types
+        - openTestDialog, closeTestDialog, startTestExecution actions
+        - updateTestNodeProgress, completeTestExecution, failTestExecution actions
+      - All styles use Fluent UI tokens (ADR-021 compliant)
+      - Build passes with 0 errors, 0 warnings
+    </note>
+  </notes>
 </task>
