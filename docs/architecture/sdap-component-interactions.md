@@ -571,6 +571,96 @@ User → PCF (DocumentRelationshipViewer) → BFF API (VisualizationEndpoints) �
 - `IVisualizationService.cs` — Interface with `DocumentNodeData`, `DocumentEdgeData` models
 - PCF bundle: 6.65 MB (React 16, Fluent UI v9 externalized via platform-library)
 
+### Pattern 9: RAG File Indexing Flow (2026-01-16)
+
+RAG file indexing supports two authentication paths that share the same underlying infrastructure:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      RAG FILE INDEXING ARCHITECTURE                          │
+│                                                                              │
+│  ┌─────────────────────────────────────────────────────────────────────────┐│
+│  │                      GraphClientFactory                                 ││
+│  │  ─────────────────────────────────────────────────────────────────────  ││
+│  │  ForApp()           → ClientSecretCredential (app-only)                 ││
+│  │  ForUserAsync(ctx)  → OBO token exchange (delegated)                    ││
+│  └─────────────────────────────────────────────────────────────────────────┘│
+│                                      │                                       │
+│                      ┌───────────────┴───────────────┐                      │
+│                      ▼                               ▼                      │
+│          ┌─────────────────────────┐    ┌─────────────────────────┐        │
+│          │  DriveItemOperations    │    │  UploadSessionManager   │        │
+│          │  DownloadFileAsync()    │    │  UploadSmallAsync()     │        │
+│          │  DownloadFileAsUserAsync│    │  (email-to-document)    │        │
+│          └─────────────────────────┘    └─────────────────────────┘        │
+│                      │                               │                      │
+│                      └───────────────┬───────────────┘                      │
+│                                      ▼                                      │
+│                     ┌─────────────────────────────┐                         │
+│                     │       SpeFileStore          │                         │
+│                     │   (ISpeFileOperations)      │                         │
+│                     └─────────────────────────────┘                         │
+│                                      │                                      │
+│              ┌───────────────────────┴───────────────────────┐              │
+│              ▼                                               ▼              │
+│  ┌─────────────────────────────┐          ┌─────────────────────────────┐  │
+│  │    FileIndexingService      │          │  EmailToDocumentJobHandler  │  │
+│  │  ───────────────────────────│          │  ───────────────────────────│  │
+│  │  IndexFileAsync() [OBO]     │          │  UploadSmallAsync()         │  │
+│  │  IndexFileAppOnlyAsync()    │          │  (writes .eml to SPE)       │  │
+│  │  (reads files from SPE)     │          │                             │  │
+│  └─────────────────────────────┘          └─────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Dual Entry Points for RAG Indexing:**
+
+| Endpoint | Auth Pattern | Use Case | Service Method |
+|----------|-------------|----------|----------------|
+| `POST /api/ai/rag/index-file` | OBO (Pattern 4) | User-initiated via PCF | `IndexFileAsync(request, httpContext)` |
+| `POST /api/ai/rag/index-file-background` | App-only (Pattern 6) | Background jobs, scheduled indexing, bulk ops | `IndexFileAppOnlyAsync(request)` |
+
+**Components involved:**
+1. `src/server/api/Sprk.Bff.Api/Api/Ai/RagEndpoints.cs` — Both endpoints defined here
+2. `src/server/api/Sprk.Bff.Api/Services/Ai/IFileIndexingService.cs` — Interface with 3 entry points
+3. `src/server/api/Sprk.Bff.Api/Services/Ai/FileIndexingService.cs` — Unified pipeline implementation
+4. `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs` — Auth factory (shared)
+5. `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/DriveItemOperations.cs` — File download operations
+6. `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs` — SPE facade (ISpeFileOperations)
+
+**Unified Pipeline (all entry points converge):**
+```
+1. Download file (OBO or app-only based on entry point)
+2. Extract text via ITextExtractor
+3. Chunk text via ITextChunkingService
+4. Build KnowledgeDocument objects for each chunk
+5. Batch index via IRagService.IndexDocumentsBatchAsync
+6. Return FileIndexingResult with statistics
+```
+
+**Shared Infrastructure with Email-to-Document:**
+
+| Component | RAG Indexing | Email-to-Document |
+|-----------|-------------|-------------------|
+| `GraphClientFactory.ForApp()` | ✅ Downloads | ✅ Uploads |
+| `SpeFileStore` | ✅ Via ISpeFileOperations | ✅ Direct |
+| `DriveItemOperations` | ✅ DownloadFileAsync | — |
+| `UploadSessionManager` | — | ✅ UploadSmallAsync |
+
+**Change Impact:**
+| Change | Impact |
+|--------|--------|
+| Modify FileIndexingService pipeline | Both OBO and app-only paths affected |
+| Change GraphClientFactory auth | All SPE operations (email, RAG, visualization) affected |
+| Update ISpeFileOperations interface | SpeFileStore + all consumers affected |
+| Modify chunking/embedding strategy | IRagService, ITextChunkingService affected |
+
+**Key Files:**
+- `RagEndpoints.cs` — POST /api/ai/rag/index-file (OBO), POST /api/ai/rag/index-file-background (app-only)
+- `FileIndexingService.cs` — Unified pipeline with 3 entry points
+- `IFileIndexingService.cs` — Interface: `FileIndexRequest`, `ContentIndexRequest`, `FileIndexingResult`
+- `GraphClientFactory.cs` — `ForApp()` and `ForUserAsync()` for auth
+
 ---
 
 ## Shared Dependencies
@@ -709,6 +799,8 @@ src/ ─────────────✗────→ tests/ (no test c
 | **PCF DocumentRelationshipViewer** | `src/client/pcf/DocumentRelationshipViewer/` (v1.0.18) | `__tests__/` (40 component tests) |
 | **Visualization Endpoints** | `src/server/api/Sprk.Bff.Api/Api/Ai/VisualizationEndpoints.cs` | Same test project |
 | **Visualization Service** | `src/server/api/Sprk.Bff.Api/Services/Ai/VisualizationService.cs` | Same test project (27 tests) |
+| **RAG Endpoints** | `src/server/api/Sprk.Bff.Api/Api/Ai/RagEndpoints.cs` | Same test project |
+| **File Indexing Service** | `src/server/api/Sprk.Bff.Api/Services/Ai/FileIndexingService.cs` | Same test project |
 | PCF Shared Auth | `src/client/pcf/*/services/auth/` | — |
 | Bicep Modules | `infrastructure/bicep/modules/` | `what-if` validation |
 | Bicep AI Modules | `infrastructure/bicep/modules/dashboard.bicep`, `alerts.bicep` | `what-if` validation |

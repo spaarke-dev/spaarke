@@ -1,7 +1,10 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Jobs.Handlers;
 
 namespace Sprk.Bff.Api.Api.Ai;
 
@@ -101,6 +104,21 @@ public static class RagEndpoints
             .WithSummary("Index a file into the knowledge base via unified pipeline")
             .WithDescription("Downloads file via OBO authentication, extracts text, chunks, generates embeddings, and indexes to Azure AI Search.")
             .Produces<FileIndexingResult>()
+            .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(500);
+
+        // POST /api/ai/rag/enqueue-indexing - Enqueue a file for background RAG indexing
+        // Uses AllowAnonymous + API key header validation (consistent with email webhook pattern)
+        // Security: Validates X-Api-Key header before enqueueing job
+        // Job handler uses app-only auth (Pattern 6) for SPE file access
+        group.MapPost("/enqueue-indexing", EnqueueIndexing)
+            .AllowAnonymous()
+            .RequireRateLimiting("ai-batch")
+            .WithName("RagEnqueueIndexing")
+            .WithSummary("Enqueue a file for background RAG indexing")
+            .WithDescription("Validates API key header and enqueues file for async indexing via job handler. Used for background jobs, scheduled indexing, bulk operations, and automated testing.")
+            .Produces<EnqueueIndexingResponse>(StatusCodes.Status202Accepted)
             .ProducesProblem(400)
             .ProducesProblem(401)
             .ProducesProblem(500);
@@ -410,6 +428,144 @@ public static class RagEndpoints
                 statusCode: 500);
         }
     }
+
+    /// <summary>
+    /// Enqueue a file for background RAG indexing via job queue.
+    /// Uses API key header validation for security (consistent with email webhook pattern).
+    /// </summary>
+    /// <remarks>
+    /// This endpoint validates an API key header before enqueueing the job.
+    /// The job handler (RagIndexingJobHandler) uses Pattern 6 (app-only auth) for SPE file access.
+    /// Returns 202 Accepted with job tracking information for async processing.
+    /// </remarks>
+    private static async Task<IResult> EnqueueIndexing(
+        FileIndexRequest request,
+        HttpRequest httpRequest,
+        JobSubmissionService jobSubmissionService,
+        IConfiguration configuration,
+        ILogger<Program> logger,
+        CancellationToken cancellationToken)
+    {
+        var traceId = httpRequest.HttpContext.TraceIdentifier;
+        var correlationId = httpRequest.Headers["X-Correlation-Id"].FirstOrDefault() ?? traceId;
+
+        // Step 1: Validate API key header
+        var apiKey = httpRequest.Headers["X-Api-Key"].FirstOrDefault();
+        var expectedApiKey = configuration["Rag:ApiKey"];
+
+        if (string.IsNullOrEmpty(expectedApiKey))
+        {
+            logger.LogWarning("RAG API key not configured - rejecting request");
+            return Results.Problem(
+                title: "Configuration Error",
+                detail: "RAG API key not configured on server",
+                statusCode: StatusCodes.Status500InternalServerError);
+        }
+
+        if (string.IsNullOrEmpty(apiKey) || apiKey != expectedApiKey)
+        {
+            logger.LogWarning("Invalid or missing RAG API key for request {TraceId}", traceId);
+            return Results.Problem(
+                title: "Unauthorized",
+                detail: "Invalid or missing API key",
+                statusCode: StatusCodes.Status401Unauthorized);
+        }
+
+        // Step 2: Validate required fields
+        if (string.IsNullOrWhiteSpace(request.TenantId))
+        {
+            return Results.BadRequest(new ProblemDetails
+            {
+                Title = "Invalid Request",
+                Detail = "TenantId is required",
+                Status = 400
+            });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.DriveId))
+        {
+            return Results.BadRequest(new ProblemDetails
+            {
+                Title = "Invalid Request",
+                Detail = "DriveId is required",
+                Status = 400
+            });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ItemId))
+        {
+            return Results.BadRequest(new ProblemDetails
+            {
+                Title = "Invalid Request",
+                Detail = "ItemId is required",
+                Status = 400
+            });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.FileName))
+        {
+            return Results.BadRequest(new ProblemDetails
+            {
+                Title = "Invalid Request",
+                Detail = "FileName is required",
+                Status = 400
+            });
+        }
+
+        try
+        {
+            // Step 3: Build job payload
+            var jobPayload = JsonDocument.Parse(JsonSerializer.Serialize(new RagIndexingJobPayload
+            {
+                TenantId = request.TenantId,
+                DriveId = request.DriveId,
+                ItemId = request.ItemId,
+                FileName = request.FileName,
+                DocumentId = request.DocumentId,
+                KnowledgeSourceId = request.KnowledgeSourceId,
+                KnowledgeSourceName = request.KnowledgeSourceName,
+                Metadata = request.Metadata,
+                Source = "EnqueueEndpoint",
+                EnqueuedAt = DateTimeOffset.UtcNow
+            }));
+
+            // Step 4: Create and submit job
+            var idempotencyKey = $"rag-index-{request.DriveId}-{request.ItemId}";
+            var job = new JobContract
+            {
+                JobType = RagIndexingJobHandler.JobTypeName,
+                SubjectId = request.ItemId,
+                CorrelationId = correlationId,
+                IdempotencyKey = idempotencyKey,
+                Payload = jobPayload,
+                MaxAttempts = 3
+            };
+
+            await jobSubmissionService.SubmitJobAsync(job, cancellationToken);
+
+            logger.LogInformation(
+                "Enqueued RAG indexing job {JobId} for file {FileName} (DriveId: {DriveId}, ItemId: {ItemId})",
+                job.JobId, request.FileName, request.DriveId, request.ItemId);
+
+            return Results.Accepted(
+                value: new EnqueueIndexingResponse
+                {
+                    Accepted = true,
+                    JobId = job.JobId,
+                    CorrelationId = correlationId,
+                    IdempotencyKey = idempotencyKey,
+                    Message = $"File {request.FileName} queued for RAG indexing"
+                });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to enqueue RAG indexing job for {FileName}", request.FileName);
+            return Results.Problem(
+                title: "Enqueue Failed",
+                detail: ex.Message,
+                statusCode: StatusCodes.Status500InternalServerError);
+        }
+    }
 }
 
 /// <summary>
@@ -480,4 +636,35 @@ public record EmbeddingResult
     /// Number of dimensions in the embedding.
     /// </summary>
     public int Dimensions { get; init; }
+}
+
+/// <summary>
+/// Response from enqueue indexing endpoint.
+/// </summary>
+public record EnqueueIndexingResponse
+{
+    /// <summary>
+    /// Whether the job was accepted for processing.
+    /// </summary>
+    public bool Accepted { get; init; }
+
+    /// <summary>
+    /// The unique job identifier for tracking.
+    /// </summary>
+    public Guid JobId { get; init; }
+
+    /// <summary>
+    /// Correlation ID for tracing.
+    /// </summary>
+    public string CorrelationId { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Idempotency key for deduplication.
+    /// </summary>
+    public string IdempotencyKey { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Human-readable message.
+    /// </summary>
+    public string Message { get; init; } = string.Empty;
 }
