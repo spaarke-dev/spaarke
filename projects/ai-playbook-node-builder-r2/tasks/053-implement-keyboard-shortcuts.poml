@@ -6,7 +6,7 @@
     <tags>pcf, accessibility</tags>
     <estimate>0.5d</estimate>
     <dependencies>Phase 2</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -59,4 +59,23 @@
     <criterion>No shortcut conflicts</criterion>
     <criterion>Works on Mac and Windows</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <completion-date>2026-01-17</completion-date>
+    <summary>
+      Implemented keyboard shortcuts hook for AI assistant.
+      Created useKeyboardShortcuts.ts with:
+      - Cmd/Ctrl+K toggle support (Mac/Windows)
+      - Escape key handling
+      - Configurable shortcut registry
+      - Modifier key support (ctrlOrCmd, shift, alt)
+      - Scoped shortcuts (per element)
+      - formatShortcut helper for display (⌘K vs Ctrl+K)
+      - createAiAssistantShortcuts factory function
+      - Prevention of conflicts with browser/input shortcuts
+    </summary>
+    <files-created>
+      <file>src/client/pcf/PlaybookBuilderHost/control/hooks/useKeyboardShortcuts.ts</file>
+    </files-created>
+  </notes>
 </task>

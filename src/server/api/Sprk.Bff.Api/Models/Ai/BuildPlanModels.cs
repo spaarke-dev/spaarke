@@ -573,13 +573,13 @@ public record BuildPlanGenerationResult
         bool requiresConfirmation = false,
         string? confirmationMessage = null,
         string[]? warnings = null) => new()
-    {
-        Success = true,
-        Plan = plan,
-        RequiresConfirmation = requiresConfirmation,
-        ConfirmationMessage = confirmationMessage,
-        Warnings = warnings
-    };
+        {
+            Success = true,
+            Plan = plan,
+            RequiresConfirmation = requiresConfirmation,
+            ConfirmationMessage = confirmationMessage,
+            Warnings = warnings
+        };
 
     /// <summary>
     /// Create a failed result.

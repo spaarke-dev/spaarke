@@ -6,7 +6,7 @@
     <tags>bff-api, pcf, error-handling</tags>
     <estimate>0.5d</estimate>
     <dependencies>All phases</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -60,4 +60,27 @@
     <criterion>SSE errors handled gracefully</criterion>
     <criterion>Correlation IDs in all logs</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <completion-date>2026-01-17</completion-date>
+    <summary>
+      Implemented comprehensive error handling for AI Builder operations.
+      Created AiBuilderErrors.cs with:
+      - Error codes for validation, node config, scope resolution, timeouts, AI service failures
+      - ProblemDetails factory methods per ADR-019
+      - SSE error event handling with SseErrorEvent record
+      - AiBuilderResult generic result type
+
+      Created ErrorDisplay.tsx with:
+      - Fluent UI v9 MessageBar-based error display
+      - Compact inline variant for chat messages
+      - Correlation ID display with copy functionality
+      - Retry button for retryable errors
+      - Error severity levels (error, warning, info)
+    </summary>
+    <files-created>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Builder/AiBuilderErrors.cs</file>
+      <file>src/client/pcf/PlaybookBuilderHost/control/components/AiAssistant/ErrorDisplay.tsx</file>
+    </files-created>
+  </notes>
 </task>
