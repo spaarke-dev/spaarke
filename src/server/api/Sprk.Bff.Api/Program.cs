@@ -402,7 +402,8 @@ if (analysisEnabled && documentIntelligenceEnabled)
         builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.IRagService, Sprk.Bff.Api.Services.Ai.RagService>();
 
         // FileIndexingService - Unified RAG indexing pipeline (download → extract → chunk → embed → index)
-        builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.IFileIndexingService, Sprk.Bff.Api.Services.Ai.FileIndexingService>();
+        // Scoped because it depends on ISpeFileOperations (which is scoped due to Graph token caching)
+        builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IFileIndexingService, Sprk.Bff.Api.Services.Ai.FileIndexingService>();
 
         // VisualizationService - Document relationship visualization using vector similarity
         builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Visualization.IVisualizationService, Sprk.Bff.Api.Services.Ai.Visualization.VisualizationService>();
