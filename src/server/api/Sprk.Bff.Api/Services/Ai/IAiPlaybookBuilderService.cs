@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Sprk.Bff.Api.Models.Ai;
 
 namespace Sprk.Bff.Api.Services.Ai;
@@ -430,6 +431,7 @@ public record CanvasPatch
 /// <summary>
 /// Canvas patch operation types.
 /// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum CanvasPatchOperation
 {
     /// <summary>Add a new node.</summary>

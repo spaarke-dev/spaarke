@@ -102,27 +102,66 @@ public class AiPlaybookBuilderService : IAiPlaybookBuilderService
             $"{systemPrompt}\n\n{userPrompt}",
             cancellationToken: cancellationToken);
 
-        // Parse response into BuildPlan (simplified for skeleton)
-        // Full implementation will parse structured JSON response
+        // Generate a meaningful playbook structure based on the goal
+        // For now, create a standard document analysis pipeline
+        // Full implementation will use AI to customize based on goal
+        var steps = new List<ExecutionStep>
+        {
+            new()
+            {
+                Order = 1,
+                Action = ExecutionStepActions.AddNode,
+                Description = "Analyze document content",
+                NodeSpec = new NodeSpec
+                {
+                    Type = PlaybookNodeTypes.AiAnalysis,
+                    Label = "Document Analysis",
+                    Position = new BuildPlanNodePosition { X = 100, Y = 200 }
+                }
+            },
+            new()
+            {
+                Order = 2,
+                Action = ExecutionStepActions.AddNode,
+                Description = "Extract key information based on goal",
+                NodeSpec = new NodeSpec
+                {
+                    Type = PlaybookNodeTypes.AiAnalysis,
+                    Label = "Extract Key Info",
+                    Position = new BuildPlanNodePosition { X = 400, Y = 200 }
+                }
+            },
+            new()
+            {
+                Order = 3,
+                Action = ExecutionStepActions.AddNode,
+                Description = "Generate structured output",
+                NodeSpec = new NodeSpec
+                {
+                    Type = PlaybookNodeTypes.AiAnalysis,
+                    Label = "Generate Output",
+                    Position = new BuildPlanNodePosition { X = 700, Y = 200 }
+                }
+            },
+            new()
+            {
+                Order = 4,
+                Action = ExecutionStepActions.AddNode,
+                Description = "Deliver results",
+                NodeSpec = new NodeSpec
+                {
+                    Type = PlaybookNodeTypes.DeliverOutput,
+                    Label = "Deliver Results",
+                    Position = new BuildPlanNodePosition { X = 1000, Y = 200 }
+                }
+            }
+        };
+
         var plan = new BuildPlan
         {
             Summary = $"Build plan for: {request.Goal}",
-            Steps =
-            [
-                new ExecutionStep
-                {
-                    Order = 1,
-                    Action = ExecutionStepActions.AddNode,
-                    Description = "Add input node for document processing",
-                    NodeSpec = new NodeSpec
-                    {
-                        Type = PlaybookNodeTypes.AiAnalysis,
-                        Label = "Document Analysis",
-                        Position = new BuildPlanNodePosition { X = 200, Y = 100 }
-                    }
-                }
-            ],
-            EstimatedNodeCount = 5,
+            Steps = steps.ToArray(),
+            EstimatedNodeCount = steps.Count,
             Confidence = 0.85
         };
 
@@ -184,11 +223,55 @@ public class AiPlaybookBuilderService : IAiPlaybookBuilderService
         {
             case BuilderIntent.CreatePlaybook:
                 yield return BuilderStreamChunk.Message("Let me create a playbook structure for you.");
-                // Generate build plan and execute
+                // Generate build plan
                 var plan = await GenerateBuildPlanAsync(
                     new BuildPlanRequest { Goal = request.Message },
                     cancellationToken);
-                yield return BuilderStreamChunk.Message($"I'll create a playbook with {plan.EstimatedNodeCount} nodes.");
+                yield return BuilderStreamChunk.Message($"Creating a playbook with {plan.EstimatedNodeCount} nodes...");
+
+                // Execute the plan steps - yield canvas patches for each node
+                var createdNodeIds = new Dictionary<int, string>();
+                foreach (var step in plan.Steps)
+                {
+                    if (step.Action == ExecutionStepActions.AddNode && step.NodeSpec != null)
+                    {
+                        var newNodeId = Guid.NewGuid().ToString("N")[..8];
+                        createdNodeIds[step.Order] = newNodeId;
+
+                        yield return BuilderStreamChunk.Operation(new CanvasPatch
+                        {
+                            Operation = CanvasPatchOperation.AddNode,
+                            Node = new CanvasNode
+                            {
+                                Id = newNodeId,
+                                Type = step.NodeSpec.Type ?? PlaybookNodeTypes.AiAnalysis,
+                                Label = step.NodeSpec.Label ?? step.Description,
+                                Position = new NodePosition(
+                                    step.NodeSpec.Position?.X ?? 200 + (step.Order * 250),
+                                    step.NodeSpec.Position?.Y ?? 200)
+                            }
+                        });
+                        yield return BuilderStreamChunk.Message($"Added: {step.NodeSpec.Label ?? step.Description}");
+                    }
+                }
+
+                // Connect nodes in sequence
+                var nodeIdsList = createdNodeIds.OrderBy(kvp => kvp.Key).Select(kvp => kvp.Value).ToList();
+                for (int i = 0; i < nodeIdsList.Count - 1; i++)
+                {
+                    yield return BuilderStreamChunk.Operation(new CanvasPatch
+                    {
+                        Operation = CanvasPatchOperation.AddEdge,
+                        Edge = new CanvasEdge
+                        {
+                            Id = $"edge-{i}",
+                            SourceId = nodeIdsList[i],
+                            TargetId = nodeIdsList[i + 1]
+                        }
+                    });
+                }
+
+                yield return BuilderStreamChunk.Message($"Playbook created with {createdNodeIds.Count} nodes connected in sequence.");
                 break;
 
             case BuilderIntent.AddNode:
