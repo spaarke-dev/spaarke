@@ -30,8 +30,8 @@ Configure these in Azure App Service > Configuration > Application Settings:
 | `DocumentIntelligence__Enabled` | Yes | `false` | Enable RAG features |
 | `DocumentIntelligence__AiSearchEndpoint` | Yes | - | Azure AI Search endpoint URL |
 | `DocumentIntelligence__AiSearchKey` | Yes | - | Azure AI Search admin API key |
-| `DocumentIntelligence__AiSearchIndexName` | No | `spaarke-knowledge-index` | Default index name (Shared model) |
-| `DocumentIntelligence__EmbeddingModel` | No | `text-embedding-3-small` | Azure OpenAI embedding model deployment |
+| `DocumentIntelligence__AiSearchIndexName` | No | `spaarke-knowledge-index-v2` | Default index name (Shared model) |
+| `DocumentIntelligence__EmbeddingModel` | No | `text-embedding-3-large` | Azure OpenAI embedding model deployment (3072 dims) |
 
 ### AI Services (Required for Embeddings)
 
@@ -47,6 +47,36 @@ Configure these in Azure App Service > Configuration > Application Settings:
 |---------|----------|---------|-------------|
 | `Redis__Enabled` | Yes | `false` | Enable Redis caching |
 | `Redis__ConnectionString` | Yes | - | Redis connection string |
+
+### Azure Service Bus (Required for Job Queue)
+
+| Setting | Required | Default | Description |
+|---------|----------|---------|-------------|
+| `ServiceBus__ConnectionString` | Yes | - | Azure Service Bus connection string |
+| `ServiceBus__QueueName` | No | `sdap-jobs` | Queue name for job processing |
+
+**Resource Details (Dev Environment)**:
+- **Namespace**: `spaarke-servicebus-dev`
+- **Queue**: `sdap-jobs`
+- **Region**: West US 2
+
+**Setting the Connection String:**
+
+```bash
+# Azure App Service
+az webapp config appsettings set \
+  --name spe-api-dev-67e2xz \
+  --resource-group spe-infrastructure-westus2 \
+  --settings "ServiceBus__ConnectionString=<connection-string-from-keyvault>"
+
+# Local development (PowerShell)
+$env:ServiceBus__ConnectionString = "<your-connection-string>"
+```
+
+**Key Vault Reference (Production)**:
+```
+ServiceBus__ConnectionString=@Microsoft.KeyVault(SecretUri=https://spaarke-spekvcert.vault.azure.net/secrets/servicebus-connection-string/)
+```
 
 ### RAG Indexing API Key (Job Queue Pattern)
 
@@ -101,12 +131,16 @@ Invoke-WebRequest -Uri "$bffApiUrl/api/ai/rag/enqueue-indexing" -Headers $header
     "Enabled": true,
     "AiSearchEndpoint": "https://spaarke-search-dev.search.windows.net",
     "AiSearchKey": "<from-key-vault>",
-    "AiSearchIndexName": "spaarke-knowledge-index",
-    "EmbeddingModel": "text-embedding-3-small"
+    "AiSearchIndexName": "spaarke-knowledge-index-v2",
+    "EmbeddingModel": "text-embedding-3-large"
   },
   "Redis": {
     "Enabled": true,
     "ConnectionString": "<redis-connection-string>"
+  },
+  "ServiceBus": {
+    "ConnectionString": "<from-key-vault>",
+    "QueueName": "sdap-jobs"
   },
   "Rag": {
     "ApiKey": "<from-key-vault-or-secure-storage>"
@@ -121,6 +155,7 @@ For production environments, use Key Vault references instead of plain text secr
 ```
 DocumentIntelligence__AiSearchKey=@Microsoft.KeyVault(SecretUri=https://spaarke-spekvcert.vault.azure.net/secrets/ai-search-key/)
 Ai__OpenAiKey=@Microsoft.KeyVault(SecretUri=https://spaarke-spekvcert.vault.azure.net/secrets/ai-openai-key/)
+ServiceBus__ConnectionString=@Microsoft.KeyVault(SecretUri=https://spaarke-spekvcert.vault.azure.net/secrets/servicebus-connection-string/)
 Rag__ApiKey=@Microsoft.KeyVault(SecretUri=https://spaarke-spekvcert.vault.azure.net/secrets/rag-api-key/)
 ```
 
@@ -130,35 +165,39 @@ Rag__ApiKey=@Microsoft.KeyVault(SecretUri=https://spaarke-spekvcert.vault.azure.
 
 ### Index Definition File
 
-Location: `infrastructure/ai-search/spaarke-knowledge-index.json`
+Location: `infrastructure/ai-search/spaarke-knowledge-index-v2.json`
 
 ### Creating the Index
 
 ```bash
 # Using Azure CLI REST
 az rest --method PUT \
-  --uri "https://spaarke-search-dev.search.windows.net/indexes/spaarke-knowledge-index?api-version=2024-07-01" \
+  --uri "https://spaarke-search-dev.search.windows.net/indexes/spaarke-knowledge-index-v2?api-version=2024-07-01" \
   --headers "Content-Type=application/json" "api-key=<your-api-key>" \
-  --body @infrastructure/ai-search/spaarke-knowledge-index.json
+  --body @infrastructure/ai-search/spaarke-knowledge-index-v2.json
 ```
 
 ### Index Schema Reference
 
 ```json
 {
-  "name": "spaarke-knowledge-index",
+  "name": "spaarke-knowledge-index-v2",
   "fields": [
     { "name": "id", "type": "Edm.String", "key": true },
     { "name": "tenantId", "type": "Edm.String", "filterable": true },
     { "name": "deploymentId", "type": "Edm.String", "filterable": true },
     { "name": "deploymentModel", "type": "Edm.String", "filterable": true },
     { "name": "documentId", "type": "Edm.String", "filterable": true },
+    { "name": "speFileId", "type": "Edm.String", "filterable": true },
+    { "name": "fileName", "type": "Edm.String", "searchable": true },
+    { "name": "fileType", "type": "Edm.String", "filterable": true },
     { "name": "documentName", "type": "Edm.String", "searchable": true },
     { "name": "documentType", "type": "Edm.String", "searchable": true, "filterable": true },
     { "name": "chunkIndex", "type": "Edm.Int32", "filterable": true },
     { "name": "chunkCount", "type": "Edm.Int32" },
     { "name": "content", "type": "Edm.String", "searchable": true },
-    { "name": "contentVector", "type": "Collection(Edm.Single)", "dimensions": 1536, "vectorSearchProfile": "knowledge-vector-profile" },
+    { "name": "contentVector3072", "type": "Collection(Edm.Single)", "dimensions": 3072, "vectorSearchProfile": "knowledge-vector-profile" },
+    { "name": "documentVector3072", "type": "Collection(Edm.Single)", "dimensions": 3072, "vectorSearchProfile": "knowledge-vector-profile" },
     { "name": "tags", "type": "Collection(Edm.String)", "searchable": true, "filterable": true },
     { "name": "metadata", "type": "Edm.String" },
     { "name": "createdAt", "type": "Edm.DateTimeOffset", "filterable": true },
@@ -369,7 +408,7 @@ cache_hit_rate{cacheType="embedding"}
 |----------|-------------|---------|
 | BFF API URL | `sprk_BffApiBaseUrl` | `https://spe-api-dev-67e2xz.azurewebsites.net/api` |
 | AI Search Endpoint | `sprk_AiSearchEndpoint` | `https://spaarke-search-dev.search.windows.net` |
-| AI Search Index | `sprk_AiSearchIndexName` | `spaarke-knowledge-index` |
+| AI Search Index | `sprk_AiSearchIndexName` | `spaarke-knowledge-index-v2` |
 
 ### Setting Environment Variables
 

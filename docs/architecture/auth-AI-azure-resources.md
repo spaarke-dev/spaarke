@@ -72,6 +72,8 @@ Secrets are stored in Key Vault: `spaarke-spekvcert` (SharePointEmbedded resourc
 | `ai-openai-key` | Azure OpenAI API key (Key1) | 2025-12-09 |
 | `ai-docintel-endpoint` | Document Intelligence endpoint URL | 2025-12-09 |
 | `ai-docintel-key` | Document Intelligence API key (Key1) | 2025-12-09 |
+| `rag-api-key` | RAG indexing API key for `/api/ai/rag/enqueue-indexing` | 2026-01-17 |
+| `servicebus-connection-string` | Azure Service Bus connection string | 2026-01-17 |
 
 ### Key Vault Access
 
@@ -353,6 +355,55 @@ See [SPAARKE-AI-ARCHITECTURE.md](../guides/SPAARKE-AI-ARCHITECTURE.md#5-entity-e
 
 ---
 
+## Azure Service Bus (RAG Job Queue)
+
+| Property | Value |
+|----------|-------|
+| **Namespace** | `spaarke-servicebus-dev` |
+| **Resource Group** | `spe-infrastructure-westus2` |
+| **Region** | West US 2 |
+| **SKU** | Standard |
+| **Queue** | `sdap-jobs` |
+
+### Queue Configuration
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| Max delivery count | 3 | Retries before dead-letter |
+| Lock duration | 5 minutes | Message processing window |
+| Max size | 1 GB | Queue size limit |
+
+### Job Types Processed
+
+| Job Type | Handler | Description |
+|----------|---------|-------------|
+| `RagIndexing` | `RagIndexingJobHandler` | Index files to AI Search |
+| `ProcessEmailToDocument` | `EmailToDocumentJobHandler` | Convert emails to documents |
+
+### Azure CLI Commands
+
+```bash
+# View Service Bus namespace
+az servicebus namespace show \
+  --name spaarke-servicebus-dev \
+  --resource-group spe-infrastructure-westus2
+
+# View queue
+az servicebus queue show \
+  --name sdap-jobs \
+  --namespace-name spaarke-servicebus-dev \
+  --resource-group spe-infrastructure-westus2
+
+# Get connection string
+az servicebus namespace authorization-rule keys list \
+  --name RootManageSharedAccessKey \
+  --namespace-name spaarke-servicebus-dev \
+  --resource-group spe-infrastructure-westus2 \
+  --query primaryConnectionString -o tsv
+```
+
+---
+
 ## RAG Pipeline Services (R1)
 
 The RAG Pipeline (Phase 1 Complete) adds file indexing capabilities:
@@ -379,4 +430,4 @@ The RAG Pipeline (Phase 1 Complete) adds file indexing capabilities:
 ---
 
 *Created: December 9, 2025*
-*Updated: January 16, 2026 (RAG Pipeline R1)*
+*Updated: January 17, 2026 (RAG Pipeline R1, Service Bus)*

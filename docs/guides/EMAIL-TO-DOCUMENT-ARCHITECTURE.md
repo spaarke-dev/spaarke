@@ -1,9 +1,9 @@
 # Email-to-Document Automation Architecture
 
-> **Version**: 1.1
-> **Date**: January 13, 2026
-> **Project**: Email-to-Document Automation (Phase 2)
-> **Status**: Core Implementation Complete, AI Analysis Planned
+> **Version**: 1.2
+> **Date**: January 17, 2026
+> **Project**: Email-to-Document Automation (Phase 2) + RAG Pipeline R1
+> **Status**: Core Implementation Complete, RAG Indexing Active
 
 ---
 
@@ -19,7 +19,7 @@ The Email-to-Document Automation feature automatically converts Dataverse email 
 | **Hybrid Triggers** | Webhook (primary) + polling backup (5-minute intervals) |
 | **Filter Rules** | Configurable rules to include/exclude emails by pattern |
 | **Idempotency** | Guaranteed exactly-once processing via Redis locks |
-| **AI Integration** | Optional auto-enqueue for AI summarization |
+| **AI Integration** | Auto-enqueue for RAG indexing (searchable knowledge base) |
 | **Telemetry** | OpenTelemetry metrics for monitoring and alerting |
 
 ---
@@ -72,7 +72,7 @@ The Email-to-Document Automation feature automatically converts Dataverse email 
 │  │     ├─ Convert to .eml via IEmailToEmlConverter                           │   │
 │  │     ├─ Upload to SPE via SpeFileStore                                     │   │
 │  │     ├─ Create/update sprk_document in Dataverse                           │   │
-│  │     └─ Optionally enqueue AI analysis job                                 │   │
+│  │     └─ Enqueue RAG indexing job (auto-indexed to AI Search)               │   │
 │  └──────────────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────────────┘
                                │
@@ -145,7 +145,7 @@ The Email-to-Document Automation feature automatically converts Dataverse email 
 5. Upload .eml to SPE via `SpeFileStore`
 6. Create `sprk_document` record in Dataverse
 7. Update document with email metadata
-8. Optionally enqueue AI analysis job
+8. Enqueue RAG indexing job to `sdap-jobs` queue
 9. Mark as processed, release lock
 
 ### 4. Storage Layer
@@ -353,6 +353,48 @@ public DateTime? OperationCreatedOn { get; set; }
 
 ---
 
+## RAG Integration (Implemented)
+
+Email documents are automatically indexed into the RAG knowledge base, enabling semantic search across email content.
+
+### Flow
+
+```
+EmailToDocumentJobHandler
+    │
+    ├── Upload .eml to SPE
+    ├── Create sprk_document record
+    │
+    └── Enqueue RAG Indexing Job
+            │
+            ▼
+    RagIndexingJobHandler
+    ├── Download .eml from SPE
+    ├── Extract text content
+    ├── Chunk text (~1000 tokens)
+    ├── Generate embeddings (text-embedding-3-large)
+    └── Index to spaarke-knowledge-index-v2
+```
+
+### Configuration
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| `EmailProcessing__AutoEnqueueAi` | `true` | Auto-enqueue for RAG indexing |
+| Index | `spaarke-knowledge-index-v2` | 3072-dim vectors |
+| Embedding Model | `text-embedding-3-large` | High accuracy retrieval |
+
+### Search Capability
+
+Once indexed, email documents can be searched via:
+- `POST /api/ai/rag/search` - Hybrid search with semantic ranking
+- Filter by `documentType: "email"` for email-only results
+- Multi-tenant isolation via `tenantId` filter
+
+See [RAG-ARCHITECTURE.md](RAG-ARCHITECTURE.md) for complete RAG documentation.
+
+---
+
 ## Future: AI Analysis Architecture
 
 ### Three Distinct Email Analysis Requirements
@@ -440,4 +482,4 @@ For .eml files, `TextExtractorService` falls back to raw text extraction which s
 
 ---
 
-*Last Updated: January 13, 2026*
+*Last Updated: January 17, 2026*

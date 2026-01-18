@@ -31,7 +31,8 @@
       "Bash(npm view:*)",
       "Bash(npm install:*)",
       "Skill(azure-deploy)",
-      "Skill(azure-deploy:*)"
+      "Skill(azure-deploy:*)",
+      "Bash(xargs -I {} sh -c 'echo \"\"=== {} ===\"\" && tail -50 {}')"
     ]
   }
 }
