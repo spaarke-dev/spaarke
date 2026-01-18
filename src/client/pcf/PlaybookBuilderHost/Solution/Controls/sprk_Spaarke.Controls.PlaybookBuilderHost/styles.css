@@ -62,8 +62,3 @@
   background: var(--colorNeutralBackground2, #fafafa);
   border-top: 1px solid var(--colorNeutralStroke2, #eeeeee);
 }
-
-/* Hide React Flow attribution link */
-.react-flow__attribution {
-  display: none !important;
-}
