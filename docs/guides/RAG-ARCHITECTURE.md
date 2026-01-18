@@ -39,7 +39,7 @@ The Spaarke RAG (Retrieval-Augmented Generation) system provides knowledge retri
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Search Platform | Azure AI Search | Native Azure integration, semantic ranking |
-| Embedding Model | text-embedding-3-small | 1536 dims, cost-effective, high quality |
+| Embedding Model | text-embedding-3-large | 3072 dims, high accuracy RAG retrieval |
 | Caching | Redis (ADR-009) | Consistent with platform caching strategy |
 | Search Type | Hybrid | Best accuracy: keyword + vector + semantic |
 
@@ -93,8 +93,8 @@ The Spaarke RAG (Retrieval-Augmented Generation) system provides knowledge retri
 │                    External Services                            │
 ├─────────────────────────────────────────────────────────────────┤
 │  Azure AI Search                Azure OpenAI                    │
-│  ├── spaarke-knowledge-index    ├── text-embedding-3-small      │
-│  ├── {tenant}-knowledge         └── 1536 dimensions             │
+│  ├── spaarke-knowledge-index-v2 ├── text-embedding-3-large      │
+│  ├── {tenant}-knowledge         └── 3072 dimensions             │
 │  └── Customer indexes                                           │
 │                                                                 │
 │  Redis Cache                    Key Vault                       │
@@ -242,7 +242,7 @@ The RAG system supports three deployment models to accommodate different custome
 
 | Aspect | Details |
 |--------|---------|
-| **Index Name** | `spaarke-knowledge-index` |
+| **Index Name** | `spaarke-knowledge-index-v2` |
 | **Isolation** | Logical (tenantId filter on all queries) |
 | **Cost** | Lowest (shared infrastructure) |
 | **Use Case** | SMB customers, default deployment |
@@ -347,7 +347,7 @@ User Query: "What are the payment terms for contracts?"
 └─────────────────────────────────────────┘
                     │
                     ▼
-        Query Embedding (1536 dims)
+        Query Embedding (3072 dims)
 ```
 
 ### Stage 2: Hybrid Retrieval
@@ -422,7 +422,7 @@ User Query: "What are the payment terms for contracts?"
 | `chunkIndex` | Int32 | No | Yes | Position in document |
 | `chunkCount` | Int32 | No | No | Total chunks for document |
 | `content` | String | Yes | No | Actual text content |
-| `contentVector` | Vector (1536) | N/A | N/A | Embedding for semantic search |
+| `contentVector3072` | Vector (3072) | N/A | N/A | Embedding for semantic search |
 | `tags` | Collection | Yes | Yes | Custom tags for filtering |
 | `metadata` | String | No | No | JSON metadata blob |
 | `createdAt` | DateTimeOffset | No | Yes | Creation timestamp |
@@ -432,9 +432,9 @@ User Query: "What are the payment terms for contracts?"
 
 ```json
 {
-  "name": "contentVector",
+  "name": "contentVector3072",
   "type": "Collection(Edm.Single)",
-  "dimensions": 1536,
+  "dimensions": 3072,
   "vectorSearchProfile": "knowledge-vector-profile"
 }
 ```

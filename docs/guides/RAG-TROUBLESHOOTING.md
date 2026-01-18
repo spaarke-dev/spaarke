@@ -47,7 +47,7 @@ curl -I "https://spaarke-search-dev.search.windows.net"
 
 Look for these log entries on successful startup:
 ```
-✓ RAG Knowledge Deployment service enabled (index: spaarke-knowledge-index)
+✓ RAG Knowledge Deployment service enabled (index: spaarke-knowledge-index-v2)
 ✓ Embedding cache enabled (Redis)
 ```
 
@@ -90,7 +90,7 @@ curl -X GET "https://spaarke-search-dev.search.windows.net/indexes?api-version=2
 
 ```bash
 # Count documents in index
-curl -X GET "https://spaarke-search-dev.search.windows.net/indexes/spaarke-knowledge-index/docs/\$count?api-version=2024-07-01" \
+curl -X GET "https://spaarke-search-dev.search.windows.net/indexes/spaarke-knowledge-index-v2/docs/\$count?api-version=2024-07-01" \
   -H "api-key: <your-api-key>"
 ```
 
@@ -100,7 +100,7 @@ Ensure documents exist for the tenant being queried:
 
 ```bash
 # Search for specific tenant
-curl -X POST "https://spaarke-search-dev.search.windows.net/indexes/spaarke-knowledge-index/docs/search?api-version=2024-07-01" \
+curl -X POST "https://spaarke-search-dev.search.windows.net/indexes/spaarke-knowledge-index-v2/docs/search?api-version=2024-07-01" \
   -H "Content-Type: application/json" \
   -H "api-key: <your-api-key>" \
   -d '{
@@ -188,7 +188,7 @@ az search service show \
 
 ```bash
 # Check index statistics
-curl -X GET "https://spaarke-search-dev.search.windows.net/indexes/spaarke-knowledge-index/stats?api-version=2024-07-01" \
+curl -X GET "https://spaarke-search-dev.search.windows.net/indexes/spaarke-knowledge-index-v2/stats?api-version=2024-07-01" \
   -H "api-key: <your-api-key>"
 ```
 
@@ -216,14 +216,14 @@ Ensure required fields:
 
 ```bash
 # Get index schema
-curl -X GET "https://spaarke-search-dev.search.windows.net/indexes/spaarke-knowledge-index?api-version=2024-07-01" \
+curl -X GET "https://spaarke-search-dev.search.windows.net/indexes/spaarke-knowledge-index-v2?api-version=2024-07-01" \
   -H "api-key: <your-api-key>"
 ```
 
 **Check 3: Embedding Generation**
 
 If embedding fails, check Azure OpenAI:
-- Deployment exists: `text-embedding-3-small`
+- Deployment exists: `text-embedding-3-large`
 - Rate limits not exceeded
 - API key is valid
 
@@ -315,7 +315,7 @@ az cognitiveservices account deployment list \
 **Check 2: Rate Limits**
 
 Check if hitting token limits:
-- text-embedding-3-small: 120,000 TPM
+- text-embedding-3-large: 120,000 TPM
 
 **Check 3: Content Size**
 
@@ -347,7 +347,7 @@ Ensure content is within token limits:
 az rest --method PUT \
   --uri "https://spaarke-search-dev.search.windows.net/indexes/{tenantId}-knowledge?api-version=2024-07-01" \
   --headers "Content-Type=application/json" "api-key=<your-api-key>" \
-  --body @infrastructure/ai-search/spaarke-knowledge-index.json
+  --body @infrastructure/ai-search/spaarke-knowledge-index-v2.json
 ```
 
 ---
@@ -434,11 +434,11 @@ _searchClients.GetOrAdd(cacheKey, _ => CreateClient(config))
 
 ```bash
 # Index statistics
-curl -X GET "https://spaarke-search-dev.search.windows.net/indexes/spaarke-knowledge-index/stats?api-version=2024-07-01" \
+curl -X GET "https://spaarke-search-dev.search.windows.net/indexes/spaarke-knowledge-index-v2/stats?api-version=2024-07-01" \
   -H "api-key: <your-api-key>"
 
 # Document count
-curl -X GET "https://spaarke-search-dev.search.windows.net/indexes/spaarke-knowledge-index/docs/\$count?api-version=2024-07-01" \
+curl -X GET "https://spaarke-search-dev.search.windows.net/indexes/spaarke-knowledge-index-v2/docs/\$count?api-version=2024-07-01" \
   -H "api-key: <your-api-key>"
 ```
 
@@ -446,7 +446,7 @@ curl -X GET "https://spaarke-search-dev.search.windows.net/indexes/spaarke-knowl
 
 ```bash
 # Simple search
-curl -X POST "https://spaarke-search-dev.search.windows.net/indexes/spaarke-knowledge-index/docs/search?api-version=2024-07-01" \
+curl -X POST "https://spaarke-search-dev.search.windows.net/indexes/spaarke-knowledge-index-v2/docs/search?api-version=2024-07-01" \
   -H "Content-Type: application/json" \
   -H "api-key: <your-api-key>" \
   -d '{
