@@ -330,7 +330,7 @@ export class AiPlaybookService {
     remaining: string;
   } {
     const parsed: SseEvent[] = [];
-    const eventRegex = /event:\s*(\w+)\s*\ndata:\s*(.+?)(?=\n\n|\nevent:|\n?$)/gs;
+    const eventRegex = /event:\s*(\w+)\s*\ndata:\s*([^\n]+)(?=\n\n|\nevent:|\n?$)/g;
 
     let lastIndex = 0;
     let match: RegExpExecArray | null;

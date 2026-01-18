@@ -39,9 +39,9 @@ import {
   Copy20Regular,
   ArrowForward20Regular,
   Delete20Regular,
-  Drag16Regular,
-  LockClosed16Regular,
-  Person16Regular,
+  ReOrderRegular,
+  LockClosedRegular,
+  PersonRegular,
 } from '@fluentui/react-icons';
 import type { ScopeItem, ScopeType, OwnershipType } from './ScopeBrowser';
 
@@ -150,12 +150,12 @@ const OwnershipBadge: React.FC<OwnershipBadgeProps> = ({ ownershipType, isImmuta
       appearance="filled"
       size="small"
       className={ownershipType === 'system' ? styles.systemBadge : styles.customerBadge}
-      icon={ownershipType === 'system' ? <LockClosed16Regular /> : <Person16Regular />}
+      icon={ownershipType === 'system' ? <LockClosedRegular /> : <PersonRegular />}
     >
       {ownershipType === 'system' ? 'SYS' : 'CUST'}
       {isImmutable && (
         <Tooltip content="This scope cannot be modified" relationship="label">
-          <LockClosed16Regular className={styles.immutableIcon} />
+          <LockClosedRegular className={styles.immutableIcon} />
         </Tooltip>
       )}
     </Badge>
@@ -221,7 +221,7 @@ export const ScopeList: React.FC<ScopeListProps> = ({
           <TableCellLayout>
             <div className={styles.nameCell}>
               {onDragStart && (
-                <Drag16Regular className={styles.dragHandle} aria-hidden="true" />
+                <ReOrderRegular className={styles.dragHandle} aria-hidden="true" />
               )}
               <OwnershipBadge
                 ownershipType={item.ownershipType}
@@ -332,7 +332,7 @@ export const ScopeList: React.FC<ScopeListProps> = ({
               key={rowId}
               className={`${styles.row} ${onDragStart ? styles.rowDraggable : ''}`}
               draggable={!!onDragStart}
-              onDragStart={(e) => handleDragStart(item, e)}
+              onDragStart={(e: React.DragEvent<HTMLDivElement>) => handleDragStart(item, e)}
             >
               {({ renderCell }) => <DataGridCell>{renderCell(item)}</DataGridCell>}
             </DataGridRow>
