@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Build ChatInput component</title>
+    <phase>2</phase>
+    <tags>pcf, fluent-ui, component</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>010</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Build the chat input component with text field and send button.</goal>
+    <context>
+      Simple input area with:
+      - Multi-line text input
+      - Send button
+      - Enter to send (Shift+Enter for newline)
+      - Disabled while streaming
+    </context>
+    <constraints>
+      - Fluent UI v9 Input and Button
+      - Keyboard accessible
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-021-fluent-design-system.md" reason="UI components" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create ChatInput.tsx component</step>
+    <step order="2">Use Fluent Textarea and Button</step>
+    <step order="3">Handle Enter key for send</step>
+    <step order="4">Disable during streaming</step>
+    <step order="5">Clear input after send</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create component</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/client/pcf/PlaybookBuilderHost/control/components/AiAssistant/ChatInput.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Text input accepts multi-line text</criterion>
+    <criterion>Enter sends message, Shift+Enter for newline</criterion>
+    <criterion>Send button triggers sendMessage action</criterion>
+    <criterion>Input disabled during streaming</criterion>
+    <criterion>Input clears after send</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <completed-date>2026-01-16</completed-date>
+    <summary>
+      Created ChatInput component for message input:
+
+      1. COMPONENT STRUCTURE:
+         - Fluent UI Textarea for multi-line input
+         - Primary Button with Send icon
+         - Flex container with gap
+
+      2. KEYBOARD BEHAVIOR:
+         - Enter key sends message (prevents default)
+         - Shift+Enter allows newline
+         - onKeyDown handler checks e.shiftKey
+
+      3. STREAMING STATE:
+         - Reads isStreaming from aiAssistantStore
+         - Disables both Textarea and Button while streaming
+         - Send button also disabled when message is empty
+
+      4. MESSAGE HANDLING:
+         - Calls addUserMessage(content) from store
+         - Optional onSendMessage callback prop
+         - Clears input after successful send
+         - Trims message before validation
+
+      5. ACCESSIBILITY:
+         - aria-label on Textarea and Button
+         - Hidden hint text with aria-describedby
+         - title attribute shows context-aware tooltip
+
+      6. STYLING (ADR-021 COMPLIANT):
+         - All colors use Fluent tokens
+         - tokens.colorNeutralBackground1 for container
+         - tokens.colorNeutralStroke1 for border
+         - Responsive sizing with flex
+
+      7. FILES MODIFIED:
+         - components/AiAssistant/ChatInput.tsx (145 lines)
+         - components/AiAssistant/index.ts (added export)
+
+      8. ACCEPTANCE CRITERIA MET:
+         - ✅ Text input accepts multi-line text
+         - ✅ Enter sends message, Shift+Enter for newline
+         - ✅ Send button triggers sendMessage action
+         - ✅ Input disabled during streaming
+         - ✅ Input clears after send
+    </summary>
+  </notes>
+</task>

@@ -52,6 +52,9 @@ export interface PlaybookNodeData {
 // Typed node for our application
 export type PlaybookNode = Node<PlaybookNodeData>;
 
+// Typed edge for our application (uses React Flow's Edge type directly)
+export type PlaybookEdge = Edge;
+
 interface CanvasState {
   // State
   nodes: PlaybookNode[];

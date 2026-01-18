@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="046" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Build Scope Browser component</title>
+    <phase>5</phase>
+    <tags>pcf, fluent-ui, scopes</tags>
+    <estimate>1d</estimate>
+    <dependencies>Phase 2</dependencies>
+    <status>completed</status>
+    <completed>2026-01-17</completed>
+  </metadata>
+
+  <prompt>
+    <goal>Create a scope browser UI component for searching and managing scopes.</goal>
+    <context>
+      Browser features:
+      - Tab per scope type (Actions, Skills, Tools, Knowledge)
+      - Search/filter within tabs
+      - Show ownership badges (SYS/CUST)
+      - Actions: View, Save As, Extend, Delete (CUST only)
+      - Drag to canvas for quick add
+    </context>
+    <constraints>
+      - Use Fluent UI v9 TabList and DataGrid
+      - Follow ADR-021 theming
+      - Lazy load scope lists
+      - React 16 APIs only
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md" reason="Scope browser design" />
+      <file path="src/client/pcf/PlaybookBuilderHost/components/" reason="Existing components" />
+      <file path=".claude/adr/ADR-021.md" reason="Fluent UI theming" />
+      <file path=".claude/adr/ADR-022.md" reason="React 16 constraint" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create ScopeBrowser container component</step>
+    <step order="2">Add TabList for scope types</step>
+    <step order="3">Create ScopeList component with DataGrid</step>
+    <step order="4">Add search input with filtering</step>
+    <step order="5">Add ownership badges</step>
+    <step order="6">Implement action menu per row</step>
+    <step order="7">Add drag-to-canvas support</step>
+    <step order="8">Style with Fluent tokens</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create browser components</tool>
+    <tool name="Edit">Add to AI Assistant modal</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/client/pcf/PlaybookBuilderHost/components/ScopeBrowser/ScopeBrowser.tsx</output>
+    <output type="file">src/client/pcf/PlaybookBuilderHost/components/ScopeBrowser/ScopeList.tsx</output>
+    <output type="file">src/client/pcf/PlaybookBuilderHost/components/ScopeBrowser/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Tabs for each scope type</criterion>
+    <criterion>Search filters results</criterion>
+    <criterion>Ownership badges visible</criterion>
+    <criterion>Actions work correctly</criterion>
+    <criterion>Drag to canvas works</criterion>
+    <criterion>Dark mode compatible</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2026-01-17">
+      Implementation complete:
+      - Created ScopeBrowser.tsx container component
+      - Fluent UI v9 TabList for scope types: Actions, Skills, Tools, Knowledge
+      - Search input with real-time filtering
+      - Lazy loading of scope lists per tab
+      - Created ScopeList.tsx with DataGrid component
+      - Ownership badges: SYS (blue) / CUST (green) with lock icon for immutable
+      - Action menu per row: View, Save As, Extend, Delete (CUST only)
+      - Drag-to-canvas support with dataTransfer
+      - All styling uses Fluent UI tokens (ADR-021 compliant)
+      - Exported types: ScopeItem, ScopeType, OwnershipType, ScopeBrowserProps, ScopeListProps
+      - Build passes with 0 errors, 0 warnings
+    </note>
+  </notes>
+</task>

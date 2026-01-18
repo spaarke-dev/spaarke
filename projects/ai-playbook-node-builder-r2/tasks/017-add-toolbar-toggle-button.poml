@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="017" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Add toolbar button to toggle modal</title>
+    <phase>2</phase>
+    <tags>pcf, fluent-ui, toolbar</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>011</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Add an AI assistant button to the PlaybookBuilderHost toolbar.</goal>
+    <context>
+      Add a button (with AI/chat icon) to the existing toolbar that toggles the AI assistant modal.
+    </context>
+    <constraints>
+      - Use Fluent UI v9 Button and icon
+      - Match existing toolbar style
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/client/pcf/PlaybookBuilderHost/control/components/BuilderLayout.tsx" reason="Toolbar location" />
+      <file path=".claude/adr/ADR-021-fluent-design-system.md" reason="Icon usage" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Find toolbar location in BuilderLayout.tsx</step>
+    <step order="2">Add AI assistant button with icon</step>
+    <step order="3">Wire button to aiAssistantStore.toggleModal</step>
+    <step order="4">Add tooltip "AI Assistant"</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Examine BuilderLayout</tool>
+    <tool name="Edit">Add toolbar button</tool>
+  </tools>
+
+  <outputs>
+    <output type="modification">src/client/pcf/PlaybookBuilderHost/control/components/BuilderLayout.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Button visible in toolbar</criterion>
+    <criterion>Click toggles modal open/closed</criterion>
+    <criterion>Icon and tooltip present</criterion>
+    <criterion>Matches existing toolbar style</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Toolbar Button Functions">
+      <steps>
+        <step>Open PlaybookBuilderHost</step>
+        <step>Locate AI assistant button in toolbar</step>
+        <step>Click button</step>
+        <step>Verify modal opens</step>
+        <step>Click button again</step>
+        <step>Verify modal closes</step>
+      </steps>
+      <expected>Button toggles modal visibility</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    <completed-date>2026-01-16</completed-date>
+    <summary>
+      Added AI assistant toolbar button to PlaybookBuilderHost:
+
+      1. IMPORTS ADDED:
+         - Sparkle20Regular icon for AI button
+         - Tooltip component for button tooltip
+         - useAiAssistantStore for toggle state
+         - AiAssistantModal component
+
+      2. STYLES ADDED:
+         - aiAssistantToggle: Positioned at right:48px (next to properties toggle)
+         - aiAssistantActive: Brand color styling when modal is open
+
+      3. BUTTON IMPLEMENTATION:
+         - Fluent UI Button with Sparkle20Regular icon
+         - Tooltip with "AI Assistant" label
+         - Wired to toggleAiAssistant from aiAssistantStore
+         - Visual feedback when active (brand color background)
+         - aria-pressed for accessibility
+
+      4. MODAL RENDERING:
+         - AiAssistantModal rendered at end of component
+         - Uses Drawer from Fluent UI (positioned as overlay)
+
+      5. FILES MODIFIED:
+         - components/BuilderLayout.tsx
+
+      6. ACCEPTANCE CRITERIA MET:
+         - ✅ Button visible in toolbar (positioned at right:48px, top:8px)
+         - ✅ Click toggles modal open/closed (wired to toggleModal)
+         - ✅ Icon and tooltip present (Sparkle20Regular + Tooltip)
+         - ✅ Matches existing toolbar style (same sidebarToggle class)
+    </summary>
+  </notes>
+</task>

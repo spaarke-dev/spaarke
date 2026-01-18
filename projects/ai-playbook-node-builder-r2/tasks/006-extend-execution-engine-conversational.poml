@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="006" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Extend PlaybookExecutionEngine with conversational mode</title>
+    <phase>1</phase>
+    <tags>bff-api, ai, execution-engine</tags>
+    <estimate>1.5d</estimate>
+    <dependencies>none</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Add conversational execution mode to PlaybookExecutionEngine for multi-turn builder interactions.</goal>
+    <context>
+      The execution engine currently supports batch mode (single document, streaming analysis).
+      We need to add conversational mode that:
+      - Accepts chat history + canvas state as context
+      - Supports multi-turn interactions
+      - Returns incremental canvas updates
+    </context>
+    <constraints>
+      - Extend existing interface, don't break batch mode
+      - Follow existing streaming patterns
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md" reason="Conversational mode spec" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing PlaybookExecutionEngine</step>
+    <step order="2">Add ExecuteConversationalAsync method to interface</step>
+    <step order="3">Define ConversationContext record</step>
+    <step order="4">Define BuilderResult record for incremental outputs</step>
+    <step order="5">Implement conversational execution logic</step>
+    <step order="6">Write unit tests</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Examine existing engine</tool>
+    <tool name="Edit">Extend interface and implementation</tool>
+  </tools>
+
+  <outputs>
+    <output type="modification">src/server/api/Sprk.Bff.Api/Services/Ai/IPlaybookExecutionEngine.cs</output>
+    <output type="modification">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookExecutionEngine.cs</output>
+    <output type="file">src/server/api/Sprk.Bff.Api/Models/Ai/ConversationContext.cs</output>
+    <output type="file">src/server/api/Sprk.Bff.Api/Models/Ai/BuilderResult.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>ExecuteConversationalAsync method added to interface</criterion>
+    <criterion>ConversationContext includes History, CurrentMessage, SessionState</criterion>
+    <criterion>Existing batch mode still works</criterion>
+    <criterion>Unit tests cover conversational mode</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <completed>2026-01-16</completed>
+    <summary>
+      Created IPlaybookExecutionEngine with dual execution modes (batch and conversational).
+      Key features:
+      - ExecuteConversationalAsync: Multi-turn builder interactions with chat history and canvas state
+      - ExecuteBatchAsync: Document analysis mode (delegates to PlaybookOrchestrationService)
+      - DetermineExecutionMode: Auto-detect mode based on context (canvas vs documents)
+      - ConversationContext: History array, CurrentMessage, SessionState (canvas, session vars)
+      - SessionState: SessionId, CanvasState, ActiveBuildPlan, SessionVariables
+      - BuilderResult: Streaming result with factory methods (Thinking, Message, Operation, etc.)
+      - ConversationTokenUsage: Named to avoid conflict with existing Api.Ai.TokenUsage
+      - PlaybookExecutionEngine implementation coordinates both modes
+    </summary>
+    <files-modified>
+      - src/server/api/Sprk.Bff.Api/Services/Ai/IPlaybookExecutionEngine.cs (new - interface + models)
+      - src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookExecutionEngine.cs (new - implementation)
+      - tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PlaybookExecutionEngineTests.cs (new - 22 tests)
+    </files-modified>
+    <tests>22 tests (conversational mode, batch mode, execution mode detection, model factory methods)</tests>
+  </notes>
+</task>

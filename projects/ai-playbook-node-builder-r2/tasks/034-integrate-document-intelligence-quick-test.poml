@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Integrate Document Intelligence for quick test</title>
+    <phase>4</phase>
+    <tags>bff-api, ai, integration</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>033</dependencies>
+    <status>completed</status>
+    <completed>2026-01-17</completed>
+  </metadata>
+
+  <prompt>
+    <goal>Wire Document Intelligence extraction into the quick test flow.</goal>
+    <context>
+      Integration requirements:
+      - Call existing DocumentIntelligenceService
+      - Pass temp blob SAS URL for extraction
+      - Handle extraction errors gracefully
+      - Map extraction results to playbook input format
+    </context>
+    <constraints>
+      - Reuse existing DocumentIntelligenceService
+      - Handle timeout scenarios
+      - Provide meaningful error messages
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/DocumentIntelligenceService.cs" reason="Existing service" />
+      <file path="projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md" reason="Integration requirements" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review DocumentIntelligenceService interface</step>
+    <step order="2">Add method for SAS URL-based extraction</step>
+    <step order="3">Map extraction results to playbook input</step>
+    <step order="4">Add error handling for extraction failures</step>
+    <step order="5">Wire into QuickTestExecutor</step>
+    <step order="6">Test with various document types</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">Extend DocumentIntelligenceService</tool>
+    <tool name="Edit">Update QuickTestExecutor</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">Updated src/server/api/Sprk.Bff.Api/Services/Ai/QuickTestExecutor.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Document Intelligence called with SAS URL</criterion>
+    <criterion>Extraction results mapped correctly</criterion>
+    <criterion>Errors handled gracefully</criterion>
+    <criterion>Works with PDF and image documents</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2026-01-17">
+      Task absorbed into Task 033 implementation:
+      - QuickTestExecutor uses ITextExtractor (TextExtractorService) for Document Intelligence
+      - Document is downloaded from blob and passed as stream to extraction
+      - TextExtractorService handles PDF/DOCX via DocumentIntelligence prebuilt-read model
+      - Native text files (.txt, .md, .json, etc.) use native extraction
+      - Error handling included with descriptive error events
+      - All acceptance criteria satisfied via existing TextExtractorService integration
+    </note>
+  </notes>
+</task>

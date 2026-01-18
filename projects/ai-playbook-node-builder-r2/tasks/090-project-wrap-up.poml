@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Project wrap-up and cleanup</title>
+    <phase>wrap-up</phase>
+    <tags>documentation, cleanup</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>All tasks</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <notes>
+    <completion-date>2026-01-17</completion-date>
+    <summary>
+      Project wrap-up completed successfully.
+      - Verified all 48 tasks complete in TASK-INDEX.md
+      - Updated README.md status to Complete
+      - All 10 graduation criteria checked off
+      - Created lessons-learned.md with project retrospective
+      - Notes/ folder reviewed (only .gitkeep placeholders + test results)
+      - Project ready for final commit and PR update
+    </summary>
+    <files-created>
+      <file>projects/ai-playbook-node-builder-r2/lessons-learned.md</file>
+    </files-created>
+    <files-updated>
+      <file>projects/ai-playbook-node-builder-r2/README.md (status → Complete)</file>
+    </files-updated>
+  </notes>
+
+  <prompt>
+    <goal>Complete project wrap-up including documentation, lessons learned, and cleanup.</goal>
+    <context>
+      Wrap-up activities:
+      - Update README status to Complete
+      - Create lessons-learned.md
+      - Archive ephemeral files
+      - Run /repo-cleanup
+      - Final commit and PR update
+    </context>
+    <constraints>
+      - Follow project-pipeline wrap-up procedure
+      - Ensure all tasks marked complete
+      - Clean up notes/ folder
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/README.md" reason="Update status" />
+      <file path=".claude/skills/repo-cleanup/SKILL.md" reason="Cleanup procedure" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify all tasks complete in TASK-INDEX.md</step>
+    <step order="2">Update README.md status to Complete</step>
+    <step order="3">Write lessons-learned.md</step>
+    <step order="4">Archive notes/ contents</step>
+    <step order="5">Run /repo-cleanup skill</step>
+    <step order="6">Final commit with summary</step>
+    <step order="7">Update PR description</step>
+    <step order="8">Request code review</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">Update README status</tool>
+    <tool name="Write">Create lessons-learned.md</tool>
+    <tool name="Skill">/repo-cleanup</tool>
+    <tool name="Skill">/push-to-github</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">projects/ai-playbook-node-builder-r2/lessons-learned.md</output>
+    <output type="file">Updated README.md with Complete status</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All tasks marked complete</criterion>
+    <criterion>README shows Complete status</criterion>
+    <criterion>Lessons learned documented</criterion>
+    <criterion>Repo cleanup passed</criterion>
+    <criterion>PR ready for review</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="038" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Add test result preview/download</title>
+    <phase>4</phase>
+    <tags>pcf, fluent-ui, testing</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>037</dependencies>
+    <status>completed</status>
+    <completed>2026-01-17</completed>
+  </metadata>
+
+  <prompt>
+    <goal>Add result preview and JSON download capability for test executions.</goal>
+    <context>
+      Result features:
+      - Preview extracted data per node
+      - Expand/collapse node details
+      - Download full results as JSON
+      - Copy individual values
+    </context>
+    <constraints>
+      - Use Fluent UI v9 Tree/Accordion components
+      - JSON must be formatted for readability
+      - Dark mode compatible
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md" reason="Result preview design" />
+      <file path="src/client/pcf/PlaybookBuilderHost/components/" reason="Existing components" />
+      <file path=".claude/adr/ADR-021.md" reason="Fluent UI theming" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create TestResultPreview component</step>
+    <step order="2">Add tree view for node results</step>
+    <step order="3">Add expand/collapse functionality</step>
+    <step order="4">Add download JSON button</step>
+    <step order="5">Add copy to clipboard for values</step>
+    <step order="6">Style with Fluent tokens</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create result preview component</tool>
+    <tool name="Edit">Integrate with progress view</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/client/pcf/PlaybookBuilderHost/components/AiAssistant/TestResultPreview.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Node results expandable</criterion>
+    <criterion>JSON download works</criterion>
+    <criterion>Copy to clipboard works</criterion>
+    <criterion>Dark mode compatible</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2026-01-17">
+      Implementation complete:
+      - Created TestResultPreview.tsx component with Fluent UI v9 Accordion
+      - Node-by-node results shown in expandable sections
+      - Status icons: completed (green checkmark), failed (red X), skipped (gray arrow)
+      - JSON output displayed in monospace code block with syntax formatting
+      - Copy to clipboard button for each node's output with success feedback
+      - Download full results as JSON file with filename: test-results-{mode}-{timestamp}.json
+      - Full results include: testMode, analysisId, totalDurationMs, reportUrl, all node outputs
+      - Error messages displayed prominently for failed nodes
+      - Failed nodes auto-expanded by default
+      - Empty state when no results available
+      - All styling uses Fluent UI tokens (ADR-021 compliant)
+      - Build passes with 0 errors, 0 warnings
+    </note>
+  </notes>
+</task>

@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Implement ownership validation (SYS- immutable)</title>
+    <phase>5</phase>
+    <tags>bff-api, validation</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>040</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <notes>
+    <completed-date>2026-01-17</completed-date>
+    <summary>
+      Created OwnershipValidator.cs with IOwnershipValidator interface.
+      Implements SYS-/CUST- prefix validation, CanModify, CanDelete checks.
+      Returns ProblemDetails for API error responses.
+      Supports EnsureCustomerPrefix and StripPrefix helper methods.
+    </summary>
+    <files-created>
+      - src/server/api/Sprk.Bff.Api/Services/Scopes/OwnershipValidator.cs
+    </files-created>
+  </notes>
+
+  <prompt>
+    <goal>Implement server-side validation to prevent modification of SYS- owned scopes.</goal>
+    <context>
+      Validation rules:
+      - SYS- prefix scopes are immutable
+      - Block update/delete operations on System-owned records
+      - Allow read operations always
+      - Allow Save As (creates new CUST- copy)
+    </context>
+    <constraints>
+      - Implement in BFF API layer (not plugin)
+      - Return clear error messages
+      - Check before any write operation
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/spec.md" reason="Ownership model" />
+      <file path="src/server/api/Sprk.Bff.Api/Services/" reason="Service patterns" />
+      <file path=".claude/adr/ADR-002.md" reason="Thin plugins constraint" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create OwnershipValidator service</step>
+    <step order="2">Implement CanModify check</step>
+    <step order="3">Add validation to scope CRUD operations</step>
+    <step order="4">Add validation to playbook operations</step>
+    <step order="5">Return ProblemDetails for violations</step>
+    <step order="6">Unit test validation logic</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create validator service</tool>
+    <tool name="Edit">Add validation to existing operations</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Scopes/OwnershipValidator.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>SYS- scopes cannot be modified</criterion>
+    <criterion>CUST- scopes can be modified</criterion>
+    <criterion>Clear error messages returned</criterion>
+    <criterion>Save As still works for SYS- scopes</criterion>
+  </acceptance-criteria>
+</task>

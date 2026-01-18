@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="049" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Implement proactive scope gap detection</title>
+    <phase>5</phase>
+    <tags>bff-api, ai, scopes</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>046</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <notes>
+    <completed-date>2026-01-17</completed-date>
+    <summary>
+      Created ScopeGapDetector.cs with IScopeGapDetector interface.
+      Implements keyword-based intent detection for quick analysis.
+      Maps intents to tool types (extraction → EntityExtractor, etc.).
+      Uses AI for nuanced suggestions when keyword analysis insufficient.
+      Compares against available scope catalog to find gaps.
+      Returns prioritized ScopeSuggestion list (max 5).
+    </summary>
+    <files-created>
+      - src/server/api/Sprk.Bff.Api/Services/Ai/ScopeGapDetector.cs
+    </files-created>
+  </notes>
+
+  <prompt>
+    <goal>Implement proactive detection of missing scopes based on user's playbook intent.</goal>
+    <context>
+      Gap detection:
+      - Analyze playbook description/goals
+      - Compare against available scopes
+      - Suggest missing scope types
+      - Offer to create custom scopes
+      - Run during playbook creation wizard
+    </context>
+    <constraints>
+      - Low latency (background analysis)
+      - Suggestions should be relevant
+      - Don't block user workflow
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md" reason="Gap detection design" />
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/" reason="AI services" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create ScopeGapDetector service</step>
+    <step order="2">Implement goal analysis</step>
+    <step order="3">Compare against scope catalog</step>
+    <step order="4">Generate suggestions</step>
+    <step order="5">Add API endpoint</step>
+    <step order="6">Wire to PCF creation flow</step>
+    <step order="7">Test with various scenarios</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create detector service</tool>
+    <tool name="Edit">Add endpoint</tool>
+    <tool name="Edit">Wire to PCF</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Ai/ScopeGapDetector.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Analyzes playbook goals</criterion>
+    <criterion>Suggests relevant missing scopes</criterion>
+    <criterion>Low latency execution</criterion>
+    <criterion>Suggestions displayed in PCF</criterion>
+  </acceptance-criteria>
+</task>

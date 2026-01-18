@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Implement build plan generation</title>
+    <phase>3</phase>
+    <tags>ai, planning</tags>
+    <estimate>1d</estimate>
+    <dependencies>021</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <notes>
+    <note date="2026-01-16">
+      Implemented BuildPlanModels.cs with:
+      - BuildPlan: Id, Summary, Steps[], EstimatedNodeCount, Confidence, Pattern
+      - ExecutionStep: Order, Action, Description, Parameters, DependsOn[], NodeSpec, ScopeReference, EdgeSpec
+      - NodeSpec, BuildPlanNodePosition, NodeConfiguration
+      - ScopeReference, EdgeSpec
+      - ScopeRequirements, ScopeRequirement
+      - BuildPlanGenerationContext, BuildPlanGenerationResult
+      - Helper classes: ExecutionStepActions, PlaybookNodeTypes, ScopeTypes
+
+      Created BuildPlanGenerationService with:
+      - GenerateBuildPlanAsync using IOpenAiClient and IModelSelector
+      - o1-mini model selection via OperationType.PlanGeneration
+      - Comprehensive validation (step order, dependencies, action types, required specs)
+      - Confirmation logic based on confidence threshold and node count
+
+      All 50 unit tests pass including lease analysis scenario.
+    </note>
+  </notes>
+
+  <prompt>
+    <goal>Implement build plan generation for CREATE_PLAYBOOK intent.</goal>
+    <context>
+      When user wants to create a full playbook:
+      - Generate internal build spec (nodes, scopes needed)
+      - Create execution plan (ordered operations)
+      - Use o1-mini for complex reasoning
+    </context>
+    <constraints>
+      - Structured JSON output
+      - Recoverable (can resume if interrupted)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md" reason="Build plan spec" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define BuildPlan model</step>
+    <step order="2">Define ExecutionStep model</step>
+    <step order="3">Implement GenerateBuildPlanAsync</step>
+    <step order="4">Use o1-mini for reasoning</step>
+    <step order="5">Parse and validate plan</step>
+    <step order="6">Test with lease analysis scenario</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create plan generation code</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Models/Ai/BuildPlan.cs</output>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Ai/BuildPlanGenerationService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Build plan includes nodes and scopes</criterion>
+    <criterion>Execution steps are ordered</criterion>
+    <criterion>Plan is JSON-serializable</criterion>
+    <criterion>Lease analysis test produces valid plan</criterion>
+  </acceptance-criteria>
+</task>

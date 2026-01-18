@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="029" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Implement ModelSelector for tiered selection</title>
+    <phase>3</phase>
+    <tags>ai, configuration</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>none</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Implement ModelSelector service for choosing AI model based on operation type.</goal>
+    <context>
+      Model selection rules:
+      - IntentClassification → GPT-4o-mini
+      - EntityResolution → GPT-4o-mini
+      - PlanGeneration → o1-mini
+      - ScopeGeneration → GPT-4o
+      - Validation → GPT-4o-mini
+    </context>
+    <constraints>
+      - Configurable via settings
+      - Cost optimization focus
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md" reason="Model strategy" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define OperationType enum</step>
+    <step order="2">Create ModelSelector class</step>
+    <step order="3">Implement SelectModel method</step>
+    <step order="4">Add configuration options</step>
+    <step order="5">Register in DI</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create selector service</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Ai/ModelSelector.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>SelectModel returns correct model per operation</criterion>
+    <criterion>Configuration overridable</criterion>
+    <criterion>Service registered in DI</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2026-01-16">
+      Implemented ModelSelector with:
+      - OperationType enum: IntentClassification, EntityResolution, PlanGeneration, ScopeGeneration, Validation, Explanation
+      - ModelSelectorOptions class for IOptions pattern configuration (section: "ModelSelector")
+      - IModelSelector interface and ModelSelector concrete implementation
+      - Registered in Program.cs as Singleton
+      - Added Explanation operation type (from design doc) for user query explanations
+      - Build verified successfully
+    </note>
+  </notes>
+</task>

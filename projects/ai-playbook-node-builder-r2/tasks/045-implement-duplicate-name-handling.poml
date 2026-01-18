@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="045" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Implement duplicate name handling (suffix)</title>
+    <phase>5</phase>
+    <tags>bff-api, scopes</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>043</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <notes>
+    <completed-date>2026-01-17</completed-date>
+    <summary>
+      Implemented GenerateUniqueNameAsync in ScopeCopyService.cs.
+      Queries existing names and adds (1), (2), etc. suffix for duplicates.
+      Strips existing suffixes before checking uniqueness.
+      Max suffix of 999, fallback to timestamp if exceeded.
+      Used by both SaveScopeAs and ExtendScope operations.
+    </summary>
+    <files-created>
+      - src/server/api/Sprk.Bff.Api/Services/Scopes/ScopeCopyService.cs (shared with 042, 043)
+    </files-created>
+  </notes>
+
+  <prompt>
+    <goal>Implement automatic suffix handling for duplicate display names.</goal>
+    <context>
+      Name collision rules:
+      - Auto-prefix CUST- for customer-created scopes
+      - If display name exists, add (1) suffix
+      - Increment suffix for multiple duplicates: (2), (3), etc.
+      - Logical name always unique (GUID-based)
+    </context>
+    <constraints>
+      - Check uniqueness within scope type
+      - Handle concurrent creation race conditions
+      - Max suffix value: 999
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/spec.md" reason="Naming requirements" />
+      <file path="src/server/api/Sprk.Bff.Api/Services/Scopes/ScopeDataverseService.cs" reason="Existing service" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create GenerateUniqueName helper method</step>
+    <step order="2">Query existing names with same base</step>
+    <step order="3">Parse existing suffixes</step>
+    <step order="4">Generate next available suffix</step>
+    <step order="5">Add to Save As and Extend operations</step>
+    <step order="6">Unit test edge cases</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">Add helper to existing service</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">Updated src/server/api/Sprk.Bff.Api/Services/Scopes/ScopeDataverseService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Duplicate names get (1) suffix</criterion>
+    <criterion>Multiple duplicates increment: (2), (3)</criterion>
+    <criterion>Concurrent creation handled</criterion>
+    <criterion>Works across all scope types</criterion>
+  </acceptance-criteria>
+</task>

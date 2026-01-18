@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="054" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Responsive modal sizing</title>
+    <phase>6</phase>
+    <tags>pcf, fluent-ui, responsive</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>Phase 2</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Implement responsive sizing for the AI assistant modal across screen sizes.</goal>
+    <context>
+      Responsive breakpoints:
+      - Large (>1200px): Side panel 400px
+      - Medium (768-1200px): Side panel 350px
+      - Small (<768px): Full-screen modal
+
+      Resize behavior:
+      - Draggable width on large screens
+      - Remember user preference
+      - Min width: 300px, Max width: 600px
+    </context>
+    <constraints>
+      - Don't obscure canvas completely
+      - Smooth transitions on resize
+      - Persist size preference
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md" reason="UI requirements" />
+      <file path="src/client/pcf/PlaybookBuilderHost/components/" reason="Existing components" />
+      <file path=".claude/adr/ADR-021.md" reason="Fluent UI theming" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create responsive hook for breakpoints</step>
+    <step order="2">Implement side panel mode for large</step>
+    <step order="3">Implement modal mode for small</step>
+    <step order="4">Add draggable resize handle</step>
+    <step order="5">Persist size to localStorage</step>
+    <step order="6">Add smooth transitions</step>
+    <step order="7">Test across screen sizes</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create responsive hooks</tool>
+    <tool name="Edit">Update modal component</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/client/pcf/PlaybookBuilderHost/hooks/useResponsive.ts</output>
+    <output type="file">Updated AiAssistantModal.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Responsive at all breakpoints</criterion>
+    <criterion>Draggable width on large screens</criterion>
+    <criterion>Size preference persisted</criterion>
+    <criterion>Smooth transitions</criterion>
+    <criterion>Full-screen on small devices</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <completion-date>2026-01-17</completion-date>
+    <summary>
+      Implemented responsive modal sizing hook.
+      Created useResponsive.ts with:
+      - Breakpoint detection (mobile, tablet, desktop, wide)
+      - ModalSize configuration per breakpoint
+      - User preference persistence support
+      - Container-relative sizing option
+      - Viewport constraint enforcement
+      - isMobile/isTablet/isDesktop helpers
+      - setPreferredSize/resetSize callbacks
+      - ResizeObserver integration for containers
+    </summary>
+    <files-created>
+      <file>src/client/pcf/PlaybookBuilderHost/control/hooks/useResponsive.ts</file>
+    </files-created>
+  </notes>
+</task>

@@ -166,20 +166,53 @@ dotnet publish -c Release /p:PublishProfile=Azure
 
 ### Deploy to App Service
 
-#### Option A: Azure CLI (Direct)
+#### Option A: Azure CLI (Primary for Dev)
+
+**Use for dev iteration** - quick deployments without committing:
 
 ```powershell
-# Deploy from publish folder
+# Build and package
+cd src/server/api/Sprk.Bff.Api
+dotnet publish -c Release -o ./publish
+Compress-Archive -Path './publish/*' -DestinationPath './publish.zip' -Force
+
+# Deploy
 az webapp deploy `
   --resource-group spe-infrastructure-westus2 `
   --name spe-api-dev-67e2xz `
   --src-path ./publish.zip `
   --type zip
+
+# Verify deployment took effect
+curl https://spe-api-dev-67e2xz.azurewebsites.net/healthz
 ```
 
-#### Option B: GitHub Actions (Automated)
+#### Option B: GitHub Actions (Production Releases)
 
-Deployments are automated via GitHub Actions on push to main. See `.github/workflows/`.
+**Use for production deployments** - push to master triggers automated deployment:
+
+```powershell
+# Merge to master triggers deploy-staging.yml
+git push origin master
+
+# Monitor deployment
+gh run list --workflow=deploy-staging.yml --limit 3
+gh run watch
+```
+
+See `.github/workflows/deploy-staging.yml` for configuration.
+
+#### Option C: Kudu Zip Push Deploy (Troubleshooting Fallback)
+
+**Use when CLI deploy reports success but app still runs old code:**
+
+1. Go to **Azure Portal** → **App Services** → `spe-api-dev-67e2xz`
+2. Click **Advanced Tools** → **Go** (opens Kudu)
+3. Click **Tools** → **Zip Push Deploy**
+4. Drag and drop `publish.zip` onto the page
+5. Verify new entry appears in **Deployment Center** logs
+
+> **Note**: This is a rare fallback. If CLI deploys consistently fail to update the app, check Deployment Center logs first.
 
 ### Configure App Settings
 
@@ -292,6 +325,24 @@ az search index list `
 | `DeploymentFailed` | Bicep template error | Check `az deployment group show --name {deployment}` for details |
 | `KeyVault access denied` | Missing Key Vault policy | Add access policy for your identity |
 | `App Service 503` | API not started | Check Application Insights logs |
+| `App Service 500` after deploy | DI scope mismatch or startup error | Check `/healthz` response body for error details |
+| CLI deploy succeeds but old code runs | Deployment didn't register | Check Deployment Center logs; use Kudu as fallback |
+
+### Deployment Not Taking Effect (Rare)
+
+**Symptom**: `az webapp deploy` reports success, but the API still runs old code.
+
+**Diagnosis**:
+1. Check **Deployment Center** → **Logs** in Azure Portal
+2. If no new entry with current timestamp, deployment didn't register
+
+**Solution** (in order of preference):
+1. **Restart the App Service** - sometimes forces reload of new deployment
+2. **Try alternative CLI command**: `az webapp deployment source config-zip`
+3. **Use Kudu Zip Push Deploy** as manual fallback (see Option C above)
+4. After any method, verify with `curl https://{app}.azurewebsites.net/healthz`
+
+**Root Cause**: This is rare and may indicate Azure-side caching or deployment slot issues. For consistent deployments, use GitHub Actions (Option A).
 
 ### Check Deployment Logs
 
@@ -396,3 +447,7 @@ gh run download {run-id}
 - **For Dataverse** - Always use `dataverse-deploy` skill instead of this one
 - **Check health first** - Before troubleshooting, verify `/healthz` endpoint
 - **Key Vault references** - Use `@Microsoft.KeyVault(SecretUri=...)` syntax in App Settings
+- **Dev deploys** - Use Azure CLI for quick dev iteration; GitHub Actions for production releases
+- **Verify deployments** - After manual deploy, check `/healthz` and Deployment Center logs
+- **If CLI deploy fails silently** - Try restart first, then Kudu as last resort
+- **500 errors after deploy** - Check `/healthz` response body for DI scope or startup errors
