@@ -15,14 +15,32 @@ export interface DocumentGraphResponse {
 }
 
 /**
+ * Node type values matching NodeTypes in IVisualizationService.cs
+ */
+export type NodeType =
+    | "source"   // The source document being queried (depth 0)
+    | "related"  // A related document found via similarity or relationship
+    | "orphan"   // An orphan file with no Dataverse record
+    | "matter"   // A Matter entity acting as a hub node
+    | "project"  // A Project entity acting as a hub node
+    | "invoice"  // An Invoice entity acting as a hub node
+    | "email";   // An Email document acting as a hub node (parent of attachments)
+
+/**
+ * Check if a node type represents a parent hub node.
+ */
+export const isParentHubNode = (type: NodeType): boolean =>
+    type === "matter" || type === "project" || type === "invoice" || type === "email";
+
+/**
  * A document node from the API response.
  */
 export interface ApiDocumentNode {
-    /** Document GUID (sprk_document ID) or speFileId for orphan files */
+    /** Entity GUID - document ID for document nodes, parent entity ID for hub nodes */
     id: string;
-    /** Node type: "source" for the queried document, "related" for similar documents, "orphan" for files without Dataverse record */
-    type: "source" | "related" | "orphan";
-    /** Depth level in the graph (0 = source, 1+ = related) */
+    /** Node type indicating the entity type */
+    type: NodeType;
+    /** Depth level in the graph (0 = source, 1 = hubs, 2 = related documents) */
     depth: number;
     /** Document data for display */
     data: ApiDocumentNodeData;
@@ -88,8 +106,10 @@ export interface ApiDocumentEdgeData {
     similarity: number;
     /** Keywords shared between documents */
     sharedKeywords: string[];
-    /** Relationship type: "semantic", "keyword", or "metadata" */
+    /** Relationship type key: "same_email", "same_matter", "semantic", etc. */
     relationshipType: string;
+    /** Human-readable label: "From same email", "Same matter", "Semantic", etc. */
+    relationshipLabel: string;
 }
 
 /**
@@ -134,4 +154,39 @@ export interface VisualizationQueryParams {
     documentTypes?: string[];
     /** Include parent entity information */
     includeParentEntity?: boolean;
+    /** Filter by relationship types (e.g., "same_email", "same_matter", "semantic") */
+    relationshipTypes?: string[];
 }
+
+/**
+ * Available relationship types for filtering.
+ * Matches RelationshipTypes in IVisualizationService.cs
+ */
+export const RELATIONSHIP_TYPES = {
+    /** Documents from the same email (parent email + attachments) */
+    same_email: "Attachment",
+    /** Documents from the same email thread (ConversationIndex prefix match) */
+    same_thread: "Email thread",
+    /** Documents associated with the same Matter */
+    same_matter: "Same matter",
+    /** Documents associated with the same Project */
+    same_project: "Same project",
+    /** Documents associated with the same Invoice */
+    same_invoice: "Same invoice",
+    /** Documents related by vector similarity (content-based) */
+    semantic: "Semantic",
+} as const;
+
+/**
+ * Get display label for a relationship type.
+ * Falls back to the API label if type is unknown.
+ */
+export function getRelationshipLabel(relationshipType: string, apiLabel?: string): string {
+    const key = relationshipType as RelationshipTypeKey;
+    return RELATIONSHIP_TYPES[key] ?? apiLabel ?? "Related";
+}
+
+/**
+ * Relationship type key (e.g., "same_email", "semantic")
+ */
+export type RelationshipTypeKey = keyof typeof RELATIONSHIP_TYPES;

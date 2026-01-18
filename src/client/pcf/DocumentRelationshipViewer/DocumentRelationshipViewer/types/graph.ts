@@ -8,6 +8,7 @@
  */
 
 import type { Node, Edge } from "react-flow-renderer";
+import type { NodeType } from "./api";
 
 /**
  * Supported file types for icon selection and display.
@@ -75,6 +76,12 @@ export interface DocumentNodeData {
     isSource?: boolean;
     /** Whether this is an orphan file (no Dataverse record) */
     isOrphanFile?: boolean;
+    /** Node type from API (source, related, orphan, matter, project, invoice, email) */
+    nodeType?: NodeType;
+    /** Primary relationship type key (derived from edge connecting to source/parent) */
+    relationshipType?: string;
+    /** Primary relationship label for display (e.g., "From email", "Same matter", "Semantic") */
+    relationshipLabel?: string;
     /** Parent entity name (Matter/Project) */
     parentEntityName?: string;
     /** URL to open the document in SPE */
@@ -95,6 +102,10 @@ export interface DocumentEdgeData {
     similarity: number;
     /** Shared keywords between documents */
     sharedKeywords?: string[];
+    /** Relationship type key: "same_email", "same_matter", "semantic", etc. */
+    relationshipType?: string;
+    /** Human-readable label for display */
+    relationshipLabel?: string;
 }
 
 /**

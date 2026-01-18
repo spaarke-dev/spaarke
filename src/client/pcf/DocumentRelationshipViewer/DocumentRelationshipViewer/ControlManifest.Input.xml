@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="DocumentRelationshipViewer" version="1.0.18"
+  <control namespace="Spaarke.Controls" constructor="DocumentRelationshipViewer" version="1.0.24"
            display-name-key="Document Relationship Viewer"
-           description-key="Interactive graph visualization of related documents based on vector similarity (v1.0.18)"
+           description-key="Node shows relationship type badge; edges show semantic similarity (v1.0.24)"
            control-type="virtual">
 
     <external-service-usage enabled="true">

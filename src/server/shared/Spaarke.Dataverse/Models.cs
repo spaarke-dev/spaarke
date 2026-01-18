@@ -123,7 +123,7 @@ public class UpdateDocumentRequest
 
     /// <summary>
     /// DEPRECATED: This field does not exist in Dataverse schema.
-    /// Use ParentDocumentLookup instead (sets sprk_ParentDocumentName lookup via @odata.bind).
+    /// Use ParentDocumentLookup instead (sets sprk_ParentDocument lookup via @odata.bind).
     /// </summary>
     [Obsolete("Use ParentDocumentLookup instead - sprk_parentdocumentid does not exist in Dataverse")]
     public string? ParentDocumentId { get; set; }
@@ -149,6 +149,17 @@ public class UpdateDocumentRequest
 
     /// <summary>Invoice lookup (sprk_invoice). Maps to sprk_Invoice@odata.bind.</summary>
     public Guid? InvoiceLookup { get; set; }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Document Source Tracking
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Document source type choice value. Maps to sprk_SourceType.
+    /// Values: UserUpload=659490000, EmailReceived=659490001, EmailSent=659490002,
+    /// EmailArchive=659490003, EmailAttachment=659490004, Import=659490005, SystemGenerated=659490006.
+    /// </summary>
+    public int? SourceType { get; set; }
 }
 
 /// <summary>
@@ -208,8 +219,30 @@ public class DocumentEntity
     /// <summary>Is this document an email archive (.eml). Maps to sprk_isemailarchive.</summary>
     public bool? IsEmailArchive { get; set; }
 
-    /// <summary>Parent document ID for attachments. Maps to sprk_parentdocumentid.</summary>
+    /// <summary>Parent document ID for attachments. Maps to _sprk_parentdocument_value.</summary>
     public string? ParentDocumentId { get; set; }
+
+    /// <summary>Email conversation index for thread correlation. Maps to sprk_emailconversationindex.</summary>
+    public string? EmailConversationIndex { get; set; }
+
+    // Record association lookups (for relationship queries)
+    /// <summary>Matter ID lookup. Maps to _sprk_matter_value.</summary>
+    public string? MatterId { get; set; }
+
+    /// <summary>Matter display name. Maps to _sprk_matter_value@OData.Community.Display.V1.FormattedValue.</summary>
+    public string? MatterName { get; set; }
+
+    /// <summary>Project ID lookup. Maps to _sprk_project_value.</summary>
+    public string? ProjectId { get; set; }
+
+    /// <summary>Project display name. Maps to _sprk_project_value@OData.Community.Display.V1.FormattedValue.</summary>
+    public string? ProjectName { get; set; }
+
+    /// <summary>Invoice ID lookup. Maps to _sprk_invoice_value.</summary>
+    public string? InvoiceId { get; set; }
+
+    /// <summary>Invoice display name. Maps to _sprk_invoice_value@OData.Community.Display.V1.FormattedValue.</summary>
+    public string? InvoiceName { get; set; }
 }
 
 /// <summary>

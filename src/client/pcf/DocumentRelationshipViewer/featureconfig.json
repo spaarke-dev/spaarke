@@ -1,3 +1,4 @@
 {
-  "pcfReactPlatformLibraries": "on"
+  "pcfReactPlatformLibraries": "on",
+  "pcfAllowCustomWebpack": "on"
 }

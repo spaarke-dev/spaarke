@@ -82,6 +82,14 @@ public record VisualizationOptions
     /// Default: true
     /// </summary>
     public bool IncludeParentEntity { get; init; } = true;
+
+    /// <summary>
+    /// Filter to include only specific relationship types.
+    /// Null or empty means include all relationship types.
+    /// Use <see cref="RelationshipTypes"/> constants for valid values.
+    /// Example: ["same_email", "semantic"] to show only email siblings and content-similar documents.
+    /// </summary>
+    public IList<string>? RelationshipTypeFilter { get; init; }
 }
 
 /// <summary>
@@ -113,14 +121,14 @@ public record DocumentGraphResponse
 public record DocumentNode
 {
     /// <summary>
-    /// Document GUID (sprk_document ID).
+    /// Entity GUID - document ID for document nodes, parent entity ID for hub nodes.
     /// </summary>
     public string Id { get; init; } = string.Empty;
 
     /// <summary>
-    /// Node type: "source" for the queried document, "related" for similar documents.
+    /// Node type indicating the entity type. See <see cref="NodeTypes"/> for valid values.
     /// </summary>
-    public string Type { get; init; } = "related";
+    public string Type { get; init; } = NodeTypes.Related;
 
     /// <summary>
     /// Depth level in the graph.
@@ -283,6 +291,7 @@ public record DocumentEdgeData
     /// <summary>
     /// Cosine similarity score between the connected documents (0.0-1.0).
     /// Higher values indicate stronger semantic similarity.
+    /// For hardcoded relationships (same_email, same_matter, etc.), this is 1.0.
     /// </summary>
     public double Similarity { get; init; }
 
@@ -293,12 +302,127 @@ public record DocumentEdgeData
     public IReadOnlyList<string> SharedKeywords { get; init; } = [];
 
     /// <summary>
-    /// Type of relationship.
-    /// "semantic" = based on vector similarity
-    /// "keyword" = based on shared extracted keywords
-    /// "metadata" = based on shared metadata (e.g., same parent entity)
+    /// Type of relationship. See <see cref="RelationshipTypes"/> for valid values.
     /// </summary>
-    public string RelationshipType { get; init; } = "semantic";
+    public string RelationshipType { get; init; } = RelationshipTypes.Semantic;
+
+    /// <summary>
+    /// Human-readable label for the relationship type.
+    /// Displayed in the UI (e.g., "From same email", "Same matter").
+    /// </summary>
+    public string RelationshipLabel { get; init; } = RelationshipTypes.GetLabel(RelationshipTypes.Semantic);
+}
+
+/// <summary>
+/// Constants for document relationship types.
+/// Relationships are prioritized: hardcoded relationships (same_email, same_matter, etc.)
+/// take precedence over semantic similarity when the same document pair has multiple relationships.
+/// </summary>
+public static class RelationshipTypes
+{
+    /// <summary>Documents from the same email (parent email + attachments).</summary>
+    public const string SameEmail = "same_email";
+
+    /// <summary>Documents from the same email thread (ConversationIndex prefix match).</summary>
+    public const string SameThread = "same_thread";
+
+    /// <summary>Documents associated with the same Matter.</summary>
+    public const string SameMatter = "same_matter";
+
+    /// <summary>Documents associated with the same Project.</summary>
+    public const string SameProject = "same_project";
+
+    /// <summary>Documents associated with the same Invoice.</summary>
+    public const string SameInvoice = "same_invoice";
+
+    /// <summary>Documents related by vector similarity (content-based).</summary>
+    public const string Semantic = "semantic";
+
+    /// <summary>
+    /// Priority order for relationship types (lower = higher priority).
+    /// When a document appears in multiple relationship types, the highest priority is shown.
+    /// </summary>
+    public static int GetPriority(string relationshipType) => relationshipType switch
+    {
+        SameEmail => 1,
+        SameThread => 2,
+        SameMatter => 3,
+        SameProject => 4,
+        SameInvoice => 5,
+        Semantic => 6,
+        _ => 99
+    };
+
+    /// <summary>
+    /// Get human-readable label for a relationship type.
+    /// </summary>
+    public static string GetLabel(string relationshipType) => relationshipType switch
+    {
+        SameEmail => "From same email",
+        SameThread => "Same email thread",
+        SameMatter => "Same matter",
+        SameProject => "Same project",
+        SameInvoice => "Same invoice",
+        Semantic => "Content similar",
+        _ => "Related"
+    };
+
+    /// <summary>
+    /// All available relationship types for filtering.
+    /// </summary>
+    public static readonly IReadOnlyList<string> All = [SameEmail, SameThread, SameMatter, SameProject, SameInvoice, Semantic];
+
+    /// <summary>
+    /// Hardcoded relationship types (non-semantic, based on Dataverse lookups).
+    /// </summary>
+    public static readonly IReadOnlyList<string> Hardcoded = [SameEmail, SameThread, SameMatter, SameProject, SameInvoice];
+}
+
+/// <summary>
+/// Constants for document graph node types.
+/// </summary>
+public static class NodeTypes
+{
+    /// <summary>The source document being queried (depth 0).</summary>
+    public const string Source = "source";
+
+    /// <summary>A related document found via similarity or relationship.</summary>
+    public const string Related = "related";
+
+    /// <summary>An orphan file with no Dataverse record.</summary>
+    public const string Orphan = "orphan";
+
+    /// <summary>A Matter entity acting as a hub node.</summary>
+    public const string Matter = "matter";
+
+    /// <summary>A Project entity acting as a hub node.</summary>
+    public const string Project = "project";
+
+    /// <summary>An Invoice entity acting as a hub node.</summary>
+    public const string Invoice = "invoice";
+
+    /// <summary>An Email document acting as a hub node (parent of attachments).</summary>
+    public const string Email = "email";
+
+    /// <summary>
+    /// Check if a node type represents a parent hub node.
+    /// </summary>
+    public static bool IsParentHub(string nodeType) => nodeType is Matter or Project or Invoice or Email;
+
+    /// <summary>
+    /// Get human-readable label for a node type.
+    /// </summary>
+    public static string GetLabel(string nodeType) => nodeType switch
+    {
+        Matter => "Matter",
+        Project => "Project",
+        Invoice => "Invoice",
+        Email => "Email",
+        Source => "Source Document",
+        Related => "Related Document",
+        Orphan => "Orphan File",
+        _ => "Unknown"
+    };
 }
 
 /// <summary>

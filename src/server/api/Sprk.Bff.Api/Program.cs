@@ -1096,6 +1096,38 @@ app.MapGet("/healthz/dataverse", TestDataverseConnectionAsync);
 // Dataverse CRUD operations test endpoint
 app.MapGet("/healthz/dataverse/crud", TestDataverseCrudOperationsAsync);
 
+// DEBUG: Test document retrieval (temporary - remove after debugging)
+app.MapGet("/debug/document/{id:guid}", async (Guid id, IDataverseService dataverseService, ILogger<Program> logger) =>
+{
+    logger.LogInformation("[DEBUG-ENDPOINT] Testing document retrieval for {Id}", id);
+    try
+    {
+        var doc = await dataverseService.GetDocumentAsync(id.ToString());
+        if (doc == null)
+        {
+            return Results.Ok(new { status = "NOT_FOUND", documentId = id.ToString(), message = "Document not found in Dataverse" });
+        }
+        return Results.Ok(new
+        {
+            status = "FOUND",
+            documentId = doc.Id,
+            name = doc.Name,
+            fileName = doc.FileName,
+            isEmailArchive = doc.IsEmailArchive,
+            parentDocumentId = doc.ParentDocumentId,
+            matterId = doc.MatterId,
+            projectId = doc.ProjectId,
+            invoiceId = doc.InvoiceId,
+            emailConversationIndex = doc.EmailConversationIndex
+        });
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "[DEBUG-ENDPOINT] Error retrieving document {Id}", id);
+        return Results.Ok(new { status = "ERROR", documentId = id.ToString(), error = ex.Message, innerError = ex.InnerException?.Message });
+    }
+}).AllowAnonymous();
+
 // Lightweight ping endpoint for warm-up agents (Task 021)
 // Must be fast (<100ms), unauthenticated, and expose no sensitive info
 app.MapGet("/ping", () => Results.Text("pong"))

@@ -100,7 +100,7 @@ public async Task UpdateDocumentAsync(string id, UpdateDocumentRequest request, 
 
     // Lookup fields require EntityReference
     if (request.ParentDocumentLookup.HasValue)
-        document["sprk_parentdocumentname"] = new EntityReference("sprk_document", request.ParentDocumentLookup.Value);
+        document["sprk_parentdocument"] = new EntityReference("sprk_document", request.ParentDocumentLookup.Value);
 
     await _serviceClient.UpdateAsync(document, ct);
     _logger.LogInformation("Document updated: {DocumentId} ({FieldCount} fields)", id, document.Attributes.Count);
