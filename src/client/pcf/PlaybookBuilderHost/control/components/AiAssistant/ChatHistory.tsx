@@ -18,7 +18,12 @@ import { useEffect, useRef } from 'react';
 import {
   Text,
   Badge,
+  Button,
   Spinner,
+  MessageBar,
+  MessageBarBody,
+  MessageBarTitle,
+  MessageBarActions,
   makeStyles,
   tokens,
   shorthands,
@@ -32,6 +37,7 @@ import {
   Delete12Regular,
   Edit12Regular,
   Link12Regular,
+  DismissRegular,
 } from '@fluentui/react-icons';
 import {
   useAiAssistantStore,
@@ -177,6 +183,9 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
     fontSize: tokens.fontSizeBase200,
   },
+  errorBar: {
+    marginBottom: tokens.spacingVerticalS,
+  },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -263,7 +272,7 @@ export const ChatHistory: React.FC<ChatHistoryProps> = ({
   const messageListRef = useRef<HTMLDivElement>(null);
 
   // Store state
-  const { messages, isStreaming, streamingState } = useAiAssistantStore();
+  const { messages, isStreaming, streamingState, error, setError } = useAiAssistantStore();
 
   // Apply message limit if specified
   const displayMessages = maxMessages
@@ -394,8 +403,31 @@ export const ChatHistory: React.FC<ChatHistoryProps> = ({
         role="list"
         aria-label="Messages"
       >
+        {/* Error display */}
+        {error && (
+          <MessageBar
+            className={styles.errorBar}
+            intent="error"
+          >
+            <MessageBarBody>
+              <MessageBarTitle>Error</MessageBarTitle>
+              {error}
+            </MessageBarBody>
+            <MessageBarActions
+              containerAction={
+                <Button
+                  appearance="transparent"
+                  icon={<DismissRegular />}
+                  onClick={() => setError(null)}
+                  aria-label="Dismiss error"
+                />
+              }
+            />
+          </MessageBar>
+        )}
+
         {/* Empty state */}
-        {displayMessages.length === 0 && !isStreaming && (
+        {displayMessages.length === 0 && !isStreaming && !error && (
           <div className={styles.emptyState}>
             <div className={styles.emptyIcon}>
               <Bot20Regular />

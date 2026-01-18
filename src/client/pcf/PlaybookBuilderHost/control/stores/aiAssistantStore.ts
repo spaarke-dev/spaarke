@@ -205,6 +205,7 @@ interface AiAssistantState {
   currentPlaybookId: string | null;
   sessionId: string | null;
   error: string | null;
+  serviceConfig: AiPlaybookServiceConfig | null;
 
   // Test execution state
   isTestDialogOpen: boolean;
@@ -217,6 +218,7 @@ interface AiAssistantState {
 
   // Session actions
   setPlaybookId: (playbookId: string | null) => void;
+  setServiceConfig: (config: AiPlaybookServiceConfig) => void;
   startSession: (playbookId: string) => void;
   endSession: () => void;
 
@@ -241,7 +243,7 @@ interface AiAssistantState {
   // API Integration
   sendMessage: (
     message: string,
-    serviceConfig: AiPlaybookServiceConfig
+    serviceConfig?: AiPlaybookServiceConfig
   ) => Promise<void>;
   abortStream: () => void;
 
@@ -341,6 +343,7 @@ const initialState = {
   currentPlaybookId: null as string | null,
   sessionId: null as string | null,
   error: null as string | null,
+  serviceConfig: null as AiPlaybookServiceConfig | null,
   isTestDialogOpen: false,
   testExecution: initialTestExecutionState,
 };
@@ -363,6 +366,8 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
 
   // Session actions
   setPlaybookId: (playbookId) => set({ currentPlaybookId: playbookId }),
+
+  setServiceConfig: (config) => set({ serviceConfig: config }),
 
   startSession: (playbookId) =>
     set({
@@ -626,9 +631,29 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
   sendMessage: async (message, serviceConfig) => {
     const state = get();
 
+    console.info('[AiAssistantStore] sendMessage called', {
+      message: message.substring(0, 50) + '...',
+      currentPlaybookId: state.currentPlaybookId,
+      hasServiceConfig: !!state.serviceConfig,
+      serviceConfigApiBaseUrl: state.serviceConfig?.apiBaseUrl,
+    });
+
+    // Use provided config or stored config
+    const config = serviceConfig ?? state.serviceConfig;
+
     // Validate playbook is set
     if (!state.currentPlaybookId) {
-      set({ error: 'No playbook selected. Please open a playbook first.' });
+      const errorMsg = 'No playbook selected. Please open a playbook first.';
+      console.error('[AiAssistantStore] Error:', errorMsg);
+      set({ error: errorMsg });
+      return;
+    }
+
+    // Validate service config is available
+    if (!config || !config.apiBaseUrl) {
+      const errorMsg = 'AI service not configured. Set the API Base URL property on the PCF control.';
+      console.error('[AiAssistantStore] Error:', errorMsg, { config });
+      set({ error: errorMsg });
       return;
     }
 
@@ -653,23 +678,24 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
     }));
 
     // Build request from current state
+    // NOTE: Property names must match API's BuilderRequest model (camelCase)
     const canvasStore = useCanvasStore.getState();
     const request: BuildPlaybookCanvasRequest = {
-      playbookId: state.currentPlaybookId,
-      currentCanvas: {
+      message,
+      canvasState: {
         nodes: canvasStore.nodes,
         edges: canvasStore.edges,
       },
-      message,
-      conversationHistory: state.messages.map((m) => ({
+      playbookId: state.currentPlaybookId ?? undefined,
+      sessionId: state.sessionId ?? undefined,
+      chatHistory: state.messages.map((m) => ({
         role: m.role,
         content: m.content,
       })),
-      sessionId: state.sessionId ?? undefined,
     };
 
     // Get service instance
-    const service = getService(serviceConfig);
+    const service = getService(config);
 
     try {
       await service.buildPlaybookCanvas(request, {

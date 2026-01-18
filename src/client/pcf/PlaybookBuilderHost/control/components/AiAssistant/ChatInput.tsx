@@ -87,8 +87,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   const styles = useStyles();
   const [message, setMessage] = useState('');
 
-  // Store state
-  const { isStreaming, addUserMessage } = useAiAssistantStore();
+  // Store state - only need isStreaming here
+  // Note: addUserMessage is called by sendMessage in the store, so we don't call it here
+  const { isStreaming } = useAiAssistantStore();
 
   // Determine if input should be disabled
   const isDisabled = disabled || isStreaming;
@@ -98,17 +99,14 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     const trimmedMessage = message.trim();
     if (!trimmedMessage || isDisabled) return;
 
-    // Add message to store
-    addUserMessage(trimmedMessage);
-
-    // Call callback if provided
+    // Call callback - the store's sendMessage will add the user message
     if (onSendMessage) {
       onSendMessage(trimmedMessage);
     }
 
     // Clear input
     setMessage('');
-  }, [message, isDisabled, addUserMessage, onSendMessage]);
+  }, [message, isDisabled, onSendMessage]);
 
   // Handle key press (Enter to send, Shift+Enter for newline)
   const handleKeyDown = useCallback(

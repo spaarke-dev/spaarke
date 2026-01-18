@@ -35,7 +35,7 @@ import { ExecutionOverlay } from './Execution';
 import { useCanvasStore, type PlaybookNodeType } from '../stores/canvasStore';
 import { useExecutionStore } from '../stores/executionStore';
 import { useAiAssistantStore } from '../stores/aiAssistantStore';
-import { AiAssistantModal } from './AiAssistant';
+import { AiAssistantModal, ChatHistory, ChatInput } from './AiAssistant';
 
 const useStyles = makeStyles({
   container: {
@@ -222,11 +222,23 @@ export const BuilderLayout = React.memo(function BuilderLayout() {
   // AI Assistant state
   const isAiAssistantOpen = useAiAssistantStore((state) => state.isOpen);
   const toggleAiAssistant = useAiAssistantStore((state) => state.toggleModal);
+  const sendMessage = useAiAssistantStore((state) => state.sendMessage);
 
-  // Auto-open properties panel when a node is selected
+  // Handler for sending AI chat messages
+  const handleSendMessage = useCallback(
+    (message: string) => {
+      // sendMessage uses the stored serviceConfig from the store
+      sendMessage(message);
+    },
+    [sendMessage]
+  );
+
+  // Auto-open/close properties panel based on node selection
   useEffect(() => {
     if (selectedNodeId) {
       setRightPanelOpen(true);
+    } else {
+      setRightPanelOpen(false);
     }
   }, [selectedNodeId]);
 
@@ -335,7 +347,10 @@ export const BuilderLayout = React.memo(function BuilderLayout() {
       </aside>
 
       {/* AI Assistant Modal */}
-      <AiAssistantModal />
+      <AiAssistantModal>
+        <ChatHistory />
+        <ChatInput onSendMessage={handleSendMessage} />
+      </AiAssistantModal>
     </div>
   );
 });

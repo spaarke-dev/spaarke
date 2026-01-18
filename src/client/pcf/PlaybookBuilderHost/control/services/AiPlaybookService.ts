@@ -1,7 +1,7 @@
 /**
  * AI Playbook Service - API client for AI playbook canvas building
  *
- * Handles communication with the /api/ai/build-playbook-canvas endpoint.
+ * Handles communication with the /api/ai/playbook-builder/process endpoint.
  * Uses fetch with ReadableStream for SSE streaming (POST request).
  *
  * SSE Event Types:
@@ -46,18 +46,19 @@ export interface ConversationMessage {
 
 /**
  * Request body for build-playbook-canvas endpoint.
+ * NOTE: Property names match API's BuilderRequest model (uses camelCase serialization)
  */
 export interface BuildPlaybookCanvasRequest {
-  /** Playbook record ID */
-  playbookId: string;
-  /** Current canvas state */
-  currentCanvas: CanvasState;
   /** User's message/instruction */
   message: string;
-  /** Conversation history */
-  conversationHistory: ConversationMessage[];
+  /** Current canvas state (API expects 'canvasState', not 'currentCanvas') */
+  canvasState: CanvasState;
+  /** Playbook record ID (optional) */
+  playbookId?: string;
   /** Session ID for continuity */
   sessionId?: string;
+  /** Conversation history (API expects 'chatHistory', not 'conversationHistory') */
+  chatHistory?: ConversationMessage[];
 }
 
 // ============================================================================
@@ -216,7 +217,7 @@ export class AiPlaybookService {
     }, this.config.timeout);
 
     try {
-      const url = `${this.config.apiBaseUrl}/api/ai/build-playbook-canvas`;
+      const url = `${this.config.apiBaseUrl}/api/ai/playbook-builder/process`;
 
       const response = await fetch(url, {
         method: 'POST',

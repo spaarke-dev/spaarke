@@ -74,6 +74,7 @@ interface CanvasState {
   setEdges: (edges: Edge[]) => void;
   onEdgesChange: (changes: EdgeChange[]) => void;
   onConnect: (connection: Connection) => void;
+  removeEdge: (edgeId: string) => void;
 
   // Selection
   selectNode: (nodeId: string | null) => void;
@@ -201,6 +202,12 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         isDirty: true,
       };
     }),
+
+  removeEdge: (edgeId) =>
+    set((state) => ({
+      edges: state.edges.filter((edge) => edge.id !== edgeId),
+      isDirty: true,
+    })),
 
   // Selection
   selectNode: (nodeId) => set({ selectedNodeId: nodeId }),
