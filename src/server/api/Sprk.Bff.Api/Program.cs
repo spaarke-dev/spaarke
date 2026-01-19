@@ -1001,12 +1001,14 @@ builder.Services.AddOpenTelemetry()
     .WithMetrics(metrics =>
     {
         metrics.AddMeter("Sprk.Bff.Api.Ai");   // AI telemetry (summarization, RAG, tools, export)
+        metrics.AddMeter("Sprk.Bff.Api.Rag");  // RAG telemetry (indexing jobs, search operations)
         metrics.AddMeter("Sprk.Bff.Api.Cache"); // Cache metrics (hits, misses, latency)
         metrics.AddMeter("Sprk.Bff.Api.CircuitBreaker"); // Circuit breaker metrics
     })
     .WithTracing(tracing =>
     {
         tracing.AddSource("Sprk.Bff.Api.Ai"); // AI distributed tracing
+        tracing.AddSource("Sprk.Bff.Api.Rag"); // RAG distributed tracing
     });
 
 // ============================================================================
