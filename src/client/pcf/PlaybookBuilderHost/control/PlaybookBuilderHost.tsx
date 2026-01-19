@@ -367,7 +367,7 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
 
       {/* Footer with Version */}
       <div className={styles.footer}>
-        <Text className={styles.versionBadge}>v2.20.2 2026-01-18</Text>
+        <Text className={styles.versionBadge}>v2.20.5 2026-01-18</Text>
       </div>
 
       {/* Template Library Dialog */}

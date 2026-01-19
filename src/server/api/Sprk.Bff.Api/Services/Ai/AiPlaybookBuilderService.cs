@@ -275,7 +275,8 @@ public class AiPlaybookBuilderService : IAiPlaybookBuilderService
                 break;
 
             case BuilderIntent.AddNode:
-                var nodeType = classification.Entities?.GetValueOrDefault("nodeType") ?? "action";
+                var nodeType = classification.Entities?.GetValueOrDefault("nodeType") ?? PlaybookNodeTypes.AiAnalysis;
+                var nodeLabel = classification.Entities?.GetValueOrDefault("nodeLabel") ?? GetDefaultNodeLabel(nodeType);
                 yield return BuilderStreamChunk.Operation(new CanvasPatch
                 {
                     Operation = CanvasPatchOperation.AddNode,
@@ -283,11 +284,11 @@ public class AiPlaybookBuilderService : IAiPlaybookBuilderService
                     {
                         Id = Guid.NewGuid().ToString("N")[..8],
                         Type = nodeType,
-                        Label = $"New {nodeType} node",
+                        Label = nodeLabel,
                         Position = new NodePosition(100, 100)
                     }
                 });
-                yield return BuilderStreamChunk.Message($"Added a new {nodeType} node.");
+                yield return BuilderStreamChunk.Message($"Added a new {nodeLabel} node.");
                 break;
 
             case BuilderIntent.RemoveNode:
@@ -375,16 +376,73 @@ public class AiPlaybookBuilderService : IAiPlaybookBuilderService
     private static Dictionary<string, string>? ExtractEntities(string message)
     {
         var entities = new Dictionary<string, string>();
+        var lower = message.ToLowerInvariant();
 
-        // Simple extraction - full implementation uses AI
-        if (message.Contains("action", StringComparison.OrdinalIgnoreCase))
-            entities["nodeType"] = "action";
-        else if (message.Contains("skill", StringComparison.OrdinalIgnoreCase))
-            entities["nodeType"] = "skill";
-        else if (message.Contains("tool", StringComparison.OrdinalIgnoreCase))
-            entities["nodeType"] = "tool";
-        else if (message.Contains("knowledge", StringComparison.OrdinalIgnoreCase))
-            entities["nodeType"] = "knowledge";
+        // Extract node types (from PlaybookNodeTypes)
+        // Check multi-word patterns first, then single-word patterns
+        if (lower.Contains("ai analysis") || lower.Contains("ai-analysis") ||
+            lower.Contains("aianalysis") || lower.Contains("analysis node"))
+        {
+            entities["nodeType"] = PlaybookNodeTypes.AiAnalysis;
+            entities["nodeLabel"] = "AI Analysis";
+        }
+        else if (lower.Contains("ai completion") || lower.Contains("ai-completion") ||
+                 lower.Contains("aicompletion") || lower.Contains("completion node"))
+        {
+            entities["nodeType"] = PlaybookNodeTypes.AiCompletion;
+            entities["nodeLabel"] = "AI Completion";
+        }
+        else if (lower.Contains("deliver output") || lower.Contains("deliver-output") ||
+                 lower.Contains("deliveroutput") || lower.Contains("output node") ||
+                 lower.Contains("delivery node"))
+        {
+            entities["nodeType"] = PlaybookNodeTypes.DeliverOutput;
+            entities["nodeLabel"] = "Deliver Output";
+        }
+        else if (lower.Contains("create task") || lower.Contains("createtask") ||
+                 lower.Contains("task node"))
+        {
+            entities["nodeType"] = PlaybookNodeTypes.CreateTask;
+            entities["nodeLabel"] = "Create Task";
+        }
+        else if (lower.Contains("send email") || lower.Contains("sendemail") ||
+                 lower.Contains("email node"))
+        {
+            entities["nodeType"] = PlaybookNodeTypes.SendEmail;
+            entities["nodeLabel"] = "Send Email";
+        }
+        else if (lower.Contains("condition") || lower.Contains("conditional") ||
+                 lower.Contains("branch") || lower.Contains("if"))
+        {
+            entities["nodeType"] = PlaybookNodeTypes.Condition;
+            entities["nodeLabel"] = "Condition";
+        }
+        else if (lower.Contains("wait") || lower.Contains("pause") || lower.Contains("delay"))
+        {
+            entities["nodeType"] = PlaybookNodeTypes.Wait;
+            entities["nodeLabel"] = "Wait";
+        }
+        // Also support scope type keywords as default
+        else if (lower.Contains("action"))
+        {
+            entities["nodeType"] = PlaybookNodeTypes.AiAnalysis;
+            entities["nodeLabel"] = "Action";
+        }
+        else if (lower.Contains("skill"))
+        {
+            entities["nodeType"] = PlaybookNodeTypes.AiAnalysis;
+            entities["nodeLabel"] = "Skill";
+        }
+        else if (lower.Contains("tool"))
+        {
+            entities["nodeType"] = PlaybookNodeTypes.AiAnalysis;
+            entities["nodeLabel"] = "Tool";
+        }
+        else if (lower.Contains("knowledge"))
+        {
+            entities["nodeType"] = PlaybookNodeTypes.AiAnalysis;
+            entities["nodeLabel"] = "Knowledge";
+        }
 
         return entities.Count > 0 ? entities : null;
     }
@@ -408,6 +466,24 @@ public class AiPlaybookBuilderService : IAiPlaybookBuilderService
             BuilderIntent.SavePlaybook => "save the playbook",
             BuilderIntent.AskQuestion => "get help",
             _ => "perform an action"
+        };
+    }
+
+    /// <summary>
+    /// Get human-readable default label for a node type.
+    /// </summary>
+    private static string GetDefaultNodeLabel(string nodeType)
+    {
+        return nodeType switch
+        {
+            PlaybookNodeTypes.AiAnalysis => "AI Analysis",
+            PlaybookNodeTypes.AiCompletion => "AI Completion",
+            PlaybookNodeTypes.Condition => "Condition",
+            PlaybookNodeTypes.DeliverOutput => "Deliver Output",
+            PlaybookNodeTypes.CreateTask => "Create Task",
+            PlaybookNodeTypes.SendEmail => "Send Email",
+            PlaybookNodeTypes.Wait => "Wait",
+            _ => nodeType // fallback to the type name itself
         };
     }
 

@@ -790,6 +790,7 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
 
         // Handle done events - mark streaming complete
         onDone: (data: DoneEventData) => {
+          console.info('[AiAssistantStore] onDone handler called', data);
           const finalContent = get().messages.find((m) => m.id === assistantMessageId)?.content ?? '';
           const summaryAddition = data.summary ? (finalContent ? '\n\n' : '') + data.summary : '';
 
@@ -804,6 +805,7 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
               operationCount: get().streamingState.operationCount,
             },
           });
+          console.info('[AiAssistantStore] Streaming ended, isStreaming set to false');
         },
 
         // Handle connection errors

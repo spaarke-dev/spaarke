@@ -142,7 +142,7 @@ export interface ErrorEventData {
  * Done event data.
  */
 export interface DoneEventData {
-  success: boolean;
+  operationCount: number;
   summary?: string;
 }
 
@@ -293,21 +293,26 @@ export class AiPlaybookService {
         const { done, value } = await reader.read();
 
         if (done) {
+          console.info('[AiPlaybookService] Stream ended, remaining buffer:', JSON.stringify(buffer));
           break;
         }
 
         // Decode chunk and add to buffer
-        buffer += decoder.decode(value, { stream: true });
+        const chunk = decoder.decode(value, { stream: true });
+        buffer += chunk;
+        console.debug('[AiPlaybookService] Received chunk:', JSON.stringify(chunk));
 
         // Process complete events from buffer
         const events = this.parseEventsFromBuffer(buffer);
         buffer = events.remaining;
+        console.debug('[AiPlaybookService] Parsed events:', events.parsed.length, 'remaining:', JSON.stringify(events.remaining));
 
         for (const event of events.parsed) {
           this.dispatchEvent(event, handlers);
 
           // Stop processing if done or error
           if (event.type === 'done' || event.type === 'error') {
+            console.info('[AiPlaybookService] Received terminal event, stopping stream processing');
             return;
           }
         }
@@ -315,10 +320,14 @@ export class AiPlaybookService {
 
       // Process any remaining data in buffer
       if (buffer.trim()) {
+        console.info('[AiPlaybookService] Processing remaining buffer:', JSON.stringify(buffer));
         const events = this.parseEventsFromBuffer(buffer + '\n\n');
+        console.info('[AiPlaybookService] Final parsed events:', events.parsed.map(e => e.type));
         for (const event of events.parsed) {
           this.dispatchEvent(event, handlers);
         }
+      } else {
+        console.info('[AiPlaybookService] No remaining buffer to process');
       }
     } finally {
       reader.releaseLock();
@@ -346,8 +355,10 @@ export class AiPlaybookService {
       try {
         // Check if this event is complete (followed by double newline or end)
         const afterMatch = buffer.slice(lastIndex);
+        console.debug('[AiPlaybookService] Parsing event:', eventType, 'afterMatch:', JSON.stringify(afterMatch.substring(0, 50)));
         if (!afterMatch.startsWith('\n') && afterMatch.length > 0 && !afterMatch.startsWith('\nevent:')) {
           // Event might be incomplete, stop here
+          console.debug('[AiPlaybookService] Event incomplete, stopping parse');
           break;
         }
 
@@ -356,6 +367,7 @@ export class AiPlaybookService {
           type: eventType as SseEventType,
           data,
         });
+        console.debug('[AiPlaybookService] Successfully parsed event:', eventType);
       } catch (parseError) {
         console.warn('[AiPlaybookService] Failed to parse event data:', dataStr, parseError);
       }
@@ -371,6 +383,8 @@ export class AiPlaybookService {
    * Dispatch event to appropriate handler.
    */
   private dispatchEvent(event: SseEvent, handlers: AiPlaybookEventHandlers): void {
+    console.info('[AiPlaybookService] SSE event received:', event.type, event.data);
+
     switch (event.type) {
       case 'thinking':
         handlers.onThinking?.(event.data as ThinkingEventData);
