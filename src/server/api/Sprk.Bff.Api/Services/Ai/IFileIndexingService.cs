@@ -249,11 +249,11 @@ public sealed record FileIndexingResult
         TimeSpan duration,
         string? documentId = null,
         string? speFileId = null) => new()
-    {
-        Success = true,
-        ChunksIndexed = chunksIndexed,
-        Duration = duration,
-        DocumentId = documentId,
-        SpeFileId = speFileId
-    };
+        {
+            Success = true,
+            ChunksIndexed = chunksIndexed,
+            Duration = duration,
+            DocumentId = documentId,
+            SpeFileId = speFileId
+        };
 }
