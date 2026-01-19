@@ -27,8 +27,8 @@
     <PackageReference Include="Microsoft.ApplicationInsights.AspNetCore" Version="2.23.0" />
 
     <!-- Caching -->
-    <PackageReference Include="Microsoft.Extensions.Caching.Abstractions" Version="10.0.1" />
-    <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Caching.Abstractions" Version="10.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.2" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.0" />
 
     <!-- Microsoft Graph SDK v5.x (CRITICAL - must be 5.x or higher) -->
