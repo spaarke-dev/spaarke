@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Create AiPlaybookBuilderService class</title>
+    <phase>1</phase>
+    <tags>bff-api, ai, service</tags>
+    <estimate>1d</estimate>
+    <dependencies>none</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <notes>
+    <completion-date>2026-01-16</completion-date>
+    <summary>Created core service with interface, 20+ supporting types, and 7 unit tests.</summary>
+    <files-created>
+      - IAiPlaybookBuilderService.cs (interface + records/enums)
+      - AiPlaybookBuilderService.cs (implementation)
+      - AiPlaybookBuilderServiceTests.cs (7 tests)
+    </files-created>
+    <decisions>
+      - Named BuilderChatMessage to avoid OpenAI.Chat.ChatMessage conflict
+      - Used scoped DI registration matching other AI services
+      - Followed interface pattern for testability (consistent with codebase)
+    </decisions>
+  </notes>
+
+  <prompt>
+    <goal>Create the core AiPlaybookBuilderService class that will orchestrate AI-assisted playbook building operations.</goal>
+    <context>
+      This service is the backend brain for the AI Chat Playbook Builder feature. It will:
+      - Receive user messages and current canvas state
+      - Classify user intent using AI
+      - Generate build plans
+      - Execute canvas operations
+      - Coordinate with Dataverse for scope management
+    </context>
+    <constraints>
+      - Follow ADR-013: Extend BFF, no separate microservice
+      - Follow ADR-010: DI minimalism (≤15 registrations)
+      - Use existing patterns from AnalysisOrchestrationService
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-013-ai-architecture.md" reason="AI architecture constraints" />
+      <file path=".claude/adr/ADR-010-di-minimalism.md" reason="DI registration limits" />
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs" reason="Reference pattern" />
+      <file path="projects/ai-playbook-node-builder-r2/spec.md" reason="Requirements" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create Services/Ai/AiPlaybookBuilderService.cs with interface</step>
+    <step order="2">Define core methods: ProcessMessageAsync, GenerateBuildPlanAsync</step>
+    <step order="3">Add constructor with required dependencies (ILogger, OpenAI client)</step>
+    <step order="4">Implement basic message processing skeleton</step>
+    <step order="5">Register service in DI (Program.cs)</step>
+    <step order="6">Write unit test skeleton</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Examine existing service patterns</tool>
+    <tool name="Write">Create new service file</tool>
+    <tool name="Edit">Update Program.cs for DI registration</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Ai/IAiPlaybookBuilderService.cs</output>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Ai/AiPlaybookBuilderService.cs</output>
+    <output type="file">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/AiPlaybookBuilderServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Service interface defines ProcessMessageAsync method</criterion>
+    <criterion>Service class implements interface with constructor injection</criterion>
+    <criterion>Service registered in DI container</criterion>
+    <criterion>Unit test file created with at least one test</criterion>
+    <criterion>Build succeeds with no errors</criterion>
+  </acceptance-criteria>
+</task>

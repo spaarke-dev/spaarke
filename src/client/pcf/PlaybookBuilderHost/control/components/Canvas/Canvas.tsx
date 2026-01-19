@@ -138,6 +138,8 @@ export const Canvas = React.memo(function Canvas() {
           animated: true,
         }}
         style={reactFlowStyle}
+        deleteKeyCode="Delete"
+        selectionKeyCode="Shift"
       >
         <Background
           variant={BackgroundVariant.Dots}

@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Implement clarification loop for ambiguous input</title>
+    <phase>3</phase>
+    <tags>ai, ux</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>021, 022</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <notes>
+    <note date="2026-01-16">
+      Implemented ClarificationService with:
+      - IClarificationService interface for generating clarification prompts
+      - GenerateIntentClarification: Creates prompts when intent confidence &lt; 75%
+      - GenerateEntityClarification: Creates prompts for ambiguous node/scope references
+      - GenerateScopeClarification: Creates prompts with "Create new" option when confidence &lt; 70%
+      - GetLikelyAlternatives: Infers alternative intents from message keywords
+      - FormatForStreaming: Converts clarification to SSE-ready BuilderStreamChunk
+
+      Models created:
+      - ClarificationRequest: Type, Question, Options, AllowFreeText, ScopeCategory
+      - ClarifyOption: Id, Label, Description, Confidence
+      - ClarificationType enum (Intent, Entity, Scope)
+      - IntentAlternative: Intent category with confidence
+      - ClarificationOptionIds constants (CreateNew, Cancel, FreeText)
+
+      All 23 unit tests pass.
+    </note>
+  </notes>
+
+  <prompt>
+    <goal>Implement clarification prompts when intent or entities are ambiguous.</goal>
+    <context>
+      When confidence is below threshold:
+      - Intent &lt; 75%: "Did you mean to [A] or [B]?"
+      - Entity &lt; 80%: Show matching options
+      - Scope &lt; 70%: Ask user to select or create
+    </context>
+    <constraints>
+      - User-friendly messages
+      - Preserve conversation context
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md" reason="Clarification spec" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create ClarificationService</step>
+    <step order="2">Generate clarification messages for low-confidence intents</step>
+    <step order="3">Generate option lists for ambiguous entities</step>
+    <step order="4">Format as SSE message events</step>
+    <step order="5">Test clarification scenarios</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create clarification service</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Ai/ClarificationService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Low intent confidence triggers clarification</criterion>
+    <criterion>Ambiguous entities show options</criterion>
+    <criterion>Messages are user-friendly</criterion>
+    <criterion>Conversation context preserved</criterion>
+  </acceptance-criteria>
+</task>

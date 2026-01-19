@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Implement mock test with sample data generation</title>
+    <phase>4</phase>
+    <tags>bff-api, testing, ai</tags>
+    <estimate>1d</estimate>
+    <dependencies>030</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Implement mock test mode that generates sample data based on scope definitions.</goal>
+    <context>
+      Mock test behavior:
+      - No real document required
+      - Generate sample extraction data from scope schemas
+      - Execute playbook against synthetic data
+      - Show expected node outputs
+      - Fast execution for quick validation
+    </context>
+    <constraints>
+      - Sample data must match scope field definitions
+      - Execution must complete in <5 seconds
+      - Results must be clearly labeled as "mock"
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md" reason="Mock test design" />
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookExecutionEngine.cs" reason="Execution engine" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create MockDataGenerator service</step>
+    <step order="2">Implement scope-based sample data generation</step>
+    <step order="3">Create MockTestExecutor class</step>
+    <step order="4">Integrate with test endpoint</step>
+    <step order="5">Add mock result formatting</step>
+    <step order="6">Unit test mock generation</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create mock generator service</tool>
+    <tool name="Edit">Integrate with test endpoint</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Ai/MockDataGenerator.cs</output>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Ai/MockTestExecutor.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Sample data generated from scope definitions</criterion>
+    <criterion>Playbook executes against mock data</criterion>
+    <criterion>Results show node outputs</criterion>
+    <criterion>Execution completes in &lt;5 seconds</criterion>
+  </acceptance-criteria>
+</task>

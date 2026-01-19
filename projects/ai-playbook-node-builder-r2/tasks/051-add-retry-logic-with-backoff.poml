@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Add retry logic with backoff</title>
+    <phase>6</phase>
+    <tags>bff-api, resilience</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>050</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Implement retry logic with exponential backoff for transient failures.</goal>
+    <context>
+      Retry scenarios:
+      - Azure OpenAI rate limits (429)
+      - Dataverse throttling
+      - Network timeouts
+      - Document Intelligence temporary failures
+
+      Backoff strategy:
+      - Initial delay: 1s
+      - Max delay: 30s
+      - Max retries: 3
+      - Jitter for distributed load
+    </context>
+    <constraints>
+      - Use Polly for resilience
+      - Don't retry on 4xx client errors (except 429)
+      - Log retry attempts
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/spec.md" reason="Resilience requirements" />
+      <file path="src/server/api/Sprk.Bff.Api/Services/" reason="Existing services" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add Polly NuGet package</step>
+    <step order="2">Create retry policy configuration</step>
+    <step order="3">Apply to Azure OpenAI calls</step>
+    <step order="4">Apply to Dataverse calls</step>
+    <step order="5">Apply to Document Intelligence calls</step>
+    <step order="6">Add logging for retries</step>
+    <step order="7">Test retry behavior</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">dotnet add package Polly</tool>
+    <tool name="Edit">Add retry policies</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Infrastructure/Resilience/RetryPolicies.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Polly policies configured</criterion>
+    <criterion>Retries on transient failures</criterion>
+    <criterion>Exponential backoff with jitter</criterion>
+    <criterion>Retry attempts logged</criterion>
+    <criterion>No retry on client errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <completion-date>2026-01-17</completion-date>
+    <summary>
+      Implemented retry logic with exponential backoff using Polly.
+      Created RetryPolicies.cs with:
+      - HTTP retry policies for Azure OpenAI, Dataverse, Document Intelligence
+      - Exponential backoff (1s, 2s, 4s...) capped at 30s
+      - Jitter factor (±50%) for distributed load balancing
+      - MaxRetries: 3
+      - Handles 429 (rate limit), 503 (unavailable), transient errors
+      - Does NOT retry 4xx client errors (except 429)
+      - Logging for all retry attempts with correlation
+
+      Additional features:
+      - Generic CreateRetryPolicy for any exception type
+      - Result-based retry policies
+      - RetryPolicyExtensions for IHttpClientBuilder
+      - RetryableResult wrapper for operations
+      - Context factory with correlation ID support
+    </summary>
+    <files-created>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Resilience/RetryPolicies.cs</file>
+    </files-created>
+  </notes>
+</task>

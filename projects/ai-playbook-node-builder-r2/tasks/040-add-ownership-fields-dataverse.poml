@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Add ownership fields to Dataverse schema</title>
+    <phase>5</phase>
+    <tags>dataverse, schema</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>none</dependencies>
+    <status>completed</status>
+    <completed>2026-01-17</completed>
+  </metadata>
+
+  <prompt>
+    <goal>Add ownership tracking fields to scope and playbook entities in Dataverse.</goal>
+    <context>
+      Fields to add:
+      - sprk_ownershiptype (Choice): System, Customer
+      - sprk_isimmutable (Boolean): For SYS- scopes
+      - sprk_parentid (Lookup): For extended scopes
+
+      Affected entities:
+      - sprk_aiplaybook
+      - sprk_aianalysisaction
+      - sprk_aianalysisskill
+      - sprk_aianalysistool
+      - sprk_aianalysisknowledge
+    </context>
+    <constraints>
+      - Use unmanaged solution
+      - Document migration path for existing data
+      - Default existing records to Customer ownership
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/spec.md" reason="Ownership model" />
+      <file path="src/solutions/CLAUDE.md" reason="Dataverse solution patterns" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Document schema changes needed</step>
+    <step order="2">Create sprk_ownershiptype global choice</step>
+    <step order="3">Add fields to sprk_aiplaybook</step>
+    <step order="4">Add fields to scope entities</step>
+    <step order="5">Set default values for new records</step>
+    <step order="6">Create data migration script for existing</step>
+    <step order="7">Export and verify solution</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">pac CLI for solution export</tool>
+    <tool name="Write">Migration script</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse">Updated entity schemas</output>
+    <output type="file">scripts/dataverse/Migrate-OwnershipFields.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Ownership fields exist on all entities</criterion>
+    <criterion>Default values set correctly</criterion>
+    <criterion>Migration script works</criterion>
+    <criterion>Solution exports cleanly</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2026-01-17">
+      Implementation complete:
+      - Created Migrate-OwnershipFields.ps1 migration script
+      - Documents schema changes for ownership fields:
+        - sprk_ownershiptype (Global Choice): System (100000000) / Customer (100000001)
+        - sprk_isimmutable (Boolean): For SYS- prefixed scopes
+        - sprk_parentid (Lookup): Self-referential for extended scopes
+      - Affected entities documented: sprk_aiplaybook, sprk_aianalysisaction,
+        sprk_aianalysisskill, sprk_aianalysistool, sprk_aianalysisknowledge
+      - Script generates solution XML snippets for import
+      - Data migration sets existing records to Customer ownership
+      - Supports -WhatIf for preview mode
+    </note>
+  </notes>
+</task>

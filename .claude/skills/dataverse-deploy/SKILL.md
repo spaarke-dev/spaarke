@@ -9,7 +9,7 @@ alwaysApply: false
 # Dataverse Deploy
 
 > **Category**: Operations
-> **Last Updated**: January 16, 2026
+> **Last Updated**: January 18, 2026
 > **Primary Guide**: [`docs/guides/PCF-DEPLOYMENT-GUIDE.md`](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md)
 
 ---
@@ -27,6 +27,11 @@ alwaysApply: false
 - ✅ **MUST** include `.js` and `.css` entries in `[Content_Types].xml`
 - ✅ **MUST** use `pack.ps1` script (creates forward slashes in ZIP)
 - ✅ **MUST** disable/restore CPM around PAC commands
+
+### 🚨 CRITICAL - Control Version is the Cache Key:
+- ✅ **MUST** update `ControlManifest.Input.xml` version FIRST - this is what Dataverse uses to detect updates
+- ✅ **MUST** increment the control version for EVERY deployment, not just the solution version
+- ⚠️ If you only update `solution.xml` but not `ControlManifest.Input.xml`, Dataverse will NOT update the control
 
 ### NEVER:
 - ❌ **NEVER** use managed solution unless explicitly told - unmanaged is the default
@@ -97,6 +102,56 @@ pac solution list | grep -i "{SolutionName}"
 Hard refresh browser (`Ctrl+Shift+R`) and verify version footer.
 
 > **⚠️ Why NOT `pac pcf push`?** It ALWAYS rebuilds in development mode, ignoring production optimizations. Bundle size increases from ~300KB to 8MB. Tree-shaking is lost. Use the pack.ps1 workflow instead.
+
+---
+
+## 🚨 Dataverse Control Caching (READ THIS)
+
+**Dataverse caches PCF controls aggressively.** If your deployment seems to succeed but the browser still shows old behavior, the cache wasn't busted.
+
+### Root Cause
+
+Dataverse determines whether to update a control based on the **control manifest version** (`ControlManifest.Input.xml`), NOT just the solution version. If you:
+- ✅ Update `solution.xml` version
+- ❌ Forget to update `ControlManifest.Input.xml` version
+
+...then Dataverse sees the same control version and **silently keeps the old bundle**.
+
+### The Fix: Version Order Matters
+
+**Always update versions in this order:**
+
+1. **FIRST**: `control/ControlManifest.Input.xml` → `version="X.Y.Z"` (THIS IS THE KEY)
+2. Then rebuild (this propagates to `out/controls/control/ControlManifest.xml`)
+3. Copy all 3 files to Solution folder
+4. Update `Solution/solution.xml` → `<Version>X.Y.Z</Version>`
+5. Update `Solution/pack.ps1` → `$version = "X.Y.Z"`
+
+### Nuclear Option: Delete and Reimport
+
+If you've deployed but the control is still cached:
+
+```bash
+# Delete the solution completely from Dataverse
+pac solution delete --solution-name {SolutionName}
+
+# Reimport fresh
+pac solution import --path bin/{SolutionName}_vX.Y.Z.zip --publish-changes
+
+# Verify
+pac solution list | grep -i "{SolutionName}"
+```
+
+Then hard refresh browser (`Ctrl+Shift+R`).
+
+### Symptoms of Caching Issue
+
+| Symptom | Likely Cause |
+|---------|--------------|
+| `pac solution import` succeeds but UI unchanged | Control version not incremented |
+| `pac solution list` shows new version but old behavior | Control manifest version mismatch |
+| Hard refresh doesn't help | Need delete + reimport |
+| Same control works in one browser but not another | Browser cache - try incognito |
 
 ---
 
@@ -472,6 +527,8 @@ pac solution publish-all
 | Solution zip not created | pack.ps1 failed | Check pack.ps1 script exists and run manually |
 | `Orphaned component blocking deployment` | Namespace changed or old controls exist | Delete orphaned controls via Web API (see below) |
 | `CustomControls Source File styles.css does not exist` | styles.css not copied to solution folder | Copy ALL 3 files to Solution folder |
+| Solution import succeeds but UI shows old behavior | Control manifest version not updated | **Update ControlManifest.Input.xml version FIRST**, rebuild, then deploy |
+| Deployment seems stuck on old version | Dataverse control cache | Delete solution with `pac solution delete`, then reimport fresh |
 
 ### Orphaned Control Cleanup
 
@@ -614,3 +671,24 @@ gh workflow run deploy-staging.yml -f deploy_plugins=true
 | Resource | Purpose |
 |----------|---------|
 | [`docs/guides/PCF-DEPLOYMENT-GUIDE.md`](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md) | **Primary guide** - Consolidated PCF deployment workflow |
+
+---
+
+## Tips for AI
+
+**🚨 CRITICAL: Control Manifest Version is the Cache Key**
+
+When deploying PCF updates, the #1 cause of "deployment succeeded but nothing changed" is forgetting to update the control manifest version. Follow this exact order:
+
+1. **FIRST**: Update `control/ControlManifest.Input.xml` version attribute
+2. **THEN**: Rebuild with `npm run build:prod` (or `pcf-scripts build --buildMode production`)
+3. **THEN**: Copy ALL 3 files to Solution folder
+4. **THEN**: Update `solution.xml` and `pack.ps1` versions
+5. **THEN**: Pack and import
+
+**If the user reports the control isn't updating after deployment:**
+1. Check if `ControlManifest.Input.xml` version was incremented
+2. If not, increment it, rebuild, and redeploy
+3. If still stuck, use the nuclear option: `pac solution delete` then reimport
+
+**Never assume** that updating `solution.xml` alone will bust the cache. The control manifest version is what Dataverse checks.

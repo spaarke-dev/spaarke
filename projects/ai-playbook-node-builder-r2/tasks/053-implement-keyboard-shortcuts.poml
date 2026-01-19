@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="053" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Implement keyboard shortcuts (Cmd/Ctrl+K)</title>
+    <phase>6</phase>
+    <tags>pcf, accessibility</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>Phase 2</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Implement keyboard shortcuts for common AI assistant actions.</goal>
+    <context>
+      Shortcuts:
+      - Cmd/Ctrl+K: Toggle AI assistant
+      - Escape: Close modal/dialog
+      - Enter: Send message (in chat)
+      - Shift+Enter: New line in chat
+      - Tab: Navigate between elements
+    </context>
+    <constraints>
+      - Don't conflict with browser/Dataverse shortcuts
+      - Support both Mac and Windows
+      - Accessible focus management
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md" reason="UX requirements" />
+      <file path="src/client/pcf/PlaybookBuilderHost/components/" reason="Existing components" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create keyboard shortcut hook</step>
+    <step order="2">Implement Cmd/Ctrl+K toggle</step>
+    <step order="3">Implement Escape handling</step>
+    <step order="4">Implement chat Enter/Shift+Enter</step>
+    <step order="5">Add focus management</step>
+    <step order="6">Document shortcuts in help</step>
+    <step order="7">Test on Mac and Windows</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create keyboard hook</tool>
+    <tool name="Edit">Wire to components</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/client/pcf/PlaybookBuilderHost/hooks/useKeyboardShortcuts.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Cmd/Ctrl+K toggles assistant</criterion>
+    <criterion>Escape closes modals</criterion>
+    <criterion>Enter sends messages</criterion>
+    <criterion>No shortcut conflicts</criterion>
+    <criterion>Works on Mac and Windows</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <completion-date>2026-01-17</completion-date>
+    <summary>
+      Implemented keyboard shortcuts hook for AI assistant.
+      Created useKeyboardShortcuts.ts with:
+      - Cmd/Ctrl+K toggle support (Mac/Windows)
+      - Escape key handling
+      - Configurable shortcut registry
+      - Modifier key support (ctrlOrCmd, shift, alt)
+      - Scoped shortcuts (per element)
+      - formatShortcut helper for display (⌘K vs Ctrl+K)
+      - createAiAssistantShortcuts factory function
+      - Prevention of conflicts with browser/input shortcuts
+    </summary>
+    <files-created>
+      <file>src/client/pcf/PlaybookBuilderHost/control/hooks/useKeyboardShortcuts.ts</file>
+    </files-created>
+  </notes>
+</task>

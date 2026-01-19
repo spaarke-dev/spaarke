@@ -10,7 +10,8 @@
   <OrganizationSettings />
   <optionsets />
   <CustomControls>
-    <CustomControl Name="sprk_Spaarke.Controls.PlaybookBuilderHost">
+    <CustomControl>
+      <Name>sprk_Spaarke.Controls.PlaybookBuilderHost</Name>
       <FileName>/Controls/sprk_Spaarke.Controls.PlaybookBuilderHost/ControlManifest.xml</FileName>
     </CustomControl>
   </CustomControls>

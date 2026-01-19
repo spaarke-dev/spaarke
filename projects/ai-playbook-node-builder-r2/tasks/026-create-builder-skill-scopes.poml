@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="026" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Create SKL-BUILDER-001 through SKL-BUILDER-005</title>
+    <phase>3</phase>
+    <tags>dataverse, scopes</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>none</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <notes>
+    <note date="2026-01-16">
+      Created 5 Builder Skill records via Create-BuilderScopes.ps1:
+      - SKL-BUILDER-001: Lease Analysis Pattern (7cf5242f-60f3-f011-8406-7ced8d1dc988)
+      - SKL-BUILDER-002: Contract Review Pattern (7ff5242f-60f3-f011-8406-7ced8d1dc988)
+      - SKL-BUILDER-003: Risk Assessment Pattern (4a811a31-60f3-f011-8406-7c1e520aa4df)
+      - SKL-BUILDER-004: Node Type Guide (4b811a31-60f3-f011-8406-7c1e520aa4df)
+      - SKL-BUILDER-005: Scope Matching (4c811a31-60f3-f011-8406-7c1e520aa4df)
+
+      Each skill includes detailed prompt fragments for playbook building patterns.
+    </note>
+  </notes>
+
+  <prompt>
+    <goal>Create the 5 Builder Skill scope records in Dataverse.</goal>
+    <context>
+      Builder Skills:
+      - SKL-BUILDER-001: Lease Analysis Pattern
+      - SKL-BUILDER-002: Contract Review Pattern
+      - SKL-BUILDER-003: Risk Assessment Pattern
+      - SKL-BUILDER-004: Node Type Guide
+      - SKL-BUILDER-005: Scope Matching
+    </context>
+    <constraints>
+      - SYS- ownership
+      - Include skill prompts
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md" reason="Skill definitions" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define skill prompt content</step>
+    <step order="2">Create Dataverse records</step>
+    <step order="3">Verify records</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Create Dataverse records</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse">5 sprk_aianalysisskill records</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>5 Skill records created</criterion>
+    <criterion>All have SYS- prefix</criterion>
+    <criterion>Content populated</criterion>
+  </acceptance-criteria>
+</task>

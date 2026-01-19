@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Build AiAssistantModal container component</title>
+    <phase>2</phase>
+    <tags>pcf, fluent-ui, component</tags>
+    <estimate>1d</estimate>
+    <dependencies>010</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Build the floating AI assistant modal container using Fluent UI v9.</goal>
+    <context>
+      The modal is a floating, resizable panel that contains:
+      - Chat history area
+      - Chat input
+      - Operation feedback
+      Can be positioned and dragged within the canvas area.
+    </context>
+    <constraints>
+      - Use Fluent UI v9 components only (ADR-021)
+      - Support light and dark mode
+      - Use design tokens for colors
+      - React 16 compatible (ADR-022)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-021-fluent-design-system.md" reason="UI requirements" />
+      <file path=".claude/adr/ADR-022-pcf-platform-libraries.md" reason="React 16" />
+      <file path="src/client/pcf/CLAUDE.md" reason="PCF guidelines" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create components/AiAssistant/ folder</step>
+    <step order="2">Create AiAssistantModal.tsx using Fluent Dialog/Panel</step>
+    <step order="3">Implement draggable/resizable behavior</step>
+    <step order="4">Add close button and header</step>
+    <step order="5">Create index.ts barrel export</step>
+    <step order="6">Style with makeStyles and tokens</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create component files</tool>
+    <tool name="Bash">Build and check for errors</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/client/pcf/PlaybookBuilderHost/control/components/AiAssistant/AiAssistantModal.tsx</output>
+    <output type="file">src/client/pcf/PlaybookBuilderHost/control/components/AiAssistant/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Modal renders with Fluent UI components</criterion>
+    <criterion>Can be opened/closed via store</criterion>
+    <criterion>Uses design tokens (no hard-coded colors)</criterion>
+    <criterion>Works in dark mode</criterion>
+    <criterion>TypeScript compiles</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Modal Opens and Closes">
+      <steps>
+        <step>Open PlaybookBuilderHost form</step>
+        <step>Click AI assistant toolbar button</step>
+        <step>Verify modal is visible</step>
+        <step>Click close button</step>
+        <step>Verify modal is hidden</step>
+      </steps>
+      <expected>Modal toggles visibility correctly</expected>
+    </test>
+    <test name="Dark Mode Compliance">
+      <steps>
+        <step>Toggle dark mode in settings</step>
+        <step>Open AI assistant modal</step>
+        <step>Verify colors adapt to dark theme</step>
+      </steps>
+      <expected>All colors use semantic tokens per ADR-021</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    <completed-date>2026-01-16</completed-date>
+    <summary>
+      Created AiAssistantModal floating draggable panel component:
+
+      1. COMPONENT STRUCTURE:
+         - Floating absolute-positioned container
+         - Draggable header (Bot icon + "AI Assistant" title)
+         - Resizable via bottom-right corner handle
+         - Minimize button (collapses to header-only)
+         - Close button (calls store.closeModal)
+
+      2. STYLING (ADR-021 COMPLIANT):
+         - All colors use Fluent tokens (no hard-coded values)
+         - tokens.colorNeutralBackground1 for body
+         - tokens.colorBrandBackground for header
+         - tokens.colorNeutralForegroundOnBrand for header text
+         - tokens.shadow16 for floating shadow
+         - Supports light/dark mode automatically
+
+      3. DRAG/RESIZE BEHAVIOR:
+         - Custom mouse event handlers for drag
+         - Window-level event listeners for smooth drag/resize
+         - Configurable min/max width/height constraints
+         - Position and size state tracked locally
+
+      4. STORE INTEGRATION:
+         - Uses useAiAssistantStore for isOpen state
+         - Calls closeModal() on close button click
+         - Visibility controlled via isOpen state
+
+      5. FILES CREATED:
+         - components/AiAssistant/AiAssistantModal.tsx (290 lines)
+         - components/AiAssistant/index.ts (barrel export)
+
+      6. ACCEPTANCE CRITERIA MET:
+         - ✅ Modal renders with Fluent UI components (Card, Button, Text)
+         - ✅ Can be opened/closed via store
+         - ✅ Uses design tokens (no hard-coded colors)
+         - ✅ Works in dark mode (all colors are token-based)
+         - ✅ TypeScript compiles without errors
+    </summary>
+  </notes>
+</task>

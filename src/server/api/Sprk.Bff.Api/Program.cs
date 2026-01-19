@@ -69,6 +69,15 @@ builder.Services
     .ValidateDataAnnotations()
     .ValidateOnStart();
 
+// Model Selector Options - Tiered AI model selection for cost optimization
+// Maps operation types (IntentClassification, PlanGeneration, etc.) to specific models
+// Defaults: gpt-4o-mini for fast ops, o1-mini for reasoning, gpt-4o for generation
+builder.Services
+    .AddOptions<ModelSelectorOptions>()
+    .Bind(builder.Configuration.GetSection(ModelSelectorOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+
 // Custom validation for conditional requirements
 builder.Services.AddSingleton<IValidateOptions<GraphOptions>, GraphOptionsValidator>();
 builder.Services.AddSingleton<IValidateOptions<DocumentIntelligenceOptions>, DocumentIntelligenceOptionsValidator>();
@@ -331,6 +340,7 @@ if (analysisEnabled && documentIntelligenceEnabled)
 
     // Analysis services - all scoped due to SpeFileStore dependency
     builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IScopeResolverService, Sprk.Bff.Api.Services.Ai.ScopeResolverService>();
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IScopeManagementService, Sprk.Bff.Api.Services.Ai.ScopeManagementService>();
     builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IAnalysisContextBuilder, Sprk.Bff.Api.Services.Ai.AnalysisContextBuilder>();
     builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IWorkingDocumentService, Sprk.Bff.Api.Services.Ai.WorkingDocumentService>();
 
@@ -359,6 +369,40 @@ if (analysisEnabled && documentIntelligenceEnabled)
 
     // Playbook Orchestration Service - multi-node playbook execution (ai-node-playbook-builder project)
     builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IPlaybookOrchestrationService, Sprk.Bff.Api.Services.Ai.PlaybookOrchestrationService>();
+
+    // AI Playbook Builder Service - conversational AI assistance for playbook building (ai-playbook-node-builder-r2 project)
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IAiPlaybookBuilderService, Sprk.Bff.Api.Services.Ai.AiPlaybookBuilderService>();
+
+    // Model Selector - tiered AI model selection for cost optimization (ai-playbook-node-builder-r2 project)
+    // Maps operation types to optimal models: mini for fast ops, o1-mini for reasoning, gpt-4o for generation
+    builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.IModelSelector, Sprk.Bff.Api.Services.Ai.ModelSelector>();
+
+    // Intent Classification - classifies user messages into 11 intent categories (ai-playbook-node-builder-r2 project)
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IIntentClassificationService, Sprk.Bff.Api.Services.Ai.IntentClassificationService>();
+
+    // Entity Resolution - resolves user references to node/scope IDs with confidence scoring (ai-playbook-node-builder-r2 project)
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IEntityResolutionService, Sprk.Bff.Api.Services.Ai.EntityResolutionService>();
+
+    // Clarification Service - generates clarification prompts for low-confidence intent/entity resolution (ai-playbook-node-builder-r2 project)
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IClarificationService, Sprk.Bff.Api.Services.Ai.ClarificationService>();
+
+    // Testing Services - Mock and Quick test execution for playbook validation (ai-playbook-node-builder-r2 Phase 4)
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.Testing.IMockDataGenerator, Sprk.Bff.Api.Services.Ai.Testing.MockDataGenerator>();
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.Testing.IMockTestExecutor, Sprk.Bff.Api.Services.Ai.Testing.MockTestExecutor>();
+
+    // Temp Blob Storage - 24hr TTL storage for Quick Test documents (ai-playbook-node-builder-r2 Phase 4)
+    var storageConnectionString = builder.Configuration.GetConnectionString("BlobStorage")
+        ?? builder.Configuration["AzureStorage:ConnectionString"];
+    if (!string.IsNullOrEmpty(storageConnectionString))
+    {
+        builder.Services.AddSingleton(sp => new Azure.Storage.Blobs.BlobServiceClient(storageConnectionString));
+        builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Testing.ITempBlobStorageService, Sprk.Bff.Api.Services.Ai.Testing.TempBlobStorageService>();
+        // Quick Test Executor - requires temp blob storage and text extraction (Task 033)
+        builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.Testing.IQuickTestExecutor, Sprk.Bff.Api.Services.Ai.Testing.QuickTestExecutor>();
+    }
+
+    // Production Test Executor - uses SPE file operations for real document testing (Task 035)
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.Testing.IProductionTestExecutor, Sprk.Bff.Api.Services.Ai.Testing.ProductionTestExecutor>();
 
     // Template Engine - Handlebars.NET for variable substitution in prompts and delivery templates
     builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.ITemplateEngine, Sprk.Bff.Api.Services.Ai.TemplateEngine>();
@@ -402,7 +446,7 @@ if (analysisEnabled && documentIntelligenceEnabled)
         builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.IRagService, Sprk.Bff.Api.Services.Ai.RagService>();
 
         // FileIndexingService - Unified RAG indexing pipeline (download → extract → chunk → embed → index)
-        // Scoped because it depends on ISpeFileOperations (which is scoped due to Graph token caching)
+        // Scoped lifetime to allow injection of scoped services (e.g., ISpeFileOperations)
         builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IFileIndexingService, Sprk.Bff.Api.Services.Ai.FileIndexingService>();
 
         // VisualizationService - Document relationship visualization using vector similarity
@@ -1220,6 +1264,7 @@ if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
 {
     app.MapAnalysisEndpoints();
     app.MapPlaybookEndpoints();
+    app.MapAiPlaybookBuilderEndpoints(); // AI Chat Playbook Builder (ai-playbook-node-builder-r2 project)
     app.MapScopeEndpoints();
     app.MapNodeEndpoints();
     app.MapPlaybookRunEndpoints();
