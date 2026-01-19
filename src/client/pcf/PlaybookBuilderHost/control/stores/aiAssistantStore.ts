@@ -721,8 +721,9 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
         },
 
         // Handle canvas patch events - apply to canvas and track operations
+        // API wraps the patch in a 'patch' property
         onCanvasPatch: (data: CanvasPatchEventData) => {
-          const operations = get().applyCanvasPatch(data);
+          const operations = get().applyCanvasPatch(data.patch);
 
           // Add operations to assistant message
           set((s) => ({

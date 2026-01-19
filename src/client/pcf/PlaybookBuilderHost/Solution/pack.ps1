@@ -6,7 +6,7 @@ $solutionDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $M
 if (-not $solutionDir) { $solutionDir = Get-Location }
 $solutionDir = Resolve-Path $solutionDir
 
-$version = "2.20.1"
+$version = "2.20.2"
 $binDir = Join-Path $solutionDir 'bin'
 $zipPath = Join-Path $binDir "PlaybookBuilderHost_v$version.zip"
 

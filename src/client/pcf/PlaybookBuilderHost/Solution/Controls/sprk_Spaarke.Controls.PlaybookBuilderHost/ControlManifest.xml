@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="PlaybookBuilderHost" version="2.20.1" display-name-key="Playbook Builder Host" description-key="Node-based Playbook Builder with visual canvas for AI workflow design" control-type="standard" api-version="1.3.18">
+  <control namespace="Spaarke.Controls" constructor="PlaybookBuilderHost" version="2.20.2" display-name-key="Playbook Builder Host" description-key="Node-based Playbook Builder with visual canvas for AI workflow design" control-type="standard" api-version="1.3.18">
     <external-service-usage enabled="false"/>
     <property name="playbookId" display-name-key="Playbook ID" description-key="Optional fallback - record ID is auto-detected from form context" of-type="SingleLine.Text" usage="input" required="false"/>
     <property name="playbookName" display-name-key="Playbook Name" description-key="Name of the playbook (sprk_name)" of-type="SingleLine.Text" usage="bound" required="false"/>

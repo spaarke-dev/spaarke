@@ -93,8 +93,11 @@ export interface DataverseOperationEventData {
 
 /**
  * Canvas patch event - changes to apply to canvas.
+ * The API wraps the patch in a 'patch' property.
  */
-export interface CanvasPatchEventData extends CanvasPatch {}
+export interface CanvasPatchEventData {
+  patch: CanvasPatch;
+}
 
 /**
  * Message event - AI response text.
