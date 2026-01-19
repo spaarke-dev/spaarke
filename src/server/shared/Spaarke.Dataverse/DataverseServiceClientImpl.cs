@@ -95,22 +95,12 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
         try
         {
+            // Use AllColumns=true to retrieve all available fields without risking "attribute not found" errors
+            // Different Dataverse environments may have different fields available
             var entity = await _serviceClient.RetrieveAsync(
                 "sprk_document",
                 Guid.Parse(id),
-                new ColumnSet(
-                    // Basic document properties
-                    "sprk_documentname", "sprk_documentdescription", "sprk_containerid",
-                    "sprk_hasfile", "sprk_filename", "sprk_filesize", "sprk_mimetype",
-                    "sprk_graphitemid", "sprk_graphdriveid", "sprk_filepath",
-                    "statuscode", "statecode", "createdon", "modifiedon",
-                    // Email fields (for visualization relationships)
-                    // Note: sprk_emailcc doesn't exist in Dataverse schema - excluded
-                    "sprk_emailsubject", "sprk_emailfrom", "sprk_emailto",
-                    "sprk_emaildate", "sprk_emailbody", "sprk_isemailarchive",
-                    "sprk_parentdocument", "sprk_emailconversationindex",
-                    // Lookup fields (for visualization relationships)
-                    "sprk_matter", "sprk_project", "sprk_invoice"),
+                new ColumnSet(true), // AllColumns - safer than specifying fields that may not exist
                 ct);
 
             if (entity == null)
@@ -119,20 +109,24 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
                 return null;
             }
 
-            _logger.LogInformation("[DATAVERSE-DEBUG] GetDocumentAsync: Found entity with {AttrCount} attributes", entity.Attributes.Count);
+            _logger.LogInformation("[DATAVERSE-DEBUG] GetDocumentAsync: Found entity with {AttrCount} attributes: {Attributes}",
+                entity.Attributes.Count, string.Join(", ", entity.Attributes.Keys.Take(20)));
 
-            // Use the full mapping method that includes email and lookup fields
+            // Use the full mapping method that includes email and lookup fields (safely handles missing fields)
             return MapToDocumentEntityWithLookups(entity);
         }
-        catch (Exception ex) when (ex.Message.Contains("does not exist") || ex.Message.Contains("ObjectDoesNotExist") || ex.Message.Contains("0x80040217"))
+        catch (Exception ex) when (ex.Message.Contains("0x80040217") || // Object doesn't exist error code
+                                   ex.Message.Contains("sprk_document With Id") ||  // Specific record not found message
+                                   (ex.Message.Contains("does not exist") && !ex.Message.Contains("attribute"))) // Not found but not attribute error
         {
             // Dataverse returns FaultException when record doesn't exist
-            _logger.LogWarning("[DATAVERSE-DEBUG] GetDocumentAsync: Document {Id} does not exist in Dataverse", id);
+            _logger.LogWarning("[DATAVERSE-DEBUG] GetDocumentAsync: Document {Id} does not exist in Dataverse. Error: {Error}", id, ex.Message);
             return null;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[DATAVERSE-DEBUG] GetDocumentAsync: Unexpected error retrieving document {Id}", id);
+            // Log the full error details to help diagnose attribute/field issues
+            _logger.LogError(ex, "[DATAVERSE-DEBUG] GetDocumentAsync: Error retrieving document {Id}. Message: {Message}", id, ex.Message);
             throw;
         }
     }
