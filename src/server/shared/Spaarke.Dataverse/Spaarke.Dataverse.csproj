@@ -11,7 +11,7 @@
   <ItemGroup>
     <PackageReference Include="Azure.Core" Version="1.50.0" />
     <PackageReference Include="Azure.Identity" Version="1.17.1" />
-    <PackageReference Include="Microsoft.Extensions.Caching.Abstractions" Version="10.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Caching.Abstractions" Version="10.0.2" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="8.0.0" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.3" />
     <PackageReference Include="Microsoft.Identity.Client" Version="4.79.2" />
