@@ -1,169 +1,373 @@
 # RAG Document Ingestion Pipeline - Comprehensive Assessment
 
-> **Date**: 2026-01-14 (Updated from 2026-01-11)
-> **Status**: Assessment Refreshed - Implementation Gaps Remain
+> **Date**: 2026-01-19
+> **Status**: ✅ Architecture Consolidated - Phase 1 Complete, Phase 2 (Bulk Indexing) In Progress
 > **Author**: AI Analysis
 > **Related Issue**: Documents not being indexed to AI Search on upload
-> **Last Code Review**: 2026-01-14
+> **Last Code Review**: 2026-01-19
 
 ---
 
 ## Executive Summary
 
-The Spaarke platform has **all core RAG components implemented** but lacks the **orchestration layer** that connects document upload to RAG indexing. The visualization control's 500 error occurs because documents are stored in SPE (SharePoint Embedded) but never indexed into Azure AI Search.
+### ✅ RESOLVED: Architecture Consolidation Complete (2026-01-19)
 
-**Root Cause**: No trigger mechanism exists to invoke the indexing pipeline when documents are uploaded or created.
+The dual-queue architecture has been eliminated. All RAG indexing now uses a single `sdap-jobs` queue:
 
-**Solution Path**: Create a `DocumentIndexingService` that orchestrates existing components, and wire it to document lifecycle events.
+**Changes Made:**
+- ❌ **DELETED**: `DocumentEventProcessor.cs` and 5 related files (~460 lines)
+- ❌ **DELETED**: `DocumentEventProcessorOptions.cs`, `DocumentEventTelemetry.cs`, `DocumentEvent.cs`
+- ❌ **DELETED**: `IDocumentEventHandler.cs`, `DocumentEventHandler.cs`
+- ❌ **DELETED**: `DocumentEventHandlerRagTests.cs` (obsolete test)
+- ✅ **UPDATED**: `WorkersModule.cs` - removed DocumentEventProcessor registration
+- ✅ **UPDATED**: `appsettings.template.json` - removed DocumentEventProcessor config section
+
+### Current Architecture (Consolidated)
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    CONSOLIDATED RAG INDEXING ARCHITECTURE               │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  REAL-TIME INDEXING (Existing - Working)                                │
+│  ┌──────────────┐    ┌──────────────┐    ┌───────────────────────────┐ │
+│  │ FileUpload   │───►│ /api/ai/rag/ │───►│ FileIndexingService       │ │
+│  │ PCF          │    │ index-file   │    │ (OBO auth, synchronous)   │ │
+│  └──────────────┘    └──────────────┘    └───────────────────────────┘ │
+│                                                                         │
+│  ┌──────────────┐    ┌──────────────┐    ┌───────────────────────────┐ │
+│  │ Email        │───►│ sdap-jobs    │───►│ RagIndexingJobHandler     │ │
+│  │ Processing   │    │ queue        │    │ (app-only auth)           │ │
+│  └──────────────┘    └──────────────┘    └───────────────────────────┘ │
+│                                                                         │
+│  BULK INDEXING (Phase 2 - In Progress)                                  │
+│  ┌──────────────┐    ┌──────────────┐    ┌───────────────────────────┐ │
+│  │ Admin UI     │───►│ POST /api/ai │───►│ BulkRagIndexingJobHandler │ │
+│  │ "Index Docs" │    │ /rag/admin/  │    │ (progress tracking)       │ │
+│  │              │    │ bulk-index   │    │                           │ │
+│  └──────────────┘    └──────────────┘    └───────────────────────────┘ │
+│                                                                         │
+│  ┌──────────────┐    ┌──────────────┐    ┌───────────────────────────┐ │
+│  │ Scheduled    │───►│ sdap-jobs    │───►│ BulkRagIndexingJobHandler │ │
+│  │ Timer Job    │    │ queue        │    │ (find unindexed docs)     │ │
+│  └──────────────┘    └──────────────┘    └───────────────────────────┘ │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### What's Working ✅
+- **Email attachments** → Indexed successfully (via `sdap-jobs` queue)
+- **PCF FileUpload** → Direct API call to `/api/ai/rag/index-file` (working)
+
+### Remaining Work (Phase 2) 🔧
+- **Bulk indexing endpoint** → For admin manual indexing (in progress)
+- **Scheduled indexing** → For periodic indexing of unindexed documents (in progress)
+
+### Key Constraints
+- **No Dataverse Plugins** - ADR-002 prohibits HTTP/Service Bus calls from plugins
+- **Single Queue Architecture** - All async processing via `sdap-jobs` queue
 
 ---
 
-## Recent Updates (Since 2026-01-11)
+## End-to-End Flow Analysis (2026-01-19)
 
-### Code Changes (Jan 12, 2026)
-| File | Change |
-|------|--------|
-| `RagService.cs` | Added Polly 8.x circuit breaker resilience (Task 072) |
-| `OpenAiClient.cs` | Added circuit breaker for embedding API calls |
-| `IRagService.cs` | Interface updated to support resilience patterns |
-| `IOpenAiClient.cs` | Interface updated for circuit breaker support |
-| `KnowledgeDeploymentService.cs` | Deployment config caching improvements |
+### Flow 1: PCF FileUpload → Search Index ✅ WORKING
 
-### Implementation Status (Unchanged)
-The core **orchestration gap remains**: no `IDocumentIndexingService` has been created to connect document upload to RAG indexing. All placeholder implementations in `DocumentEventHandler.cs` are still `await Task.CompletedTask`.
+**Source**: [DocumentUploadForm.tsx:247-271](src/client/pcf/UniversalQuickCreate/control/components/DocumentUploadForm.tsx#L247-L271)
+
+```
+PCF DocumentUploadForm
+    │
+    ├──► Phase 1: Upload file to SPE
+    │    └── PUT /api/obo/containers/{id}/files/{path} → SpeFileStore.UploadSmallAsUserAsync()
+    │
+    ├──► Phase 2: Create Dataverse document record
+    │    └── documentRecordService.createDocuments()
+    │
+    ├──► Phase 3: AI Summary (optional, streaming)
+    │    └── POST /api/ai/document-intelligence/analyze
+    │
+    └──► Phase 4: RAG Indexing (fire-and-forget)
+         └── POST /api/ai/rag/index-file
+                 │
+                 ▼
+         FileIndexingService.IndexFileAsync() (OBO auth)
+                 │
+                 ├── Download file from SPE (OBO)
+                 ├── Extract text (Document Intelligence)
+                 ├── Chunk text (TextChunkingService)
+                 ├── Generate embeddings (OpenAI)
+                 └── Index to Azure AI Search
+```
+
+**Status**: ✅ WORKING - Documents uploaded via PCF are indexed to Search
+
+### Flow 2: Email → Search Index ✅ WORKING
+
+**Source**: [EmailToDocumentJobHandler.cs:301-303](src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/EmailToDocumentJobHandler.cs#L301-L303)
+
+```
+Graph Webhook → BFF API
+    │
+    ├──► EmailWebhookEndpoints → EmailToDocumentJobHandler
+    │        │
+    │        ├── Create .eml file in SPE
+    │        ├── Create Dataverse document record
+    │        ├── Process attachments → child documents
+    │        │
+    │        └── EnqueueRagIndexingJobAsync() (if AutoIndexToRag=true)
+    │                │
+    │                ▼
+    │        sdap-jobs queue (JobContract with type="RagIndexing")
+    │
+    ▼
+ServiceBusJobProcessor → RagIndexingJobHandler → FileIndexingService (app-only auth)
+```
+
+**Status**: ✅ WORKING - Email documents indexed at 2026-01-19T17:09:06Z
+
+### Flow 3: Matter/Dataverse Documents → Search Index ❌ NOT WORKING
+
+**Intended Source**: [DocumentEventHandler.cs:545-607](src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/DocumentEventHandler.cs#L545-L607)
+
+```
+Dataverse Plugin → Service Bus
+    │
+    ├──► document-events queue (DocumentEvent message)
+    │
+    ▼
+DocumentEventProcessor → DocumentEventHandler.HandleEventAsync()
+    │
+    ├── HandleDocumentCreatedAsync() (sprk_hasfile=true only)
+    │        │
+    │        └── EnqueueRagIndexingJobAsync() (if AutoIndexToRag=true)
+    │                │
+    │                ▼
+    │        sdap-jobs queue (JobContract with type="RagIndexing")
+    │
+    ▼
+ServiceBusJobProcessor → RagIndexingJobHandler → FileIndexingService (app-only auth)
+```
+
+**Status**: ❌ NOT WORKING
+- Queue has 4 dead-lettered messages
+- No logs from DocumentEventProcessor in Application Insights
+- Service is registered but not processing
+
+### Service Bus Queue Status (2026-01-19)
+
+| Queue | Active | Dead Letter | Status |
+|-------|--------|-------------|--------|
+| `sdap-jobs` | 0 | 2938 | Processing, but backlog in DLQ (mostly email duplicates) |
+| `document-events` | 0 | 4 | NOT processing - DocumentEventProcessor appears inactive |
+
+---
+
+## Recommended Solution: Consolidate to Single Queue
+
+### Option A: Fix DocumentEventProcessor (Maintains Current Architecture)
+
+**Pros**: Minimal code changes
+**Cons**: Still has 2-hop inefficiency, maintains complexity
+
+**Steps**:
+1. Debug why DocumentEventProcessor is not processing messages
+2. Check DI registration ordering (potential ServiceBusClient conflict)
+3. Add startup logging to verify service starts
+
+### Option B: Eliminate DocumentEventProcessor (RECOMMENDED) ⭐
+
+**Pros**: Single job queue, simpler architecture, matches email flow
+**Cons**: Requires Dataverse plugin modification
+
+**Steps**:
+1. Modify Dataverse plugin to send `RagIndexing` jobs directly to `sdap-jobs` queue
+2. Use same `JobContract` format as email processing
+3. Delete `DocumentEventProcessor` and `document-events` queue
+4. Update documentation to reflect single-queue architecture
+
+**New Architecture**:
+```
+ALL document indexing flows → sdap-jobs queue → ServiceBusJobProcessor
+                                                        │
+                                                        ├── EmailToDocumentJobHandler
+                                                        ├── RagIndexingJobHandler ← Dataverse plugin jobs
+                                                        └── Other job handlers
+```
+
+### Option C: Enhance PCF Direct Indexing (Simplest Short-Term Fix)
+
+**Pros**: No backend changes needed, immediate fix
+**Cons**: Only works for PCF-created documents, not Dataverse UI/flows
+
+**Steps**:
+1. Ensure all PCF controls that create documents also call `/api/ai/rag/index-file`
+2. For Matter documents: Add indexing call to the form's onSave event
+3. For Dataverse UI users: Provide manual "Index Document" button
+
+---
+
+## Documentation Discrepancy
+
+**RAG-ARCHITECTURE.md** describes a single-queue architecture using `sdap-jobs`:
+- `ServiceBusJobProcessor` processes all jobs
+- `RagIndexingJobHandler` handles indexing jobs
+- No mention of `DocumentEventProcessor` or `document-events` queue
+
+**Actual Implementation** has two processors:
+- `ServiceBusJobProcessor` for `sdap-jobs` queue (working)
+- `DocumentEventProcessor` for `document-events` queue (not working)
+
+**Action**: Update documentation OR consolidate to match documentation
+
+---
+
+## Recent Updates (Since 2026-01-14)
+
+### Code Changes (Jan 14-19, 2026) - IMPLEMENTATION COMPLETE
+| File | Change | Status |
+|------|--------|--------|
+| `IFileIndexingService.cs` | Created unified indexing interface with 3 entry points | ✅ Complete |
+| `FileIndexingService.cs` | Full pipeline: download → extract → chunk → embed → index | ✅ Complete |
+| `ITextChunkingService.cs` | Shared chunking interface | ✅ Complete |
+| `TextChunkingService.cs` | Extracted from tool handlers, sentence-aware chunking | ✅ Complete |
+| `RagEndpoints.cs` | Added `/index-file` and `/enqueue-indexing` endpoints | ✅ Complete |
+| `RagIndexingJobHandler.cs` | Background job processor with idempotency | ✅ Complete |
+| `DocumentEventHandler.cs` | Added `EnqueueRagIndexingJobAsync()` for event-driven indexing | ✅ Complete |
+| `Program.cs` | DI registrations for all new services | ✅ Complete |
+
+### Implementation Status (RESOLVED)
+The **orchestration layer is now complete**. `IFileIndexingService` serves as the `DocumentIndexingService` referenced in the original assessment. All placeholder implementations in `DocumentEventHandler.cs` have been replaced with working code that enqueues RAG indexing jobs.
+
+### Current Issue: Configuration/Trigger Path
+Documents are not being indexed because the trigger path is not active:
+1. `EmailProcessing:AutoIndexToRag` defaults to `false` in configuration
+2. Dataverse webhook may not be sending document events to the BFF API
+3. Job queue processing may not be running
 
 ---
 
 ## Component Inventory
 
-### Fully Implemented Components (Ready to Use)
+### Fully Implemented Components (All Ready)
 
 | Component | Location | Status | Key Methods |
 |-----------|----------|--------|-------------|
 | **Text Extraction** | `Services/Ai/TextExtractorService.cs` | ✅ Complete | `ExtractAsync()` - PDF, DOCX, TXT, email, vision OCR |
+| **Text Chunking** | `Services/Ai/TextChunkingService.cs` | ✅ Complete | `ChunkTextAsync()` - sentence-aware, configurable overlap |
 | **Embedding Generation** | `Services/Ai/OpenAiClient.cs` | ✅ Complete | `GenerateEmbeddingAsync()`, `GenerateEmbeddingsAsync()` + circuit breaker |
 | **Embedding Cache** | `Services/Ai/EmbeddingCache.cs` | ✅ Complete | Redis-based, 7-day TTL, SHA256 keys, graceful error handling |
 | **RAG Indexing** | `Services/Ai/RagService.cs` | ✅ Complete | `IndexDocumentAsync()`, `IndexDocumentsBatchAsync()` + Polly 8.x resilience |
 | **RAG Search** | `Services/Ai/RagService.cs` | ✅ Complete | `SearchAsync()` - hybrid + semantic + circuit breaker |
+| **File Indexing Orchestrator** | `Services/Ai/FileIndexingService.cs` | ✅ Complete | `IndexFileAsync()`, `IndexFileAppOnlyAsync()`, `IndexContentAsync()` |
 | **Deployment Routing** | `Services/Ai/KnowledgeDeploymentService.cs` | ✅ Complete | Multi-tenant index routing, deployment config caching |
-| **RAG API Endpoints** | `Api/Ai/RagEndpoints.cs` | ✅ Complete | POST /index, /index/batch, /search, DELETE /{id}, /source/{id} |
+| **RAG API Endpoints** | `Api/Ai/RagEndpoints.cs` | ✅ Complete | `/index-file`, `/enqueue-indexing`, `/search`, `/index/batch`, DELETE endpoints |
 | **File Download (OBO)** | `Infrastructure/Graph/SpeFileStore.cs` | ✅ Complete | `DownloadFileAsUserAsync()` |
+| **File Download (App-Only)** | `Infrastructure/Graph/SpeFileStore.cs` | ✅ Complete | `DownloadFileAsync()` |
+| **RAG Indexing Job Handler** | `Services/Jobs/Handlers/RagIndexingJobHandler.cs` | ✅ Complete | Background processing with idempotency |
 | **Job Framework** | `Services/Jobs/IJobHandler.cs` | ✅ Complete | Service Bus job processing |
 | **Document Events** | `Services/Jobs/DocumentEvent.cs` | ✅ Complete | Event model for Create/Update/Delete |
+| **Event-Driven RAG Trigger** | `Services/Jobs/Handlers/DocumentEventHandler.cs` | ✅ Complete | `EnqueueRagIndexingJobAsync()` - conditional on `AutoIndexToRag` |
 
-### Partially Implemented (Needs Work)
+### Configuration Required (Not Code Issues)
 
-| Component | Location | Status | Issue |
-|-----------|----------|--------|-------|
-| **Text Chunking** | Multiple tool handlers | ⚠️ Duplicated | Same `ChunkText()` in 5+ handlers (ClauseComparisonHandler, ClauseAnalyzerHandler, DateExtractorHandler, EntityExtractorHandler, SummaryHandler) |
-| **Document Event Handler** | `Services/Jobs/Handlers/DocumentEventHandler.cs` | ⚠️ Placeholder | All critical methods are `await Task.CompletedTask` stubs |
-| **Document Processing Job** | `Services/Jobs/Handlers/DocumentProcessingJobHandler.cs` | ⚠️ Sample | Placeholder implementation |
+| Item | Current State | Required Action |
+|------|---------------|-----------------|
+| **AutoIndexToRag Setting** | `false` (default) | Set `EmailProcessing:AutoIndexToRag=true` in Azure App Service |
+| **Dataverse Webhook** | Unknown | Verify webhook is registered and sending document events to BFF |
+| **Service Bus Connection** | Unknown | Verify job queue is configured and processing jobs |
+| **Rag:ApiKey** | Required for `/enqueue-indexing` | Ensure configured in Key Vault / App Settings |
 
-**DocumentEventHandler Placeholder Methods** (all stubs):
-- `InitializeDocumentForFileOperationsAsync()`
-- `ProcessInitialFileUploadAsync()`
-- `SyncDocumentNameToSpeAsync()`
-- `HandleContainerChangeAsync()`
-- `HandleFileStatusChangeAsync()`
-- `HandleFileAddedAsync()` ← **Critical for RAG ingestion trigger**
-- `HandleFileRemovedAsync()`
-- `DeleteAssociatedFileAsync()`
-- All status-specific handlers (`HandleDocumentActivationAsync()`, etc.)
+### Legacy/Deprecated (Can Be Cleaned Up)
 
-### Missing Components
-
-| Component | Purpose | Priority |
-|-----------|---------|----------|
-| **IDocumentIndexingService** | Orchestrate download → extract → chunk → embed → index | HIGH |
-| **ITextChunkingService** | Shared chunking logic (extract from tool handlers) | MEDIUM |
-| **Trigger Integration** | Wire upload/create events to indexing | HIGH |
+| Component | Location | Status | Note |
+|-----------|----------|--------|------|
+| **Duplicated ChunkText()** | Multiple tool handlers | ⚠️ Deprecated | Now use `ITextChunkingService` - handlers can be refactored |
+| **Placeholder Methods** | `DocumentEventHandler.cs` | ⚠️ Stubs remain | Non-RAG methods still placeholders (container moves, etc.) |
 
 ---
 
 ## Current Data Flow
 
-### What Happens Today (Broken)
+### What Happens Today (AutoIndexToRag=false)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                        DOCUMENT UPLOAD FLOW                             │
+│                    DOCUMENT UPLOAD FLOW (Current State)                 │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
 │  PCF Upload        BFF API              SPE Storage                     │
 │  Component ──────► UploadEndpoints ───► SharePoint Embedded             │
-│                                              │                          │
-│                                              ▼                          │
-│                    ┌─────────────────────────────────────────┐          │
-│                    │  ✅ File stored in SPE container        │          │
-│                    │  ✅ Dataverse record created             │          │
-│                    │  ❌ NO RAG INDEXING TRIGGERED            │          │
-│                    └─────────────────────────────────────────┘          │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    VISUALIZATION REQUEST (FAILS)                        │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│  PCF Control       BFF API              Azure AI Search                 │
-│  Viewer ─────────► /api/ai/visualization ──► Query Index                │
-│                         │                         │                     │
-│                         │                         ▼                     │
-│                         │              ┌─────────────────────┐          │
-│                         │              │  Document NOT found  │          │
-│                         │              │  (never indexed)     │          │
-│                         │              └─────────────────────┘          │
-│                         │                         │                     │
-│                         ◄─────────────────────────┘                     │
+│                         │                    │                          │
+│                         ▼                    ▼                          │
+│              ┌────────────────────┐  ┌─────────────────────┐            │
+│              │  Dataverse record  │  │  File stored in     │            │
+│              │  created           │  │  SPE container      │            │
+│              └────────────────────┘  └─────────────────────┘            │
 │                         │                                               │
-│                    500 Internal Server Error                            │
+│                         ▼                                               │
+│              ┌────────────────────────────────────────────┐             │
+│              │  Dataverse Webhook → BFF API               │             │
+│              │  DocumentEventHandler.HandleEventAsync()   │             │
+│              └────────────────────────────────────────────┘             │
+│                         │                                               │
+│                         ▼                                               │
+│              ┌────────────────────────────────────────────┐             │
+│              │  EnqueueRagIndexingJobAsync()              │             │
+│              │  ⚠️ SKIPPED: AutoIndexToRag = false        │             │
+│              └────────────────────────────────────────────┘             │
+│                                                                         │
+│  Result: Document stored but NOT indexed to AI Search                   │
 │                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### What Should Happen (Target State)
+### What Should Happen (AutoIndexToRag=true) - IMPLEMENTED
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                        DOCUMENT UPLOAD FLOW (FIXED)                     │
+│                    DOCUMENT UPLOAD FLOW (With AutoIndexToRag=true)      │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
 │  PCF Upload        BFF API              SPE Storage                     │
 │  Component ──────► UploadEndpoints ───► SharePoint Embedded             │
 │                         │                    │                          │
-│                         │                    ▼                          │
-│                         │         ┌─────────────────────┐               │
-│                         │         │  File stored in SPE │               │
-│                         │         └─────────────────────┘               │
-│                         │                    │                          │
-│                         ▼                    │                          │
-│              ┌────────────────────┐          │                          │
-│              │  Trigger Indexing  │◄─────────┘                          │
-│              │  (Event or API)    │                                     │
-│              └────────────────────┘                                     │
+│                         ▼                    ▼                          │
+│              ┌────────────────────┐  ┌─────────────────────┐            │
+│              │  Dataverse record  │  │  File stored in     │            │
+│              │  created           │  │  SPE container      │            │
+│              └────────────────────┘  └─────────────────────┘            │
+│                         │                                               │
+│                         ▼                                               │
+│              ┌────────────────────────────────────────────┐             │
+│              │  Dataverse Webhook → BFF API               │             │
+│              │  DocumentEventHandler.HandleEventAsync()   │             │
+│              └────────────────────────────────────────────┘             │
+│                         │                                               │
+│                         ▼                                               │
+│              ┌────────────────────────────────────────────┐             │
+│              │  EnqueueRagIndexingJobAsync()              │             │
+│              │  ✅ AutoIndexToRag = true → enqueue job    │             │
+│              └────────────────────────────────────────────┘             │
 │                         │                                               │
 │                         ▼                                               │
 │  ┌──────────────────────────────────────────────────────────────────┐   │
-│  │              DocumentIndexingService (NEW)                        │   │
+│  │              RagIndexingJobHandler → FileIndexingService          │   │
 │  ├──────────────────────────────────────────────────────────────────┤   │
 │  │                                                                   │   │
-│  │  Step 1: Download file from SPE                                  │   │
-│  │          └─► SpeFileStore.DownloadFileAsUserAsync() [EXISTING]   │   │
+│  │  Step 1: Download file from SPE (app-only auth)                  │   │
+│  │          └─► SpeFileStore.DownloadFileAsync()                    │   │
 │  │                                                                   │   │
 │  │  Step 2: Extract text from file                                  │   │
-│  │          └─► TextExtractorService.ExtractAsync() [EXISTING]      │   │
+│  │          └─► TextExtractorService.ExtractAsync()                 │   │
 │  │                                                                   │   │
 │  │  Step 3: Chunk text into segments                                │   │
-│  │          └─► TextChunkingService.ChunkText() [NEW - extract]     │   │
+│  │          └─► TextChunkingService.ChunkTextAsync()                │   │
 │  │                                                                   │   │
-│  │  Step 4: Generate embeddings (batch)                             │   │
-│  │          └─► OpenAiClient.GenerateEmbeddingsAsync() [EXISTING]   │   │
+│  │  Step 4: Build KnowledgeDocument objects                         │   │
 │  │                                                                   │   │
-│  │  Step 5: Index chunks to AI Search                               │   │
-│  │          └─► RagService.IndexDocumentsBatchAsync() [EXISTING]    │   │
-│  │                                                                   │   │
-│  │  Step 6: Update Dataverse record status                          │   │
-│  │          └─► DataverseService.UpdateDocumentAsync() [EXISTING]   │   │
+│  │  Step 5: Index chunks to AI Search (embeddings auto-generated)   │   │
+│  │          └─► RagService.IndexDocumentsBatchAsync()               │   │
 │  │                                                                   │   │
 │  └──────────────────────────────────────────────────────────────────┘   │
 │                         │                                               │
@@ -172,6 +376,37 @@ The core **orchestration gap remains**: no `IDocumentIndexingService` has been c
 │              │  Azure AI Search   │                                     │
 │              │  spaarke-knowledge │                                     │
 │              │  -index-v2         │                                     │
+│              └────────────────────┘                                     │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Alternative: Manual/On-Demand Indexing (Also Implemented)
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    MANUAL INDEXING FLOW (API Triggered)                 │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  PCF Control        BFF API                                             │
+│  or Script ────────► POST /api/ai/rag/index-file                        │
+│                         │                                               │
+│                         ▼                                               │
+│              ┌────────────────────────────────────────────┐             │
+│              │  FileIndexingService.IndexFileAsync()      │             │
+│              │  (OBO authentication - user's token)       │             │
+│              └────────────────────────────────────────────┘             │
+│                         │                                               │
+│                         ▼                                               │
+│              ┌────────────────────────────────────────────┐             │
+│              │  Download → Extract → Chunk → Index        │             │
+│              │  (synchronous, returns result immediately) │             │
+│              └────────────────────────────────────────────┘             │
+│                         │                                               │
+│                         ▼                                               │
+│              ┌────────────────────┐                                     │
+│              │  FileIndexingResult│                                     │
+│              │  { success, count }│                                     │
 │              └────────────────────┘                                     │
 │                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -566,14 +801,73 @@ private async Task HandleFileAddedAsync(DocumentEvent documentEvent, Cancellatio
 | Category | Status |
 |----------|--------|
 | **Core RAG Components** | ✅ 100% Complete (with resilience) |
-| **Orchestration Layer** | ❌ 0% Complete (blocking gap) |
-| **Text Chunking Service** | ⚠️ Logic exists, needs extraction |
-| **Event Handler Integration** | ⚠️ Structure exists, needs implementation |
-| **API Trigger Endpoint** | ❌ Not yet created |
+| **Orchestration Layer** | ✅ 100% Complete (`FileIndexingService`) |
+| **Text Chunking Service** | ✅ 100% Complete (`TextChunkingService`) |
+| **Event Handler Integration** | ✅ 100% Complete (`EnqueueRagIndexingJobAsync`) |
+| **API Trigger Endpoints** | ✅ 100% Complete (`/index-file`, `/enqueue-indexing`) |
+| **Background Job Handler** | ✅ 100% Complete (`RagIndexingJobHandler`) |
+| **Configuration** | ⚠️ `AutoIndexToRag=false` by default |
+| **Dataverse Webhook** | ❓ Unknown - needs verification |
 
-**Bottom Line**: All building blocks are production-ready. The project needs the `DocumentIndexingService` orchestrator and `/index-document/{documentId}` endpoint to close the gap.
+**Bottom Line**: All code is production-ready. Documents are not being indexed because:
+1. `EmailProcessing:AutoIndexToRag` is disabled (needs to be set to `true`)
+2. The Dataverse webhook trigger path needs verification
+
+---
+
+## Immediate Action Items
+
+### 1. Enable AutoIndexToRag (Quick Fix)
+
+**Azure Portal** → **App Services** → `spe-api-dev-67e2xz` → **Configuration** → **Application Settings**
+
+Add or update:
+```
+EmailProcessing__AutoIndexToRag = true
+```
+
+Or via Azure CLI:
+```bash
+az webapp config appsettings set \
+  --resource-group spe-infrastructure-westus2 \
+  --name spe-api-dev-67e2xz \
+  --settings EmailProcessing__AutoIndexToRag=true
+```
+
+### 2. Verify Dataverse Webhook Configuration
+
+Check if document events are being sent to the BFF API:
+- Look for Service Endpoint registration in Dataverse
+- Verify webhook URL points to: `https://spe-api-dev-67e2xz.azurewebsites.net/api/documents/events`
+- Check Application Insights for incoming webhook requests
+
+### 3. Test Manual Indexing (Immediate Workaround)
+
+Use the `/index-file` endpoint to manually index documents:
+
+```bash
+curl -X POST "https://spe-api-dev-67e2xz.azurewebsites.net/api/ai/rag/index-file" \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tenantId": "a221a95e-6abc-4434-aecc-e48338a1b2f2",
+    "driveId": "{spe-drive-id}",
+    "itemId": "{spe-item-id}",
+    "fileName": "document.pdf",
+    "documentId": "{dataverse-document-id}"
+  }'
+```
+
+### 4. Check Application Insights Logs
+
+Search for these log patterns to understand what's happening:
+- `"Processing RAG indexing job"` - Job handler is processing
+- `"AutoIndexToRag disabled"` - Skipping because of config
+- `"Enqueued RAG indexing job"` - Job was successfully enqueued
+- `"Indexed {FileName}"` - File successfully indexed
 
 ---
 
 *Assessment created: 2026-01-11*
 *Assessment refreshed: 2026-01-14*
+*Assessment updated: 2026-01-19 - Implementation complete, configuration issue identified*

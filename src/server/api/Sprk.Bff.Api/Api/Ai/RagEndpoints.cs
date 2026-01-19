@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Models.Email;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
@@ -121,6 +122,33 @@ public static class RagEndpoints
             .Produces<EnqueueIndexingResponse>(StatusCodes.Status202Accepted)
             .ProducesProblem(400)
             .ProducesProblem(401)
+            .ProducesProblem(500);
+
+        // ═══════════════════════════════════════════════════════════════════════════
+        // Admin Bulk Indexing Endpoints
+        // ═══════════════════════════════════════════════════════════════════════════
+
+        var adminGroup = group.MapGroup("/admin")
+            .RequireAuthorization("SystemAdmin")
+            .WithTags("AI RAG Admin");
+
+        // POST /api/ai/rag/admin/bulk-index - Submit a bulk RAG indexing job
+        adminGroup.MapPost("/bulk-index", SubmitBulkIndexingJob)
+            .WithName("RagSubmitBulkIndexing")
+            .WithSummary("Submit a bulk RAG indexing job")
+            .WithDescription("Queries documents matching criteria and indexes them in bulk with progress tracking. Returns job ID for status monitoring.")
+            .Produces<BulkIndexingResponse>(StatusCodes.Status202Accepted)
+            .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(500);
+
+        // GET /api/ai/rag/admin/bulk-index/{jobId}/status - Get bulk job status
+        adminGroup.MapGet("/bulk-index/{jobId}/status", GetBulkIndexingJobStatus)
+            .WithName("RagGetBulkIndexingStatus")
+            .WithSummary("Get bulk indexing job status")
+            .WithDescription("Returns progress and status of a bulk indexing job including processed count, errors, and estimated time remaining.")
+            .Produces<BulkIndexingStatusResponse>()
+            .ProducesProblem(404)
             .ProducesProblem(500);
 
         return app;
@@ -567,6 +595,152 @@ public static class RagEndpoints
                 statusCode: StatusCodes.Status500InternalServerError);
         }
     }
+
+    /// <summary>
+    /// Submit a bulk RAG indexing job.
+    /// Admin endpoint that queries documents matching criteria and enqueues them for indexing.
+    /// </summary>
+    private static async Task<IResult> SubmitBulkIndexingJob(
+        [FromBody] BulkIndexingRequest request,
+        HttpRequest httpRequest,
+        JobSubmissionService jobSubmissionService,
+        BatchJobStatusStore statusStore,
+        ILoggerFactory loggerFactory,
+        CancellationToken cancellationToken)
+    {
+        var logger = loggerFactory.CreateLogger("RagEndpoints");
+        var correlationId = httpRequest.Headers["X-Correlation-Id"].FirstOrDefault()
+            ?? httpRequest.HttpContext.TraceIdentifier;
+
+        // Validate required fields
+        if (string.IsNullOrWhiteSpace(request.TenantId))
+        {
+            return Results.BadRequest(new ProblemDetails
+            {
+                Title = "Invalid Request",
+                Detail = "TenantId is required",
+                Status = 400
+            });
+        }
+
+        try
+        {
+            // Build job payload from request
+            var payload = new BulkRagIndexingPayload
+            {
+                TenantId = request.TenantId,
+                Filter = request.Filter,
+                MatterId = request.MatterId,
+                CreatedAfter = request.CreatedAfter,
+                CreatedBefore = request.CreatedBefore,
+                DocumentType = request.DocumentType,
+                MaxDocuments = request.MaxDocuments,
+                MaxConcurrency = request.MaxConcurrency,
+                ForceReindex = request.ForceReindex,
+                Source = "Admin"
+            };
+
+            var jobPayload = JsonDocument.Parse(JsonSerializer.Serialize(payload));
+
+            // Create job contract
+            var job = new JobContract
+            {
+                JobType = BulkRagIndexingJobHandler.JobTypeName,
+                SubjectId = request.TenantId,
+                CorrelationId = correlationId,
+                IdempotencyKey = $"bulk-rag-{request.TenantId}-{DateTimeOffset.UtcNow.Ticks}",
+                Payload = jobPayload,
+                MaxAttempts = 1 // Bulk jobs should not auto-retry
+            };
+
+            // Create initial job status in cache (estimated total is 0 until job starts)
+            // Note: BatchFiltersApplied is reused from email batch - we map RAG filters to compatible fields
+            await statusStore.CreateJobStatusAsync(
+                job.JobId.ToString(),
+                new BatchFiltersApplied
+                {
+                    StartDate = request.CreatedAfter ?? DateTime.MinValue,
+                    EndDate = request.CreatedBefore ?? DateTime.MaxValue,
+                    StatusFilter = request.Filter // "unindexed", "all", etc.
+                },
+                estimatedTotalEmails: 0, // Actual count determined when job starts
+                cancellationToken);
+
+            // Submit job to queue
+            await jobSubmissionService.SubmitJobAsync(job, cancellationToken);
+
+            logger.LogInformation(
+                "Submitted bulk RAG indexing job {JobId} for tenant {TenantId}, filter={Filter}, maxDocs={MaxDocs}",
+                job.JobId, request.TenantId, request.Filter, request.MaxDocuments);
+
+            var statusUrl = $"/api/ai/rag/admin/bulk-index/{job.JobId}/status";
+
+            return Results.Accepted(
+                value: new BulkIndexingResponse
+                {
+                    JobId = job.JobId,
+                    Status = "Pending",
+                    Message = $"Bulk indexing job submitted. Use status endpoint to monitor progress.",
+                    StatusUrl = statusUrl
+                });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to submit bulk RAG indexing job for tenant {TenantId}", request.TenantId);
+            return Results.Problem(
+                title: "Submit Failed",
+                detail: ex.Message,
+                statusCode: StatusCodes.Status500InternalServerError);
+        }
+    }
+
+    /// <summary>
+    /// Get status of a bulk RAG indexing job.
+    /// </summary>
+    private static async Task<IResult> GetBulkIndexingJobStatus(
+        string jobId,
+        BatchJobStatusStore statusStore,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(jobId))
+        {
+            return Results.BadRequest(new ProblemDetails
+            {
+                Title = "Invalid Request",
+                Detail = "Job ID is required",
+                Status = 400
+            });
+        }
+
+        var status = await statusStore.GetJobStatusAsync(jobId, cancellationToken);
+
+        if (status == null)
+        {
+            return Results.NotFound(new ProblemDetails
+            {
+                Title = "Not Found",
+                Detail = $"Bulk indexing job '{jobId}' not found",
+                Status = 404
+            });
+        }
+
+        // Map BatchJobStatusResponse to BulkIndexingStatusResponse
+        var response = new BulkIndexingStatusResponse
+        {
+            JobId = status.JobId,
+            Status = status.Status.ToString(),
+            TotalDocuments = status.TotalEmails, // TotalEmails is reused for documents
+            ProcessedCount = status.ProcessedCount,
+            ErrorCount = status.ErrorCount,
+            SkippedCount = status.SkippedCount,
+            PercentComplete = status.ProgressPercent,
+            StartedAt = status.StartedAt.HasValue ? new DateTimeOffset(status.StartedAt.Value, TimeSpan.Zero) : null,
+            CompletedAt = status.CompletedAt.HasValue ? new DateTimeOffset(status.CompletedAt.Value, TimeSpan.Zero) : null,
+            RecentErrors = status.RecentErrors.Select(e => e.Message).ToList()
+        };
+
+        return Results.Ok(response);
+    }
 }
 
 /// <summary>
@@ -668,4 +842,137 @@ public record EnqueueIndexingResponse
     /// Human-readable message.
     /// </summary>
     public string Message { get; init; } = string.Empty;
+}
+
+/// <summary>
+/// Request model for bulk RAG indexing.
+/// </summary>
+public record BulkIndexingRequest
+{
+    /// <summary>
+    /// Tenant ID for multi-tenant isolation.
+    /// </summary>
+    public required string TenantId { get; init; }
+
+    /// <summary>
+    /// Filter type: "unindexed" (default), "all".
+    /// </summary>
+    public string Filter { get; init; } = "unindexed";
+
+    /// <summary>
+    /// Optional Matter ID to filter documents.
+    /// </summary>
+    public string? MatterId { get; init; }
+
+    /// <summary>
+    /// Optional: Only index documents created after this date.
+    /// </summary>
+    public DateTime? CreatedAfter { get; init; }
+
+    /// <summary>
+    /// Optional: Only index documents created before this date.
+    /// </summary>
+    public DateTime? CreatedBefore { get; init; }
+
+    /// <summary>
+    /// Optional document type filter (e.g., ".pdf", ".docx").
+    /// </summary>
+    public string? DocumentType { get; init; }
+
+    /// <summary>
+    /// Maximum number of documents to process (default: 1000).
+    /// </summary>
+    public int MaxDocuments { get; init; } = 1000;
+
+    /// <summary>
+    /// Maximum concurrent document processing (default: 5).
+    /// </summary>
+    public int MaxConcurrency { get; init; } = 5;
+
+    /// <summary>
+    /// If true, reindex documents even if they have been indexed before.
+    /// </summary>
+    public bool ForceReindex { get; init; } = false;
+}
+
+/// <summary>
+/// Response from bulk indexing submission.
+/// </summary>
+public record BulkIndexingResponse
+{
+    /// <summary>
+    /// The unique job identifier for tracking.
+    /// </summary>
+    public Guid JobId { get; init; }
+
+    /// <summary>
+    /// Status of the job (Pending, InProgress, etc.).
+    /// </summary>
+    public string Status { get; init; } = "Pending";
+
+    /// <summary>
+    /// Human-readable message.
+    /// </summary>
+    public string Message { get; init; } = string.Empty;
+
+    /// <summary>
+    /// URL to poll for status updates.
+    /// </summary>
+    public string StatusUrl { get; init; } = string.Empty;
+}
+
+/// <summary>
+/// Response for bulk indexing job status.
+/// </summary>
+public record BulkIndexingStatusResponse
+{
+    /// <summary>
+    /// The unique job identifier.
+    /// </summary>
+    public string JobId { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Current job status (Pending, InProgress, Completed, PartiallyCompleted, Failed).
+    /// </summary>
+    public string Status { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Total number of documents to process.
+    /// </summary>
+    public int TotalDocuments { get; init; }
+
+    /// <summary>
+    /// Number of documents successfully processed.
+    /// </summary>
+    public int ProcessedCount { get; init; }
+
+    /// <summary>
+    /// Number of documents that failed to process.
+    /// </summary>
+    public int ErrorCount { get; init; }
+
+    /// <summary>
+    /// Number of documents skipped (already indexed).
+    /// </summary>
+    public int SkippedCount { get; init; }
+
+    /// <summary>
+    /// Percentage of completion (0-100).
+    /// </summary>
+    public double PercentComplete { get; init; }
+
+    /// <summary>
+    /// When the job was started.
+    /// </summary>
+    public DateTimeOffset? StartedAt { get; init; }
+
+    /// <summary>
+    /// When the job was completed (if finished).
+    /// </summary>
+    public DateTimeOffset? CompletedAt { get; init; }
+
+    /// <summary>
+    /// Last few errors encountered (for debugging).
+    /// </summary>
+    public List<string> RecentErrors { get; init; } = [];
 }
