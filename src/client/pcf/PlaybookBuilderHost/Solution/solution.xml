@@ -5,7 +5,7 @@
       <LocalizedName description="Spaarke Playbook Builder Host PCF" languagecode="1033" />
     </LocalizedNames>
     <Descriptions />
-    <Version>2.20.5</Version>
+    <Version>2.20.6</Version>
     <Managed>0</Managed>
     <Publisher>
       <UniqueName>Spaarke</UniqueName>
