@@ -244,7 +244,7 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
             (async () => {
                 try {
                     const token = await getAuthToken();
-                    const response = await fetch(`${apiBaseUrl}/api/ai/rag/index-file`, {
+                    const response = await fetch(`${apiBaseUrl}/ai/rag/index-file`, {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
