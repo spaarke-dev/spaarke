@@ -294,6 +294,7 @@ public sealed class FileIndexingService : IFileIndexingService
             Metadata = metadata is not null
                 ? JsonSerializer.Serialize(metadata)
                 : null,
+            Tags = [], // Required: AI Search index has tags as non-nullable collection
             CreatedAt = now,
             UpdatedAt = now
         }).ToList();

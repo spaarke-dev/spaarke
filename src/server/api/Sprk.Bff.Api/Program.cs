@@ -402,7 +402,8 @@ if (analysisEnabled && documentIntelligenceEnabled)
         builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.IRagService, Sprk.Bff.Api.Services.Ai.RagService>();
 
         // FileIndexingService - Unified RAG indexing pipeline (download → extract → chunk → embed → index)
-        builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.IFileIndexingService, Sprk.Bff.Api.Services.Ai.FileIndexingService>();
+        // Scoped because it depends on ISpeFileOperations (which is scoped due to Graph token caching)
+        builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IFileIndexingService, Sprk.Bff.Api.Services.Ai.FileIndexingService>();
 
         // VisualizationService - Document relationship visualization using vector similarity
         builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Visualization.IVisualizationService, Sprk.Bff.Api.Services.Ai.Visualization.VisualizationService>();
@@ -1095,6 +1096,70 @@ app.MapGet("/healthz/dataverse", TestDataverseConnectionAsync);
 // Dataverse CRUD operations test endpoint
 app.MapGet("/healthz/dataverse/crud", TestDataverseCrudOperationsAsync);
 
+// DEBUG: Test document retrieval by ID (string param, not GUID constraint)
+app.MapGet("/healthz/dataverse/doc/{id}", async (string id, IDataverseService dataverseService, ILogger<Program> logger) =>
+{
+    logger.LogInformation("[DEBUG-ENDPOINT] Testing document retrieval for {Id}", id);
+    try
+    {
+        var doc = await dataverseService.GetDocumentAsync(id);
+        if (doc == null)
+        {
+            return Results.Ok(new { status = "NOT_FOUND", documentId = id, message = "Document not found in Dataverse" });
+        }
+        return Results.Ok(new
+        {
+            status = "FOUND",
+            documentId = doc.Id,
+            name = doc.Name,
+            fileName = doc.FileName,
+            isEmailArchive = doc.IsEmailArchive,
+            parentDocumentId = doc.ParentDocumentId,
+            matterId = doc.MatterId,
+            projectId = doc.ProjectId,
+            invoiceId = doc.InvoiceId,
+            emailConversationIndex = doc.EmailConversationIndex
+        });
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "[DEBUG-ENDPOINT] Error retrieving document {Id}", id);
+        return Results.Ok(new { status = "ERROR", documentId = id, error = ex.Message, innerError = ex.InnerException?.Message });
+    }
+}).AllowAnonymous();
+
+// DEBUG: Test document retrieval (temporary - remove after debugging)
+app.MapGet("/debug/document/{id:guid}", async (Guid id, IDataverseService dataverseService, ILogger<Program> logger) =>
+{
+    logger.LogInformation("[DEBUG-ENDPOINT] Testing document retrieval for {Id}", id);
+    try
+    {
+        var doc = await dataverseService.GetDocumentAsync(id.ToString());
+        if (doc == null)
+        {
+            return Results.Ok(new { status = "NOT_FOUND", documentId = id.ToString(), message = "Document not found in Dataverse" });
+        }
+        return Results.Ok(new
+        {
+            status = "FOUND",
+            documentId = doc.Id,
+            name = doc.Name,
+            fileName = doc.FileName,
+            isEmailArchive = doc.IsEmailArchive,
+            parentDocumentId = doc.ParentDocumentId,
+            matterId = doc.MatterId,
+            projectId = doc.ProjectId,
+            invoiceId = doc.InvoiceId,
+            emailConversationIndex = doc.EmailConversationIndex
+        });
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "[DEBUG-ENDPOINT] Error retrieving document {Id}", id);
+        return Results.Ok(new { status = "ERROR", documentId = id.ToString(), error = ex.Message, innerError = ex.InnerException?.Message });
+    }
+}).AllowAnonymous();
+
 // Lightweight ping endpoint for warm-up agents (Task 021)
 // Must be fast (<100ms), unauthenticated, and expose no sensitive info
 app.MapGet("/ping", () => Results.Text("pong"))
@@ -1108,8 +1173,9 @@ app.MapGet("/status", () =>
     return TypedResults.Json(new
     {
         service = "Sprk.Bff.Api",
-        version = "1.0.0",
-        timestamp = DateTimeOffset.UtcNow
+        version = "1.0.1-debug", // Updated version to verify deployment
+        timestamp = DateTimeOffset.UtcNow,
+        debugEndpoints = new[] { "/healthz/dataverse/doc/{id}" }
     });
 })
     .AllowAnonymous()

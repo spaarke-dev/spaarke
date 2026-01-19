@@ -12,13 +12,13 @@ public class DocumentProfileFieldMapperTests
     #region GetFieldName Tests
 
     [Theory]
-    [InlineData("TL;DR", "sprk_tldr")]
-    [InlineData("tl;dr", "sprk_tldr")]
-    [InlineData("TL;dr", "sprk_tldr")]
-    [InlineData("Summary", "sprk_summary")]
-    [InlineData("summary", "sprk_summary")]
-    [InlineData("Keywords", "sprk_keywords")]
-    [InlineData("keywords", "sprk_keywords")]
+    [InlineData("TL;DR", "sprk_filetldr")]
+    [InlineData("tl;dr", "sprk_filetldr")]
+    [InlineData("TL;dr", "sprk_filetldr")]
+    [InlineData("Summary", "sprk_filesummary")]
+    [InlineData("summary", "sprk_filesummary")]
+    [InlineData("Keywords", "sprk_filekeywords")]
+    [InlineData("keywords", "sprk_filekeywords")]
     [InlineData("Document Type", "sprk_documenttype")]
     [InlineData("document type", "sprk_documenttype")]
     [InlineData("Entities", "sprk_entities")]
@@ -135,15 +135,15 @@ public class DocumentProfileFieldMapperTests
 
         // Assert
         result.Should().HaveCount(5);
-        result.Should().ContainKey("sprk_tldr");
-        result.Should().ContainKey("sprk_summary");
-        result.Should().ContainKey("sprk_keywords");
+        result.Should().ContainKey("sprk_filetldr");
+        result.Should().ContainKey("sprk_filesummary");
+        result.Should().ContainKey("sprk_filekeywords");
         result.Should().ContainKey("sprk_documenttype");
         result.Should().ContainKey("sprk_entities");
 
-        result["sprk_tldr"].Should().Be("Brief summary");
-        result["sprk_summary"].Should().Be("Detailed summary");
-        result["sprk_keywords"].Should().Be("contract, agreement, terms");
+        result["sprk_filetldr"].Should().Be("Brief summary");
+        result["sprk_filesummary"].Should().Be("Detailed summary");
+        result["sprk_filekeywords"].Should().Be("contract, agreement, terms");
         result["sprk_documenttype"].Should().Be("Contract");
         result["sprk_entities"].Should().Be("{\"parties\":[\"Acme Corp\"]}");
     }
@@ -177,7 +177,7 @@ public class DocumentProfileFieldMapperTests
 
         // Assert
         result.Should().HaveCount(1);
-        result.Should().ContainKey("sprk_tldr");
+        result.Should().ContainKey("sprk_filetldr");
         result.Should().NotContainKey("UnknownType");
         result.Should().NotContainKey("InvalidOutput");
     }
@@ -198,9 +198,9 @@ public class DocumentProfileFieldMapperTests
 
         // Assert
         result.Should().HaveCount(1);
-        result.Should().ContainKey("sprk_tldr");
-        result.Should().NotContainKey("sprk_summary");
-        result.Should().NotContainKey("sprk_keywords");
+        result.Should().ContainKey("sprk_filetldr");
+        result.Should().NotContainKey("sprk_filesummary");
+        result.Should().NotContainKey("sprk_filekeywords");
     }
 
     #endregion

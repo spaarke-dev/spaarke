@@ -12,6 +12,7 @@ import type {
     VisualizationQueryParams,
     GraphMetadata,
 } from "../types/api";
+import { getRelationshipLabel } from "../types/api";
 import type { DocumentNode, DocumentEdge, DocumentNodeData, DocumentEdgeData } from "../types/graph";
 
 /**
@@ -97,6 +98,11 @@ export class VisualizationApiService {
                 url.searchParams.append("documentTypes", type);
             });
         }
+        if (params.relationshipTypes && params.relationshipTypes.length > 0) {
+            params.relationshipTypes.forEach((type) => {
+                url.searchParams.append("relationshipTypes", type);
+            });
+        }
 
         return url.toString();
     }
@@ -118,14 +124,24 @@ export class VisualizationApiService {
 
     /**
      * Map API response to PCF graph types.
+     * Derives primary relationship type for each node from connected edges.
      */
     private mapToGraphData(apiResponse: DocumentGraphResponse): {
         nodes: DocumentNode[];
         edges: DocumentEdge[];
         metadata: GraphMetadata;
     } {
-        const nodes = apiResponse.nodes.map((apiNode) => this.mapApiNodeToDocumentNode(apiNode));
+        // First map edges to get relationship data
         const edges = apiResponse.edges.map((apiEdge) => this.mapApiEdgeToDocumentEdge(apiEdge));
+
+        // Build a map of node ID → primary relationship (from edges targeting this node)
+        // Priority: same_email > same_thread > same_matter > same_project > same_invoice > semantic
+        const nodeRelationships = this.buildNodeRelationshipMap(apiResponse.edges);
+
+        // Map nodes with relationship data from edges
+        const nodes = apiResponse.nodes.map((apiNode) =>
+            this.mapApiNodeToDocumentNode(apiNode, nodeRelationships.get(apiNode.id))
+        );
 
         return {
             nodes,
@@ -135,24 +151,79 @@ export class VisualizationApiService {
     }
 
     /**
-     * Map an API document node to PCF DocumentNode type.
+     * Build a map of node ID to primary relationship data.
+     * For each node, finds the highest-priority relationship from connected edges.
      */
-    private mapApiNodeToDocumentNode(apiNode: ApiDocumentNode): DocumentNode {
+    private buildNodeRelationshipMap(
+        edges: ApiDocumentEdge[]
+    ): Map<string, { type: string; label: string; similarity: number }> {
+        const relationshipPriority: Record<string, number> = {
+            same_email: 1,
+            same_thread: 2,
+            same_matter: 3,
+            same_project: 4,
+            same_invoice: 5,
+            semantic: 6,
+        };
+
+        const nodeRelationships = new Map<string, { type: string; label: string; similarity: number }>();
+
+        for (const edge of edges) {
+            // Edges connect source → target, so the source node has this relationship
+            const nodeId = edge.source;
+            const relType = edge.data.relationshipType;
+            const relLabel = getRelationshipLabel(relType, edge.data.relationshipLabel);
+            const similarity = edge.data.similarity;
+
+            const existing = nodeRelationships.get(nodeId);
+            const existingPriority = existing ? (relationshipPriority[existing.type] ?? 99) : 99;
+            const newPriority = relationshipPriority[relType] ?? 99;
+
+            // Update if this relationship has higher priority (lower number)
+            if (newPriority < existingPriority) {
+                nodeRelationships.set(nodeId, { type: relType, label: relLabel, similarity });
+            }
+        }
+
+        return nodeRelationships;
+    }
+
+    /**
+     * Map an API document node to PCF DocumentNode type.
+     * @param apiNode - The API node data
+     * @param relationshipData - Optional relationship data derived from edges
+     */
+    private mapApiNodeToDocumentNode(
+        apiNode: ApiDocumentNode,
+        relationshipData?: { type: string; label: string; similarity: number }
+    ): DocumentNode {
         // For orphan files, the node ID is the speFileId
         const isOrphanFile = apiNode.data.isOrphanFile ?? apiNode.type === "orphan";
 
         // Use fileType from API if available, otherwise extract from name
-        const fileType = apiNode.data.fileType ?? this.extractFileType(apiNode.data.label, apiNode.data.documentType);
+        // For parent hub nodes, use the document type directly (Matter, Project, etc.)
+        const isParentHub = apiNode.type === "matter" || apiNode.type === "project" ||
+                           apiNode.type === "invoice" || apiNode.type === "email";
+        const fileType = isParentHub
+            ? apiNode.data.documentType?.toLowerCase() ?? apiNode.type
+            : apiNode.data.fileType ?? this.extractFileType(apiNode.data.label, apiNode.data.documentType);
 
         const data: DocumentNodeData = {
             // For orphan files, documentId is undefined; use speFileId instead
-            documentId: isOrphanFile ? undefined : apiNode.id,
+            // For parent hub nodes, use the node id (which is formatted as "matter-{guid}")
+            documentId: isOrphanFile ? undefined : (isParentHub ? undefined : apiNode.id),
             speFileId: apiNode.data.speFileId,
             name: apiNode.data.label,
             fileType,
-            similarity: apiNode.data.similarity,
+            // Use similarity from relationship data if available (for direct relationships),
+            // otherwise use the API node similarity (for semantic)
+            similarity: relationshipData?.similarity ?? apiNode.data.similarity,
             isSource: apiNode.type === "source",
             isOrphanFile,
+            nodeType: apiNode.type, // Pass the API node type for hub node styling
+            // Relationship data derived from edges
+            relationshipType: relationshipData?.type,
+            relationshipLabel: relationshipData?.label,
             parentEntityName: apiNode.data.parentEntityName,
             fileUrl: apiNode.data.fileUrl,
             recordUrl: apiNode.data.recordUrl,
@@ -174,6 +245,8 @@ export class VisualizationApiService {
         const data: DocumentEdgeData = {
             similarity: apiEdge.data.similarity,
             sharedKeywords: apiEdge.data.sharedKeywords,
+            relationshipType: apiEdge.data.relationshipType,
+            relationshipLabel: getRelationshipLabel(apiEdge.data.relationshipType, apiEdge.data.relationshipLabel),
         };
 
         return {

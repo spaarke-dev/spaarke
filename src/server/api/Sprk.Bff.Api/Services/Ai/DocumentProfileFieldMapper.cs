@@ -14,14 +14,18 @@ public static class DocumentProfileFieldMapper
     /// Maps output type name to sprk_document field name.
     /// </summary>
     /// <param name="outputTypeName">Output type name (e.g., "TL;DR", "Summary", "Keywords")</param>
-    /// <returns>Dataverse field name (e.g., "sprk_tldr", "sprk_summary") or null if no mapping exists.</returns>
+    /// <returns>Dataverse field name (e.g., "sprk_filetldr", "sprk_filesummary") or null if no mapping exists.</returns>
+    /// <remarks>
+    /// Field names use the sprk_file* prefix from the original schema (sprk_filesummary, sprk_filetldr, sprk_filekeywords).
+    /// The sprk_entities field was added later for extracted entities JSON.
+    /// </remarks>
     public static string? GetFieldName(string? outputTypeName)
     {
         return outputTypeName?.ToLowerInvariant() switch
         {
-            "tl;dr" => "sprk_tldr",
-            "summary" => "sprk_summary",
-            "keywords" => "sprk_keywords",
+            "tl;dr" => "sprk_filetldr",
+            "summary" => "sprk_filesummary",
+            "keywords" => "sprk_filekeywords",
             "document type" => "sprk_documenttype",
             "entities" => "sprk_entities",
             _ => null

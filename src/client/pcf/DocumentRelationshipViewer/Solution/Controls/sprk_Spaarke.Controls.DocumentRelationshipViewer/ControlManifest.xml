@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<manifest>
+  <control namespace="Spaarke.Controls" constructor="DocumentRelationshipViewer" version="1.0.24" display-name-key="Document Relationship Viewer" description-key="Node shows relationship type badge; edges show semantic similarity (v1.0.24)" control-type="virtual" api-version="1.3.18">
+    <external-service-usage enabled="true">
+      <domain>spe-api-dev-67e2xz.azurewebsites.net</domain>
+      <domain>login.microsoftonline.com</domain>
+    </external-service-usage>
+    <property name="documentId" display-name-key="Document ID" description-key="The GUID of the source document" of-type="SingleLine.Text" usage="bound" required="true"/>
+    <property name="tenantId" display-name-key="Tenant ID" description-key="Tenant identifier for API routing" of-type="SingleLine.Text" usage="input" required="false"/>
+    <property name="apiBaseUrl" display-name-key="API Base URL" description-key="BFF API base URL" of-type="SingleLine.Text" usage="input" required="false"/>
+    <property name="selectedDocumentId" display-name-key="Selected Document" description-key="The document selected by the user" of-type="SingleLine.Text" usage="output"/>
+    <resources>
+      <code path="bundle.js" order="1"/>
+      <platform-library name="React" version="16.14.0"/>
+      <platform-library name="Fluent" version="9.46.2"/>
+    </resources>
+    <feature-usage>
+      <uses-feature name="WebAPI" required="true"/>
+      <uses-feature name="Utility" required="true"/>
+    </feature-usage>
+    <built-by name="pac" version="1.51.1"/>
+  </control>
+</manifest>

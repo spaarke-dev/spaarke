@@ -21,6 +21,7 @@ import {
     Caption1,
     Body1Strong,
     mergeClasses,
+    Link,
 } from "@fluentui/react-components";
 import {
     Document20Regular,
@@ -35,8 +36,16 @@ import {
     FolderZip20Regular,
     Video20Regular,
     DocumentQuestionMark20Regular,
+    // Parent hub node icons
+    Briefcase24Regular,
+    Building24Regular,
+    Receipt24Regular,
+    MailInbox24Regular,
+    // Action icons
+    Open16Regular,
 } from "@fluentui/react-icons";
 import type { DocumentNodeData } from "../types/graph";
+import { isParentHubNode, type NodeType } from "../types/api";
 
 /**
  * Get file type icon based on extension
@@ -117,27 +126,39 @@ const getFileTypeIcon = (fileType: string): React.ReactElement => {
 };
 
 /**
- * Get similarity badge appearance based on score
- * - 90-100%: green (success)
- * - 75-89%: blue (informative)
- * - 65-74%: yellow (warning)
- * - <65%: gray (subtle)
+ * Get icon for parent hub nodes based on node type
  */
-const getSimilarityAppearance = (
-    similarity: number
-): "filled" | "outline" | "tint" => {
-    if (similarity >= 0.9) return "filled";
-    if (similarity >= 0.75) return "tint";
-    return "outline";
+const getParentHubIcon = (nodeType: NodeType): React.ReactElement => {
+    switch (nodeType) {
+        case "matter":
+            return <Briefcase24Regular />;
+        case "project":
+            return <Building24Regular />;
+        case "invoice":
+            return <Receipt24Regular />;
+        case "email":
+            return <MailInbox24Regular />;
+        default:
+            return <Document20Regular />;
+    }
 };
 
-const getSimilarityColor = (
-    similarity: number
-): "success" | "informative" | "warning" | "subtle" => {
-    if (similarity >= 0.9) return "success";
-    if (similarity >= 0.75) return "informative";
-    if (similarity >= 0.65) return "warning";
-    return "subtle";
+/**
+ * Get display label for parent hub node type
+ */
+const getParentHubLabel = (nodeType: NodeType): string => {
+    switch (nodeType) {
+        case "matter":
+            return "Matter";
+        case "project":
+            return "Project";
+        case "invoice":
+            return "Invoice";
+        case "email":
+            return "Email";
+        default:
+            return "Parent";
+    }
 };
 
 /**
@@ -167,6 +188,31 @@ const useStyles = makeStyles({
         border: `2px dashed ${tokens.colorNeutralStroke2}`,
         boxShadow: tokens.shadow2,
         opacity: 0.9,
+    },
+    // Parent hub node styles - larger, accent colored
+    parentHubCard: {
+        backgroundColor: tokens.colorPaletteGreenBackground2,
+        border: `2px solid ${tokens.colorPaletteGreenBorder2}`,
+        boxShadow: tokens.shadow8,
+        minWidth: "120px",
+        maxWidth: "150px",
+    },
+    parentHubIcon: {
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: "28px",
+        height: "28px",
+        borderRadius: "50%",
+        backgroundColor: tokens.colorPaletteGreenBackground3,
+        color: tokens.colorPaletteGreenForeground1,
+    },
+    compactParentHubIcon: {
+        backgroundColor: tokens.colorPaletteGreenBackground2,
+        border: `2px solid ${tokens.colorPaletteGreenBorder2}`,
+        color: tokens.colorPaletteGreenForeground1,
+        width: "48px",
+        height: "48px",
     },
     // Compact mode styles - icon only
     compactContainer: {
@@ -254,6 +300,28 @@ const useStyles = makeStyles({
     orphanBadge: {
         fontSize: tokens.fontSizeBase100,
     },
+    openLink: {
+        display: "flex",
+        alignItems: "center",
+        gap: tokens.spacingHorizontalXXS,
+        fontSize: tokens.fontSizeBase100,
+        textDecoration: "none",
+        color: tokens.colorBrandForegroundLink,
+        cursor: "pointer",
+        "&:hover": {
+            textDecoration: "underline",
+        },
+    },
+    sourceOpenLink: {
+        color: tokens.colorNeutralForegroundOnBrand,
+        opacity: 0.9,
+    },
+    footerRow: {
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        width: "100%",
+    },
 });
 
 /**
@@ -269,6 +337,18 @@ export const DocumentNode: React.FC<NodeProps<DocumentNodeData>> = ({
     const similarity = data.similarity ?? 0;
     const fileType = data.fileType ?? "unknown";
     const compactMode = data.compactMode ?? false;
+    const nodeType = data.nodeType ?? (isSource ? "source" : isOrphanFile ? "orphan" : "related");
+    const isParentHub = isParentHubNode(nodeType);
+    const relationshipLabel = data.relationshipLabel;
+    const recordUrl = data.recordUrl;
+
+    // Handle click on "Open" link to navigate to Dataverse record
+    const handleOpenRecord = (e: React.MouseEvent) => {
+        e.stopPropagation(); // Prevent node selection
+        if (recordUrl) {
+            window.open(recordUrl, "_blank", "noopener,noreferrer");
+        }
+    };
 
     // Compact mode: icon-only display for fieldBound mode
     if (compactMode) {
@@ -280,7 +360,7 @@ export const DocumentNode: React.FC<NodeProps<DocumentNodeData>> = ({
                     style={{
                         width: "6px",
                         height: "6px",
-                        background: tokens.colorBrandBackground,
+                        background: isParentHub ? tokens.colorPaletteGreenBorder2 : tokens.colorBrandBackground,
                         border: `1px solid ${tokens.colorNeutralBackground1}`,
                     }}
                 />
@@ -288,15 +368,20 @@ export const DocumentNode: React.FC<NodeProps<DocumentNodeData>> = ({
                     className={mergeClasses(
                         styles.compactContainer,
                         styles.compactIcon,
-                        isSource
-                            ? styles.compactSourceIcon
-                            : isOrphanFile
-                                ? styles.compactOrphanIcon
-                                : styles.compactRelatedIcon
+                        isParentHub
+                            ? styles.compactParentHubIcon
+                            : isSource
+                                ? styles.compactSourceIcon
+                                : isOrphanFile
+                                    ? styles.compactOrphanIcon
+                                    : styles.compactRelatedIcon
                     )}
-                    title={`${data.name}${isOrphanFile ? " (File only)" : ""}${similarity > 0 ? ` (${Math.round(similarity * 100)}%)` : ""}`}
+                    title={isParentHub
+                        ? `${getParentHubLabel(nodeType)}: ${data.name}`
+                        : `${data.name}${relationshipLabel ? ` • ${relationshipLabel}` : ""}${isOrphanFile ? " (File only)" : ""}${similarity > 0 ? ` (${Math.round(similarity * 100)}%)` : ""}`
+                    }
                 >
-                    {getFileTypeIcon(fileType)}
+                    {isParentHub ? getParentHubIcon(nodeType) : getFileTypeIcon(fileType)}
                 </div>
                 <Handle
                     type="source"
@@ -304,7 +389,56 @@ export const DocumentNode: React.FC<NodeProps<DocumentNodeData>> = ({
                     style={{
                         width: "6px",
                         height: "6px",
-                        background: tokens.colorBrandBackground,
+                        background: isParentHub ? tokens.colorPaletteGreenBorder2 : tokens.colorBrandBackground,
+                        border: `1px solid ${tokens.colorNeutralBackground1}`,
+                    }}
+                />
+            </>
+        );
+    }
+
+    // Parent hub nodes: special rendering with centered icon and name
+    // Handle on RIGHT side - documents connect TO parent hubs from the left
+    if (isParentHub) {
+        return (
+            <>
+                <Card
+                    className={mergeClasses(styles.nodeContainer, styles.parentHubCard)}
+                    selected={selected}
+                    size="small"
+                >
+                    <CardHeader
+                        className={styles.cardHeader}
+                        image={
+                            <div className={styles.parentHubIcon}>
+                                {getParentHubIcon(nodeType)}
+                            </div>
+                        }
+                        header={
+                            <div className={styles.headerContent}>
+                                <Body1Strong className={styles.documentName}>
+                                    {data.name}
+                                </Body1Strong>
+                                <Caption1 className={styles.caption}>
+                                    {getParentHubLabel(nodeType)}
+                                </Caption1>
+                            </div>
+                        }
+                    />
+                    <div className={styles.footer}>
+                        <Badge appearance="tint" color="success" size="small">
+                            {getParentHubLabel(nodeType)}
+                        </Badge>
+                    </div>
+                </Card>
+                {/* Target handle on RIGHT - parent receives connections from documents */}
+                <Handle
+                    type="target"
+                    position={Position.Right}
+                    style={{
+                        width: "8px",
+                        height: "8px",
+                        background: tokens.colorPaletteGreenBorder2,
                         border: `1px solid ${tokens.colorNeutralBackground1}`,
                     }}
                 />
@@ -313,11 +447,12 @@ export const DocumentNode: React.FC<NodeProps<DocumentNodeData>> = ({
     }
 
     // Full mode: card display with details
+    // Source handle on LEFT - documents connect TO parent hubs on the right
     return (
         <>
-            {/* Handle positioned on left side for radial layout */}
+            {/* Source handle on LEFT - outgoing edge to parent hub */}
             <Handle
-                type="target"
+                type="source"
                 position={Position.Left}
                 style={{
                     width: "6px",
@@ -356,24 +491,35 @@ export const DocumentNode: React.FC<NodeProps<DocumentNodeData>> = ({
                             <Body1Strong className={styles.documentName}>
                                 {data.name}
                             </Body1Strong>
-                            <Caption1
-                                className={mergeClasses(
-                                    styles.caption,
-                                    isSource && styles.sourceCaption
-                                )}
-                            >
-                                {fileType.toUpperCase()}
-                                {data.size && ` • ${formatFileSize(data.size)}`}
-                            </Caption1>
+                            {/* Show "Source" label for source node only - relationship type is in footer for related nodes */}
+                            {isSource && (
+                                <Caption1
+                                    className={mergeClasses(
+                                        styles.caption,
+                                        styles.sourceCaption
+                                    )}
+                                >
+                                    Source
+                                </Caption1>
+                            )}
                         </div>
                     }
                 />
 
-                {/* Footer with similarity badge (only for related nodes) or orphan indicator */}
-                {!isSource && (similarity > 0 || isOrphanFile) && (
+                {/* Footer for related nodes: relationship type and Open link */}
+                {!isSource && (
                     <div className={styles.footer}>
-                        {isOrphanFile ? (
-                            <>
+                        <div className={styles.footerRow}>
+                            {/* Relationship type badge */}
+                            {relationshipLabel ? (
+                                <Badge
+                                    appearance="outline"
+                                    color="informative"
+                                    size="small"
+                                >
+                                    {relationshipLabel}
+                                </Badge>
+                            ) : isOrphanFile ? (
                                 <Badge
                                     className={styles.orphanBadge}
                                     appearance="outline"
@@ -382,48 +528,49 @@ export const DocumentNode: React.FC<NodeProps<DocumentNodeData>> = ({
                                 >
                                     File only
                                 </Badge>
-                                {similarity > 0 && (
-                                    <Badge
-                                        className={styles.similarityBadge}
-                                        appearance={getSimilarityAppearance(similarity)}
-                                        color={getSimilarityColor(similarity)}
-                                        size="small"
-                                    >
-                                        {Math.round(similarity * 100)}%
-                                    </Badge>
-                                )}
-                            </>
-                        ) : (
-                            <>
-                                <Caption1 className={styles.caption}>
-                                    Similarity
-                                </Caption1>
-                                <Badge
-                                    className={styles.similarityBadge}
-                                    appearance={getSimilarityAppearance(similarity)}
-                                    color={getSimilarityColor(similarity)}
-                                    size="small"
+                            ) : (
+                                <span /> // Empty spacer
+                            )}
+                            {/* Open record link */}
+                            {recordUrl && (
+                                <Link
+                                    className={styles.openLink}
+                                    onClick={handleOpenRecord}
+                                    title="Open in Dataverse"
                                 >
-                                    {Math.round(similarity * 100)}%
-                                </Badge>
-                            </>
-                        )}
+                                    <Open16Regular />
+                                    Open
+                                </Link>
+                            )}
+                        </div>
                     </div>
                 )}
 
-                {/* Source node label */}
+                {/* Footer for source node: Source badge and Open link */}
                 {isSource && (
-                    <div className={styles.footer}>
-                        <Badge appearance="filled" color="brand" size="small">
-                            Source Document
-                        </Badge>
+                    <div className={mergeClasses(styles.footer, styles.sourceFooter)}>
+                        <div className={styles.footerRow}>
+                            <Badge appearance="filled" color="brand" size="small">
+                                Source
+                            </Badge>
+                            {recordUrl && (
+                                <Link
+                                    className={mergeClasses(styles.openLink, styles.sourceOpenLink)}
+                                    onClick={handleOpenRecord}
+                                    title="Open in Dataverse"
+                                >
+                                    <Open16Regular />
+                                    Open
+                                </Link>
+                            )}
+                        </div>
                     </div>
                 )}
             </Card>
 
-            {/* Output handle on right side for radial layout */}
+            {/* Target handle on RIGHT - receives semantic relationship connections */}
             <Handle
-                type="source"
+                type="target"
                 position={Position.Right}
                 style={{
                     width: "6px",

@@ -60,7 +60,7 @@ public class DataverseEntitySchemaTests
         { "ParentDocumentId", new("sprk_parentdocumentid", typeof(string)) },
         { "ParentFileName", new("sprk_parentfilename", typeof(string)) },
         { "ParentGraphItemId", new("sprk_parentgraphitemid", typeof(string)) },
-        { "ParentDocumentLookup", new("sprk_parentdocumentname", typeof(EntityReference)) }
+        { "ParentDocumentLookup", new("sprk_parentdocument", typeof(EntityReference)) }
     };
 
     private record DataverseFieldMapping(string DataverseFieldName, Type ExpectedType);
@@ -337,8 +337,8 @@ public class DataverseEntitySchemaTests
 
         var entity = BuildEntityFromRequest(Guid.NewGuid(), request);
 
-        entity["sprk_parentdocumentname"].Should().BeOfType<EntityReference>();
-        var entityRef = (EntityReference)entity["sprk_parentdocumentname"];
+        entity["sprk_parentdocument"].Should().BeOfType<EntityReference>();
+        var entityRef = (EntityReference)entity["sprk_parentdocument"];
         entityRef.LogicalName.Should().Be("sprk_document");
         entityRef.Id.Should().Be(parentId);
     }

@@ -25,7 +25,7 @@ Use EntityReference for lookup fields (lines 215-226):
 ```csharp
 // Parent document lookup
 if (request.ParentDocumentLookup.HasValue)
-    document["sprk_parentdocumentname"] = new EntityReference("sprk_document", request.ParentDocumentLookup.Value);
+    document["sprk_parentdocument"] = new EntityReference("sprk_document", request.ParentDocumentLookup.Value);
 
 // Record association lookups
 if (request.MatterLookup.HasValue)
@@ -50,7 +50,7 @@ var payload = new Dictionary<string, object>
 
 // Parent document lookup
 if (request.ParentDocumentLookup.HasValue)
-    payload["sprk_ParentDocumentName@odata.bind"] = $"/sprk_documents({request.ParentDocumentLookup.Value})";
+    payload["sprk_ParentDocument@odata.bind"] = $"/sprk_documents({request.ParentDocumentLookup.Value})";
 
 // Record associations
 if (request.MatterLookup.HasValue)

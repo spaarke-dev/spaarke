@@ -30,6 +30,8 @@ export interface UseVisualizationApiOptions {
     depth?: number;
     /** Document type filters */
     documentTypes?: string[];
+    /** Relationship type filters (e.g., ["same_email", "semantic"]) */
+    relationshipTypes?: string[];
     /** Whether API should be called (skip if false) */
     enabled?: boolean;
 }
@@ -78,6 +80,7 @@ export function useVisualizationApi(options: UseVisualizationApiOptions): Visual
         limit = 25,
         depth = 1,
         documentTypes,
+        relationshipTypes,
         enabled = true,
     } = options;
 
@@ -99,9 +102,10 @@ export function useVisualizationApi(options: UseVisualizationApiOptions): Visual
         limit,
         depth,
         documentTypes,
+        relationshipTypes,
         includeKeywords: true,
         includeParentEntity: true,
-    }), [tenantId, threshold, limit, depth, documentTypes]);
+    }), [tenantId, threshold, limit, depth, documentTypes, relationshipTypes]);
 
     // Fetch function
     const fetchData = React.useCallback(async () => {

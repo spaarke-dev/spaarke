@@ -91,19 +91,44 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
     public async Task<DocumentEntity?> GetDocumentAsync(string id, CancellationToken ct = default)
     {
-        var entity = await _serviceClient.RetrieveAsync(
-            "sprk_document",
-            Guid.Parse(id),
-            new ColumnSet("sprk_documentname", "sprk_documentdescription", "sprk_containerid",
-                         "sprk_hasfile", "sprk_filename", "sprk_filesize", "sprk_mimetype",
-                         "sprk_graphitemid", "sprk_graphdriveid", "sprk_filepath",
-                         "statuscode", "statecode", "createdon", "modifiedon"),
-            ct);
+        _logger.LogInformation("[DATAVERSE-DEBUG] GetDocumentAsync called for ID: {Id}", id);
 
-        if (entity == null)
+        try
+        {
+            // Use AllColumns=true to retrieve all available fields without risking "attribute not found" errors
+            // Different Dataverse environments may have different fields available
+            var entity = await _serviceClient.RetrieveAsync(
+                "sprk_document",
+                Guid.Parse(id),
+                new ColumnSet(true), // AllColumns - safer than specifying fields that may not exist
+                ct);
+
+            if (entity == null)
+            {
+                _logger.LogWarning("[DATAVERSE-DEBUG] GetDocumentAsync: Entity not found for ID: {Id}", id);
+                return null;
+            }
+
+            _logger.LogInformation("[DATAVERSE-DEBUG] GetDocumentAsync: Found entity with {AttrCount} attributes: {Attributes}",
+                entity.Attributes.Count, string.Join(", ", entity.Attributes.Keys.Take(20)));
+
+            // Use the full mapping method that includes email and lookup fields (safely handles missing fields)
+            return MapToDocumentEntityWithLookups(entity);
+        }
+        catch (Exception ex) when (ex.Message.Contains("0x80040217") || // Object doesn't exist error code
+                                   ex.Message.Contains("sprk_document With Id") ||  // Specific record not found message
+                                   (ex.Message.Contains("does not exist") && !ex.Message.Contains("attribute"))) // Not found but not attribute error
+        {
+            // Dataverse returns FaultException when record doesn't exist
+            _logger.LogWarning("[DATAVERSE-DEBUG] GetDocumentAsync: Document {Id} does not exist in Dataverse. Error: {Error}", id, ex.Message);
             return null;
-
-        return MapToDocumentEntity(entity);
+        }
+        catch (Exception ex)
+        {
+            // Log the full error details to help diagnose attribute/field issues
+            _logger.LogError(ex, "[DATAVERSE-DEBUG] GetDocumentAsync: Error retrieving document {Id}. Message: {Message}", id, ex.Message);
+            throw;
+        }
     }
 
     public async Task<AnalysisEntity?> GetAnalysisAsync(string id, CancellationToken ct = default)
@@ -429,13 +454,13 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
                 "sprk_documentname", "sprk_documentdescription", "sprk_containerid",
                 "sprk_hasfile", "sprk_filename", "sprk_filesize", "sprk_mimetype",
                 "sprk_graphitemid", "sprk_graphdriveid", "sprk_filepath",
-                "sprk_parentdocumentname",
+                "sprk_parentdocument",
                 "statuscode", "statecode", "createdon", "modifiedon"),
             Criteria = new FilterExpression
             {
                 Conditions =
                 {
-                    new ConditionExpression("sprk_parentdocumentname", ConditionOperator.Equal, parentDocumentId)
+                    new ConditionExpression("sprk_parentdocument", ConditionOperator.Equal, parentDocumentId)
                 }
             }
         };
@@ -446,6 +471,132 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             results.Entities.Count, parentDocumentId);
 
         return results.Entities.Select(MapToDocumentEntity).ToList();
+    }
+
+    // ========================================
+    // Relationship Query Operations (Visualization)
+    // ========================================
+
+    public async Task<IEnumerable<DocumentEntity>> GetDocumentsByMatterAsync(Guid matterId, Guid? excludeDocumentId = null, CancellationToken ct = default)
+    {
+        return await GetDocumentsByLookupAsync("sprk_matter", matterId, excludeDocumentId, "Matter", ct);
+    }
+
+    public async Task<IEnumerable<DocumentEntity>> GetDocumentsByProjectAsync(Guid projectId, Guid? excludeDocumentId = null, CancellationToken ct = default)
+    {
+        return await GetDocumentsByLookupAsync("sprk_project", projectId, excludeDocumentId, "Project", ct);
+    }
+
+    public async Task<IEnumerable<DocumentEntity>> GetDocumentsByInvoiceAsync(Guid invoiceId, Guid? excludeDocumentId = null, CancellationToken ct = default)
+    {
+        return await GetDocumentsByLookupAsync("sprk_invoice", invoiceId, excludeDocumentId, "Invoice", ct);
+    }
+
+    private async Task<IEnumerable<DocumentEntity>> GetDocumentsByLookupAsync(
+        string lookupField,
+        Guid lookupValue,
+        Guid? excludeDocumentId,
+        string entityDisplayName,
+        CancellationToken ct)
+    {
+        _logger.LogDebug("Querying documents by {EntityDisplayName}: {LookupValue}", entityDisplayName, lookupValue);
+
+        var query = new QueryExpression("sprk_document")
+        {
+            ColumnSet = new ColumnSet(
+                "sprk_documentname", "sprk_documentdescription", "sprk_containerid",
+                "sprk_hasfile", "sprk_filename", "sprk_filesize", "sprk_mimetype",
+                "sprk_graphitemid", "sprk_graphdriveid", "sprk_filepath",
+                "sprk_matter", "sprk_project", "sprk_invoice",
+                "sprk_emailconversationindex", "sprk_isemailarchive", "sprk_parentdocument",
+                "statuscode", "statecode", "createdon", "modifiedon"),
+            TopCount = 50,
+            Criteria = new FilterExpression
+            {
+                Conditions =
+                {
+                    new ConditionExpression(lookupField, ConditionOperator.Equal, lookupValue)
+                }
+            }
+        };
+
+        if (excludeDocumentId.HasValue)
+        {
+            query.Criteria.Conditions.Add(
+                new ConditionExpression("sprk_documentid", ConditionOperator.NotEqual, excludeDocumentId.Value));
+        }
+
+        var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
+
+        _logger.LogDebug("Found {Count} documents for {EntityDisplayName} {LookupValue}",
+            results.Entities.Count, entityDisplayName, lookupValue);
+
+        return results.Entities.Select(MapToDocumentEntityWithLookups).ToList();
+    }
+
+    public async Task<IEnumerable<DocumentEntity>> GetDocumentsByConversationIndexAsync(string conversationIndexPrefix, Guid? excludeDocumentId = null, CancellationToken ct = default)
+    {
+        _logger.LogDebug("Querying documents by ConversationIndex prefix: {Prefix}", conversationIndexPrefix);
+
+        var query = new QueryExpression("sprk_document")
+        {
+            ColumnSet = new ColumnSet(
+                "sprk_documentname", "sprk_documentdescription", "sprk_containerid",
+                "sprk_hasfile", "sprk_filename", "sprk_filesize", "sprk_mimetype",
+                "sprk_graphitemid", "sprk_graphdriveid", "sprk_filepath",
+                "sprk_matter", "sprk_project", "sprk_invoice",
+                "sprk_emailconversationindex", "sprk_isemailarchive", "sprk_parentdocument",
+                "statuscode", "statecode", "createdon", "modifiedon"),
+            TopCount = 50,
+            Criteria = new FilterExpression
+            {
+                Conditions =
+                {
+                    new ConditionExpression("sprk_emailconversationindex", ConditionOperator.BeginsWith, conversationIndexPrefix)
+                }
+            }
+        };
+
+        if (excludeDocumentId.HasValue)
+        {
+            query.Criteria.Conditions.Add(
+                new ConditionExpression("sprk_documentid", ConditionOperator.NotEqual, excludeDocumentId.Value));
+        }
+
+        var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
+
+        _logger.LogDebug("Found {Count} documents for ConversationIndex prefix {Prefix}",
+            results.Entities.Count, conversationIndexPrefix);
+
+        return results.Entities.Select(MapToDocumentEntityWithLookups).ToList();
+    }
+
+    private DocumentEntity MapToDocumentEntityWithLookups(Entity entity)
+    {
+        var doc = MapToDocumentEntityWithEmailFields(entity);
+
+        // Add lookup references
+        var matterRef = entity.GetAttributeValue<EntityReference>("sprk_matter");
+        if (matterRef != null)
+        {
+            doc.MatterId = matterRef.Id.ToString();
+        }
+
+        var projectRef = entity.GetAttributeValue<EntityReference>("sprk_project");
+        if (projectRef != null)
+        {
+            doc.ProjectId = projectRef.Id.ToString();
+        }
+
+        var invoiceRef = entity.GetAttributeValue<EntityReference>("sprk_invoice");
+        if (invoiceRef != null)
+        {
+            doc.InvoiceId = invoiceRef.Id.ToString();
+        }
+
+        doc.EmailConversationIndex = entity.GetAttributeValue<string>("sprk_emailconversationindex");
+
+        return doc;
     }
 
     private DocumentEntity MapToDocumentEntityWithEmailFields(Entity entity)
@@ -462,7 +613,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         doc.IsEmailArchive = entity.GetAttributeValue<bool?>("sprk_isemailarchive");
 
         // Handle parent document lookup
-        var parentRef = entity.GetAttributeValue<EntityReference>("sprk_parentdocumentname");
+        var parentRef = entity.GetAttributeValue<EntityReference>("sprk_parentdocument");
         if (parentRef != null)
         {
             doc.ParentDocumentId = parentRef.Id.ToString();

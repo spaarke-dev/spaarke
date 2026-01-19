@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Services.Ai.Visualization;
 
@@ -52,6 +53,14 @@ public static class VisualizationEndpoints
             .ProducesProblem(404)
             .ProducesProblem(500);
 
+        // GET /api/ai/visualization/debug/{documentId} - Debug document retrieval (temporary)
+        group.MapGet("/debug/{documentId:guid}", DebugDocumentRetrieval)
+            .AllowAnonymous()  // Temporary for debugging - remove after testing
+            .WithName("VisualizationDebugDocument")
+            .WithSummary("Debug: Test Dataverse document retrieval")
+            .Produces<object>()
+            .ProducesProblem(500);
+
         return app;
     }
 
@@ -101,12 +110,13 @@ public static class VisualizationEndpoints
             Depth = Math.Clamp(query.Depth ?? 1, 1, 3),
             IncludeKeywords = query.IncludeKeywords ?? true,
             DocumentTypes = query.DocumentTypes?.ToList(),
-            IncludeParentEntity = query.IncludeParentEntity ?? true
+            IncludeParentEntity = query.IncludeParentEntity ?? true,
+            RelationshipTypeFilter = query.RelationshipTypes?.ToList()
         };
 
         try
         {
-            logger.LogDebug(
+            logger.LogInformation(
                 "[VISUALIZATION] Getting related documents: DocumentId={DocumentId}, TenantId={TenantId}, Threshold={Threshold}, Limit={Limit}, Depth={Depth}",
                 documentId, options.TenantId, options.Threshold, options.Limit, options.Depth);
 
@@ -144,6 +154,61 @@ public static class VisualizationEndpoints
                 title: "Visualization Failed",
                 detail: "An error occurred while retrieving related documents",
                 statusCode: 500);
+        }
+    }
+
+    /// <summary>
+    /// Debug endpoint to test Dataverse document retrieval directly.
+    /// </summary>
+    private static async Task<IResult> DebugDocumentRetrieval(
+        Guid documentId,
+        IDataverseService dataverseService,
+        ILogger<Program> logger,
+        CancellationToken cancellationToken)
+    {
+        logger.LogInformation("[DEBUG] Testing document retrieval for {DocumentId}", documentId);
+
+        try
+        {
+            var doc = await dataverseService.GetDocumentAsync(documentId.ToString(), cancellationToken);
+
+            if (doc == null)
+            {
+                return Results.Ok(new
+                {
+                    status = "NOT_FOUND",
+                    documentId = documentId.ToString(),
+                    message = "GetDocumentAsync returned null - document not found in Dataverse"
+                });
+            }
+
+            return Results.Ok(new
+            {
+                status = "FOUND",
+                documentId = doc.Id,
+                name = doc.Name,
+                fileName = doc.FileName,
+                isEmailArchive = doc.IsEmailArchive,
+                parentDocumentId = doc.ParentDocumentId,
+                matterId = doc.MatterId,
+                projectId = doc.ProjectId,
+                invoiceId = doc.InvoiceId,
+                emailConversationIndex = doc.EmailConversationIndex,
+                emailSubject = doc.EmailSubject,
+                createdOn = doc.CreatedOn
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "[DEBUG] Error retrieving document {DocumentId}", documentId);
+            return Results.Ok(new
+            {
+                status = "ERROR",
+                documentId = documentId.ToString(),
+                errorType = ex.GetType().Name,
+                errorMessage = ex.Message,
+                innerError = ex.InnerException?.Message
+            });
         }
     }
 }
@@ -201,4 +266,12 @@ public class VisualizationQueryParameters
     /// </summary>
     [FromQuery(Name = "includeParentEntity")]
     public bool? IncludeParentEntity { get; init; }
+
+    /// <summary>
+    /// Filter by relationship types.
+    /// Valid values: same_email, same_thread, same_matter, same_project, same_invoice, semantic
+    /// Default: all types (no filter)
+    /// </summary>
+    [FromQuery(Name = "relationshipTypes")]
+    public string[]? RelationshipTypes { get; init; }
 }

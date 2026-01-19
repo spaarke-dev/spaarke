@@ -79,10 +79,54 @@ public interface IDataverseService
 
     /// <summary>
     /// Get child documents (attachments) by parent document lookup.
-    /// Returns documents where sprk_ParentDocumentName lookup equals the parent document ID.
+    /// Returns documents where sprk_ParentDocument lookup equals the parent document ID.
     /// </summary>
     /// <param name="parentDocumentId">The parent document ID</param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>List of child document entities</returns>
     Task<IEnumerable<DocumentEntity>> GetDocumentsByParentAsync(Guid parentDocumentId, CancellationToken ct = default);
+
+    // ========================================
+    // Relationship Query Operations (Visualization)
+    // ========================================
+
+    /// <summary>
+    /// Get documents associated with the same Matter.
+    /// Returns documents where sprk_Matter lookup equals the given Matter ID.
+    /// </summary>
+    /// <param name="matterId">The Matter ID</param>
+    /// <param name="excludeDocumentId">Optional document ID to exclude from results</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>List of document entities linked to this Matter</returns>
+    Task<IEnumerable<DocumentEntity>> GetDocumentsByMatterAsync(Guid matterId, Guid? excludeDocumentId = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Get documents associated with the same Project.
+    /// Returns documents where sprk_Project lookup equals the given Project ID.
+    /// </summary>
+    /// <param name="projectId">The Project ID</param>
+    /// <param name="excludeDocumentId">Optional document ID to exclude from results</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>List of document entities linked to this Project</returns>
+    Task<IEnumerable<DocumentEntity>> GetDocumentsByProjectAsync(Guid projectId, Guid? excludeDocumentId = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Get documents associated with the same Invoice.
+    /// Returns documents where sprk_Invoice lookup equals the given Invoice ID.
+    /// </summary>
+    /// <param name="invoiceId">The Invoice ID</param>
+    /// <param name="excludeDocumentId">Optional document ID to exclude from results</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>List of document entities linked to this Invoice</returns>
+    Task<IEnumerable<DocumentEntity>> GetDocumentsByInvoiceAsync(Guid invoiceId, Guid? excludeDocumentId = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Get documents in the same email thread (same ConversationIndex prefix).
+    /// Uses startswith filter on sprk_EmailConversationIndex.
+    /// </summary>
+    /// <param name="conversationIndexPrefix">First 44 chars of ConversationIndex (thread root)</param>
+    /// <param name="excludeDocumentId">Optional document ID to exclude from results</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>List of document entities in this email thread</returns>
+    Task<IEnumerable<DocumentEntity>> GetDocumentsByConversationIndexAsync(string conversationIndexPrefix, Guid? excludeDocumentId = null, CancellationToken ct = default);
 }

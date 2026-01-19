@@ -9,17 +9,24 @@ import {
     Spinner,
     MessageBar,
     MessageBarBody,
+    Menu,
+    MenuTrigger,
+    MenuPopover,
+    MenuList,
+    MenuItemCheckbox,
+    Button,
 } from "@fluentui/react-components";
-import { DocumentFlowchart24Regular } from "@fluentui/react-icons";
+import { DocumentFlowchart24Regular, Filter20Regular } from "@fluentui/react-icons";
 import { IInputs } from "./generated/ManifestTypes";
 import { DocumentGraph } from "./components/DocumentGraph";
 import { useVisualizationApi, formatVisualizationError } from "./hooks/useVisualizationApi";
 import { MsalAuthProvider } from "./services/auth/MsalAuthProvider";
 import { loginRequest } from "./services/auth/msalConfig";
 import type { DocumentNode } from "./types/graph";
+import { RELATIONSHIP_TYPES, type RelationshipTypeKey } from "./types/api";
 
 // Control version - must match ControlManifest.Input.xml
-const CONTROL_VERSION = "1.0.18";
+const CONTROL_VERSION = "1.0.24";
 
 /**
  * Props for the DocumentRelationshipViewer component
@@ -99,6 +106,14 @@ const useStyles = makeStyles({
         padding: tokens.spacingVerticalL,
         width: "100%",
     },
+    filterDropdown: {
+        minWidth: "180px",
+    },
+    filterContainer: {
+        display: "flex",
+        alignItems: "center",
+        gap: tokens.spacingHorizontalS,
+    },
 });
 
 /**
@@ -171,6 +186,9 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
     // Selected node state
     const [selectedNodeId, setSelectedNodeId] = React.useState<string | null>(null);
 
+    // Relationship type filter state (empty array = all types)
+    const [selectedRelationshipTypes, setSelectedRelationshipTypes] = React.useState<string[]>([]);
+
     // Access token state for authenticated API calls
     const [accessToken, setAccessToken] = React.useState<string | undefined>(undefined);
     const [authError, setAuthError] = React.useState<string | null>(null);
@@ -209,6 +227,7 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
         threshold: 0.65,
         limit: 25,
         depth: 1,
+        relationshipTypes: selectedRelationshipTypes.length > 0 ? selectedRelationshipTypes : undefined,
         enabled: !!documentId && documentId.trim() !== "" && !!tenantId && !!accessToken,
     });
 
@@ -259,6 +278,42 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
         [onDocumentSelect, notifyOutputChanged]
     );
 
+    // Handle relationship type filter toggle
+    const handleFilterToggle = React.useCallback(
+        (key: RelationshipTypeKey) => {
+            setSelectedRelationshipTypes((prev) => {
+                if (prev.includes(key)) {
+                    return prev.filter((k) => k !== key);
+                } else {
+                    return [...prev, key];
+                }
+            });
+        },
+        []
+    );
+
+    // Get all relationship type options for the menu
+    const relationshipTypeOptions = React.useMemo(() => {
+        return Object.entries(RELATIONSHIP_TYPES).map(([key, label]) => ({
+            key: key as RelationshipTypeKey,
+            label,
+        }));
+    }, []);
+
+    // Filter button label
+    const filterButtonLabel = React.useMemo(() => {
+        if (selectedRelationshipTypes.length === 0) {
+            return "All types";
+        }
+        return `${selectedRelationshipTypes.length} selected`;
+    }, [selectedRelationshipTypes.length]);
+
+    // Build checked items object for Menu
+    const checkedItems = React.useMemo(() => {
+        const items: Record<string, string[]> = { filter: selectedRelationshipTypes };
+        return items;
+    }, [selectedRelationshipTypes]);
+
     // Check if we should show the placeholder (missing document or tenant)
     const showPlaceholder = !documentId || documentId.trim() === "";
     const showTenantMissing = documentId && !tenantId;
@@ -283,6 +338,33 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
                                 Selected: {selectedNodeId}
                             </Text>
                         )}
+                    </div>
+                    <div className={styles.filterContainer}>
+                        <Menu checkedValues={checkedItems}>
+                            <MenuTrigger disableButtonEnhancement>
+                                <Button
+                                    appearance="subtle"
+                                    icon={<Filter20Regular />}
+                                    size="small"
+                                >
+                                    {filterButtonLabel}
+                                </Button>
+                            </MenuTrigger>
+                            <MenuPopover>
+                                <MenuList>
+                                    {relationshipTypeOptions.map((option) => (
+                                        <MenuItemCheckbox
+                                            key={option.key}
+                                            name="filter"
+                                            value={option.key}
+                                            onClick={() => handleFilterToggle(option.key)}
+                                        >
+                                            {option.label}
+                                        </MenuItemCheckbox>
+                                    ))}
+                                </MenuList>
+                            </MenuPopover>
+                        </Menu>
                     </div>
                 </div>
 

@@ -43,6 +43,10 @@ public class EmailToDocumentJobHandler : IJobHandler
     // Relationship type choice value for Email Attachment
     private const int RelationshipTypeEmailAttachment = 100000000;
 
+    // Source type choice values (sprk_sourcetype)
+    private const int SourceTypeEmailArchive = 659490003;
+    private const int SourceTypeEmailAttachment = 659490004;
+
     // Email processing status choice values (sprk_documentprocessingstatus on email entity)
     // These prevent infinite retry loops by marking emails as processed/failed
     private const int ProcessingStatusInProgress = 100000000;
@@ -266,6 +270,7 @@ public class EmailToDocumentJobHandler : IJobHandler
                     HasFile = true,
                     DocumentType = DocumentTypeEmail,
                     IsEmailArchive = true,
+                    SourceType = SourceTypeEmailArchive,
 
                     // Email metadata
                     EmailSubject = metadata.Subject,
@@ -315,6 +320,7 @@ public class EmailToDocumentJobHandler : IJobHandler
                     driveId,
                     containerId,
                     emailId,
+                    metadata.ConversationIndex, // Copy to attachments for same_thread queries
                     ct);
 
                 // Mark as processed
@@ -562,6 +568,7 @@ public class EmailToDocumentJobHandler : IJobHandler
         string driveId,
         string containerId,
         Guid emailId,
+        string? conversationIndex,
         CancellationToken ct)
     {
         var result = new AttachmentProcessingResult();
@@ -633,6 +640,7 @@ public class EmailToDocumentJobHandler : IJobHandler
                         driveId,
                         containerId,
                         emailId,
+                        conversationIndex,
                         ct);
 
                     result.UploadedCount++;
@@ -680,6 +688,7 @@ public class EmailToDocumentJobHandler : IJobHandler
         string driveId,
         string containerId,
         Guid emailId,
+        string? conversationIndex,
         CancellationToken ct)
     {
         if (attachment.Content == null || attachment.Content.Length == 0)
@@ -737,7 +746,13 @@ public class EmailToDocumentJobHandler : IJobHandler
             ParentDocumentLookup = parentDocumentId,
             ParentFileName = parentFileName,
             ParentGraphItemId = parentGraphItemId,
-            RelationshipType = RelationshipTypeEmailAttachment
+            RelationshipType = RelationshipTypeEmailAttachment,
+
+            // Source type for relationship queries
+            SourceType = SourceTypeEmailAttachment,
+
+            // Copy ConversationIndex from parent email to enable same_thread queries
+            EmailConversationIndex = conversationIndex
 
             // Note: EmailLookup is NOT set for child documents because:
             // 1. The sprk_document entity has an alternate key on sprk_email (Email Activity Key)

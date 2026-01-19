@@ -115,29 +115,41 @@ public class DataverseWebApiService : IDataverseService
             return null;
         }
 
+        // Query without $select to get all fields including lookup values
+        // Lookup values are returned as _lookupfieldname_value format automatically
         var url = $"{_entitySetName}({guid})";
-        _logger.LogDebug("Retrieving document: {Id}", id);
+        _logger.LogInformation("[DATAVERSE-DEBUG] GetDocumentAsync: Querying {Url}", url);
 
         try
         {
-            var response = await _httpClient.GetAsync(url, ct);
+            // Request formatted values for lookup field display names
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Add("Prefer", "odata.include-annotations=\"OData.Community.Display.V1.FormattedValue\"");
+
+            var response = await _httpClient.SendAsync(request, ct);
+            _logger.LogInformation("[DATAVERSE-DEBUG] GetDocumentAsync: Response status {StatusCode}", response.StatusCode);
 
             if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
-                _logger.LogWarning("Document not found: {Id}", id);
+                _logger.LogWarning("[DATAVERSE-DEBUG] Document not found: {Id}", id);
                 return null;
             }
 
             response.EnsureSuccessStatusCode();
 
             var data = await response.Content.ReadFromJsonAsync<Dictionary<string, JsonElement>>(cancellationToken: ct);
-            if (data == null) return null;
+            if (data == null)
+            {
+                _logger.LogWarning("[DATAVERSE-DEBUG] GetDocumentAsync: Response data was null for {Id}", id);
+                return null;
+            }
 
+            _logger.LogInformation("[DATAVERSE-DEBUG] GetDocumentAsync: Got {FieldCount} fields for {Id}", data.Count, id);
             return MapToDocumentEntity(data, id);
         }
         catch (Exception ex)
         {
-            _logger.LogError(exception: ex, message: "Failed to retrieve document {Id}", id);
+            _logger.LogError(exception: ex, message: "[DATAVERSE-DEBUG] Failed to retrieve document {Id}", id);
             throw;
         }
     }
@@ -404,6 +416,10 @@ public class DataverseWebApiService : IDataverseService
         if (request.InvoiceLookup.HasValue)
             payload["sprk_Invoice@odata.bind"] = $"/sprk_invoices({request.InvoiceLookup.Value})";
 
+        // Source type (choice field)
+        if (request.SourceType.HasValue)
+            payload["sprk_sourcetype"] = request.SourceType.Value;
+
         var url = $"{_entitySetName}({guid})";
 
         // Log the actual payload for debugging email field persistence
@@ -526,6 +542,13 @@ public class DataverseWebApiService : IDataverseService
 
     private DocumentEntity MapToDocumentEntity(Dictionary<string, JsonElement> data, string id)
     {
+        // Debug: Log lookup field values for relationship queries
+        var matterId = GetStringValue(data, "_sprk_matter_value");
+        var projectId = GetStringValue(data, "_sprk_project_value");
+        var invoiceId = GetStringValue(data, "_sprk_invoice_value");
+        _logger.LogWarning("[DATAVERSE-DEBUG] MapToDocumentEntity for {Id}: MatterId={MatterId}, ProjectId={ProjectId}, InvoiceId={InvoiceId}",
+            id, matterId ?? "(null)", projectId ?? "(null)", invoiceId ?? "(null)");
+
         return new DocumentEntity
         {
             Id = id,
@@ -552,7 +575,17 @@ public class DataverseWebApiService : IDataverseService
             EmailDate = GetDateTimeValue(data, "sprk_emaildate"),
             EmailBody = GetStringValue(data, "sprk_emailbody"),
             IsEmailArchive = GetNullableBoolValue(data, "sprk_isemailarchive"),
-            ParentDocumentId = GetStringValue(data, "sprk_parentdocumentid")
+            // ParentDocumentId is the lookup value (GUID string) from sprk_parentdocument lookup
+            ParentDocumentId = GetStringValue(data, "_sprk_parentdocument_value"),
+            EmailConversationIndex = GetStringValue(data, "sprk_emailconversationindex"),
+
+            // Record association lookups (for relationship queries)
+            MatterId = GetStringValue(data, "_sprk_matter_value"),
+            MatterName = GetStringValue(data, "_sprk_matter_value@OData.Community.Display.V1.FormattedValue"),
+            ProjectId = GetStringValue(data, "_sprk_project_value"),
+            ProjectName = GetStringValue(data, "_sprk_project_value@OData.Community.Display.V1.FormattedValue"),
+            InvoiceId = GetStringValue(data, "_sprk_invoice_value"),
+            InvoiceName = GetStringValue(data, "_sprk_invoice_value@OData.Community.Display.V1.FormattedValue")
         };
     }
 
@@ -664,14 +697,14 @@ public class DataverseWebApiService : IDataverseService
 
     /// <summary>
     /// Get child documents (attachments) by parent document lookup.
-    /// Queries: $filter=_sprk_parentdocumentname_value eq {parentDocumentId}
+    /// Queries: $filter=_sprk_parentdocument_value eq {parentDocumentId}
     /// </summary>
     public async Task<IEnumerable<DocumentEntity>> GetDocumentsByParentAsync(Guid parentDocumentId, CancellationToken ct = default)
     {
         await EnsureAuthenticatedAsync(ct);
 
-        // OData filter for parent document lookup (lookup value is stored as _sprk_parentdocumentname_value)
-        var filter = $"_sprk_parentdocumentname_value eq {parentDocumentId}";
+        // OData filter for parent document lookup (lookup value is stored as _sprk_parentdocument_value)
+        var filter = $"_sprk_parentdocument_value eq {parentDocumentId}";
         var url = $"{_entitySetName}?$filter={Uri.EscapeDataString(filter)}";
 
         _logger.LogDebug("Querying child documents by parent: {ParentDocumentId}", parentDocumentId);
@@ -702,6 +735,127 @@ public class DataverseWebApiService : IDataverseService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error querying child documents by parent {ParentDocumentId}", parentDocumentId);
+            throw;
+        }
+    }
+
+    // ========================================
+    // Relationship Query Operations (Visualization)
+    // ========================================
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<DocumentEntity>> GetDocumentsByMatterAsync(Guid matterId, Guid? excludeDocumentId = null, CancellationToken ct = default)
+    {
+        return await GetDocumentsByLookupAsync("_sprk_matter_value", matterId, excludeDocumentId, "Matter", ct);
+    }
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<DocumentEntity>> GetDocumentsByProjectAsync(Guid projectId, Guid? excludeDocumentId = null, CancellationToken ct = default)
+    {
+        return await GetDocumentsByLookupAsync("_sprk_project_value", projectId, excludeDocumentId, "Project", ct);
+    }
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<DocumentEntity>> GetDocumentsByInvoiceAsync(Guid invoiceId, Guid? excludeDocumentId = null, CancellationToken ct = default)
+    {
+        return await GetDocumentsByLookupAsync("_sprk_invoice_value", invoiceId, excludeDocumentId, "Invoice", ct);
+    }
+
+    /// <summary>
+    /// Generic helper to query documents by a lookup field value.
+    /// </summary>
+    private async Task<IEnumerable<DocumentEntity>> GetDocumentsByLookupAsync(
+        string lookupField,
+        Guid lookupValue,
+        Guid? excludeDocumentId,
+        string entityDisplayName,
+        CancellationToken ct)
+    {
+        await EnsureAuthenticatedAsync(ct);
+
+        var filter = $"{lookupField} eq {lookupValue}";
+        if (excludeDocumentId.HasValue)
+        {
+            filter += $" and sprk_documentid ne {excludeDocumentId.Value}";
+        }
+
+        var url = $"{_entitySetName}?$filter={Uri.EscapeDataString(filter)}&$top=50";
+
+        _logger.LogDebug("Querying documents by {EntityDisplayName}: {LookupValue}", entityDisplayName, lookupValue);
+
+        try
+        {
+            var response = await _httpClient.GetAsync(url, ct);
+            response.EnsureSuccessStatusCode();
+
+            var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
+            if (result?.Value == null || result.Value.Count == 0)
+            {
+                _logger.LogDebug("No documents found for {EntityDisplayName} {LookupValue}", entityDisplayName, lookupValue);
+                return Enumerable.Empty<DocumentEntity>();
+            }
+
+            var documents = result.Value.Select(data =>
+            {
+                var id = data.TryGetValue("sprk_documentid", out var idElement)
+                    ? idElement.GetString() ?? string.Empty
+                    : string.Empty;
+                return MapToDocumentEntity(data, id);
+            }).ToList();
+
+            _logger.LogDebug("Found {Count} documents for {EntityDisplayName} {LookupValue}", documents.Count, entityDisplayName, lookupValue);
+            return documents;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error querying documents by {EntityDisplayName} {LookupValue}", entityDisplayName, lookupValue);
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<DocumentEntity>> GetDocumentsByConversationIndexAsync(string conversationIndexPrefix, Guid? excludeDocumentId = null, CancellationToken ct = default)
+    {
+        await EnsureAuthenticatedAsync(ct);
+
+        // ConversationIndex prefix match: first 44 chars identify the thread root
+        // Use startswith for matching all emails in the same thread
+        var filter = $"startswith(sprk_emailconversationindex,'{conversationIndexPrefix}')";
+        if (excludeDocumentId.HasValue)
+        {
+            filter += $" and sprk_documentid ne {excludeDocumentId.Value}";
+        }
+
+        var url = $"{_entitySetName}?$filter={Uri.EscapeDataString(filter)}&$top=50";
+
+        _logger.LogDebug("Querying documents by ConversationIndex prefix: {Prefix}", conversationIndexPrefix);
+
+        try
+        {
+            var response = await _httpClient.GetAsync(url, ct);
+            response.EnsureSuccessStatusCode();
+
+            var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
+            if (result?.Value == null || result.Value.Count == 0)
+            {
+                _logger.LogDebug("No documents found for ConversationIndex prefix {Prefix}", conversationIndexPrefix);
+                return Enumerable.Empty<DocumentEntity>();
+            }
+
+            var documents = result.Value.Select(data =>
+            {
+                var id = data.TryGetValue("sprk_documentid", out var idElement)
+                    ? idElement.GetString() ?? string.Empty
+                    : string.Empty;
+                return MapToDocumentEntity(data, id);
+            }).ToList();
+
+            _logger.LogDebug("Found {Count} documents for ConversationIndex prefix {Prefix}", documents.Count, conversationIndexPrefix);
+            return documents;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error querying documents by ConversationIndex prefix {Prefix}", conversationIndexPrefix);
             throw;
         }
     }
