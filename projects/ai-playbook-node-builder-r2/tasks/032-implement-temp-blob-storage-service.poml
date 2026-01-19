@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Implement temp blob storage service (24hr TTL)</title>
+    <phase>4</phase>
+    <tags>bff-api, storage, azure</tags>
+    <estimate>1d</estimate>
+    <dependencies>none</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create a temporary blob storage service for test documents with automatic 24-hour TTL.</goal>
+    <context>
+      Service requirements:
+      - Upload test documents to Azure Blob with 24hr lifecycle
+      - Generate secure SAS URLs for document access
+      - Auto-cleanup via Azure lifecycle policy
+      - Max file size: 50MB
+      - Container: test-documents
+    </context>
+    <constraints>
+      - Use Azure Blob Storage SDK
+      - Implement lifecycle policy via Bicep
+      - Validate file size before upload
+      - Generate read-only SAS tokens
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/spec.md" reason="50MB limit requirement" />
+      <file path="src/server/api/Sprk.Bff.Api/Services/Storage/" reason="Existing storage patterns" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create TempBlobStorageService class</step>
+    <step order="2">Implement UploadTestDocument method</step>
+    <step order="3">Implement GenerateSasUrl method</step>
+    <step order="4">Add file size validation</step>
+    <step order="5">Add Bicep for lifecycle policy</step>
+    <step order="6">Register service in DI</step>
+    <step order="7">Unit test upload/SAS generation</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create storage service</tool>
+    <tool name="Write">Create Bicep template</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Storage/TempBlobStorageService.cs</output>
+    <output type="file">infrastructure/bicep/modules/temp-blob-lifecycle.bicep</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Documents upload to temp container</criterion>
+    <criterion>SAS URLs generated with 24hr expiry</criterion>
+    <criterion>File size validation enforced</criterion>
+    <criterion>Lifecycle policy configured</criterion>
+  </acceptance-criteria>
+</task>

@@ -28,8 +28,8 @@ public static class ToolFrameworkExtensions
         // Discover and register all tool handlers from this assembly
         services.AddToolHandlersFromAssembly(Assembly.GetExecutingAssembly());
 
-        // Register the tool handler registry as singleton
-        services.AddSingleton<IToolHandlerRegistry, ToolHandlerRegistry>();
+        // Register the tool handler registry as scoped (matches handler lifetime)
+        services.AddScoped<IToolHandlerRegistry, ToolHandlerRegistry>();
 
         return services;
     }
@@ -50,8 +50,8 @@ public static class ToolFrameworkExtensions
         // Discover and register all tool handlers from this assembly
         services.AddToolHandlersFromAssembly(Assembly.GetExecutingAssembly());
 
-        // Register the tool handler registry as singleton
-        services.AddSingleton<IToolHandlerRegistry, ToolHandlerRegistry>();
+        // Register the tool handler registry as scoped (matches handler lifetime)
+        services.AddScoped<IToolHandlerRegistry, ToolHandlerRegistry>();
 
         return services;
     }
@@ -77,7 +77,8 @@ public static class ToolFrameworkExtensions
         foreach (var handlerType in handlerTypes)
         {
             // Register as IAnalysisToolHandler for enumeration by registry
-            services.AddSingleton(handlerInterface, handlerType);
+            // Use scoped lifetime to allow injection of scoped services (e.g., IScopeResolverService)
+            services.AddScoped(handlerInterface, handlerType);
         }
 
         return services;
@@ -93,7 +94,7 @@ public static class ToolFrameworkExtensions
     public static IServiceCollection AddToolHandler<THandler>(this IServiceCollection services)
         where THandler : class, IAnalysisToolHandler
     {
-        services.AddSingleton<IAnalysisToolHandler, THandler>();
+        services.AddScoped<IAnalysisToolHandler, THandler>();
         return services;
     }
 

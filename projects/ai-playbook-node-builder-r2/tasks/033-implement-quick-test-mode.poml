@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Implement quick test with temp blob</title>
+    <phase>4</phase>
+    <tags>bff-api, testing, ai</tags>
+    <estimate>1d</estimate>
+    <dependencies>030, 032</dependencies>
+    <status>completed</status>
+    <completed>2026-01-17</completed>
+  </metadata>
+
+  <prompt>
+    <goal>Implement quick test mode that processes real documents via temp blob storage.</goal>
+    <context>
+      Quick test flow:
+      1. User uploads document to temp blob
+      2. Document Intelligence extracts content
+      3. Playbook executes against real extraction
+      4. Results shown but not persisted
+      5. Document auto-deleted after 24hr
+    </context>
+    <constraints>
+      - Document must go through temp storage (not SPE)
+      - Use real Document Intelligence extraction
+      - Results are ephemeral (not saved)
+      - Stream progress updates
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md" reason="Quick test design" />
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookExecutionEngine.cs" reason="Execution engine" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create QuickTestExecutor class</step>
+    <step order="2">Implement document upload handling</step>
+    <step order="3">Call TempBlobStorageService for upload</step>
+    <step order="4">Integrate Document Intelligence extraction</step>
+    <step order="5">Execute playbook against extraction</step>
+    <step order="6">Stream progress and results</step>
+    <step order="7">Integration test with sample PDF</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create quick test executor</tool>
+    <tool name="Edit">Integrate with test endpoint</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Ai/QuickTestExecutor.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Document uploads to temp storage</criterion>
+    <criterion>Real extraction performed</criterion>
+    <criterion>Playbook executes against extraction</criterion>
+    <criterion>Progress streamed to client</criterion>
+    <criterion>Results not persisted to Dataverse</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2026-01-17">
+      Implementation complete:
+      - Created QuickTestExecutor service in src/server/api/Sprk.Bff.Api/Services/Ai/Testing/QuickTestExecutor.cs
+      - Added POST /api/ai/playbook-builder/test-execution/quick endpoint with multipart/form-data support
+      - Integrates with TempBlobStorageService for document upload
+      - Uses ITextExtractor (TextExtractorService) for Document Intelligence extraction
+      - Executes playbook nodes with real document context
+      - Streams progress via SSE (progress, node_start, node_output, node_complete, test_complete events)
+      - Results are ephemeral - not persisted to Dataverse
+      - Document URL expires in 24hr via SAS token
+      - Registered IQuickTestExecutor in Program.cs DI container
+    </note>
+  </notes>
+</task>

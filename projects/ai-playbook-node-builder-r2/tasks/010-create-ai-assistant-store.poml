@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Create aiAssistantStore (Zustand)</title>
+    <phase>2</phase>
+    <tags>pcf, zustand, state</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>none</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create the Zustand store for AI assistant modal state and chat history.</goal>
+    <context>
+      The store manages:
+      - Modal open/close state
+      - Chat message history
+      - Streaming state
+      - Canvas patch application
+    </context>
+    <constraints>
+      - Follow existing store patterns in PlaybookBuilderHost
+      - Keep ephemeral (session-only, no persistence)
+      - Follow ADR-022 React 16 compatibility
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/client/pcf/PlaybookBuilderHost/control/stores/canvasStore.ts" reason="Store pattern" />
+      <file path="src/client/pcf/CLAUDE.md" reason="PCF guidelines" />
+      <file path=".claude/adr/ADR-022-pcf-platform-libraries.md" reason="React 16" />
+      <file path="projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md" reason="Store spec" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create stores/aiAssistantStore.ts</step>
+    <step order="2">Define AiAssistantState interface</step>
+    <step order="3">Define ChatMessage interface</step>
+    <step order="4">Implement actions: toggleModal, sendMessage, applyCanvasPatch, clearHistory</step>
+    <step order="5">Export store hook</step>
+    <step order="6">Update stores/index.ts to export new store</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Examine existing stores</tool>
+    <tool name="Write">Create store file</tool>
+    <tool name="Edit">Update index exports</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/client/pcf/PlaybookBuilderHost/control/stores/aiAssistantStore.ts</output>
+    <output type="modification">src/client/pcf/PlaybookBuilderHost/control/stores/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Store has isOpen, messages, isStreaming state</criterion>
+    <criterion>Actions for toggle, send, patch, clear</criterion>
+    <criterion>TypeScript compiles without errors</criterion>
+    <criterion>Store exports from index.ts</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <completed-date>2026-01-16</completed-date>
+    <summary>
+      Created aiAssistantStore.ts with full Zustand state management:
+
+      1. STATE:
+         - isOpen: Modal open/close state
+         - messages: ChatMessage[] chat history
+         - isStreaming: boolean for streaming state
+         - streamingState: { isActive, currentStep, operationCount }
+         - currentPlaybookId: Active playbook context
+         - sessionId: Unique session identifier
+         - error: Error message state
+
+      2. INTERFACES:
+         - ChatMessage: { id, role, content, timestamp, canvasOperations?, isStreaming? }
+         - CanvasOperation: { type, nodeId?, edgeId?, description? }
+         - CanvasPatch: Matches server model (individual + batch operations)
+         - CanvasPatchNode, CanvasPatchEdge: Node/edge structures for patches
+
+      3. ACTIONS:
+         - Modal: openModal, closeModal, toggleModal
+         - Session: setPlaybookId, startSession, endSession
+         - Messages: addUserMessage, addAssistantMessage, addSystemMessage,
+                     updateMessage, appendToMessage, clearHistory
+         - Streaming: setStreaming, updateStreamingState
+         - Canvas: applyCanvasPatch (integrates with canvasStore)
+         - Error: setError
+         - Reset: reset
+
+      4. CANVAS INTEGRATION:
+         - applyCanvasPatch() calls canvasStore actions directly
+         - Supports both individual operations (streaming) and batch operations
+         - Returns CanvasOperation[] for UI feedback
+
+      5. FILES:
+         - Created: aiAssistantStore.ts (380 lines)
+         - Modified: stores/index.ts (added exports)
+
+      TypeScript compiles without errors.
+    </summary>
+  </notes>
+</task>

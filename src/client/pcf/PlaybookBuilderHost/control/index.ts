@@ -430,12 +430,19 @@ export class PlaybookBuilderHost
       });
 
       // Use the PCF webAPI to update the record directly
+      logInfo('Calling webAPI.updateRecord', { entityName, entityId, updateDataKeys: Object.keys(updateData) });
       this.context.webAPI.updateRecord(entityName, entityId, updateData).then(
-        () => {
-          logInfo('Canvas auto-saved successfully');
+        (result: unknown) => {
+          logInfo('Canvas auto-saved successfully', { result });
         },
         (error: unknown) => {
-          logError('Canvas auto-save failed', error);
+          logError('Canvas auto-save FAILED', {
+            error,
+            errorMessage: (error as { message?: string })?.message,
+            entityName,
+            entityId,
+            fieldName: 'sprk_canvaslayoutjson',
+          });
         }
       );
     } catch (error) {

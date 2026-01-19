@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Create AiPlaybookService API client</title>
+    <phase>2</phase>
+    <tags>pcf, api-client, sse</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>Phase 1</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create the TypeScript API client for calling /api/ai/build-playbook-canvas.</goal>
+    <context>
+      Client service that:
+      - Makes POST request to BFF endpoint
+      - Handles SSE event stream
+      - Parses different event types
+      - Returns typed results
+    </context>
+    <constraints>
+      - Use EventSource or fetch with stream reading
+      - Type-safe event parsing
+      - Handle connection errors
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/client/pcf/PlaybookBuilderHost/control/hooks/useExecutionStream.ts" reason="SSE pattern" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create services/AiPlaybookService.ts</step>
+    <step order="2">Define request/response types</step>
+    <step order="3">Implement buildPlaybookCanvas method</step>
+    <step order="4">Handle SSE stream parsing</step>
+    <step order="5">Add error handling</step>
+    <step order="6">Export service</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Examine existing SSE hooks</tool>
+    <tool name="Write">Create service file</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/client/pcf/PlaybookBuilderHost/control/services/AiPlaybookService.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Service makes POST request to correct endpoint</criterion>
+    <criterion>SSE events parsed by type</criterion>
+    <criterion>Typed responses for each event</criterion>
+    <criterion>Connection errors handled</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <completed-date>2026-01-16</completed-date>
+    <summary>
+      Created AiPlaybookService API client for SSE streaming:
+
+      1. REQUEST TYPES:
+         - BuildPlaybookCanvasRequest: playbookId, currentCanvas, message, conversationHistory
+         - CanvasState: nodes, edges arrays
+         - ConversationMessage: role, content
+
+      2. RESPONSE TYPES (SSE Events):
+         - ThinkingEventData: message, step
+         - DataverseOperationEventData: operation, entity, record, id
+         - CanvasPatchEventData: extends CanvasPatch from store
+         - MessageEventData: content, isPartial
+         - ClarificationEventData: question, options, context
+         - PlanPreviewEventData: summary, steps, estimatedNodes
+         - ErrorEventData: message, code, details
+         - DoneEventData: success, summary
+
+      3. SERVICE CLASS:
+         - Constructor takes config (apiBaseUrl, accessToken, timeout)
+         - buildPlaybookCanvas(request, handlers) - main streaming method
+         - abort() - cancel current request
+         - isStreaming() - check if request in progress
+         - setAccessToken() - update token for refresh
+
+      4. SSE STREAM PROCESSING:
+         - Uses fetch with ReadableStream (not EventSource, since POST)
+         - TextDecoder for chunk decoding
+         - Buffer for incomplete events
+         - Regex parsing for event: + data: format
+         - Dispatches to typed event handlers
+
+      5. ERROR HANDLING:
+         - AbortController with timeout
+         - HTTP error status handling
+         - Connection error callback
+         - Parse error warnings
+
+      6. FILES CREATED:
+         - services/AiPlaybookService.ts (330 lines)
+         - services/index.ts (barrel export)
+
+      7. ACCEPTANCE CRITERIA MET:
+         - ✅ Service makes POST request to /api/ai/build-playbook-canvas
+         - ✅ SSE events parsed by type (8 event types supported)
+         - ✅ Typed responses for each event (full TypeScript types)
+         - ✅ Connection errors handled (timeout, abort, fetch errors)
+    </summary>
+  </notes>
+</task>

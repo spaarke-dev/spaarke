@@ -12,7 +12,10 @@ param location string = resourceGroup().location
 param sku string = 'Standard_LRS'
 
 @description('Blob containers to create')
-param containers array = ['temp-files', 'document-processing']
+param containers array = ['temp-files', 'document-processing', 'test-documents']
+
+@description('Enable lifecycle policy for test-documents container (24hr TTL)')
+param enableTestDocumentLifecycle bool = true
 
 @description('Tags for the resource')
 param tags object = {}
@@ -56,6 +59,36 @@ resource blobContainers 'Microsoft.Storage/storageAccounts/blobServices/containe
     publicAccess: 'None'
   }
 }]
+
+// Lifecycle policy for test-documents container (24hr auto-delete)
+resource lifecyclePolicy 'Microsoft.Storage/storageAccounts/managementPolicies@2023-01-01' = if (enableTestDocumentLifecycle) {
+  parent: storageAccount
+  name: 'default'
+  properties: {
+    policy: {
+      rules: [
+        {
+          name: 'delete-test-documents-after-24hrs'
+          enabled: true
+          type: 'Lifecycle'
+          definition: {
+            filters: {
+              blobTypes: ['blockBlob']
+              prefixMatch: ['test-documents/']
+            }
+            actions: {
+              baseBlob: {
+                delete: {
+                  daysAfterCreationGreaterThan: 1
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
 
 output storageAccountId string = storageAccount.id
 output storageAccountName string = storageAccount.name

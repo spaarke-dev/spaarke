@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="007" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Add ConversationContext and CanvasState models</title>
+    <phase>1</phase>
+    <tags>bff-api, models</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>006</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Define the ConversationContext and CanvasState models for conversational mode.</goal>
+    <context>
+      These models capture the full context needed for conversational playbook building:
+      - ConversationContext: chat history, current message, session state
+      - CanvasState: current nodes, edges, linked scopes
+    </context>
+    <constraints>
+      - JSON-serializable
+      - Match design spec structures
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md" reason="Model definitions" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create Models/Ai/ConversationContext.cs</step>
+    <step order="2">Create Models/Ai/CanvasState.cs</step>
+    <step order="3">Create Models/Ai/ChatMessage.cs</step>
+    <step order="4">Add proper JSON attributes</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create model files</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Models/Ai/ConversationContext.cs</output>
+    <output type="file">src/server/api/Sprk.Bff.Api/Models/Ai/CanvasState.cs</output>
+    <output type="file">src/server/api/Sprk.Bff.Api/Models/Ai/ChatMessage.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>ConversationContext has History, CurrentMessage, SessionState</criterion>
+    <criterion>CanvasState has Nodes, Edges, LinkedScopes</criterion>
+    <criterion>ChatMessage has Id, Role, Content, Timestamp, CanvasOperations</criterion>
+    <criterion>All models JSON-serializable</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <completed>2026-01-16</completed>
+    <summary>
+      Models were mostly created in task 006. This task completed the missing fields:
+      - ConversationContext: Already complete (History, CurrentMessage, SessionState)
+      - CanvasState: Added LinkedScopes (Dictionary&lt;string, Guid[]&gt;)
+      - ConversationMessage: Added Id field (auto-generated GUID)
+      - All models use C# record types with standard property types (JSON-serializable)
+      Note: Models remain in interface files (IPlaybookExecutionEngine.cs, IAiPlaybookBuilderService.cs)
+      rather than separate Model files - this follows the existing codebase pattern.
+    </summary>
+    <files-modified>
+      - src/server/api/Sprk.Bff.Api/Services/Ai/IAiPlaybookBuilderService.cs (added LinkedScopes to CanvasState)
+      - src/server/api/Sprk.Bff.Api/Services/Ai/IPlaybookExecutionEngine.cs (added Id to ConversationMessage)
+    </files-modified>
+    <tests>Existing 22 tests pass - no new tests needed as models are simple data records</tests>
+  </notes>
+</task>

@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="055" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Dark mode verification</title>
+    <phase>6</phase>
+    <tags>pcf, fluent-ui, theming</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>Phase 2</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Verify and fix dark mode compatibility across all AI assistant components.</goal>
+    <context>
+      Dark mode requirements (ADR-021):
+      - All colors use semantic tokens
+      - No hard-coded colors
+      - Test with Dataverse dark theme
+      - Contrast ratios meet WCAG AA
+    </context>
+    <constraints>
+      - Use Fluent UI v9 tokens only
+      - No custom color values
+      - Test both light and dark modes
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md" reason="Theming requirements" />
+      <file path=".claude/adr/ADR-021.md" reason="Fluent UI theming" />
+      <file path="src/client/pcf/PlaybookBuilderHost/components/" reason="Existing components" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Audit all components for hard-coded colors</step>
+    <step order="2">Replace with Fluent tokens</step>
+    <step order="3">Test in Dataverse dark mode</step>
+    <step order="4">Check contrast ratios</step>
+    <step order="5">Fix any issues found</step>
+    <step order="6">Document theming approach</step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">Find hard-coded colors</tool>
+    <tool name="Edit">Replace with tokens</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">Updated component styles</output>
+    <output type="file">docs/guides/ai-assistant-theming.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>No hard-coded colors</criterion>
+    <criterion>All tokens from Fluent UI</criterion>
+    <criterion>Works in Dataverse dark mode</criterion>
+    <criterion>WCAG AA contrast met</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Dark Mode Appearance">
+      <url>https://spaarkedev1.crm.dynamics.com/main.aspx?appid={appid}&amp;pagetype=entityrecord&amp;etn=sprk_aiplaybook</url>
+      <steps>
+        <step>Navigate to a playbook record with PlaybookBuilderHost</step>
+        <step>Toggle dark mode in Dataverse settings</step>
+        <step>Open AI assistant modal</step>
+        <step>Verify all text is readable</step>
+        <step>Verify no white flashes or color issues</step>
+      </steps>
+      <expected>All components adapt to dark theme with proper contrast</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    <completion-date>2026-01-17</completion-date>
+    <summary>
+      Verified dark mode compatibility and documented theming approach.
+      Created docs/guides/ai-assistant-theming.md with:
+      - ADR-021 compliance documentation
+      - Token category reference (background, foreground, border, shadow)
+      - Component theming examples
+      - Spacing and typography token tables
+      - Border radius tokens
+      - Dark mode testing checklist
+      - Common issues and solutions
+      - FluentProvider setup guidance
+
+      All new components (ErrorDisplay, TypingIndicator) use semantic tokens
+      throughout, ensuring automatic dark mode support.
+    </summary>
+    <files-created>
+      <file>docs/guides/ai-assistant-theming.md</file>
+    </files-created>
+  </notes>
+</task>

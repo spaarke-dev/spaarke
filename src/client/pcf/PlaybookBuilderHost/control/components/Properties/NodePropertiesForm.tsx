@@ -15,12 +15,14 @@ import {
   Label,
   SpinButton,
   Badge,
+  Button,
   Accordion,
   AccordionHeader,
   AccordionItem,
   AccordionPanel,
   shorthands,
 } from '@fluentui/react-components';
+import { Delete20Regular } from '@fluentui/react-icons';
 import type {
   SpinButtonChangeEvent,
   SpinButtonOnChangeData,
@@ -35,12 +37,17 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
   },
+  headerRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: tokens.spacingVerticalS,
+    ...shorthands.padding(tokens.spacingVerticalS, 0),
+  },
   nodeTypeHeader: {
     display: 'flex',
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
-    marginBottom: tokens.spacingVerticalS,
-    ...shorthands.padding(tokens.spacingVerticalS, 0),
   },
   field: {
     display: 'flex',
@@ -95,6 +102,7 @@ export const NodePropertiesForm = React.memo(function NodePropertiesForm({
 }: NodePropertiesFormProps) {
   const styles = useStyles();
   const updateNode = useCanvasStore((state) => state.updateNode);
+  const removeNode = useCanvasStore((state) => state.removeNode);
 
   const isConditionNode = node.data.type === 'condition';
   const isAiNode = node.data.type === 'aiAnalysis' || node.data.type === 'aiCompletion';
@@ -127,6 +135,11 @@ export const NodePropertiesForm = React.memo(function NodePropertiesForm({
     [handleUpdate]
   );
 
+  // Handler for deleting the node
+  const handleDelete = useCallback(() => {
+    removeNode(node.id);
+  }, [node.id, removeNode]);
+
   // Get current values with defaults
   const values = useMemo(
     () => ({
@@ -150,14 +163,23 @@ export const NodePropertiesForm = React.memo(function NodePropertiesForm({
 
   return (
     <div className={styles.form}>
-      {/* Node Type Badge (always visible, not in accordion) */}
-      <div className={styles.nodeTypeHeader}>
-        <Text size={200} weight="semibold">
-          Type:
-        </Text>
-        <Badge appearance="filled" color={nodeTypeBadgeColors[node.data.type]}>
-          {nodeTypeLabels[node.data.type]}
-        </Badge>
+      {/* Header row: Node type badge + delete button */}
+      <div className={styles.headerRow}>
+        <div className={styles.nodeTypeHeader}>
+          <Text size={200} weight="semibold">
+            Type:
+          </Text>
+          <Badge appearance="filled" color={nodeTypeBadgeColors[node.data.type]}>
+            {nodeTypeLabels[node.data.type]}
+          </Badge>
+        </div>
+        <Button
+          appearance="subtle"
+          icon={<Delete20Regular />}
+          onClick={handleDelete}
+          aria-label="Delete node"
+          title="Delete node"
+        />
       </div>
 
       <Accordion

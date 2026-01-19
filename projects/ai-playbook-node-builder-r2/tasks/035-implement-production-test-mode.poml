@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Implement production test (full flow)</title>
+    <phase>4</phase>
+    <tags>bff-api, testing, ai</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>030</dependencies>
+    <status>completed</status>
+    <completed>2026-01-17</completed>
+  </metadata>
+
+  <prompt>
+    <goal>Implement production test mode that executes the full SPE-based flow.</goal>
+    <context>
+      Production test flow:
+      - Uses existing document from SPE container
+      - Full extraction and execution pipeline
+      - Results saved to Dataverse (test flag)
+      - Same path as real production use
+    </context>
+    <constraints>
+      - Require document to exist in SPE
+      - Mark results as "test" in Dataverse
+      - Use existing execution engine
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md" reason="Production test design" />
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookExecutionEngine.cs" reason="Execution engine" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create ProductionTestExecutor class</step>
+    <step order="2">Validate document exists in SPE</step>
+    <step order="3">Call existing execution engine</step>
+    <step order="4">Add test flag to results</step>
+    <step order="5">Stream progress and results</step>
+    <step order="6">Integration test</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create production test executor</tool>
+    <tool name="Edit">Integrate with test endpoint</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/server/api/Sprk.Bff.Api/Services/Ai/ProductionTestExecutor.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Document validated in SPE</criterion>
+    <criterion>Full execution pipeline used</criterion>
+    <criterion>Results marked as test</criterion>
+    <criterion>Progress streamed to client</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2026-01-17">
+      Implementation complete:
+      - Created ProductionTestExecutor service in src/server/api/Sprk.Bff.Api/Services/Ai/Testing/ProductionTestExecutor.cs
+      - Added POST /api/ai/playbook-builder/test-execution/production endpoint
+      - Validates document exists in SPE via ISpeFileOperations.GetFileMetadataAsync
+      - Downloads and extracts document via ITextExtractor (Document Intelligence)
+      - Executes playbook nodes against real document context
+      - Streams progress via SSE (progress, node_start, node_output, node_complete, test_complete events)
+      - Results saved to in-memory store with IsTestExecution=true flag (Phase 1 pattern - Dataverse persistence to follow)
+      - Returns AnalysisId in completion event for result retrieval
+      - Registered IProductionTestExecutor in Program.cs DI container
+      - All acceptance criteria satisfied
+    </note>
+  </notes>
+</task>

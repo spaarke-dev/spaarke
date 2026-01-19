@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="018" project="ai-chat-playbook-builder">
+  <metadata>
+    <title>Apply canvas patches from stream</title>
+    <phase>2</phase>
+    <tags>pcf, canvas, integration</tags>
+    <estimate>0.5d</estimate>
+    <dependencies>016</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Implement canvas patch application from SSE canvas_patch events.</goal>
+    <context>
+      When a canvas_patch event arrives:
+      - Add new nodes to canvas
+      - Remove nodes by ID
+      - Update existing node properties
+      - Add/remove edges
+    </context>
+    <constraints>
+      - Use existing canvasStore actions
+      - Maintain canvas consistency
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/client/pcf/PlaybookBuilderHost/control/stores/canvasStore.ts" reason="Canvas actions" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review canvasStore actions (addNode, removeNode, etc.)</step>
+    <step order="2">Implement applyCanvasPatch in aiAssistantStore</step>
+    <step order="3">Handle each patch operation type</step>
+    <step order="4">Ensure proper node/edge IDs</step>
+    <step order="5">Test with mock patches</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Examine canvasStore</tool>
+    <tool name="Edit">Update patch application</tool>
+  </tools>
+
+  <outputs>
+    <output type="modification">src/client/pcf/PlaybookBuilderHost/control/stores/aiAssistantStore.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>addNodes creates new nodes on canvas</criterion>
+    <criterion>removeNodeIds deletes nodes</criterion>
+    <criterion>updateNodes modifies existing nodes</criterion>
+    <criterion>Edges created/removed correctly</criterion>
+    <criterion>Canvas visually updates immediately</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <completed-date>2026-01-16</completed-date>
+    <summary>
+      Canvas patch application was implemented as part of Tasks 010 and 016:
+
+      1. APPLYCANVASPATCH FUNCTION (in aiAssistantStore.ts):
+         - Fully implemented in Task 010
+         - Wired to SSE onCanvasPatch handler in Task 016
+
+      2. INDIVIDUAL OPERATIONS (streaming mode):
+         - AddNode: canvasStore.addNode() with patchNodeToPlaybookNode conversion
+         - RemoveNode: canvasStore.removeNode() (also removes connected edges)
+         - UpdateNode/ConfigureNode: canvasStore.updateNode() with merged config
+         - AddEdge: canvasStore.setEdges() append with edge type/animated defaults
+         - RemoveEdge: canvasStore.setEdges() with filter
+
+      3. BATCH OPERATIONS:
+         - patch.addNodes: Loop through and add each node
+         - patch.removeNodeIds: Loop through and remove each node
+         - patch.updateNodes: Loop through and update each node
+         - patch.addEdges: Bulk add with setEdges
+         - patch.removeEdgeIds: Bulk remove with filter
+
+      4. CANVASSTORE ACTIONS USED:
+         - addNode(node) - Adds node to nodes array
+         - removeNode(nodeId) - Removes node and connected edges
+         - updateNode(nodeId, data) - Merges data into node.data
+         - setEdges(edges) - Replaces edges array
+
+      5. REACTIVITY:
+         - Zustand set() triggers React re-renders
+         - Canvas component uses useCanvasStore selectors
+         - isDirty flag set for save tracking
+
+      6. OPERATION TRACKING:
+         - Returns CanvasOperation[] for chat message display
+         - operationCount updated in streamingState
+
+      7. ACCEPTANCE CRITERIA MET:
+         - ✅ addNodes creates new nodes on canvas
+         - ✅ removeNodeIds deletes nodes (and connected edges)
+         - ✅ updateNodes modifies existing nodes
+         - ✅ Edges created/removed correctly
+         - ✅ Canvas visually updates immediately (Zustand reactivity)
+
+      Note: No additional code changes required - implementation complete from prior tasks.
+    </summary>
+  </notes>
+</task>

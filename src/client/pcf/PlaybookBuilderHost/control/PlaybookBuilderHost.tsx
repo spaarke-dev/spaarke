@@ -9,7 +9,7 @@
  * - Canvas state managed by Zustand store
  * - Dirty state tracked and exposed to PCF host
  *
- * @version 2.13.1
+ * @version 2.20.0
  */
 
 import * as React from 'react';
@@ -26,7 +26,7 @@ import {
 import { DocumentMultiple20Regular } from '@fluentui/react-icons';
 import { ReactFlowProvider } from 'react-flow-renderer';
 import { BuilderLayout, TemplateLibraryDialog } from './components';
-import { useCanvasStore, useTemplateStore } from './stores';
+import { useCanvasStore, useTemplateStore, useAiAssistantStore } from './stores';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -143,6 +143,13 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
     setApiBaseUrl: state.setApiBaseUrl,
   }));
 
+  // AI Assistant store - initialize playbook ID and service config
+  const { setPlaybookId, setServiceConfig, startSession } = useAiAssistantStore((state) => ({
+    setPlaybookId: state.setPlaybookId,
+    setServiceConfig: state.setServiceConfig,
+    startSession: state.startSession,
+  }));
+
   // Get store state and actions
   const { isDirty, loadCanvas, getCanvasJson, clearDirty } = useCanvasStore((state) => ({
     isDirty: state.isDirty,
@@ -184,6 +191,22 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
       setApiBaseUrl(apiBaseUrl);
     }
   }, [apiBaseUrl, setApiBaseUrl]);
+
+  // Initialize AI Assistant store with playbook ID and service config
+  useEffect(() => {
+    if (playbookId) {
+      setPlaybookId(playbookId);
+      startSession(playbookId);
+    }
+    if (apiBaseUrl) {
+      // Note: accessToken is empty for now - authentication to be configured
+      // The BFF API endpoint will return an error if authentication is required
+      setServiceConfig({
+        apiBaseUrl,
+        accessToken: '', // TODO: Get access token from PCF context or auth provider
+      });
+    }
+  }, [playbookId, apiBaseUrl, setPlaybookId, setServiceConfig, startSession]);
 
   // Notify parent of dirty state changes
   useEffect(() => {
@@ -344,7 +367,7 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
 
       {/* Footer with Version */}
       <div className={styles.footer}>
-        <Text className={styles.versionBadge}>v2.13.1 2025-01-15</Text>
+        <Text className={styles.versionBadge}>v2.20.5 2026-01-18</Text>
       </div>
 
       {/* Template Library Dialog */}
