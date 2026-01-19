@@ -1,0 +1,79 @@
+<task id="042" project="ai-playbook-node-builder-r3">
+  <metadata>
+    <title>Implement Test Mode Selector Component</title>
+    <phase>5</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>pcf, frontend, fluent-ui</tags>
+    <dependencies>032</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create a TestModeSelector component for choosing test execution mode before running playbook tests.</goal>
+
+    <context>
+      Users need to select between Mock, Quick, and Production test modes. Each mode has different implications that should be clearly explained.
+    </context>
+
+    <constraints>
+      - Use Fluent UI v9 components
+      - Clear descriptions for each mode
+      - File upload UI for Quick mode
+      - Confirmation for Production mode
+      - Support dark mode
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/client/pcf/PlaybookBuilderHost/control/components/" reason="Existing components" />
+      <file path=".claude/adr/ADR-021-fluent-design-system.md" reason="UI requirements" />
+      <file path="src/client/pcf/CLAUDE.md" reason="PCF context" />
+      <file path="docs/guides/PCF-DEPLOYMENT-GUIDE.md" reason="Packaging guide" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create TestModeSelector folder in components/</step>
+    <step order="2">Create TestModeSelector.tsx with RadioGroup for mode selection</step>
+    <step order="3">Add mode descriptions with MessageBar</step>
+    <step order="4">Add file upload input for Quick mode (shows when Quick selected)</step>
+    <step order="5">Add confirmation dialog for Production mode</step>
+    <step order="6">Add "Run Test" button</step>
+    <step order="7">Show test progress and results</step>
+    <step order="8">Add dark mode support</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create component</tool>
+    <tool name="Bash">Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">TestModeSelector component</output>
+    <output type="tests">Component tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Three modes selectable with clear descriptions</criterion>
+    <criterion>Quick mode shows file upload</criterion>
+    <criterion>Production mode requires confirmation</criterion>
+    <criterion>Test results displayed after execution</criterion>
+    <criterion>Dark mode supported</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Test Mode Selection Flow">
+      <steps>
+        <step>Open playbook in builder</step>
+        <step>Click "Test Playbook" button</step>
+        <step>Verify three modes shown</step>
+        <step>Select Quick mode</step>
+        <step>Verify file upload appears</step>
+        <step>Select Production mode</step>
+        <step>Verify confirmation dialog appears</step>
+      </steps>
+      <expected>Mode selection shows appropriate UI for each mode</expected>
+    </test>
+  </ui-tests>
+</task>

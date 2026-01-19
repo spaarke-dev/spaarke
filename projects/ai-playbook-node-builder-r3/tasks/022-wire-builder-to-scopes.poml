@@ -1,0 +1,61 @@
+<task id="022" project="ai-playbook-node-builder-r3">
+  <metadata>
+    <title>Wire Builder to Use Its Own Scopes</title>
+    <phase>3</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>bff-api, integration</tags>
+    <dependencies>021, 011</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Update AiPlaybookBuilderService to load and use its own builder scopes (ACT-BUILDER-* for intent, SKL-BUILDER-* for patterns).</goal>
+
+    <context>
+      The builder should use its own scopes for AI operations:
+      - ACT-BUILDER-001 for intent classification system prompt
+      - SKL-BUILDER-004 for node type guidance
+      - Other builder scopes as needed
+    </context>
+
+    <constraints>
+      - Load scopes dynamically via ScopeResolverService
+      - Cache loaded scopes appropriately
+      - Graceful fallback if scopes not found
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/AiPlaybookBuilderService.cs" reason="Service to update" />
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs" reason="Scope loading" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define builder scope IDs as constants</step>
+    <step order="2">Add method to load builder scopes at startup or on-demand</step>
+    <step order="3">Update ClassifyIntentAsync to use ACT-BUILDER-001 prompt</step>
+    <step order="4">Update node generation to use SKL-BUILDER-004 guidance</step>
+    <step order="5">Add caching for loaded builder scopes</step>
+    <step order="6">Add fallback prompts if scopes not found</step>
+    <step order="7">Write integration tests verifying scope usage</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">Update builder service</tool>
+    <tool name="Bash">Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Builder service using its own scopes</output>
+    <output type="tests">Integration tests for scope usage</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Intent classification uses ACT-BUILDER-001 prompt</criterion>
+    <criterion>Node generation uses SKL-BUILDER-004 guidance</criterion>
+    <criterion>Scopes cached after first load</criterion>
+    <criterion>Graceful fallback when scopes missing</criterion>
+  </acceptance-criteria>
+</task>

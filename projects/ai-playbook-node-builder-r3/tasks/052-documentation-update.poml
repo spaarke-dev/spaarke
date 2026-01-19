@@ -1,0 +1,55 @@
+<task id="052" project="ai-playbook-node-builder-r3">
+  <metadata>
+    <title>Update Documentation</title>
+    <phase>6</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>documentation</tags>
+    <dependencies>051</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Update documentation to reflect new AI Assistant capabilities.</goal>
+
+    <context>
+      The enhanced AI Assistant has new capabilities that need documentation for users and developers.
+    </context>
+
+    <constraints>
+      - Update existing guides, don't create unnecessary new docs
+      - Focus on user-facing capabilities
+      - Include troubleshooting guidance
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="docs/guides/PLAYBOOK-BUILDER-FULLSCREEN-SETUP.md" reason="Existing setup guide" />
+      <file path="docs/guides/SPAARKE-AI-ARCHITECTURE.md" reason="AI architecture docs" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Update PLAYBOOK-BUILDER-FULLSCREEN-SETUP.md with AI Assistant section</step>
+    <step order="2">Document scope management capabilities</step>
+    <step order="3">Document test execution modes</step>
+    <step order="4">Add troubleshooting section for common issues</step>
+    <step order="5">Update SPAARKE-AI-ARCHITECTURE.md with builder scope patterns</step>
+    <step order="6">Review and update any outdated content</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Review existing docs</tool>
+    <tool name="Edit">Update documentation</tool>
+  </tools>
+
+  <outputs>
+    <output type="documentation">Updated guides</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>AI Assistant capabilities documented</criterion>
+    <criterion>Test modes explained with use cases</criterion>
+    <criterion>Troubleshooting guidance included</criterion>
+  </acceptance-criteria>
+</task>

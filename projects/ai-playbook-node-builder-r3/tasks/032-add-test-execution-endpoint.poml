@@ -1,0 +1,63 @@
+<task id="032" project="ai-playbook-node-builder-r3">
+  <metadata>
+    <title>Add Test Execution API Endpoint</title>
+    <phase>4</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>bff-api, endpoint</tags>
+    <dependencies>031</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Add POST /api/playbook-builder/test endpoint for executing playbook tests.</goal>
+
+    <context>
+      The test execution needs an API endpoint for frontend to call. Endpoint should accept test mode, playbook configuration, and optional test document.
+    </context>
+
+    <constraints>
+      - Follow ADR-001 Minimal API pattern
+      - Use endpoint filters for auth per ADR-008
+      - Support file upload for Quick mode
+      - Return test results with details
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/server/api/Sprk.Bff.Api/Endpoints/AiPlaybookBuilderEndpoints.cs" reason="Existing endpoints" />
+      <file path=".claude/adr/ADR-001-minimal-api.md" reason="API pattern" />
+      <file path=".claude/adr/ADR-008-endpoint-filters.md" reason="Auth pattern" />
+      <file path=".claude/patterns/api/endpoint-definition.md" reason="Endpoint pattern" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define TestExecutionRequest and TestExecutionResult DTOs</step>
+    <step order="2">Add POST /api/playbook-builder/test endpoint</step>
+    <step order="3">Add endpoint filter for authorization</step>
+    <step order="4">Handle file upload for Quick mode</step>
+    <step order="5">Call AiPlaybookBuilderService.ExecuteTestAsync</step>
+    <step order="6">Return structured test results</step>
+    <step order="7">Add OpenAPI documentation</step>
+    <step order="8">Write integration tests for endpoint</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">Add endpoint</tool>
+    <tool name="Bash">Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Test execution endpoint</output>
+    <output type="code">Request/Response DTOs</output>
+    <output type="tests">Integration tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Endpoint accepts mode and playbook configuration</criterion>
+    <criterion>File upload works for Quick mode</criterion>
+    <criterion>Authorization enforced</criterion>
+    <criterion>Returns detailed test results</criterion>
+  </acceptance-criteria>
+</task>

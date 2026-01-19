@@ -1,0 +1,59 @@
+<task id="012" project="ai-playbook-node-builder-r3">
+  <metadata>
+    <title>Implement Clarification Flow</title>
+    <phase>2</phase>
+    <estimate>3-4 hours</estimate>
+    <tags>ai, bff-api</tags>
+    <dependencies>011</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Implement the clarification flow when AI intent classification confidence is below threshold.</goal>
+
+    <context>
+      When confidence &lt; 0.8, generate clarification questions and return them to the frontend. After user responds, re-classify with additional context.
+    </context>
+
+    <constraints>
+      - Generate relevant questions based on ambiguity
+      - Support multiple-choice and free-text responses
+      - Re-classify efficiently after response
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/AiPlaybookBuilderService.cs" reason="Service to extend" />
+      <file path="projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md" reason="Clarification design" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define ClarificationQuestion class with type, text, options</step>
+    <step order="2">Define ClarificationResponse class</step>
+    <step order="3">Implement GenerateClarificationAsync method</step>
+    <step order="4">Update ProcessMessageAsync to handle clarification state</step>
+    <step order="5">Implement re-classification with user response context</step>
+    <step order="6">Add endpoint for clarification response</step>
+    <step order="7">Write unit tests for clarification flow</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">Implement clarification logic</tool>
+    <tool name="Bash">Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Clarification classes and methods</output>
+    <output type="code">Updated message processing with clarification state</output>
+    <output type="tests">Unit tests for clarification flow</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Low confidence triggers clarification questions</criterion>
+    <criterion>Questions are contextually relevant</criterion>
+    <criterion>Re-classification uses response context</criterion>
+    <criterion>State maintained across clarification round-trip</criterion>
+  </acceptance-criteria>
+</task>

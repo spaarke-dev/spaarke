@@ -1,0 +1,68 @@
+<task id="001" project="ai-playbook-node-builder-r3">
+  <metadata>
+    <title>Extend IScopeResolverService Interface with CRUD Methods</title>
+    <phase>1</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>bff-api, interface, scope-management</tags>
+    <dependencies>none</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Extend the IScopeResolverService interface with CRUD operations for all scope types (Actions, Skills, Knowledge, Tools) and search capability.</goal>
+
+    <context>
+      The existing IScopeResolverService has read-only operations. We need to add Create, Update, Delete methods for all four scope types, plus a unified search method.
+
+      Key ownership rules:
+      - SYS- prefix = System owned, immutable
+      - CUST- prefix = Customer owned, editable
+      - Updates/Deletes must validate ownership before proceeding
+    </context>
+
+    <constraints>
+      - EXTEND existing interface, do not create new interface
+      - Follow ADR-010 DI minimalism principles
+      - Use CancellationToken on all async methods
+      - Return types should match existing patterns in the interface
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/IScopeResolverService.cs" reason="Interface to extend" />
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs" reason="Current implementation pattern" />
+      <file path=".claude/adr/ADR-010-di-minimalism.md" reason="DI constraints" />
+      <file path=".claude/patterns/api/service-registration.md" reason="Service patterns" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read the existing IScopeResolverService.cs to understand current interface structure</step>
+    <step order="2">Add CRUD method signatures for AnalysisAction (Create, Update, Delete)</step>
+    <step order="3">Add CRUD method signatures for AnalysisSkill (Create, Update, Delete)</step>
+    <step order="4">Add CRUD method signatures for AnalysisKnowledge (Create, Update, Delete)</step>
+    <step order="5">Add CRUD method signatures for AnalysisTool (Create, Update, Delete)</step>
+    <step order="6">Add SearchScopesAsync method signature with ScopeSearchQuery parameter</step>
+    <step order="7">Create request/response DTOs for CRUD operations if not existing</step>
+    <step order="8">Verify interface compiles without errors</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Examine existing interface</tool>
+    <tool name="Edit">Add new method signatures</tool>
+    <tool name="Bash">Verify compilation with dotnet build</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Extended IScopeResolverService.cs with CRUD and search methods</output>
+    <output type="code">Request/Response DTOs for scope operations</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Interface has Create, Update, Delete methods for all 4 scope types</criterion>
+    <criterion>SearchScopesAsync method accepts query with type filter, text search</criterion>
+    <criterion>All methods follow existing naming patterns</criterion>
+    <criterion>Project compiles successfully</criterion>
+  </acceptance-criteria>
+</task>

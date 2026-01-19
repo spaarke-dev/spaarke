@@ -1,0 +1,62 @@
+<task id="090" project="ai-playbook-node-builder-r3">
+  <metadata>
+    <title>Project Wrap-up</title>
+    <phase>6</phase>
+    <estimate>1-2 hours</estimate>
+    <tags>wrap-up</tags>
+    <dependencies>053</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Complete project wrap-up: update README status, create lessons learned, archive artifacts.</goal>
+
+    <context>
+      Project is complete. Need to finalize documentation, capture lessons learned, and prepare for archive.
+    </context>
+
+    <constraints>
+      - Update README status to Complete
+      - Create lessons-learned.md
+      - Run /repo-cleanup for validation
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r3/README.md" reason="README to update" />
+      <file path=".claude/skills/repo-cleanup/SKILL.md" reason="Cleanup workflow" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Update README.md status to "Complete"</step>
+    <step order="2">Mark all graduation criteria as checked</step>
+    <step order="3">Create notes/lessons-learned.md with key learnings</step>
+    <step order="4">Update TASK-INDEX.md with all tasks completed</step>
+    <step order="5">Run /repo-cleanup to validate structure</step>
+    <step order="6">Commit final changes</step>
+    <step order="7">Create PR for merge to master (or mark existing PR ready)</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">Update README and task index</tool>
+    <tool name="Write">Create lessons-learned.md</tool>
+    <tool name="Skill">Run repo-cleanup</tool>
+    <tool name="Bash">Git operations</tool>
+  </tools>
+
+  <outputs>
+    <output type="documentation">Updated README with Complete status</output>
+    <output type="documentation">lessons-learned.md</output>
+    <output type="pr">PR ready for merge</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>README shows Complete status</criterion>
+    <criterion>All graduation criteria marked complete</criterion>
+    <criterion>Lessons learned documented</criterion>
+    <criterion>repo-cleanup passes</criterion>
+    <criterion>PR ready for review/merge</criterion>
+  </acceptance-criteria>
+</task>

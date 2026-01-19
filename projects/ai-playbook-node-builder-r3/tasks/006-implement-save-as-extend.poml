@@ -1,0 +1,60 @@
+<task id="006" project="ai-playbook-node-builder-r3">
+  <metadata>
+    <title>Implement Save As and Extend Functionality</title>
+    <phase>1</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>bff-api, scope-management</tags>
+    <dependencies>005</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Implement Save As (copy with basedon reference) and Extend (create with parentscope reference) functionality for scopes.</goal>
+
+    <context>
+      Save As: Creates a copy of an existing scope with a new name, storing reference to original in basedon field.
+      Extend: Creates a child scope that inherits from parent, storing reference in parentscope field.
+
+      Both operations create CUST- scopes regardless of source scope ownership.
+    </context>
+
+    <constraints>
+      - Save As creates independent copy (basedon for lineage tracking only)
+      - Extend creates dependent child (may inherit updates from parent in future)
+      - Both operations result in CUST- ownership
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs" reason="Service to extend" />
+      <file path="projects/ai-playbook-node-builder-r3/spec.md" reason="Requirements" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add SaveAsActionAsync method - copy all fields, set new name, set basedon</step>
+    <step order="2">Add ExtendActionAsync method - create child, set parentscope</step>
+    <step order="3">Implement Save As for Skills, Knowledge, Tools</step>
+    <step order="4">Implement Extend for Skills, Knowledge, Tools</step>
+    <step order="5">Write unit tests for both operations</step>
+    <step order="6">Verify lineage tracking works correctly</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">Add Save As and Extend methods</tool>
+    <tool name="Bash">Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">SaveAs and Extend methods for all scope types</output>
+    <output type="tests">Unit tests verifying lineage tracking</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Save As creates copy with basedon reference</criterion>
+    <criterion>Extend creates child with parentscope reference</criterion>
+    <criterion>Both result in CUST- ownership</criterion>
+    <criterion>Lineage can be queried from Dataverse</criterion>
+  </acceptance-criteria>
+</task>

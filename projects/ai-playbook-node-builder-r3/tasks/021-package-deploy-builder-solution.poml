@@ -1,0 +1,58 @@
+<task id="021" project="ai-playbook-node-builder-r3">
+  <metadata>
+    <title>Package and Deploy Builder Scopes Solution</title>
+    <phase>3</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>dataverse, deploy</tags>
+    <dependencies>020</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Package the 23 builder scope records into an unmanaged Dataverse solution and deploy to development environment.</goal>
+
+    <context>
+      The scope records from task 020 need to be packaged as a Dataverse solution for deployment. Include schema updates from task 005.
+    </context>
+
+    <constraints>
+      - Use unmanaged solution per ADR-022
+      - Use Spaarke publisher (sprk_ prefix)
+      - Include both schema (Phase 1) and data (Phase 3)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/skills/dataverse-deploy/SKILL.md" reason="Deployment workflow" />
+      <file path="docs/guides/PCF-DEPLOYMENT-GUIDE.md" reason="Solution packaging" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create solution in Dataverse with schema from task 005</step>
+    <step order="2">Import scope records using data import or API</step>
+    <step order="3">Add records to solution</step>
+    <step order="4">Verify all 23 records visible in solution</step>
+    <step order="5">Export solution to source control</step>
+    <step order="6">Test solution import in clean environment</step>
+    <step order="7">Document solution contents and import process</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">PAC CLI for solution operations</tool>
+    <tool name="Write">Document solution</tool>
+  </tools>
+
+  <outputs>
+    <output type="solution">Unmanaged solution with builder scopes</output>
+    <output type="documentation">Solution import guide</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Solution contains all 23 scope records</criterion>
+    <criterion>Solution includes ownership fields schema</criterion>
+    <criterion>Solution imports cleanly</criterion>
+    <criterion>Scopes queryable via API after import</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,58 @@
+<task id="003" project="ai-playbook-node-builder-r3">
+  <metadata>
+    <title>Implement Skill, Knowledge, Tool CRUD Operations</title>
+    <phase>1</phase>
+    <estimate>4-5 hours</estimate>
+    <tags>bff-api, dataverse, scope-management</tags>
+    <dependencies>002</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Implement CRUD operations for AnalysisSkill, AnalysisKnowledge, and AnalysisTool in ScopeResolverService, following the same patterns established for Actions.</goal>
+
+    <context>
+      After implementing Action CRUD (task 002), apply the same patterns to the remaining three scope types. Reuse the ownership validation helper.
+    </context>
+
+    <constraints>
+      - Follow same patterns as Action CRUD
+      - Reuse ownership validation helper
+      - Each type may have type-specific validation (e.g., Knowledge has Type field)
+      - Tool has limited scope - create records only, no custom code handlers
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs" reason="Service with Action CRUD" />
+      <file path=".claude/patterns/dataverse/entity-operations.md" reason="CRUD patterns" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Implement CreateSkillAsync, UpdateSkillAsync, DeleteSkillAsync</step>
+    <step order="2">Implement CreateKnowledgeAsync, UpdateKnowledgeAsync, DeleteKnowledgeAsync</step>
+    <step order="3">Implement CreateToolAsync, UpdateToolAsync, DeleteToolAsync</step>
+    <step order="4">Add type-specific validation where needed</step>
+    <step order="5">Write unit tests for all three scope types</step>
+    <step order="6">Verify all tests pass</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Examine Action CRUD patterns</tool>
+    <tool name="Edit">Implement remaining CRUD methods</tool>
+    <tool name="Bash">Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">CRUD implementations for Skill, Knowledge, Tool</output>
+    <output type="tests">Unit tests for all scope type CRUD operations</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All three scope types have working CRUD operations</criterion>
+    <criterion>Ownership validation applied consistently</criterion>
+    <criterion>Unit tests pass for all operations</criterion>
+  </acceptance-criteria>
+</task>

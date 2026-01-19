@@ -1,0 +1,56 @@
+<task id="030" project="ai-playbook-node-builder-r3">
+  <metadata>
+    <title>Create Dedicated Blob Container for Playbook Tests</title>
+    <phase>4</phase>
+    <estimate>1-2 hours</estimate>
+    <tags>azure, infrastructure</tags>
+    <dependencies>none</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create a dedicated Azure Blob container `playbook-test-documents` for quick test mode with 24-hour auto-cleanup policy.</goal>
+
+    <context>
+      Quick test mode needs temporary storage for test documents. Documents should auto-delete after 24 hours.
+    </context>
+
+    <constraints>
+      - Container name: playbook-test-documents
+      - Auto-delete policy: 24 hours
+      - Add connection string to BFF configuration
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="docs/architecture/auth-azure-resources.md" reason="Azure resource info" />
+      <file path=".claude/skills/azure-deploy/SKILL.md" reason="Azure deployment" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Identify storage account for dev environment</step>
+    <step order="2">Create playbook-test-documents container</step>
+    <step order="3">Configure lifecycle management policy for 24-hour deletion</step>
+    <step order="4">Add container connection to BFF appsettings</step>
+    <step order="5">Verify container accessible from BFF</step>
+    <step order="6">Document container configuration</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Azure CLI commands</tool>
+    <tool name="Edit">Update appsettings</tool>
+  </tools>
+
+  <outputs>
+    <output type="infrastructure">Blob container with lifecycle policy</output>
+    <output type="configuration">Updated appsettings with connection</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Container created in Azure</criterion>
+    <criterion>Lifecycle policy deletes blobs after 24 hours</criterion>
+    <criterion>BFF can upload/download to container</criterion>
+  </acceptance-criteria>
+</task>

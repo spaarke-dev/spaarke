@@ -1,0 +1,63 @@
+<task id="004" project="ai-playbook-node-builder-r3">
+  <metadata>
+    <title>Implement Scope Search with Semantic Matching</title>
+    <phase>1</phase>
+    <estimate>3-4 hours</estimate>
+    <tags>bff-api, dataverse, search</tags>
+    <dependencies>003</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Implement SearchScopesAsync in ScopeResolverService to enable semantic search across all scope types.</goal>
+
+    <context>
+      Users need to find existing scopes by name, description, or type. The search should be fast (&lt;1s) and return ranked results.
+    </context>
+
+    <constraints>
+      - Search across all four scope types
+      - Support filtering by type
+      - Support text search on name and description
+      - Return results ranked by relevance
+      - Performance target: &lt;1s response
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs" reason="Service to extend" />
+      <file path="src/server/shared/Spaarke.Dataverse/IDataverseService.cs" reason="Query patterns" />
+      <file path=".claude/patterns/dataverse/web-api-client.md" reason="Query optimization" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define ScopeSearchQuery class with filters (type, text, page, pageSize)</step>
+    <step order="2">Define ScopeSearchResult class with mixed results and pagination</step>
+    <step order="3">Implement SearchScopesAsync with parallel queries to all scope types</step>
+    <step order="4">Implement relevance scoring based on text match quality</step>
+    <step order="5">Add caching for frequently searched terms</step>
+    <step order="6">Write unit tests for search functionality</step>
+    <step order="7">Performance test to verify &lt;1s response</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Examine Dataverse query patterns</tool>
+    <tool name="Edit">Implement search method</tool>
+    <tool name="Bash">Run tests and performance check</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">SearchScopesAsync implementation</output>
+    <output type="code">ScopeSearchQuery and ScopeSearchResult classes</output>
+    <output type="tests">Unit tests for search</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Search returns results from all scope types</criterion>
+    <criterion>Type filter works correctly</criterion>
+    <criterion>Text search matches name and description</criterion>
+    <criterion>Response time &lt;1s for typical queries</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,63 @@
+<task id="020" project="ai-playbook-node-builder-r3">
+  <metadata>
+    <title>Create Builder Scope Records</title>
+    <phase>3</phase>
+    <estimate>3-4 hours</estimate>
+    <tags>dataverse, scope-management</tags>
+    <dependencies>005</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create the 23 builder-specific scope records (ACT-BUILDER-*, SKL-BUILDER-*, TL-BUILDER-*, KNW-BUILDER-*) as Dataverse data.</goal>
+
+    <context>
+      These scopes power the AI Builder itself. They define how the builder classifies intents, generates nodes, and manages scopes.
+
+      All builder scopes have:
+      - SYS- ownership (immutable)
+      - Predefined prompts/content from spec.md
+    </context>
+
+    <constraints>
+      - All scopes must have SYS- ownership
+      - Use IDs from spec.md for consistency
+      - Content must align with builder functionality
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/ai-playbook-node-builder-r3/spec.md" reason="Builder scope definitions" />
+      <file path="projects/ai-playbook-node-builder-r2/ai-chat-playbook-builder.md" reason="Scope content details" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create JSON/XML data for 5 Action scopes (ACT-BUILDER-001-005)</step>
+    <step order="2">Create JSON/XML data for 5 Skill scopes (SKL-BUILDER-001-005)</step>
+    <step order="3">Create JSON/XML data for 9 Tool scopes (TL-BUILDER-001-009)</step>
+    <step order="4">Create JSON/XML data for 4 Knowledge scopes (KNW-BUILDER-001-004)</step>
+    <step order="5">Write detailed system prompts for each Action scope</step>
+    <step order="6">Write prompt fragments for each Skill scope</step>
+    <step order="7">Define tool configurations for each Tool scope</step>
+    <step order="8">Prepare Knowledge content references</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create scope data files</tool>
+    <tool name="Read">Reference spec for scope definitions</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">23 scope record definitions in JSON/XML format</output>
+    <output type="documentation">Scope content documentation</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All 23 scopes defined with complete content</criterion>
+    <criterion>All scopes have SYS- ownership markers</criterion>
+    <criterion>Action scopes have valid system prompts</criterion>
+    <criterion>Tool scopes have valid configurations</criterion>
+  </acceptance-criteria>
+</task>

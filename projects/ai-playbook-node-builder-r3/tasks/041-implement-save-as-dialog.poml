@@ -1,0 +1,78 @@
+<task id="041" project="ai-playbook-node-builder-r3">
+  <metadata>
+    <title>Implement Save As Dialog Component</title>
+    <phase>5</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>pcf, frontend, fluent-ui</tags>
+    <dependencies>006</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create a SaveAsDialog component for creating copies of existing scopes with a new name.</goal>
+
+    <context>
+      When users want to customize a system scope, they need to "Save As" to create their own editable copy.
+    </context>
+
+    <constraints>
+      - Use Fluent UI v9 Dialog component
+      - Show source scope info
+      - Allow name editing
+      - Show ownership will be CUST-
+      - Support dark mode
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/client/pcf/PlaybookBuilderHost/control/components/" reason="Existing components" />
+      <file path=".claude/adr/ADR-021-fluent-design-system.md" reason="UI requirements" />
+      <file path=".claude/patterns/pcf/dialog-patterns.md" reason="Dialog patterns" />
+      <file path="src/client/pcf/CLAUDE.md" reason="PCF context" />
+      <file path="docs/guides/PCF-DEPLOYMENT-GUIDE.md" reason="Packaging guide" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create SaveAsDialog folder in components/</step>
+    <step order="2">Create SaveAsDialog.tsx with Dialog from Fluent UI v9</step>
+    <step order="3">Show source scope name and type</step>
+    <step order="4">Add text input for new name</step>
+    <step order="5">Show ownership info (will be CUST-)</step>
+    <step order="6">Add save and cancel buttons</step>
+    <step order="7">Call Save As API on confirm</step>
+    <step order="8">Add dark mode support</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create component</tool>
+    <tool name="Bash">Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">SaveAsDialog component</output>
+    <output type="tests">Component tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Dialog shows source scope info</criterion>
+    <criterion>Name input validates (not empty, unique)</criterion>
+    <criterion>Save creates CUST- copy via API</criterion>
+    <criterion>Dark mode supported</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Save As Dialog Flow">
+      <steps>
+        <step>Select a SYS- scope in browser</step>
+        <step>Click "Save As" button</step>
+        <step>Verify dialog shows source scope name</step>
+        <step>Enter new name</step>
+        <step>Click Save</step>
+        <step>Verify new CUST- scope created</step>
+      </steps>
+      <expected>New scope appears in browser with CUST- prefix</expected>
+    </test>
+  </ui-tests>
+</task>

@@ -1,0 +1,65 @@
+<task id="011" project="ai-playbook-node-builder-r3">
+  <metadata>
+    <title>Implement AI-Powered Intent Classification</title>
+    <phase>2</phase>
+    <estimate>4-5 hours</estimate>
+    <tags>ai, bff-api</tags>
+    <dependencies>010</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Replace the rule-based ParseIntent() method with Azure OpenAI structured output classification in AiPlaybookBuilderService.</goal>
+
+    <context>
+      Using the schema from task 010, implement the AI-powered intent classification. Use existing IOpenAiClient for AI calls.
+    </context>
+
+    <constraints>
+      - Use existing IOpenAiClient, do not create new AI service
+      - Implement confidence threshold (>0.8 proceed, &lt;0.8 clarify)
+      - Add model selection parameter (GPT-4o vs GPT-4o-mini)
+      - Handle structured output parsing errors gracefully
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/AiPlaybookBuilderService.cs" reason="Service to modify" />
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/OpenAiClient.cs" reason="AI client" />
+      <file path=".claude/adr/ADR-013-ai-architecture.md" reason="AI patterns" />
+      <file path=".claude/patterns/ai/streaming-endpoints.md" reason="AI call patterns" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create ClassifyIntentAsync method using IOpenAiClient</step>
+    <step order="2">Build prompt with system instructions and user message</step>
+    <step order="3">Parse structured output into IntentResult</step>
+    <step order="4">Add confidence threshold check</step>
+    <step order="5">Replace ParseIntent() calls with ClassifyIntentAsync</step>
+    <step order="6">Add model selection parameter (default: GPT-4o-mini)</step>
+    <step order="7">Add error handling for parsing failures</step>
+    <step order="8">Write unit tests with mocked OpenAI responses</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Examine existing code</tool>
+    <tool name="Edit">Implement AI classification</tool>
+    <tool name="Bash">Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">ClassifyIntentAsync method implementation</output>
+    <output type="code">Updated AiPlaybookBuilderService using AI classification</output>
+    <output type="tests">Unit tests for intent classification</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>AI classification replaces rule-based parsing</criterion>
+    <criterion>Confidence threshold triggers clarification</criterion>
+    <criterion>Model selection works</criterion>
+    <criterion>Parsing errors handled gracefully</criterion>
+    <criterion>Unit tests pass with mocked responses</criterion>
+  </acceptance-criteria>
+</task>
