@@ -70,22 +70,22 @@ public class VisualizationService : IVisualizationService
         try
         {
             // Step 1: Get source document from Dataverse (always required for relationship lookups)
-            _logger.LogWarning("[VIZ-DEBUG] Step 1: Fetching source document {DocumentId} from Dataverse", documentId);
+            _logger.LogDebug("[VIZ-DEBUG] Step 1: Fetching source document {DocumentId} from Dataverse", documentId);
             var sourceDataverseDoc = await _dataverseService.GetDocumentAsync(documentId.ToString(), cancellationToken);
 
             if (sourceDataverseDoc == null)
             {
-                _logger.LogWarning("[VIZ-DEBUG] Source document {DocumentId} NOT FOUND in Dataverse - returning empty response", documentId);
+                _logger.LogDebug("[VIZ-DEBUG] Source document {DocumentId} NOT FOUND in Dataverse - returning empty response", documentId);
                 return CreateEmptyResponse(documentId.ToString(), options);
             }
 
-            _logger.LogWarning("[VIZ-DEBUG] Source document {DocumentId} FOUND: Name={Name}, FileName={FileName}",
+            _logger.LogDebug("[VIZ-DEBUG] Source document {DocumentId} FOUND: Name={Name}, FileName={FileName}",
                 documentId, sourceDataverseDoc.Name, sourceDataverseDoc.FileName ?? "(null)");
 
             // Step 2: Get SearchClient and try to get source document from AI Search (optional for semantic search)
-            _logger.LogWarning("[VIZ-DEBUG] Step 2: Getting SearchClient for tenant {TenantId}", options.TenantId);
+            _logger.LogDebug("[VIZ-DEBUG] Step 2: Getting SearchClient for tenant {TenantId}", options.TenantId);
             var searchClient = await _deploymentService.GetSearchClientAsync(options.TenantId, cancellationToken);
-            _logger.LogWarning("[VIZ-DEBUG] Step 2: SearchClient obtained, index={IndexName}", searchClient.IndexName);
+            _logger.LogDebug("[VIZ-DEBUG] Step 2: SearchClient obtained, index={IndexName}", searchClient.IndexName);
 
             var sourceDocument = await GetSourceDocumentAsync(
                 searchClient, documentId.ToString(), options.TenantId, cancellationToken);
@@ -95,11 +95,11 @@ public class VisualizationService : IVisualizationService
 
             if (sourceDocument == null)
             {
-                _logger.LogWarning("[VIZ-DEBUG] Step 2: Source document {DocumentId} NOT FOUND in AI Search index (tenant={TenantId}). Semantic search will be SKIPPED.", documentId, options.TenantId);
+                _logger.LogDebug("[VIZ-DEBUG] Step 2: Source document {DocumentId} NOT FOUND in AI Search index (tenant={TenantId}). Semantic search will be SKIPPED.", documentId, options.TenantId);
             }
             else
             {
-                _logger.LogWarning("[VIZ-DEBUG] Step 2: Source document FOUND in AI Search: Id={Id}, DocumentId={DocId}, FileName={FileName}, VectorLength={VectorLength}",
+                _logger.LogDebug("[VIZ-DEBUG] Step 2: Source document FOUND in AI Search: Id={Id}, DocumentId={DocId}, FileName={FileName}, VectorLength={VectorLength}",
                     sourceDocument.Id, sourceDocument.DocumentId ?? "(null)", sourceDocument.FileName ?? "(null)", sourceDocument.DocumentVector3072.Length);
             }
 
@@ -108,22 +108,22 @@ public class VisualizationService : IVisualizationService
                 documentId, sourceDataverseDoc, options, cancellationToken);
 
             // Step 4: Query semantic relationships from AI Search (only if document is indexed and has vector)
-            _logger.LogWarning("[VIZ-DEBUG] Step 4: Semantic search check - sourceDocument={HasSource}, ShouldIncludeSemantic={ShouldInclude}",
+            _logger.LogDebug("[VIZ-DEBUG] Step 4: Semantic search check - sourceDocument={HasSource}, ShouldIncludeSemantic={ShouldInclude}",
                 sourceDocument != null, ShouldIncludeRelationshipType(options, RelationshipTypes.Semantic));
 
             var semanticRelationships = new List<(VisualizationDocument Document, double Score, string RelationType)>();
             if (sourceDocument != null && ShouldIncludeRelationshipType(options, RelationshipTypes.Semantic))
             {
                 var sourceVector = sourceDocument.GetBestVector();
-                _logger.LogWarning("[VIZ-DEBUG] Step 4: Source vector length={VectorLength} (need >0 to search)", sourceVector.Length);
+                _logger.LogDebug("[VIZ-DEBUG] Step 4: Source vector length={VectorLength} (need >0 to search)", sourceVector.Length);
 
                 if (sourceVector.Length > 0)
                 {
-                    _logger.LogWarning("[VIZ-DEBUG] Step 4: Executing semantic search with threshold={Threshold}, limit={Limit}", options.Threshold, options.Limit);
+                    _logger.LogDebug("[VIZ-DEBUG] Step 4: Executing semantic search with threshold={Threshold}, limit={Limit}", options.Threshold, options.Limit);
                     var semanticDocs = await SearchRelatedDocumentsAsync(
                         searchClient, sourceVector, documentId.ToString(), options, cancellationToken);
 
-                    _logger.LogWarning("[VIZ-DEBUG] Step 4: Semantic search returned {Count} documents", semanticDocs.Count);
+                    _logger.LogDebug("[VIZ-DEBUG] Step 4: Semantic search returned {Count} documents", semanticDocs.Count);
 
                     semanticRelationships = semanticDocs
                         .Select(r => (r.Document, r.Score, RelationshipTypes.Semantic))
@@ -131,12 +131,12 @@ public class VisualizationService : IVisualizationService
                 }
                 else
                 {
-                    _logger.LogWarning("[VIZ-DEBUG] Step 4: Source document has NO VECTOR - semantic search SKIPPED. DocumentId={DocumentId}", documentId);
+                    _logger.LogDebug("[VIZ-DEBUG] Step 4: Source document has NO VECTOR - semantic search SKIPPED. DocumentId={DocumentId}", documentId);
                 }
             }
             else if (sourceDocument == null)
             {
-                _logger.LogWarning("[VIZ-DEBUG] Step 4: Semantic search SKIPPED because source document not in AI Search index");
+                _logger.LogDebug("[VIZ-DEBUG] Step 4: Semantic search SKIPPED because source document not in AI Search index");
             }
 
             // Step 5: Merge and deduplicate relationships (hardcoded takes priority)
@@ -206,16 +206,16 @@ public class VisualizationService : IVisualizationService
         }
 
         // same_matter relationship (documents linked to same Matter)
-        _logger.LogWarning("[VIZ-DEBUG] same_matter check: MatterId={MatterId}, ShouldInclude={ShouldInclude}",
+        _logger.LogDebug("[VIZ-DEBUG] same_matter check: MatterId={MatterId}, ShouldInclude={ShouldInclude}",
             sourceDoc?.MatterId ?? "(null)", ShouldIncludeRelationshipType(options, RelationshipTypes.SameMatter));
 
         if (ShouldIncludeRelationshipType(options, RelationshipTypes.SameMatter) &&
             sourceDoc?.MatterId != null &&
             Guid.TryParse(sourceDoc.MatterId, out var matterId))
         {
-            _logger.LogWarning("[VIZ-DEBUG] Querying same_matter documents for MatterId={MatterId}", matterId);
+            _logger.LogDebug("[VIZ-DEBUG] Querying same_matter documents for MatterId={MatterId}", matterId);
             var matterDocs = await GetDocumentsByMatterAsync(matterId, sourceDocumentId, cancellationToken);
-            _logger.LogWarning("[VIZ-DEBUG] same_matter query returned {Count} documents", matterDocs.Count);
+            _logger.LogDebug("[VIZ-DEBUG] same_matter query returned {Count} documents", matterDocs.Count);
             results.AddRange(matterDocs.Select(doc => (doc, 1.0, RelationshipTypes.SameMatter)));
         }
 
@@ -361,8 +361,8 @@ public class VisualizationService : IVisualizationService
             return siblings;
         }
 
-        // Log source document email-related fields for debugging (INFO level to ensure visibility in App Service logs)
-        _logger.LogInformation(
+        // Log source document email-related fields for debugging
+        _logger.LogDebug(
             "[VIZ-DEBUG] Email sibling check for {DocumentId}: IsEmailArchive={IsEmailArchive}, ParentDocumentId={ParentDocumentId}, FileName={FileName}",
             sourceDocumentId, sourceDoc.IsEmailArchive, sourceDoc.ParentDocumentId ?? "(null)", sourceDoc.FileName ?? "(null)");
 
@@ -409,7 +409,7 @@ public class VisualizationService : IVisualizationService
             }
             else
             {
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "[VIZ-DEBUG] Source document {DocumentId} is not an email archive and has no parent - IsEmailArchive={IsEmailArchive}, ParentDocumentId={ParentDocumentId}",
                     sourceDocumentId, sourceDoc.IsEmailArchive, sourceDoc.ParentDocumentId ?? "(null)");
             }
@@ -772,7 +772,7 @@ public class VisualizationService : IVisualizationService
     {
         // Query for a single chunk of the source document to get its documentVector
         var filter = $"documentId eq '{EscapeFilterValue(documentId)}' and tenantId eq '{EscapeFilterValue(tenantId)}'";
-        _logger.LogWarning("[VIZ-DEBUG] GetSourceDocumentAsync: Querying AI Search with filter: {Filter}", filter);
+        _logger.LogDebug("[VIZ-DEBUG] GetSourceDocumentAsync: Querying AI Search with filter: {Filter}", filter);
 
         var searchOptions = new SearchOptions
         {
@@ -786,19 +786,19 @@ public class VisualizationService : IVisualizationService
         var response = await searchClient.SearchAsync<VisualizationDocument>("*", searchOptions, cancellationToken);
         var results = response.Value;
 
-        _logger.LogWarning("[VIZ-DEBUG] GetSourceDocumentAsync: Search returned TotalCount={TotalCount}", results.TotalCount);
+        _logger.LogDebug("[VIZ-DEBUG] GetSourceDocumentAsync: Search returned TotalCount={TotalCount}", results.TotalCount);
 
         await foreach (var result in results.GetResultsAsync().WithCancellation(cancellationToken))
         {
             if (result.Document != null)
             {
-                _logger.LogWarning("[VIZ-DEBUG] GetSourceDocumentAsync: Found document Id={Id}, DocumentId={DocId}, VectorLength={VectorLength}",
+                _logger.LogDebug("[VIZ-DEBUG] GetSourceDocumentAsync: Found document Id={Id}, DocumentId={DocId}, VectorLength={VectorLength}",
                     result.Document.Id, result.Document.DocumentId ?? "(null)", result.Document.DocumentVector3072.Length);
                 return result.Document;
             }
         }
 
-        _logger.LogWarning("[VIZ-DEBUG] GetSourceDocumentAsync: No document found matching filter");
+        _logger.LogDebug("[VIZ-DEBUG] GetSourceDocumentAsync: No document found matching filter");
         return null;
     }
 
@@ -814,11 +814,11 @@ public class VisualizationService : IVisualizationService
     {
         if (sourceVector.Length == 0)
         {
-            _logger.LogWarning("[VIZ-DEBUG] SearchRelatedDocumentsAsync: Source document {DocumentId} has no documentVector", sourceDocumentId);
+            _logger.LogDebug("[VIZ-DEBUG] SearchRelatedDocumentsAsync: Source document {DocumentId} has no documentVector", sourceDocumentId);
             return [];
         }
 
-        _logger.LogWarning("[VIZ-DEBUG] SearchRelatedDocumentsAsync: Starting vector search with sourceVector.Length={VectorLength}", sourceVector.Length);
+        _logger.LogDebug("[VIZ-DEBUG] SearchRelatedDocumentsAsync: Starting vector search with sourceVector.Length={VectorLength}", sourceVector.Length);
 
         // Build search options with vector search
         var searchOptions = new SearchOptions
@@ -856,14 +856,14 @@ public class VisualizationService : IVisualizationService
         }
 
         searchOptions.Filter = string.Join(" and ", filters);
-        _logger.LogWarning("[VIZ-DEBUG] SearchRelatedDocumentsAsync: Filter={Filter}, VectorField={VectorField}, KNN={KNN}",
+        _logger.LogDebug("[VIZ-DEBUG] SearchRelatedDocumentsAsync: Filter={Filter}, VectorField={VectorField}, KNN={KNN}",
             searchOptions.Filter, DocumentVectorFieldName, options.Limit * 2);
 
         // Execute search
         var response = await searchClient.SearchAsync<VisualizationDocument>("*", searchOptions, cancellationToken);
         var results = response.Value;
 
-        _logger.LogWarning("[VIZ-DEBUG] SearchRelatedDocumentsAsync: Search returned TotalCount={TotalCount}", results.TotalCount);
+        _logger.LogDebug("[VIZ-DEBUG] SearchRelatedDocumentsAsync: Search returned TotalCount={TotalCount}", results.TotalCount);
 
         // Process results, deduplicating by unique ID (documentId or speFileId for orphan files)
         var seenDocuments = new HashSet<string>();
@@ -882,7 +882,7 @@ public class VisualizationService : IVisualizationService
             // Log first few results for debugging
             if (rawResultCount <= 5)
             {
-                _logger.LogWarning("[VIZ-DEBUG] SearchRelatedDocumentsAsync: Result[{Index}] DocId={DocId}, FileName={FileName}, Score={Score}, VectorLen={VectorLen}",
+                _logger.LogDebug("[VIZ-DEBUG] SearchRelatedDocumentsAsync: Result[{Index}] DocId={DocId}, FileName={FileName}, Score={Score}, VectorLen={VectorLen}",
                     rawResultCount, result.Document.DocumentId ?? "(null)", result.Document.FileName ?? "(null)", score, result.Document.DocumentVector3072.Length);
             }
 
@@ -911,7 +911,7 @@ public class VisualizationService : IVisualizationService
             }
         }
 
-        _logger.LogWarning("[VIZ-DEBUG] SearchRelatedDocumentsAsync: Processed {RawCount} results - {BelowThreshold} below threshold ({Threshold}), {Duplicates} duplicates, {Final} final results",
+        _logger.LogDebug("[VIZ-DEBUG] SearchRelatedDocumentsAsync: Processed {RawCount} results - {BelowThreshold} below threshold ({Threshold}), {Duplicates} duplicates, {Final} final results",
             rawResultCount, belowThresholdCount, options.Threshold, duplicateCount, relatedDocuments.Count);
 
         return relatedDocuments;
@@ -932,7 +932,10 @@ public class VisualizationService : IVisualizationService
         var allDocuments = new List<VisualizationDocument> { sourceDocument };
         allDocuments.AddRange(relatedDocuments.Select(r => r.Document));
 
-        // Fetch metadata for each document
+        // Note: Individual Dataverse fetches are acceptable here due to the limit cap
+        // (default 25, max 100 via MaxTotalNodes). Each call is ~20-50ms, so worst case
+        // is ~1-2s total which is acceptable for this visualization UX.
+        // For bulk scenarios (>100 docs), consider implementing a batch fetch method.
         foreach (var doc in allDocuments)
         {
             var uniqueId = doc.GetUniqueId();
