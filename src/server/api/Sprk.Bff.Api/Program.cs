@@ -1326,6 +1326,9 @@ if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
 // RAG endpoints for knowledge base operations (R3)
 app.MapRagEndpoints();
 
+// Semantic Search endpoints for hybrid search (R1)
+app.MapSemanticSearchEndpoints();
+
 // Visualization endpoints for document relationship discovery
 app.MapVisualizationEndpoints();
 
