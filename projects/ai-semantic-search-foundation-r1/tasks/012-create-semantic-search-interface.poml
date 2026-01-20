@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="ai-semantic-search-foundation-r1">
+  <metadata>
+    <title>Create ISemanticSearchService interface</title>
+    <phase>2: Core Search Service</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>013</blocks>
+    <tags>bff-api, ai, services</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Interface defines service contract, foundational for search functionality</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create the ISemanticSearchService interface that defines the contract for semantic search operations.
+    The interface should support search with configurable modes (RRF, vectorOnly, keywordOnly)
+    and extensibility hooks for future agentic RAG features.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in interface design and the AI tool framework.
+    Follow ADR-010 for DI patterns and ADR-013 for AI architecture.
+  </role>
+
+  <goal>
+    ISemanticSearchService interface created with SearchAsync and CountAsync methods.
+    Extensibility interfaces (IQueryPreprocessor, IResultPostprocessor) defined.
+  </goal>
+
+  <context>
+    <background>
+      The semantic search service is the core component for hybrid search functionality.
+      The interface must support all three search modes and include extensibility points
+      for query preprocessing and result post-processing (no-op for R1, but interface ready).
+    </background>
+    <relevant-files>
+      <file>projects/ai-semantic-search-foundation-r1/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IRagService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">Keep interface minimal; one responsibility</constraint>
+    <constraint source="ADR-013">Part of AI services within BFF API</constraint>
+    <constraint source="spec">Methods: SearchAsync, CountAsync</constraint>
+    <constraint source="spec">Extensibility: IQueryPreprocessor, IResultPostprocessor (no-op for R1)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>projects/ai-semantic-search-foundation-r1/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IRagService.cs</file>
+    </files>
+    <patterns>
+      <pattern name="Existing Service Interface" location="src/server/api/Sprk.Bff.Api/Services/Ai/IRagService.cs">
+        Follow existing pattern for AI service interfaces
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec.md for service method requirements</step>
+    <step order="2">Read existing IRagService.cs for interface patterns</step>
+    <step order="3">Create ISemanticSearchService.cs in Services/Ai/SemanticSearch/</step>
+    <step order="4">Define SearchAsync method accepting SemanticSearchRequest, tenantId, CancellationToken</step>
+    <step order="5">Define CountAsync method accepting same parameters</step>
+    <step order="6">Create IQueryPreprocessor interface with ProcessAsync method</step>
+    <step order="7">Create IResultPostprocessor interface with ProcessAsync method</step>
+    <step order="8">Add XML documentation for all public members</step>
+    <step order="9">Run dotnet build to verify compilation</step>
+    <step order="10">Update TASK-INDEX.md: change task 012 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/ISemanticSearchService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/IQueryPreprocessor.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/IResultPostprocessor.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ISemanticSearchService.cs exists</criterion>
+    <criterion testable="true">SearchAsync method defined with correct signature</criterion>
+    <criterion testable="true">CountAsync method defined</criterion>
+    <criterion testable="true">IQueryPreprocessor interface defined</criterion>
+    <criterion testable="true">IResultPostprocessor interface defined</criterion>
+    <criterion testable="true">XML documentation present</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

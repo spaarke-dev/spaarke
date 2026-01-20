@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="ai-semantic-search-foundation-r1">
+  <metadata>
+    <title>Implement SemanticSearchService with hybrid search</title>
+    <phase>2: Core Search Service</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>011, 012</dependencies>
+    <blocks>014, 020</blocks>
+    <tags>bff-api, ai, services</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Core service implementation, critical for all search functionality</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement the SemanticSearchService that performs hybrid semantic search using Azure AI Search.
+    The service must support all three search modes (RRF, vectorOnly, keywordOnly), handle embedding
+    failures with graceful fallback, and return properly enriched results.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Azure AI Search SDK and hybrid search implementation.
+    Follow ADR-013 for AI architecture and ADR-016 for rate limiting.
+  </role>
+
+  <goal>
+    SemanticSearchService fully implemented with:
+    - Hybrid search using RRF (default mode)
+    - Vector-only and keyword-only modes
+    - Embedding failure fallback to keyword search with warning
+    - Result enrichment from Dataverse (batch lookup)
+  </goal>
+
+  <context>
+    <background>
+      This is the main search service that orchestrates:
+      1. Query embedding (via IEmbeddingService)
+      2. Filter construction (via SearchFilterBuilder)
+      3. Azure AI Search execution (hybrid/vector/keyword modes)
+      4. Result enrichment (batch Dataverse lookup for entity names)
+      5. Response assembly with metadata
+    </background>
+    <relevant-files>
+      <file>projects/ai-semantic-search-foundation-r1/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IEmbeddingService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Use existing IEmbeddingService for query embedding</constraint>
+    <constraint source="ADR-016">Bounded concurrency for Azure OpenAI calls</constraint>
+    <constraint source="spec">On embedding failure: fall back to keywordOnly mode with EMBEDDING_FALLBACK warning</constraint>
+    <constraint source="spec">Batch Dataverse lookup for entity names (avoid N+1)</constraint>
+    <constraint source="spec">Return timing metrics (embeddingLatencyMs, searchLatencyMs)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>projects/ai-semantic-search-foundation-r1/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IEmbeddingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/EmbeddingService.cs</file>
+    </files>
+    <patterns>
+      <pattern name="Existing Search Pattern" location="src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs">
+        Reference existing search implementation for patterns
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec.md Search Execution Contract for implementation requirements</step>
+    <step order="2">Read existing RagService.cs for search patterns</step>
+    <step order="3">Read EmbeddingService.cs for embedding integration</step>
+    <step order="4">Create SemanticSearchService.cs implementing ISemanticSearchService</step>
+    <step order="5">Inject IEmbeddingService, IAiSearchClientFactory, IDataverseService</step>
+    <step order="6">Implement GetEmbeddingAsync with fallback handling</step>
+    <step order="7">Implement ExecuteSearchAsync for all three modes (RRF, vectorOnly, keywordOnly)</step>
+    <step order="8">Implement EnrichResultsAsync for batch Dataverse lookup</step>
+    <step order="9">Implement SearchAsync combining embedding, search, enrichment</step>
+    <step order="10">Implement CountAsync for count-only queries</step>
+    <step order="11">Add timing metrics collection (Stopwatch)</step>
+    <step order="12">Add warning collection for fallback scenarios</step>
+    <step order="13">Run dotnet build to verify compilation</step>
+    <step order="14">Update TASK-INDEX.md: change task 013 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SemanticSearchService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SemanticSearchService implements ISemanticSearchService</criterion>
+    <criterion testable="true">RRF mode executes hybrid search</criterion>
+    <criterion testable="true">vectorOnly mode executes vector search</criterion>
+    <criterion testable="true">keywordOnly mode executes keyword search</criterion>
+    <criterion testable="true">Embedding failure triggers fallback with warning</criterion>
+    <criterion testable="true">Results enriched with entity names from Dataverse</criterion>
+    <criterion testable="true">Timing metrics populated in response</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

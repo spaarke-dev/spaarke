@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="ai-semantic-search-foundation-r1">
+  <metadata>
+    <title>Unit tests for SemanticSearchService</title>
+    <phase>5: Testing &amp; Validation</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>013</dependencies>
+    <blocks>045</blocks>
+    <tags>testing, unit-tests</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Test writing, follows established patterns</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Write comprehensive unit tests for SemanticSearchService covering all search
+    modes, embedding fallback, result enrichment, and error handling.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in unit testing with xUnit and Moq.
+  </role>
+
+  <goal>
+    Comprehensive test coverage for SemanticSearchService:
+    - RRF hybrid search mode
+    - vectorOnly mode
+    - keywordOnly mode
+    - Embedding failure fallback
+    - Result enrichment
+    - Timing metrics
+  </goal>
+
+  <context>
+    <background>
+      SemanticSearchService is the core search component. Tests must mock
+      dependencies (IEmbeddingService, IAiSearchClientFactory, IDataverseService)
+      and verify all search modes and fallback behaviors work correctly.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SemanticSearchService.cs</file>
+      <file>tests/unit/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="testing">Use xUnit and Moq for mocking</constraint>
+    <constraint source="testing">Target 80%+ code coverage</constraint>
+    <constraint source="testing">Test fallback behavior explicitly</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>tests/unit/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SemanticSearchService.cs</file>
+    </files>
+    <patterns>
+      <pattern name="Existing Service Tests" location="tests/unit/">
+        Follow existing service test patterns with mocks
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create SemanticSearchServiceTests.cs in tests/unit/</step>
+    <step order="2">Setup mocks for dependencies</step>
+    <step order="3">Test: RRF mode executes hybrid search</step>
+    <step order="4">Test: vectorOnly mode executes vector search</step>
+    <step order="5">Test: keywordOnly mode executes keyword search</step>
+    <step order="6">Test: Embedding failure triggers fallback</step>
+    <step order="7">Test: Fallback returns EMBEDDING_FALLBACK warning</step>
+    <step order="8">Test: Results enriched with entity names</step>
+    <step order="9">Test: Timing metrics populated</step>
+    <step order="10">Test: CountAsync returns count only</step>
+    <step order="11">Run tests with dotnet test</step>
+    <step order="12">Verify code coverage</step>
+    <step order="13">Update TASK-INDEX.md: change task 041 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/unit/SemanticSearch/SemanticSearchServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Test file exists with comprehensive tests</criterion>
+    <criterion testable="true">All search modes tested</criterion>
+    <criterion testable="true">Embedding fallback tested</criterion>
+    <criterion testable="true">Result enrichment tested</criterion>
+    <criterion testable="true">Timing metrics tested</criterion>
+    <criterion testable="true">All tests pass with dotnet test</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

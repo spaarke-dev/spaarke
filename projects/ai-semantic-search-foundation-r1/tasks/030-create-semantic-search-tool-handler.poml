@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="ai-semantic-search-foundation-r1">
+  <metadata>
+    <title>Create SemanticSearchToolHandler for Copilot integration</title>
+    <phase>4: AI Tool Integration</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>022</dependencies>
+    <blocks>031</blocks>
+    <tags>bff-api, ai, tools</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>AI Tool Handler integration, follows established patterns</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create SemanticSearchToolHandler implementing IAiToolHandler that enables Copilot
+    to invoke semantic search via the tool framework. The handler translates tool
+    invocations to SemanticSearchService calls.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in the AI Tool Framework and IAiToolHandler interface.
+    Follow ADR-013 for AI architecture patterns.
+  </role>
+
+  <goal>
+    SemanticSearchToolHandler class that:
+    - Implements IAiToolHandler with tool name "search_documents"
+    - Defines tool parameters (query, scope, filters)
+    - Invokes SemanticSearchService and formats results for Copilot
+    - Registered in ToolHandlerRegistry
+  </goal>
+
+  <context>
+    <background>
+      The AI Tool Framework enables Copilot to invoke backend services through structured
+      tool definitions. The SemanticSearchToolHandler exposes semantic search as a tool
+      that Copilot can call when users ask "find documents about X".
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ToolHandlerRegistry.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IAiToolHandler.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Follow AI Tool Framework patterns</constraint>
+    <constraint source="spec">Tool name: search_documents</constraint>
+    <constraint source="spec">Tool parameters: query (required), scope, entityType, entityId, filters</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IAiToolHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ToolHandlerRegistry.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/</file>
+      <file>docs/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing Tool Handler" location="src/server/api/Sprk.Bff.Api/Services/Ai/Tools/">
+        Follow existing tool handler patterns
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read IAiToolHandler interface for required implementation</step>
+    <step order="2">Read existing tool handlers in Tools/ for patterns</step>
+    <step order="3">Create SemanticSearchToolHandler.cs in Services/Ai/Tools/</step>
+    <step order="4">Implement IAiToolHandler with ToolName "search_documents"</step>
+    <step order="5">Define tool description and parameters</step>
+    <step order="6">Implement HandleAsync to invoke SemanticSearchService</step>
+    <step order="7">Format search results for Copilot response</step>
+    <step order="8">Handle errors and return appropriate tool response</step>
+    <step order="9">Register handler in ToolHandlerRegistry</step>
+    <step order="10">Run dotnet build to verify compilation</step>
+    <step order="11">Update TASK-INDEX.md: change task 030 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Tools/SemanticSearchToolHandler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ToolHandlerRegistry.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SemanticSearchToolHandler implements IAiToolHandler</criterion>
+    <criterion testable="true">ToolName is "search_documents"</criterion>
+    <criterion testable="true">Tool parameters defined correctly</criterion>
+    <criterion testable="true">HandleAsync invokes SemanticSearchService</criterion>
+    <criterion testable="true">Results formatted for Copilot</criterion>
+    <criterion testable="true">Handler registered in ToolHandlerRegistry</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

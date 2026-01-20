@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="ai-semantic-search-foundation-r1">
+  <metadata>
+    <title>Integration tests for semantic search flow</title>
+    <phase>5: Testing &amp; Validation</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>022</dependencies>
+    <blocks>045</blocks>
+    <tags>testing, integration-tests</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Integration test writing</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Write integration tests for the complete semantic search flow from API endpoint
+    to Azure AI Search and back. Use test fixtures with real Azure resources.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in integration testing with WebApplicationFactory.
+  </role>
+
+  <goal>
+    Integration tests verifying:
+    - End-to-end search flow works
+    - Authorization enforced
+    - Validation enforced
+    - Error responses correct
+  </goal>
+
+  <context>
+    <background>
+      Integration tests verify the complete flow from HTTP request through service
+      layer to Azure AI Search. Tests should use WebApplicationFactory for API testing
+      and real Azure resources in dev environment.
+    </background>
+    <relevant-files>
+      <file>tests/integration/</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/SemanticSearchEndpoints.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="testing">Use WebApplicationFactory</constraint>
+    <constraint source="testing">Tests may require dev Azure resources</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>tests/integration/</file>
+    </files>
+    <patterns>
+      <pattern name="Existing Integration Tests" location="tests/integration/">
+        Follow existing integration test patterns
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create SemanticSearchIntegrationTests.cs</step>
+    <step order="2">Setup WebApplicationFactory with test configuration</step>
+    <step order="3">Test: POST /api/ai/search/semantic returns results</step>
+    <step order="4">Test: POST /api/ai/search/semantic/count returns count</step>
+    <step order="5">Test: Invalid request returns 400</step>
+    <step order="6">Test: Unauthorized returns 403</step>
+    <step order="7">Test: scope=all returns 400</step>
+    <step order="8">Test: Response includes metadata and warnings</step>
+    <step order="9">Run tests with dotnet test</step>
+    <step order="10">Update TASK-INDEX.md: change task 043 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/SemanticSearch/SemanticSearchIntegrationTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Integration tests exist</criterion>
+    <criterion testable="true">E2E search flow tested</criterion>
+    <criterion testable="true">Error responses tested</criterion>
+    <criterion testable="true">All tests pass</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

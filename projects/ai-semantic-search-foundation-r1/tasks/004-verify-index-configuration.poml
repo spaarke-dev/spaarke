@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="ai-semantic-search-foundation-r1">
+  <metadata>
+    <title>Verify index configuration supports hybrid search</title>
+    <phase>1: Index Schema &amp; Infrastructure</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>010</blocks>
+    <tags>infrastructure, ai, testing</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Verification task, not code implementation</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Verify the Azure AI Search index configuration supports hybrid search with RRF fusion.
+    Confirm vector profiles, semantic configurations, and filter fields are correctly configured
+    for the semantic search requirements.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Azure AI Search configuration and hybrid search.
+  </role>
+
+  <goal>
+    Documentation confirming index supports hybrid search. Any required configuration
+    changes identified and applied. Verification checklist completed.
+  </goal>
+
+  <context>
+    <background>
+      Azure AI Search supports hybrid search combining vector similarity and keyword (BM25) search.
+      The index must have correct vector search profiles, semantic ranker configuration, and
+      filterable fields to support the semantic search API requirements.
+    </background>
+    <relevant-files>
+      <file>infrastructure/ai-search/spaarke-knowledge-index-v2.json</file>
+      <file>projects/ai-semantic-search-foundation-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Must support RRF (Reciprocal Rank Fusion) hybrid mode</constraint>
+    <constraint source="spec">Must support vectorOnly and keywordOnly modes</constraint>
+    <constraint source="spec">Semantic ranker configuration: knowledge-semantic-config</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>infrastructure/ai-search/spaarke-knowledge-index-v2.json</file>
+      <file>projects/ai-semantic-search-foundation-r1/spec.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read index schema at infrastructure/ai-search/spaarke-knowledge-index-v2.json</step>
+    <step order="2">Verify vectorSearch.algorithms includes HNSW algorithm for 3072 dimensions</step>
+    <step order="3">Verify vectorSearch.profiles includes profile for documentVector3072</step>
+    <step order="4">Verify semantic.configurations includes knowledge-semantic-config</step>
+    <step order="5">Verify filter fields: tenantId, parentEntityType, parentEntityId, documentType, fileType, tags, createdAt, updatedAt</step>
+    <step order="6">Document verification results in project notes</step>
+    <step order="7">If any configuration gaps found, document required changes</step>
+    <step order="8">Update TASK-INDEX.md: change task 004 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Run validation commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes">projects/ai-semantic-search-foundation-r1/notes/index-verification.md</output>
+    <output type="infrastructure">infrastructure/ai-search/spaarke-knowledge-index-v2.json (if changes needed)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Vector search profiles verified for 3072 dimensions</criterion>
+    <criterion testable="true">Semantic ranker configuration verified</criterion>
+    <criterion testable="true">All required filter fields present</criterion>
+    <criterion testable="true">Verification notes documented</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

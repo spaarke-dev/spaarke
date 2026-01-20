@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="ai-semantic-search-foundation-r1">
+  <metadata>
+    <title>Project wrap-up</title>
+    <phase>6: Project Wrap-up</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>all</dependencies>
+    <blocks>none</blocks>
+    <tags>project-management, documentation</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Final wrap-up with quality gates</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Complete project wrap-up: update README status, create lessons-learned document,
+    run final quality checks, archive project artifacts, and prepare for merge.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Project completion and handoff.
+  </role>
+
+  <goal>
+    Project fully wrapped up with:
+    - README status updated to "Complete"
+    - Lessons learned documented
+    - All tests passing
+    - Code review completed
+    - PR ready for merge
+  </goal>
+
+  <context>
+    <background>
+      This is the mandatory final task for all projects. It ensures:
+      - Quality gates are satisfied
+      - Documentation is complete
+      - Learnings are captured
+      - Project is ready for merge and archival
+    </background>
+    <relevant-files>
+      <file>projects/ai-semantic-search-foundation-r1/README.md</file>
+      <file>projects/ai-semantic-search-foundation-r1/tasks/TASK-INDEX.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">All tasks must be completed before wrap-up</constraint>
+    <constraint source="project">All tests must pass</constraint>
+    <constraint source="project">Code review must be completed</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-semantic-search-foundation-r1/README.md</file>
+      <file>projects/ai-semantic-search-foundation-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify all other tasks are completed in TASK-INDEX.md</step>
+    <step order="2">Run full test suite (dotnet test)</step>
+    <step order="3">Verify build succeeds (dotnet build)</step>
+    <step order="4">Run code-review skill on all changes</step>
+    <step order="5">Run adr-check skill to verify compliance</step>
+    <step order="6">Update README.md status to "Complete"</step>
+    <step order="7">Create lessons-learned.md in project folder</step>
+    <step order="8">Review graduation criteria in README - all met?</step>
+    <step order="9">Update PR with final status</step>
+    <step order="10">Request merge approval</step>
+    <step order="11">Run /repo-cleanup for project archival</step>
+    <step order="12">Update TASK-INDEX.md: change task 090 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="gh">GitHub PR management</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-semantic-search-foundation-r1/README.md (status update)</output>
+    <output type="docs">projects/ai-semantic-search-foundation-r1/lessons-learned.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All tasks completed</criterion>
+    <criterion testable="true">All tests passing</criterion>
+    <criterion testable="true">Build succeeds</criterion>
+    <criterion testable="true">Code review passed</criterion>
+    <criterion testable="true">ADR compliance verified</criterion>
+    <criterion testable="true">README status is "Complete"</criterion>
+    <criterion testable="true">Lessons learned documented</criterion>
+    <criterion testable="true">PR ready for merge</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

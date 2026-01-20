@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="045" project="ai-semantic-search-foundation-r1">
+  <metadata>
+    <title>Performance validation (latency targets)</title>
+    <phase>5: Testing &amp; Validation</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>043, 044</dependencies>
+    <blocks>090</blocks>
+    <tags>testing, performance</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Performance validation, documentation task</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Validate performance meets spec requirements: p50 &lt; 500ms, p95 &lt; 1000ms
+    under 50 concurrent users. Document results and any optimization recommendations.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in performance testing.
+  </role>
+
+  <goal>
+    Performance validation confirming:
+    - p50 latency &lt; 500ms
+    - p95 latency &lt; 1000ms
+    - System handles 50 concurrent searches
+    Results documented with metrics.
+  </goal>
+
+  <context>
+    <background>
+      The spec defines performance targets that must be validated before release.
+      Performance testing should use realistic queries and data volumes in
+      the dev environment.
+    </background>
+    <relevant-files>
+      <file>projects/ai-semantic-search-foundation-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">p50 &lt; 500ms</constraint>
+    <constraint source="spec">p95 &lt; 1000ms</constraint>
+    <constraint source="spec">Support 50 concurrent searches</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-semantic-search-foundation-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create performance test script</step>
+    <step order="2">Configure 50 concurrent virtual users</step>
+    <step order="3">Define realistic query patterns</step>
+    <step order="4">Run load test against dev environment</step>
+    <step order="5">Collect latency metrics (p50, p95, p99)</step>
+    <step order="6">Verify p50 &lt; 500ms</step>
+    <step order="7">Verify p95 &lt; 1000ms</step>
+    <step order="8">Document results in notes/performance-results.md</step>
+    <step order="9">Identify optimization opportunities if targets not met</step>
+    <step order="10">Update TASK-INDEX.md: change task 045 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Run load test tools</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes">projects/ai-semantic-search-foundation-r1/notes/performance-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Performance test executed</criterion>
+    <criterion testable="true">p50 &lt; 500ms verified</criterion>
+    <criterion testable="true">p95 &lt; 1000ms verified</criterion>
+    <criterion testable="true">Results documented</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

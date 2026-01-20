@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="ai-semantic-search-foundation-r1">
+  <metadata>
+    <title>Create SemanticSearch request/response DTOs</title>
+    <phase>2: Core Search Service</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>003</dependencies>
+    <blocks>011, 012</blocks>
+    <tags>bff-api, ai, models</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>DTOs define API contract, must match spec exactly</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create the request and response DTOs for the semantic search API endpoints.
+    These must match the API schema defined in spec.md exactly, including all fields,
+    validation rules, and response structures.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in C# DTOs and API design.
+    Follow ADR-001 for Minimal API patterns and ADR-019 for error handling.
+  </role>
+
+  <goal>
+    Complete set of request/response DTOs for semantic search API:
+    SemanticSearchRequest, SemanticSearchResponse, SearchResult, SearchMetadata,
+    SearchFilters, SearchOptions, SearchWarning.
+  </goal>
+
+  <context>
+    <background>
+      The semantic search API has specific request/response schemas defined in the spec.
+      DTOs must include proper validation attributes, JSON serialization configuration,
+      and match the documented field names exactly for API compatibility.
+    </background>
+    <relevant-files>
+      <file>projects/ai-semantic-search-foundation-r1/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Use records for immutable DTOs</constraint>
+    <constraint source="spec">Request: query (1-2000 chars), scope (entity|documentIds), filters, options</constraint>
+    <constraint source="spec">Response: results[], totalCount, metadata (query, executedMode, timing, warnings[])</constraint>
+    <constraint source="spec">SearchResult: documentId, documentName, fileName, content (snippet), combinedScore, similarity (null), keywordScore (null), highlights[], parentEntity</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>projects/ai-semantic-search-foundation-r1/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/</file>
+    </files>
+    <patterns>
+      <pattern name="DTO Pattern" location="src/server/api/Sprk.Bff.Api/Models/">
+        Follow existing DTO patterns with records and validation attributes
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec.md API Design section for exact schema requirements</step>
+    <step order="2">Create SemanticSearchRequest record with query, scope, entityType?, entityId?, documentIds?, filters, options</step>
+    <step order="3">Create SearchFilters record with documentTypes[], fileTypes[], tags[], dateRange?</step>
+    <step order="4">Create SearchOptions record with limit (default 20), offset (default 0), includeHighlights, hybridMode</step>
+    <step order="5">Create SemanticSearchResponse record with results[], totalCount, metadata</step>
+    <step order="6">Create SearchResult record with all specified fields</step>
+    <step order="7">Create SearchMetadata record with query, executedMode, embeddingLatencyMs, searchLatencyMs, warnings[]</step>
+    <step order="8">Create SearchWarning record with code, message</step>
+    <step order="9">Add validation attributes ([Required], [StringLength], etc.)</step>
+    <step order="10">Run dotnet build to verify compilation</step>
+    <step order="11">Update TASK-INDEX.md: change task 010 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SemanticSearchRequest.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SemanticSearchResponse.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SearchResult.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SearchFilters.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SearchOptions.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SearchMetadata.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SemanticSearchRequest has all fields from spec.md</criterion>
+    <criterion testable="true">SemanticSearchResponse has results, totalCount, metadata</criterion>
+    <criterion testable="true">SearchResult has all 10+ fields from spec</criterion>
+    <criterion testable="true">Validation attributes present on required fields</criterion>
+    <criterion testable="true">JSON serialization configured (camelCase)</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

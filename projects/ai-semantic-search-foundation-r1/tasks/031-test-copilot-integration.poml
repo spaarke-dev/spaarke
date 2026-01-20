@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="ai-semantic-search-foundation-r1">
+  <metadata>
+    <title>Test Copilot tool integration manually</title>
+    <phase>4: AI Tool Integration</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>040</blocks>
+    <tags>testing, ai, manual</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Manual verification task, no code changes</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Manually test the search_documents tool integration with Copilot to verify
+    the tool is callable, returns results, and formats them appropriately for
+    conversational responses.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Testing AI tool integration.
+  </role>
+
+  <goal>
+    Verification that Copilot can successfully invoke the search_documents tool
+    and receive formatted search results. Document test results.
+  </goal>
+
+  <context>
+    <background>
+      The AI Tool Framework allows Copilot to discover and invoke tools dynamically.
+      This task verifies the integration works end-to-end by using the Copilot UI
+      to ask questions that should trigger the search_documents tool.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Tools/SemanticSearchToolHandler.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="testing">Use dev environment for testing</constraint>
+    <constraint source="testing">Document test scenarios and results</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Deploy API to dev environment (if not already)</step>
+    <step order="2">Open Copilot interface in dev environment</step>
+    <step order="3">Test: "Find documents about payment terms"</step>
+    <step order="4">Verify search_documents tool is invoked</step>
+    <step order="5">Verify results are displayed conversationally</step>
+    <step order="6">Test: "Search for contracts in matter X" (entity scope)</step>
+    <step order="7">Test edge case: Empty results query</step>
+    <step order="8">Document test results in notes/copilot-testing.md</step>
+    <step order="9">Update TASK-INDEX.md: change task 031 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="browser">Access Copilot UI</tool>
+    <tool name="terminal">Check API logs</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes">projects/ai-semantic-search-foundation-r1/notes/copilot-testing.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Tool invokes successfully from Copilot</criterion>
+    <criterion testable="true">Search results displayed in conversation</criterion>
+    <criterion testable="true">Entity scope works correctly</criterion>
+    <criterion testable="true">Test results documented</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

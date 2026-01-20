@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="ai-semantic-search-foundation-r1">
+  <metadata>
+    <title>Update FileIndexingService to populate parent entity fields</title>
+    <phase>1: Index Schema &amp; Infrastructure</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>010</blocks>
+    <tags>bff-api, ai, services</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Service change affects data flow through indexing pipeline</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Update the FileIndexingService to populate the new parent entity fields when indexing documents.
+    The service should accept parent entity context and propagate it to the KnowledgeDocument
+    being indexed in Azure AI Search.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Azure AI Search indexing and the BFF API.
+    Follow ADR-013 for AI architecture patterns.
+  </role>
+
+  <goal>
+    FileIndexingService accepts parent entity context and populates ParentEntityType,
+    ParentEntityId, ParentEntityName on indexed documents. New documents are searchable by entity.
+  </goal>
+
+  <context>
+    <background>
+      The FileIndexingService is responsible for converting documents into KnowledgeDocument
+      objects and uploading them to Azure AI Search. Adding parent entity support enables
+      callers to specify which business entity (Matter, Project, etc.) owns the document.
+      This context flows through to enable entity-scoped search.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/FileIndexingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IFileIndexingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">Minimal interface changes; extend existing method signatures</constraint>
+    <constraint source="ADR-013">Part of AI services within BFF API</constraint>
+    <constraint source="spec">Parent entity fields are optional (backward compatible)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/FileIndexingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IFileIndexingService.cs</file>
+    </files>
+    <patterns>
+      <pattern name="Existing Indexing Pattern" location="src/server/api/Sprk.Bff.Api/Services/Ai/FileIndexingService.cs">
+        Follow existing pattern for passing context through indexing pipeline
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read current FileIndexingService.cs and IFileIndexingService.cs</step>
+    <step order="2">Create ParentEntityContext record/class with Type, Id, Name properties</step>
+    <step order="3">Update IFileIndexingService interface with optional ParentEntityContext parameter</step>
+    <step order="4">Update FileIndexingService implementation to accept and use ParentEntityContext</step>
+    <step order="5">Populate KnowledgeDocument parent entity fields from context</step>
+    <step order="6">Ensure backward compatibility (null context = no parent entity)</step>
+    <step order="7">Run dotnet build to verify compilation</step>
+    <step order="8">Update TASK-INDEX.md: change task 003 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/IFileIndexingService.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/FileIndexingService.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/ParentEntityContext.cs (created)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ParentEntityContext class/record exists</criterion>
+    <criterion testable="true">IFileIndexingService has updated method signature</criterion>
+    <criterion testable="true">FileIndexingService populates parent entity fields on KnowledgeDocument</criterion>
+    <criterion testable="true">Null ParentEntityContext is handled gracefully</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>
