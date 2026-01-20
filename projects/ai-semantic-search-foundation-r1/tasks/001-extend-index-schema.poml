@@ -3,7 +3,7 @@
   <metadata>
     <title>Extend Azure AI Search index schema with parent entity fields</title>
     <phase>1: Index Schema &amp; Infrastructure</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>002, 003</blocks>

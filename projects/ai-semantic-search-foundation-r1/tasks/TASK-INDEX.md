@@ -11,9 +11,9 @@
 | Metric | Value |
 |--------|-------|
 | Total Tasks | 18 |
-| Completed | 0 |
+| Completed | 1 |
 | In Progress | 0 |
-| Pending | 18 |
+| Pending | 17 |
 
 ---
 
@@ -35,7 +35,7 @@
 
 | ID | Title | Status | Dependencies | Rigor |
 |----|-------|--------|--------------|-------|
-| 001 | Extend Azure AI Search index schema with parent entity fields | 🔲 | none | FULL |
+| 001 | Extend Azure AI Search index schema with parent entity fields | ✅ | none | FULL |
 | 002 | Update KnowledgeDocument model with parent entity fields | 🔲 | 001 | FULL |
 | 003 | Update FileIndexingService to populate parent entity fields | 🔲 | 002 | FULL |
 | 004 | Verify index configuration supports hybrid search | 🔲 | 001 | STANDARD |
