@@ -115,6 +115,10 @@ export class PlaybookBuilderHost
   private playbookNameOutput: string | undefined = undefined;
   private playbookDescriptionOutput: string | undefined = undefined;
 
+  // Fallback canvas data loaded via WebAPI when bound property is null
+  private fallbackCanvasJson: string | null = null;
+  private fallbackLoadAttempted: boolean = false;
+
   constructor() {
     logInfo('Constructor called');
   }
@@ -298,8 +302,17 @@ export class PlaybookBuilderHost
       // Get other input parameters
       const playbookName = context.parameters.playbookName?.raw || '';
       const playbookDescription = context.parameters.playbookDescription?.raw || '';
-      const canvasJson = context.parameters.canvasJson?.raw || '';
+      const boundCanvasJson = context.parameters.canvasJson?.raw || '';
       const apiBaseUrl = context.parameters.apiBaseUrl?.raw || '';
+
+      // Use bound property if available, otherwise use fallback from WebAPI
+      const canvasJson = boundCanvasJson || this.fallbackCanvasJson || '';
+
+      // If bound property is null and we have a playbook ID, load via WebAPI
+      if (!boundCanvasJson && !this.fallbackCanvasJson && playbookId && !this.fallbackLoadAttempted) {
+        logInfo('Bound canvasJson is null - triggering fallback WebAPI load', { playbookId });
+        this.loadCanvasFromDataverse(playbookId);
+      }
 
       logInfo('Rendering with context', {
         playbookId,
@@ -309,10 +322,14 @@ export class PlaybookBuilderHost
         canvasJsonPreview: canvasJson ? canvasJson.substring(0, 200) : '(empty)',
         playbookName,
         hasDescription: !!playbookDescription,
+        usingFallback: !boundCanvasJson && !!this.fallbackCanvasJson,
       });
 
       // React 16 API - ReactDOM.render
       // FluentProvider needs flex styling to pass through the height chain
+      // Use a key that changes when fallback canvas loads to force re-initialization
+      const componentKey = this.fallbackCanvasJson ? 'with-fallback' : 'initial';
+
       ReactDOM.render(
         React.createElement(
           FluentProvider,
@@ -321,6 +338,7 @@ export class PlaybookBuilderHost
             style: { height: '100%', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }
           },
           React.createElement(PlaybookBuilderHostApp, {
+            key: componentKey,
             playbookId,
             playbookName,
             playbookDescription,
@@ -482,5 +500,52 @@ export class PlaybookBuilderHost
     if (this.context) {
       this.renderReactTree(this.context);
     }
+  }
+
+  /**
+   * Load canvas data directly from Dataverse via WebAPI.
+   * Used as a fallback when the bound property is null (form binding not configured).
+   */
+  private loadCanvasFromDataverse(entityId: string): void {
+    if (!this.context || this.fallbackLoadAttempted) {
+      return;
+    }
+
+    this.fallbackLoadAttempted = true;
+    const entityName = 'sprk_analysisplaybook';
+
+    logInfo('Loading canvas from Dataverse via WebAPI (fallback)', {
+      entityId,
+      entityName,
+    });
+
+    // Retrieve the record with the canvas field
+    this.context.webAPI
+      .retrieveRecord(entityName, entityId, '?$select=sprk_canvaslayoutjson,sprk_name,sprk_description')
+      .then(
+        (record: ComponentFramework.WebApi.Entity) => {
+          const canvasJson = record['sprk_canvaslayoutjson'] as string | null;
+          logInfo('Canvas loaded from Dataverse (fallback)', {
+            hasCanvas: !!canvasJson,
+            canvasLength: canvasJson?.length || 0,
+            canvasPreview: canvasJson ? canvasJson.substring(0, 200) : '(empty)',
+          });
+
+          if (canvasJson) {
+            this.fallbackCanvasJson = canvasJson;
+            // Re-render with the loaded canvas data
+            if (this.context) {
+              this.renderReactTree(this.context);
+            }
+          }
+        },
+        (error: unknown) => {
+          logError('Failed to load canvas from Dataverse (fallback)', {
+            error,
+            errorMessage: (error as { message?: string })?.message,
+            entityId,
+          });
+        }
+      );
   }
 }
