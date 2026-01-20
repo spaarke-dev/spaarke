@@ -1327,7 +1327,12 @@ if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
 app.MapRagEndpoints();
 
 // Semantic Search endpoints for hybrid search (R1)
-app.MapSemanticSearchEndpoints();
+// Only map if semantic search services are registered (requires DocumentIntelligence + Analysis enabled)
+if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
+    app.Configuration.GetValue<bool>("Analysis:Enabled", true))
+{
+    app.MapSemanticSearchEndpoints();
+}
 
 // Visualization endpoints for document relationship discovery
 app.MapVisualizationEndpoints();

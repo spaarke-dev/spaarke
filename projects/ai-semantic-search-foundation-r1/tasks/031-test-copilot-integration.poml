@@ -3,7 +3,8 @@
   <metadata>
     <title>Test Copilot tool integration manually</title>
     <phase>4: AI Tool Integration</phase>
-    <status>not-started</status>
+    <status>deferred</status>
+    <deferred-reason>No Copilot UI exists that invokes SemanticSearchToolHandler. R1 scope is backend API only. See notes/copilot-integration-deferred.md</deferred-reason>
     <estimated-hours>1</estimated-hours>
     <dependencies>030</dependencies>
     <blocks>040</blocks>

@@ -3,7 +3,7 @@
   <metadata>
     <title>Unit tests for SearchFilterBuilder</title>
     <phase>5: Testing &amp; Validation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>011</dependencies>
     <blocks>045</blocks>

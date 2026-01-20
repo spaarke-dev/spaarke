@@ -56,6 +56,21 @@ public interface IAiPlaybookBuilderService
     IAsyncEnumerable<Models.Ai.TestExecutionEvent> ExecuteTestAsync(
         Models.Ai.TestPlaybookRequest request,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Generate a structured clarification question based on a low-confidence classification result.
+    /// Used when intent classification confidence is below threshold.
+    /// </summary>
+    /// <param name="message">The original user message that needs clarification.</param>
+    /// <param name="canvasContext">Current canvas context for disambiguation.</param>
+    /// <param name="lowConfidenceResult">The initial low-confidence classification result.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A structured clarification question with options and suggestions.</returns>
+    Task<Models.Ai.ClarificationQuestion> GenerateClarificationAsync(
+        string message,
+        CanvasContext? canvasContext,
+        Models.Ai.AiIntentResult? lowConfidenceResult,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>
