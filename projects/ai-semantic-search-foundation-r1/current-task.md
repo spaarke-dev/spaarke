@@ -13,10 +13,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 011, 012 - Filter builder + Interface (parallel) |
-| **Step** | In progress |
-| **Status** | in-progress |
-| **Next Action** | Executing tasks 011 and 012 in parallel |
+| **Task** | 013, 014 - SemanticSearchService + No-op processors (parallel) |
+| **Step** | Ready to start |
+| **Status** | pending |
+| **Next Action** | Execute tasks 013 and 014 in parallel |
 
 ### Files Modified This Session
 <!-- Only files touched in CURRENT session, not all time -->
@@ -27,10 +27,14 @@
 - `src/server/api/Sprk.Bff.Api/Services/Ai/FileIndexingService.cs` - Modified - Populate parent fields (Task 003)
 - `projects/.../notes/index-verification.md` - Created - Hybrid search verification (Task 004)
 - `src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/*.cs` - Created - 7 DTO files (Task 010)
+- `src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SearchFilterBuilder.cs` - Created (Task 011)
+- `src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/ISemanticSearchService.cs` - Created (Task 012)
+- `src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/IQueryPreprocessor.cs` - Created (Task 012)
+- `src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/IResultPostprocessor.cs` - Created (Task 012)
 
 ### Critical Context
 <!-- 1-3 sentences of essential context for continuation -->
-**PHASE 2 IN PROGRESS** (Task 010 complete). 7 SemanticSearch DTOs created: Request, Response, Filters, Options, Result, Metadata, ErrorCodes. Now executing tasks 011 (SearchFilterBuilder) and 012 (ISemanticSearchService) in parallel.
+**PHASE 2 IN PROGRESS** (Tasks 010-012 complete). SearchFilterBuilder builds OData filters. ISemanticSearchService + extensibility interfaces created. Next: Tasks 013 (SemanticSearchService impl) and 014 (no-op processors) can run in parallel.
 
 ---
 
@@ -57,14 +61,19 @@
 - [x] **Task 001**: Extend Azure AI Search index schema (2026-01-20)
 - [x] **Task 002**: Update KnowledgeDocument model (2026-01-20)
 - [x] **Task 003**: Update FileIndexingService (2026-01-20)
-  - Created ParentEntityContext record
-  - Added ParentEntity property to FileIndexRequest and ContentIndexRequest
-  - Updated indexing pipeline to populate parent entity fields
 - [x] **Task 004**: Verify index configuration (2026-01-20)
+- [x] **Task 010**: Create SemanticSearch DTOs (2026-01-20)
+  - 7 DTO files: Request, Response, Filters, Options, Result, Metadata, ErrorCodes
+- [x] **Task 011**: Create SearchFilterBuilder (2026-01-20)
+  - OData filter construction with tenant isolation, entity scope, documentIds scope
+  - Input escaping to prevent filter injection
+- [x] **Task 012**: Create ISemanticSearchService interface (2026-01-20)
+  - SearchAsync and CountAsync methods
+  - IQueryPreprocessor and IResultPostprocessor extensibility hooks
 
 ### Current Step
 
-Ready to start Phase 2: Task 010 (SemanticSearch DTOs)
+Tasks 013 and 014 can run in parallel (both have their dependencies met)
 
 ### Files Modified (This Session)
 

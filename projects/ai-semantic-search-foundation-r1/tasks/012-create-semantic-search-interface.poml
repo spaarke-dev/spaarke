@@ -3,7 +3,7 @@
   <metadata>
     <title>Create ISemanticSearchService interface</title>
     <phase>2: Core Search Service</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1</estimated-hours>
     <dependencies>010</dependencies>
     <blocks>013</blocks>

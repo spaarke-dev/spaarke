@@ -3,7 +3,7 @@
   <metadata>
     <title>Create SearchFilterBuilder for OData filter construction</title>
     <phase>2: Core Search Service</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>010</dependencies>
     <blocks>012</blocks>
