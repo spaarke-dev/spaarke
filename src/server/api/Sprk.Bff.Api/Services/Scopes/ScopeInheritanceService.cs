@@ -140,7 +140,7 @@ public sealed class ScopeInheritanceService : IScopeInheritanceService
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<ScopeChildInfo>> GetChildrenAsync(
+    public Task<IReadOnlyList<ScopeChildInfo>> GetChildrenAsync(
         Guid parentScopeId,
         ScopeType scopeType,
         CancellationToken cancellationToken)
@@ -152,7 +152,7 @@ public sealed class ScopeInheritanceService : IScopeInheritanceService
 
         // In full implementation, query Dataverse for scopes with parentid = parentScopeId
         // For now, return empty list
-        return Array.Empty<ScopeChildInfo>();
+        return Task.FromResult<IReadOnlyList<ScopeChildInfo>>(Array.Empty<ScopeChildInfo>());
     }
 
     /// <inheritdoc />

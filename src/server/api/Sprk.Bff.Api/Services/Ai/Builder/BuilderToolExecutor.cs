@@ -505,7 +505,7 @@ public class BuilderToolExecutor
 
     #region Scope Operation Tools
 
-    private async Task<BuilderToolResult> ExecuteLinkScopeAsync(
+    private Task<BuilderToolResult> ExecuteLinkScopeAsync(
         BuilderToolCall toolCall,
         CanvasState canvasState,
         CancellationToken cancellationToken)
@@ -517,7 +517,7 @@ public class BuilderToolExecutor
         var nodeId = args.NodeId ?? FindNodeIdByLabel(canvasState, args.NodeLabel);
         if (nodeId == null)
         {
-            return CreateErrorResult(toolCall, "Node not found");
+            return Task.FromResult(CreateErrorResult(toolCall, "Node not found"));
         }
 
         // Resolve scope by ID or name
@@ -557,17 +557,17 @@ public class BuilderToolExecutor
         _logger.LogInformation("LinkScope: Linked {ScopeType} scope to node {NodeId}",
             args.ScopeType, nodeId);
 
-        return new BuilderToolResult
+        return Task.FromResult(new BuilderToolResult
         {
             ToolCallId = toolCall.Id,
             ToolName = toolCall.ToolName,
             Success = true,
             Result = JsonDocument.Parse(JsonSerializer.Serialize(result, JsonOptions)),
             CanvasOperations = new[] { CreateCanvasOperation(CanvasOperationType.UpdateNode, patch) }
-        };
+        });
     }
 
-    private async Task<BuilderToolResult> ExecuteSearchScopesAsync(
+    private Task<BuilderToolResult> ExecuteSearchScopesAsync(
         BuilderToolCall toolCall,
         CancellationToken cancellationToken)
     {
@@ -627,17 +627,17 @@ public class BuilderToolExecutor
             Success = true
         };
 
-        return new BuilderToolResult
+        return Task.FromResult(new BuilderToolResult
         {
             ToolCallId = toolCall.Id,
             ToolName = toolCall.ToolName,
             Success = true,
             Result = JsonDocument.Parse(JsonSerializer.Serialize(searchResult, JsonOptions)),
             CanvasOperations = null // Search doesn't modify canvas
-        };
+        });
     }
 
-    private async Task<BuilderToolResult> ExecuteCreateScopeAsync(
+    private Task<BuilderToolResult> ExecuteCreateScopeAsync(
         BuilderToolCall toolCall,
         CancellationToken cancellationToken)
     {
@@ -659,14 +659,14 @@ public class BuilderToolExecutor
             Success = true
         };
 
-        return new BuilderToolResult
+        return Task.FromResult(new BuilderToolResult
         {
             ToolCallId = toolCall.Id,
             ToolName = toolCall.ToolName,
             Success = true,
             Result = JsonDocument.Parse(JsonSerializer.Serialize(result, JsonOptions)),
             CanvasOperations = null // Scope creation doesn't directly modify canvas
-        };
+        });
     }
 
     #endregion

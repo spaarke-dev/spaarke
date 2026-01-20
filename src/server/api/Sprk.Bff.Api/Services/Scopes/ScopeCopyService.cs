@@ -233,14 +233,14 @@ public sealed class ScopeCopyService : IScopeCopyService
     /// <summary>
     /// Get the display name of the source scope.
     /// </summary>
-    private async Task<string> GetSourceDisplayNameAsync(
+    private Task<string> GetSourceDisplayNameAsync(
         Guid scopeId,
         ScopeType scopeType,
         CancellationToken cancellationToken)
     {
         // In full implementation, would query Dataverse for the source record
         // For now, return a default name
-        return scopeType switch
+        var displayName = scopeType switch
         {
             ScopeType.Action => "My Action",
             ScopeType.Skill => "My Skill",
@@ -249,6 +249,7 @@ public sealed class ScopeCopyService : IScopeCopyService
             ScopeType.Playbook => "My Playbook",
             _ => "My Copy"
         };
+        return Task.FromResult(displayName);
     }
 
     /// <summary>
