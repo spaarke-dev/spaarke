@@ -13,10 +13,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 010 - Create SemanticSearch DTOs |
-| **Step** | Ready to start |
-| **Status** | pending |
-| **Next Action** | Begin Phase 2: Create SemanticSearch request/response DTOs |
+| **Task** | 011, 012 - Filter builder + Interface (parallel) |
+| **Step** | In progress |
+| **Status** | in-progress |
+| **Next Action** | Executing tasks 011 and 012 in parallel |
 
 ### Files Modified This Session
 <!-- Only files touched in CURRENT session, not all time -->
@@ -26,10 +26,11 @@
 - `src/server/api/Sprk.Bff.Api/Services/Ai/IFileIndexingService.cs` - Modified - ParentEntity property (Task 003)
 - `src/server/api/Sprk.Bff.Api/Services/Ai/FileIndexingService.cs` - Modified - Populate parent fields (Task 003)
 - `projects/.../notes/index-verification.md` - Created - Hybrid search verification (Task 004)
+- `src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/*.cs` - Created - 7 DTO files (Task 010)
 
 ### Critical Context
 <!-- 1-3 sentences of essential context for continuation -->
-**PHASE 1 COMPLETE** (Tasks 001-004). Index schema extended, model updated, indexing service populates parent entity fields. Ready for Phase 2: Core Search Service starting with task 010 (DTOs).
+**PHASE 2 IN PROGRESS** (Task 010 complete). 7 SemanticSearch DTOs created: Request, Response, Filters, Options, Result, Metadata, ErrorCodes. Now executing tasks 011 (SearchFilterBuilder) and 012 (ISemanticSearchService) in parallel.
 
 ---
 
