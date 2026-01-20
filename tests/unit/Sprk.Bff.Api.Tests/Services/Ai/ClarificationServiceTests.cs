@@ -3,10 +3,9 @@ using Moq;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Xunit;
-
+using SvcClarificationRequest = Sprk.Bff.Api.Services.Ai.ClarificationRequest;
 // Explicit aliases for Services.Ai types to disambiguate from Models.Ai
 using SvcClarificationType = Sprk.Bff.Api.Services.Ai.ClarificationType;
-using SvcClarificationRequest = Sprk.Bff.Api.Services.Ai.ClarificationRequest;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai;
 

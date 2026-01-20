@@ -6,12 +6,11 @@ using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai.Testing;
-
-// Type aliases to resolve namespace conflicts with Services.Ai types
-using IntentOperationType = Sprk.Bff.Api.Models.Ai.OperationType;
+using IntentClarificationContext = Sprk.Bff.Api.Models.Ai.ClarificationContext;
 using IntentClarificationRequest = Sprk.Bff.Api.Models.Ai.ClarificationRequest;
 using IntentClarificationType = Sprk.Bff.Api.Models.Ai.ClarificationType;
-using IntentClarificationContext = Sprk.Bff.Api.Models.Ai.ClarificationContext;
+// Type aliases to resolve namespace conflicts with Services.Ai types
+using IntentOperationType = Sprk.Bff.Api.Models.Ai.OperationType;
 
 namespace Sprk.Bff.Api.Services.Ai;
 

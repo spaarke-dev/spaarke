@@ -6,11 +6,10 @@ using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Testing;
 using Xunit;
-
-// Type aliases to resolve namespace conflicts with Models.Ai and Services.Ai types
-using OperationType = Sprk.Bff.Api.Models.Ai.OperationType;
 using ClarificationRequest = Sprk.Bff.Api.Models.Ai.ClarificationRequest;
 using ClarificationType = Sprk.Bff.Api.Models.Ai.ClarificationType;
+// Type aliases to resolve namespace conflicts with Models.Ai and Services.Ai types
+using OperationType = Sprk.Bff.Api.Models.Ai.OperationType;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai;
 
