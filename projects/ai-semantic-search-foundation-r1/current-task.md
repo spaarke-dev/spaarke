@@ -15,19 +15,22 @@
 |-------|-------|
 | **Task** | none |
 | **Step** | — |
-| **Status** | none (project initialized, no task started) |
-| **Next Action** | Execute task 001 via task-execute skill |
+| **Status** | Ready (project initialized, 18 tasks generated) |
+| **Next Action** | Execute task 001 via "work on task 001" |
 
 ### Files Modified This Session
 <!-- Only files touched in CURRENT session, not all time -->
+- `spec.md` - Created - Design specification (from design-to-spec)
 - `README.md` - Created - Project overview
 - `plan.md` - Created - Implementation plan
 - `CLAUDE.md` - Created - AI context
 - `current-task.md` - Created - Task state tracker
+- `tasks/*.poml` - Created - 18 task files
+- `tasks/TASK-INDEX.md` - Created - Task registry
 
 ### Critical Context
 <!-- 1-3 sentences of essential context for continuation -->
-Project initialized via project-pipeline. All artifacts created. Task files will be generated next. Ready to begin implementation with task 001.
+Project initialized via project-pipeline. All artifacts created. 18 task files generated across 5 phases. Branch pushed to origin. Ready to begin implementation with task 001 (extend index schema).
 
 ---
 
