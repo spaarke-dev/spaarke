@@ -11,9 +11,9 @@
 | Metric | Value |
 |--------|-------|
 | Total Tasks | 18 |
-| Completed | 7 |
+| Completed | 9 |
 | In Progress | 0 |
-| Pending | 11 |
+| Pending | 9 |
 
 ---
 
@@ -47,8 +47,8 @@
 | 010 | Create SemanticSearch request/response DTOs | ✅ | 003 | FULL |
 | 011 | Create SearchFilterBuilder for OData filter construction | ✅ | 010 | FULL |
 | 012 | Create ISemanticSearchService interface | ✅ | 010 | FULL |
-| 013 | Implement SemanticSearchService with hybrid search | 🔲 | 011, 012 | FULL |
-| 014 | Implement no-op preprocessor and postprocessor for R1 | 🔲 | 012 | STANDARD |
+| 013 | Implement SemanticSearchService with hybrid search | ✅ | 011, 012 | FULL |
+| 014 | Implement no-op preprocessor and postprocessor for R1 | ✅ | 012 | STANDARD |
 | 015 | Register SemanticSearch services in DI container | 🔲 | 013, 014 | STANDARD |
 
 ### Phase 3: API Endpoints & Authorization

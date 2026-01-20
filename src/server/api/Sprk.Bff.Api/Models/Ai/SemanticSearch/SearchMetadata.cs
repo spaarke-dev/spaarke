@@ -26,6 +26,18 @@ public sealed record SearchMetadata
     public long SearchDurationMs { get; init; }
 
     /// <summary>
+    /// Embedding generation time in milliseconds.
+    /// </summary>
+    [JsonPropertyName("embeddingDurationMs")]
+    public long EmbeddingDurationMs { get; init; }
+
+    /// <summary>
+    /// The actual search mode executed (may differ from requested if fallback occurred).
+    /// </summary>
+    [JsonPropertyName("executedMode")]
+    public string? ExecutedMode { get; init; }
+
+    /// <summary>
     /// Filters that were applied to the search.
     /// </summary>
     [JsonPropertyName("appliedFilters")]
@@ -43,6 +55,30 @@ public sealed record SearchMetadata
 /// </summary>
 public sealed record AppliedFilters
 {
+    /// <summary>
+    /// Search scope that was applied.
+    /// </summary>
+    [JsonPropertyName("scope")]
+    public string? Scope { get; init; }
+
+    /// <summary>
+    /// Entity type filter (when scope=entity).
+    /// </summary>
+    [JsonPropertyName("entityType")]
+    public string? EntityType { get; init; }
+
+    /// <summary>
+    /// Entity ID filter (when scope=entity).
+    /// </summary>
+    [JsonPropertyName("entityId")]
+    public string? EntityId { get; init; }
+
+    /// <summary>
+    /// Number of document IDs filtered (when scope=documentIds).
+    /// </summary>
+    [JsonPropertyName("documentIdCount")]
+    public int? DocumentIdCount { get; init; }
+
     /// <summary>
     /// Document types that were filtered.
     /// </summary>
@@ -119,6 +155,11 @@ public static class SearchWarningCode
     /// Embedding service unavailable; fell back to keyword-only search.
     /// </summary>
     public const string EmbeddingUnavailable = "EMBEDDING_UNAVAILABLE";
+
+    /// <summary>
+    /// Embedding generation failed; fell back to keyword-only search.
+    /// </summary>
+    public const string EmbeddingFallback = "EMBEDDING_FALLBACK";
 
     /// <summary>
     /// Rate limit reached; request was throttled.
