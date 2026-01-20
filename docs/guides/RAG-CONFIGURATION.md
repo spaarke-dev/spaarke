@@ -1,8 +1,8 @@
 # RAG Configuration Reference
 
-> **Version**: 1.1
+> **Version**: 1.2
 > **Created**: 2025-12-29
-> **Updated**: 2026-01-16
+> **Updated**: 2026-01-19
 > **Project**: AI Document Intelligence R3 + RAG Pipeline R1
 
 ---
@@ -10,6 +10,8 @@
 ## Table of Contents
 
 1. [App Service Configuration](#app-service-configuration)
+   - [Scheduled RAG Indexing](#scheduled-rag-indexing-catch-up-service)
+   - [Bulk Indexing Admin Endpoints](#bulk-indexing-admin-endpoints)
 2. [Index Configuration](#index-configuration)
 3. [Deployment Model Configuration](#deployment-model-configuration)
 4. [Embedding Cache Configuration](#embedding-cache-configuration)
@@ -76,6 +78,62 @@ $env:ServiceBus__ConnectionString = "<your-connection-string>"
 **Key Vault Reference (Production)**:
 ```
 ServiceBus__ConnectionString=@Microsoft.KeyVault(SecretUri=https://spaarke-spekvcert.vault.azure.net/secrets/servicebus-connection-string/)
+```
+
+### Scheduled RAG Indexing (Catch-up Service)
+
+The scheduled indexing service runs periodically to catch up on documents not indexed during upload. It submits bulk indexing jobs to the queue for background processing.
+
+| Setting | Required | Default | Description |
+|---------|----------|---------|-------------|
+| `ScheduledRagIndexing__Enabled` | No | `false` | Enable scheduled bulk indexing |
+| `ScheduledRagIndexing__IntervalMinutes` | No | `60` | Interval between indexing runs |
+| `ScheduledRagIndexing__MaxDocumentsPerRun` | No | `100` | Max documents per batch |
+| `ScheduledRagIndexing__MaxConcurrency` | No | `5` | Concurrent document processing |
+| `ScheduledRagIndexing__TenantId` | Yes* | - | Tenant ID (*required if enabled) |
+
+**Configuration Example:**
+
+```json
+{
+  "ScheduledRagIndexing": {
+    "Enabled": false,
+    "IntervalMinutes": 60,
+    "MaxDocumentsPerRun": 100,
+    "MaxConcurrency": 5,
+    "TenantId": "your-tenant-id"
+  }
+}
+```
+
+**Notes:**
+- Only enable in production if you need catch-up indexing for documents missed on upload
+- The service queries documents where `sprk_hasfile=true` AND `sprk_ragindexedon=null`
+- Uses app-only authentication (Pattern 6) for Dataverse and SPE access
+- Progress tracked via `BatchJobStatusStore` (Redis)
+
+### Bulk Indexing Admin Endpoints
+
+Admin endpoints for manual bulk document indexing (requires `SystemAdmin` authorization):
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/ai/rag/admin/bulk-index` | POST | Submit bulk indexing job |
+| `/api/ai/rag/admin/bulk-index/{jobId}/status` | GET | Get job progress |
+
+**Bulk Indexing Request:**
+```json
+{
+  "tenantId": "required-tenant-id",
+  "filter": "unindexed",      // "unindexed" or "all"
+  "matterId": "optional",     // Filter by Matter ID
+  "createdAfter": null,       // Date filter
+  "createdBefore": null,      // Date filter
+  "documentType": null,       // e.g., ".pdf"
+  "maxDocuments": 1000,       // Batch limit
+  "maxConcurrency": 5,        // Parallel processing
+  "forceReindex": false       // Re-index already indexed docs
+}
 ```
 
 ### RAG Indexing API Key (Job Queue Pattern)

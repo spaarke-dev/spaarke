@@ -582,7 +582,18 @@ pac solution list | grep -i "{ControlName}"
 
 **Prevention:**
 
-After using `pac pcf push` successfully, examine the generated `Customizations.xml` and update your Solution folder's version to match the structure. This way future `pac solution pack` deployments will work.
+After using `pac pcf push` successfully:
+1. Examine the generated `Customizations.xml` and update your Solution folder's version to match the structure
+2. **IMPORTANT**: `pac pcf push` bypasses the Solution folder entirely - it builds from source and deploys directly to Dataverse. **You must still copy the fresh bundle.js and ControlManifest.xml to your Solution folder** to keep it in sync for future `pac solution pack` deployments.
+
+```bash
+# After pac pcf push, sync Solution folder:
+cp out/controls/control/bundle.js \
+   out/controls/control/ControlManifest.xml \
+   Solution/src/WebResources/sprk_Spaarke.Controls.{ControlName}/
+```
+
+This prevents the Solution folder from becoming stale and ensures future solution imports work correctly.
 
 ### Orphaned Control Cleanup
 
@@ -757,4 +768,9 @@ If `pac solution pack` + `pac solution import` succeeds but the solution is empt
 2. **Fix**: Use `pac pcf push --publisher-prefix sprk` as fallback
 3. **Why it works**: `pac pcf push` auto-generates proper component references
 4. **File lock error during cleanup is harmless** - solution is already packed, import it directly
-5. **Prevention**: After successful `pac pcf push`, copy the generated `Customizations.xml` structure to your Solution folder
+5. **CRITICAL**: After `pac pcf push`, **sync the Solution folder** - `pac pcf push` bypasses it entirely, leaving it stale:
+   ```bash
+   cp out/controls/control/bundle.js out/controls/control/ControlManifest.xml \
+      Solution/src/WebResources/sprk_Spaarke.Controls.{ControlName}/
+   ```
+6. **Prevention**: Copy the generated `Customizations.xml` structure to your Solution folder for future `pac solution pack` deployments

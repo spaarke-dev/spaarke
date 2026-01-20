@@ -75,8 +75,11 @@ public class VisualizationService : IVisualizationService
 
             if (sourceDataverseDoc == null)
             {
-                _logger.LogDebug("[VIZ-DEBUG] Source document {DocumentId} NOT FOUND in Dataverse - returning empty response", documentId);
-                return CreateEmptyResponse(documentId.ToString(), options);
+                _logger.LogWarning("[VISUALIZATION] Source document {DocumentId} NOT FOUND in Dataverse. Ensure the document exists and the app has read permissions.", documentId);
+                // Return empty response with diagnostic info in metadata
+                var emptyResponse = CreateEmptyResponse(documentId.ToString(), options);
+                emptyResponse.Metadata.DiagnosticMessage = $"Source document {documentId} not found in Dataverse";
+                return emptyResponse;
             }
 
             _logger.LogDebug("[VIZ-DEBUG] Source document {DocumentId} FOUND: Name={Name}, FileName={FileName}",

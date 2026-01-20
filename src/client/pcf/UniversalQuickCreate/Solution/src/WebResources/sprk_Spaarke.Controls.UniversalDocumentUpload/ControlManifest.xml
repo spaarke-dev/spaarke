@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<manifest>
+  <control namespace="Spaarke.Controls" constructor="UniversalDocumentUpload" version="3.11.0" display-name-key="Universal Document Upload" description-key="Tabbed multi-file upload with AI Summary, keywords, and entity extraction (v3.11.0)" control-type="standard" api-version="1.3.18">
+    <external-service-usage enabled="false"/>
+    <property name="parentEntityName" display-name-key="Parent Entity Name" description-key="Logical name of parent entity (e.g., sprk_matter, account, contact)" of-type="SingleLine.Text" usage="input" required="true"/>
+    <property name="parentRecordId" display-name-key="Parent Record ID" description-key="GUID of parent record (without curly braces)" of-type="SingleLine.Text" usage="input" required="true"/>
+    <property name="containerId" display-name-key="Container ID" description-key="SharePoint Embedded Container ID for file uploads" of-type="SingleLine.Text" usage="input" required="true"/>
+    <property name="parentDisplayName" display-name-key="Parent Display Name" description-key="Display name of parent record for UI header (e.g., Matter #12345)" of-type="SingleLine.Text" usage="input" required="false"/>
+    <property name="sdapApiBaseUrl" display-name-key="SDAP API Base URL" description-key="Base URL for SDAP BFF API (include /api suffix)" of-type="SingleLine.Text" usage="input" required="false" default-value="spe-api-dev-67e2xz.azurewebsites.net/api"/>
+    <property name="shouldClose" display-name-key="Should Close Dialog" description-key="Set to true when upload completes successfully - Custom Page monitors this and calls Exit()" of-type="TwoOptions" usage="output" required="false"/>
+    <resources>
+      <code path="bundle.js" order="1"/>
+      <css path="css/UniversalQuickCreate.css" order="1"/>
+      <platform-library name="React" version="16.14.0"/>
+      <platform-library name="Fluent" version="9.46.2"/>
+    </resources>
+    <feature-usage>
+      <uses-feature name="WebAPI" required="true"/>
+      <uses-feature name="Utility" required="true"/>
+    </feature-usage>
+    <built-by name="pac" version="1.49.3"/>
+  </control>
+</manifest>

@@ -1,10 +1,10 @@
 # RAG Architecture Guide
 
-> **Version**: 1.2
+> **Version**: 1.3
 > **Created**: 2025-12-29
-> **Updated**: 2026-01-16
+> **Updated**: 2026-01-19
 > **Project**: AI Document Intelligence R3 + RAG Pipeline R1
-> **Status**: R3 Phases 1-5 Complete, RAG Pipeline Phase 1 Complete
+> **Status**: R3 Phases 1-5 Complete, RAG Pipeline Phase 1 Complete (Architecture Consolidated)
 
 ---
 
@@ -530,11 +530,32 @@ public interface IRagService
 
 ## Job Processing
 
-The RAG pipeline supports async job processing via `RagIndexingJobHandler` for background file indexing.
+The RAG pipeline supports async job processing via a single `sdap-jobs` Azure Service Bus queue. All background indexing flows through `ServiceBusJobProcessor` which routes to job handlers by type.
 
-### Job Handler Architecture
+### Job Processing Architecture
 
 ```
+┌─────────────────────────────────────────────────────────────────┐
+│  Entry Points                                                    │
+├─────────────────────────────────────────────────────────────────┤
+│  PCF FileUpload  ──► POST /api/ai/rag/index-file (direct)       │
+│  Email Processing ──► sdap-jobs queue (async)                   │
+│  API Endpoint    ──► POST /api/ai/rag/enqueue-indexing (async)  │
+│  Bulk Admin      ──► POST /api/ai/rag/admin/bulk-index (async)  │
+└─────────────────────────────────────────────────────────────────┘
+                              │ (async paths)
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  ServiceBusJobProcessor (sdap-jobs queue)                        │
+├─────────────────────────────────────────────────────────────────┤
+│  - Deserializes JobContract from Service Bus message            │
+│  - Routes to handler by JobType                                  │
+│  - Handles retries, dead-letter queue                           │
+│  - JobType: "RagIndexing" → RagIndexingJobHandler               │
+│  - JobType: "BulkRagIndexing" → BulkRagIndexingJobHandler       │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │  RagIndexingJobHandler                                           │
 ├─────────────────────────────────────────────────────────────────┤
@@ -826,6 +847,6 @@ When the circuit is open, returns `503 Service Unavailable` with error code `ai_
 ---
 
 *Document created: 2025-12-29*
-*Updated: 2026-01-16*
+*Updated: 2026-01-19 - Architecture consolidated to single sdap-jobs queue*
 *AI Document Intelligence R3 - Phases 1-5 Complete*
-*RAG Pipeline R1 - Phase 1 Complete*
+*RAG Pipeline R1 - Phase 1 Complete, Phase 2 (Bulk Indexing) In Progress*
