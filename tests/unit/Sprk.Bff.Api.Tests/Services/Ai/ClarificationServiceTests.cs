@@ -4,6 +4,10 @@ using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Xunit;
 
+// Explicit aliases for Services.Ai types to disambiguate from Models.Ai
+using SvcClarificationType = Sprk.Bff.Api.Services.Ai.ClarificationType;
+using SvcClarificationRequest = Sprk.Bff.Api.Services.Ai.ClarificationRequest;
+
 namespace Sprk.Bff.Api.Tests.Services.Ai;
 
 /// <summary>
@@ -40,7 +44,7 @@ public class ClarificationServiceTests
 
         // Assert
         Assert.NotNull(result);
-        Assert.Equal(ClarificationType.Intent, result.Type);
+        Assert.Equal(SvcClarificationType.Intent, result.Type);
         // When there are 3+ alternatives, the question uses "Which of these actions"
         Assert.True(
             result.Question.Contains("Did you mean") ||
@@ -101,7 +105,7 @@ public class ClarificationServiceTests
 
         // Assert
         Assert.NotNull(result);
-        Assert.Equal(ClarificationType.Entity, result.Type);
+        Assert.Equal(SvcClarificationType.Entity, result.Type);
         Assert.Contains("Which node", result.Question);
         Assert.Equal(2, result.Options.Length);
         Assert.Contains(result.Options, o => o.Id == "node_001");
@@ -162,7 +166,7 @@ public class ClarificationServiceTests
 
         // Assert
         Assert.NotNull(result);
-        Assert.Equal(ClarificationType.Scope, result.Type);
+        Assert.Equal(SvcClarificationType.Scope, result.Type);
         Assert.Equal(ScopeCategory.Skill, result.ScopeCategory);
         Assert.Contains(result.Options, o => o.Id == ClarificationOptionIds.CreateNew);
         Assert.Contains(result.Options, o => o.Label.Contains("Create new"));
@@ -242,9 +246,9 @@ public class ClarificationServiceTests
     public void FormatForStreaming_FormatsQuestionOnly()
     {
         // Arrange
-        var clarification = new ClarificationRequest
+        var clarification = new SvcClarificationRequest
         {
-            Type = ClarificationType.Intent,
+            Type = SvcClarificationType.Intent,
             Question = "What would you like to do?",
             Options = []
         };
@@ -262,9 +266,9 @@ public class ClarificationServiceTests
     public void FormatForStreaming_FormatsWithOptions()
     {
         // Arrange
-        var clarification = new ClarificationRequest
+        var clarification = new SvcClarificationRequest
         {
-            Type = ClarificationType.Intent,
+            Type = SvcClarificationType.Intent,
             Question = "Which action?",
             Options =
             [

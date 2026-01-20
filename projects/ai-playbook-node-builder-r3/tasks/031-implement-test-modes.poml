@@ -5,8 +5,33 @@
     <estimate>4-5 hours</estimate>
     <tags>bff-api, testing</tags>
     <dependencies>030, 007</dependencies>
-    <status>pending</status>
+    <status>completed</status>
+    <completed-date>2026-01-19</completed-date>
   </metadata>
+
+  <notes>
+    <note date="2026-01-19">
+      Task completed successfully. Implementation summary:
+      - TestMode enum already existed in TestPlaybookModels.cs (Mock, Quick, Production)
+      - TestPlaybookRequest already existed with mode, playbook, test data
+      - MockTestExecutor, QuickTestExecutor, ProductionTestExecutor already implemented in Testing/
+      - Updated AiPlaybookBuilderService to:
+        - Inject IMockTestExecutor and IPlaybookService dependencies
+        - Delegate Mock mode to dedicated MockTestExecutor (no external calls)
+        - Load canvas from PlaybookService when PlaybookId provided
+        - Add ConvertLayoutToCanvasState helper method
+      - Added 8 unit tests for test execution modes:
+        - ExecuteTestAsync_MockMode_DelegatesToMockTestExecutor
+        - ExecuteTestAsync_MockMode_NoExternalCalls
+        - ExecuteTestAsync_QuickMode_ExecutesNodesWithAi
+        - ExecuteTestAsync_ProductionMode_ExecutesNodesWithAi
+        - ExecuteTestAsync_EmptyCanvas_ReturnsError
+        - ExecuteTestAsync_WithPlaybookId_LoadsCanvasFromPlaybookService
+        - ExecuteTestAsync_PlaybookNotFound_ReturnsError
+        - ExecuteTestAsync_WithMaxNodes_LimitsExecution
+      All tests pass. Build succeeds.
+    </note>
+  </notes>
 
   <prompt>
     <goal>Implement three test execution modes for playbooks: Mock (simulated), Quick (temp storage), Production (real data).</goal>

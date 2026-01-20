@@ -13,10 +13,11 @@
 import * as React from 'react';
 import { useCallback, useState, useRef, useEffect } from 'react';
 import {
-  Card,
-  CardHeader,
   Button,
   Text,
+  Dropdown,
+  Option,
+  Label,
   makeStyles,
   tokens,
   shorthands,
@@ -26,8 +27,13 @@ import {
   Dismiss20Regular,
   Bot20Regular,
   SubtractCircle20Regular,
+  Settings20Regular,
 } from '@fluentui/react-icons';
-import { useAiAssistantStore } from '../../stores/aiAssistantStore';
+import {
+  useAiAssistantStore,
+  AI_MODEL_OPTIONS,
+  type AiModelSelection,
+} from '../../stores/aiAssistantStore';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -152,6 +158,34 @@ const useStyles = makeStyles({
   minimizedBody: {
     display: 'none',
   },
+  // Advanced options panel
+  advancedOptions: {
+    display: 'flex',
+    flexDirection: 'column',
+    ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
+    ...shorthands.gap(tokens.spacingVerticalXS),
+    backgroundColor: tokens.colorNeutralBackground2,
+    ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke1),
+  },
+  advancedOptionsRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    ...shorthands.gap(tokens.spacingHorizontalS),
+  },
+  modelLabel: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground2,
+    flexShrink: 0,
+  },
+  modelDropdown: {
+    minWidth: '180px',
+  },
+  modelDescription: {
+    fontSize: tokens.fontSizeBase100,
+    color: tokens.colorNeutralForeground3,
+    marginLeft: tokens.spacingHorizontalXS,
+  },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -181,7 +215,14 @@ export const AiAssistantModal: React.FC<AiAssistantModalProps> = ({
   const styles = useStyles();
 
   // Store state
-  const { isOpen, closeModal } = useAiAssistantStore();
+  const {
+    isOpen,
+    closeModal,
+    modelSelection,
+    showAdvancedOptions,
+    setModelSelection,
+    toggleAdvancedOptions,
+  } = useAiAssistantStore();
 
   // Local state
   const [position, setPosition] = useState<Position>(initialPosition);
@@ -301,6 +342,25 @@ export const AiAssistantModal: React.FC<AiAssistantModalProps> = ({
     closeModal();
   }, [closeModal]);
 
+  const handleSettingsToggle = useCallback(() => {
+    toggleAdvancedOptions();
+  }, [toggleAdvancedOptions]);
+
+  const handleModelChange = useCallback(
+    (_event: unknown, data: { optionValue?: string }) => {
+      if (data.optionValue) {
+        setModelSelection(data.optionValue as AiModelSelection);
+      }
+    },
+    [setModelSelection]
+  );
+
+  // Get current model display text
+  const currentModelOption = AI_MODEL_OPTIONS.find((m) => m.id === modelSelection);
+  const modelDisplayText = currentModelOption
+    ? `${currentModelOption.name} (${currentModelOption.description})`
+    : modelSelection;
+
   // ─────────────────────────────────────────────────────────────────────────
   // Render
   // ─────────────────────────────────────────────────────────────────────────
@@ -342,6 +402,16 @@ export const AiAssistantModal: React.FC<AiAssistantModalProps> = ({
           <Button
             appearance="transparent"
             size="small"
+            icon={<Settings20Regular />}
+            onClick={handleSettingsToggle}
+            className={styles.headerButton}
+            aria-label={showAdvancedOptions ? 'Hide settings' : 'Show settings'}
+            title={showAdvancedOptions ? 'Hide settings' : 'Show settings'}
+            aria-pressed={showAdvancedOptions}
+          />
+          <Button
+            appearance="transparent"
+            size="small"
             icon={<SubtractCircle20Regular />}
             onClick={handleMinimize}
             className={styles.headerButton}
@@ -359,6 +429,32 @@ export const AiAssistantModal: React.FC<AiAssistantModalProps> = ({
           />
         </div>
       </div>
+
+      {/* Advanced Options Panel */}
+      {showAdvancedOptions && !isMinimized && (
+        <div className={styles.advancedOptions}>
+          <div className={styles.advancedOptionsRow}>
+            <Label className={styles.modelLabel} htmlFor="model-select">
+              Model
+            </Label>
+            <Dropdown
+              id="model-select"
+              className={styles.modelDropdown}
+              value={modelDisplayText}
+              selectedOptions={[modelSelection]}
+              onOptionSelect={handleModelChange}
+              aria-label="Select AI model"
+            >
+              {AI_MODEL_OPTIONS.map((option) => (
+                <Option key={option.id} value={option.id} text={`${option.name} (${option.description})`}>
+                  {option.name}
+                  <span className={styles.modelDescription}>({option.description})</span>
+                </Option>
+              ))}
+            </Dropdown>
+          </div>
+        </div>
+      )}
 
       {/* Body */}
       <div className={mergeClasses(styles.body, isMinimized && styles.minimizedBody)}>

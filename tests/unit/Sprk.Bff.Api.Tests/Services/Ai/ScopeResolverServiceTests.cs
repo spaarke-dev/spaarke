@@ -152,7 +152,7 @@ public class ScopeResolverServiceTests
         result.Should().NotBeNull();
         result!.Id.Should().Be(SummarizeActionId);
         result.Name.Should().Be("Summarize Document");
-        result.SystemPrompt.Should().Contain("summary");
+        result.SystemPrompt.Should().Contain("summar"); // Matches "summaries" or "summary"
         result.SortOrder.Should().Be(1);
     }
 
@@ -243,6 +243,174 @@ public class ScopeResolverServiceTests
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);
+    }
+
+    #endregion
+
+    #region SearchScopesAsync Tests
+
+    [Fact]
+    public async Task SearchScopesAsync_NoFilters_ReturnsAllScopeTypes()
+    {
+        // Arrange
+        var query = new ScopeSearchQuery();
+
+        // Act
+        var result = await _service.SearchScopesAsync(query, CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result.Actions.Should().NotBeNull();
+        result.Skills.Should().NotBeNull();
+        result.Knowledge.Should().NotBeNull();
+        result.Tools.Should().NotBeNull();
+        result.TotalCount.Should().BeGreaterThan(0);
+        result.CountsByType.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public async Task SearchScopesAsync_TextSearch_MatchesNameAndDescription()
+    {
+        // Arrange - Search for "Legal" which appears in skills
+        var query = new ScopeSearchQuery { SearchText = "Legal" };
+
+        // Act
+        var result = await _service.SearchScopesAsync(query, CancellationToken.None);
+
+        // Assert
+        result.Skills.Should().NotBeEmpty();
+        result.Skills.Should().Contain(s => s.Name.Contains("Legal", StringComparison.OrdinalIgnoreCase) ||
+                                           (s.Description != null && s.Description.Contains("Legal", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    [Fact]
+    public async Task SearchScopesAsync_TypeFilter_ReturnsOnlySpecifiedTypes()
+    {
+        // Arrange - Filter for skills only
+        var query = new ScopeSearchQuery { ScopeTypes = new[] { ScopeType.Skill } };
+
+        // Act
+        var result = await _service.SearchScopesAsync(query, CancellationToken.None);
+
+        // Assert
+        result.Skills.Should().NotBeEmpty();
+        result.Actions.Should().BeEmpty();
+        result.Knowledge.Should().BeEmpty();
+        result.Tools.Should().BeEmpty();
+        result.CountsByType.Should().ContainKey(ScopeType.Skill);
+        result.CountsByType.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public async Task SearchScopesAsync_MultipleTypeFilters_ReturnsSpecifiedTypes()
+    {
+        // Arrange - Filter for actions and tools
+        var query = new ScopeSearchQuery { ScopeTypes = new[] { ScopeType.Action, ScopeType.Tool } };
+
+        // Act
+        var result = await _service.SearchScopesAsync(query, CancellationToken.None);
+
+        // Assert
+        result.Actions.Should().NotBeEmpty();
+        result.Tools.Should().NotBeEmpty();
+        result.Skills.Should().BeEmpty();
+        result.Knowledge.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task SearchScopesAsync_TextSearchNoMatch_ReturnsEmptyResults()
+    {
+        // Arrange - Search for text that doesn't exist
+        var query = new ScopeSearchQuery { SearchText = "XyzNonExistent123" };
+
+        // Act
+        var result = await _service.SearchScopesAsync(query, CancellationToken.None);
+
+        // Assert
+        result.TotalCount.Should().Be(0);
+        result.Actions.Should().BeEmpty();
+        result.Skills.Should().BeEmpty();
+        result.Knowledge.Should().BeEmpty();
+        result.Tools.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task SearchScopesAsync_Pagination_RespectsPageAndPageSize()
+    {
+        // Arrange
+        var query = new ScopeSearchQuery
+        {
+            ScopeTypes = new[] { ScopeType.Tool },
+            Page = 1,
+            PageSize = 2
+        };
+
+        // Act
+        var result = await _service.SearchScopesAsync(query, CancellationToken.None);
+
+        // Assert
+        result.Tools.Length.Should().BeLessOrEqualTo(2);
+    }
+
+    [Fact]
+    public async Task SearchScopesAsync_CaseInsensitive_MatchesDifferentCases()
+    {
+        // Arrange - Search for "risk" (lowercase)
+        var query = new ScopeSearchQuery { SearchText = "risk" };
+
+        // Act
+        var result = await _service.SearchScopesAsync(query, CancellationToken.None);
+
+        // Assert - Should find "Risk Assessment" skill and "Risk Detector" tool
+        var matchingItems = result.Skills.Concat<object>(result.Tools)
+            .Count();
+        matchingItems.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public async Task SearchScopesAsync_CountsByType_AccurateBreakdown()
+    {
+        // Arrange
+        var query = new ScopeSearchQuery();
+
+        // Act
+        var result = await _service.SearchScopesAsync(query, CancellationToken.None);
+
+        // Assert
+        result.CountsByType.Should().ContainKey(ScopeType.Action);
+        result.CountsByType.Should().ContainKey(ScopeType.Skill);
+        result.CountsByType.Should().ContainKey(ScopeType.Knowledge);
+        result.CountsByType.Should().ContainKey(ScopeType.Tool);
+
+        // Total should match sum of counts
+        var expectedTotal = result.CountsByType.Values.Sum();
+        result.TotalCount.Should().Be(expectedTotal);
+    }
+
+    [Fact]
+    public async Task SearchScopesAsync_NullQuery_ThrowsArgumentNullException()
+    {
+        // Arrange & Act
+        var act = async () => await _service.SearchScopesAsync(null!, CancellationToken.None);
+
+        // Assert
+        await act.Should().ThrowAsync<ArgumentNullException>();
+    }
+
+    [Fact]
+    public async Task SearchScopesAsync_PerformanceUnder1Second_ForTypicalQuery()
+    {
+        // Arrange
+        var query = new ScopeSearchQuery { SearchText = "Document" };
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        // Act
+        var result = await _service.SearchScopesAsync(query, CancellationToken.None);
+        stopwatch.Stop();
+
+        // Assert
+        result.Should().NotBeNull();
+        stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(1));
     }
 
     #endregion

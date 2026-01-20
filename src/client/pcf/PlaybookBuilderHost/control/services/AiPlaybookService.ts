@@ -22,18 +22,52 @@ import type {
   CanvasPatch,
   ChatMessage,
 } from '../stores/aiAssistantStore';
-import type { PlaybookNode, PlaybookEdge } from '../stores/canvasStore';
 
 // ============================================================================
-// Request Types
+// API Request Types (matches BFF API's BuilderRequest model)
 // ============================================================================
 
 /**
- * Current canvas state for context.
+ * Node position for API request.
+ */
+export interface ApiNodePosition {
+  x: number;
+  y: number;
+}
+
+/**
+ * Canvas node for API request.
+ * Matches BFF API's CanvasNode model.
+ */
+export interface ApiCanvasNode {
+  id: string;
+  type?: string;
+  position: ApiNodePosition;
+  label?: string;
+  config?: Record<string, unknown>;
+}
+
+/**
+ * Canvas edge for API request.
+ * Matches BFF API's CanvasEdge model (uses sourceId/targetId, NOT source/target).
+ */
+export interface ApiCanvasEdge {
+  id: string;
+  sourceId: string;
+  targetId: string;
+  sourceHandle?: string | null;
+  targetHandle?: string | null;
+  edgeType?: string;
+  animated?: boolean;
+}
+
+/**
+ * Current canvas state for API request.
+ * Uses API-specific types that match BFF API's CanvasState model.
  */
 export interface CanvasState {
-  nodes: PlaybookNode[];
-  edges: PlaybookEdge[];
+  nodes: ApiCanvasNode[];
+  edges: ApiCanvasEdge[];
 }
 
 /**
@@ -59,6 +93,8 @@ export interface BuildPlaybookCanvasRequest {
   sessionId?: string;
   /** Conversation history (API expects 'chatHistory', not 'conversationHistory') */
   chatHistory?: ConversationMessage[];
+  /** Selected AI model (e.g., 'gpt-4o', 'gpt-4o-mini') */
+  modelId?: string;
 }
 
 // ============================================================================

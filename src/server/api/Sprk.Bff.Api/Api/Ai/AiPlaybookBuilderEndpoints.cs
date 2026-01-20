@@ -73,6 +73,50 @@ public static class AiPlaybookBuilderEndpoints
             .ProducesProblem(429)
             .ProducesProblem(500);
 
+        // POST /api/ai/playbook-builder/clarification-response - Handle user response to clarification
+        group.MapPost("/clarification-response", HandleClarificationResponse)
+            .RequireRateLimiting("ai-stream")
+            .WithName("HandleClarificationResponse")
+            .WithSummary("Process a user's response to a clarification question")
+            .WithDescription("""
+                Handles a user's response to a clarification question and re-classifies the intent
+                with the additional context. Supports option selection, free-text responses,
+                and cancellation.
+
+                Response Types:
+                - OPTION_SELECTED: User selected one of the provided options
+                - FREE_TEXT: User provided a free-form text clarification
+                - CANCELLED: User wants to cancel the current operation
+                - CONFIRMED: User confirmed the suggested action
+                - REJECTED: User rejected the suggested action
+
+                Uses proper SSE format with event: and data: lines.
+                """)
+            .Produces(200, contentType: "text/event-stream")
+            .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(429)
+            .ProducesProblem(500);
+
+        // POST /api/ai/playbook-builder/generate-clarification - Generate AI-powered clarification
+        group.MapPost("/generate-clarification", GenerateClarification)
+            .RequireRateLimiting("ai-batch")
+            .WithName("GenerateClarification")
+            .WithSummary("Generate AI-powered clarification questions")
+            .WithDescription("""
+                Generates contextually relevant clarification questions when the user's intent
+                is ambiguous. Uses AI to understand what the user meant and what additional
+                information is needed.
+
+                Returns structured clarification questions with options, suggestions, and context
+                about what was understood vs. what needs clarification.
+                """)
+            .Produces<ClarificationQuestion>()
+            .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(429)
+            .ProducesProblem(500);
+
         // POST /api/ai/playbook-builder/test-execution - Execute playbook test with SSE streaming
         group.MapPost("/test-execution", TestPlaybookExecution)
             .RequireRateLimiting("ai-stream")
@@ -190,9 +234,9 @@ public static class AiPlaybookBuilderEndpoints
 
         try
         {
-            // Stream initial thinking event
+            // Stream initial thinking event - friendly message
             await ServerSentEventWriter.WriteThinkingAsync(
-                response, "Processing your request...", "Classifying intent", cancellationToken);
+                response, "Let me understand what you need...", "Thinking", cancellationToken);
 
             await foreach (var chunk in builderService.ProcessMessageAsync(request, cancellationToken))
             {
@@ -222,12 +266,14 @@ public static class AiPlaybookBuilderEndpoints
 
             if (!cancellationToken.IsCancellationRequested)
             {
+                // Task 050: Include correlation ID in error response for tracing
                 await ServerSentEventWriter.WriteErrorAsync(
                     response,
                     "An error occurred while processing your request",
                     code: "PROCESSING_ERROR",
                     isRecoverable: true,
                     suggestedAction: "Please try again",
+                    correlationId: context.TraceIdentifier,
                     cancellationToken: CancellationToken.None);
             }
         }
@@ -357,6 +403,161 @@ public static class AiPlaybookBuilderEndpoints
     }
 
     /// <summary>
+    /// Handle user response to a clarification question.
+    /// POST /api/ai/playbook-builder/clarification-response
+    /// </summary>
+    /// <remarks>
+    /// Re-classifies the user's intent with the additional context from their clarification response.
+    /// Streams the result similar to the regular /process endpoint.
+    /// </remarks>
+    private static async Task HandleClarificationResponse(
+        ClarificationResponseRequest request,
+        IAiPlaybookBuilderService builderService,
+        HttpContext context,
+        ILogger<AiPlaybookBuilderService> logger)
+    {
+        var cancellationToken = context.RequestAborted;
+        var response = context.Response;
+
+        // Validate request
+        if (request.ClarificationResponse == null)
+        {
+            response.StatusCode = StatusCodes.Status400BadRequest;
+            await response.WriteAsJsonAsync(new { error = "ClarificationResponse is required" }, cancellationToken);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ClarificationResponse.SessionId))
+        {
+            response.StatusCode = StatusCodes.Status400BadRequest;
+            await response.WriteAsJsonAsync(new { error = "SessionId is required in ClarificationResponse" }, cancellationToken);
+            return;
+        }
+
+        // Build the BuilderRequest with clarification response
+        var builderRequest = new BuilderRequest
+        {
+            Message = request.ClarificationResponse.FreeTextResponse ?? request.OriginalMessage ?? "",
+            CanvasState = request.CanvasState ?? new CanvasState(),
+            SessionId = request.ClarificationResponse.SessionId,
+            ClarificationResponse = request.ClarificationResponse,
+            PlaybookId = request.PlaybookId
+        };
+
+        // Set SSE headers
+        ServerSentEventWriter.SetSseHeaders(response);
+
+        logger.LogInformation(
+            "Handling clarification response, SessionId={SessionId}, ResponseType={ResponseType}, TraceId={TraceId}",
+            request.ClarificationResponse.SessionId,
+            request.ClarificationResponse.ResponseType,
+            context.TraceIdentifier);
+
+        var operationCount = 0;
+
+        try
+        {
+            // Stream initial thinking event - friendly message
+            await ServerSentEventWriter.WriteThinkingAsync(
+                response, "Got it, let me work on that...", "Thinking", cancellationToken);
+
+            await foreach (var chunk in builderService.ProcessMessageAsync(builderRequest, cancellationToken))
+            {
+                if (await WriteChunkAsSseEventAsync(response, chunk, cancellationToken))
+                {
+                    operationCount++;
+                }
+            }
+
+            // Stream done event
+            await ServerSentEventWriter.WriteDoneAsync(
+                response, operationCount, "Processing complete", cancellationToken: cancellationToken);
+
+            logger.LogInformation(
+                "Clarification response processing completed, OperationCount={OperationCount}, TraceId={TraceId}",
+                operationCount, context.TraceIdentifier);
+        }
+        catch (OperationCanceledException)
+        {
+            logger.LogInformation(
+                "Client disconnected during clarification processing, TraceId={TraceId}",
+                context.TraceIdentifier);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error during clarification processing, TraceId={TraceId}", context.TraceIdentifier);
+
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                // Task 050: Include correlation ID in error response for tracing
+                await ServerSentEventWriter.WriteErrorAsync(
+                    response,
+                    "An error occurred while processing your clarification",
+                    code: "CLARIFICATION_ERROR",
+                    isRecoverable: true,
+                    suggestedAction: "Please try again",
+                    correlationId: context.TraceIdentifier,
+                    cancellationToken: CancellationToken.None);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Generate AI-powered clarification questions.
+    /// POST /api/ai/playbook-builder/generate-clarification
+    /// </summary>
+    /// <remarks>
+    /// Generates contextually relevant clarification questions using AI.
+    /// Used when intent classification has low confidence.
+    /// </remarks>
+    private static async Task<IResult> GenerateClarification(
+        GenerateClarificationRequest request,
+        AiPlaybookBuilderService builderService,
+        ILogger<AiPlaybookBuilderService> logger,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Message))
+        {
+            return Results.BadRequest(new { error = "Message is required" });
+        }
+
+        logger.LogDebug(
+            "Generating clarification for message: {Message}, InitialConfidence={Confidence}",
+            request.Message, request.InitialClassification?.Confidence);
+
+        try
+        {
+            // Build canvas context if provided
+            var canvasContext = request.CanvasContext != null
+                ? new CanvasContext
+                {
+                    NodeCount = request.CanvasContext.NodeCount,
+                    NodeTypes = request.CanvasContext.NodeTypes ?? [],
+                    IsSaved = request.CanvasContext.IsSaved,
+                    SelectedNodeId = request.CanvasContext.SelectedNodeId
+                }
+                : null;
+
+            // Generate clarification using the service
+            var clarification = await builderService.GenerateClarificationAsync(
+                request.Message,
+                canvasContext,
+                request.InitialClassification,
+                cancellationToken);
+
+            return Results.Ok(clarification);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error generating clarification");
+            return Results.Problem(
+                statusCode: 500,
+                title: "Internal Server Error",
+                detail: "Failed to generate clarification");
+        }
+    }
+
+    /// <summary>
     /// Execute a playbook test with SSE streaming.
     /// POST /api/ai/playbook-builder/test-execution
     /// </summary>
@@ -421,11 +622,13 @@ public static class AiPlaybookBuilderEndpoints
 
             if (!cancellationToken.IsCancellationRequested)
             {
+                // Task 050: Include correlation ID in error response for tracing
                 await WriteTestEventAsync(response, TestEventTypes.Error, new
                 {
                     message = "An error occurred during test execution",
                     code = "TEST_EXECUTION_ERROR",
-                    isRecoverable = true
+                    isRecoverable = true,
+                    correlationId = context.TraceIdentifier
                 }, CancellationToken.None, done: true);
             }
         }
@@ -649,12 +852,14 @@ public static class AiPlaybookBuilderEndpoints
 
             if (!cancellationToken.IsCancellationRequested)
             {
+                // Task 050: Include correlation ID in error response for tracing
                 await WriteTestEventAsync(response, TestEventTypes.Error, new
                 {
                     message = "An error occurred during quick test execution",
                     code = "QUICK_TEST_ERROR",
                     isRecoverable = true,
-                    details = ex.Message
+                    details = ex.Message,
+                    correlationId = context.TraceIdentifier
                 }, CancellationToken.None, done: true);
             }
         }
@@ -787,12 +992,14 @@ public static class AiPlaybookBuilderEndpoints
 
             if (!cancellationToken.IsCancellationRequested)
             {
+                // Task 050: Include correlation ID in error response for tracing
                 await WriteTestEventAsync(response, TestEventTypes.Error, new
                 {
                     message = "An error occurred during production test execution",
                     code = "PRODUCTION_TEST_ERROR",
                     isRecoverable = true,
-                    details = ex.Message
+                    details = ex.Message,
+                    correlationId = context.TraceIdentifier
                 }, CancellationToken.None, done: true);
             }
         }
@@ -854,4 +1061,55 @@ public record ClassifyIntentRequest
 
     /// <summary>Optional canvas context for disambiguation.</summary>
     public CanvasContext? CanvasContext { get; init; }
+}
+
+/// <summary>
+/// Request for handling a clarification response.
+/// </summary>
+public record ClarificationResponseRequest
+{
+    /// <summary>The user's response to the clarification question.</summary>
+    public required ClarificationResponse ClarificationResponse { get; init; }
+
+    /// <summary>Current canvas state.</summary>
+    public CanvasState? CanvasState { get; init; }
+
+    /// <summary>The original message that triggered the clarification.</summary>
+    public string? OriginalMessage { get; init; }
+
+    /// <summary>Optional playbook ID if editing existing playbook.</summary>
+    public Guid? PlaybookId { get; init; }
+}
+
+/// <summary>
+/// Request for generating AI-powered clarification questions.
+/// </summary>
+public record GenerateClarificationRequest
+{
+    /// <summary>The ambiguous user message.</summary>
+    public required string Message { get; init; }
+
+    /// <summary>Optional canvas context for generating relevant options.</summary>
+    public GenerateClarificationCanvasContext? CanvasContext { get; init; }
+
+    /// <summary>The initial low-confidence classification result, if any.</summary>
+    public AiIntentResult? InitialClassification { get; init; }
+}
+
+/// <summary>
+/// Canvas context for clarification generation requests.
+/// </summary>
+public record GenerateClarificationCanvasContext
+{
+    /// <summary>Number of nodes on canvas.</summary>
+    public int NodeCount { get; init; }
+
+    /// <summary>Types of nodes present.</summary>
+    public string[]? NodeTypes { get; init; }
+
+    /// <summary>Whether playbook has been saved.</summary>
+    public bool IsSaved { get; init; }
+
+    /// <summary>Currently selected node ID.</summary>
+    public string? SelectedNodeId { get; init; }
 }

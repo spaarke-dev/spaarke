@@ -5,7 +5,7 @@
     <estimate>4-5 hours</estimate>
     <tags>bff-api, dataverse, scope-management</tags>
     <dependencies>002</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -55,4 +55,25 @@
     <criterion>Ownership validation applied consistently</criterion>
     <criterion>Unit tests pass for all operations</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <note date="2026-01-19">
+      VERIFIED COMPLETE: Task 003 was already implemented as part of tasks 002 and 006.
+
+      Implementation verified in ScopeResolverService.cs:
+      - Skill CRUD: Lines 540-642 (GetSkillAsync, CreateSkillAsync, UpdateSkillAsync, DeleteSkillAsync)
+      - Knowledge CRUD: Lines 644-748 (GetKnowledgeAsync, CreateKnowledgeAsync, UpdateKnowledgeAsync, DeleteKnowledgeAsync)
+      - Tool CRUD: Lines 750-853 (GetToolAsync, CreateToolAsync, UpdateToolAsync, DeleteToolAsync)
+
+      All implementations follow Action CRUD patterns:
+      - Create with CUST- prefix using EnsureCustomerPrefix() helper
+      - Update/Delete with ownership validation using ValidateOwnership() helper
+      - Customer ownership defaults (OwnerType = Customer, IsImmutable = false)
+      - Type-specific fields handled (Knowledge: Type, Content, DocumentId, DeploymentId; Tool: Type, HandlerClass, Configuration)
+
+      Interface declarations verified in IScopeResolverService.cs lines 122-263.
+
+      Existing unit tests pass (11/12 - one pre-existing test assertion issue unrelated to this task).
+    </note>
+  </notes>
 </task>

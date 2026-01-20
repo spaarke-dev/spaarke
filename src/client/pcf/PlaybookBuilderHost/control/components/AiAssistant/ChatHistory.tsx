@@ -44,6 +44,7 @@ import {
   type ChatMessage,
   type CanvasOperation,
 } from '../../stores/aiAssistantStore';
+import { ClarificationOptions } from './ClarificationOptions';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -272,7 +273,7 @@ export const ChatHistory: React.FC<ChatHistoryProps> = ({
   const messageListRef = useRef<HTMLDivElement>(null);
 
   // Store state
-  const { messages, isStreaming, streamingState, error, setError } = useAiAssistantStore();
+  const { messages, isStreaming, streamingState, error, setError, respondToClarification } = useAiAssistantStore();
 
   // Apply message limit if specified
   const displayMessages = maxMessages
@@ -328,6 +329,16 @@ export const ChatHistory: React.FC<ChatHistoryProps> = ({
           )}
         >
           <Text size={300}>{message.content}</Text>
+
+          {/* Clarification options for messages with clarification data */}
+          {isAssistant && message.clarification && (
+            <ClarificationOptions
+              clarification={message.clarification}
+              messageId={message.id}
+              onRespond={respondToClarification}
+              disabled={isStreaming}
+            />
+          )}
         </div>
 
         {/* Operation badges for assistant messages */}

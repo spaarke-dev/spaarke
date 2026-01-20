@@ -5,8 +5,22 @@
     <estimate>2-3 hours</estimate>
     <tags>bff-api, integration</tags>
     <dependencies>021, 011</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
+
+  <notes>
+    <note date="2026-01-19">
+      Implemented builder scope loading and caching:
+      - Added BuilderScopeIds constants for all builder scopes (ACT-BUILDER-*, SKL-BUILDER-*)
+      - Added GetBuilderScopePromptAsync method with 30-minute caching
+      - Added FallbackPrompts.cs with hardcoded fallback prompts for graceful degradation
+      - Updated ClassifyIntentWithAiAsync to use ACT-BUILDER-001 scope
+      - Updated GenerateBuildPlanAsync to use ACT-BUILDER-005 and SKL-BUILDER-004 scopes
+      - Added InvalidateBuilderScopeCache and InvalidateAllBuilderScopeCaches methods
+      - Added 7 unit tests verifying scope loading, caching, and fallback behavior
+      - All 15 AiPlaybookBuilderService tests pass
+    </note>
+  </notes>
 
   <prompt>
     <goal>Update AiPlaybookBuilderService to load and use its own builder scopes (ACT-BUILDER-* for intent, SKL-BUILDER-* for patterns).</goal>

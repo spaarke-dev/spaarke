@@ -1,0 +1,113 @@
+{
+  "id": "d1e2f3a4-b5c6-4d5e-9f0a-002002002002",
+  "name": "SYS-KNW-BUILDER-002-ReferencePlaybooks",
+  "displayName": "Reference Playbooks",
+  "description": "Example playbook patterns and templates for common document analysis scenarios. Provides reusable patterns for lease analysis, contract review, risk assessment, and other workflows.",
+  "scopeType": "Knowledge",
+  "ownerType": 1,
+  "isImmutable": true,
+  "content": {
+    "sourceType": "inline",
+    "contentType": "patterns",
+    "patterns": [
+      {
+        "id": "pattern-lease-analysis",
+        "name": "Lease Analysis Pattern",
+        "description": "Standard workflow for analyzing lease agreements",
+        "documentTypes": ["LEASE"],
+        "estimatedNodes": 8,
+        "nodeSequence": [
+          { "order": 1, "type": "aiAnalysis", "label": "TL;DR Summary", "purpose": "Executive overview" },
+          { "order": 2, "type": "aiAnalysis", "label": "Party Extraction", "purpose": "Identify landlord, tenant, guarantors" },
+          { "order": 3, "type": "aiAnalysis", "label": "Key Terms", "purpose": "Extract rent, dates, square footage" },
+          { "order": 4, "type": "aiAnalysis", "label": "Financial Analysis", "purpose": "Payment terms, escalations, expenses" },
+          { "order": 5, "type": "aiAnalysis", "label": "Provision Analysis", "purpose": "Rights, restrictions, obligations" },
+          { "order": 6, "type": "aiAnalysis", "label": "Risk Assessment", "purpose": "Flag concerning provisions" },
+          { "order": 7, "type": "assemble", "label": "Compile Report", "purpose": "Combine all outputs" },
+          { "order": 8, "type": "deliver", "label": "Output Results", "purpose": "Save to Dataverse" }
+        ],
+        "recommendedScopes": {
+          "actions": ["SYS-ACT-002", "SYS-ACT-001", "SYS-ACT-005", "SYS-ACT-004"],
+          "skills": ["SYS-SKL-001"]
+        }
+      },
+      {
+        "id": "pattern-contract-review",
+        "name": "Contract Review Pattern",
+        "description": "Standard workflow for reviewing contracts and agreements",
+        "documentTypes": ["CONTRACT", "AGREEMENT", "MSA"],
+        "estimatedNodes": 7,
+        "nodeSequence": [
+          { "order": 1, "type": "aiAnalysis", "label": "Document Overview", "purpose": "Quick summary and classification" },
+          { "order": 2, "type": "aiAnalysis", "label": "Party Identification", "purpose": "Extract all parties and roles" },
+          { "order": 3, "type": "aiAnalysis", "label": "Commercial Terms", "purpose": "Scope, pricing, schedule" },
+          { "order": 4, "type": "aiAnalysis", "label": "Legal Terms", "purpose": "Warranties, liability, indemnification" },
+          { "order": 5, "type": "aiAnalysis", "label": "Risk Analysis", "purpose": "Identify unfavorable provisions" },
+          { "order": 6, "type": "assemble", "label": "Generate Report", "purpose": "Structured output" },
+          { "order": 7, "type": "deliver", "label": "Deliver Results", "purpose": "Save analysis" }
+        ],
+        "recommendedScopes": {
+          "actions": ["SYS-ACT-002", "SYS-ACT-001", "SYS-ACT-003", "SYS-ACT-004"],
+          "skills": ["SYS-SKL-002"]
+        }
+      },
+      {
+        "id": "pattern-risk-escalation",
+        "name": "Risk-Based Escalation Pattern",
+        "description": "Workflow that routes to human review based on risk level",
+        "documentTypes": ["ALL"],
+        "estimatedNodes": 6,
+        "nodeSequence": [
+          { "order": 1, "type": "aiAnalysis", "label": "Initial Analysis", "purpose": "Document overview and key points" },
+          { "order": 2, "type": "aiAnalysis", "label": "Risk Assessment", "purpose": "Score and categorize risks" },
+          { "order": 3, "type": "condition", "label": "Risk Level Check", "purpose": "Branch on risk severity" },
+          { "order": 4, "type": "humanReview", "label": "High Risk Review", "purpose": "Human approval for high risk" },
+          { "order": 5, "type": "assemble", "label": "Prepare Output", "purpose": "Combine results" },
+          { "order": 6, "type": "deliver", "label": "Complete", "purpose": "Output final results" }
+        ],
+        "recommendedScopes": {
+          "actions": ["SYS-ACT-002", "SYS-ACT-004"]
+        }
+      },
+      {
+        "id": "pattern-document-classification",
+        "name": "Document Classification Pattern",
+        "description": "Classify and route documents to appropriate analysis workflows",
+        "documentTypes": ["ALL"],
+        "estimatedNodes": 5,
+        "nodeSequence": [
+          { "order": 1, "type": "aiAnalysis", "label": "Classify Document", "purpose": "Determine document type" },
+          { "order": 2, "type": "condition", "label": "Route by Type", "purpose": "Branch to appropriate analysis" },
+          { "order": 3, "type": "aiAnalysis", "label": "Type-Specific Analysis", "purpose": "Varies by branch" },
+          { "order": 4, "type": "assemble", "label": "Merge Results", "purpose": "Combine branches" },
+          { "order": 5, "type": "deliver", "label": "Output", "purpose": "Deliver results" }
+        ],
+        "recommendedScopes": {
+          "tools": ["SYS-TL-003"]
+        }
+      },
+      {
+        "id": "pattern-simple-extraction",
+        "name": "Simple Extraction Pattern",
+        "description": "Quick extraction workflow for single-purpose analysis",
+        "documentTypes": ["ALL"],
+        "estimatedNodes": 3,
+        "nodeSequence": [
+          { "order": 1, "type": "aiAnalysis", "label": "Extract Data", "purpose": "Single extraction task" },
+          { "order": 2, "type": "transform", "label": "Format Output", "purpose": "Optional formatting" },
+          { "order": 3, "type": "deliver", "label": "Save Results", "purpose": "Output data" }
+        ],
+        "recommendedScopes": {
+          "actions": ["SYS-ACT-001"]
+        }
+      }
+    ],
+    "lastUpdated": "2026-01-19",
+    "version": "1.0.0"
+  },
+  "metadata": {
+    "tags": ["builder", "knowledge", "patterns", "templates", "reference"],
+    "version": "1.0.0",
+    "category": "builder-reference"
+  }
+}

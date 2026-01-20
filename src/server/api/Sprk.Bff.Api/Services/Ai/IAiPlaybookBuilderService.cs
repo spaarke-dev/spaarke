@@ -77,6 +77,17 @@ public record BuilderRequest
 
     /// <summary>Previous messages in the conversation.</summary>
     public BuilderChatMessage[]? ChatHistory { get; init; }
+
+    /// <summary>
+    /// User's response to a clarification request (if this is a continuation of a clarification flow).
+    /// When provided, the service will re-classify using this context.
+    /// </summary>
+    public Models.Ai.ClarificationResponse? ClarificationResponse { get; init; }
+
+    /// <summary>
+    /// Indicates whether this request is a response to a clarification question.
+    /// </summary>
+    public bool IsClarificationResponse => ClarificationResponse != null;
 }
 
 /// <summary>

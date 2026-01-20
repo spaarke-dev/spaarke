@@ -60,17 +60,39 @@ const useStyles = makeStyles({
   header: {
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalL),
-    ...shorthands.gap(tokens.spacingHorizontalS),
+    ...shorthands.gap(tokens.spacingHorizontalM),
     ...shorthands.borderBottom(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke1),
-    backgroundColor: tokens.colorNeutralBackground1,
+    backgroundColor: tokens.colorNeutralBackground2,
     flexShrink: 0,
+    position: 'sticky',
+    top: 0,
+    zIndex: 100,
+  },
+  headerLeft: {
+    display: 'flex',
+    alignItems: 'center',
+    ...shorthands.gap(tokens.spacingHorizontalM),
+  },
+  headerTitle: {
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground1,
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+  },
+  headerStatus: {
+    display: 'flex',
+    alignItems: 'center',
+    ...shorthands.gap(tokens.spacingHorizontalXS),
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
   },
   headerActions: {
     display: 'flex',
     alignItems: 'center',
-    ...shorthands.gap(tokens.spacingHorizontalS),
+    ...shorthands.gap(tokens.spacingHorizontalXS),
   },
   builderContainer: {
     flex: 1,
@@ -96,10 +118,14 @@ const useStyles = makeStyles({
     textAlign: 'center',
     color: tokens.colorPaletteRedForeground1,
   },
-  dirtyIndicator: {
-    color: tokens.colorPaletteMarigoldForeground1,
-    minWidth: '110px', // Reserve space to prevent layout shift
-    textAlign: 'right',
+  statusDot: {
+    width: '8px',
+    height: '8px',
+    ...shorthands.borderRadius('50%'),
+    backgroundColor: tokens.colorPaletteGreenBackground3,
+  },
+  statusDotUnsaved: {
+    backgroundColor: tokens.colorPaletteMarigoldBackground3,
   },
   footer: {
     display: 'flex',
@@ -334,20 +360,28 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
 
   return (
     <div className={styles.container}>
-      {/* Header with Actions */}
+      {/* Header with Actions - Fixed position, Fluent V9 pattern */}
       <div className={styles.header}>
+        {/* Left side: Title and Status */}
+        <div className={styles.headerLeft}>
+          <Text className={styles.headerTitle}>Playbook Builder</Text>
+          <div className={styles.headerStatus}>
+            <span
+              className={`${styles.statusDot} ${isDirty ? styles.statusDotUnsaved : ''}`}
+            />
+            <Text size={200}>
+              {isDirty ? 'Unsaved changes' : 'All changes saved'}
+            </Text>
+          </div>
+        </div>
+
+        {/* Right side: Action buttons */}
         <div className={styles.headerActions}>
-          <Text
-            className={styles.dirtyIndicator}
-            size={200}
-            style={{ visibility: isDirty ? 'visible' : 'hidden' }}
-          >
-            Unsaved changes
-          </Text>
           {apiBaseUrl && (
             <Tooltip content="Browse playbook templates" relationship="description">
               <Button
                 appearance="subtle"
+                size="small"
                 icon={<DocumentMultiple20Regular />}
                 onClick={handleOpenTemplateLibrary}
               >
@@ -367,7 +401,7 @@ export const PlaybookBuilderHost: React.FC<PlaybookBuilderHostProps> = ({
 
       {/* Footer with Version */}
       <div className={styles.footer}>
-        <Text className={styles.versionBadge}>v2.20.6 2026-01-19</Text>
+        <Text className={styles.versionBadge}>v2.25.0 2026-01-19</Text>
       </div>
 
       {/* Template Library Dialog */}

@@ -5,8 +5,21 @@
     <estimate>2-3 hours</estimate>
     <tags>bff-api, endpoint</tags>
     <dependencies>031</dependencies>
-    <status>pending</status>
+    <status>completed</status>
+    <completed>2026-01-19</completed>
   </metadata>
+
+  <notes>
+    <note>Task 032 was already fully implemented as part of task 031 (Implement Test Modes).</note>
+    <note>Three test execution endpoints exist at /api/ai/playbook-builder/test-execution, /test-execution/quick, and /test-execution/production.</note>
+    <note>All DTOs defined in TestPlaybookModels.cs: TestPlaybookRequest, TestOptions, TestExecutionEvent, TestEventTypes.</note>
+    <note>ExecuteTestAsync implemented in AiPlaybookBuilderService with full Mock/Quick/Production support.</note>
+    <note>8 unit tests exist in AiPlaybookBuilderServiceTests.cs covering all modes and edge cases.</note>
+    <note>OpenAPI documentation present with WithSummary, WithDescription, Produces, ProducesProblem.</note>
+    <note>File upload handled via multipart/form-data at /test-execution/quick endpoint.</note>
+    <note>Authorization currently AllowAnonymous for dev; TODO comment notes production auth requirement.</note>
+    <note>Build verified: 0 errors, 0 warnings.</note>
+  </notes>
 
   <prompt>
     <goal>Add POST /api/playbook-builder/test endpoint for executing playbook tests.</goal>

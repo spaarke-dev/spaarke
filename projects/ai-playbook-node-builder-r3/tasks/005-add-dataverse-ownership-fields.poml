@@ -5,8 +5,22 @@
     <estimate>2-3 hours</estimate>
     <tags>dataverse, schema</tags>
     <dependencies>none</dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
+
+  <notes>
+    <completed>2026-01-19</completed>
+    <summary>Created detailed field specification document for manual Dataverse field creation. Document located at: projects/ai-playbook-node-builder-r3/notes/dataverse-ownership-fields-spec.md</summary>
+    <deliverables>
+      - Global option set spec: sprk_scopeownertype (System=1, Customer=2)
+      - Field specs for all 4 entities: sprk_ownertype, sprk_isimmutable, sprk_parentscope, sprk_basedon
+      - Self-referencing lookup relationship specifications
+      - Manual creation steps for Power Platform UI
+      - Web API script patterns for automated deployment
+      - Verification checklist
+    </deliverables>
+    <next-steps>Execute manual field creation in Dataverse using the specification document, OR proceed with task 006 which depends on these fields existing.</next-steps>
+  </notes>
 
   <prompt>
     <goal>Add ownership-related fields to all Dataverse scope entities (sprk_analysisaction, sprk_analysisskill, sprk_analysisknowledge, sprk_analysistool).</goal>

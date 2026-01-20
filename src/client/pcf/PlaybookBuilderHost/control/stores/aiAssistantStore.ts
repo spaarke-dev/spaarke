@@ -46,6 +46,27 @@ export interface CanvasOperation {
 }
 
 /**
+ * Clarification data for messages that need user input.
+ * Used to display interactive option selection UI.
+ */
+export interface ClarificationData {
+  /** The question asking for clarification */
+  question: string;
+  /** Available options for the user to select */
+  options?: string[];
+  /** Additional context about the clarification */
+  context?: string;
+  /** Session ID for tracking the clarification flow */
+  sessionId?: string;
+  /** Whether the user has responded to this clarification */
+  responded?: boolean;
+  /** The user's selected response (option index or 'other') */
+  selectedOption?: number | 'other';
+  /** Free-text response if 'other' was selected */
+  freeTextResponse?: string;
+}
+
+/**
  * A chat message in the conversation history.
  */
 export interface ChatMessage {
@@ -55,6 +76,8 @@ export interface ChatMessage {
   timestamp: Date;
   canvasOperations?: CanvasOperation[];
   isStreaming?: boolean;
+  /** Clarification data if this is a clarification message */
+  clarification?: ClarificationData;
 }
 
 /**
@@ -192,6 +215,20 @@ export interface TestExecutionState {
   error: string | null;
 }
 
+/**
+ * AI model selection options.
+ */
+export type AiModelSelection = 'gpt-4o' | 'gpt-4o-mini';
+
+/**
+ * Model option with display information.
+ */
+export interface AiModelOption {
+  id: AiModelSelection;
+  name: string;
+  description: string;
+}
+
 // ============================================================================
 // Store State Interface
 // ============================================================================
@@ -206,6 +243,10 @@ interface AiAssistantState {
   sessionId: string | null;
   error: string | null;
   serviceConfig: AiPlaybookServiceConfig | null;
+
+  // Model selection state
+  modelSelection: AiModelSelection;
+  showAdvancedOptions: boolean;
 
   // Test execution state
   isTestDialogOpen: boolean;
@@ -255,6 +296,17 @@ interface AiAssistantState {
   completeTestExecution: (result: { analysisId?: string; reportUrl?: string; totalDurationMs: number }) => void;
   failTestExecution: (error: string) => void;
   resetTestExecution: () => void;
+
+  // Model selection actions
+  setModelSelection: (model: AiModelSelection) => void;
+  toggleAdvancedOptions: () => void;
+  setShowAdvancedOptions: (show: boolean) => void;
+
+  // Clarification actions
+  respondToClarification: (
+    messageId: string,
+    response: { selectedOption: number | 'other'; freeText?: string }
+  ) => void;
 
   // Reset
   reset: () => void;
@@ -318,6 +370,31 @@ const patchNodeToPlaybookNode = (
 });
 
 // ============================================================================
+// Constants
+// ============================================================================
+
+/**
+ * Available AI model options for selection.
+ */
+export const AI_MODEL_OPTIONS: AiModelOption[] = [
+  {
+    id: 'gpt-4o',
+    name: 'GPT-4o',
+    description: 'Powerful',
+  },
+  {
+    id: 'gpt-4o-mini',
+    name: 'GPT-4o-mini',
+    description: 'Fast',
+  },
+];
+
+/**
+ * Default AI model selection.
+ */
+export const DEFAULT_MODEL_SELECTION: AiModelSelection = 'gpt-4o-mini';
+
+// ============================================================================
 // Initial State
 // ============================================================================
 
@@ -344,6 +421,8 @@ const initialState = {
   sessionId: null as string | null,
   error: null as string | null,
   serviceConfig: null as AiPlaybookServiceConfig | null,
+  modelSelection: DEFAULT_MODEL_SELECTION as AiModelSelection,
+  showAdvancedOptions: false,
   isTestDialogOpen: false,
   testExecution: initialTestExecutionState,
 };
@@ -679,12 +758,27 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
 
     // Build request from current state
     // NOTE: Property names must match API's BuilderRequest model (camelCase)
+    // Transform React Flow edges (source/target) to API format (sourceId/targetId)
     const canvasStore = useCanvasStore.getState();
     const request: BuildPlaybookCanvasRequest = {
       message,
       canvasState: {
-        nodes: canvasStore.nodes,
-        edges: canvasStore.edges,
+        nodes: canvasStore.nodes.map((node) => ({
+          id: node.id,
+          type: node.type,
+          position: node.position,
+          label: node.data?.label,
+          config: node.data,
+        })),
+        edges: canvasStore.edges.map((edge) => ({
+          id: edge.id,
+          sourceId: edge.source,
+          targetId: edge.target,
+          sourceHandle: edge.sourceHandle,
+          targetHandle: edge.targetHandle,
+          edgeType: edge.type,
+          animated: edge.animated,
+        })),
       },
       playbookId: state.currentPlaybookId ?? undefined,
       sessionId: state.sessionId ?? undefined,
@@ -692,6 +786,7 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
         role: m.role,
         content: m.content,
       })),
+      modelId: state.modelSelection,
     };
 
     // Get service instance
@@ -751,17 +846,27 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
           }));
         },
 
-        // Handle clarification events - add as system message
+        // Handle clarification events - store clarification data for interactive UI
         onClarification: (data: ClarificationEventData) => {
-          let clarificationContent = data.question;
-          if (data.options && data.options.length > 0) {
-            clarificationContent += '\n\nOptions:\n' + data.options.map((o, i) => `${i + 1}. ${o}`).join('\n');
-          }
-          if (data.context) {
-            clarificationContent += '\n\n' + data.context;
-          }
+          // Store the clarification data for the ClarificationOptions component to render
           get().updateMessage(assistantMessageId, {
-            content: clarificationContent,
+            content: data.question,
+            clarification: {
+              question: data.question,
+              options: data.options,
+              context: data.context,
+              sessionId: state.sessionId ?? undefined,
+              responded: false,
+            },
+            isStreaming: false,
+          });
+          // End streaming since we're waiting for user input
+          set({
+            isStreaming: false,
+            streamingState: {
+              isActive: false,
+              operationCount: get().streamingState.operationCount,
+            },
           });
         },
 
@@ -926,6 +1031,58 @@ export const useAiAssistantStore = create<AiAssistantState>((set, get) => ({
     set({
       testExecution: initialTestExecutionState,
     }),
+
+  // Model selection actions
+  setModelSelection: (model: AiModelSelection) =>
+    set({ modelSelection: model }),
+
+  toggleAdvancedOptions: () =>
+    set((state) => ({ showAdvancedOptions: !state.showAdvancedOptions })),
+
+  setShowAdvancedOptions: (show: boolean) =>
+    set({ showAdvancedOptions: show }),
+
+  // Clarification actions
+  respondToClarification: (messageId, response) => {
+    const state = get();
+
+    // Find the message with clarification
+    const message = state.messages.find((m) => m.id === messageId);
+    if (!message?.clarification) {
+      console.warn('[AiAssistantStore] respondToClarification: No clarification found for message', messageId);
+      return;
+    }
+
+    // Get the response text
+    let responseText: string;
+    if (response.selectedOption === 'other') {
+      responseText = response.freeText ?? '';
+    } else {
+      const options = message.clarification.options ?? [];
+      responseText = options[response.selectedOption] ?? `Option ${response.selectedOption + 1}`;
+    }
+
+    // Update the clarification as responded
+    set((s) => ({
+      messages: s.messages.map((m) =>
+        m.id === messageId
+          ? {
+              ...m,
+              clarification: {
+                ...m.clarification!,
+                responded: true,
+                selectedOption: response.selectedOption,
+                freeTextResponse: response.freeText,
+              },
+            }
+          : m
+      ),
+    }));
+
+    // Send the response as a new user message that continues the conversation
+    // This will trigger a new sendMessage call with the clarification response
+    get().sendMessage(responseText);
+  },
 
   // Reset
   reset: () => set(initialState),
