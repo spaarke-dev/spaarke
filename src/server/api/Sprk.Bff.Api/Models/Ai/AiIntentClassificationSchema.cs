@@ -217,6 +217,14 @@ public record AiIntentResult
     public string? Reasoning { get; init; }
 
     /// <summary>
+    /// Conversational message to display to the user.
+    /// This is the AI's friendly explanation of what it's doing.
+    /// Should be used instead of hardcoded messages for a natural experience.
+    /// </summary>
+    [JsonPropertyName("message")]
+    public string? Message { get; init; }
+
+    /// <summary>
     /// Alternative interpretations if ambiguous.
     /// Populated when multiple intents could match.
     /// </summary>

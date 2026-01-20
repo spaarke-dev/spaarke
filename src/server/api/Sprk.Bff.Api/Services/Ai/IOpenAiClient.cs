@@ -1,4 +1,24 @@
+using OpenAI.Chat;
+
 namespace Sprk.Bff.Api.Services.Ai;
+
+/// <summary>
+/// Result of a chat completion request with tools.
+/// </summary>
+public record ChatCompletionResult
+{
+    /// <summary>Text response from the model (null if tool calls are returned).</summary>
+    public string? Content { get; init; }
+
+    /// <summary>Tool calls requested by the model (empty if content is returned).</summary>
+    public IReadOnlyList<ChatToolCall> ToolCalls { get; init; } = [];
+
+    /// <summary>The finish reason indicating why the model stopped.</summary>
+    public ChatFinishReason FinishReason { get; init; }
+
+    /// <summary>Whether the model wants to call tools.</summary>
+    public bool HasToolCalls => ToolCalls.Count > 0;
+}
 
 /// <summary>
 /// Interface for OpenAI client operations.
@@ -68,5 +88,20 @@ public interface IOpenAiClient
         IEnumerable<string> texts,
         string? model = null,
         int? dimensions = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Execute a chat completion with function calling tools.
+    /// Used for agentic workflows where the model can call tools.
+    /// </summary>
+    /// <param name="messages">The conversation messages including system, user, assistant, and tool messages.</param>
+    /// <param name="tools">The available tools the model can call.</param>
+    /// <param name="model">Optional model override. Defaults to configured model.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Chat completion result with either content or tool calls.</returns>
+    Task<ChatCompletionResult> GetChatCompletionWithToolsAsync(
+        IEnumerable<ChatMessage> messages,
+        IEnumerable<ChatTool> tools,
+        string? model = null,
         CancellationToken cancellationToken = default);
 }

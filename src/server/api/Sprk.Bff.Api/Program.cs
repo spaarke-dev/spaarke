@@ -373,6 +373,10 @@ if (analysisEnabled && documentIntelligenceEnabled)
     // AI Playbook Builder Service - conversational AI assistance for playbook building (ai-playbook-node-builder-r2 project)
     builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IAiPlaybookBuilderService, Sprk.Bff.Api.Services.Ai.AiPlaybookBuilderService>();
 
+    // Builder Agent Service - agentic loop for "Claude Code for Playbooks" pattern with function calling (ai-playbook-node-builder-r2 Phase 2)
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.Builder.BuilderToolExecutor>();
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.Builder.IBuilderAgentService, Sprk.Bff.Api.Services.Ai.Builder.BuilderAgentService>();
+
     // Model Selector - tiered AI model selection for cost optimization (ai-playbook-node-builder-r2 project)
     // Maps operation types to optimal models: mini for fast ops, o1-mini for reasoning, gpt-4o for generation
     builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.IModelSelector, Sprk.Bff.Api.Services.Ai.ModelSelector>();

@@ -668,6 +668,121 @@ public static class PlaybookBuilderSystemPrompt
             - Status: {savedStatus}
             """;
     }
+
+    /// <summary>
+    /// Builds the system prompt for the agentic builder with function calling.
+    /// Includes the scope catalog so the AI knows what scopes are available.
+    /// </summary>
+    /// <param name="actions">Available action scopes.</param>
+    /// <param name="skills">Available skill scopes.</param>
+    /// <param name="knowledge">Available knowledge scopes.</param>
+    /// <returns>Complete system prompt for function calling.</returns>
+    public static string Build(
+        IReadOnlyList<ScopeCatalogEntry> actions,
+        IReadOnlyList<ScopeCatalogEntry> skills,
+        IReadOnlyList<ScopeCatalogEntry> knowledge)
+    {
+        var actionCatalog = actions.Count > 0
+            ? string.Join("\n", actions.Select(a =>
+                $"  - **{a.Name}** ({a.DisplayName}): {a.Description}"))
+            : "  No actions available yet.";
+
+        var skillCatalog = skills.Count > 0
+            ? string.Join("\n", skills.Select(s =>
+                $"  - **{s.Name}** ({s.DisplayName}): {s.Description}"))
+            : "  No skills available yet.";
+
+        var knowledgeCatalog = knowledge.Count > 0
+            ? string.Join("\n", knowledge.Select(k =>
+                $"  - **{k.Name}** ({k.DisplayName}): {k.Description}"))
+            : "  No knowledge sources available yet.";
+
+        return $"""
+            You are the AI Playbook Builder assistant - think of yourself as "Claude Code for Playbooks."
+            Your job is to help users build document analysis workflows through natural conversation.
+
+            ## Your Capabilities
+
+            You have access to tools that let you manipulate the playbook canvas:
+            - **add_node**: Add nodes (aiAnalysis, condition, assemble, deliver, etc.)
+            - **remove_node**: Remove nodes from the canvas
+            - **create_edge**: Connect nodes with edges
+            - **update_node_config**: Update node properties
+            - **link_scope**: Attach existing scopes to nodes
+            - **create_scope**: Create new custom scopes
+            - **search_scopes**: Find scopes by name or purpose
+            - **auto_layout**: Arrange nodes visually
+            - **validate_canvas**: Check for issues
+
+            ## Node Types
+
+            | Type | Purpose | Use When |
+            |------|---------|----------|
+            | **aiAnalysis** | AI-powered analysis | Document analysis, extraction, classification |
+            | **condition** | Branch logic | If/then decisions based on results |
+            | **assemble** | Combine outputs | Merge results from multiple nodes |
+            | **deliver** | Final output | Format and deliver results |
+            | **loop** | Iterate over items | Process collections |
+            | **transform** | Data transformation | Convert or reshape data |
+            | **humanReview** | Manual checkpoint | Require human approval |
+            | **externalApi** | API integration | Call external services |
+
+            ## Available Scopes (Your Knowledge Base)
+
+            ### Actions (AI Analysis Instructions)
+            {actionCatalog}
+
+            ### Skills (Reusable Prompt Fragments)
+            {skillCatalog}
+
+            ### Knowledge Sources (RAG Content)
+            {knowledgeCatalog}
+
+            ## How to Work
+
+            1. **Understand the request**: Parse what the user wants to accomplish
+            2. **Plan the approach**: Decide which tools to use
+            3. **Execute with tools**: Call the necessary tools to make changes
+            4. **Explain your work**: Tell the user what you did and why
+
+            ## Interaction Guidelines
+
+            - Be conversational and helpful, not robotic
+            - Explain what you're doing as you work
+            - Proactively suggest improvements ("Would you also like me to add...")
+            - Use the scope catalog to recommend existing scopes
+            - When multiple approaches exist, briefly explain the tradeoffs
+            - If something is unclear, ask for clarification
+
+            ## Important Rules
+
+            1. **Always use tools** when making changes - don't just describe what you would do
+            2. **Reference nodes by label** when talking to users, but use IDs internally
+            3. **Check the canvas state** before making changes
+            4. **Validate connections** - ensure source nodes exist before creating edges
+            5. **Prefer existing scopes** over creating new ones when appropriate
+
+            You are helpful, capable, and proactive. Help users build great playbooks!
+            """;
+    }
+}
+
+/// <summary>
+/// Entry in the scope catalog for system prompt.
+/// </summary>
+public record ScopeCatalogEntry
+{
+    /// <summary>Technical name of the scope (e.g., SYS-ACT-001).</summary>
+    public required string Name { get; init; }
+
+    /// <summary>Display name for the scope.</summary>
+    public required string DisplayName { get; init; }
+
+    /// <summary>Description of what the scope does.</summary>
+    public required string Description { get; init; }
+
+    /// <summary>Type of scope (action, skill, knowledge, tool).</summary>
+    public required string ScopeType { get; init; }
 }
 
 /// <summary>

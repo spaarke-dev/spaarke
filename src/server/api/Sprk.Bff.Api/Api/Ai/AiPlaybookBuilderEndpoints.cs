@@ -2,6 +2,7 @@ using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Streaming;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Builder;
 using Sprk.Bff.Api.Services.Ai.Testing;
 
 namespace Sprk.Bff.Api.Api.Ai;
@@ -190,6 +191,35 @@ public static class AiPlaybookBuilderEndpoints
                 Results ARE persisted to Dataverse (marked as test execution).
                 """)
             .Produces(200, contentType: "text/event-stream")
+            .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(429)
+            .ProducesProblem(500);
+
+        // POST /api/ai/playbook-builder/agentic - Agentic builder with function calling (Phase 2)
+        group.MapPost("/agentic", ProcessAgenticBuilder)
+            .RequireRateLimiting("ai-stream")
+            .WithName("ProcessAgenticBuilder")
+            .WithSummary("Process a builder message using agentic function calling")
+            .WithDescription("""
+                Processes a user message using an agentic loop with OpenAI function calling.
+                The AI agent can execute multiple tool calls (add_node, create_edge, link_scope, etc.)
+                in a multi-turn conversation until the task is complete.
+
+                This endpoint implements the "Claude Code for Playbooks" pattern where the AI:
+                1. Receives the user request and current canvas state
+                2. Has full awareness of available scopes (actions, skills, knowledge)
+                3. Calls tools to manipulate the canvas
+                4. Continues the loop until the task is complete
+                5. Returns all canvas operations and a summary message
+
+                Returns JSON response (not SSE streaming) with:
+                - message: AI's response summarizing what was done
+                - canvasOperations: Array of operations to apply to the canvas
+                - toolCallCount: Number of tool calls made
+                - success: Whether the operation completed successfully
+                """)
+            .Produces<AgenticBuilderResponse>()
             .ProducesProblem(400)
             .ProducesProblem(401)
             .ProducesProblem(429)
@@ -1031,6 +1061,75 @@ public static class AiPlaybookBuilderEndpoints
             }).ToArray()
         };
     }
+
+    /// <summary>
+    /// Process a builder message using agentic function calling.
+    /// POST /api/ai/playbook-builder/agentic
+    /// </summary>
+    /// <remarks>
+    /// Uses an agentic loop with OpenAI function calling to process the user's request.
+    /// The AI can make multiple tool calls (add_node, create_edge, link_scope, etc.)
+    /// until the task is complete.
+    /// </remarks>
+    private static async Task<IResult> ProcessAgenticBuilder(
+        AgenticBuilderRequest request,
+        IBuilderAgentService agentService,
+        HttpContext context,
+        ILogger<BuilderAgentService> logger)
+    {
+        var cancellationToken = context.RequestAborted;
+
+        // Validate request
+        if (string.IsNullOrWhiteSpace(request.Message))
+        {
+            return Results.BadRequest(new { error = "Message is required" });
+        }
+
+        logger.LogInformation(
+            "Processing agentic builder request, NodeCount={NodeCount}, TraceId={TraceId}",
+            request.CanvasState.Nodes.Length, context.TraceIdentifier);
+
+        try
+        {
+            var result = await agentService.ExecuteAsync(
+                request.Message,
+                request.CanvasState,
+                cancellationToken);
+
+            logger.LogInformation(
+                "Agentic builder completed, ToolCalls={ToolCalls}, Operations={Operations}, Success={Success}, TraceId={TraceId}",
+                result.ToolCallCount, result.CanvasOperations.Count, result.Success, context.TraceIdentifier);
+
+            return Results.Ok(new AgenticBuilderResponse
+            {
+                Message = result.Message,
+                CanvasOperations = result.CanvasOperations.Select(op => new AgenticCanvasOperation
+                {
+                    Type = op.Type.ToString(),
+                    Payload = op.Payload
+                }).ToArray(),
+                ToolCallCount = result.ToolCallCount,
+                Success = result.Success,
+                Error = result.Error
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            logger.LogInformation(
+                "Client disconnected during agentic builder processing, TraceId={TraceId}",
+                context.TraceIdentifier);
+            return Results.StatusCode(499); // Client Closed Request
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error during agentic builder processing, TraceId={TraceId}", context.TraceIdentifier);
+            return Results.Problem(
+                detail: "An error occurred while processing your request",
+                statusCode: 500,
+                extensions: new Dictionary<string, object?> { ["correlationId"] = context.TraceIdentifier }
+            );
+        }
+    }
 }
 
 /// <summary>
@@ -1112,4 +1211,55 @@ public record GenerateClarificationCanvasContext
 
     /// <summary>Currently selected node ID.</summary>
     public string? SelectedNodeId { get; init; }
+}
+
+/// <summary>
+/// Request for agentic builder processing with function calling.
+/// </summary>
+public record AgenticBuilderRequest
+{
+    /// <summary>The user's natural language request.</summary>
+    public required string Message { get; init; }
+
+    /// <summary>Current canvas state (nodes and edges).</summary>
+    public required CanvasState CanvasState { get; init; }
+
+    /// <summary>Optional playbook ID if editing existing playbook.</summary>
+    public Guid? PlaybookId { get; init; }
+
+    /// <summary>Session ID for conversation continuity.</summary>
+    public string? SessionId { get; init; }
+}
+
+/// <summary>
+/// Response from agentic builder processing.
+/// </summary>
+public record AgenticBuilderResponse
+{
+    /// <summary>The AI's response message to the user.</summary>
+    public required string Message { get; init; }
+
+    /// <summary>Canvas operations generated by tool execution.</summary>
+    public AgenticCanvasOperation[] CanvasOperations { get; init; } = [];
+
+    /// <summary>Number of tool calls made during the conversation.</summary>
+    public int ToolCallCount { get; init; }
+
+    /// <summary>Whether the agent completed successfully.</summary>
+    public bool Success { get; init; } = true;
+
+    /// <summary>Error message if the agent failed.</summary>
+    public string? Error { get; init; }
+}
+
+/// <summary>
+/// A canvas operation in the agentic response.
+/// </summary>
+public record AgenticCanvasOperation
+{
+    /// <summary>Operation type: AddNode, RemoveNode, AddEdge, RemoveEdge, UpdateNode, UpdateLayout.</summary>
+    public required string Type { get; init; }
+
+    /// <summary>Operation payload (node data, edge data, etc.).</summary>
+    public required System.Text.Json.JsonDocument Payload { get; init; }
 }

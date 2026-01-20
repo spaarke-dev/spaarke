@@ -371,8 +371,11 @@ public class AiPlaybookBuilderService : IAiPlaybookBuilderService
             }
         }
 
-        // Process based on intent
-        yield return BuilderStreamChunk.Message($"I understand you want to {GetIntentDescription(classification.Intent)}.");
+        // Process based on intent - use AI's conversational message if available
+        var introMessage = !string.IsNullOrEmpty(classification.Message)
+            ? classification.Message
+            : $"I understand you want to {GetIntentDescription(classification.Intent)}.";
+        yield return BuilderStreamChunk.Message(introMessage);
 
         // Generate and execute operations based on intent
         await foreach (var chunk in ExecuteIntentAsync(
@@ -488,7 +491,8 @@ public class AiPlaybookBuilderService : IAiPlaybookBuilderService
             Intent = legacyIntent,
             Confidence = aiResult.Confidence,
             Entities = entities,
-            NeedsClarification = false // Already handled clarification at this point
+            NeedsClarification = false, // Already handled clarification at this point
+            Message = aiResult.Message // Pass through the AI's conversational message
         };
     }
 
@@ -1593,7 +1597,8 @@ public class AiPlaybookBuilderService : IAiPlaybookBuilderService
             Confidence = aiResult.Confidence,
             Entities = ExtractEntitiesFromAiResult(aiResult),
             NeedsClarification = needsClarification,
-            ClarificationQuestion = aiResult.Clarification?.Question
+            ClarificationQuestion = aiResult.Clarification?.Question,
+            Message = aiResult.Message // Pass through the AI's conversational message
         };
     }
 
@@ -1719,6 +1724,8 @@ public class AiPlaybookBuilderService : IAiPlaybookBuilderService
 
     /// <summary>
     /// Execute operations based on classified intent.
+    /// NOTE: The AI's conversational message is already displayed before this method is called.
+    /// This method only emits canvas operations and progress updates, NOT intro messages.
     /// </summary>
     private async IAsyncEnumerable<BuilderStreamChunk> ExecuteIntentAsync(
         IntentClassification classification,
@@ -1728,7 +1735,6 @@ public class AiPlaybookBuilderService : IAiPlaybookBuilderService
         switch (classification.Intent)
         {
             case BuilderIntent.CreatePlaybook:
-                yield return BuilderStreamChunk.Message("Let me create a playbook structure for you.");
                 // Generate build plan
                 var plan = await GenerateBuildPlanAsync(
                     new BuildPlanRequest { Goal = request.Message },
@@ -1777,7 +1783,7 @@ public class AiPlaybookBuilderService : IAiPlaybookBuilderService
                     });
                 }
 
-                yield return BuilderStreamChunk.Message($"Playbook created with {createdNodeIds.Count} nodes connected in sequence.");
+                yield return BuilderStreamChunk.Message($"Done! Created {createdNodeIds.Count} nodes connected in sequence.");
                 break;
 
             case BuilderIntent.AddNode:
@@ -1794,7 +1800,7 @@ public class AiPlaybookBuilderService : IAiPlaybookBuilderService
                         Position = new NodePosition(100, 100)
                     }
                 });
-                yield return BuilderStreamChunk.Message($"Added a new {nodeLabel} node.");
+                // Operation message already shown by AI - just emit the operation
                 break;
 
             case BuilderIntent.RemoveNode:
@@ -1806,41 +1812,40 @@ public class AiPlaybookBuilderService : IAiPlaybookBuilderService
                         Operation = CanvasPatchOperation.RemoveNode,
                         NodeId = nodeId
                     });
-                    yield return BuilderStreamChunk.Message("Removed the node.");
                 }
                 break;
 
             case BuilderIntent.ConnectNodes:
-                yield return BuilderStreamChunk.Message("I'll connect those nodes for you.");
                 // Would extract source/target from entities and create edge
+                // Operation message already shown by AI
                 break;
 
             case BuilderIntent.ConfigureNode:
-                yield return BuilderStreamChunk.Message("Updating the node configuration.");
+                // Would update node configuration
+                // Operation message already shown by AI
                 break;
 
             case BuilderIntent.SearchScopes:
-                yield return BuilderStreamChunk.Message("Searching for matching scopes...");
                 // Would call _scopeResolver.SearchScopesAsync
+                // Operation message already shown by AI
                 break;
 
             case BuilderIntent.TestPlaybook:
-                yield return BuilderStreamChunk.Message("I'll help you test the playbook.");
+                // Would initiate test execution
+                // Operation message already shown by AI
                 break;
 
             case BuilderIntent.SavePlaybook:
-                yield return BuilderStreamChunk.Message("Saving your playbook.");
+                // Would save playbook to Dataverse
+                // Operation message already shown by AI
                 break;
 
             case BuilderIntent.AskQuestion:
-                yield return BuilderStreamChunk.Message("Let me help you with that question.");
-                // Would generate helpful response about playbook building
+                // AI's conversational response already displayed - nothing more to do
                 break;
 
             default:
-                yield return BuilderStreamChunk.Message(
-                    "I'm not sure how to help with that. Try asking me to add a node, " +
-                    "connect nodes, or create a playbook.");
+                // AI's response already shown - nothing more to do
                 break;
         }
     }

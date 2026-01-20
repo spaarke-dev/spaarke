@@ -284,6 +284,12 @@ public record IntentClassification
 
     /// <summary>Clarification question if needed.</summary>
     public string? ClarificationQuestion { get; init; }
+
+    /// <summary>
+    /// Conversational message from the AI to display to the user.
+    /// This is the AI's friendly explanation of what it's doing.
+    /// </summary>
+    public string? Message { get; init; }
 }
 
 /// <summary>

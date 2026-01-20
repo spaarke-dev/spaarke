@@ -6,6 +6,38 @@
 
 ---
 
+## Vision: What Makes This "Claude Code for Playbooks"
+
+Just like Claude Code enables developers to build software through conversation, the AI Playbook Builder should enable users to build document analysis playbooks conversationally. The key capabilities:
+
+| Claude Code Capability | AI Playbook Builder Equivalent |
+|------------------------|-------------------------------|
+| **Tools** - Read files, write code, run commands | **Tools** - Add nodes, create edges, search scopes, create scopes |
+| **Codebase Awareness** - Knows project structure | **Scope Awareness** - Knows available Actions, Skills, Knowledge, Tools |
+| **Execute Operations** - Makes real changes | **Canvas Operations** - Creates/modifies playbook structure |
+| **Create Artifacts** - New files, configs | **Create Scopes** - New custom Actions/Skills when needed |
+| **Multi-step Reasoning** - Agentic loops | **Agentic Execution** - Iterative playbook building |
+
+### Current Gap (Pre-Phase 2)
+
+The AI is currently "blind" - it:
+- ❌ Can't see what scopes exist in the system
+- ❌ Can't search for scopes matching user needs
+- ❌ Can't create new scopes dynamically
+- ❌ Returns JSON intent, not tool calls
+- ❌ Single-turn execution only
+
+### Target State (Post-Phase 2+3)
+
+The AI has full awareness and capabilities:
+- ✅ Receives tool definitions (OpenAI Function Calling)
+- ✅ Can search scope catalog (`search_scopes` tool)
+- ✅ Can add nodes with specific scopes (`add_node` tool)
+- ✅ Can create custom scopes (`create_scope` tool)
+- ✅ Agentic loop for multi-step operations
+
+---
+
 ## Current State Summary
 
 The AI Playbook Builder has three main components:
@@ -118,29 +150,196 @@ See [builder-scopes/INDEX.md](builder-scopes/INDEX.md) for full inventory.
 
 ---
 
-### Phase 2: Tool Schema Integration (PENDING)
+### Phase 2: Tool Schema Integration (IN PROGRESS)
 
-**Goal**: Give the LLM structured tools instead of just natural language
+**Goal**: Give the LLM structured tools using OpenAI Function Calling
 
 Current state: The LLM receives a prompt describing operations in text. It returns JSON with intent classification. The backend then maps this to canvas operations.
 
 Target state: The LLM receives actual tool definitions (OpenAI function calling format). It can call tools directly, which get validated against schemas.
 
-**Tasks**:
-- [ ] Create `BuilderToolDefinitions.cs` with OpenAI function schemas
-- [ ] Map TL-BUILDER-* JSON files to OpenAI tool format
-- [ ] Update `ClassifyIntentWithAiAsync` to include tools in request
-- [ ] Add tool call response parsing (parallel to JSON intent parsing)
-- [ ] Map tool calls → canvas patch operations
-- [ ] Update PCF to handle tool-based responses
+---
 
-**Key Files to Create/Modify**:
+#### Phase 2a: Create Tool Definitions (CURRENT)
+
+**Convert TL-BUILDER-* JSON files to OpenAI function calling format.**
+
+| TL-BUILDER | OpenAI Tool Name | Description |
+|------------|------------------|-------------|
+| TL-BUILDER-001 | `add_node` | Add a node to the playbook canvas |
+| TL-BUILDER-002 | `remove_node` | Remove a node from the canvas |
+| TL-BUILDER-003 | `create_edge` | Connect two nodes |
+| TL-BUILDER-004 | `update_node_config` | Modify node configuration |
+| TL-BUILDER-005 | `link_scope` | Wire a scope to a node |
+| TL-BUILDER-006 | `create_scope` | Create a new scope in Dataverse |
+| TL-BUILDER-007 | `search_scopes` | Find existing scopes by criteria |
+| TL-BUILDER-008 | `auto_layout` | Arrange canvas nodes |
+| TL-BUILDER-009 | `validate_canvas` | Validate playbook structure |
+
+**Tasks**:
+- [ ] Create `BuilderToolDefinitions.cs` with all 9 tool schemas
+- [ ] Create `Models/BuilderToolCall.cs` for response types
+- [ ] Map each TL-BUILDER inputSchema → OpenAI function parameters
+
+**Key Files to Create**:
 ```
 src/server/api/Sprk.Bff.Api/Services/Ai/
-├── BuilderToolDefinitions.cs (NEW) - Tool schemas for OpenAI
-├── AiPlaybookBuilderService.cs - Add tool call handling
-└── Models/BuilderToolCall.cs (NEW) - Tool call response models
+├── Tools/
+│   ├── BuilderToolDefinitions.cs (NEW) - Tool schemas for OpenAI
+│   └── BuilderToolExecutor.cs (NEW) - Tool execution logic
+└── Models/
+    └── BuilderToolCall.cs (NEW) - Tool call response models
 ```
+
+**OpenAI Tool Format Example** (from TL-BUILDER-001):
+```json
+{
+  "type": "function",
+  "function": {
+    "name": "add_node",
+    "description": "Add a new node to the playbook canvas",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "nodeType": {
+          "type": "string",
+          "enum": ["aiAnalysis", "condition", "assemble", "deliver", "loop", "transform", "humanReview", "externalApi"],
+          "description": "Type of node to create"
+        },
+        "label": {
+          "type": "string",
+          "description": "Display label for the node"
+        },
+        "position": {
+          "type": "object",
+          "properties": { "x": {"type": "number"}, "y": {"type": "number"} },
+          "description": "Canvas position (optional)"
+        },
+        "config": {
+          "type": "object",
+          "description": "Node-specific configuration"
+        }
+      },
+      "required": ["nodeType", "label"]
+    }
+  }
+}
+```
+
+---
+
+#### Phase 2b: Integrate Tools with AI Service
+
+**Update `ClassifyIntentWithAiAsync` to use function calling.**
+
+**Tasks**:
+- [ ] Add tools array to OpenAI chat completion request
+- [ ] Set `tool_choice: "auto"` for flexible tool selection
+- [ ] Parse `tool_calls` from response (in addition to content)
+- [ ] Handle mixed responses (text + tool calls)
+
+**Code Changes** (AiPlaybookBuilderService.cs):
+```csharp
+// Before: JSON intent in response content
+var response = await _openAiClient.GetChatCompletionsAsync(options);
+var json = response.Value.Choices[0].Message.Content;
+
+// After: Tool calls + optional text
+var response = await _openAiClient.GetChatCompletionsAsync(options);
+var message = response.Value.Choices[0].Message;
+if (message.ToolCalls?.Count > 0)
+{
+    foreach (var toolCall in message.ToolCalls)
+    {
+        // Execute tool and collect results
+    }
+}
+```
+
+---
+
+#### Phase 2c: Implement Tool Execution
+
+**Map tool calls → service methods → canvas operations.**
+
+**Tasks**:
+- [ ] Create `BuilderToolExecutor` class
+- [ ] Implement handler for each tool
+- [ ] Return tool results as `CanvasPatch` operations
+- [ ] Support streaming tool execution updates to PCF
+
+**Execution Flow**:
+```
+LLM Response
+    │
+    ├─ tool_calls: [{name: "add_node", arguments: {...}}]
+    │
+    ▼
+BuilderToolExecutor.ExecuteAsync(toolCall)
+    │
+    ├─ Validate arguments against schema
+    ├─ Execute operation (create node, search scopes, etc.)
+    │
+    ▼
+CanvasPatch (or ScopeCreationResult, SearchResults, etc.)
+    │
+    ▼
+SSE stream to PCF
+```
+
+---
+
+#### Phase 2d: Agentic Loop (Multi-Step Execution)
+
+**Enable multi-turn tool execution for complex operations.**
+
+**The Problem**: "Build a lease analysis playbook" requires multiple operations:
+1. Add aiAnalysis node for entity extraction
+2. Add condition node for rent threshold
+3. Add assemble node for report generation
+4. Connect nodes in sequence
+
+**The Solution**: Agentic loop pattern
+
+```
+User: "Build a lease analysis playbook"
+    │
+    ▼
+┌─────────────────────────────────────────────┐
+│  AGENTIC LOOP                               │
+│                                             │
+│  Turn 1: LLM → add_node(aiAnalysis)         │
+│          Execute → node created             │
+│          Feed result back to LLM            │
+│                                             │
+│  Turn 2: LLM → add_node(condition)          │
+│          Execute → node created             │
+│          Feed result back to LLM            │
+│                                             │
+│  Turn 3: LLM → create_edge(node1→node2)     │
+│          Execute → edge created             │
+│          Feed result back to LLM            │
+│                                             │
+│  Turn 4: LLM → "Playbook created!" (done)   │
+└─────────────────────────────────────────────┘
+    │
+    ▼
+Final canvas state streamed to PCF
+```
+
+**Tasks**:
+- [ ] Implement turn loop (max 10 turns safety limit)
+- [ ] Accumulate tool results as context for next turn
+- [ ] Stream incremental updates to PCF (each tool result)
+- [ ] Detect completion (no more tool calls, or explicit "done")
+- [ ] Handle errors gracefully (continue or abort)
+
+**Loop Termination Conditions**:
+1. LLM returns no tool calls (just text) → Done
+2. Maximum turns reached (10) → Stop with warning
+3. Error in tool execution → Depending on severity, retry or abort
+
+---
 
 **Reference**: [TL-BUILDER-001-addNode.json](builder-scopes/TL-BUILDER-001-addNode.json) shows the schema format:
 ```json
@@ -162,13 +361,78 @@ src/server/api/Sprk.Bff.Api/Services/Ai/
 
 Current state: The LLM knows about node types from the prompt text, but doesn't have dynamic access to the scope catalog.
 
-Target state: Inject KNW-BUILDER-001 (scope catalog) into context so LLM can recommend specific scopes.
+Target state: Inject KNW-BUILDER-001 (scope catalog) into context so LLM can recommend specific scopes, and implement search functionality.
+
+---
+
+#### Phase 3a: Scope Catalog Injection
+
+**Inject scope catalog into system prompt for awareness.**
 
 **Tasks**:
 - [ ] Load `KNW-BUILDER-001-scope-catalog` content at runtime
-- [ ] Inject as context section in system prompt
-- [ ] Enable "what skills are available?" queries
-- [ ] Add scope search functionality (TL-BUILDER-007)
+- [ ] Format as context section in system prompt
+- [ ] Enable queries like "what skills are available?"
+- [ ] Enable queries like "what can extract entities from documents?"
+
+**System Prompt Injection**:
+```markdown
+## Available Scopes
+
+You have access to the following pre-built scopes:
+
+### Actions (AI operations)
+- **SYS-ACT-001 Entity Extraction**: Extract named entities from documents
+- **SYS-ACT-002 Document Summary**: Generate TL;DR summaries
+- **SYS-ACT-003 Clause Analysis**: Analyze and categorize clauses
+- **SYS-ACT-004 Risk Detection**: Identify potential risks
+- **SYS-ACT-005 Financial Term Extraction**: Extract monetary values
+
+### Skills (Domain expertise)
+- **SYS-SKL-001 Real Estate Domain**: Leases, deeds, easements
+- **SYS-SKL-002 Contract Law Basics**: Contract principles
+- **SYS-SKL-003 Financial Analysis**: Financial documents
+- **SYS-SKL-004 Insurance Expertise**: Insurance, COI
+
+(etc.)
+```
+
+---
+
+#### Phase 3b: Scope Search Tool Implementation
+
+**Implement `search_scopes` tool for dynamic discovery.**
+
+**Tasks**:
+- [ ] Implement `TL-BUILDER-007-searchScopes` as `search_scopes` tool
+- [ ] Support search by name, description, document types
+- [ ] Return matching scopes with relevance ranking
+- [ ] Enable LLM to discover scopes beyond injected catalog
+
+**Search Tool Schema**:
+```json
+{
+  "name": "search_scopes",
+  "description": "Search for scopes matching criteria",
+  "parameters": {
+    "query": "string - search text",
+    "scopeType": "enum - Action|Skill|Knowledge|Tool",
+    "documentTypes": "array - filter by applicable doc types"
+  }
+}
+```
+
+---
+
+#### Phase 3c: Dynamic Scope Linking
+
+**Enable LLM to wire specific scopes to nodes.**
+
+**Tasks**:
+- [ ] Implement `TL-BUILDER-005-linkScope` as `link_scope` tool
+- [ ] Validate scope exists before linking
+- [ ] Update node config with scope reference
+- [ ] Stream update to PCF
 
 **Key Files**:
 - [KNW-BUILDER-001-scope-catalog.json](builder-scopes/KNW-BUILDER-001-scope-catalog.json) - Contains catalog of actions, skills, knowledge, tools
@@ -255,7 +519,7 @@ curl -X POST https://spe-api-dev-67e2xz.azurewebsites.net/api/ai-playbook-builde
 
 ## Session Notes
 
-### 2026-01-20 Session
+### 2026-01-20 Session (Morning)
 
 **Completed**:
 1. Updated backend prompts to conversational "Claude Code" style
@@ -264,9 +528,71 @@ curl -X POST https://spe-api-dev-67e2xz.azurewebsites.net/api/ai-playbook-builde
 4. Created PR #142 with all changes
 5. Documented architecture and created this checklist
 
+---
+
+### 2026-01-20 Session (Afternoon) - Message Passthrough Fix
+
+**Problem Identified**:
+Testing revealed AI responses were generic ("Let me help you with that question") instead of conversational. Root cause: LLM returns a `message` field with conversational text, but it was being dropped.
+
+**Root Cause Analysis**:
+- LLM prompt asks for JSON with `message` field for conversational response
+- `AiIntentResult` model was missing `Message` property - field was ignored
+- `IntentClassification` model was also missing `Message` property
+- `ExecuteIntentAsync` used hardcoded messages instead of AI's message
+
+**Fixes Applied**:
+1. Added `Message` property to `AiIntentResult` (AiIntentClassificationSchema.cs:37)
+2. Added `Message` property to `IntentClassification` (IAiPlaybookBuilderService.cs)
+3. Updated `ConvertAiIntentToClassification` to pass through Message
+4. Updated `ConvertToIntentClassification` to pass through Message
+5. Updated `ProcessMessageAsync` to use AI's message as intro
+6. Updated `ExecuteIntentAsync` to remove redundant hardcoded messages
+
+**Files Modified**:
+- `AiIntentClassificationSchema.cs` - Added Message property
+- `IAiPlaybookBuilderService.cs` - Added Message property to IntentClassification
+- `AiPlaybookBuilderService.cs` - Updated conversion and execution methods
+
+**Deployed**: API redeployed to https://spe-api-dev-67e2xz.azurewebsites.net
+
 **Next Steps**:
-1. End-to-end test conversational experience in Dataverse
-2. Begin Phase 2 (tool schema integration) if Phase 1 validated
+1. Test conversational experience in Dataverse (hard refresh browser)
+2. Verify AI asks clarifying questions and provides friendly responses
+3. Begin Phase 2 (tool schema integration) once validated
+
+---
+
+### 2026-01-20 Session (Evening) - Architecture Planning for Tool/Agentic Pattern
+
+**Discussion Summary**:
+User articulated the core challenge: "enable the playbook builder AI agent to have awareness of all aspects of building a playbook--just like Claude Code for writing software code--and how do we build that awareness."
+
+**Key Architectural Decisions**:
+
+1. **OpenAI Function Calling** - Use native tool support instead of JSON intent classification
+   - More reliable than prompting for JSON
+   - Validated against schemas
+   - Supports parallel tool calls
+
+2. **Agentic Loop Pattern** - Multi-turn execution for complex operations
+   - "Build a lease playbook" requires multiple tool calls
+   - Each tool result feeds back into LLM context
+   - Continue until LLM stops calling tools or max turns reached
+
+3. **Scope Catalog Injection** - Give LLM awareness of available scopes
+   - KNW-BUILDER-001 injected into system prompt
+   - Enables "what skills are available?" queries
+   - `search_scopes` tool for dynamic discovery beyond catalog
+
+4. **Tool Set** - 9 tools mapped from TL-BUILDER-* files:
+   - Canvas ops: `add_node`, `remove_node`, `create_edge`, `update_node_config`, `auto_layout`, `validate_canvas`
+   - Scope ops: `link_scope`, `search_scopes`, `create_scope`
+
+**Files Updated**:
+- This checklist - Added Vision section, detailed Phase 2 sub-phases, updated Phase 3
+
+**Beginning Implementation**: Phase 2a - Create BuilderToolDefinitions.cs
 
 ---
 
