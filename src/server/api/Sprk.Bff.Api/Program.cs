@@ -578,6 +578,10 @@ builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.
 // Uses FileIndexingService with app-only authentication (idempotency: rag-index-{driveId}-{itemId})
 builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.RagIndexingJobHandler>();
 
+// Bulk RAG indexing job handler - for admin-initiated and scheduled bulk document indexing
+// Queries documents from Dataverse, processes with bounded concurrency, tracks progress via BatchJobStatusStore
+builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.BulkRagIndexingJobHandler>();
+
 // Configure Service Bus job processing
 var serviceBusConnectionString = builder.Configuration.GetConnectionString("ServiceBus");
 if (string.IsNullOrWhiteSpace(serviceBusConnectionString))
@@ -602,11 +606,17 @@ builder.Services.Configure<Sprk.Bff.Api.Services.Jobs.EmbeddingMigrationOptions>
     builder.Configuration.GetSection(Sprk.Bff.Api.Services.Jobs.EmbeddingMigrationOptions.SectionName));
 builder.Services.AddHostedService<Sprk.Bff.Api.Services.Jobs.EmbeddingMigrationService>();
 
+// Scheduled RAG indexing service - periodic catch-up indexing for unindexed documents
+builder.Services.Configure<Sprk.Bff.Api.Services.Jobs.ScheduledRagIndexingOptions>(
+    builder.Configuration.GetSection(Sprk.Bff.Api.Services.Jobs.ScheduledRagIndexingOptions.SectionName));
+builder.Services.AddHostedService<Sprk.Bff.Api.Services.Jobs.ScheduledRagIndexingService>();
+
 builder.Logging.AddConsole();
 Console.WriteLine("✓ Job processing configured with Service Bus (queue: sdap-jobs)");
 Console.WriteLine("✓ Email polling backup service configured");
 Console.WriteLine("✓ Document vector backfill service registered (enable via config)");
 Console.WriteLine("✓ Embedding migration service registered (enable via config)");
+Console.WriteLine("✓ Scheduled RAG indexing service registered (enable via config)");
 
 // ============================================================================
 // HEALTH CHECKS - Redis availability monitoring
@@ -991,12 +1001,14 @@ builder.Services.AddOpenTelemetry()
     .WithMetrics(metrics =>
     {
         metrics.AddMeter("Sprk.Bff.Api.Ai");   // AI telemetry (summarization, RAG, tools, export)
+        metrics.AddMeter("Sprk.Bff.Api.Rag");  // RAG telemetry (indexing jobs, search operations)
         metrics.AddMeter("Sprk.Bff.Api.Cache"); // Cache metrics (hits, misses, latency)
         metrics.AddMeter("Sprk.Bff.Api.CircuitBreaker"); // Circuit breaker metrics
     })
     .WithTracing(tracing =>
     {
         tracing.AddSource("Sprk.Bff.Api.Ai"); // AI distributed tracing
+        tracing.AddSource("Sprk.Bff.Api.Rag"); // RAG distributed tracing
     });
 
 // ============================================================================
@@ -1201,6 +1213,37 @@ app.MapGet("/debug/document/{id:guid}", async (Guid id, IDataverseService datave
     {
         logger.LogError(ex, "[DEBUG-ENDPOINT] Error retrieving document {Id}", id);
         return Results.Ok(new { status = "ERROR", documentId = id.ToString(), error = ex.Message, innerError = ex.InnerException?.Message });
+    }
+}).AllowAnonymous();
+
+// DEBUG: Test querying children by parent ID (temporary - for debugging email relationships)
+app.MapGet("/debug/children/{parentId:guid}", async (Guid parentId, IDataverseService dataverseService, ILogger<Program> logger) =>
+{
+    logger.LogInformation("[DEBUG-ENDPOINT] Testing GetDocumentsByParentAsync for parent {ParentId}", parentId);
+    try
+    {
+        var children = await dataverseService.GetDocumentsByParentAsync(parentId);
+        var childList = children.ToList();
+        return Results.Ok(new
+        {
+            status = "OK",
+            parentDocumentId = parentId.ToString(),
+            childCount = childList.Count,
+            children = childList.Select(c => new
+            {
+                documentId = c.Id,
+                name = c.Name,
+                fileName = c.FileName,
+                isEmailArchive = c.IsEmailArchive,
+                parentDocumentId = c.ParentDocumentId,
+                createdOn = c.CreatedOn
+            })
+        });
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "[DEBUG-ENDPOINT] Error querying children for parent {ParentId}", parentId);
+        return Results.Ok(new { status = "ERROR", parentDocumentId = parentId.ToString(), error = ex.Message, innerError = ex.InnerException?.Message });
     }
 }).AllowAnonymous();
 

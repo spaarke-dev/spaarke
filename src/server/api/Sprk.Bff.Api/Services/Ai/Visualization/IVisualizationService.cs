@@ -476,4 +476,10 @@ public record GraphMetadata
     /// Whether the source document embedding was retrieved from cache.
     /// </summary>
     public bool CacheHit { get; init; }
+
+    /// <summary>
+    /// Diagnostic message for debugging when no results are returned.
+    /// Set when the source document cannot be found or other issues occur.
+    /// </summary>
+    public string? DiagnosticMessage { get; set; }
 }

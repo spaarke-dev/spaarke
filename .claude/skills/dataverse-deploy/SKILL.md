@@ -9,7 +9,7 @@ alwaysApply: false
 # Dataverse Deploy
 
 > **Category**: Operations
-> **Last Updated**: January 18, 2026
+> **Last Updated**: January 19, 2026
 > **Primary Guide**: [`docs/guides/PCF-DEPLOYMENT-GUIDE.md`](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md)
 
 ---
@@ -37,9 +37,12 @@ alwaysApply: false
 - ❌ **NEVER** use managed solution unless explicitly told - unmanaged is the default
 - ❌ **NEVER** use or create a new publisher - always use `Spaarke` (`sprk_`)
 - ❌ **NEVER** reuse old solution ZIPs - always pack fresh
-- ❌ **NEVER** use `pac pcf push` - creates temp solutions, rebuilds in dev mode
 - ❌ **NEVER** use `Compress-Archive` - creates backslashes, breaks import
 - ❌ **NEVER** skip copying files - stale bundles cause silent failures
+
+### ⚠️ AVOID (but valid fallback):
+- ⚠️ **AVOID** `pac pcf push` for production - rebuilds in dev mode, larger bundles
+- ✅ **BUT** use `pac pcf push --publisher-prefix sprk` when solution imports empty (see Troubleshooting)
 
 ---
 
@@ -101,7 +104,7 @@ pac solution list | grep -i "{SolutionName}"
 
 Hard refresh browser (`Ctrl+Shift+R`) and verify version footer.
 
-> **⚠️ Why NOT `pac pcf push`?** It ALWAYS rebuilds in development mode, ignoring production optimizations. Bundle size increases from ~300KB to 8MB. Tree-shaking is lost. Use the pack.ps1 workflow instead.
+> **⚠️ Why avoid `pac pcf push` for production?** It rebuilds in development mode, ignoring production optimizations. Bundle size increases from ~300KB to 8MB. Tree-shaking is lost. **However**, it is a valid fallback when `pac solution pack` imports an empty solution (see "Solution Imports But Is Empty" in Troubleshooting).
 
 ---
 
@@ -188,8 +191,8 @@ Deploy Dataverse components using PAC CLI following the [PCF-DEPLOYMENT-GUIDE.md
 
 ### Key Guidance
 
-- **Always use the pack.ps1 workflow** - build → copy files → pack.ps1 → import
-- **Never use `pac pcf push`** - it rebuilds in dev mode, ignoring production optimizations
+- **Prefer pack.ps1 workflow** for production - build → copy files → pack.ps1 → import
+- **Use `pac pcf push` as fallback** when solution imports empty (Customizations.xml issue)
 - **Version Locations:** Update ALL 5: (1) ControlManifest.Input.xml, (2) UI footer, (3) Solution.xml, (4) extracted ControlManifest.xml, (5) pack.ps1
 - **Full Guide:** See [`docs/guides/PCF-DEPLOYMENT-GUIDE.md`](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md) for complete workflow
 
@@ -529,6 +532,68 @@ pac solution publish-all
 | `CustomControls Source File styles.css does not exist` | styles.css not copied to solution folder | Copy ALL 3 files to Solution folder |
 | Solution import succeeds but UI shows old behavior | Control manifest version not updated | **Update ControlManifest.Input.xml version FIRST**, rebuild, then deploy |
 | Deployment seems stuck on old version | Dataverse control cache | Delete solution with `pac solution delete`, then reimport fresh |
+| **Solution imports but shows 0 components** | Empty `Customizations.xml` | Use `pac pcf push` fallback (see below) |
+
+### 🚨 Solution Imports But Is Empty (0 Components)
+
+**Symptoms:**
+- `pac solution import` succeeds
+- `pac solution list` shows solution with correct version
+- But solution in portal shows "All: 0" - no components
+- PCF control doesn't appear or doesn't update
+
+**Root Cause:**
+
+The `Customizations.xml` file in your Solution folder has **empty component sections**:
+```xml
+<CustomControls />
+<WebResources />
+```
+
+When you run `pac solution pack`, it packs exactly what's in `Customizations.xml`. If the component references are missing, you get an empty solution that imports but does nothing.
+
+**Solution - Use `pac pcf push` as Fallback:**
+
+```bash
+cd src/client/pcf/{ControlName}
+
+# pac pcf push generates proper Customizations.xml automatically
+pac pcf push --publisher-prefix sprk
+
+# If you get file lock error during cleanup, ignore it - solution is already packed
+# Import the generated solution
+pac solution import --path "out/PowerAppsTools_sprk/bin/Debug/PowerAppsTools_sprk.zip" --publish-changes
+
+# Verify
+pac solution list | grep -i "{ControlName}"
+```
+
+**Why This Works:**
+
+`pac pcf push` generates a proper `Customizations.xml` with component references:
+```xml
+<CustomControls>
+  <CustomControl>
+    <Name>sprk_Spaarke.Controls.UniversalDocumentUpload</Name>
+    <FileName>/Controls/sprk_Spaarke.Controls.UniversalDocumentUpload/ControlManifest.xml</FileName>
+  </CustomControl>
+</CustomControls>
+```
+
+**Prevention:**
+
+After using `pac pcf push` successfully:
+1. Examine the generated `Customizations.xml` and update your Solution folder's version to match the structure
+2. **IMPORTANT**: `pac pcf push` bypasses the Solution folder entirely - it builds from source and deploys directly to Dataverse. **You must still copy the fresh bundle.js and ControlManifest.xml to your Solution folder** to keep it in sync for future `pac solution pack` deployments.
+
+```bash
+# After pac pcf push, sync Solution folder:
+cp out/controls/control/bundle.js \
+   out/controls/control/ControlManifest.xml \
+   Solution/src/WebResources/sprk_Spaarke.Controls.{ControlName}/
+```
+
+This prevents the Solution folder from becoming stale and ensures future solution imports work correctly.
 
 ### Orphaned Control Cleanup
 
@@ -692,3 +757,20 @@ When deploying PCF updates, the #1 cause of "deployment succeeded but nothing ch
 3. If still stuck, use the nuclear option: `pac solution delete` then reimport
 
 **Never assume** that updating `solution.xml` alone will bust the cache. The control manifest version is what Dataverse checks.
+
+---
+
+**🚨 CRITICAL: Solution Imports But Shows 0 Components**
+
+If `pac solution pack` + `pac solution import` succeeds but the solution is empty in the portal:
+
+1. **Root cause**: `Customizations.xml` has empty `<CustomControls />` section
+2. **Fix**: Use `pac pcf push --publisher-prefix sprk` as fallback
+3. **Why it works**: `pac pcf push` auto-generates proper component references
+4. **File lock error during cleanup is harmless** - solution is already packed, import it directly
+5. **CRITICAL**: After `pac pcf push`, **sync the Solution folder** - `pac pcf push` bypasses it entirely, leaving it stale:
+   ```bash
+   cp out/controls/control/bundle.js out/controls/control/ControlManifest.xml \
+      Solution/src/WebResources/sprk_Spaarke.Controls.{ControlName}/
+   ```
+6. **Prevention**: Copy the generated `Customizations.xml` structure to your Solution folder for future `pac solution pack` deployments

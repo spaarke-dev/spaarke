@@ -22,6 +22,7 @@ import {
     Body1Strong,
     mergeClasses,
     Link,
+    Tooltip,
 } from "@fluentui/react-components";
 import {
     Document20Regular,
@@ -43,6 +44,7 @@ import {
     MailInbox24Regular,
     // Action icons
     Open16Regular,
+    Info16Regular,
 } from "@fluentui/react-icons";
 import type { DocumentNodeData } from "../types/graph";
 import { isParentHubNode, type NodeType } from "../types/api";
@@ -166,8 +168,8 @@ const getParentHubLabel = (nodeType: NodeType): string => {
  */
 const useStyles = makeStyles({
     nodeContainer: {
-        minWidth: "100px",
-        maxWidth: "130px",
+        minWidth: "120px",
+        maxWidth: "160px",
     },
     sourceCard: {
         backgroundColor: tokens.colorBrandBackground,
@@ -271,7 +273,7 @@ const useStyles = makeStyles({
         overflow: "hidden",
         textOverflow: "ellipsis",
         whiteSpace: "nowrap",
-        maxWidth: "80px",
+        maxWidth: "100px",
         fontSize: tokens.fontSizeBase100,
     },
     caption: {
@@ -308,6 +310,7 @@ const useStyles = makeStyles({
         textDecoration: "none",
         color: tokens.colorBrandForegroundLink,
         cursor: "pointer",
+        marginLeft: "auto", // Push to right side of footer
         "&:hover": {
             textDecoration: "underline",
         },
@@ -318,11 +321,176 @@ const useStyles = makeStyles({
     },
     footerRow: {
         display: "flex",
-        justifyContent: "space-between",
         alignItems: "center",
+        gap: tokens.spacingHorizontalXS,
         width: "100%",
     },
+    infoIcon: {
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        cursor: "pointer",
+        padding: "2px",
+        borderRadius: tokens.borderRadiusSmall,
+        color: tokens.colorNeutralForeground3,
+        "&:hover": {
+            backgroundColor: tokens.colorNeutralBackground3,
+            color: tokens.colorNeutralForeground1,
+        },
+    },
+    sourceInfoIcon: {
+        color: tokens.colorNeutralForegroundOnBrand,
+        opacity: 0.7,
+        "&:hover": {
+            backgroundColor: tokens.colorBrandBackgroundPressed,
+            opacity: 1,
+        },
+    },
+    tooltipContent: {
+        display: "flex",
+        flexDirection: "column",
+        gap: tokens.spacingVerticalXXS,
+        maxWidth: "250px",
+    },
+    tooltipTitle: {
+        fontWeight: 600,
+        fontSize: tokens.fontSizeBase200,
+        wordBreak: "break-word",
+    },
+    tooltipRow: {
+        display: "flex",
+        fontSize: tokens.fontSizeBase100,
+        gap: tokens.spacingHorizontalXS,
+    },
+    tooltipLabel: {
+        color: tokens.colorNeutralForeground3,
+        minWidth: "60px",
+    },
+    tooltipValue: {
+        color: tokens.colorNeutralForeground1,
+        wordBreak: "break-word",
+    },
 });
+
+/**
+ * Format date string to readable format
+ */
+const formatDate = (isoDate: string | undefined): string | null => {
+    if (!isoDate) return null;
+    try {
+        const date = new Date(isoDate);
+        return date.toLocaleDateString(undefined, {
+            year: "numeric",
+            month: "short",
+            day: "numeric",
+        });
+    } catch {
+        return null;
+    }
+};
+
+/**
+ * Build tooltip content for document info
+ */
+const buildTooltipContent = (
+    data: DocumentNodeData,
+    styles: ReturnType<typeof useStyles>
+): React.ReactElement => {
+    const similarity = data.similarity ?? 0;
+    const similarityPercent = Math.round(similarity * 100);
+
+    return (
+        <div className={styles.tooltipContent}>
+            {/* Full document name */}
+            <div className={styles.tooltipTitle}>{data.name}</div>
+
+            {/* Document type/classification (e.g., "Contract", "Invoice") */}
+            {data.documentType && (
+                <div className={styles.tooltipRow}>
+                    <span className={styles.tooltipLabel}>Doc Type:</span>
+                    <span className={styles.tooltipValue}>{data.documentType}</span>
+                </div>
+            )}
+
+            {/* File type/extension */}
+            {data.fileType && (
+                <div className={styles.tooltipRow}>
+                    <span className={styles.tooltipLabel}>Format:</span>
+                    <span className={styles.tooltipValue}>{data.fileType.toUpperCase()}</span>
+                </div>
+            )}
+
+            {/* File size */}
+            {data.size != null && data.size > 0 && (
+                <div className={styles.tooltipRow}>
+                    <span className={styles.tooltipLabel}>Size:</span>
+                    <span className={styles.tooltipValue}>{formatFileSize(data.size)}</span>
+                </div>
+            )}
+
+            {/* Similarity score (for related nodes) */}
+            {!data.isSource && similarity > 0 && (
+                <div className={styles.tooltipRow}>
+                    <span className={styles.tooltipLabel}>Similarity:</span>
+                    <span className={styles.tooltipValue}>{similarityPercent}%</span>
+                </div>
+            )}
+
+            {/* Relationship type */}
+            {data.relationshipLabel && (
+                <div className={styles.tooltipRow}>
+                    <span className={styles.tooltipLabel}>Relation:</span>
+                    <span className={styles.tooltipValue}>{data.relationshipLabel}</span>
+                </div>
+            )}
+
+            {/* Parent entity */}
+            {data.parentEntityName && (
+                <div className={styles.tooltipRow}>
+                    <span className={styles.tooltipLabel}>Parent:</span>
+                    <span className={styles.tooltipValue}>{data.parentEntityName}</span>
+                </div>
+            )}
+
+            {/* Created date */}
+            {formatDate(data.createdOn) && (
+                <div className={styles.tooltipRow}>
+                    <span className={styles.tooltipLabel}>Created:</span>
+                    <span className={styles.tooltipValue}>{formatDate(data.createdOn)}</span>
+                </div>
+            )}
+
+            {/* Modified date */}
+            {formatDate(data.modifiedOn) && (
+                <div className={styles.tooltipRow}>
+                    <span className={styles.tooltipLabel}>Modified:</span>
+                    <span className={styles.tooltipValue}>{formatDate(data.modifiedOn)}</span>
+                </div>
+            )}
+
+            {/* Document ID or SPE File ID */}
+            {(data.documentId ?? data.speFileId) && (
+                <div className={styles.tooltipRow}>
+                    <span className={styles.tooltipLabel}>ID:</span>
+                    <span className={styles.tooltipValue} style={{ fontSize: "9px" }}>
+                        {(data.documentId ?? data.speFileId)?.substring(0, 8)}...
+                    </span>
+                </div>
+            )}
+
+            {/* Shared keywords */}
+            {data.sharedKeywords && data.sharedKeywords.length > 0 && (
+                <div className={styles.tooltipRow}>
+                    <span className={styles.tooltipLabel}>Keywords:</span>
+                    <span className={styles.tooltipValue}>
+                        {data.sharedKeywords.slice(0, 3).join(", ")}
+                        {data.sharedKeywords.length > 3 && "..."}
+                    </span>
+                </div>
+            )}
+        </div>
+    );
+};
 
 /**
  * DocumentNode component for React Flow
@@ -341,6 +509,9 @@ export const DocumentNode: React.FC<NodeProps<DocumentNodeData>> = ({
     const isParentHub = isParentHubNode(nodeType);
     const relationshipLabel = data.relationshipLabel;
     const recordUrl = data.recordUrl;
+
+    // Build tooltip content for this node
+    const tooltipContent = buildTooltipContent(data, styles);
 
     // Handle click on "Open" link to navigate to Dataverse record
     const handleOpenRecord = (e: React.MouseEvent) => {
@@ -426,9 +597,21 @@ export const DocumentNode: React.FC<NodeProps<DocumentNodeData>> = ({
                         }
                     />
                     <div className={styles.footer}>
-                        <Badge appearance="tint" color="success" size="small">
-                            {getParentHubLabel(nodeType)}
-                        </Badge>
+                        <div className={styles.footerRow}>
+                            <Badge appearance="tint" color="success" size="small">
+                                {getParentHubLabel(nodeType)}
+                            </Badge>
+                            <Tooltip
+                                content={tooltipContent}
+                                relationship="description"
+                                positioning="above"
+                                withArrow
+                            >
+                                <div className={styles.infoIcon}>
+                                    <Info16Regular />
+                                </div>
+                            </Tooltip>
+                        </div>
                     </div>
                 </Card>
                 {/* Target handle on RIGHT - parent receives connections from documents */}
@@ -506,7 +689,7 @@ export const DocumentNode: React.FC<NodeProps<DocumentNodeData>> = ({
                     }
                 />
 
-                {/* Footer for related nodes: relationship type and Open link */}
+                {/* Footer for related nodes: relationship type, info icon, and Open link */}
                 {!isSource && (
                     <div className={styles.footer}>
                         <div className={styles.footerRow}>
@@ -531,7 +714,18 @@ export const DocumentNode: React.FC<NodeProps<DocumentNodeData>> = ({
                             ) : (
                                 <span /> // Empty spacer
                             )}
-                            {/* Open record link */}
+                            {/* Info icon with tooltip */}
+                            <Tooltip
+                                content={tooltipContent}
+                                relationship="description"
+                                positioning="above"
+                                withArrow
+                            >
+                                <div className={styles.infoIcon}>
+                                    <Info16Regular />
+                                </div>
+                            </Tooltip>
+                            {/* Open record icon */}
                             {recordUrl && (
                                 <Link
                                     className={styles.openLink}
@@ -539,20 +733,30 @@ export const DocumentNode: React.FC<NodeProps<DocumentNodeData>> = ({
                                     title="Open in Dataverse"
                                 >
                                     <Open16Regular />
-                                    Open
                                 </Link>
                             )}
                         </div>
                     </div>
                 )}
 
-                {/* Footer for source node: Source badge and Open link */}
+                {/* Footer for source node: Source badge, info icon, and Open icon */}
                 {isSource && (
                     <div className={mergeClasses(styles.footer, styles.sourceFooter)}>
                         <div className={styles.footerRow}>
                             <Badge appearance="filled" color="brand" size="small">
                                 Source
                             </Badge>
+                            {/* Info icon with tooltip */}
+                            <Tooltip
+                                content={tooltipContent}
+                                relationship="description"
+                                positioning="above"
+                                withArrow
+                            >
+                                <div className={mergeClasses(styles.infoIcon, styles.sourceInfoIcon)}>
+                                    <Info16Regular />
+                                </div>
+                            </Tooltip>
                             {recordUrl && (
                                 <Link
                                     className={mergeClasses(styles.openLink, styles.sourceOpenLink)}
@@ -560,7 +764,6 @@ export const DocumentNode: React.FC<NodeProps<DocumentNodeData>> = ({
                                     title="Open in Dataverse"
                                 >
                                     <Open16Regular />
-                                    Open
                                 </Link>
                             )}
                         </div>
