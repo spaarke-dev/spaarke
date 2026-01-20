@@ -44,9 +44,17 @@ The AI Playbook Builder has three main components:
 
 | Component | Location | Status |
 |-----------|----------|--------|
-| **PCF Control** | `src/client/pcf/PlaybookBuilderHost/` | v2.25.0 deployed |
-| **Backend Service** | `src/server/api/Sprk.Bff.Api/Services/Ai/` | Updated, needs deploy |
+| **PCF Control** | `src/client/pcf/PlaybookBuilderHost/` | v2.25.0+ with slash commands |
+| **Backend Service** | `src/server/api/Sprk.Bff.Api/Services/Ai/` | ✅ Phase 2 complete (agentic + tools) |
 | **Builder Scopes** | `projects/.../notes/builder-scopes/` | Design artifacts (23 JSON files) |
+
+**Phase Status**:
+| Phase | Status |
+|-------|--------|
+| Phase 1: Conversational Experience | ✅ Complete |
+| Phase 2: Tool Schema Integration | ✅ Complete |
+| Phase 3: Knowledge Scope Integration | ⏳ Pending |
+| Phase 4: Dataverse Persistence | ⏳ Future |
 
 ---
 
@@ -150,45 +158,45 @@ See [builder-scopes/INDEX.md](builder-scopes/INDEX.md) for full inventory.
 
 ---
 
-### Phase 2: Tool Schema Integration (IN PROGRESS)
+### Phase 2: Tool Schema Integration (COMPLETE ✅)
 
 **Goal**: Give the LLM structured tools using OpenAI Function Calling
 
-Current state: The LLM receives a prompt describing operations in text. It returns JSON with intent classification. The backend then maps this to canvas operations.
+~~Current state: The LLM receives a prompt describing operations in text. It returns JSON with intent classification. The backend then maps this to canvas operations.~~
 
-Target state: The LLM receives actual tool definitions (OpenAI function calling format). It can call tools directly, which get validated against schemas.
+**Implemented**: The LLM receives actual tool definitions (OpenAI function calling format). It can call tools directly, which get validated against schemas. The `/agentic` endpoint implements multi-turn tool execution.
 
 ---
 
-#### Phase 2a: Create Tool Definitions (CURRENT)
+#### Phase 2a: Create Tool Definitions (COMPLETE ✅)
 
 **Convert TL-BUILDER-* JSON files to OpenAI function calling format.**
 
-| TL-BUILDER | OpenAI Tool Name | Description |
-|------------|------------------|-------------|
-| TL-BUILDER-001 | `add_node` | Add a node to the playbook canvas |
-| TL-BUILDER-002 | `remove_node` | Remove a node from the canvas |
-| TL-BUILDER-003 | `create_edge` | Connect two nodes |
-| TL-BUILDER-004 | `update_node_config` | Modify node configuration |
-| TL-BUILDER-005 | `link_scope` | Wire a scope to a node |
-| TL-BUILDER-006 | `create_scope` | Create a new scope in Dataverse |
-| TL-BUILDER-007 | `search_scopes` | Find existing scopes by criteria |
-| TL-BUILDER-008 | `auto_layout` | Arrange canvas nodes |
-| TL-BUILDER-009 | `validate_canvas` | Validate playbook structure |
+| TL-BUILDER | OpenAI Tool Name | Description | Status |
+|------------|------------------|-------------|--------|
+| TL-BUILDER-001 | `add_node` | Add a node to the playbook canvas | ✅ |
+| TL-BUILDER-002 | `remove_node` | Remove a node from the canvas | ✅ |
+| TL-BUILDER-003 | `create_edge` | Connect two nodes | ✅ |
+| TL-BUILDER-004 | `update_node_config` | Modify node configuration | ✅ |
+| TL-BUILDER-005 | `link_scope` | Wire a scope to a node | ✅ |
+| TL-BUILDER-006 | `create_scope` | Create a new scope in Dataverse | ✅ |
+| TL-BUILDER-007 | `search_scopes` | Find existing scopes by criteria | ✅ |
+| TL-BUILDER-008 | `auto_layout` | Arrange canvas nodes | ✅ |
+| TL-BUILDER-009 | `validate_canvas` | Validate playbook structure | ✅ |
 
 **Tasks**:
-- [ ] Create `BuilderToolDefinitions.cs` with all 9 tool schemas
-- [ ] Create `Models/BuilderToolCall.cs` for response types
-- [ ] Map each TL-BUILDER inputSchema → OpenAI function parameters
+- [x] Create `BuilderToolDefinitions.cs` with all 9 tool schemas
+- [x] Create `Models/BuilderToolCall.cs` for response types
+- [x] Map each TL-BUILDER inputSchema → OpenAI function parameters
 
-**Key Files to Create**:
+**Files Created** (commit `52ef667`):
 ```
-src/server/api/Sprk.Bff.Api/Services/Ai/
-├── Tools/
-│   ├── BuilderToolDefinitions.cs (NEW) - Tool schemas for OpenAI
-│   └── BuilderToolExecutor.cs (NEW) - Tool execution logic
-└── Models/
-    └── BuilderToolCall.cs (NEW) - Tool call response models
+src/server/api/Sprk.Bff.Api/Services/Ai/Builder/
+├── BuilderToolDefinitions.cs   - Tool schemas for OpenAI
+├── BuilderToolExecutor.cs      - Tool execution logic (729 lines)
+├── BuilderToolCall.cs          - Tool call response models
+├── BuilderAgentService.cs      - Agentic loop orchestration
+└── AiBuilderErrors.cs          - Error handling
 ```
 
 **OpenAI Tool Format Example** (from TL-BUILDER-001):
@@ -228,15 +236,15 @@ src/server/api/Sprk.Bff.Api/Services/Ai/
 
 ---
 
-#### Phase 2b: Integrate Tools with AI Service
+#### Phase 2b: Integrate Tools with AI Service (COMPLETE ✅)
 
 **Update `ClassifyIntentWithAiAsync` to use function calling.**
 
 **Tasks**:
-- [ ] Add tools array to OpenAI chat completion request
-- [ ] Set `tool_choice: "auto"` for flexible tool selection
-- [ ] Parse `tool_calls` from response (in addition to content)
-- [ ] Handle mixed responses (text + tool calls)
+- [x] Add tools array to OpenAI chat completion request
+- [x] Set `tool_choice: "auto"` for flexible tool selection
+- [x] Parse `tool_calls` from response (in addition to content)
+- [x] Handle mixed responses (text + tool calls)
 
 **Code Changes** (AiPlaybookBuilderService.cs):
 ```csharp
@@ -258,15 +266,15 @@ if (message.ToolCalls?.Count > 0)
 
 ---
 
-#### Phase 2c: Implement Tool Execution
+#### Phase 2c: Implement Tool Execution (COMPLETE ✅)
 
 **Map tool calls → service methods → canvas operations.**
 
 **Tasks**:
-- [ ] Create `BuilderToolExecutor` class
-- [ ] Implement handler for each tool
-- [ ] Return tool results as `CanvasPatch` operations
-- [ ] Support streaming tool execution updates to PCF
+- [x] Create `BuilderToolExecutor` class
+- [x] Implement handler for each tool
+- [x] Return tool results as `CanvasPatch` operations
+- [x] Support streaming tool execution updates to PCF
 
 **Execution Flow**:
 ```
@@ -289,9 +297,11 @@ SSE stream to PCF
 
 ---
 
-#### Phase 2d: Agentic Loop (Multi-Step Execution)
+#### Phase 2d: Agentic Loop (Multi-Step Execution) (COMPLETE ✅)
 
 **Enable multi-turn tool execution for complex operations.**
+
+**Implemented**: `/api/ai/playbook-builder/agentic` endpoint with `BuilderAgentService`
 
 **The Problem**: "Build a lease analysis playbook" requires multiple operations:
 1. Add aiAnalysis node for entity extraction
@@ -328,11 +338,13 @@ Final canvas state streamed to PCF
 ```
 
 **Tasks**:
-- [ ] Implement turn loop (max 10 turns safety limit)
-- [ ] Accumulate tool results as context for next turn
-- [ ] Stream incremental updates to PCF (each tool result)
-- [ ] Detect completion (no more tool calls, or explicit "done")
-- [ ] Handle errors gracefully (continue or abort)
+- [x] Implement turn loop (max 10 turns safety limit)
+- [x] Accumulate tool results as context for next turn
+- [x] Stream incremental updates to PCF (each tool result)
+- [x] Detect completion (no more tool calls, or explicit "done")
+- [x] Handle errors gracefully (continue or abort)
+
+**Implementation**: `BuilderAgentService.ExecuteAsync()` in `src/server/api/Sprk.Bff.Api/Services/Ai/Builder/BuilderAgentService.cs`
 
 **Loop Termination Conditions**:
 1. LLM returns no tool calls (just text) → Done
@@ -593,6 +605,53 @@ User articulated the core challenge: "enable the playbook builder AI agent to ha
 - This checklist - Added Vision section, detailed Phase 2 sub-phases, updated Phase 3
 
 **Beginning Implementation**: Phase 2a - Create BuilderToolDefinitions.cs
+
+---
+
+### 2026-01-20 Session (Night) - Phase 2 Complete + PCF Slash Commands
+
+**Phase 2 Implementation Complete** (commit `52ef667`):
+
+All 4 sub-phases of Tool Schema Integration completed:
+- **Phase 2a**: `BuilderToolDefinitions.cs` - 9 OpenAI function calling tool schemas
+- **Phase 2b**: Tools integrated with AI service via function calling
+- **Phase 2c**: `BuilderToolExecutor.cs` (729 lines) - Tool execution logic
+- **Phase 2d**: `BuilderAgentService.cs` - Agentic loop with multi-turn execution
+
+**New Backend Files**:
+```
+src/server/api/Sprk.Bff.Api/Services/Ai/Builder/
+├── BuilderToolDefinitions.cs   - Tool schemas
+├── BuilderToolExecutor.cs      - Tool execution (729 lines)
+├── BuilderToolCall.cs          - Response models
+├── BuilderAgentService.cs      - Agentic loop
+└── AiBuilderErrors.cs          - Error handling
+```
+
+**New API Endpoints**:
+- `POST /api/ai/playbook-builder/agentic` - Agentic builder with function calling
+- `POST /api/ai/playbook-builder/clarification-response` - Handle clarification responses
+- `POST /api/ai/playbook-builder/generate-clarification` - Generate clarification questions
+
+**PCF Slash Command Support** (ChatInput.tsx v1.1.0):
+- Added `CommandPalette.tsx` - Visual command picker
+- Added `commands.ts` - Command definitions
+- Typing `/` shows command palette
+- Commands: `/help`, `/clear`, `/new`, etc.
+
+**Files Modified**:
+- `ChatInput.tsx` v1.1.0 - Slash command integration
+- `AiPlaybookBuilderEndpoints.cs` - New endpoints + correlation IDs in errors
+
+**Status**:
+- ✅ Phase 2 (Tool Schema Integration): **COMPLETE**
+- ⏳ Phase 3 (Knowledge Scope Integration): **PENDING**
+- ⏳ Phase 4 (Dataverse Persistence): **FUTURE**
+
+**Next Steps**:
+1. Test agentic endpoint in Dataverse
+2. Wire PCF to use `/agentic` endpoint for complex operations
+3. Begin Phase 3 (scope catalog injection)
 
 ---
 
