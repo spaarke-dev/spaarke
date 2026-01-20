@@ -13,22 +13,23 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 003 - Update FileIndexingService |
+| **Task** | 010 - Create SemanticSearch DTOs |
 | **Step** | Ready to start |
 | **Status** | pending |
-| **Next Action** | Execute task 003 (update indexing service with parent entity fields) |
+| **Next Action** | Begin Phase 2: Create SemanticSearch request/response DTOs |
 
 ### Files Modified This Session
 <!-- Only files touched in CURRENT session, not all time -->
-- `infrastructure/ai-search/spaarke-knowledge-index-v2.json` - Modified - Added parent entity fields (Task 001)
-- `src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs` - Modified - Added ParentEntityType/Id/Name properties (Task 002)
+- `infrastructure/ai-search/spaarke-knowledge-index-v2.json` - Modified - Parent entity fields (Task 001)
+- `src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs` - Modified - Parent entity properties (Task 002)
+- `src/server/api/Sprk.Bff.Api/Models/Ai/ParentEntityContext.cs` - Created - Parent entity record (Task 003)
+- `src/server/api/Sprk.Bff.Api/Services/Ai/IFileIndexingService.cs` - Modified - ParentEntity property (Task 003)
+- `src/server/api/Sprk.Bff.Api/Services/Ai/FileIndexingService.cs` - Modified - Populate parent fields (Task 003)
 - `projects/.../notes/index-verification.md` - Created - Hybrid search verification (Task 004)
-- `tasks/001-extend-index-schema.poml`, `tasks/002-*.poml`, `tasks/004-*.poml` - Status to completed
-- `tasks/TASK-INDEX.md` - Modified - Tasks 001, 002, 004 marked completed
 
 ### Critical Context
 <!-- 1-3 sentences of essential context for continuation -->
-Tasks 001, 002, 004 COMPLETE. Phase 1 progress: 3/4 tasks done. Task 003 (update FileIndexingService) is now unblocked and ready to execute.
+**PHASE 1 COMPLETE** (Tasks 001-004). Index schema extended, model updated, indexing service populates parent entity fields. Ready for Phase 2: Core Search Service starting with task 010 (DTOs).
 
 ---
 
@@ -36,10 +37,10 @@ Tasks 001, 002, 004 COMPLETE. Phase 1 progress: 3/4 tasks done. Task 003 (update
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | 003 |
-| **Task File** | tasks/003-update-indexing-service.poml |
-| **Title** | Update FileIndexingService to populate parent entity fields |
-| **Phase** | 1: Index Schema & Infrastructure |
+| **Task ID** | 010 |
+| **Task File** | tasks/010-create-semantic-search-dtos.poml |
+| **Title** | Create SemanticSearch request/response DTOs |
+| **Phase** | 2: Core Search Service |
 | **Status** | pending |
 | **Started** | — |
 | **Rigor Level** | FULL (code changes) |
@@ -48,53 +49,54 @@ Tasks 001, 002, 004 COMPLETE. Phase 1 progress: 3/4 tasks done. Task 003 (update
 
 ## Progress
 
+### Completed Phases
+- **Phase 1: Index Schema & Infrastructure** ✅ (4/4 tasks)
+
 ### Completed Tasks
 - [x] **Task 001**: Extend Azure AI Search index schema (2026-01-20)
-  - Added parentEntityType, parentEntityId, parentEntityName fields
-  - JSON validated successfully
 - [x] **Task 002**: Update KnowledgeDocument model (2026-01-20)
-  - Added ParentEntityType, ParentEntityId, ParentEntityName properties
-  - Build succeeded with zero warnings
+- [x] **Task 003**: Update FileIndexingService (2026-01-20)
+  - Created ParentEntityContext record
+  - Added ParentEntity property to FileIndexRequest and ContentIndexRequest
+  - Updated indexing pipeline to populate parent entity fields
 - [x] **Task 004**: Verify index configuration (2026-01-20)
-  - Vector profiles (1536, 3072) verified
-  - Semantic ranker config verified
-  - All filter fields present
-  - Documentation created at notes/index-verification.md
 
 ### Current Step
 
-Ready to execute task 003
+Ready to start Phase 2: Task 010 (SemanticSearch DTOs)
 
 ### Files Modified (This Session)
 
 - `infrastructure/ai-search/spaarke-knowledge-index-v2.json` - Task 001
 - `src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs` - Task 002
+- `src/server/api/Sprk.Bff.Api/Models/Ai/ParentEntityContext.cs` - Task 003
+- `src/server/api/Sprk.Bff.Api/Services/Ai/IFileIndexingService.cs` - Task 003
+- `src/server/api/Sprk.Bff.Api/Services/Ai/FileIndexingService.cs` - Task 003
 - `projects/.../notes/index-verification.md` - Task 004
 
 ### Decisions Made
 
 - Used existing field patterns from index schema
 - Made parent entity fields nullable for backward compatibility
+- ParentEntityContext is a sealed record with EntityType, EntityId, EntityName
 
 ---
 
 ## Next Action
 
-**Next Step**: Execute task 003 (update FileIndexingService)
+**Next Step**: Execute task 010 (create SemanticSearch DTOs)
 
 **Pre-conditions**:
-- ✅ Task 001 completed (index schema extended)
-- ✅ Task 002 completed (model updated)
-- ✅ Task 004 completed (configuration verified)
+- ✅ Phase 1 complete (all 4 tasks)
 
 **Key Context**:
-- Task 003: Update FileIndexingService to populate parent entity fields during indexing
-- Task 003 is the last task in Phase 1
-- After 003, Phase 2 (Core Search Service) can begin with task 010
+- Task 010: Create request/response DTOs for semantic search API
+- After 010, tasks 011 and 012 can run in parallel
+- Phase 2 has 6 tasks total (010-015)
 
 **Expected Output**:
-- Task 003 completed
-- Phase 1 complete, ready for Phase 2
+- SemanticSearch DTOs created
+- Tasks 011 and 012 unblocked for parallel execution
 
 ---
 
