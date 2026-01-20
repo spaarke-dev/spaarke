@@ -22,6 +22,7 @@ using Sprk.Bff.Api.Infrastructure.Startup;
 using Sprk.Bff.Api.Infrastructure.Validation;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.SemanticSearch;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -477,6 +478,10 @@ if (analysisEnabled && documentIntelligenceEnabled)
     {
         Console.WriteLine("⚠ Tool framework disabled (ToolFramework:Enabled = false)");
     }
+
+    // Semantic Search - Hybrid search for AI knowledge base (ADR-013)
+    builder.Services.AddSemanticSearch();
+    Console.WriteLine("✓ Semantic search enabled");
 
     Console.WriteLine("✓ Analysis services enabled");
 }
@@ -1320,6 +1325,14 @@ if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
 
 // RAG endpoints for knowledge base operations (R3)
 app.MapRagEndpoints();
+
+// Semantic Search endpoints for hybrid search (R1)
+// Only map if semantic search services are registered (requires DocumentIntelligence + Analysis enabled)
+if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
+    app.Configuration.GetValue<bool>("Analysis:Enabled", true))
+{
+    app.MapSemanticSearchEndpoints();
+}
 
 // Visualization endpoints for document relationship discovery
 app.MapVisualizationEndpoints();

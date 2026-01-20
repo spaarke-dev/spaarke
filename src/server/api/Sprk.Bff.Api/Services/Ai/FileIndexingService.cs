@@ -106,6 +106,7 @@ public sealed class FileIndexingService : IFileIndexingService
                 request.KnowledgeSourceId,
                 request.KnowledgeSourceName,
                 request.Metadata,
+                request.ParentEntity,
                 stopwatch,
                 cancellationToken);
         }
@@ -176,6 +177,7 @@ public sealed class FileIndexingService : IFileIndexingService
                 request.KnowledgeSourceId,
                 request.KnowledgeSourceName,
                 request.Metadata,
+                request.ParentEntity,
                 stopwatch,
                 cancellationToken);
         }
@@ -221,6 +223,7 @@ public sealed class FileIndexingService : IFileIndexingService
                 request.KnowledgeSourceId,
                 request.KnowledgeSourceName,
                 request.Metadata,
+                request.ParentEntity,
                 stopwatch,
                 cancellationToken);
         }
@@ -251,6 +254,7 @@ public sealed class FileIndexingService : IFileIndexingService
         string? knowledgeSourceId,
         string? knowledgeSourceName,
         Dictionary<string, string>? metadata,
+        ParentEntityContext? parentEntity,
         Stopwatch stopwatch,
         CancellationToken cancellationToken)
     {
@@ -296,7 +300,11 @@ public sealed class FileIndexingService : IFileIndexingService
                 : null,
             Tags = [], // Required: AI Search index has tags as non-nullable collection
             CreatedAt = now,
-            UpdatedAt = now
+            UpdatedAt = now,
+            // Parent entity fields for entity-scoped search
+            ParentEntityType = parentEntity?.EntityType,
+            ParentEntityId = parentEntity?.EntityId,
+            ParentEntityName = parentEntity?.EntityName
         }).ToList();
 
         // Step 3: Batch index (embeddings generated inside RagService)

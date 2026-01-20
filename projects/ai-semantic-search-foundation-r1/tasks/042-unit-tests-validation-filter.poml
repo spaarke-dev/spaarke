@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="ai-semantic-search-foundation-r1">
+  <metadata>
+    <title>Unit tests for request validation filter</title>
+    <phase>5: Testing &amp; Validation</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>022</dependencies>
+    <blocks>045</blocks>
+    <tags>testing, unit-tests</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Test writing, follows established patterns</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Write comprehensive unit tests for SemanticSearchValidationFilter covering
+    all validation rules and error codes defined in spec.md.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in unit testing endpoint filters.
+  </role>
+
+  <goal>
+    Comprehensive test coverage for validation:
+    - Query validation (required, length limits)
+    - Scope validation (valid values, required fields)
+    - Limit/offset validation
+    - Error codes match spec
+  </goal>
+
+  <context>
+    <background>
+      The validation filter enforces API contract requirements. Tests must verify
+      each validation rule returns the correct error code and message per spec.md.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/SemanticSearchValidationFilter.cs</file>
+      <file>projects/ai-semantic-search-foundation-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="testing">Error codes must match spec exactly</constraint>
+    <constraint source="testing">Test all validation rules</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>tests/unit/</file>
+      <file>projects/ai-semantic-search-foundation-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create SemanticSearchValidationFilterTests.cs</step>
+    <step order="2">Test: QUERY_REQUIRED when query missing</step>
+    <step order="3">Test: QUERY_REQUIRED when query empty</step>
+    <step order="4">Test: QUERY_TOO_LONG when query > 2000 chars</step>
+    <step order="5">Test: INVALID_SCOPE for invalid scope values</step>
+    <step order="6">Test: MISSING_ENTITY_TYPE for entity scope</step>
+    <step order="7">Test: MISSING_ENTITY_ID for entity scope</step>
+    <step order="8">Test: MISSING_DOCUMENT_IDS for documentIds scope</step>
+    <step order="9">Test: TOO_MANY_DOCUMENT_IDS when > 100 IDs</step>
+    <step order="10">Test: INVALID_LIMIT for out of range</step>
+    <step order="11">Test: Valid request passes validation</step>
+    <step order="12">Run tests with dotnet test</step>
+    <step order="13">Update TASK-INDEX.md: change task 042 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/unit/SemanticSearch/SemanticSearchValidationFilterTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All validation rules tested</criterion>
+    <criterion testable="true">Error codes match spec</criterion>
+    <criterion testable="true">Valid requests pass</criterion>
+    <criterion testable="true">All tests pass with dotnet test</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="ai-semantic-search-foundation-r1">
+  <metadata>
+    <title>Extend Azure AI Search index schema with parent entity fields</title>
+    <phase>1: Index Schema &amp; Infrastructure</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>002, 003</blocks>
+    <tags>bff-api, ai, infrastructure</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Foundational schema change that all other work depends on</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Extend the Azure AI Search index schema (spaarke-knowledge-index-v2) to add parent entity fields
+    required for entity-scoped semantic search. This enables filtering documents by parent entity
+    (Matter, Project, Invoice, Account, Contact) rather than just by document ID.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Azure AI Search index design and the BFF API.
+    Follow ADR-013 for AI architecture patterns.
+  </role>
+
+  <goal>
+    Index schema definition file updated with parentEntityType, parentEntityId, parentEntityName fields.
+    Schema is ready for deployment (actual deployment in task 003).
+  </goal>
+
+  <context>
+    <background>
+      The current index has no concept of business entity ownership. Documents are indexed with
+      tenantId and documentId, but searching "all documents in Matter X" requires knowing all
+      document IDs upfront. Adding parent entity fields enables direct filtering by entity.
+      New documents will be indexed with these fields; old documents remain searchable by documentId only.
+    </background>
+    <relevant-files>
+      <file>infrastructure/ai-search/spaarke-knowledge-index-v2.json</file>
+      <file>projects/ai-semantic-search-foundation-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">AI infrastructure changes within existing Azure resources</constraint>
+    <constraint source="spec">New fields: parentEntityType (string, filterable), parentEntityId (string, filterable), parentEntityName (string, searchable)</constraint>
+    <constraint source="spec">parentEntityType values: matter, project, invoice, account, contact</constraint>
+    <constraint source="spec">Fields filterable for scoping, parentEntityName searchable for document names</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>infrastructure/ai-search/spaarke-knowledge-index-v2.json</file>
+      <file>projects/ai-semantic-search-foundation-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Index Field Definition" location="infrastructure/ai-search/spaarke-knowledge-index-v2.json">
+        Follow existing field definition pattern with type, filterable, searchable properties
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read current index schema at infrastructure/ai-search/spaarke-knowledge-index-v2.json</step>
+    <step order="2">Review spec.md Index Contract section for field requirements</step>
+    <step order="3">Add parentEntityType field (Edm.String, filterable=true, facetable=true)</step>
+    <step order="4">Add parentEntityId field (Edm.String, filterable=true)</step>
+    <step order="5">Add parentEntityName field (Edm.String, searchable=true, analyzer=standard.lucene)</step>
+    <step order="6">Validate JSON syntax is correct</step>
+    <step order="7">Document changes in spec.md if needed</step>
+    <step order="8">Update TASK-INDEX.md: change task 001 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Run shell commands for validation</tool>
+  </tools>
+
+  <outputs>
+    <output type="infrastructure">infrastructure/ai-search/spaarke-knowledge-index-v2.json (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">parentEntityType field exists with filterable=true, facetable=true</criterion>
+    <criterion testable="true">parentEntityId field exists with filterable=true</criterion>
+    <criterion testable="true">parentEntityName field exists with searchable=true</criterion>
+    <criterion testable="true">JSON schema validates without errors</criterion>
+    <criterion testable="true">Fields match spec.md Index Contract requirements</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

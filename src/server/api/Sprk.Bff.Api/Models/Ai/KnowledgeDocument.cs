@@ -160,6 +160,40 @@ public class KnowledgeDocument
     [SimpleField(IsFilterable = true, IsSortable = true)]
     [JsonPropertyName("updatedAt")]
     public DateTimeOffset UpdatedAt { get; set; }
+
+    /// <summary>
+    /// Type of parent entity that owns this document.
+    /// Valid values: matter, project, invoice, account, contact.
+    /// </summary>
+    /// <remarks>
+    /// Used for entity-scoped semantic search. Nullable to support documents
+    /// indexed before parent entity tracking was implemented.
+    /// </remarks>
+    [SimpleField(IsFilterable = true, IsFacetable = true)]
+    [JsonPropertyName("parentEntityType")]
+    public string? ParentEntityType { get; set; }
+
+    /// <summary>
+    /// Unique identifier of the parent entity (GUID format).
+    /// </summary>
+    /// <remarks>
+    /// Combined with ParentEntityType for entity-scoped filtering.
+    /// Nullable to support legacy documents without entity association.
+    /// </remarks>
+    [SimpleField(IsFilterable = true)]
+    [JsonPropertyName("parentEntityId")]
+    public string? ParentEntityId { get; set; }
+
+    /// <summary>
+    /// Display name of the parent entity for search result presentation.
+    /// </summary>
+    /// <remarks>
+    /// Searchable field to allow finding documents by entity name.
+    /// Nullable to support legacy documents without entity association.
+    /// </remarks>
+    [SearchableField(AnalyzerName = LexicalAnalyzerName.Values.StandardLucene, IsSortable = true)]
+    [JsonPropertyName("parentEntityName")]
+    public string? ParentEntityName { get; set; }
 }
 
 /// <summary>

@@ -542,7 +542,7 @@ public static class AiPlaybookBuilderEndpoints
     /// </remarks>
     private static async Task<IResult> GenerateClarification(
         GenerateClarificationRequest request,
-        AiPlaybookBuilderService builderService,
+        IAiPlaybookBuilderService builderService,
         ILogger<AiPlaybookBuilderService> logger,
         CancellationToken cancellationToken)
     {

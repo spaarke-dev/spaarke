@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="ai-semantic-search-foundation-r1">
+  <metadata>
+    <title>Register SemanticSearch services in DI container</title>
+    <phase>2: Core Search Service</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>013, 014</dependencies>
+    <blocks>020</blocks>
+    <tags>bff-api, ai, di</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>DI registration, following existing patterns</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Register the semantic search services in the DI container following ADR-010 patterns.
+    Use concrete type registration (not interfaces) per the DI minimalism principle.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in .NET DI and the BFF API architecture.
+    Follow ADR-010 for DI minimalism.
+  </role>
+
+  <goal>
+    All semantic search services registered in AiModule.cs or appropriate extension method.
+    Services available for injection into endpoints.
+  </goal>
+
+  <context>
+    <background>
+      ADR-010 requires concrete type registration unless an interface seam is explicitly needed.
+      The semantic search services follow this pattern. Registration should be in the AI module
+      alongside other AI services.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Modules/AiModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">Register concrete types, not interfaces (unless seam needed)</constraint>
+    <constraint source="ADR-010">≤15 non-framework DI registrations total</constraint>
+    <constraint source="ADR-013">AI services registered in AiModule</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Modules/AiModule.cs</file>
+    </files>
+    <patterns>
+      <pattern name="Service Registration" location="src/server/api/Sprk.Bff.Api/Modules/AiModule.cs">
+        Follow existing service registration patterns
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read AiModule.cs for existing registration patterns</step>
+    <step order="2">Determine if SemanticSearchService needs interface seam (likely yes for testing)</step>
+    <step order="3">Add SemanticSearchService registration (Scoped lifetime)</step>
+    <step order="4">Add NoOpQueryPreprocessor registration (Singleton)</step>
+    <step order="5">Add NoOpResultPostprocessor registration (Singleton)</step>
+    <step order="6">Verify total DI registrations stay within ADR-010 limit</step>
+    <step order="7">Run dotnet build to verify compilation</step>
+    <step order="8">Update TASK-INDEX.md: change task 015 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Modules/AiModule.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SemanticSearchService registered in DI</criterion>
+    <criterion testable="true">NoOpQueryPreprocessor registered</criterion>
+    <criterion testable="true">NoOpResultPostprocessor registered</criterion>
+    <criterion testable="true">Registration follows ADR-010 patterns</criterion>
+    <criterion testable="true">Total registrations ≤ 15</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>
