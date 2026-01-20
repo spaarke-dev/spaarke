@@ -3,7 +3,7 @@
   <metadata>
     <title>Verify index configuration supports hybrid search</title>
     <phase>1: Index Schema &amp; Infrastructure</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1</estimated-hours>
     <dependencies>001</dependencies>
     <blocks>010</blocks>

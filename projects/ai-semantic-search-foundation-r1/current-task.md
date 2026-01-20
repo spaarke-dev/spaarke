@@ -13,20 +13,22 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 002, 004 - Update model + Verify hybrid search (parallel) |
+| **Task** | 003 - Update FileIndexingService |
 | **Step** | Ready to start |
 | **Status** | pending |
-| **Next Action** | Execute tasks 002 and 004 in parallel |
+| **Next Action** | Execute task 003 (update indexing service with parent entity fields) |
 
 ### Files Modified This Session
 <!-- Only files touched in CURRENT session, not all time -->
-- `infrastructure/ai-search/spaarke-knowledge-index-v2.json` - Modified - Added parentEntityType, parentEntityId, parentEntityName fields
-- `tasks/001-extend-index-schema.poml` - Modified - Status to completed
-- `tasks/TASK-INDEX.md` - Modified - Task 001 marked completed
+- `infrastructure/ai-search/spaarke-knowledge-index-v2.json` - Modified - Added parent entity fields (Task 001)
+- `src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs` - Modified - Added ParentEntityType/Id/Name properties (Task 002)
+- `projects/.../notes/index-verification.md` - Created - Hybrid search verification (Task 004)
+- `tasks/001-extend-index-schema.poml`, `tasks/002-*.poml`, `tasks/004-*.poml` - Status to completed
+- `tasks/TASK-INDEX.md` - Modified - Tasks 001, 002, 004 marked completed
 
 ### Critical Context
 <!-- 1-3 sentences of essential context for continuation -->
-Task 001 COMPLETE: Extended Azure AI Search index schema with parent entity fields. Tasks 002 and 004 can now run in parallel (both depend only on 001). Task 003 depends on 002.
+Tasks 001, 002, 004 COMPLETE. Phase 1 progress: 3/4 tasks done. Task 003 (update FileIndexingService) is now unblocked and ready to execute.
 
 ---
 
@@ -34,9 +36,9 @@ Task 001 COMPLETE: Extended Azure AI Search index schema with parent entity fiel
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | 002, 004 (parallel) |
-| **Task Files** | tasks/002-update-knowledgedocument-model.poml, tasks/004-verify-hybrid-search.poml |
-| **Title** | Update model + Verify hybrid search configuration |
+| **Task ID** | 003 |
+| **Task File** | tasks/003-update-indexing-service.poml |
+| **Title** | Update FileIndexingService to populate parent entity fields |
 | **Phase** | 1: Index Schema & Infrastructure |
 | **Status** | pending |
 | **Started** | — |
@@ -48,41 +50,51 @@ Task 001 COMPLETE: Extended Azure AI Search index schema with parent entity fiel
 
 ### Completed Tasks
 - [x] **Task 001**: Extend Azure AI Search index schema (2026-01-20)
-  - Added parentEntityType field (filterable, facetable)
-  - Added parentEntityId field (filterable)
-  - Added parentEntityName field (searchable, standard.lucene)
+  - Added parentEntityType, parentEntityId, parentEntityName fields
   - JSON validated successfully
+- [x] **Task 002**: Update KnowledgeDocument model (2026-01-20)
+  - Added ParentEntityType, ParentEntityId, ParentEntityName properties
+  - Build succeeded with zero warnings
+- [x] **Task 004**: Verify index configuration (2026-01-20)
+  - Vector profiles (1536, 3072) verified
+  - Semantic ranker config verified
+  - All filter fields present
+  - Documentation created at notes/index-verification.md
 
 ### Current Step
 
-Ready to execute tasks 002 and 004 in parallel
+Ready to execute task 003
 
-### Files Modified (Task 001)
+### Files Modified (This Session)
 
-- `infrastructure/ai-search/spaarke-knowledge-index-v2.json` - Added 3 parent entity fields
+- `infrastructure/ai-search/spaarke-knowledge-index-v2.json` - Task 001
+- `src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs` - Task 002
+- `projects/.../notes/index-verification.md` - Task 004
 
 ### Decisions Made
 
-- Used existing field patterns from index schema (matching tenantId, knowledgeSourceName patterns)
+- Used existing field patterns from index schema
+- Made parent entity fields nullable for backward compatibility
 
 ---
 
 ## Next Action
 
-**Next Step**: Execute tasks 002 and 004 in parallel
+**Next Step**: Execute task 003 (update FileIndexingService)
 
 **Pre-conditions**:
 - ✅ Task 001 completed (index schema extended)
-- Tasks 002 and 004 have no interdependency
+- ✅ Task 002 completed (model updated)
+- ✅ Task 004 completed (configuration verified)
 
 **Key Context**:
-- Task 002: Update KnowledgeDocument model with parent entity fields
-- Task 004: Verify index configuration supports hybrid search
-- Task 003 depends on 002 (cannot start until 002 completes)
+- Task 003: Update FileIndexingService to populate parent entity fields during indexing
+- Task 003 is the last task in Phase 1
+- After 003, Phase 2 (Core Search Service) can begin with task 010
 
 **Expected Output**:
-- Tasks 002 and 004 completed
-- Ready to proceed with tasks 003 and 005
+- Task 003 completed
+- Phase 1 complete, ready for Phase 2
 
 ---
 
