@@ -22,6 +22,7 @@ using Sprk.Bff.Api.Infrastructure.Startup;
 using Sprk.Bff.Api.Infrastructure.Validation;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.SemanticSearch;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -477,6 +478,10 @@ if (analysisEnabled && documentIntelligenceEnabled)
     {
         Console.WriteLine("⚠ Tool framework disabled (ToolFramework:Enabled = false)");
     }
+
+    // Semantic Search - Hybrid search for AI knowledge base (ADR-013)
+    builder.Services.AddSemanticSearch();
+    Console.WriteLine("✓ Semantic search enabled");
 
     Console.WriteLine("✓ Analysis services enabled");
 }
