@@ -188,11 +188,14 @@ public class BuilderScopeImporter
         BuilderScopeImportResult result,
         CancellationToken cancellationToken)
     {
+        // Content can be a string or object - serialize to string if needed
+        var contentString = GetContentAsString(scope.Content, scope.SystemPrompt);
+
         var request = new CreateKnowledgeRequest
         {
             Name = scope.Name ?? scope.DisplayName ?? "Unknown",
             Description = scope.Description,
-            Content = scope.Content ?? scope.SystemPrompt ?? string.Empty,
+            Content = contentString,
             Type = KnowledgeType.Inline
         };
 
@@ -254,6 +257,22 @@ public class BuilderScopeImporter
             _ => ToolType.Custom
         };
     }
+
+    /// <summary>
+    /// Convert JsonElement content to string (handles both string and object values).
+    /// </summary>
+    private static string GetContentAsString(JsonElement? content, string? fallback)
+    {
+        if (content == null)
+            return fallback ?? string.Empty;
+
+        return content.Value.ValueKind switch
+        {
+            JsonValueKind.String => content.Value.GetString() ?? fallback ?? string.Empty,
+            JsonValueKind.Object or JsonValueKind.Array => content.Value.GetRawText(),
+            _ => fallback ?? string.Empty
+        };
+    }
 }
 
 /// <summary>
@@ -270,7 +289,7 @@ public record BuilderScopeDefinition
     public bool IsImmutable { get; init; }
     public string? SystemPrompt { get; init; }
     public string? PromptFragment { get; init; }
-    public string? Content { get; init; }
+    public JsonElement? Content { get; init; }  // Can be string or object
     public BuilderScopeMetadata? Metadata { get; init; }
     public BuilderToolConfiguration? Configuration { get; init; }
 }

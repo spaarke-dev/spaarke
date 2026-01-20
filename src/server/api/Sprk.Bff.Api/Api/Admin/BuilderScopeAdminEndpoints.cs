@@ -5,15 +5,15 @@ namespace Sprk.Bff.Api.Api.Admin;
 /// <summary>
 /// Admin endpoints for Builder Scope management.
 /// These endpoints allow administrators to import builder scope definitions into Dataverse.
+/// Uses API key authentication (X-Api-Key header) for CLI/script access.
 /// </summary>
 public static class BuilderScopeAdminEndpoints
 {
+    private const string ApiKeyHeader = "X-Api-Key";
+    private const string ConfigKey = "BuilderAdmin:ApiKey";
+
     public static IEndpointRouteBuilder MapBuilderScopeAdminEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/admin/builder-scopes")
-            .RequireAuthorization()
-            .WithTags("Admin");
-
         // GET /api/admin/builder-scopes/status - Check builder scopes file status (no auth for diagnostics)
         app.MapGet("/api/admin/builder-scopes/status", GetScopeFilesStatus)
             .WithName("GetBuilderScopeFilesStatus")
@@ -23,19 +23,24 @@ public static class BuilderScopeAdminEndpoints
             .Produces<BuilderScopeFilesStatus>(StatusCodes.Status200OK);
 
         // POST /api/admin/builder-scopes/import - Import scopes from JSON directory
-        group.MapPost("/import", ImportFromDirectory)
+        // Uses AllowAnonymous + API key header validation (consistent with RAG endpoint pattern)
+        app.MapPost("/api/admin/builder-scopes/import", ImportFromDirectory)
+            .AllowAnonymous()
             .WithName("ImportBuilderScopes")
             .WithSummary("Import builder scopes from JSON files")
-            .WithDescription("Imports all builder scope JSON files from the default builder-scopes directory into Dataverse.")
+            .WithDescription("Imports all builder scope JSON files from the default builder-scopes directory into Dataverse. Requires X-Api-Key header.")
+            .WithTags("Admin")
             .Produces<BuilderScopeImportResult>(StatusCodes.Status200OK)
             .ProducesProblem(401)
             .ProducesProblem(500);
 
         // POST /api/admin/builder-scopes/import-json - Import a single scope from JSON body
-        group.MapPost("/import-json", ImportFromJson)
+        app.MapPost("/api/admin/builder-scopes/import-json", ImportFromJson)
+            .AllowAnonymous()
             .WithName("ImportBuilderScopeJson")
             .WithSummary("Import a single builder scope from JSON")
-            .WithDescription("Imports a single builder scope definition from the request body into Dataverse.")
+            .WithDescription("Imports a single builder scope definition from the request body into Dataverse. Requires X-Api-Key header.")
+            .WithTags("Admin")
             .Produces<BuilderScopeImportResult>(StatusCodes.Status200OK)
             .ProducesProblem(400)
             .ProducesProblem(401)
@@ -45,14 +50,53 @@ public static class BuilderScopeAdminEndpoints
     }
 
     /// <summary>
+    /// Validates authentication via either OAuth bearer token OR API key header.
+    /// Production: OAuth (from Dataverse/PCF) preferred for audit trail
+    /// CLI/Scripts: API key for automation
+    /// </summary>
+    private static IResult? ValidateAuth(HttpRequest request, IConfiguration configuration, ILogger logger)
+    {
+        // Option 1: Check if user is already authenticated via OAuth (bearer token)
+        if (request.HttpContext.User.Identity?.IsAuthenticated == true)
+        {
+            logger.LogInformation("Builder admin request authenticated via OAuth: {User}",
+                request.HttpContext.User.Identity.Name ?? "unknown");
+            return null; // Auth passed via OAuth
+        }
+
+        // Option 2: Fall back to API key validation
+        var apiKey = request.Headers[ApiKeyHeader].FirstOrDefault();
+        var expectedApiKey = configuration[ConfigKey];
+
+        if (!string.IsNullOrEmpty(expectedApiKey) && apiKey == expectedApiKey)
+        {
+            logger.LogInformation("Builder admin request authenticated via API key");
+            return null; // Auth passed via API key
+        }
+
+        // Neither OAuth nor valid API key
+        logger.LogWarning("Builder admin request rejected - no valid OAuth or API key");
+        return Results.Problem(
+            title: "Unauthorized",
+            detail: "Authentication required. Use either: (1) OAuth bearer token, or (2) X-Api-Key header.",
+            statusCode: StatusCodes.Status401Unauthorized);
+    }
+
+    /// <summary>
     /// Import all builder scopes from the default JSON directory.
     /// </summary>
     private static async Task<IResult> ImportFromDirectory(
+        HttpRequest request,
+        IConfiguration configuration,
         BuilderScopeImporter importer,
         IWebHostEnvironment env,
         ILogger<Program> logger,
         CancellationToken cancellationToken)
     {
+        // Validate API key
+        var authError = ValidateAuth(request, configuration, logger);
+        if (authError != null) return authError;
+
         // Default to builder-scopes directory in content root
         var jsonDirectory = Path.Combine(env.ContentRootPath, "builder-scopes");
 
@@ -91,11 +135,17 @@ public static class BuilderScopeAdminEndpoints
     /// Import a single builder scope from JSON in the request body.
     /// </summary>
     private static async Task<IResult> ImportFromJson(
+        HttpRequest httpRequest,
+        IConfiguration configuration,
         BuilderScopeImporter importer,
         ImportScopeJsonRequest request,
         ILogger<Program> logger,
         CancellationToken cancellationToken)
     {
+        // Validate API key
+        var authError = ValidateAuth(httpRequest, configuration, logger);
+        if (authError != null) return authError;
+
         if (string.IsNullOrWhiteSpace(request.Json))
         {
             return Results.BadRequest("'json' field is required and cannot be empty");
