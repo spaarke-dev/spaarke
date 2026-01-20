@@ -75,5 +75,9 @@
     <ProjectReference Include="..\..\shared\Spaarke.Dataverse\Spaarke.Dataverse.csproj" />
   </ItemGroup>
 
+  <!-- Builder scope JSON files for AI Playbook Builder (Phase 4 Dataverse import) -->
+  <ItemGroup>
+    <Content Update="builder-scopes\**\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 
 </Project>

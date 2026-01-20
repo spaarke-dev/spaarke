@@ -1,0 +1,85 @@
+{
+  "id": "c1d2e3f4-a5b6-4c5d-8e9f-004004004004",
+  "name": "SYS-TL-BUILDER-004-updateNodeConfig",
+  "displayName": "Update Node Config",
+  "description": "Update the configuration of an existing node on the canvas. Can modify label, position, or type-specific settings.",
+  "scopeType": "Tool",
+  "ownerType": 1,
+  "isImmutable": true,
+  "configuration": {
+    "handlerType": "CanvasOperationHandler",
+    "operation": "updateNodeConfig",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "nodeId": {
+          "type": "string",
+          "description": "ID of the node to update"
+        },
+        "nodeLabel": {
+          "type": "string",
+          "description": "Label of the node to update (alternative to nodeId)"
+        },
+        "updates": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "type": "string",
+              "description": "New display label"
+            },
+            "position": {
+              "type": "object",
+              "properties": {
+                "x": { "type": "number" },
+                "y": { "type": "number" }
+              }
+            },
+            "config": {
+              "type": "object",
+              "description": "Type-specific configuration updates (merged with existing)"
+            }
+          }
+        }
+      },
+      "required": ["updates"]
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "nodeId": {
+          "type": "string",
+          "description": "ID of the updated node"
+        },
+        "updatedFields": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "List of fields that were updated"
+        },
+        "success": {
+          "type": "boolean"
+        }
+      }
+    },
+    "validationRules": [
+      {
+        "rule": "nodeId or nodeLabel must be provided",
+        "errorMessage": "Must specify which node to update"
+      },
+      {
+        "rule": "node must exist on canvas",
+        "errorMessage": "Node not found on canvas"
+      },
+      {
+        "rule": "updates object must not be empty",
+        "errorMessage": "No updates specified"
+      }
+    ],
+    "mergeStrategy": "deep",
+    "notes": "Config updates are merged with existing config, not replaced entirely"
+  },
+  "metadata": {
+    "tags": ["builder", "tool", "canvas", "node", "configuration"],
+    "version": "1.0.0",
+    "category": "builder-canvas-ops"
+  }
+}

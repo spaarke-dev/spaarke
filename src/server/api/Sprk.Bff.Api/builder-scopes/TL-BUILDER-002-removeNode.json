@@ -1,0 +1,66 @@
+{
+  "id": "c1d2e3f4-a5b6-4c5d-8e9f-002002002002",
+  "name": "SYS-TL-BUILDER-002-removeNode",
+  "displayName": "Remove Node",
+  "description": "Remove a node from the playbook canvas. Also removes all edges connected to the node.",
+  "scopeType": "Tool",
+  "ownerType": 1,
+  "isImmutable": true,
+  "configuration": {
+    "handlerType": "CanvasOperationHandler",
+    "operation": "removeNode",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "nodeId": {
+          "type": "string",
+          "description": "ID of the node to remove"
+        },
+        "nodeLabel": {
+          "type": "string",
+          "description": "Label of the node to remove (alternative to ID)"
+        }
+      },
+      "oneOf": [
+        { "required": ["nodeId"] },
+        { "required": ["nodeLabel"] }
+      ]
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "removedNodeId": {
+          "type": "string",
+          "description": "ID of the removed node"
+        },
+        "removedEdgeIds": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "IDs of edges that were also removed"
+        },
+        "success": {
+          "type": "boolean"
+        }
+      }
+    },
+    "validationRules": [
+      {
+        "rule": "nodeId or nodeLabel must be provided",
+        "errorMessage": "Must specify which node to remove"
+      },
+      {
+        "rule": "node must exist on canvas",
+        "errorMessage": "Node not found on canvas"
+      }
+    ],
+    "sideEffects": [
+      "Removes all edges connected to the node",
+      "Updates dependent node references"
+    ]
+  },
+  "metadata": {
+    "tags": ["builder", "tool", "canvas", "node", "destructive"],
+    "version": "1.0.0",
+    "category": "builder-canvas-ops"
+  }
+}

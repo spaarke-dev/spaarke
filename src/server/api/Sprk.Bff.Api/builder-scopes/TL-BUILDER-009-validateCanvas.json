@@ -1,0 +1,130 @@
+{
+  "id": "c1d2e3f4-a5b6-4c5d-8e9f-009009009009",
+  "name": "SYS-TL-BUILDER-009-validateCanvas",
+  "displayName": "Validate Canvas",
+  "description": "Validate the current playbook canvas for completeness and correctness. Checks for missing scopes, orphaned nodes, cycles, and configuration issues.",
+  "scopeType": "Tool",
+  "ownerType": 1,
+  "isImmutable": true,
+  "configuration": {
+    "handlerType": "CanvasOperationHandler",
+    "operation": "validateCanvas",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "strictMode": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, treat warnings as errors"
+        },
+        "validationRules": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Specific rules to check (default: all)",
+          "default": ["all"]
+        }
+      }
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "isValid": {
+          "type": "boolean",
+          "description": "True if no errors (warnings may still exist)"
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": { "type": "string" },
+              "message": { "type": "string" },
+              "nodeId": { "type": "string" },
+              "severity": {
+                "type": "string",
+                "enum": ["error", "warning", "info"]
+              }
+            }
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": { "type": "string" },
+              "message": { "type": "string" },
+              "nodeId": { "type": "string" }
+            }
+          }
+        },
+        "summary": {
+          "type": "object",
+          "properties": {
+            "totalNodes": { "type": "integer" },
+            "totalEdges": { "type": "integer" },
+            "errorCount": { "type": "integer" },
+            "warningCount": { "type": "integer" }
+          }
+        }
+      }
+    },
+    "validationChecks": [
+      {
+        "code": "NO_START_NODE",
+        "description": "Canvas has no entry point (no nodes without incoming edges)",
+        "severity": "error"
+      },
+      {
+        "code": "NO_END_NODE",
+        "description": "Canvas has no deliver node",
+        "severity": "error"
+      },
+      {
+        "code": "ORPHAN_NODE",
+        "description": "Node has no incoming or outgoing edges",
+        "severity": "warning"
+      },
+      {
+        "code": "CYCLE_DETECTED",
+        "description": "Playbook flow contains a cycle",
+        "severity": "error"
+      },
+      {
+        "code": "MISSING_ACTION",
+        "description": "AI Analysis node has no Action scope linked",
+        "severity": "error"
+      },
+      {
+        "code": "MISSING_OUTPUT_VAR",
+        "description": "Node has no output variable defined",
+        "severity": "warning"
+      },
+      {
+        "code": "UNREACHABLE_NODE",
+        "description": "Node cannot be reached from start",
+        "severity": "warning"
+      },
+      {
+        "code": "DEAD_END_NODE",
+        "description": "Non-deliver node has no outgoing edges",
+        "severity": "warning"
+      },
+      {
+        "code": "CONDITION_INCOMPLETE",
+        "description": "Condition node missing true or false branch",
+        "severity": "error"
+      },
+      {
+        "code": "DUPLICATE_OUTPUT_VAR",
+        "description": "Multiple nodes use same output variable name",
+        "severity": "error"
+      }
+    ]
+  },
+  "metadata": {
+    "tags": ["builder", "tool", "canvas", "validation", "quality"],
+    "version": "1.0.0",
+    "category": "builder-canvas-ops"
+  }
+}

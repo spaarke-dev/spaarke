@@ -465,7 +465,7 @@ You have access to the following pre-built scopes:
 
 ---
 
-### Phase 4: Dataverse Persistence (FUTURE)
+### Phase 4: Dataverse Persistence (IN PROGRESS)
 
 **Goal**: Store builder scopes in Dataverse for dynamic updates
 
@@ -474,10 +474,37 @@ Current state: Builder scopes are JSON design artifacts. FallbackPrompts.cs cont
 Target state: Import JSON into Dataverse. GetBuilderScopePromptAsync loads from Dataverse with fallback.
 
 **Tasks**:
-- [ ] Create Dataverse import script for 23 builder scope records
-- [ ] Test GetBuilderScopePromptAsync loading from Dataverse
+- [x] Create Dataverse import utility (`BuilderScopeImporter.cs`)
+- [x] Add admin endpoints for scope import (`BuilderScopeAdminEndpoints.cs`)
+- [x] Copy 23 builder scope JSON files to API project (`builder-scopes/`)
+- [ ] Deploy via Kudu portal (see note below)
+- [ ] Test import of 23 builder scope records via `/api/admin/builder-scopes/import`
+- [ ] Verify GetBuilderScopePromptAsync loads from Dataverse
 - [ ] Implement cache invalidation endpoint
 - [ ] Add admin UI for scope editing (future)
+
+**Files Created**:
+```
+src/server/api/Sprk.Bff.Api/
+├── Services/Ai/Builder/BuilderScopeImporter.cs  - Import utility (257 lines)
+├── Api/Admin/BuilderScopeAdminEndpoints.cs      - Admin endpoints
+├── builder-scopes/                               - 23 JSON files
+└── Sprk.Bff.Api.csproj                          - Updated to include JSON files
+```
+
+**Admin Endpoints**:
+- `GET /api/admin/builder-scopes/status` - Check file status (no auth)
+- `POST /api/admin/builder-scopes/import` - Import all JSON files (requires auth)
+- `POST /api/admin/builder-scopes/import-json` - Import single JSON (requires auth)
+
+**Deployment Note**:
+Azure CLI `az webapp deploy` may not update the running code reliably. If the status endpoint returns 404 after CLI deploy:
+1. Go to Azure Portal → App Services → `spe-api-dev-67e2xz`
+2. Click **Advanced Tools** → **Go** (opens Kudu)
+3. Click **Tools** → **Zip Push Deploy**
+4. Drag and drop `publish.zip` onto the page
+5. Verify new entry appears in **Deployment Center** logs
+6. Test: `curl https://spe-api-dev-67e2xz.azurewebsites.net/api/admin/builder-scopes/status`
 
 ---
 
@@ -739,6 +766,43 @@ All Knowledge Scope Integration tasks complete:
 2. Test scope awareness queries ("what skills are available?")
 3. Test search_scopes tool via agentic endpoint
 4. Future: Phase 4 (Dataverse Persistence)
+
+---
+
+### 2026-01-20 Session - Phase 4 Implementation Started
+
+**Completed**:
+1. Created `BuilderScopeImporter.cs` (257 lines) - Utility to import builder scopes from JSON
+   - `ImportFromDirectoryAsync()` - Import all JSON files from a directory
+   - `ImportFromJsonAsync()` - Import a single scope from JSON string
+   - Handles all 4 scope types: Action, Skill, Knowledge, Tool
+   - Name prefix (SYS- vs CUST-) determines owner type in service
+
+2. Created `BuilderScopeAdminEndpoints.cs` - Admin API endpoints
+   - `GET /api/admin/builder-scopes/status` - File status check (no auth required)
+   - `POST /api/admin/builder-scopes/import` - Import all JSON files
+   - `POST /api/admin/builder-scopes/import-json` - Import single scope
+
+3. Copied 23 builder scope JSON files to `src/server/api/Sprk.Bff.Api/builder-scopes/`
+   - 5 Actions (ACT-BUILDER-001 through 005)
+   - 5 Skills (SKL-BUILDER-001 through 005)
+   - 9 Tools (TL-BUILDER-001 through 009)
+   - 4 Knowledge (KNW-BUILDER-001 through 004)
+
+4. Updated `Sprk.Bff.Api.csproj` to include JSON files in publish output
+
+5. Registered `BuilderScopeImporter` in DI and mapped admin endpoints in `Program.cs`
+
+**Build Status**: ✅ 0 errors, 0 warnings
+
+**Deployment Issue**:
+Azure CLI `az webapp deploy` and `az webapp deployment source config-zip` both succeed but the running app doesn't update. The `/api/admin/builder-scopes/status` endpoint returns 404.
+
+**Next Steps**:
+1. Deploy via Kudu portal (manual zip push)
+2. Test status endpoint: `curl https://spe-api-dev-67e2xz.azurewebsites.net/api/admin/builder-scopes/status`
+3. Test import endpoint with authentication
+4. Verify scopes are created in Dataverse
 
 ---
 
