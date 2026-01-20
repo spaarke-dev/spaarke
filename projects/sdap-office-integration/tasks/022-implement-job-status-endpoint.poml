@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="sdap-office-integration">
+  <metadata>
+    <title>Implement GET /office/jobs/{id} endpoint</title>
+    <phase>3: Backend API Development</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>023, 034</blocks>
+    <tags>bff-api, api, minimal-api, endpoints</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>API endpoint implementation for job status polling</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement the GET /office/jobs/{jobId} endpoint that returns the current status of a
+    processing job including stage progress, completion percentage, and any error information.
+  </prompt>
+
+  <role>
+    .NET developer specializing in API implementation. Expert in status reporting and
+    data access patterns.
+  </role>
+
+  <goal>
+    A working GET /office/jobs/{id} endpoint that returns detailed job status information
+    for polling-based status updates.
+  </goal>
+
+  <context>
+    <background>
+      While SSE is the preferred method for job status updates, polling provides a fallback
+      for clients that don't support SSE. This endpoint returns the complete job status
+      including all stage information.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/Office/OfficeEndpoints.cs</file>
+      <file>projects/sdap-office-integration/spec.md (Job status endpoint contract)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST return job status with stage details</constraint>
+    <constraint source="spec">MUST return 404 for non-existent jobs</constraint>
+    <constraint source="ADR-008">MUST verify user owns the job (authorization filter)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/adr/ADR-004-async-job-contract.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create JobStatusResponse DTO with all fields from spec</step>
+    <step order="2">Create StageStatus DTO for individual stage tracking</step>
+    <step order="3">Implement job lookup by ID from Dataverse</step>
+    <step order="4">Map ProcessingJob entity to JobStatusResponse DTO</step>
+    <step order="5">Handle 404 for non-existent jobs</step>
+    <step order="6">Add authorization filter to verify job ownership</step>
+    <step order="7">Handle 403 for jobs not owned by requesting user</step>
+    <step order="8">Write unit tests</step>
+    <step order="9">Verify endpoint works with existing job</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/Office/OfficeEndpoints.cs (updated)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/Office/DTOs/JobStatusResponse.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/Office/DTOs/StageStatus.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Endpoints/Office/JobStatusEndpointTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">GET /office/jobs/{id} returns 200 with valid job ID</criterion>
+    <criterion testable="true">Response includes status, progress, and stages</criterion>
+    <criterion testable="true">Non-existent job returns 404</criterion>
+    <criterion testable="true">Job owned by another user returns 403</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The response should include enough information for the UI to display a progress indicator
+    with stage labels. Include estimatedTimeRemaining if possible based on historical data.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

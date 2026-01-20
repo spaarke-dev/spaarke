@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="054" project="sdap-office-integration">
+  <metadata>
+    <title>Implement dark mode and high-contrast support</title>
+    <phase>4: Office Add-in Development</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>046</dependencies>
+    <blocks>056</blocks>
+    <tags>frontend, react, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Theme implementation with multiple theme modes per ADR-021</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement comprehensive dark mode and high-contrast support across all add-in
+    components. Ensure all colors use Fluent UI v9 design tokens and the UI responds
+    correctly to Office theme changes.
+  </prompt>
+
+  <role>
+    Frontend developer specializing in theming. Expert in Fluent UI v9 design tokens
+    and accessibility requirements.
+  </role>
+
+  <goal>
+    Full dark mode and high-contrast support with automatic theme detection and
+    proper color token usage throughout.
+  </goal>
+
+  <context>
+    <background>
+      Office applications support light, dark, and high-contrast themes. The add-in
+      must detect the current theme and adapt accordingly using Fluent UI v9 design
+      tokens. No hard-coded colors should be used.
+    </background>
+    <relevant-files>
+      <file>src/client/office-addins/shared/taskpane/</file>
+      <file>projects/sdap-office-integration/spec.md (Theme requirements)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">MUST use design tokens for all colors</constraint>
+    <constraint source="ADR-021">MUST NOT use hard-coded hex/rgb/named colors</constraint>
+    <constraint source="ADR-021">MUST support light, dark, and high-contrast modes</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Enhance useOfficeTheme hook to detect all theme modes</step>
+    <step order="2">Map Office themes to Fluent UI v9 themes</step>
+    <step order="3">Audit all components for hard-coded colors</step>
+    <step order="4">Replace any hard-coded colors with design tokens</step>
+    <step order="5">Test light mode appearance</step>
+    <step order="6">Test dark mode appearance</step>
+    <step order="7">Test high-contrast mode appearance</step>
+    <step order="8">Fix any contrast issues for accessibility</step>
+    <step order="9">Add theme transition animations</step>
+    <step order="10">Write visual regression tests</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Package management and build</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/taskpane/hooks/useOfficeTheme.ts (updated)</output>
+    <output type="code">src/client/office-addins/shared/taskpane/theme/themeMapping.ts</output>
+    <output type="test">src/client/office-addins/shared/taskpane/theme/__tests__/themeMapping.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Light mode displays correctly</criterion>
+    <criterion testable="true">Dark mode displays correctly</criterion>
+    <criterion testable="true">High-contrast mode displays correctly</criterion>
+    <criterion testable="true">No hard-coded colors in any component</criterion>
+    <criterion testable="true">Theme changes apply immediately</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle Office to dark mode</step>
+        <step>Verify all backgrounds adapt (no white)</step>
+        <step>Verify all text colors adapt (no black)</step>
+        <step>Verify icons use currentColor</step>
+      </steps>
+      <expected>All colors use Fluent UI v9 semantic tokens</expected>
+    </test>
+    <test name="High Contrast Mode">
+      <steps>
+        <step>Enable Windows high contrast mode</step>
+        <step>Verify all elements remain visible</step>
+        <step>Verify interactive elements are distinguishable</step>
+      </steps>
+      <expected>UI is fully usable in high contrast mode</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Use the Fluent UI v9 theme tokens consistently: colorNeutralBackground1,
+    colorNeutralForeground1, etc. Never use raw color values.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

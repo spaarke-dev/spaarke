@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="sdap-office-integration">
+  <metadata>
+    <title>Implement upload finalization worker</title>
+    <phase>5: Background Workers</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>060</dependencies>
+    <blocks>065</blocks>
+    <tags>bff-api, worker, job</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Worker implementation with SPE integration</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement the upload finalization worker that takes temporary file uploads,
+    moves them to permanent SPE storage, creates Document records, and updates
+    job status. Handle EmailArtifact creation for email saves.
+  </prompt>
+
+  <role>
+    .NET developer specializing in file processing. Expert in SharePoint Embedded,
+    document management, and error handling.
+  </role>
+
+  <goal>
+    A reliable upload worker that finalizes document saves by moving files to SPE
+    and creating all necessary records.
+  </goal>
+
+  <context>
+    <background>
+      When a user submits a save request, files are initially stored temporarily.
+      The upload worker finalizes the save by moving files to permanent SPE storage,
+      creating Document records with proper associations, and EmailArtifact/AttachmentArtifact
+      for email saves.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Workers/Office/UploadFinalizationWorker.cs (to create)</file>
+      <file>projects/sdap-office-integration/spec.md (Upload worker requirements)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-007">MUST use SpeFileStore for all SPE operations</constraint>
+    <constraint source="ADR-004">MUST update job status at each stage</constraint>
+    <constraint source="spec">MUST create Document with association lookup</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>.claude/adr/ADR-007-spefilestore-facade.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create UploadFinalizationWorker implementing IOfficeJobHandler</step>
+    <step order="2">Implement temporary file retrieval</step>
+    <step order="3">Implement SPE upload via SpeFileStore</step>
+    <step order="4">Create Document record in Dataverse</step>
+    <step order="5">Set association lookup based on request</step>
+    <step order="6">Create EmailArtifact for email saves</step>
+    <step order="7">Create AttachmentArtifact records for attachments</step>
+    <step order="8">Update job status to "uploaded"</step>
+    <step order="9">Queue next stage (profile or indexing)</step>
+    <step order="10">Handle errors and set job to failed</step>
+    <step order="11">Clean up temporary files</step>
+    <step order="12">Write unit tests</step>
+    <step order="13">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Workers/Office/UploadFinalizationWorker.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Workers/Office/UploadFinalizationWorkerTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Files are uploaded to SPE correctly</criterion>
+    <criterion testable="true">Document records are created with associations</criterion>
+    <criterion testable="true">EmailArtifact is created for email saves</criterion>
+    <criterion testable="true">Job status is updated to "uploaded"</criterion>
+    <criterion testable="true">Temporary files are cleaned up</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The worker should be idempotent - if it runs twice for the same job, it should
+    not create duplicate files or records. Use the job's idempotency key to check.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

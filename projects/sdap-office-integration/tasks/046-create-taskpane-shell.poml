@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="046" project="sdap-office-integration">
+  <metadata>
+    <title>Create task pane shell with FluentProvider</title>
+    <phase>4: Office Add-in Development</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>006</dependencies>
+    <blocks>047, 048, 049, 050, 051, 052, 053, 054, 055</blocks>
+    <tags>frontend, react, fluent-ui, pcf</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>UI shell implementation with Fluent UI v9 and theme management</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create the task pane shell component that wraps the entire add-in UI. Include
+    FluentProvider with theme detection, navigation header, and content area for
+    views. Support mode switching between Save and Share flows.
+  </prompt>
+
+  <role>
+    Frontend developer specializing in React and Fluent UI v9. Expert in component
+    architecture and responsive design.
+  </role>
+
+  <goal>
+    A polished task pane shell with proper theming, navigation, and layout that
+    hosts all add-in views.
+  </goal>
+
+  <context>
+    <background>
+      The task pane shell is the main container for all add-in UI. It provides
+      consistent header, navigation, and theming across all views. The shell
+      must adapt to both Outlook and Word hosts.
+    </background>
+    <relevant-files>
+      <file>src/client/office-addins/shared/taskpane/components/TaskPaneShell.tsx (from task 006)</file>
+      <file>projects/sdap-office-integration/spec.md (UI requirements)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">MUST use Fluent UI v9 exclusively</constraint>
+    <constraint source="ADR-021">MUST use design tokens for all styling</constraint>
+    <constraint source="ADR-021">MUST support light, dark, and high-contrast themes</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Enhance TaskPaneShell with proper header component</step>
+    <step order="2">Add navigation tabs (Save, Share based on host mode)</step>
+    <step order="3">Create content area with routing</step>
+    <step order="4">Integrate useOfficeTheme for dynamic theming</step>
+    <step order="5">Add loading state skeleton</step>
+    <step order="6">Add error boundary for crash handling</step>
+    <step order="7">Create responsive layout for different task pane widths</step>
+    <step order="8">Add host-specific branding (Outlook vs Word icon)</step>
+    <step order="9">Verify all colors use design tokens</step>
+    <step order="10">Write unit tests</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Package management and build</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/taskpane/components/TaskPaneShell.tsx (enhanced)</output>
+    <output type="code">src/client/office-addins/shared/taskpane/components/Header.tsx</output>
+    <output type="code">src/client/office-addins/shared/taskpane/components/Navigation.tsx</output>
+    <output type="test">src/client/office-addins/shared/taskpane/components/__tests__/TaskPaneShell.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Shell renders with header and content areas</criterion>
+    <criterion testable="true">Theme changes are reflected immediately</criterion>
+    <criterion testable="true">Navigation tabs switch between views</criterion>
+    <criterion testable="true">Error boundary catches and displays errors</criterion>
+    <criterion testable="true">No hard-coded colors in styles</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Shell Renders Correctly">
+      <steps>
+        <step>Open task pane</step>
+        <step>Verify header displays correctly</step>
+        <step>Verify navigation tabs are visible</step>
+      </steps>
+      <expected>Shell renders with all elements visible</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle to dark mode</step>
+        <step>Verify background adapts</step>
+        <step>Verify text colors adapt</step>
+      </steps>
+      <expected>All colors use Fluent UI v9 semantic tokens</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    The shell should feel native to Office apps. Use Fluent UI's design tokens
+    consistently to ensure visual harmony with the host application.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

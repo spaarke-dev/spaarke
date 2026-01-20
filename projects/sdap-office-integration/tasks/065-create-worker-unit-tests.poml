@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="065" project="sdap-office-integration">
+  <metadata>
+    <title>Create worker unit tests</title>
+    <phase>5: Background Workers</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>061, 062, 063, 064</dependencies>
+    <blocks>066</blocks>
+    <tags>testing, unit-test, worker</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task with explicit coverage requirements</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create comprehensive unit tests for all Office workers and the job status
+    service. Ensure idempotency, error handling, and status updates are properly
+    tested.
+  </prompt>
+
+  <role>
+    .NET developer specializing in testing. Expert in mocking Service Bus,
+    Redis, and Dataverse dependencies.
+  </role>
+
+  <goal>
+    Comprehensive unit test suite for all workers achieving at least 80%
+    coverage with proper mocking of external dependencies.
+  </goal>
+
+  <context>
+    <background>
+      Workers are critical path components that must be reliable. Unit tests
+      should verify idempotency, error handling, status updates, and proper
+      integration with external services (mocked).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Workers/Office/</file>
+      <file>tests/Sprk.Bff.Api.Tests/Workers/Office/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST achieve 80% code coverage</constraint>
+    <constraint source="spec">MUST test idempotency behavior</constraint>
+    <constraint source="spec">MUST test error recovery scenarios</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create test fixtures for worker dependencies</step>
+    <step order="2">Create Service Bus message mock utilities</step>
+    <step order="3">Write tests for UploadFinalizationWorker</step>
+    <step order="4">Write tests for ProfileSummaryWorker</step>
+    <step order="5">Write tests for IndexingWorker</step>
+    <step order="6">Write tests for JobStatusService</step>
+    <step order="7">Test idempotency (duplicate message handling)</step>
+    <step order="8">Test error scenarios (SPE failure, AI failure)</step>
+    <step order="9">Test status update flow</step>
+    <step order="10">Run coverage report and verify 80%+</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and run tests</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Workers/Office/*.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Services/Office/*.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All tests pass</criterion>
+    <criterion testable="true">Code coverage is at least 80%</criterion>
+    <criterion testable="true">Idempotency scenarios are tested</criterion>
+    <criterion testable="true">Error scenarios are tested</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use in-memory test doubles for Service Bus and Redis where possible.
+    Focus on testing the worker logic, not the infrastructure integration.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

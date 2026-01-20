@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="066" project="sdap-office-integration">
+  <metadata>
+    <title>Deploy workers to Azure</title>
+    <phase>5: Background Workers</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>065</dependencies>
+    <blocks>070, 071, 074</blocks>
+    <tags>deploy, azure, worker</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task with verification steps</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Deploy the Office background workers to the Azure development environment.
+    Verify Service Bus queues are configured, workers start correctly, and
+    job processing functions end-to-end.
+  </prompt>
+
+  <role>
+    DevOps engineer specializing in Azure deployments. Expert in App Service
+    background services and Service Bus configuration.
+  </role>
+
+  <goal>
+    Workers are deployed and processing jobs correctly in the Azure development
+    environment.
+  </goal>
+
+  <context>
+    <background>
+      The background workers run as part of the BFF API App Service (hosted services).
+      They connect to Service Bus queues to receive work and process documents
+      asynchronously.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Workers/Office/</file>
+      <file>infrastructure/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST deploy to development environment first</constraint>
+    <constraint source="spec">MUST verify Service Bus queue connectivity</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify all unit tests pass</step>
+    <step order="2">Create/verify Service Bus queues for Office workers</step>
+    <step order="3">Configure queue connection strings in App Service</step>
+    <step order="4">Deploy updated API with workers</step>
+    <step order="5">Verify workers start (check logs for registration)</step>
+    <step order="6">Test job processing with a sample save request</step>
+    <step order="7">Verify job status updates flow to SSE</step>
+    <step order="8">Check dead letter queue handling</step>
+    <step order="9">Document deployment in notes/deployment-log.md</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="az-cli">Azure CLI for deployment</tool>
+    <tool name="dotnet">Build</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment">Workers deployed to Azure dev environment</output>
+    <output type="docs">projects/sdap-office-integration/notes/deployment-log.md (updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Workers start without errors</criterion>
+    <criterion testable="true">Service Bus connection works</criterion>
+    <criterion testable="true">Sample job processes successfully</criterion>
+    <criterion testable="true">SSE receives status updates</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use the azure-deploy skill for deployment operations. Workers share the
+    App Service with the API - they're hosted services, not separate deployments.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Use the azure-deploy skill for deployment operations.
+    </protocol>
+  </execution>
+</task>

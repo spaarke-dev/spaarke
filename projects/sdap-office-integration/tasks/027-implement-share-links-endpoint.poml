@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="027" project="sdap-office-integration">
+  <metadata>
+    <title>Implement POST /office/share/links endpoint</title>
+    <phase>3: Backend API Development</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>034</blocks>
+    <tags>bff-api, api, minimal-api, endpoints</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>API endpoint implementation with link generation logic</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement the POST /office/share/links endpoint that generates shareable links for
+    selected documents. Links should resolve through Spaarke access controls and support
+    multiple documents in a single request.
+  </prompt>
+
+  <role>
+    .NET developer specializing in sharing and link generation. Expert in URL construction
+    and access control integration.
+  </role>
+
+  <goal>
+    An endpoint that generates share links for documents, returning properly formatted
+    URLs that resolve through Spaarke access controls.
+  </goal>
+
+  <context>
+    <background>
+      Users in Outlook compose mode can insert links to Spaarke documents into their emails.
+      These links should resolve through Spaarke, which checks access permissions before
+      allowing download. This enables controlled document sharing.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/Office/OfficeEndpoints.cs</file>
+      <file>projects/sdap-office-integration/spec.md (Share links endpoint contract)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST verify user has share permission on documents</constraint>
+    <constraint source="spec">MUST return shareable URLs that resolve through Spaarke</constraint>
+    <constraint source="spec">MUST support batch link generation</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create ShareLinksRequest DTO with documentIds array</step>
+    <step order="2">Create ShareLinksResponse with links array</step>
+    <step order="3">Create DocumentLink DTO with documentId, url, displayName</step>
+    <step order="4">Verify user has share permission on all documents</step>
+    <step order="5">Generate shareable URLs for each document</step>
+    <step order="6">Return links with display names for UI insertion</step>
+    <step order="7">Handle partial success (some documents not accessible)</step>
+    <step order="8">Add idempotency support</step>
+    <step order="9">Write unit tests</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/Office/OfficeEndpoints.cs (updated)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/Office/DTOs/ShareLinksRequest.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/Office/DTOs/ShareLinksResponse.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Endpoints/Office/ShareLinksEndpointTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">POST /office/share/links returns link URLs</criterion>
+    <criterion testable="true">Links resolve through Spaarke access control</criterion>
+    <criterion testable="true">User without share permission gets 403</criterion>
+    <criterion testable="true">Batch requests return multiple links</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The link URL format should be configurable (e.g., https://spaarke.app/doc/{id}).
+    The link resolution endpoint already exists in the main Spaarke application.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

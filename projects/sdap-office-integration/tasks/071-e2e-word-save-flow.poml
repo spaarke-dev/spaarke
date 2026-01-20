@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="071" project="sdap-office-integration">
+  <metadata>
+    <title>E2E test: Word save flow</title>
+    <phase>6: Integration &amp; Testing</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>058, 066</dependencies>
+    <blocks>078</blocks>
+    <tags>testing, e2e-test, word</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task with explicit E2E coverage requirements</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create end-to-end tests for the Word save flow. Test saving the active
+    document to Spaarke with entity associations, verifying the complete journey
+    from add-in UI through API to worker processing.
+  </prompt>
+
+  <role>
+    QA engineer specializing in Office add-in testing. Expert in E2E testing
+    patterns and Word API integration.
+  </role>
+
+  <goal>
+    Comprehensive E2E test suite validating the Word save flow works correctly
+    from user interaction to job completion.
+  </goal>
+
+  <context>
+    <background>
+      The Word save flow allows users to save the active document to Spaarke.
+      Unlike Outlook, Word deals with a single document at a time. The test
+      must verify document capture, entity association, and processing.
+    </background>
+    <relevant-files>
+      <file>src/client/office-addins/word/</file>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/Office/</file>
+      <file>tests/e2e/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST test document capture via WordApi 1.3+</constraint>
+    <constraint source="spec">MUST verify 100MB document size limit</constraint>
+    <constraint source="spec">MUST test SSE status updates</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/e2e-testing.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create Word E2E test file structure</step>
+    <step order="2">Configure Word test environment with mock host</step>
+    <step order="3">Test: Save empty/new document</step>
+    <step order="4">Test: Save document with content</step>
+    <step order="5">Test: Save document with images/embedded objects</step>
+    <step order="6">Test: Save large document (verify 100MB limit)</step>
+    <step order="7">Test: Entity picker and association</step>
+    <step order="8">Test: Quick Create during save</step>
+    <step order="9">Test: SSE job status updates</step>
+    <step order="10">Test: Error handling for oversized documents</step>
+    <step order="11">Test: Duplicate document detection</step>
+    <step order="12">Document test scenarios</step>
+    <step order="13">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build and run tests</tool>
+    <tool name="playwright">E2E test framework</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/e2e/word-save-flow.spec.ts</output>
+    <output type="test">tests/e2e/fixtures/word-mocks.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All E2E tests pass</criterion>
+    <criterion testable="true">Document is captured correctly</criterion>
+    <criterion testable="true">Entity association works</criterion>
+    <criterion testable="true">Large document limit is enforced</criterion>
+    <criterion testable="true">Status updates are received</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Save Document Flow">
+      <url>Word Desktop with add-in sideloaded</url>
+      <steps>
+        <step>Open a document in Word</step>
+        <step>Click Spaarke add-in in ribbon</step>
+        <step>Verify task pane opens</step>
+        <step>Select entity from picker</step>
+        <step>Click Save button</step>
+        <step>Verify progress indicator</step>
+        <step>Verify success message</step>
+      </steps>
+      <expected>Document saved to Spaarke with progress shown</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Word uses XML manifest (not unified JSON) because unified manifest for Word
+    is still in preview. Test both Word Online and Word Desktop if possible.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

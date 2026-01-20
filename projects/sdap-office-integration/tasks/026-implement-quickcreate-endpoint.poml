@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="026" project="sdap-office-integration">
+  <metadata>
+    <title>Implement POST /office/quickcreate/{entityType} endpoint</title>
+    <phase>3: Backend API Development</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>034</blocks>
+    <tags>bff-api, api, minimal-api, endpoints</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>API endpoint implementation with entity creation logic</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement the POST /office/quickcreate/{entityType} endpoint that allows users to
+    create new Matters, Projects, Invoices, Accounts, or Contacts inline from the
+    Office add-in with minimal required fields.
+  </prompt>
+
+  <role>
+    .NET developer specializing in entity creation APIs. Expert in validation,
+    Dataverse operations, and dynamic entity handling.
+  </role>
+
+  <goal>
+    A flexible Quick Create endpoint that supports creating any association target
+    entity type with minimal required fields.
+  </goal>
+
+  <context>
+    <background>
+      When saving a document, users may need to create a new entity to associate it with.
+      Quick Create allows them to do this without leaving the add-in. The endpoint must
+      support multiple entity types with type-specific required fields.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/Office/OfficeEndpoints.cs</file>
+      <file>projects/sdap-office-integration/spec.md (Quick Create endpoint contract)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST support: matter, project, invoice, account, contact</constraint>
+    <constraint source="spec">MUST validate type-specific required fields</constraint>
+    <constraint source="spec">MUST return created entity ID for immediate use</constraint>
+    <constraint source="ADR-008">MUST verify user has create permission for entity type</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create QuickCreateRequest DTO with dynamic field dictionary</step>
+    <step order="2">Create QuickCreateResponse with entityId, entityType, name</step>
+    <step order="3">Implement entity type validation (allowed types only)</step>
+    <step order="4">Define required fields per entity type</step>
+    <step order="5">Implement field validation per entity type</step>
+    <step order="6">Verify user has create permission for entity type</step>
+    <step order="7">Create entity in Dataverse</step>
+    <step order="8">Return created entity details</step>
+    <step order="9">Handle validation errors with OFFICE_007</step>
+    <step order="10">Write unit tests for each entity type</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/Office/OfficeEndpoints.cs (updated)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/Office/DTOs/QuickCreateRequest.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/Office/DTOs/QuickCreateResponse.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Endpoints/Office/QuickCreateEndpointTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">POST /office/quickcreate/matter creates a Matter</criterion>
+    <criterion testable="true">POST /office/quickcreate/project creates a Project</criterion>
+    <criterion testable="true">Invalid entity type returns 400 error</criterion>
+    <criterion testable="true">Missing required fields returns 400 with OFFICE_007</criterion>
+    <criterion testable="true">Response includes created entity ID</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The required fields for each entity type should be extensible via configuration
+    or code. Start with a minimal set (name only for most types) and expand based on
+    business requirements.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

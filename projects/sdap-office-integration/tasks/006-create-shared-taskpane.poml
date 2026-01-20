@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="006" project="sdap-office-integration">
+  <metadata>
+    <title>Create shared task pane React project</title>
+    <phase>1: Foundation &amp; Setup</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>003</dependencies>
+    <blocks>040, 042, 046</blocks>
+    <tags>frontend, react, fluent-ui, typescript</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation with React, TypeScript, and Fluent UI v9</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create the shared React task pane application that will be used by both Outlook and Word
+    add-ins. Set up FluentProvider with theme detection, basic routing structure, and the
+    application shell with header and content areas.
+  </prompt>
+
+  <role>
+    Frontend developer specializing in React and Fluent UI v9. Expert in Office Add-in
+    task pane development and theming.
+  </role>
+
+  <goal>
+    A working React application shell at src/client/office-addins/shared/taskpane/ with
+    FluentProvider configured, theme detection working, and basic routing structure in place.
+  </goal>
+
+  <context>
+    <background>
+      The task pane is the primary UI surface for Office Add-ins. It appears as a side panel
+      in Outlook and Word. The shared task pane will host all features (save, share, etc.)
+      with host-specific adapters providing context about the current document/email.
+    </background>
+    <relevant-files>
+      <file>src/client/office-addins/shared/taskpane/ (to create)</file>
+      <file>projects/sdap-office-integration/spec.md (UI requirements)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">MUST use Fluent UI v9 (@fluentui/react-components) exclusively</constraint>
+    <constraint source="ADR-021">MUST wrap entire app in FluentProvider with theme</constraint>
+    <constraint source="ADR-021">MUST use design tokens for all colors, spacing, typography</constraint>
+    <constraint source="ADR-021">MUST support light, dark, and high-contrast themes</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create App.tsx as the root component with FluentProvider</step>
+    <step order="2">Create index.tsx entry point that initializes Office.js and renders App</step>
+    <step order="3">Create useOfficeTheme hook to detect and respond to theme changes</step>
+    <step order="4">Create TaskPaneShell component with header and content areas</step>
+    <step order="5">Create basic routing structure (Save view, Share view, Status view)</step>
+    <step order="6">Create placeholder components for each main view</step>
+    <step order="7">Set up CSS-in-JS with makeStyles from Fluent UI v9</step>
+    <step order="8">Add theme tokens usage examples in shell component</step>
+    <step order="9">Create taskpane.html host page with Office.js script reference</step>
+    <step order="10">Update webpack to output to dist/taskpane/</step>
+    <step order="11">Verify build succeeds and app renders in browser</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build and test</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/taskpane/App.tsx</output>
+    <output type="code">src/client/office-addins/shared/taskpane/index.tsx</output>
+    <output type="code">src/client/office-addins/shared/taskpane/hooks/useOfficeTheme.ts</output>
+    <output type="code">src/client/office-addins/shared/taskpane/components/TaskPaneShell.tsx</output>
+    <output type="code">src/client/office-addins/shared/taskpane/taskpane.html</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm run build succeeds</criterion>
+    <criterion testable="true">App renders with FluentProvider wrapping</criterion>
+    <criterion testable="true">Theme detection hook responds to Office theme changes</criterion>
+    <criterion testable="true">No hard-coded colors in styles (tokens only)</criterion>
+    <criterion testable="true">Task pane shell displays header and content areas</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Task Pane Renders">
+      <url>https://localhost:3000/taskpane.html</url>
+      <steps>
+        <step>Open task pane HTML in browser</step>
+        <step>Verify React app renders without errors</step>
+        <step>Check console for Office.js initialization</step>
+      </steps>
+      <expected>Task pane shell displays with header and content areas</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle browser to dark mode (or use Fluent storybook dark theme)</step>
+        <step>Verify background colors adapt</step>
+        <step>Verify text colors adapt</step>
+      </steps>
+      <expected>All colors use Fluent UI v9 semantic tokens</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Office.js must be initialized before the React app renders. Use the Office.onReady()
+    callback to ensure proper initialization sequence. The theme detection should use
+    Office.context.ui.roamingSettings if available, with fallback to system preference.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

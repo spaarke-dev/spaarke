@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="044" project="sdap-office-integration">
+  <metadata>
+    <title>Implement Word adapter</title>
+    <phase>4: Office Add-in Development</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>042</dependencies>
+    <blocks>049</blocks>
+    <tags>frontend, typescript, word</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Host adapter implementation with Office.js Word API</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement the WordAdapter that implements IHostAdapter for Word. Handle document
+    content extraction and link insertion using Office.js WordApi 1.3+ APIs.
+  </prompt>
+
+  <role>
+    Frontend developer specializing in Word Add-ins. Expert in Office.js Word API
+    and document manipulation.
+  </role>
+
+  <goal>
+    A complete WordAdapter that extracts document content and metadata, and supports
+    link insertion for sharing.
+  </goal>
+
+  <context>
+    <background>
+      The Word adapter handles Word-specific operations. It extracts document content
+      for saving and supports inserting share links. Unlike Outlook, Word doesn't have
+      separate read/compose modes - the document is always editable.
+    </background>
+    <relevant-files>
+      <file>src/client/office-addins/word/WordAdapter.ts (to create)</file>
+      <file>projects/sdap-office-integration/spec.md (Word adapter section)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST use WordApi 1.3+</constraint>
+    <constraint source="spec">MUST extract document as OOXML for save</constraint>
+    <constraint source="spec">MUST support link insertion at cursor</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create WordAdapter class implementing IHostAdapter</step>
+    <step order="2">Implement getHostType() returning 'word'</step>
+    <step order="3">Implement getCurrentContext() extracting document properties</step>
+    <step order="4">Implement getContent() using document.body.getOoxml()</step>
+    <step order="5">Implement getAttachments() returning empty (N/A for Word)</step>
+    <step order="6">Implement insertLink() using range.insertHtml()</step>
+    <step order="7">Implement attachFile() (N/A for Word - throw not supported)</step>
+    <step order="8">Implement getCapabilities() for Word-specific features</step>
+    <step order="9">Handle document versioning context (sprk_document metadata)</step>
+    <step order="10">Add capability check with isSetSupported('WordApi', '1.3')</step>
+    <step order="11">Write unit tests</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Package management and build</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/word/WordAdapter.ts</output>
+    <output type="test">src/client/office-addins/word/__tests__/WordAdapter.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Document content is extracted as OOXML</criterion>
+    <criterion testable="true">Document properties (title, author) are extracted</criterion>
+    <criterion testable="true">Links are inserted at cursor position</criterion>
+    <criterion testable="true">Capability check prevents errors on older clients</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Word doesn't have attachments like Outlook emails. The getAttachments method
+    should return an empty array. Consider using document.getFileAsync for binary
+    format if OOXML is not suitable.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

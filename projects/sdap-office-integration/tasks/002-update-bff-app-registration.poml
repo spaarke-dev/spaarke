@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="sdap-office-integration">
+  <metadata>
+    <title>Update BFF API app registration for OBO</title>
+    <phase>1: Foundation &amp; Setup</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>040</blocks>
+    <tags>auth, azure, config</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Configuration task with explicit constraints, no code implementation</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Update the existing Spaarke BFF API app registration to expose the user_impersonation scope
+    and configure OBO (On-Behalf-Of) flow for Graph API access. Add the Office add-in app as
+    an authorized client application.
+  </prompt>
+
+  <role>
+    Azure AD administrator and identity specialist. Expert in OAuth 2.0 flows and
+    API permission configuration for multi-app scenarios.
+  </role>
+
+  <goal>
+    The BFF API app registration exposes the user_impersonation scope, accepts tokens from
+    the Office add-in, and is configured for OBO flow to access Microsoft Graph.
+  </goal>
+
+  <context>
+    <background>
+      The BFF API needs to accept tokens from the Office add-in (configured in task 001) and
+      exchange them for Graph tokens via OBO flow when accessing SharePoint Embedded. The
+      user_impersonation scope allows the add-in to call the BFF API on behalf of the user.
+    </background>
+    <relevant-files>
+      <file>docs/architecture/auth-azure-resources.md (existing BFF app registration details)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST expose api://{bff-api-id}/user_impersonation scope</constraint>
+    <constraint source="spec">MUST add Office add-in app ID as authorized client</constraint>
+    <constraint source="spec">MUST configure OBO permissions for Graph API (User.Read, Sites.ReadWrite.All)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/obo-flow.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Navigate to Azure Portal > App registrations > Spaarke BFF API</step>
+    <step order="2">Under "Expose an API", verify or set Application ID URI (api://{client-id})</step>
+    <step order="3">Add scope: user_impersonation with admin consent description</step>
+    <step order="4">Under "Authorized client applications", add the Office add-in client ID from task 001</step>
+    <step order="5">Under "API permissions", verify Graph permissions for OBO (User.Read, Sites.ReadWrite.All)</step>
+    <step order="6">Ensure admin consent is granted for required permissions</step>
+    <step order="7">Document the configuration in projects/sdap-office-integration/notes/app-registration.md</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="azure-portal">Azure Portal for app registration</tool>
+    <tool name="az-cli">Azure CLI for scripted configuration (optional)</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">Updated BFF API App Registration with OBO configuration</output>
+    <output type="docs">projects/sdap-office-integration/notes/app-registration.md (append)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">user_impersonation scope is exposed on BFF API</criterion>
+    <criterion testable="true">Office add-in app ID is listed as authorized client</criterion>
+    <criterion testable="true">Graph API permissions are configured for OBO</criterion>
+    <criterion testable="true">Admin consent is granted</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The BFF API app registration details are in docs/architecture/auth-azure-resources.md.
+    Ensure the add-in client ID from task 001 is used as the authorized client.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

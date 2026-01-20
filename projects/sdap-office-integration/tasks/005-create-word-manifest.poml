@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="sdap-office-integration">
+  <metadata>
+    <title>Create Word XML manifest</title>
+    <phase>1: Foundation &amp; Setup</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>003</dependencies>
+    <blocks>058</blocks>
+    <tags>config, word, manifest</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Configuration file creation with explicit format requirements</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create the XML add-in-only manifest for the Word add-in. The unified manifest is still
+    preview for Word, so XML manifest is required for production. Configure ribbon buttons
+    for "Save to Spaarke", "Save Version", "Share", and "Grant Access".
+  </prompt>
+
+  <role>
+    Office Add-in developer specializing in manifest configuration. Expert in XML manifest
+    schema, FormFactor elements, and Word-specific extension points.
+  </role>
+
+  <goal>
+    A complete XML manifest (manifest.xml) for Word that defines the add-in identity,
+    permissions, ribbon buttons, and task pane configuration.
+  </goal>
+
+  <context>
+    <background>
+      The unified manifest is only preview for Word (as of January 2026), so XML add-in-only
+      manifest is required for production deployments. The XML format uses different schema
+      and structure than the unified JSON format used for Outlook.
+    </background>
+    <relevant-files>
+      <file>src/client/office-addins/word/manifest.xml (to create)</file>
+      <file>projects/sdap-office-integration/spec.md (manifest requirements)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST use XML add-in-only manifest format for Word (unified is preview)</constraint>
+    <constraint source="spec">MUST configure ribbon buttons for Save, Save Version, Share, Grant Access</constraint>
+    <constraint source="spec">MUST specify WordApi 1.3+ requirement</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="XML Manifest" location="https://learn.microsoft.com/en-us/office/dev/add-ins/develop/add-in-manifests">
+        Microsoft documentation for XML manifest schema
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create manifest.xml skeleton with OfficeApp root element and namespaces</step>
+    <step order="2">Configure Id, Version, ProviderName, DefaultLocale elements</step>
+    <step order="3">Add DisplayName and Description elements</step>
+    <step order="4">Configure Hosts element with Host Name="Document" (Word)</step>
+    <step order="5">Set Requirements element with WordApi 1.3+</step>
+    <step order="6">Add DefaultSettings with SourceLocation</step>
+    <step order="7">Configure Permissions element</step>
+    <step order="8">Add ExtensionPoint for PrimaryCommandSurface with ribbon buttons</step>
+    <step order="9">Add icon resources (16x16, 32x32, 80x80 placeholders)</step>
+    <step order="10">Validate manifest using Office Add-in Manifest Validator</step>
+    <step order="11">Document manifest configuration in notes/manifest-word.md</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Manifest validation tools</tool>
+    <tool name="terminal">Run validation commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/word/manifest.xml</output>
+    <output type="docs">projects/sdap-office-integration/notes/manifest-word.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">manifest.xml is valid XML against Office schema</criterion>
+    <criterion testable="true">Ribbon buttons are configured for all four actions</criterion>
+    <criterion testable="true">WordApi 1.3+ requirement is specified</criterion>
+    <criterion testable="true">Task pane SourceLocation is configured</criterion>
+    <criterion testable="true">Icon resources are referenced</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The XML manifest format is mature and production-ready. Once unified manifest reaches GA
+    for Word, we can consider migration, but for V1 XML is the correct choice.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

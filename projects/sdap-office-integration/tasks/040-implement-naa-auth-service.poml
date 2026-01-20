@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="sdap-office-integration">
+  <metadata>
+    <title>Implement NAA authentication service</title>
+    <phase>4: Office Add-in Development</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>006, 001</dependencies>
+    <blocks>041, 045</blocks>
+    <tags>frontend, typescript, auth</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Core authentication implementation with MSAL.js 3.x</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement the NAA (Nested App Authentication) service using MSAL.js 3.x
+    createNestablePublicClientApplication. Handle silent token acquisition,
+    interactive popup fallback, and token caching.
+  </prompt>
+
+  <role>
+    Frontend developer specializing in authentication. Expert in MSAL.js, OAuth 2.0
+    flows, and Office Add-in authentication patterns.
+  </role>
+
+  <goal>
+    A working NaaAuthService that acquires tokens for the BFF API using NAA,
+    with proper caching and error handling.
+  </goal>
+
+  <context>
+    <background>
+      NAA is the Microsoft-recommended authentication pattern for Office Add-ins. It uses
+      MSAL.js 3.x with createNestablePublicClientApplication() instead of the legacy
+      createPublicClientApplication(). Tokens are acquired silently when possible,
+      with interactive popup as fallback.
+    </background>
+    <relevant-files>
+      <file>src/client/office-addins/shared/auth/NaaAuthService.ts (to create)</file>
+      <file>projects/sdap-office-integration/spec.md (Authentication Architecture section)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST use createNestablePublicClientApplication from MSAL.js 3.x</constraint>
+    <constraint source="spec">MUST NOT use legacy Exchange tokens</constraint>
+    <constraint source="spec">MUST implement silent acquisition with popup fallback</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/msal-client.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Install @azure/msal-browser 3.x package</step>
+    <step order="2">Create NaaAuthService class in shared/auth/</step>
+    <step order="3">Configure MSAL with client ID and authority</step>
+    <step order="4">Initialize with createNestablePublicClientApplication</step>
+    <step order="5">Implement acquireTokenSilent for BFF API scope</step>
+    <step order="6">Implement acquireTokenPopup fallback</step>
+    <step order="7">Create getAccessToken() method for API calls</step>
+    <step order="8">Handle MSAL errors and translate to user-friendly messages</step>
+    <step order="9">Add token cache management</step>
+    <step order="10">Create isNaaSupported() method to detect client capability</step>
+    <step order="11">Write unit tests</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Package management and build</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/auth/NaaAuthService.ts</output>
+    <output type="code">src/client/office-addins/shared/auth/authConfig.ts</output>
+    <output type="test">src/client/office-addins/shared/auth/__tests__/NaaAuthService.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Service initializes without errors</criterion>
+    <criterion testable="true">Silent token acquisition works when cached token exists</criterion>
+    <criterion testable="true">Interactive popup triggers when silent fails</criterion>
+    <criterion testable="true">Token contains correct audience (BFF API)</criterion>
+    <criterion testable="true">isNaaSupported correctly detects client capability</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The redirect URI for NAA is brk-multihub://localhost which is handled by the
+    Office host. Test in actual Office clients, not just browser.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="sdap-office-integration">
+  <metadata>
+    <title>Configure table relationships and indexes</title>
+    <phase>2: Dataverse Schema</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>010, 011, 012</dependencies>
+    <blocks>014</blocks>
+    <tags>dataverse, solution, config</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Configuration task with relationship and index setup</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Configure relationships between the new Office tables (EmailArtifact, AttachmentArtifact,
+    ProcessingJob) and existing entities (Document, Matter, Project, etc.). Set up cascading
+    behaviors and verify all lookups work correctly.
+  </prompt>
+
+  <role>
+    Dataverse developer specializing in relationship configuration and data integrity.
+    Expert in cascade behaviors and referential integrity.
+  </role>
+
+  <goal>
+    All table relationships are properly configured with appropriate cascade behaviors,
+    and indexes support efficient querying patterns.
+  </goal>
+
+  <context>
+    <background>
+      The Office integration tables need to integrate with existing Spaarke entities.
+      EmailArtifact links to Document, AttachmentArtifact links to both EmailArtifact
+      and Document, and ProcessingJob links to Document and User.
+    </background>
+    <relevant-files>
+      <file>projects/sdap-office-integration/spec.md (relationship diagram)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Document deletion MUST cascade to EmailArtifact</constraint>
+    <constraint source="spec">EmailArtifact deletion MUST restrict if AttachmentArtifacts exist</constraint>
+    <constraint source="spec">Indexes MUST support duplicate detection queries</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify EmailArtifact → Document lookup with cascade delete</step>
+    <step order="2">Verify AttachmentArtifact → EmailArtifact lookup with restrict delete</step>
+    <step order="3">Verify AttachmentArtifact → Document lookup with cascade delete</step>
+    <step order="4">Verify ProcessingJob → Document lookup with restrict delete</step>
+    <step order="5">Verify ProcessingJob → User (InitiatedBy) lookup with restrict delete</step>
+    <step order="6">Create compound index on EmailArtifact (HeadersHash, sprk_document)</step>
+    <step order="7">Create index on ProcessingJob (Status, CreatedOn) for queue queries</step>
+    <step order="8">Test lookup navigation works in both directions</step>
+    <step order="9">Document relationship diagram in notes/schema-relationships.md</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="pac-cli">Power Platform CLI for solution operations</tool>
+    <tool name="power-platform">Power Apps maker portal</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">Configured relationships in Dataverse solution</output>
+    <output type="docs">projects/sdap-office-integration/notes/schema-relationships.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All lookups navigate correctly</criterion>
+    <criterion testable="true">Cascade delete works for Document → EmailArtifact</criterion>
+    <criterion testable="true">Restrict delete prevents EmailArtifact deletion with attachments</criterion>
+    <criterion testable="true">Index queries perform within acceptable latency</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Test cascade behaviors carefully in a dev environment before deploying to higher
+    environments. Incorrect cascade settings can lead to data loss.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

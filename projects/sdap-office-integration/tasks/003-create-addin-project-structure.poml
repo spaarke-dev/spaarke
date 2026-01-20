@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="sdap-office-integration">
+  <metadata>
+    <title>Create Office add-in project structure</title>
+    <phase>1: Foundation &amp; Setup</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>004, 005, 006</blocks>
+    <tags>frontend, typescript, react, config</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates code project structure, TypeScript configuration, and build setup</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create the Office add-in project structure with separate Outlook and Word folders,
+    shared components folder, and appropriate TypeScript/React configuration. Set up
+    build tooling with webpack and Office.js type definitions.
+  </prompt>
+
+  <role>
+    Frontend developer specializing in Office Add-in development. Expert in TypeScript,
+    React, webpack, and Office.js integration.
+  </role>
+
+  <goal>
+    A complete project structure at src/client/office-addins/ with configured TypeScript,
+    React, webpack, and Office.js integration ready for add-in development.
+  </goal>
+
+  <context>
+    <background>
+      The Office add-ins share a common React task pane UI but have host-specific adapters
+      and manifest files. The project structure needs to support both Outlook (unified manifest)
+      and Word (XML manifest) while maximizing code reuse through shared components.
+    </background>
+    <relevant-files>
+      <file>src/client/office-addins/ (new directory)</file>
+      <file>projects/sdap-office-integration/spec.md (architecture section)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">MUST use Fluent UI v9 for all UI components</constraint>
+    <constraint source="spec">MUST use React 18 compatible with Office.js</constraint>
+    <constraint source="spec">MUST support Office.js Mailbox 1.8+ and WordApi 1.3+</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create directory structure: src/client/office-addins/{outlook,word,shared}</step>
+    <step order="2">Initialize package.json with Office.js, React, Fluent UI v9 dependencies</step>
+    <step order="3">Create tsconfig.json with strict mode and Office.js types</step>
+    <step order="4">Create webpack.config.js for development and production builds</step>
+    <step order="5">Create shared/taskpane/ folder for React app shell</step>
+    <step order="6">Create shared/services/ folder for API client and auth services</step>
+    <step order="7">Create shared/adapters/ folder for host adapter interface</step>
+    <step order="8">Create outlook/ and word/ folders for host-specific code</step>
+    <step order="9">Add .gitignore entries for node_modules, dist, etc.</step>
+    <step order="10">Verify npm install completes without errors</step>
+    <step order="11">Verify npm run build completes (empty app)</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Package management and build</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/package.json</output>
+    <output type="code">src/client/office-addins/tsconfig.json</output>
+    <output type="code">src/client/office-addins/webpack.config.js</output>
+    <output type="code">src/client/office-addins/shared/ (folder structure)</output>
+    <output type="code">src/client/office-addins/outlook/ (folder)</output>
+    <output type="code">src/client/office-addins/word/ (folder)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">npm install completes without errors</criterion>
+    <criterion testable="true">npm run build succeeds (compiles TypeScript)</criterion>
+    <criterion testable="true">Office.js types are available in IDE</criterion>
+    <criterion testable="true">Fluent UI v9 is in dependencies</criterion>
+    <criterion testable="true">Project structure matches spec architecture diagram</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use @microsoft/office-js-helpers or office-addin-dev-certs for local HTTPS development.
+    The shared task pane will be built in task 006 after this structure is in place.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

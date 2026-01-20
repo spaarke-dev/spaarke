@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="sdap-office-integration">
+  <metadata>
+    <title>Implement share flow UI</title>
+    <phase>4: Office Add-in Development</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>046</dependencies>
+    <blocks>056</blocks>
+    <tags>frontend, react, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>User flow implementation for document sharing</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement the share flow UI for Outlook compose mode. Include document search,
+    selection, and options for inserting links or attaching copies. Handle the
+    insertion into the email compose window.
+  </prompt>
+
+  <role>
+    Frontend developer specializing in user flows. Expert in React and Office.js
+    compose APIs.
+  </role>
+
+  <goal>
+    A complete share flow that lets users search for documents and insert links
+    or attach copies to their email.
+  </goal>
+
+  <context>
+    <background>
+      In Outlook compose mode, users can share documents from Spaarke. They search
+      for documents, select one or more, and choose to insert links or attach copies.
+      Links are inserted into the email body; attachments are added via Office.js.
+    </background>
+    <relevant-files>
+      <file>src/client/office-addins/shared/taskpane/views/ShareView.tsx (to create)</file>
+      <file>projects/sdap-office-integration/spec.md (Share flow requirements)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">MUST use Fluent UI v9 components</constraint>
+    <constraint source="spec">MUST support both link insertion and file attachment</constraint>
+    <constraint source="spec">MUST respect document sharing permissions</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create ShareView component as main share flow container</step>
+    <step order="2">Add document search input with typeahead</step>
+    <step order="3">Display search results with document metadata</step>
+    <step order="4">Allow multiple document selection</step>
+    <step order="5">Add share option toggle (Insert Links / Attach Copies)</step>
+    <step order="6">Implement "Insert Links" action via host adapter</step>
+    <step order="7">Implement "Attach Copies" action via host adapter</step>
+    <step order="8">Show confirmation after successful insertion</step>
+    <step order="9">Handle size limits for attachments</step>
+    <step order="10">Add recent documents section</step>
+    <step order="11">Write integration tests</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Package management and build</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/taskpane/views/ShareView.tsx</output>
+    <output type="code">src/client/office-addins/shared/taskpane/components/DocumentPicker.tsx</output>
+    <output type="code">src/client/office-addins/shared/taskpane/hooks/useShareFlow.ts</output>
+    <output type="test">src/client/office-addins/shared/taskpane/views/__tests__/ShareView.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">User can search for documents</criterion>
+    <criterion testable="true">Multiple documents can be selected</criterion>
+    <criterion testable="true">Links are inserted into email body</criterion>
+    <criterion testable="true">Files are attached to email</criterion>
+    <criterion testable="true">Confirmation shows after insertion</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Insert Document Link">
+      <steps>
+        <step>Open share view in compose mode</step>
+        <step>Search for document</step>
+        <step>Select document</step>
+        <step>Click Insert Links</step>
+        <step>Verify link appears in email body</step>
+      </steps>
+      <expected>Document link is inserted into email</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    The share flow is only available in Outlook compose mode and Word. Hide the
+    share tab in Outlook read mode.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

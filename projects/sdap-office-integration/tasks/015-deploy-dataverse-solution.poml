@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="sdap-office-integration">
+  <metadata>
+    <title>Deploy Dataverse solution</title>
+    <phase>2: Dataverse Schema</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>014</dependencies>
+    <blocks>020</blocks>
+    <tags>deploy, dataverse, solution</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task with explicit verification steps</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Export the Office integration solution from the development environment and import it
+    to the target environment. Verify all tables, relationships, and security roles are
+    deployed correctly.
+  </prompt>
+
+  <role>
+    Dataverse deployment specialist. Expert in solution lifecycle management and
+    environment-specific configuration.
+  </role>
+
+  <goal>
+    The Office integration Dataverse solution is deployed to the target environment with
+    all schema changes verified and working.
+  </goal>
+
+  <context>
+    <background>
+      The Dataverse schema changes (EmailArtifact, AttachmentArtifact, ProcessingJob tables)
+      need to be packaged into a solution and deployed to the development/test environment
+      before API development can proceed.
+    </background>
+    <relevant-files>
+      <file>src/solutions/ (solution projects)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST use unmanaged solution for development</constraint>
+    <constraint source="spec">MUST verify all relationships after import</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Export solution from development environment using pac solution export</step>
+    <step order="2">Verify solution ZIP contains all expected components</step>
+    <step order="3">Import solution to target environment using pac solution import</step>
+    <step order="4">Publish all customizations</step>
+    <step order="5">Verify EmailArtifact table is accessible</step>
+    <step order="6">Verify AttachmentArtifact table is accessible</step>
+    <step order="7">Verify ProcessingJob table is accessible</step>
+    <step order="8">Verify all relationships work correctly</step>
+    <step order="9">Verify security roles are applied</step>
+    <step order="10">Document deployment in notes/deployment-log.md</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="pac-cli">Power Platform CLI for solution export/import</tool>
+    <tool name="power-platform">Power Apps maker portal</tool>
+  </tools>
+
+  <outputs>
+    <output type="artifact">Exported solution ZIP file</output>
+    <output type="docs">projects/sdap-office-integration/notes/deployment-log.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Solution imports without errors</criterion>
+    <criterion testable="true">All three tables are visible in target environment</criterion>
+    <criterion testable="true">Relationships allow record creation with lookups</criterion>
+    <criterion testable="true">Security roles restrict access as designed</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use the dataverse-deploy skill for the deployment process. Keep the exported solution
+    ZIP as an artifact for future deployments.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+      Use the dataverse-deploy skill for deployment operations.
+    </protocol>
+  </execution>
+</task>

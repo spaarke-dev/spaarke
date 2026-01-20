@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="sdap-office-integration">
+  <metadata>
+    <title>Create Azure AD app registration for Office add-in</title>
+    <phase>1: Foundation &amp; Setup</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>002, 040</blocks>
+    <tags>auth, azure, config</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Configuration task with explicit constraints, no code implementation</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create an Azure AD app registration for the Spaarke Office add-in as a public client (SPA).
+    Configure redirect URIs for NAA broker and fallback, and request delegated permissions for
+    the BFF API and Microsoft Graph User.Read scope.
+  </prompt>
+
+  <role>
+    Azure AD administrator and identity specialist. Expert in OAuth 2.0 flows for Office add-ins
+    and Nested App Authentication (NAA) configuration.
+  </role>
+
+  <goal>
+    A fully configured Azure AD app registration for the Office add-in that supports NAA authentication
+    with proper redirect URIs, API permissions, and SPA platform configuration.
+  </goal>
+
+  <context>
+    <background>
+      The Office add-in requires authentication to access Spaarke BFF APIs. NAA (Nested App Authentication)
+      is the Microsoft-recommended pattern for Office add-ins, replacing legacy Exchange tokens which were
+      deprecated in August 2025. The add-in will use MSAL.js 3.x with createNestablePublicClientApplication().
+    </background>
+    <relevant-files>
+      <file>projects/sdap-office-integration/spec.md (Authentication Architecture section)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST use NAA as primary authentication method</constraint>
+    <constraint source="spec">MUST configure redirect URI: brk-multihub://localhost (NAA broker)</constraint>
+    <constraint source="spec">MUST configure fallback redirect URI: https://{addin-domain}/taskpane.html</constraint>
+    <constraint source="spec">MUST request delegated permission: api://{bff-api-id}/user_impersonation</constraint>
+    <constraint source="spec">MUST request delegated permission: User.Read (Microsoft Graph)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/msal-client.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Navigate to Azure Portal > Azure Active Directory > App registrations</step>
+    <step order="2">Create new registration: "Spaarke Office Add-in" with Single-page application (SPA) platform</step>
+    <step order="3">Configure redirect URIs: brk-multihub://localhost and https://{addin-domain}/taskpane.html</step>
+    <step order="4">Under API permissions, add delegated permission: api://{bff-api-id}/user_impersonation</step>
+    <step order="5">Add delegated permission: Microsoft Graph > User.Read</step>
+    <step order="6">Record the Application (client) ID for use in add-in configuration</step>
+    <step order="7">Document the configuration in projects/sdap-office-integration/notes/app-registration.md</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="azure-portal">Azure Portal for app registration</tool>
+    <tool name="az-cli">Azure CLI for scripted configuration (optional)</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">Azure AD App Registration: Spaarke Office Add-in</output>
+    <output type="docs">projects/sdap-office-integration/notes/app-registration.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">App registration exists with name "Spaarke Office Add-in"</criterion>
+    <criterion testable="true">Platform type is Single-page application (SPA)</criterion>
+    <criterion testable="true">Redirect URI brk-multihub://localhost is configured</criterion>
+    <criterion testable="true">API permission api://{bff-api-id}/user_impersonation is granted</criterion>
+    <criterion testable="true">API permission User.Read is granted</criterion>
+    <criterion testable="true">Application (client) ID is documented</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The BFF API client ID must be obtained from existing Azure resources. See docs/architecture/auth-azure-resources.md
+    for current app registration details. The addin-domain placeholder will be replaced during deployment configuration.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

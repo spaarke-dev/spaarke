@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="055" project="sdap-office-integration">
+  <metadata>
+    <title>Implement accessibility (keyboard nav, screen reader)</title>
+    <phase>4: Office Add-in Development</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>046</dependencies>
+    <blocks>056, 076</blocks>
+    <tags>frontend, react, fluent-ui, a11y</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Accessibility implementation with WCAG 2.1 AA compliance</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement comprehensive accessibility support including keyboard navigation,
+    screen reader compatibility, focus management, and ARIA attributes. Meet
+    WCAG 2.1 AA compliance requirements.
+  </prompt>
+
+  <role>
+    Frontend developer specializing in accessibility. Expert in WCAG guidelines,
+    ARIA patterns, and assistive technology testing.
+  </role>
+
+  <goal>
+    Full WCAG 2.1 AA compliance with complete keyboard navigation, proper screen
+    reader announcements, and accessible focus management.
+  </goal>
+
+  <context>
+    <background>
+      Accessibility is a requirement for enterprise software. The add-in must be
+      fully usable via keyboard alone and compatible with screen readers like NVDA
+      and JAWS. All interactive elements must be accessible.
+    </background>
+    <relevant-files>
+      <file>src/client/office-addins/shared/taskpane/</file>
+      <file>projects/sdap-office-integration/spec.md (Accessibility requirements)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST meet WCAG 2.1 AA compliance</constraint>
+    <constraint source="spec">MUST support complete keyboard navigation</constraint>
+    <constraint source="spec">MUST work with NVDA and JAWS screen readers</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Audit all components for keyboard accessibility</step>
+    <step order="2">Implement focus trap for dialogs</step>
+    <step order="3">Add skip links for navigation</step>
+    <step order="4">Ensure all interactive elements are focusable</step>
+    <step order="5">Add ARIA labels to all controls</step>
+    <step order="6">Implement live regions for status updates</step>
+    <step order="7">Add landmark roles (main, navigation, complementary)</step>
+    <step order="8">Implement focus management for view transitions</step>
+    <step order="9">Test with NVDA screen reader</step>
+    <step order="10">Test with keyboard-only navigation</step>
+    <step order="11">Run automated accessibility scan (axe-core)</step>
+    <step order="12">Fix any identified issues</step>
+    <step order="13">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Package management and build</tool>
+    <tool name="terminal">Run commands</tool>
+    <tool name="axe-core">Accessibility testing</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/taskpane/components/ (updated with a11y)</output>
+    <output type="code">src/client/office-addins/shared/taskpane/hooks/useFocusManagement.ts</output>
+    <output type="test">src/client/office-addins/shared/taskpane/__tests__/accessibility.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All actions achievable via keyboard</criterion>
+    <criterion testable="true">Focus visible on all interactive elements</criterion>
+    <criterion testable="true">Screen reader announces all content correctly</criterion>
+    <criterion testable="true">axe-core reports no violations</criterion>
+    <criterion testable="true">Dialogs trap and restore focus properly</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Keyboard Navigation">
+      <steps>
+        <step>Use Tab to navigate through all elements</step>
+        <step>Use Enter/Space to activate buttons</step>
+        <step>Use arrow keys in lists and pickers</step>
+        <step>Use Escape to close dialogs</step>
+      </steps>
+      <expected>All functionality accessible via keyboard</expected>
+    </test>
+    <test name="Screen Reader Compatibility">
+      <steps>
+        <step>Enable NVDA/JAWS</step>
+        <step>Navigate through task pane</step>
+        <step>Verify all elements are announced</step>
+        <step>Verify status changes are announced</step>
+      </steps>
+      <expected>All content and state changes are announced</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Fluent UI v9 components have good built-in accessibility, but custom components
+    need explicit ARIA attributes. Test with actual screen readers, not just
+    automated tools.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

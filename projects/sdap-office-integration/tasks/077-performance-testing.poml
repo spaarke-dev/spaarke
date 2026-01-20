@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="077" project="sdap-office-integration">
+  <metadata>
+    <title>Performance testing</title>
+    <phase>6: Integration &amp; Testing</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>035, 066</dependencies>
+    <blocks>078</blocks>
+    <tags>testing, performance, load-testing</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task with explicit performance requirements</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Conduct performance testing for the Office integration APIs and workers.
+    Verify response times meet SLA requirements and the system handles expected
+    concurrent load without degradation.
+  </prompt>
+
+  <role>
+    Performance engineer. Expert in load testing, latency analysis, and
+    bottleneck identification.
+  </role>
+
+  <goal>
+    Performance test report documenting API response times, worker throughput,
+    and system behavior under load.
+  </goal>
+
+  <context>
+    <background>
+      The Office integration has specific performance requirements:
+      - API response times under 2 seconds (p95)
+      - SSE status updates within 1 second
+      - Worker processing completes within job timeout
+      - System handles concurrent users without degradation
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/Office/</file>
+      <file>src/server/api/Sprk.Bff.Api/Workers/Office/</file>
+      <file>projects/sdap-office-integration/notes/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">API p95 response time MUST be under 2 seconds</constraint>
+    <constraint source="spec">SSE updates MUST arrive within 1 second</constraint>
+    <constraint source="spec">System MUST handle 50 concurrent users</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Set up performance testing environment</step>
+    <step order="2">Create load test scripts for save endpoint</step>
+    <step order="3">Create load test scripts for search endpoints</step>
+    <step order="4">Create load test scripts for share endpoints</step>
+    <step order="5">Test: Single user response times (baseline)</step>
+    <step order="6">Test: 10 concurrent users</step>
+    <step order="7">Test: 50 concurrent users</step>
+    <step order="8">Test: SSE latency under load</step>
+    <step order="9">Test: Worker throughput (jobs per minute)</step>
+    <step order="10">Identify any bottlenecks</step>
+    <step order="11">Document findings in performance report</step>
+    <step order="12">Create optimization backlog if needed</step>
+    <step order="13">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="k6">Load testing tool</tool>
+    <tool name="dotnet">Build and run</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/sdap-office-integration/notes/performance-report.md</output>
+    <output type="code">tests/performance/office-endpoints.js</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">API p95 latency under 2 seconds</criterion>
+    <criterion testable="true">SSE update latency under 1 second</criterion>
+    <criterion testable="true">System handles 50 concurrent users</criterion>
+    <criterion testable="true">No memory leaks under sustained load</criterion>
+    <criterion testable="true">Performance report documents all metrics</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use k6 for API load testing. Focus on the critical path (save flow) first.
+    Monitor Azure App Service metrics during tests to identify resource limits.
+    Consider file size variations in test scenarios.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

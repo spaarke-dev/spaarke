@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="sdap-office-integration">
+  <metadata>
+    <title>Implement Outlook adapter</title>
+    <phase>4: Office Add-in Development</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>042</dependencies>
+    <blocks>049, 050</blocks>
+    <tags>frontend, typescript, outlook</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Host adapter implementation with Office.js Mailbox API</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement the OutlookAdapter that implements IHostAdapter for Outlook. Handle both
+    read mode (email/attachments) and compose mode (insert links/attach files). Use
+    Office.js Mailbox 1.8+ APIs for attachment content retrieval.
+  </prompt>
+
+  <role>
+    Frontend developer specializing in Outlook Add-ins. Expert in Office.js Mailbox API
+    and email message handling.
+  </role>
+
+  <goal>
+    A complete OutlookAdapter that extracts email content and attachments in read mode,
+    and inserts links/attachments in compose mode.
+  </goal>
+
+  <context>
+    <background>
+      The Outlook adapter handles all Outlook-specific operations. In read mode, it extracts
+      email metadata, body, and attachments. In compose mode, it inserts links into the
+      body and attaches files. The adapter must handle both modes transparently.
+    </background>
+    <relevant-files>
+      <file>src/client/office-addins/outlook/OutlookAdapter.ts (to create)</file>
+      <file>projects/sdap-office-integration/spec.md (Outlook adapter section)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST use Mailbox 1.8+ for getAttachmentContentAsync</constraint>
+    <constraint source="spec">MUST handle both read and compose modes</constraint>
+    <constraint source="spec">MUST extract email headers for duplicate detection</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create OutlookAdapter class implementing IHostAdapter</step>
+    <step order="2">Implement getHostType() returning 'outlook'</step>
+    <step order="3">Implement getCurrentContext() extracting email metadata</step>
+    <step order="4">Implement getContent() for email body (HTML/text)</step>
+    <step order="5">Implement getAttachments() using getAttachmentContentAsync</step>
+    <step order="6">Implement insertLink() using setSelectedDataAsync for compose</step>
+    <step order="7">Implement attachFile() using addFileAttachmentFromBase64Async</step>
+    <step order="8">Implement getCapabilities() with mode-specific flags</step>
+    <step order="9">Handle internet headers extraction for deduplication</step>
+    <step order="10">Add capability check with isSetSupported('Mailbox', '1.8')</step>
+    <step order="11">Write unit tests</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Package management and build</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/outlook/OutlookAdapter.ts</output>
+    <output type="test">src/client/office-addins/outlook/__tests__/OutlookAdapter.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Read mode: Email metadata is extracted correctly</criterion>
+    <criterion testable="true">Read mode: Attachments are retrieved as base64</criterion>
+    <criterion testable="true">Compose mode: Links are inserted into email body</criterion>
+    <criterion testable="true">Compose mode: Files are attached using base64</criterion>
+    <criterion testable="true">Capability check prevents errors on older clients</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The getAttachmentContentAsync API requires Mailbox 1.8+. Check capability before
+    calling. For inline attachments (embedded images), use the contentId to match
+    with HTML body references.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="081" project="sdap-office-integration">
+  <metadata>
+    <title>Production deployment: Add-ins</title>
+    <phase>7: Deployment &amp; Go-Live</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>080</dependencies>
+    <blocks>082, 083, 090</blocks>
+    <tags>deploy, office-addin, production</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task with verification steps</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Deploy the Office add-ins (Outlook and Word) to production. Publish to
+    Microsoft 365 admin center for organization-wide deployment. Configure
+    production manifests with correct API endpoints.
+  </prompt>
+
+  <role>
+    DevOps engineer specializing in Office add-in deployment. Expert in
+    Microsoft 365 admin center and add-in distribution.
+  </role>
+
+  <goal>
+    Outlook and Word add-ins deployed to production and available to all
+    organization users via centralized deployment.
+  </goal>
+
+  <context>
+    <background>
+      After BFF API is deployed to production, the add-ins can be deployed.
+      The manifests must point to production API endpoints. Centralized
+      deployment via M365 admin center enables automatic installation for users.
+    </background>
+    <relevant-files>
+      <file>src/client/office-addins/outlook/manifest.json</file>
+      <file>src/client/office-addins/word/manifest.xml</file>
+      <file>src/client/office-addins/dist/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST update manifests with production API URLs</constraint>
+    <constraint source="spec">MUST use centralized deployment for organization</constraint>
+    <constraint source="spec">MUST verify add-ins load in production Office clients</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Update Outlook manifest with production API URL</step>
+    <step order="2">Update Word manifest with production API URL</step>
+    <step order="3">Build production add-in bundles</step>
+    <step order="4">Deploy add-in static assets to CDN/hosting</step>
+    <step order="5">Upload Outlook manifest to M365 admin center</step>
+    <step order="6">Upload Word manifest to M365 admin center</step>
+    <step order="7">Configure deployment scope (all users or pilot group)</step>
+    <step order="8">Verify Outlook add-in loads in production</step>
+    <step order="9">Verify Word add-in loads in production</step>
+    <step order="10">Test save flow end-to-end in production</step>
+    <step order="11">Document deployment in deployment-log.md</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build</tool>
+    <tool name="m365-admin">Microsoft 365 admin center</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment">Add-ins deployed to M365 admin center</output>
+    <output type="docs">projects/sdap-office-integration/notes/deployment-log.md (updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Outlook add-in visible in production Outlook</criterion>
+    <criterion testable="true">Word add-in visible in production Word</criterion>
+    <criterion testable="true">Add-ins authenticate successfully</criterion>
+    <criterion testable="true">Save flow works end-to-end</criterion>
+    <criterion testable="true">Share flow works in Outlook compose</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Centralized deployment can take up to 24 hours to propagate to all users.
+    Consider piloting with a small group first. Have rollback plan ready
+    (remove from admin center).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

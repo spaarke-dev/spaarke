@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="082" project="sdap-office-integration">
+  <metadata>
+    <title>Create user documentation</title>
+    <phase>7: Deployment &amp; Go-Live</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>081</dependencies>
+    <blocks>090</blocks>
+    <tags>documentation, user-guide</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation task only</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create end-user documentation for the Spaarke Office add-ins. Write guides
+    for saving emails/documents, sharing from Spaarke, and using Quick Create.
+    Include screenshots and troubleshooting tips.
+  </prompt>
+
+  <role>
+    Technical writer. Expert in creating clear, user-friendly documentation
+    with visual guides.
+  </role>
+
+  <goal>
+    Complete user documentation that enables end users to effectively use
+    the Spaarke Office add-ins without training.
+  </goal>
+
+  <context>
+    <background>
+      End users need clear documentation to understand how to use the Office
+      add-ins. Documentation should cover common workflows, tips, and
+      troubleshooting for self-service support.
+    </background>
+    <relevant-files>
+      <file>docs/product-documentation/</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST include visual guides with screenshots</constraint>
+    <constraint source="spec">MUST cover all primary workflows</constraint>
+    <constraint source="spec">MUST be understandable by non-technical users</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Outline documentation structure</step>
+    <step order="2">Write "Getting Started" introduction</step>
+    <step order="3">Write "Saving Emails" guide with screenshots</step>
+    <step order="4">Write "Saving Attachments" guide</step>
+    <step order="5">Write "Saving Word Documents" guide</step>
+    <step order="6">Write "Sharing Documents" guide (links and attachments)</step>
+    <step order="7">Write "Using Quick Create" guide</step>
+    <step order="8">Write "Understanding Job Status" section</step>
+    <step order="9">Write "Troubleshooting" section with common issues</step>
+    <step order="10">Capture screenshots for all guides</step>
+    <step order="11">Review documentation for clarity</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="editor">Documentation editing</tool>
+    <tool name="screenshot">Screen capture tool</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/product-documentation/office-addins-user-guide.md</output>
+    <output type="docs">docs/product-documentation/office-addins-quickstart.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All primary workflows documented</criterion>
+    <criterion testable="true">Screenshots included for visual guidance</criterion>
+    <criterion testable="true">Troubleshooting covers common issues</criterion>
+    <criterion testable="true">Language is clear and non-technical</criterion>
+    <criterion testable="true">Documentation reviewed by non-developer</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Focus on the most common user workflows. Use simple language and avoid
+    jargon. Consider creating a quick reference card for power users.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

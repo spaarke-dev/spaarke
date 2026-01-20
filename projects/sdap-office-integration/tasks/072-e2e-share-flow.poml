@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="072" project="sdap-office-integration">
+  <metadata>
+    <title>E2E test: Share flow</title>
+    <phase>6: Integration &amp; Testing</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>057</dependencies>
+    <blocks>078</blocks>
+    <tags>testing, e2e-test, outlook</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task with explicit E2E coverage requirements</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create end-to-end tests for the Outlook share flow. Test sharing documents
+    from Spaarke as links or attachments in compose mode, verifying the search,
+    selection, and insertion work correctly.
+  </prompt>
+
+  <role>
+    QA engineer specializing in Office add-in testing. Expert in Outlook compose
+    mode APIs and E2E testing patterns.
+  </role>
+
+  <goal>
+    Comprehensive E2E test suite validating the share flow works correctly
+    for both link sharing and attachment insertion.
+  </goal>
+
+  <context>
+    <background>
+      The share flow allows users to insert Spaarke documents into emails being
+      composed. Users can share as links (inserts URL into email body) or as
+      attachments (downloads and attaches the file). This flow only works in
+      Outlook compose mode.
+    </background>
+    <relevant-files>
+      <file>src/client/office-addins/outlook/</file>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/Office/</file>
+      <file>tests/e2e/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST test both share-as-link and share-as-attachment</constraint>
+    <constraint source="spec">MUST verify document search works correctly</constraint>
+    <constraint source="spec">MUST test multi-document selection</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/e2e-testing.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create share flow E2E test file</step>
+    <step order="2">Configure compose mode test environment</step>
+    <step order="3">Test: Document search with typeahead</step>
+    <step order="4">Test: Single document share as link</step>
+    <step order="5">Test: Multiple documents share as links</step>
+    <step order="6">Test: Single document share as attachment</step>
+    <step order="7">Test: Multiple documents share as attachments</step>
+    <step order="8">Test: Search filters (entity type, date range)</step>
+    <step order="9">Test: Recent documents list</step>
+    <step order="10">Test: Error handling for unavailable documents</step>
+    <step order="11">Test: Compose mode detection</step>
+    <step order="12">Document test scenarios</step>
+    <step order="13">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build and run tests</tool>
+    <tool name="playwright">E2E test framework</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/e2e/share-flow.spec.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All E2E tests pass</criterion>
+    <criterion testable="true">Links are inserted into email body correctly</criterion>
+    <criterion testable="true">Attachments are added to email correctly</criterion>
+    <criterion testable="true">Multi-document selection works</criterion>
+    <criterion testable="true">Search returns relevant results</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Share as Link Flow">
+      <url>https://outlook.office.com/mail/new (compose mode)</url>
+      <steps>
+        <step>Click Spaarke add-in in compose ribbon</step>
+        <step>Verify task pane shows share mode</step>
+        <step>Search for a document</step>
+        <step>Select document from results</step>
+        <step>Click "Share as Link"</step>
+        <step>Verify link appears in email body</step>
+      </steps>
+      <expected>Document link inserted into email body</expected>
+    </test>
+    <test name="Share as Attachment Flow">
+      <steps>
+        <step>Search and select document</step>
+        <step>Click "Share as Attachment"</step>
+        <step>Verify attachment appears in email</step>
+      </steps>
+      <expected>Document attached to email</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Share flow only works in Outlook compose mode. The add-in should detect
+    mode and show appropriate UI. Test both new email and reply scenarios.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

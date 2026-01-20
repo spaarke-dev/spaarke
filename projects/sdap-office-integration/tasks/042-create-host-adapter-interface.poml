@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="sdap-office-integration">
+  <metadata>
+    <title>Create host adapter interface</title>
+    <phase>4: Office Add-in Development</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>006</dependencies>
+    <blocks>043, 044</blocks>
+    <tags>frontend, typescript, architecture</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Interface design establishing adapter pattern</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create the IHostAdapter interface that abstracts host-specific operations (Outlook vs Word).
+    Define methods for getting current item context, extracting content, and host capabilities.
+  </prompt>
+
+  <role>
+    Frontend architect specializing in interface design. Expert in adapter patterns
+    and Office.js API abstraction.
+  </role>
+
+  <goal>
+    A clean IHostAdapter interface that the shared task pane uses to interact with
+    host-specific functionality without knowing the underlying host.
+  </goal>
+
+  <context>
+    <background>
+      The shared task pane needs to work in both Outlook and Word. The host adapter
+      pattern abstracts the differences so the UI code doesn't need conditional logic.
+      Each host (Outlook, Word) provides its own adapter implementation.
+    </background>
+    <relevant-files>
+      <file>src/client/office-addins/shared/adapters/IHostAdapter.ts (to create)</file>
+      <file>projects/sdap-office-integration/spec.md (Host adapter section)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST abstract all host-specific operations</constraint>
+    <constraint source="spec">MUST support both Outlook (email) and Word (document) contexts</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create IHostAdapter interface in shared/adapters/</step>
+    <step order="2">Define getHostType(): 'outlook' | 'word' method</step>
+    <step order="3">Define getCurrentContext(): ItemContext method</step>
+    <step order="4">Define getContent(): Promise&lt;ContentItem[]&gt; method</step>
+    <step order="5">Define getAttachments(): Promise&lt;Attachment[]&gt; method (Outlook only)</step>
+    <step order="6">Define insertLink(url: string): Promise&lt;void&gt; method (compose)</step>
+    <step order="7">Define attachFile(base64: string, name: string): Promise&lt;void&gt; method</step>
+    <step order="8">Define getCapabilities(): HostCapabilities method</step>
+    <step order="9">Create ItemContext, ContentItem, Attachment, HostCapabilities types</step>
+    <step order="10">Create HostAdapterFactory for adapter creation</step>
+    <step order="11">Write unit tests for factory</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Package management and build</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/adapters/IHostAdapter.ts</output>
+    <output type="code">src/client/office-addins/shared/adapters/types.ts</output>
+    <output type="code">src/client/office-addins/shared/adapters/HostAdapterFactory.ts</output>
+    <output type="test">src/client/office-addins/shared/adapters/__tests__/HostAdapterFactory.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Interface compiles without errors</criterion>
+    <criterion testable="true">All required methods are defined</criterion>
+    <criterion testable="true">Types are properly exported</criterion>
+    <criterion testable="true">Factory creates correct adapter based on host</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The interface should be minimal but complete. Methods not applicable to a host
+    (like getAttachments for Word) should return empty arrays or be marked optional.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

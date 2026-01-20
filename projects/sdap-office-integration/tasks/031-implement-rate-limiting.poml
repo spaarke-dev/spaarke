@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="sdap-office-integration">
+  <metadata>
+    <title>Implement rate limiting</title>
+    <phase>3: Backend API Development</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>034</blocks>
+    <tags>bff-api, api, middleware, security</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Security middleware implementation with rate limiting logic</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement rate limiting for the Office endpoints to prevent abuse. Configure
+    appropriate limits per user and per endpoint, with proper 429 Too Many Requests
+    responses.
+  </prompt>
+
+  <role>
+    .NET developer specializing in API security. Expert in rate limiting patterns
+    and ASP.NET Core rate limiting middleware.
+  </role>
+
+  <goal>
+    Rate limiting configured for all Office endpoints with appropriate limits and
+    proper error responses when limits are exceeded.
+  </goal>
+
+  <context>
+    <background>
+      Rate limiting protects the API from abuse and ensures fair resource usage.
+      The Office endpoints should have reasonable limits that don't interfere with
+      normal usage but prevent excessive requests.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/Office/OfficeEndpoints.cs</file>
+      <file>projects/sdap-office-integration/spec.md (Rate limiting requirements)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST return 429 with Retry-After header</constraint>
+    <constraint source="spec">MUST use ProblemDetails for rate limit errors</constraint>
+    <constraint source="spec">MUST be configurable per endpoint</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Configure ASP.NET Core rate limiting services</step>
+    <step order="2">Define rate limit policies for Office endpoints</step>
+    <step order="3">Set save endpoint limit: 10 requests per minute per user</step>
+    <step order="4">Set search endpoints limit: 60 requests per minute per user</step>
+    <step order="5">Set SSE endpoint limit: 5 concurrent connections per user</step>
+    <step order="6">Configure 429 response with Retry-After header</step>
+    <step order="7">Return OFFICE_015 error code in ProblemDetails</step>
+    <step order="8">Apply rate limiting to Office endpoint group</step>
+    <step order="9">Write unit tests for rate limit triggering</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Configuration/RateLimitingConfig.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/Office/OfficeEndpoints.cs (updated)</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/RateLimiting/OfficeRateLimitTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Exceeding save limit returns 429</criterion>
+    <criterion testable="true">Response includes Retry-After header</criterion>
+    <criterion testable="true">Error response includes OFFICE_015 code</criterion>
+    <criterion testable="true">Normal usage is not affected</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    ASP.NET Core 7+ has built-in rate limiting middleware. Use the fixed window or
+    sliding window algorithm based on requirements. Consider using Redis for distributed
+    rate limiting in multi-instance deployments.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="sdap-office-integration">
+  <metadata>
+    <title>Implement idempotency middleware</title>
+    <phase>3: Backend API Development</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>021</dependencies>
+    <blocks>034</blocks>
+    <tags>bff-api, api, middleware, cache</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Middleware implementation with caching and SHA256 hashing</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement idempotency middleware for the Office endpoints that uses SHA256 hash of
+    the canonical request payload as the idempotency key. Store processed request results
+    in Redis for replay on duplicate requests.
+  </prompt>
+
+  <role>
+    .NET developer specializing in middleware and caching. Expert in idempotency patterns
+    and distributed caching with Redis.
+  </role>
+
+  <goal>
+    An endpoint filter that detects duplicate requests using payload hash and returns
+    cached responses, preventing duplicate document saves.
+  </goal>
+
+  <context>
+    <background>
+      Network issues may cause the add-in to retry requests. Without idempotency, this
+      could create duplicate documents. The idempotency middleware hashes the request
+      payload and caches results, returning cached responses for duplicate requests.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/Office/OfficeEndpoints.cs</file>
+      <file>projects/sdap-office-integration/spec.md (Idempotency requirements)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST use SHA256 hash of canonical payload</constraint>
+    <constraint source="spec">MUST store results in Redis with 24-hour TTL</constraint>
+    <constraint source="spec">MUST apply to POST endpoints (save, quickcreate, share)</constraint>
+    <constraint source="ADR-009">MUST use Redis via IDistributedCache</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create IdempotencyFilter endpoint filter class</step>
+    <step order="2">Implement canonical payload serialization (sorted keys, consistent format)</step>
+    <step order="3">Implement SHA256 hash generation</step>
+    <step order="4">Check Redis for existing hash on request</step>
+    <step order="5">Return cached response if hash exists</step>
+    <step order="6">Execute endpoint if hash not found</step>
+    <step order="7">Store response in Redis with 24-hour TTL</step>
+    <step order="8">Include user ID in hash to scope per-user</step>
+    <step order="9">Add idempotency filter to POST endpoints</step>
+    <step order="10">Write unit tests for hash generation and caching</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Filters/IdempotencyFilter.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/IdempotencyService.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Filters/IdempotencyFilterTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Identical requests return cached response</criterion>
+    <criterion testable="true">Different payloads create different hashes</criterion>
+    <criterion testable="true">Cache expires after 24 hours</criterion>
+    <criterion testable="true">User ID is included in hash scope</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The canonical payload format must be deterministic - object property order should
+    not affect the hash. Consider using a sorted JSON serialization or defined field order.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="029" project="sdap-office-integration">
+  <metadata>
+    <title>Implement GET /office/recent endpoint</title>
+    <phase>3: Backend API Development</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>034</blocks>
+    <tags>bff-api, api, minimal-api, endpoints</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>API endpoint implementation with user history tracking</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement the GET /office/recent endpoint that returns the user's recently used
+    association targets and documents for quick selection in the Office add-in.
+  </prompt>
+
+  <role>
+    .NET developer specializing in user experience APIs. Expert in tracking user
+    activity and providing personalized suggestions.
+  </role>
+
+  <goal>
+    An endpoint that returns recently used entities and documents, enabling quick
+    access to frequently used association targets.
+  </goal>
+
+  <context>
+    <background>
+      Users often save documents to the same entities repeatedly (e.g., an active Matter).
+      The recent items feature remembers these choices and presents them at the top of
+      the picker for quick selection.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/Office/OfficeEndpoints.cs</file>
+      <file>projects/sdap-office-integration/spec.md (Recent endpoint contract)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST return recent entities grouped by type</constraint>
+    <constraint source="spec">MUST respect user permissions on returned items</constraint>
+    <constraint source="spec">MUST limit to configurable number of items (default 10)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create RecentItemsResponse DTO with entities and documents arrays</step>
+    <step order="2">Define storage mechanism for recent items (Redis or Dataverse)</step>
+    <step order="3">Implement recent entities retrieval per user</step>
+    <step order="4">Implement recent documents retrieval per user</step>
+    <step order="5">Filter out items user no longer has access to</step>
+    <step order="6">Sort by most recently used</step>
+    <step order="7">Limit results per category</step>
+    <step order="8">Write unit tests</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/Office/OfficeEndpoints.cs (updated)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/Office/DTOs/RecentItemsResponse.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/RecentItemsService.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Endpoints/Office/RecentEndpointTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">GET /office/recent returns recent items</criterion>
+    <criterion testable="true">Items are sorted by most recently used</criterion>
+    <criterion testable="true">Items without access are filtered out</criterion>
+    <criterion testable="true">Results are limited to configured maximum</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Recent items should be updated when save endpoint is called. Consider using Redis
+    sorted sets for efficient recent item tracking per user.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

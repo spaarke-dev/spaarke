@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="076" project="sdap-office-integration">
+  <metadata>
+    <title>Accessibility audit</title>
+    <phase>6: Integration &amp; Testing</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>055</dependencies>
+    <blocks>078</blocks>
+    <tags>testing, accessibility, wcag</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Audit task - review and documentation only</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Conduct a comprehensive accessibility audit of the Office add-ins. Verify
+    WCAG 2.1 AA compliance for all UI components, keyboard navigation, screen
+    reader support, and high contrast mode.
+  </prompt>
+
+  <role>
+    Accessibility specialist. Expert in WCAG 2.1 guidelines and assistive
+    technology testing.
+  </role>
+
+  <goal>
+    Complete accessibility audit report documenting compliance status and any
+    remediation items for WCAG 2.1 AA.
+  </goal>
+
+  <context>
+    <background>
+      Office add-ins must be accessible to users with disabilities. Microsoft
+      requires add-ins distributed via AppSource to meet WCAG 2.1 AA standards.
+      This audit verifies compliance before production deployment.
+    </background>
+    <relevant-files>
+      <file>src/client/office-addins/shared/</file>
+      <file>projects/sdap-office-integration/notes/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST meet WCAG 2.1 AA standards</constraint>
+    <constraint source="spec">MUST support keyboard-only navigation</constraint>
+    <constraint source="spec">MUST work with common screen readers (NVDA, JAWS, Narrator)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Prepare accessibility testing tools (axe, Accessibility Insights)</step>
+    <step order="2">Run automated accessibility scan on all pages</step>
+    <step order="3">Test keyboard navigation through save flow</step>
+    <step order="4">Test keyboard navigation through share flow</step>
+    <step order="5">Test with NVDA screen reader</step>
+    <step order="6">Test with Windows Narrator</step>
+    <step order="7">Test high contrast mode (all Windows themes)</step>
+    <step order="8">Test focus management in dialogs</step>
+    <step order="9">Verify ARIA labels and roles</step>
+    <step order="10">Document all findings in audit report</step>
+    <step order="11">Create remediation backlog for any issues</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="axe">Automated accessibility testing</tool>
+    <tool name="accessibility-insights">Microsoft accessibility tool</tool>
+    <tool name="nvda">Screen reader testing</tool>
+    <tool name="narrator">Windows screen reader</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/sdap-office-integration/notes/accessibility-audit.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Automated scans report no critical issues</criterion>
+    <criterion testable="true">All interactive elements keyboard accessible</criterion>
+    <criterion testable="true">Screen reader announces all content correctly</criterion>
+    <criterion testable="true">High contrast mode is usable</criterion>
+    <criterion testable="true">Audit report documents all findings</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Focus on the critical user journeys (save, share, quick create). Use
+    Accessibility Insights for Windows for the most thorough testing.
+    Document any known limitations with mitigation strategies.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

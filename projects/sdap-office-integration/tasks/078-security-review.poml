@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="078" project="sdap-office-integration">
+  <metadata>
+    <title>Security review</title>
+    <phase>6: Integration &amp; Testing</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>035, 057</dependencies>
+    <blocks>080</blocks>
+    <tags>testing, security, review</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Security review with explicit compliance requirements</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Conduct a security review of the Office integration. Verify OAuth flow
+    security, token handling, API authorization, input validation, and data
+    protection measures meet security requirements.
+  </prompt>
+
+  <role>
+    Security engineer. Expert in OAuth 2.0, token security, and OWASP
+    guidelines.
+  </role>
+
+  <goal>
+    Security review report documenting security posture, any vulnerabilities
+    found, and remediation recommendations.
+  </goal>
+
+  <context>
+    <background>
+      The Office integration handles sensitive user data (emails, documents)
+      and authenticates via NAA/OAuth. Security is critical for enterprise
+      adoption. This review ensures no security vulnerabilities exist before
+      production deployment.
+    </background>
+    <relevant-files>
+      <file>src/client/office-addins/shared/services/AuthService.ts</file>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/Office/</file>
+      <file>projects/sdap-office-integration/notes/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST use secure token storage (no localStorage for tokens)</constraint>
+    <constraint source="spec">MUST validate all API input</constraint>
+    <constraint source="spec">MUST use HTTPS for all communications</constraint>
+    <constraint source="ADR-008">MUST use endpoint filters for authorization</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review OAuth/NAA implementation</step>
+    <step order="2">Review token storage and handling</step>
+    <step order="3">Review API authorization filters</step>
+    <step order="4">Review input validation on all endpoints</step>
+    <step order="5">Review file upload security (size limits, type validation)</step>
+    <step order="6">Test for injection vulnerabilities (SQL, command, XSS)</step>
+    <step order="7">Test for broken access control</step>
+    <step order="8">Test for insecure direct object references</step>
+    <step order="9">Review error handling (no sensitive data in errors)</step>
+    <step order="10">Review logging (no tokens or PII in logs)</step>
+    <step order="11">Verify CORS configuration</step>
+    <step order="12">Document findings in security report</step>
+    <step order="13">Create remediation backlog for any issues</step>
+    <step order="14">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="burp">Security testing proxy</tool>
+    <tool name="owasp-zap">Vulnerability scanner</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/sdap-office-integration/notes/security-review.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">No critical security vulnerabilities found</criterion>
+    <criterion testable="true">OAuth flow follows best practices</criterion>
+    <criterion testable="true">Tokens not exposed in logs or errors</criterion>
+    <criterion testable="true">All API input validated</criterion>
+    <criterion testable="true">Authorization enforced on all endpoints</criterion>
+    <criterion testable="true">Security report documents all findings</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Focus on OWASP Top 10 vulnerabilities. Pay special attention to the auth
+    flow since NAA is relatively new. Verify Dialog fallback doesn't introduce
+    additional attack surface. Check manifest permissions are minimal.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

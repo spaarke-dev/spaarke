@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="057" project="sdap-office-integration">
+  <metadata>
+    <title>Deploy Outlook add-in to M365 admin center</title>
+    <phase>4: Office Add-in Development</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>056</dependencies>
+    <blocks>070, 072, 073</blocks>
+    <tags>deploy, outlook, config</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task with explicit verification steps</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Deploy the Outlook add-in to the Microsoft 365 admin center for the development
+    tenant. Configure deployment settings and verify the add-in loads correctly in
+    New Outlook and Outlook Web.
+  </prompt>
+
+  <role>
+    DevOps engineer specializing in Office Add-in deployment. Expert in M365 admin
+    center and add-in lifecycle management.
+  </role>
+
+  <goal>
+    The Outlook add-in is deployed and accessible to test users in the development
+    tenant.
+  </goal>
+
+  <context>
+    <background>
+      Office Add-ins are deployed via the Microsoft 365 admin center for organizational
+      use. The admin center manages add-in availability, updates, and user assignments.
+      Test deployment in the dev tenant before production.
+    </background>
+    <relevant-files>
+      <file>src/client/office-addins/outlook/manifest.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST deploy to development tenant first</constraint>
+    <constraint source="spec">MUST test in New Outlook and Outlook Web</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Build production version of add-in (npm run build)</step>
+    <step order="2">Deploy static files to hosting (Azure Blob or App Service)</step>
+    <step order="3">Update manifest.json with production URLs</step>
+    <step order="4">Access Microsoft 365 admin center</step>
+    <step order="5">Navigate to Settings > Integrated Apps</step>
+    <step order="6">Upload the unified manifest (manifest.json)</step>
+    <step order="7">Configure deployment settings (users, availability)</step>
+    <step order="8">Wait for deployment to propagate (up to 24 hours)</step>
+    <step order="9">Test in New Outlook (Windows)</step>
+    <step order="10">Test in Outlook Web</step>
+    <step order="11">Document deployment in notes/deployment-log.md</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build add-in</tool>
+    <tool name="m365-admin">Microsoft 365 admin center</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment">Outlook add-in deployed to dev tenant</output>
+    <output type="docs">projects/sdap-office-integration/notes/deployment-log.md (updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Add-in appears in M365 admin center</criterion>
+    <criterion testable="true">Add-in loads in New Outlook</criterion>
+    <criterion testable="true">Add-in loads in Outlook Web</criterion>
+    <criterion testable="true">Ribbon buttons appear and work</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Deployment can take up to 24 hours to propagate to all clients. Test with
+    multiple user accounts to verify permissions work correctly.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

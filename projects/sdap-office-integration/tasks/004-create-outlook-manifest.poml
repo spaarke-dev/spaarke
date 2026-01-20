@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="sdap-office-integration">
+  <metadata>
+    <title>Create Outlook unified manifest</title>
+    <phase>1: Foundation &amp; Setup</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>003</dependencies>
+    <blocks>057</blocks>
+    <tags>config, outlook, manifest</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Configuration file creation with explicit format requirements</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create the unified JSON manifest for the Outlook add-in. Configure extension points
+    for read mode (Save to Spaarke button) and compose mode (Share from Spaarke, Grant Access).
+    Include proper permissions, host requirements, and icon resources.
+  </prompt>
+
+  <role>
+    Office Add-in developer specializing in manifest configuration. Expert in unified manifest
+    schema, extension points, and permission requirements.
+  </role>
+
+  <goal>
+    A complete unified JSON manifest (manifest.json) for Outlook that defines the add-in
+    identity, permissions, ribbon buttons, and task pane configuration.
+  </goal>
+
+  <context>
+    <background>
+      The unified manifest (GA for Outlook) is the newer JSON-based format that replaces
+      XML manifests. It provides cleaner configuration and better integration with
+      Microsoft 365 admin center. The Outlook add-in needs read mode and compose mode
+      extension points.
+    </background>
+    <relevant-files>
+      <file>src/client/office-addins/outlook/manifest.json (to create)</file>
+      <file>projects/sdap-office-integration/spec.md (manifest requirements)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST use unified JSON manifest format for Outlook (GA)</constraint>
+    <constraint source="spec">MUST configure read mode extension point for "Save to Spaarke"</constraint>
+    <constraint source="spec">MUST configure compose mode extension points for "Share" and "Grant Access"</constraint>
+    <constraint source="spec">MUST specify Mailbox 1.8+ requirement</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Unified Manifest" location="https://learn.microsoft.com/en-us/office/dev/add-ins/develop/unified-manifest-overview">
+        Microsoft documentation for unified manifest schema
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create manifest.json skeleton with $schema, id, version, name fields</step>
+    <step order="2">Configure authorization section with permissions for Mail.Read, Mail.Send</step>
+    <step order="3">Add extension point for messageReadCommandSurface (Save to Spaarke button)</step>
+    <step order="4">Add extension point for messageComposeCommandSurface (Share, Grant Access buttons)</step>
+    <step order="5">Configure task pane resources with correct URLs</step>
+    <step order="6">Add icon resources (16x16, 32x32, 80x80 placeholders)</step>
+    <step order="7">Set host requirements to Mailbox 1.8+</step>
+    <step order="8">Validate manifest using Office Add-in Manifest Validator (optional)</step>
+    <step order="9">Document manifest configuration in notes/manifest-outlook.md</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Manifest validation tools</tool>
+    <tool name="terminal">Run validation commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/outlook/manifest.json</output>
+    <output type="docs">projects/sdap-office-integration/notes/manifest-outlook.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">manifest.json is valid JSON</criterion>
+    <criterion testable="true">Read mode button "Save to Spaarke" is configured</criterion>
+    <criterion testable="true">Compose mode buttons "Share" and "Grant Access" are configured</criterion>
+    <criterion testable="true">Mailbox 1.8+ requirement is specified</criterion>
+    <criterion testable="true">Task pane URL points to correct resource</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The unified manifest is GA for Outlook but preview for Word (which uses XML manifest in task 005).
+    Use placeholder URLs for now; they will be updated when deployment configuration is finalized.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

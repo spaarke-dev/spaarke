@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="sdap-office-integration">
+  <metadata>
+    <title>Implement job status component (SSE + polling)</title>
+    <phase>4: Office Add-in Development</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>046, 023</dependencies>
+    <blocks>056</blocks>
+    <tags>frontend, react, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Real-time component with SSE/polling and progress visualization</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement the job status component that displays real-time processing status
+    using SSE with polling fallback. Show stage progress, overall percentage, and
+    completion/error states.
+  </prompt>
+
+  <role>
+    Frontend developer specializing in real-time UI. Expert in SSE handling,
+    progress visualization, and Fluent UI v9.
+  </role>
+
+  <goal>
+    A polished job status component that shows real-time progress with clear
+    stage indicators and proper error handling.
+  </goal>
+
+  <context>
+    <background>
+      After submitting a save request, users see the job status component which tracks
+      processing progress. It connects to the SSE endpoint for real-time updates,
+      falling back to polling if SSE fails. Shows stages like "Uploading", "Profiling", etc.
+    </background>
+    <relevant-files>
+      <file>src/client/office-addins/shared/taskpane/components/JobStatusView.tsx (to create)</file>
+      <file>projects/sdap-office-integration/spec.md (Job status requirements)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST use fetch + ReadableStream for SSE (not EventSource)</constraint>
+    <constraint source="spec">MUST fallback to polling at 3-second intervals</constraint>
+    <constraint source="spec">MUST show stage-based progress</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create JobStatusView component</step>
+    <step order="2">Create SSE client using fetch + ReadableStream (supports auth headers)</step>
+    <step order="3">Implement polling fallback when SSE fails</step>
+    <step order="4">Display overall progress bar with percentage</step>
+    <step order="5">Display stage list with completion indicators</step>
+    <step order="6">Show current stage with spinner</step>
+    <step order="7">Handle completion state with success message</step>
+    <step order="8">Handle error state with error message and retry option</step>
+    <step order="9">Add "View Document" link on completion</step>
+    <step order="10">Clean up SSE connection on unmount</step>
+    <step order="11">Write unit tests</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Package management and build</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/taskpane/components/JobStatusView.tsx</output>
+    <output type="code">src/client/office-addins/shared/taskpane/services/SseClient.ts</output>
+    <output type="code">src/client/office-addins/shared/taskpane/hooks/useJobStatus.ts</output>
+    <output type="test">src/client/office-addins/shared/taskpane/components/__tests__/JobStatusView.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SSE connection is established with auth header</criterion>
+    <criterion testable="true">Progress updates display in real-time</criterion>
+    <criterion testable="true">Polling activates when SSE fails</criterion>
+    <criterion testable="true">Completion shows success state</criterion>
+    <criterion testable="true">Error shows message and retry option</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Job Progress Display">
+      <steps>
+        <step>Submit a save request</step>
+        <step>Observe job status component</step>
+        <step>Verify stages update as processing proceeds</step>
+        <step>Verify completion state shows</step>
+      </steps>
+      <expected>Progress updates in real-time until completion</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Native EventSource doesn't support custom headers, so we use fetch with
+    ReadableStream to parse SSE format. Handle reconnection gracefully using
+    the Last-Event-ID mechanism.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

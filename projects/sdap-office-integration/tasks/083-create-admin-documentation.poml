@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="083" project="sdap-office-integration">
+  <metadata>
+    <title>Create admin documentation</title>
+    <phase>7: Deployment &amp; Go-Live</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>081</dependencies>
+    <blocks>090</blocks>
+    <tags>documentation, admin-guide</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation task only</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create administrator documentation for the Spaarke Office add-ins. Document
+    deployment procedures, configuration options, monitoring, and troubleshooting
+    for IT administrators.
+  </prompt>
+
+  <role>
+    Technical writer with IT operations expertise. Expert in creating
+    administrator-focused documentation.
+  </role>
+
+  <goal>
+    Complete administrator documentation that enables IT teams to deploy,
+    configure, and support the Office add-ins.
+  </goal>
+
+  <context>
+    <background>
+      IT administrators need documentation to deploy and manage the Office
+      add-ins across the organization. This includes deployment via M365
+      admin center, monitoring, and troubleshooting user issues.
+    </background>
+    <relevant-files>
+      <file>docs/guides/</file>
+      <file>infrastructure/</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST document deployment procedures</constraint>
+    <constraint source="spec">MUST document configuration options</constraint>
+    <constraint source="spec">MUST include troubleshooting guides</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Outline admin documentation structure</step>
+    <step order="2">Document prerequisites and requirements</step>
+    <step order="3">Document Azure AD app registration setup</step>
+    <step order="4">Document M365 admin center deployment</step>
+    <step order="5">Document deployment scoping (users/groups)</step>
+    <step order="6">Document configuration options</step>
+    <step order="7">Document monitoring and alerting setup</step>
+    <step order="8">Document common admin tasks (updates, rollback)</step>
+    <step order="9">Document troubleshooting procedures</step>
+    <step order="10">Document support escalation paths</step>
+    <step order="11">Review with IT operations team</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="editor">Documentation editing</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/guides/office-addins-admin-guide.md</output>
+    <output type="docs">docs/guides/office-addins-deployment-checklist.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Deployment procedures documented step-by-step</criterion>
+    <criterion testable="true">Configuration options explained</criterion>
+    <criterion testable="true">Monitoring setup documented</criterion>
+    <criterion testable="true">Troubleshooting guides included</criterion>
+    <criterion testable="true">Documentation reviewed by IT team member</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Include command-line examples where applicable. Document both initial
+    deployment and update procedures. Include rollback procedures for
+    emergency situations.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

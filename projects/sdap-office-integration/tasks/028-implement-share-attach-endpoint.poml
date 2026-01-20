@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="028" project="sdap-office-integration">
+  <metadata>
+    <title>Implement POST /office/share/attach endpoint</title>
+    <phase>3: Backend API Development</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>034</blocks>
+    <tags>bff-api, api, minimal-api, endpoints</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>API endpoint implementation with file download and packaging</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement the POST /office/share/attach endpoint that provides document file content
+    for attaching to Outlook emails. Return base64-encoded file content with metadata
+    for the Outlook compose API.
+  </prompt>
+
+  <role>
+    .NET developer specializing in file operations. Expert in base64 encoding,
+    MIME types, and Office.js attachment APIs.
+  </role>
+
+  <goal>
+    An endpoint that returns document file content in a format suitable for the
+    Office.js addFileAttachmentFromBase64Async API.
+  </goal>
+
+  <context>
+    <background>
+      Users can attach document copies from Spaarke to their Outlook emails. Unlike links,
+      this sends the actual file as an attachment. The endpoint retrieves the file from
+      SPE, encodes it, and returns metadata for the Outlook attachment API.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/Office/OfficeEndpoints.cs</file>
+      <file>projects/sdap-office-integration/spec.md (Share attach endpoint contract)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST return base64-encoded file content</constraint>
+    <constraint source="spec">MUST include filename and MIME type</constraint>
+    <constraint source="spec">MUST verify user has share permission</constraint>
+    <constraint source="spec">MUST enforce size limits (per attachment and total)</constraint>
+    <constraint source="ADR-007">MUST use SpeFileStore for file retrieval</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/adr/ADR-007-spefilestore-facade.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create ShareAttachRequest DTO with documentIds array</step>
+    <step order="2">Create ShareAttachResponse with attachments array</step>
+    <step order="3">Create AttachmentPackage DTO with base64Content, filename, contentType, size</step>
+    <step order="4">Verify user has share permission on all documents</step>
+    <step order="5">Retrieve file content from SPE via SpeFileStore</step>
+    <step order="6">Enforce size limits (25MB per file, 100MB total)</step>
+    <step order="7">Encode file content as base64</step>
+    <step order="8">Return attachment packages with metadata</step>
+    <step order="9">Handle OFFICE_008 for files exceeding size limit</step>
+    <step order="10">Write unit tests</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/Office/OfficeEndpoints.cs (updated)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/Office/DTOs/ShareAttachRequest.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/Office/DTOs/ShareAttachResponse.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/Office/DTOs/AttachmentPackage.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Endpoints/Office/ShareAttachEndpointTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">POST /office/share/attach returns base64 content</criterion>
+    <criterion testable="true">Response includes filename and content type</criterion>
+    <criterion testable="true">Files over 25MB return OFFICE_008 error</criterion>
+    <criterion testable="true">Content can be used with addFileAttachmentFromBase64Async</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The base64 encoding increases payload size by ~33%. Account for this when calculating
+    size limits. Consider streaming for very large files, but V1 can use simple approach.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

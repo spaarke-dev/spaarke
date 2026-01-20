@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="sdap-office-integration">
+  <metadata>
+    <title>Create ProcessingJob table (ADR-004)</title>
+    <phase>2: Dataverse Schema</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>013, 022</blocks>
+    <tags>dataverse, solution, fields</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Schema creation task following ADR-004 job contract</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create the ProcessingJob (sprk_processingjob) table in Dataverse following ADR-004
+    job contract pattern. Include fields for job type, status, stages, progress, and
+    error tracking to support the async job processing architecture.
+  </prompt>
+
+  <role>
+    Dataverse developer with expertise in job queue patterns. Follows ADR-004 async job
+    contract specifications precisely.
+  </role>
+
+  <goal>
+    A ProcessingJob table that implements the ADR-004 job contract, enabling tracking of
+    async document processing through multiple stages.
+  </goal>
+
+  <context>
+    <background>
+      Document saves trigger async processing (upload finalization, profile summary, indexing,
+      deep analysis). The ProcessingJob table tracks each job's progress through stages,
+      enabling real-time status updates via SSE and proper error handling/retry logic.
+    </background>
+    <relevant-files>
+      <file>.claude/adr/ADR-004-async-job-contract.md</file>
+      <file>projects/sdap-office-integration/spec.md (ProcessingJob schema section)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">MUST follow standard job schema from ADR-004</constraint>
+    <constraint source="ADR-004">MUST include JobType, Status, Stages, Progress fields</constraint>
+    <constraint source="ADR-004">MUST support idempotent job handlers</constraint>
+    <constraint source="spec">MUST track individual stage completion for SSE updates</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-004-async-job-contract.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>docs/guides/DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create sprk_processingjob table with display name "Processing Job"</step>
+    <step order="2">Add sprk_name (Primary Name) - auto-generated job ID</step>
+    <step order="3">Add sprk_jobtype (Option Set: DocumentSave, EmailSave, ShareLinks, etc.)</step>
+    <step order="4">Add sprk_status (Option Set: Pending, InProgress, Completed, Failed, Cancelled)</step>
+    <step order="5">Add sprk_stages (Multiline Text - JSON array of stage definitions)</step>
+    <step order="6">Add sprk_currentstage (Single Line Text - current stage name)</step>
+    <step order="7">Add sprk_stagestatus (Multiline Text - JSON object of stage statuses)</step>
+    <step order="8">Add sprk_progress (Whole Number 0-100 - overall percentage)</step>
+    <step order="9">Add sprk_starteddate (DateTime)</step>
+    <step order="10">Add sprk_completeddate (DateTime)</step>
+    <step order="11">Add sprk_errorcode (Single Line Text)</step>
+    <step order="12">Add sprk_errormessage (Multiline Text)</step>
+    <step order="13">Add sprk_retrycount (Whole Number)</step>
+    <step order="14">Add sprk_idempotencykey (Single Line Text, 64 chars - SHA256) - indexed</step>
+    <step order="15">Add sprk_correlationid (Single Line Text - for tracing)</step>
+    <step order="16">Add sprk_initiatedby lookup (User)</step>
+    <step order="17">Add sprk_document lookup (Document - the target document)</step>
+    <step order="18">Add sprk_payload (Multiline Text - JSON input data)</step>
+    <step order="19">Add sprk_result (Multiline Text - JSON output data)</step>
+    <step order="20">Configure index on IdempotencyKey and Status</step>
+    <step order="21">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="pac-cli">Power Platform CLI for solution operations</tool>
+    <tool name="power-platform">Power Apps maker portal</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">sprk_processingjob table in Dataverse solution</output>
+    <output type="docs">projects/sdap-office-integration/notes/schema-processingjob.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Table sprk_processingjob exists in solution</criterion>
+    <criterion testable="true">All ADR-004 required fields are present</criterion>
+    <criterion testable="true">Status option set has all required values</criterion>
+    <criterion testable="true">IdempotencyKey field is indexed</criterion>
+    <criterion testable="true">StageStatus supports JSON storage</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The Stages field contains the ordered list of stages for this job type. The StageStatus
+    field tracks individual stage completion. This enables granular progress updates via SSE.
+    See ADR-004 for the complete job contract specification.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

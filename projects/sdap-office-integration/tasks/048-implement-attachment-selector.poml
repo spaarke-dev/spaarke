@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="048" project="sdap-office-integration">
+  <metadata>
+    <title>Implement attachment selector component</title>
+    <phase>4: Office Add-in Development</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>046</dependencies>
+    <blocks>049</blocks>
+    <tags>frontend, react, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>UI component with file selection and size validation</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement the attachment selector component for Outlook emails. Display email
+    attachments with checkboxes, file type icons, sizes, and total size calculation.
+    Enforce size limits with visual feedback.
+  </prompt>
+
+  <role>
+    Frontend developer specializing in list components. Expert in Fluent UI v9
+    DataGrid patterns and file handling.
+  </role>
+
+  <goal>
+    An intuitive attachment selector that lets users pick which email attachments
+    to save, with clear size information and limit enforcement.
+  </goal>
+
+  <context>
+    <background>
+      When saving emails, users can select which attachments to include. The selector
+      shows all attachments with size information and enforces the 25MB per file /
+      100MB total limits. Users should easily toggle attachments on/off.
+    </background>
+    <relevant-files>
+      <file>src/client/office-addins/shared/taskpane/components/AttachmentSelector.tsx (to create)</file>
+      <file>projects/sdap-office-integration/spec.md (Attachment requirements)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">MUST use Fluent UI v9 components</constraint>
+    <constraint source="spec">MUST enforce 25MB per file limit</constraint>
+    <constraint source="spec">MUST enforce 100MB total limit</constraint>
+    <constraint source="spec">MUST show file type icons</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create AttachmentSelector component with checkbox list</step>
+    <step order="2">Display attachment name, type icon, and formatted size</step>
+    <step order="3">Add select all / deselect all controls</step>
+    <step order="4">Calculate and display total selected size</step>
+    <step order="5">Disable selection for files over 25MB with warning</step>
+    <step order="6">Show warning when total exceeds 100MB</step>
+    <step order="7">Add file type icons based on extension/MIME</step>
+    <step order="8">Handle inline attachments separately (optional include)</step>
+    <step order="9">Support keyboard navigation for accessibility</step>
+    <step order="10">Write unit tests</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Package management and build</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/taskpane/components/AttachmentSelector.tsx</output>
+    <output type="code">src/client/office-addins/shared/taskpane/utils/fileUtils.ts</output>
+    <output type="test">src/client/office-addins/shared/taskpane/components/__tests__/AttachmentSelector.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Attachments display with checkboxes</criterion>
+    <criterion testable="true">File sizes are formatted correctly (KB, MB)</criterion>
+    <criterion testable="true">Files over 25MB are disabled</criterion>
+    <criterion testable="true">Total over 100MB shows warning</criterion>
+    <criterion testable="true">Select all/none works correctly</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Attachment Selection Works">
+      <steps>
+        <step>Open save flow with email having attachments</step>
+        <step>Toggle attachment checkboxes</step>
+        <step>Verify total size updates</step>
+      </steps>
+      <expected>Attachments can be selected/deselected with size tracking</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    File type icons can use Fluent UI's icon library or custom icons for common
+    Office file types. Show tooltip with full filename for truncated names.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

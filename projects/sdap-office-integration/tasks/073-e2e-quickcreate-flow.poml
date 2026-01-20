@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="073" project="sdap-office-integration">
+  <metadata>
+    <title>E2E test: Quick Create flow</title>
+    <phase>6: Integration &amp; Testing</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>057</dependencies>
+    <blocks>078</blocks>
+    <tags>testing, e2e-test, outlook</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task with explicit E2E coverage requirements</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create end-to-end tests for the Quick Create flow. Test creating new
+    Dataverse entities (Matter, Project, Invoice, Account, Contact) inline
+    from the add-in without leaving the save workflow.
+  </prompt>
+
+  <role>
+    QA engineer specializing in Office add-in testing. Expert in E2E testing
+    and Dataverse integration.
+  </role>
+
+  <goal>
+    Comprehensive E2E test suite validating the Quick Create flow works correctly
+    for all supported entity types.
+  </goal>
+
+  <context>
+    <background>
+      Quick Create allows users to create a new entity (e.g., Matter, Contact)
+      directly from the add-in when the desired association doesn't exist. This
+      avoids context switching to Dynamics 365 during the save workflow.
+    </background>
+    <relevant-files>
+      <file>src/client/office-addins/shared/components/QuickCreateDialog/</file>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/Office/QuickCreateEndpoint.cs</file>
+      <file>tests/e2e/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST test all 5 entity types (Matter, Project, Invoice, Account, Contact)</constraint>
+    <constraint source="spec">MUST validate required fields per entity type</constraint>
+    <constraint source="spec">MUST verify created entity appears in picker</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/e2e-testing.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create Quick Create E2E test file</step>
+    <step order="2">Configure test environment with Dataverse connection</step>
+    <step order="3">Test: Create Matter via Quick Create</step>
+    <step order="4">Test: Create Project via Quick Create</step>
+    <step order="5">Test: Create Account via Quick Create</step>
+    <step order="6">Test: Create Contact via Quick Create</step>
+    <step order="7">Test: Create Invoice via Quick Create</step>
+    <step order="8">Test: Validation for required fields</step>
+    <step order="9">Test: Created entity auto-selected in picker</step>
+    <step order="10">Test: Cancel Quick Create and return to picker</step>
+    <step order="11">Test: Error handling for creation failures</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build and run tests</tool>
+    <tool name="playwright">E2E test framework</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/e2e/quickcreate-flow.spec.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All E2E tests pass</criterion>
+    <criterion testable="true">All 5 entity types can be created</criterion>
+    <criterion testable="true">Required field validation works</criterion>
+    <criterion testable="true">Created entity appears in picker automatically</criterion>
+    <criterion testable="true">Cancel returns to picker without creating</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Quick Create Matter">
+      <steps>
+        <step>Open entity picker in save flow</step>
+        <step>Click "Create New Matter" button</step>
+        <step>Fill in Matter name and required fields</step>
+        <step>Click Create</step>
+        <step>Verify dialog closes</step>
+        <step>Verify new Matter is selected in picker</step>
+      </steps>
+      <expected>Matter created and auto-selected for document association</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Quick Create uses a minimal form with only required fields. The full
+    entity can be edited later in Dynamics 365. Test cleanup should delete
+    created test entities to avoid polluting the environment.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

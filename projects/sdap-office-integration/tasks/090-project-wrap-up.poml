@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="sdap-office-integration">
+  <metadata>
+    <title>Project wrap-up</title>
+    <phase>Wrap-up</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>080, 081, 082, 083, 084</dependencies>
+    <blocks>none</blocks>
+    <tags>documentation, cleanup, review</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Final quality gates and comprehensive project closure</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Complete the project wrap-up tasks: run final quality gates (code-review,
+    adr-check), clean up repository (repo-cleanup), update project documentation
+    to Complete status, and document lessons learned.
+  </prompt>
+
+  <role>
+    Project lead. Responsible for ensuring project meets quality standards
+    and all documentation is complete.
+  </role>
+
+  <goal>
+    Project fully complete with all quality gates passed, repository cleaned,
+    and documentation finalized. Ready for handoff to operations.
+  </goal>
+
+  <context>
+    <background>
+      This is the mandatory final task for all projects. It ensures quality
+      gates are passed, ephemeral files are cleaned up, and project status
+      is updated to Complete. This task must be the last task executed.
+    </background>
+    <relevant-files>
+      <file>projects/sdap-office-integration/README.md</file>
+      <file>projects/sdap-office-integration/plan.md</file>
+      <file>projects/sdap-office-integration/CLAUDE.md</file>
+      <file>projects/sdap-office-integration/tasks/TASK-INDEX.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="skill">MUST run /code-review on all project code</constraint>
+    <constraint source="skill">MUST run /adr-check to validate architecture compliance</constraint>
+    <constraint source="skill">MUST run /repo-cleanup to audit and clean repository</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run /code-review on all project code</step>
+    <step order="2">Fix any critical issues from code review</step>
+    <step order="3">Run /adr-check to validate ADR compliance</step>
+    <step order="4">Fix any ADR violations found</step>
+    <step order="5">Run /repo-cleanup projects/sdap-office-integration</step>
+    <step order="6">Review cleanup report and approve removals</step>
+    <step order="7">Update README.md: Status to "Complete"</step>
+    <step order="8">Update README.md: Progress to "100%"</step>
+    <step order="9">Update README.md: Add Completed Date</step>
+    <step order="10">Update README.md: Check all Graduation Criteria boxes</step>
+    <step order="11">Update plan.md: Status to "Complete"</step>
+    <step order="12">Update plan.md: All milestones to ✅</step>
+    <step order="13">Create notes/lessons-learned.md if notable insights</step>
+    <step order="14">Verify all tasks marked ✅ in TASK-INDEX.md</step>
+    <step order="15">Final verification checklist</step>
+    <step order="16">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="skill">code-review, adr-check, repo-cleanup</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/sdap-office-integration/README.md (updated - Complete)</output>
+    <output type="docs">projects/sdap-office-integration/plan.md (updated - Complete)</output>
+    <output type="docs">projects/sdap-office-integration/notes/lessons-learned.md (if applicable)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Code review passes with no critical issues</criterion>
+    <criterion testable="true">ADR check passes with no violations</criterion>
+    <criterion testable="true">Repo cleanup completed (ephemeral files removed)</criterion>
+    <criterion testable="true">README.md shows Status: Complete</criterion>
+    <criterion testable="true">All 56 tasks marked ✅ in TASK-INDEX.md</criterion>
+    <criterion testable="true">Graduation criteria all checked</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task is MANDATORY for all projects. Do not skip any quality gate steps.
+    If code review or ADR check finds issues, they must be fixed before marking
+    the project complete. Lessons learned document is optional but encouraged
+    for projects with notable insights.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow each quality gate skill completely before proceeding.
+    </protocol>
+  </execution>
+</task>

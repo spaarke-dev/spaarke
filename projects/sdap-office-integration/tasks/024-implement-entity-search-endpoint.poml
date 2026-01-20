@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="sdap-office-integration">
+  <metadata>
+    <title>Implement GET /office/search/entities endpoint</title>
+    <phase>3: Backend API Development</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>034</blocks>
+    <tags>bff-api, api, minimal-api, endpoints</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>API endpoint implementation with search logic</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement the GET /office/search/entities endpoint that provides typeahead search
+    for association targets (Matters, Projects, Invoices, Accounts, Contacts). Support
+    filtering by entity type and return results within 500ms.
+  </prompt>
+
+  <role>
+    .NET developer specializing in search implementations. Expert in Dataverse queries
+    and performance optimization.
+  </role>
+
+  <goal>
+    A fast search endpoint that returns matching entities for the association picker
+    with proper authorization and performance.
+  </goal>
+
+  <context>
+    <background>
+      Users need to find and select association targets when saving documents. The search
+      must be fast enough for typeahead (results as user types) and respect user permissions
+      (only return entities the user has access to).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/Office/OfficeEndpoints.cs</file>
+      <file>projects/sdap-office-integration/spec.md (Entity search endpoint contract)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST return results within 500ms</constraint>
+    <constraint source="spec">MUST filter by entity type when specified</constraint>
+    <constraint source="spec">MUST respect user permissions on returned entities</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create EntitySearchRequest with query, entityTypes, limit parameters</step>
+    <step order="2">Create EntitySearchResult DTO with id, name, type, metadata</step>
+    <step order="3">Implement search across multiple entity types</step>
+    <step order="4">Add filtering by entity type parameter</step>
+    <step order="5">Ensure user permissions are respected in queries</step>
+    <step order="6">Implement result ranking (relevance + recency)</step>
+    <step order="7">Add caching for frequently searched terms (optional)</step>
+    <step order="8">Optimize query for 500ms response time</step>
+    <step order="9">Write unit tests</step>
+    <step order="10">Performance test with realistic data volume</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/Office/OfficeEndpoints.cs (updated)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/Office/DTOs/EntitySearchResult.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Endpoints/Office/EntitySearchEndpointTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">GET /office/search/entities?q=term returns results</criterion>
+    <criterion testable="true">Response time is under 500ms for typical queries</criterion>
+    <criterion testable="true">Filter by entityType works correctly</criterion>
+    <criterion testable="true">Only entities user has access to are returned</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Consider using FetchXML with proper filters rather than retrieving all and filtering
+    in memory. The UAC module may have existing methods for permission-filtered queries.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

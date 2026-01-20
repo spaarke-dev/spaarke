@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="049" project="sdap-office-integration">
+  <metadata>
+    <title>Implement save flow UI</title>
+    <phase>4: Office Add-in Development</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>047, 048</dependencies>
+    <blocks>056</blocks>
+    <tags>frontend, react, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Complete user flow implementation with multiple components</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement the complete save flow UI that combines entity picker, attachment selector,
+    processing options, and submit action. Handle the flow from item selection through
+    job submission and status display.
+  </prompt>
+
+  <role>
+    Frontend developer specializing in user flows. Expert in React state management
+    and form handling.
+  </role>
+
+  <goal>
+    A complete, polished save flow that guides users through selecting association,
+    choosing attachments, setting options, and tracking progress.
+  </goal>
+
+  <context>
+    <background>
+      The save flow is the primary user journey for filing emails and documents. It must
+      be intuitive, with clear steps and feedback. The flow integrates entity picker,
+      attachment selector, processing options, and job status components.
+    </background>
+    <relevant-files>
+      <file>src/client/office-addins/shared/taskpane/views/SaveView.tsx (to create)</file>
+      <file>projects/sdap-office-integration/spec.md (Save flow requirements)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">MUST use Fluent UI v9 components</constraint>
+    <constraint source="spec">MUST require association selection (no document-only)</constraint>
+    <constraint source="spec">MUST show job status after submission</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create SaveView component as main save flow container</step>
+    <step order="2">Integrate EntityPicker for association selection</step>
+    <step order="3">Integrate AttachmentSelector (Outlook only)</step>
+    <step order="4">Add processing options toggles (Profile, Index, Analysis)</step>
+    <step order="5">Create Save button with validation</step>
+    <step order="6">Implement form validation (association required)</step>
+    <step order="7">Handle save submission via API client</step>
+    <step order="8">Transition to job status view after submission</step>
+    <step order="9">Handle duplicate detection response</step>
+    <step order="10">Add loading states during submission</step>
+    <step order="11">Handle errors with user-friendly messages</step>
+    <step order="12">Write integration tests</step>
+    <step order="13">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Package management and build</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/taskpane/views/SaveView.tsx</output>
+    <output type="code">src/client/office-addins/shared/taskpane/hooks/useSaveFlow.ts</output>
+    <output type="test">src/client/office-addins/shared/taskpane/views/__tests__/SaveView.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">User can select association target</criterion>
+    <criterion testable="true">User can select/deselect attachments (Outlook)</criterion>
+    <criterion testable="true">Save button is disabled without association</criterion>
+    <criterion testable="true">Submission shows loading state</criterion>
+    <criterion testable="true">Success transitions to job status</criterion>
+    <criterion testable="true">Duplicate detection shows existing document</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Complete Save Flow">
+      <steps>
+        <step>Open save view</step>
+        <step>Select association target</step>
+        <step>Toggle attachments</step>
+        <step>Click Save</step>
+        <step>Verify job status displays</step>
+      </steps>
+      <expected>Document is saved and job status shows progress</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    The save flow should remember the last-used association for convenience.
+    Consider adding a "Save to same" quick action for repeat saves.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

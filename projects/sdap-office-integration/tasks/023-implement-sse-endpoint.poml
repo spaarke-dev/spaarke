@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="sdap-office-integration">
+  <metadata>
+    <title>Implement GET /office/jobs/{id}/stream SSE endpoint</title>
+    <phase>3: Backend API Development</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>022</dependencies>
+    <blocks>034, 052</blocks>
+    <tags>bff-api, api, minimal-api, endpoints</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Complex SSE implementation with real-time status streaming</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement the GET /office/jobs/{jobId}/stream SSE endpoint that streams real-time job
+    status updates to the client. Use Server-Sent Events format with proper connection
+    handling and heartbeats.
+  </prompt>
+
+  <role>
+    .NET developer specializing in real-time communication. Expert in Server-Sent Events,
+    async streaming, and connection management.
+  </role>
+
+  <goal>
+    A working SSE endpoint that streams job status updates in real-time, with proper
+    heartbeats, error handling, and connection cleanup.
+  </goal>
+
+  <context>
+    <background>
+      SSE provides real-time job status updates without polling overhead. The client connects
+      once and receives updates as the job progresses through stages. The endpoint must handle
+      connection drops gracefully and support reconnection.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/Office/OfficeEndpoints.cs</file>
+      <file>projects/sdap-office-integration/spec.md (SSE endpoint contract)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST use text/event-stream content type</constraint>
+    <constraint source="spec">MUST send heartbeats every 15 seconds</constraint>
+    <constraint source="spec">MUST close connection when job completes or fails</constraint>
+    <constraint source="spec">MUST support Last-Event-ID for reconnection</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create SSE response helper for formatting event stream</step>
+    <step order="2">Implement endpoint with text/event-stream content type</step>
+    <step order="3">Verify job exists and user has access</step>
+    <step order="4">Send initial status event on connection</step>
+    <step order="5">Subscribe to job status change notifications</step>
+    <step order="6">Stream status update events as job progresses</step>
+    <step order="7">Implement heartbeat timer (every 15 seconds)</step>
+    <step order="8">Handle Last-Event-ID header for reconnection</step>
+    <step order="9">Close connection on job completion or failure</step>
+    <step order="10">Handle client disconnection gracefully</step>
+    <step order="11">Write integration tests</step>
+    <step order="12">Test with actual job progression</step>
+    <step order="13">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/Office/OfficeEndpoints.cs (updated)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/SseHelper.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Endpoints/Office/SseEndpointTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">GET /office/jobs/{id}/stream returns text/event-stream</criterion>
+    <criterion testable="true">Initial status event is sent on connection</criterion>
+    <criterion testable="true">Heartbeat events are sent every 15 seconds</criterion>
+    <criterion testable="true">Status updates are streamed as job progresses</criterion>
+    <criterion testable="true">Connection closes after job completes</criterion>
+    <criterion testable="true">Reconnection with Last-Event-ID resumes from correct point</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The SSE endpoint needs a mechanism to receive job status change notifications. This
+    could be via Redis pub/sub, SignalR backplane, or direct database polling. Choose
+    the approach that aligns with existing infrastructure.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

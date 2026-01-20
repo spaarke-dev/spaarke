@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="074" project="sdap-office-integration">
+  <metadata>
+    <title>Integration test: SSE job status</title>
+    <phase>6: Integration &amp; Testing</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>066</dependencies>
+    <blocks>078</blocks>
+    <tags>testing, integration-test, sse</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task with explicit integration coverage requirements</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create integration tests for the SSE job status flow. Test that workers
+    correctly publish status updates via Redis pub/sub and that the SSE endpoint
+    delivers them to connected clients in real-time.
+  </prompt>
+
+  <role>
+    .NET developer specializing in integration testing. Expert in SSE and
+    Redis pub/sub testing patterns.
+  </role>
+
+  <goal>
+    Integration test suite validating the complete SSE status update flow from
+    worker to client, including Redis pub/sub reliability.
+  </goal>
+
+  <context>
+    <background>
+      Job status updates flow from workers → Redis pub/sub → SSE endpoint → client.
+      This integration test verifies the complete chain works reliably, including
+      reconnection scenarios and message ordering.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/Office/JobStatusStreamEndpoint.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Office/JobStatusService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Workers/Office/</file>
+      <file>tests/Sprk.Bff.Api.Tests/Integration/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST deliver updates within 1 second of worker publish</constraint>
+    <constraint source="spec">MUST handle client reconnection gracefully</constraint>
+    <constraint source="ADR-009">MUST use Redis via IConnectionMultiplexer for pub/sub</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/integration-test-patterns.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create integration test project structure if needed</step>
+    <step order="2">Configure Redis test container (or test instance)</step>
+    <step order="3">Test: Worker publishes status → SSE client receives</step>
+    <step order="4">Test: Multiple status updates in sequence</step>
+    <step order="5">Test: Status update latency is under 1 second</step>
+    <step order="6">Test: Client reconnection receives current status</step>
+    <step order="7">Test: Multiple clients receive same updates</step>
+    <step order="8">Test: Redis connection failure handling</step>
+    <step order="9">Test: Polling fallback when SSE unavailable</step>
+    <step order="10">Test: SSE connection timeout and keepalive</step>
+    <step order="11">Document test scenarios and timing requirements</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and run tests</tool>
+    <tool name="docker">Redis test container</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Integration/JobStatusSseTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All integration tests pass</criterion>
+    <criterion testable="true">Status updates delivered within 1 second</criterion>
+    <criterion testable="true">Reconnection handles gracefully</criterion>
+    <criterion testable="true">Redis failures don't crash the service</criterion>
+    <criterion testable="true">Polling fallback works correctly</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    SSE uses fetch + ReadableStream in the client (NOT EventSource) because
+    EventSource cannot send Authorization headers. The SSE endpoint must send
+    current status on connection before streaming updates.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

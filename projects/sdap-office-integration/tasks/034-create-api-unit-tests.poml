@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="sdap-office-integration">
+  <metadata>
+    <title>Create API unit tests</title>
+    <phase>3: Backend API Development</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>021, 022, 023, 024, 025, 026, 027, 028, 029, 030, 031, 032, 033</dependencies>
+    <blocks>035</blocks>
+    <tags>testing, unit-test, bff-api</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task with explicit test coverage requirements</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create comprehensive unit tests for all Office API endpoints and services. Ensure
+    at least 80% code coverage for the Office module with tests for happy paths,
+    error cases, and edge cases.
+  </prompt>
+
+  <role>
+    .NET developer specializing in testing. Expert in xUnit, mocking with Moq,
+    and test-driven development.
+  </role>
+
+  <goal>
+    Comprehensive unit test suite for the Office module achieving at least 80%
+    code coverage with well-organized, maintainable tests.
+  </goal>
+
+  <context>
+    <background>
+      Unit tests ensure code quality and enable confident refactoring. The Office
+      endpoints have specific behaviors that need verification: validation,
+      authorization, error handling, and business logic.
+    </background>
+    <relevant-files>
+      <file>tests/Sprk.Bff.Api.Tests/</file>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/Office/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST achieve 80% code coverage minimum</constraint>
+    <constraint source="spec">MUST test all error code scenarios</constraint>
+    <constraint source="spec">MUST use xUnit and Moq</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create test project structure under tests/Sprk.Bff.Api.Tests/Office/</step>
+    <step order="2">Create test fixtures for common dependencies</step>
+    <step order="3">Write tests for SaveEndpoint (valid save, missing association, invalid target)</step>
+    <step order="4">Write tests for JobStatusEndpoint (existing job, non-existent, unauthorized)</step>
+    <step order="5">Write tests for SSE endpoint (connection, heartbeat, completion)</step>
+    <step order="6">Write tests for EntitySearchEndpoint (search results, permissions)</step>
+    <step order="7">Write tests for DocumentSearchEndpoint</step>
+    <step order="8">Write tests for QuickCreateEndpoint (each entity type, validation)</step>
+    <step order="9">Write tests for ShareLinksEndpoint</step>
+    <step order="10">Write tests for ShareAttachEndpoint (size limits)</step>
+    <step order="11">Write tests for IdempotencyFilter</step>
+    <step order="12">Write tests for authorization filters</step>
+    <step order="13">Run coverage report and verify 80%+</step>
+    <step order="14">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and run tests</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Endpoints/Office/*.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Services/Office/*.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Filters/*.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All tests pass</criterion>
+    <criterion testable="true">Code coverage is at least 80%</criterion>
+    <criterion testable="true">All error codes have test coverage</criterion>
+    <criterion testable="true">Tests are organized by endpoint/feature</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use the Arrange-Act-Assert pattern consistently. Mock external dependencies
+    (Dataverse, Service Bus, Redis) to isolate unit tests from infrastructure.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

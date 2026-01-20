@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="075" project="sdap-office-integration">
+  <metadata>
+    <title>Integration test: Duplicate detection</title>
+    <phase>6: Integration &amp; Testing</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>035</dependencies>
+    <blocks>078</blocks>
+    <tags>testing, integration-test, idempotency</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task with explicit integration coverage requirements</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create integration tests for duplicate detection and idempotency. Test that
+    the system correctly identifies duplicate emails/documents using content
+    hashing and returns existing job IDs for idempotent requests.
+  </prompt>
+
+  <role>
+    .NET developer specializing in integration testing. Expert in idempotency
+    patterns and caching strategies.
+  </role>
+
+  <goal>
+    Integration test suite validating duplicate detection works correctly and
+    idempotent requests return cached responses.
+  </goal>
+
+  <context>
+    <background>
+      Duplicate detection uses two mechanisms:
+      1. Idempotency key (SHA256 of canonical request) with 24h Redis TTL
+      2. Email content hash (HeadersHash) for logical duplicates
+      Both must be tested to ensure users don't accidentally create duplicate
+      artifacts.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Middleware/IdempotencyMiddleware.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Office/DuplicateDetectionService.cs</file>
+      <file>tests/Sprk.Bff.Api.Tests/Integration/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST detect duplicate requests within 24h window</constraint>
+    <constraint source="spec">MUST detect logically duplicate emails by HeadersHash</constraint>
+    <constraint source="ADR-009">MUST use Redis for idempotency key storage</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/integration-test-patterns.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create integration test file for duplicate detection</step>
+    <step order="2">Configure Redis test instance</step>
+    <step order="3">Test: Identical request returns cached job ID</step>
+    <step order="4">Test: Different request creates new job</step>
+    <step order="5">Test: Idempotency key expires after 24h</step>
+    <step order="6">Test: Email with same headers detected as duplicate</step>
+    <step order="7">Test: User prompt for duplicate email handling</step>
+    <step order="8">Test: Force re-save overrides duplicate detection</step>
+    <step order="9">Test: Different user same email (not a duplicate)</step>
+    <step order="10">Test: Same email different entity association (allowed)</step>
+    <step order="11">Document test scenarios</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and run tests</tool>
+    <tool name="docker">Redis test container</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Integration/DuplicateDetectionTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All integration tests pass</criterion>
+    <criterion testable="true">Duplicate requests return same job ID</criterion>
+    <criterion testable="true">Email duplicates detected by content hash</criterion>
+    <criterion testable="true">24h TTL works correctly</criterion>
+    <criterion testable="true">Force re-save bypasses detection</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Idempotency key is SHA256(userId + requestBody canonical form). The key is
+    stored in Redis with 24h TTL. EmailArtifact also has HeadersHash index for
+    detecting logically duplicate emails at the data layer.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

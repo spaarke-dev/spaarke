@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="sdap-office-integration">
+  <metadata>
+    <title>Create AttachmentArtifact table</title>
+    <phase>2: Dataverse Schema</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>013</blocks>
+    <tags>dataverse, solution, fields</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Schema creation task with explicit field definitions</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create the AttachmentArtifact (sprk_attachmentartifact) table in Dataverse to track
+    email attachments that are saved as separate documents. Link to the parent EmailArtifact
+    and the resulting Document entity.
+  </prompt>
+
+  <role>
+    Dataverse developer and data modeler. Expert in Power Platform schema design and
+    relationship configuration.
+  </role>
+
+  <goal>
+    A fully configured AttachmentArtifact table that tracks email attachment metadata
+    and links to both the source email and the resulting document.
+  </goal>
+
+  <context>
+    <background>
+      When users save email attachments, each attachment becomes a separate Document in
+      Spaarke. The AttachmentArtifact captures the original attachment metadata (filename,
+      content type, size) and links the Document back to its source email.
+    </background>
+    <relevant-files>
+      <file>projects/sdap-office-integration/spec.md (AttachmentArtifact schema section)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST use sprk_ prefix for all fields</constraint>
+    <constraint source="spec">MUST link to EmailArtifact parent</constraint>
+    <constraint source="spec">MUST link to resulting Document</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/plugins.md</file>
+      <file>docs/guides/DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create sprk_attachmentartifact table with display name "Attachment Artifact"</step>
+    <step order="2">Add sprk_name (Primary Name) - original filename</step>
+    <step order="3">Add sprk_originalfilename (Single Line Text, 260 chars)</step>
+    <step order="4">Add sprk_contenttype (Single Line Text, 100 chars - MIME type)</step>
+    <step order="5">Add sprk_size (Whole Number - bytes)</step>
+    <step order="6">Add sprk_contentid (Single Line Text, 256 chars - for inline attachments)</step>
+    <step order="7">Add sprk_isinline (Yes/No - true for embedded images)</step>
+    <step order="8">Add sprk_emailartifact lookup (N:1 to EmailArtifact)</step>
+    <step order="9">Add sprk_document lookup (N:1 to Document - the saved file)</step>
+    <step order="10">Configure cascade delete from EmailArtifact (restrict)</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="pac-cli">Power Platform CLI for solution operations</tool>
+    <tool name="power-platform">Power Apps maker portal</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">sprk_attachmentartifact table in Dataverse solution</output>
+    <output type="docs">projects/sdap-office-integration/notes/schema-attachmentartifact.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Table sprk_attachmentartifact exists in solution</criterion>
+    <criterion testable="true">All specified fields are present with correct types</criterion>
+    <criterion testable="true">EmailArtifact lookup relationship works</criterion>
+    <criterion testable="true">Document lookup relationship works</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The IsInline flag distinguishes between regular file attachments and inline images
+    embedded in HTML email bodies. ContentId is used to match inline attachments with
+    their references in the HTML body.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

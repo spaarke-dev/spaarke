@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="sdap-office-integration">
+  <metadata>
+    <title>Implement GET /office/search/documents endpoint</title>
+    <phase>3: Backend API Development</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>034</blocks>
+    <tags>bff-api, api, minimal-api, endpoints</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>API endpoint implementation with document search logic</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement the GET /office/search/documents endpoint that enables users to search for
+    documents to share from Outlook compose mode. Support filtering by associated entity
+    and document metadata.
+  </prompt>
+
+  <role>
+    .NET developer specializing in search implementations. Expert in document queries
+    and user permissions.
+  </role>
+
+  <goal>
+    A search endpoint for finding documents to share, with proper filtering and
+    permission enforcement.
+  </goal>
+
+  <context>
+    <background>
+      In Outlook compose mode, users can share documents from Spaarke by inserting links
+      or attaching copies. This endpoint provides the search functionality for the document
+      picker, returning documents the user has permission to share.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/Office/OfficeEndpoints.cs</file>
+      <file>projects/sdap-office-integration/spec.md (Document search endpoint contract)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST filter by associated entity when specified</constraint>
+    <constraint source="spec">MUST respect document sharing permissions</constraint>
+    <constraint source="spec">MUST return document metadata for preview</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create DocumentSearchRequest with query, entityId, contentType filters</step>
+    <step order="2">Create DocumentSearchResult DTO with id, name, type, size, modifiedDate</step>
+    <step order="3">Implement search across Document entity</step>
+    <step order="4">Add filtering by associated entity</step>
+    <step order="5">Add filtering by content type</step>
+    <step order="6">Ensure user has share permission on returned documents</step>
+    <step order="7">Include thumbnail URL in results if available</step>
+    <step order="8">Implement pagination with skip/take</step>
+    <step order="9">Write unit tests</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/Office/OfficeEndpoints.cs (updated)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/Office/DTOs/DocumentSearchResult.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Endpoints/Office/DocumentSearchEndpointTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">GET /office/search/documents?q=term returns results</criterion>
+    <criterion testable="true">Filter by entityId returns only related documents</criterion>
+    <criterion testable="true">Only shareable documents are returned</criterion>
+    <criterion testable="true">Pagination works correctly</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This endpoint is similar to entity search but queries the Document entity.
+    Consider reusing common search infrastructure.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

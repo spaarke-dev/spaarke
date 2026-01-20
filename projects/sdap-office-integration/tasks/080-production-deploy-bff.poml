@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="080" project="sdap-office-integration">
+  <metadata>
+    <title>Production deployment: BFF API</title>
+    <phase>7: Deployment &amp; Go-Live</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>078</dependencies>
+    <blocks>081, 084, 090</blocks>
+    <tags>deploy, azure, bff-api, production</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task with verification steps</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Deploy the Office integration BFF API to production Azure environment.
+    Configure production settings, verify all endpoints work correctly, and
+    enable monitoring.
+  </prompt>
+
+  <role>
+    DevOps engineer specializing in Azure deployments. Expert in App Service
+    configuration and production deployment best practices.
+  </role>
+
+  <goal>
+    BFF API deployed to production Azure App Service with all Office endpoints
+    operational and monitoring enabled.
+  </goal>
+
+  <context>
+    <background>
+      After passing security review and all testing phases, the BFF API is ready
+      for production deployment. This includes the Office endpoints, workers,
+      and supporting services.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/</file>
+      <file>infrastructure/</file>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST configure production connection strings via Key Vault</constraint>
+    <constraint source="spec">MUST enable Application Insights monitoring</constraint>
+    <constraint source="spec">MUST verify all endpoints respond correctly</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review production configuration requirements</step>
+    <step order="2">Verify production Key Vault secrets configured</step>
+    <step order="3">Verify production Redis cache available</step>
+    <step order="4">Verify production Service Bus queues configured</step>
+    <step order="5">Build release configuration</step>
+    <step order="6">Deploy to production App Service</step>
+    <step order="7">Verify health check endpoint responds</step>
+    <step order="8">Verify Office endpoints respond with auth</step>
+    <step order="9">Verify workers start correctly (check logs)</step>
+    <step order="10">Enable Application Insights alerting</step>
+    <step order="11">Document deployment in deployment-log.md</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="az-cli">Azure CLI for deployment</tool>
+    <tool name="dotnet">Build</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment">Production BFF API deployed</output>
+    <output type="docs">projects/sdap-office-integration/notes/deployment-log.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">API deployed to production without errors</criterion>
+    <criterion testable="true">Health check returns 200</criterion>
+    <criterion testable="true">Office endpoints respond correctly</criterion>
+    <criterion testable="true">Workers start and process jobs</criterion>
+    <criterion testable="true">Application Insights collecting telemetry</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use the azure-deploy skill for deployment operations. Coordinate with
+    operations team for production deployment window. Have rollback plan ready.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Use the azure-deploy skill for deployment operations.
+    </protocol>
+  </execution>
+</task>

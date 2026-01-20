@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="047" project="sdap-office-integration">
+  <metadata>
+    <title>Implement entity picker component</title>
+    <phase>4: Office Add-in Development</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>046</dependencies>
+    <blocks>049</blocks>
+    <tags>frontend, react, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Complex UI component with typeahead search and selection</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement the entity picker component for selecting association targets (Matter,
+    Project, Invoice, Account, Contact). Include typeahead search, recent items,
+    entity type filtering, and Quick Create integration.
+  </prompt>
+
+  <role>
+    Frontend developer specializing in form controls. Expert in Fluent UI v9 components
+    and search/select patterns.
+  </role>
+
+  <goal>
+    A polished entity picker component with fast search, recent items, and seamless
+    Quick Create integration.
+  </goal>
+
+  <context>
+    <background>
+      The entity picker is the most important UI element in the save flow. Users must
+      select an association target for every document. The picker needs to be fast,
+      accessible, and easy to use with both keyboard and mouse.
+    </background>
+    <relevant-files>
+      <file>src/client/office-addins/shared/taskpane/components/EntityPicker.tsx (to create)</file>
+      <file>projects/sdap-office-integration/spec.md (Entity picker requirements)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">MUST use Fluent UI v9 components</constraint>
+    <constraint source="spec">MUST show typeahead results within 500ms</constraint>
+    <constraint source="spec">MUST support keyboard navigation</constraint>
+    <constraint source="spec">MUST integrate with Quick Create</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create EntityPicker component with Fluent Combobox/Dropdown</step>
+    <step order="2">Implement debounced search input</step>
+    <step order="3">Integrate with searchEntities API</step>
+    <step order="4">Display recent items above search results</step>
+    <step order="5">Add entity type filter chips</step>
+    <step order="6">Display entity type icons in results</step>
+    <step order="7">Add "Create new..." option triggering Quick Create dialog</step>
+    <step order="8">Implement keyboard navigation (arrow keys, enter, escape)</step>
+    <step order="9">Add loading state for search</step>
+    <step order="10">Add empty state for no results</step>
+    <step order="11">Write unit tests</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Package management and build</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/taskpane/components/EntityPicker.tsx</output>
+    <output type="code">src/client/office-addins/shared/taskpane/hooks/useEntitySearch.ts</output>
+    <output type="test">src/client/office-addins/shared/taskpane/components/__tests__/EntityPicker.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Typeahead search shows results as user types</criterion>
+    <criterion testable="true">Recent items appear before search results</criterion>
+    <criterion testable="true">Entity type filter limits results</criterion>
+    <criterion testable="true">Keyboard navigation works completely</criterion>
+    <criterion testable="true">"Create new" triggers Quick Create</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Entity Search Works">
+      <steps>
+        <step>Open entity picker</step>
+        <step>Type search term</step>
+        <step>Verify results appear within 500ms</step>
+      </steps>
+      <expected>Search results display matching entities</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Consider caching recent search results for faster response. The picker should
+    work well with long entity names (truncation with tooltip).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

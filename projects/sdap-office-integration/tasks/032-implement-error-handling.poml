@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="sdap-office-integration">
+  <metadata>
+    <title>Implement error handling (ProblemDetails)</title>
+    <phase>3: Backend API Development</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>034</blocks>
+    <tags>bff-api, api, error-handling</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Error handling implementation with custom error codes</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement comprehensive error handling for the Office endpoints following ADR-019.
+    Create custom ProblemDetails responses with OFFICE_001-015 error codes and ensure
+    all errors include correlation IDs.
+  </prompt>
+
+  <role>
+    .NET developer specializing in error handling. Expert in RFC 7807 ProblemDetails
+    and observability patterns.
+  </role>
+
+  <goal>
+    Consistent error handling across all Office endpoints with proper error codes,
+    user-friendly messages, and correlation IDs for troubleshooting.
+  </goal>
+
+  <context>
+    <background>
+      Good error handling is essential for add-in UX and debugging. All errors should
+      return ProblemDetails format with specific error codes that the add-in can handle
+      appropriately. Correlation IDs enable end-to-end tracing.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/Office/OfficeEndpoints.cs</file>
+      <file>projects/sdap-office-integration/spec.md (Error codes section)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-019">MUST use ProblemDetails RFC 7807 format</constraint>
+    <constraint source="spec">MUST include error codes OFFICE_001-015</constraint>
+    <constraint source="spec">MUST include correlation ID in all responses</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/error-handling.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create OfficeProblemDetails extension class</step>
+    <step order="2">Define error code constants (OFFICE_001 through OFFICE_015)</step>
+    <step order="3">Create factory methods for each error type</step>
+    <step order="4">Implement correlation ID extraction/generation</step>
+    <step order="5">Add correlation ID to all error responses</step>
+    <step order="6">Create global exception handler for unhandled errors</step>
+    <step order="7">Map domain exceptions to appropriate error codes</step>
+    <step order="8">Ensure no stack traces in production responses</step>
+    <step order="9">Write unit tests for error mapping</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Errors/OfficeProblemDetails.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Errors/OfficeErrorCodes.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Filters/OfficeExceptionFilter.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Errors/OfficeProblemDetailsTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All errors return ProblemDetails format</criterion>
+    <criterion testable="true">Error codes match OFFICE_001-015 specification</criterion>
+    <criterion testable="true">Correlation ID is present in all error responses</criterion>
+    <criterion testable="true">No stack traces in error responses</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The error codes from the spec should be implemented exactly as specified.
+    See spec.md Error Codes section for the complete list with descriptions.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

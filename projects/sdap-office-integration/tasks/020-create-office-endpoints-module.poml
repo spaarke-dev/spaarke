@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="sdap-office-integration">
+  <metadata>
+    <title>Create Office endpoints module structure</title>
+    <phase>3: Backend API Development</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>015</dependencies>
+    <blocks>021, 022, 023, 024, 025, 026, 027, 028, 029</blocks>
+    <tags>bff-api, api, minimal-api, endpoints</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation establishing API module structure</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create the Office endpoints module structure in the BFF API following ADR-001 Minimal API
+    pattern. Set up the Endpoints/Office folder with base configuration, dependency injection,
+    and route group registration.
+  </prompt>
+
+  <role>
+    .NET developer specializing in Minimal API architecture. Expert in endpoint organization,
+    DI configuration, and ADR-001 compliance.
+  </role>
+
+  <goal>
+    A structured Endpoints/Office module with route group registration, shared services,
+    and DTOs ready for individual endpoint implementation.
+  </goal>
+
+  <context>
+    <background>
+      The BFF API uses Minimal API pattern per ADR-001. All Office-related endpoints will
+      be grouped under /office/* routes. This task establishes the module structure that
+      subsequent endpoint tasks will build upon.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/ (existing endpoint modules)</file>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/Office/ (to create)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">MUST use Minimal API pattern</constraint>
+    <constraint source="ADR-008">MUST use endpoint filters for authorization</constraint>
+    <constraint source="ADR-010">MUST minimize DI registrations</constraint>
+    <constraint source="ADR-019">MUST use ProblemDetails for errors</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create Endpoints/Office folder structure</step>
+    <step order="2">Create OfficeEndpoints.cs with MapOfficeEndpoints extension method</step>
+    <step order="3">Create DTOs folder for request/response types</step>
+    <step order="4">Create SaveRequest.cs, SaveResponse.cs DTOs</step>
+    <step order="5">Create JobStatusResponse.cs DTO following spec schema</step>
+    <step order="6">Create Services/Office folder for Office-specific services</step>
+    <step order="7">Create IOfficeService interface and stub implementation</step>
+    <step order="8">Register Office services in DI</step>
+    <step order="9">Add /office route group to Program.cs</step>
+    <step order="10">Add basic health check endpoint at GET /office/health</step>
+    <step order="11">Verify build succeeds and endpoint is reachable</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and run API</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/Office/OfficeEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/Office/DTOs/</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/IOfficeService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">dotnet build succeeds</criterion>
+    <criterion testable="true">GET /office/health returns 200 OK</criterion>
+    <criterion testable="true">Route group /office is registered</criterion>
+    <criterion testable="true">DTO classes compile without errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Follow existing endpoint modules as patterns. The Endpoints folder typically contains
+    the endpoint registration while Services contains the business logic. Keep this
+    separation clean.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

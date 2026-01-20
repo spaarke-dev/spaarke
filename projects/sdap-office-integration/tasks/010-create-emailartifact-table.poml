@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="sdap-office-integration">
+  <metadata>
+    <title>Create EmailArtifact table</title>
+    <phase>2: Dataverse Schema</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>011, 013</blocks>
+    <tags>dataverse, solution, fields</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Schema creation task with explicit field definitions</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create the EmailArtifact (sprk_emailartifact) table in Dataverse to store email metadata
+    and body snapshots. Include fields for sender, recipients, subject, sent date, message ID,
+    and internet headers hash for duplicate detection.
+  </prompt>
+
+  <role>
+    Dataverse developer and data modeler. Expert in Power Platform schema design and
+    Spaarke entity conventions.
+  </role>
+
+  <goal>
+    A fully configured EmailArtifact table in Dataverse with all required fields, proper
+    data types, and appropriate indexes for query performance.
+  </goal>
+
+  <context>
+    <background>
+      When users save emails from Outlook, we need to capture email metadata separately from
+      the document. The EmailArtifact stores the original email context (sender, recipients,
+      dates, headers) while the Document entity tracks the saved PDF/EML file.
+    </background>
+    <relevant-files>
+      <file>projects/sdap-office-integration/spec.md (EmailArtifact schema section)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST use sprk_ prefix for all fields</constraint>
+    <constraint source="spec">MUST include MessageId for duplicate detection</constraint>
+    <constraint source="spec">MUST include HeadersHash (SHA256) for deduplication</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/plugins.md</file>
+      <file>docs/guides/DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create sprk_emailartifact table with display name "Email Artifact"</step>
+    <step order="2">Add sprk_name (Primary Name) - auto-generated from Subject + Date</step>
+    <step order="3">Add sprk_subject (Single Line Text, 400 chars)</step>
+    <step order="4">Add sprk_sender (Single Line Text, 320 chars - email address)</step>
+    <step order="5">Add sprk_recipients (Multiline Text - JSON array of recipients)</step>
+    <step order="6">Add sprk_ccrecipients (Multiline Text - JSON array)</step>
+    <step order="7">Add sprk_sentdate (DateTime)</step>
+    <step order="8">Add sprk_receiveddate (DateTime)</step>
+    <step order="9">Add sprk_messageid (Single Line Text, 256 chars) - indexed</step>
+    <step order="10">Add sprk_internetheadershash (Single Line Text, 64 chars - SHA256) - indexed</step>
+    <step order="11">Add sprk_conversationid (Single Line Text, 256 chars)</step>
+    <step order="12">Add sprk_importance (Option Set: Low, Normal, High)</step>
+    <step order="13">Add sprk_hasattachments (Yes/No)</step>
+    <step order="14">Add sprk_bodypreview (Multiline Text, 2000 chars)</step>
+    <step order="15">Add sprk_document lookup to Document entity</step>
+    <step order="16">Configure indexes on MessageId and HeadersHash</step>
+    <step order="17">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="pac-cli">Power Platform CLI for solution operations</tool>
+    <tool name="power-platform">Power Apps maker portal</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">sprk_emailartifact table in Dataverse solution</output>
+    <output type="docs">projects/sdap-office-integration/notes/schema-emailartifact.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Table sprk_emailartifact exists in solution</criterion>
+    <criterion testable="true">All specified fields are present with correct types</criterion>
+    <criterion testable="true">MessageId field is indexed</criterion>
+    <criterion testable="true">HeadersHash field is indexed</criterion>
+    <criterion testable="true">Document lookup is configured</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The HeadersHash is used for duplicate detection - if we receive an email with the same
+    hash, we can quickly identify it as a duplicate. MessageId from internet headers is
+    another uniqueness indicator but may not always be available.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

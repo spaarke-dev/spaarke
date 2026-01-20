@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="062" project="sdap-office-integration">
+  <metadata>
+    <title>Implement profile summary worker</title>
+    <phase>5: Background Workers</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>060</dependencies>
+    <blocks>065</blocks>
+    <tags>bff-api, worker, job, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Worker implementation with AI integration</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement the profile summary worker that generates AI-powered document profiles
+    for saved documents. Integrate with the existing AI pipeline for document
+    summarization and metadata extraction.
+  </prompt>
+
+  <role>
+    .NET developer specializing in AI integration. Expert in document processing
+    and existing Spaarke AI pipeline.
+  </role>
+
+  <goal>
+    A worker that generates document profiles using the AI pipeline and updates
+    document metadata.
+  </goal>
+
+  <context>
+    <background>
+      After upload, documents can optionally be profiled using AI to extract
+      summary, key topics, and metadata. This worker integrates with the existing
+      Spaarke AI pipeline for document profiling.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Workers/Office/ProfileSummaryWorker.cs (to create)</file>
+      <file>docs/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">MUST update job status at each stage</constraint>
+    <constraint source="spec">MUST only run if user enabled profile option</constraint>
+    <constraint source="spec">MUST use existing AI pipeline</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>docs/guides/SPAARKE-AI-ARCHITECTURE.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create ProfileSummaryWorker implementing IOfficeJobHandler</step>
+    <step order="2">Check if profile option was enabled in job payload</step>
+    <step order="3">Skip and mark complete if not enabled</step>
+    <step order="4">Retrieve document content from SPE</step>
+    <step order="5">Call AI pipeline for document profiling</step>
+    <step order="6">Update Document metadata with profile results</step>
+    <step order="7">Update job status to "profiled"</step>
+    <step order="8">Queue next stage (indexing)</step>
+    <step order="9">Handle AI service errors gracefully</step>
+    <step order="10">Write unit tests</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Workers/Office/ProfileSummaryWorker.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Workers/Office/ProfileSummaryWorkerTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Worker skips if profile option not enabled</criterion>
+    <criterion testable="true">AI pipeline is called for document profiling</criterion>
+    <criterion testable="true">Document metadata is updated with profile</criterion>
+    <criterion testable="true">Job status is updated to "profiled"</criterion>
+    <criterion testable="true">AI errors don't fail the entire job</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Follow the existing AI architecture patterns. The profile worker is optional -
+    if it fails, the document should still be accessible, just without AI metadata.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

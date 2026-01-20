@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="sdap-office-integration">
+  <metadata>
+    <title>Implement authorization filters</title>
+    <phase>3: Backend API Development</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>034</blocks>
+    <tags>bff-api, api, auth, security</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Security implementation with endpoint filters per ADR-008</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement authorization endpoint filters for the Office endpoints following ADR-008.
+    Create filters for user authentication, job ownership verification, and document
+    access control.
+  </prompt>
+
+  <role>
+    .NET developer specializing in authorization. Expert in endpoint filters,
+    claims-based authorization, and resource-level access control.
+  </role>
+
+  <goal>
+    Authorization filters that enforce authentication and resource-level permissions
+    for all Office endpoints without global middleware.
+  </goal>
+
+  <context>
+    <background>
+      Per ADR-008, authorization is implemented via endpoint filters rather than global
+      middleware. This allows fine-grained control over authorization logic per endpoint
+      and makes the authorization requirements explicit.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/Office/OfficeEndpoints.cs</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008">MUST use endpoint filters, not global middleware</constraint>
+    <constraint source="spec">MUST verify user authentication on all endpoints</constraint>
+    <constraint source="spec">MUST verify job ownership for job status endpoints</constraint>
+    <constraint source="spec">MUST verify document access for share endpoints</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create OfficeAuthFilter for basic authentication check</step>
+    <step order="2">Create JobOwnershipFilter for job status endpoints</step>
+    <step order="3">Create DocumentAccessFilter for share endpoints</step>
+    <step order="4">Implement user ID extraction from claims</step>
+    <step order="5">Integrate with UAC module for permission checks</step>
+    <step order="6">Return 401 for unauthenticated requests</step>
+    <step order="7">Return 403 for unauthorized resource access</step>
+    <step order="8">Apply filters to appropriate endpoints</step>
+    <step order="9">Write unit tests for each filter</step>
+    <step order="10">Integration test with actual tokens</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Filters/OfficeAuthFilter.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Filters/JobOwnershipFilter.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Filters/DocumentAccessFilter.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Filters/OfficeAuthFilterTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Unauthenticated requests return 401</criterion>
+    <criterion testable="true">Accessing another user's job returns 403</criterion>
+    <criterion testable="true">Sharing document without access returns 403</criterion>
+    <criterion testable="true">Valid requests proceed to endpoint handler</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The UAC module should have existing methods for permission checks. Reuse those
+    rather than implementing permission logic from scratch.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

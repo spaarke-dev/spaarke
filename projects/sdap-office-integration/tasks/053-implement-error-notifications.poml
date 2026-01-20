@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="053" project="sdap-office-integration">
+  <metadata>
+    <title>Implement error handling and notifications</title>
+    <phase>4: Office Add-in Development</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>046</dependencies>
+    <blocks>056</blocks>
+    <tags>frontend, react, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Error handling implementation across all UI components</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement centralized error handling and notification system for the add-in.
+    Create toast notifications for errors and success messages, and map API error
+    codes to user-friendly messages.
+  </prompt>
+
+  <role>
+    Frontend developer specializing in UX. Expert in error handling patterns and
+    notification systems.
+  </role>
+
+  <goal>
+    A consistent error handling system that displays user-friendly messages for
+    all error scenarios with appropriate notification styling.
+  </goal>
+
+  <context>
+    <background>
+      Good error handling is essential for user experience. All API errors should
+      be translated to user-friendly messages, displayed via toast notifications,
+      and logged for debugging. Success actions should also provide confirmation.
+    </background>
+    <relevant-files>
+      <file>src/client/office-addins/shared/taskpane/components/NotificationProvider.tsx (to create)</file>
+      <file>projects/sdap-office-integration/spec.md (Error codes)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">MUST use Fluent UI v9 Toast components</constraint>
+    <constraint source="spec">MUST map all OFFICE_* error codes to messages</constraint>
+    <constraint source="spec">MUST include correlation ID for support</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create NotificationProvider context and component</step>
+    <step order="2">Implement toast notification display using Fluent Toast</step>
+    <step order="3">Create error message mapping for OFFICE_001-015 codes</step>
+    <step order="4">Create useNotification hook for components</step>
+    <step order="5">Implement success, warning, and error toast variants</step>
+    <step order="6">Include correlation ID in error toasts for support</step>
+    <step order="7">Add "Copy details" action for error toasts</step>
+    <step order="8">Auto-dismiss success toasts after delay</step>
+    <step order="9">Persist error toasts until dismissed</step>
+    <step order="10">Write unit tests</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Package management and build</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/taskpane/components/NotificationProvider.tsx</output>
+    <output type="code">src/client/office-addins/shared/taskpane/hooks/useNotification.ts</output>
+    <output type="code">src/client/office-addins/shared/taskpane/utils/errorMessages.ts</output>
+    <output type="test">src/client/office-addins/shared/taskpane/components/__tests__/NotificationProvider.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Success toasts display and auto-dismiss</criterion>
+    <criterion testable="true">Error toasts display with message and correlation ID</criterion>
+    <criterion testable="true">All OFFICE_* codes have mapped messages</criterion>
+    <criterion testable="true">"Copy details" copies error info to clipboard</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Error messages should be actionable where possible (e.g., "Please select an
+    entity to associate this document with" rather than "Association required").
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

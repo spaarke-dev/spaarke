@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="058" project="sdap-office-integration">
+  <metadata>
+    <title>Deploy Word add-in</title>
+    <phase>4: Office Add-in Development</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>056</dependencies>
+    <blocks>071</blocks>
+    <tags>deploy, word, config</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task with explicit verification steps</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Deploy the Word add-in using the XML manifest to the development environment.
+    Configure sideloading for development and verify the add-in loads correctly in
+    Word Desktop and Word Web.
+  </prompt>
+
+  <role>
+    DevOps engineer specializing in Office Add-in deployment. Expert in XML manifest
+    deployment and sideloading configurations.
+  </role>
+
+  <goal>
+    The Word add-in is deployed and accessible to test users in Word Desktop and
+    Word Web.
+  </goal>
+
+  <context>
+    <background>
+      Since Word doesn't support unified manifest in GA yet, the Word add-in uses
+      XML manifest. This can be deployed via sideloading for development or via
+      SharePoint catalog for broader distribution.
+    </background>
+    <relevant-files>
+      <file>src/client/office-addins/word/manifest.xml</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST use XML manifest (unified is preview for Word)</constraint>
+    <constraint source="spec">MUST test in Word Desktop and Word Web</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Build production version of add-in</step>
+    <step order="2">Deploy static files to hosting</step>
+    <step order="3">Update manifest.xml with production URLs</step>
+    <step order="4">Configure SharePoint app catalog or sideloading</step>
+    <step order="5">Upload manifest.xml to catalog</step>
+    <step order="6">Configure user access</step>
+    <step order="7">Test in Word Desktop (Windows)</step>
+    <step order="8">Test in Word Desktop (Mac)</step>
+    <step order="9">Test in Word Web</step>
+    <step order="10">Verify ribbon buttons appear and work</step>
+    <step order="11">Document deployment in notes/deployment-log.md</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build add-in</tool>
+    <tool name="sharepoint">SharePoint app catalog</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment">Word add-in deployed to dev environment</output>
+    <output type="docs">projects/sdap-office-integration/notes/deployment-log.md (updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Add-in loads in Word Desktop Windows</criterion>
+    <criterion testable="true">Add-in loads in Word Desktop Mac</criterion>
+    <criterion testable="true">Add-in loads in Word Web</criterion>
+    <criterion testable="true">Ribbon buttons appear and work</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    XML manifest deployment is different from unified manifest. Use SharePoint
+    catalog for organization-wide deployment or sideloading for development testing.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

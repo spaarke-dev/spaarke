@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="sdap-office-integration">
+  <metadata>
+    <title>Implement POST /office/save endpoint</title>
+    <phase>3: Backend API Development</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>030, 034</blocks>
+    <tags>bff-api, api, minimal-api, endpoints</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Core API endpoint implementation with business logic</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement the POST /office/save endpoint that accepts email/document save requests,
+    validates the payload, creates a ProcessingJob, queues the work, and returns 202 Accepted
+    with jobId and status URL.
+  </prompt>
+
+  <role>
+    .NET developer specializing in API implementation. Expert in async patterns,
+    Service Bus integration, and validation.
+  </role>
+
+  <goal>
+    A working POST /office/save endpoint that accepts save requests, validates association
+    targets, creates jobs, and returns immediately with job tracking information.
+  </goal>
+
+  <context>
+    <background>
+      The save endpoint is the primary entry point for Office add-in document saves. It must
+      respond quickly (within 3 seconds) by creating a ProcessingJob and queuing the actual
+      work for background processing. The endpoint enforces mandatory association.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/Office/OfficeEndpoints.cs</file>
+      <file>projects/sdap-office-integration/spec.md (Save endpoint contract)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST return 202 Accepted with jobId</constraint>
+    <constraint source="spec">MUST validate association target exists</constraint>
+    <constraint source="spec">MUST reject saves without association (OFFICE_003)</constraint>
+    <constraint source="ADR-001">MUST queue work to Service Bus for background processing</constraint>
+    <constraint source="ADR-019">MUST return ProblemDetails on validation errors</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/error-handling.md</file>
+      <file>.claude/adr/ADR-004-async-job-contract.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create SaveRequest DTO with all required fields from spec</step>
+    <step order="2">Create SaveResponse DTO with jobId, statusUrl, estimatedDuration</step>
+    <step order="3">Implement request validation (association target required)</step>
+    <step order="4">Add validation for attachment sizes (25MB per file, 100MB total)</step>
+    <step order="5">Create ProcessingJob record in Dataverse via service</step>
+    <step order="6">Queue save message to Service Bus</step>
+    <step order="7">Return 202 Accepted with SaveResponse</step>
+    <step order="8">Implement OFFICE_003 error for missing association</step>
+    <step order="9">Implement OFFICE_006 error for invalid association target</step>
+    <step order="10">Add endpoint filter for authorization</step>
+    <step order="11">Write unit tests for validation logic</step>
+    <step order="12">Verify endpoint works with test request</step>
+    <step order="13">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/Office/OfficeEndpoints.cs (updated)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/Office/DTOs/SaveRequest.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/Office/DTOs/SaveResponse.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Endpoints/Office/SaveEndpointTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">POST /office/save returns 202 Accepted with valid payload</criterion>
+    <criterion testable="true">Response includes jobId and statusUrl</criterion>
+    <criterion testable="true">Missing association returns 400 with OFFICE_003 error</criterion>
+    <criterion testable="true">Invalid association returns 400 with OFFICE_006 error</criterion>
+    <criterion testable="true">ProcessingJob record is created in Dataverse</criterion>
+    <criterion testable="true">Message is queued to Service Bus</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The endpoint should be fast - all heavy processing happens in background workers.
+    The estimatedDuration in the response is a hint for the UI (e.g., "typically 10-30 seconds").
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="sdap-office-integration">
+  <metadata>
+    <title>Implement Quick Create dialog</title>
+    <phase>4: Office Add-in Development</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>046</dependencies>
+    <blocks>056</blocks>
+    <tags>frontend, react, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Dialog component with dynamic form generation</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement the Quick Create dialog that allows users to create new entities
+    (Matter, Project, etc.) inline without leaving the add-in. Support dynamic
+    form fields based on entity type.
+  </prompt>
+
+  <role>
+    Frontend developer specializing in forms and dialogs. Expert in Fluent UI v9
+    dialog components and form validation.
+  </role>
+
+  <goal>
+    A reusable Quick Create dialog that supports creating any entity type with
+    proper validation and immediate availability in the picker.
+  </goal>
+
+  <context>
+    <background>
+      Users may need to create a new entity to associate their document with. Quick
+      Create provides a minimal form for creating entities without leaving the
+      add-in. The newly created entity should immediately be selectable.
+    </background>
+    <relevant-files>
+      <file>src/client/office-addins/shared/taskpane/components/QuickCreateDialog.tsx (to create)</file>
+      <file>projects/sdap-office-integration/spec.md (Quick Create requirements)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">MUST use Fluent UI v9 Dialog component</constraint>
+    <constraint source="spec">MUST support all entity types (Matter, Project, etc.)</constraint>
+    <constraint source="spec">MUST validate required fields before submission</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create QuickCreateDialog component using Fluent Dialog</step>
+    <step order="2">Add entity type selector (if not pre-selected)</step>
+    <step order="3">Define required fields per entity type</step>
+    <step order="4">Generate form fields dynamically based on type</step>
+    <step order="5">Implement field validation (required, format)</step>
+    <step order="6">Handle form submission via API client</step>
+    <step order="7">Return created entity to caller on success</step>
+    <step order="8">Handle API errors with user-friendly messages</step>
+    <step order="9">Add loading state during creation</step>
+    <step order="10">Write unit tests</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Package management and build</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/taskpane/components/QuickCreateDialog.tsx</output>
+    <output type="code">src/client/office-addins/shared/taskpane/config/entityFields.ts</output>
+    <output type="test">src/client/office-addins/shared/taskpane/components/__tests__/QuickCreateDialog.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Dialog opens from entity picker</criterion>
+    <criterion testable="true">Form fields display based on entity type</criterion>
+    <criterion testable="true">Required field validation works</criterion>
+    <criterion testable="true">Created entity is returned on success</criterion>
+    <criterion testable="true">Errors are displayed in dialog</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Quick Create Matter">
+      <steps>
+        <step>Open entity picker</step>
+        <step>Click "Create new Matter"</step>
+        <step>Fill in required fields</step>
+        <step>Click Create</step>
+        <step>Verify new Matter is selected</step>
+      </steps>
+      <expected>Matter is created and automatically selected</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Keep the form minimal - just required fields. Users can add more details in
+    the full Spaarke application later.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

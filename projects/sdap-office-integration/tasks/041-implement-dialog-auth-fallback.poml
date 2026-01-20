@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="sdap-office-integration">
+  <metadata>
+    <title>Implement Dialog API auth fallback</title>
+    <phase>4: Office Add-in Development</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>040</dependencies>
+    <blocks>045</blocks>
+    <tags>frontend, typescript, auth</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Authentication fallback implementation with Office Dialog API</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement the Dialog API authentication fallback for older Outlook clients that
+    don't support NAA. Use Office.context.ui.displayDialogAsync to open an auth popup
+    and handle the OAuth callback.
+  </prompt>
+
+  <role>
+    Frontend developer specializing in Office Add-in authentication. Expert in
+    Office Dialog API and cross-window communication.
+  </role>
+
+  <goal>
+    A working DialogAuthService that authenticates users in older clients using
+    the Office Dialog API with proper callback handling.
+  </goal>
+
+  <context>
+    <background>
+      Some older Outlook clients don't support NAA. The Dialog API provides a fallback
+      by opening a dialog window for authentication. The add-in must handle the OAuth
+      callback and extract the token from the dialog.
+    </background>
+    <relevant-files>
+      <file>src/client/office-addins/shared/auth/DialogAuthService.ts (to create)</file>
+      <file>projects/sdap-office-integration/spec.md (Authentication fallback section)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST use Office.context.ui.displayDialogAsync</constraint>
+    <constraint source="spec">MUST handle dialog close and error events</constraint>
+    <constraint source="spec">MUST use messageParent for token return</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/msal-client.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create DialogAuthService class in shared/auth/</step>
+    <step order="2">Create dialog.html page for auth popup</step>
+    <step order="3">Implement displayDialogAsync wrapper</step>
+    <step order="4">Configure MSAL in dialog page for redirect flow</step>
+    <step order="5">Handle OAuth callback in dialog</step>
+    <step order="6">Use messageParent to send token back to task pane</step>
+    <step order="7">Handle dialog close/cancel events</step>
+    <step order="8">Implement error handling and retries</step>
+    <step order="9">Create unified AuthService that tries NAA first, falls back to Dialog</step>
+    <step order="10">Write unit tests</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Package management and build</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/auth/DialogAuthService.ts</output>
+    <output type="code">src/client/office-addins/shared/auth/dialog.html</output>
+    <output type="code">src/client/office-addins/shared/auth/dialog.ts</output>
+    <output type="code">src/client/office-addins/shared/auth/AuthService.ts</output>
+    <output type="test">src/client/office-addins/shared/auth/__tests__/DialogAuthService.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Dialog opens when NAA is not supported</criterion>
+    <criterion testable="true">Auth flow completes in dialog</criterion>
+    <criterion testable="true">Token is returned to task pane via messageParent</criterion>
+    <criterion testable="true">Dialog cancel is handled gracefully</criterion>
+    <criterion testable="true">AuthService tries NAA first, falls back to Dialog</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Reference Microsoft sample Outlook-Add-in-SSO-NAA-IE for implementation patterns.
+    The dialog URL must be in the same domain as the add-in.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

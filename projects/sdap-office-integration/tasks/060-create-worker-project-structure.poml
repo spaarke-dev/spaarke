@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="sdap-office-integration">
+  <metadata>
+    <title>Create worker project structure</title>
+    <phase>5: Background Workers</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>061, 062, 063, 064</blocks>
+    <tags>bff-api, worker, job</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates worker infrastructure and project structure</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create the background worker project structure in the BFF API following ADR-001
+    BackgroundService pattern. Set up Service Bus handlers, worker base classes,
+    and job processing infrastructure.
+  </prompt>
+
+  <role>
+    .NET developer specializing in background processing. Expert in BackgroundService,
+    Azure Service Bus, and ADR-001/ADR-004 compliance.
+  </role>
+
+  <goal>
+    A structured worker infrastructure with Service Bus integration, base handler
+    classes, and job processing framework.
+  </goal>
+
+  <context>
+    <background>
+      Document saves trigger background processing through multiple stages. Workers
+      consume messages from Service Bus, process documents, and update job status.
+      The infrastructure must be reliable, observable, and idempotent.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Workers/ (existing workers)</file>
+      <file>src/server/api/Sprk.Bff.Api/Workers/Office/ (to create)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">MUST use BackgroundService, not Azure Functions</constraint>
+    <constraint source="ADR-004">MUST follow job contract pattern</constraint>
+    <constraint source="ADR-004">MUST implement idempotent handlers</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>.claude/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>.claude/adr/ADR-004-async-job-contract.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create Workers/Office folder structure</step>
+    <step order="2">Create base OfficeWorkerBase class extending BackgroundService</step>
+    <step order="3">Create IOfficeJobHandler interface</step>
+    <step order="4">Implement Service Bus message receiver</step>
+    <step order="5">Create job message DTOs (UploadJob, ProfileJob, etc.)</step>
+    <step order="6">Implement idempotency check in base handler</step>
+    <step order="7">Implement job status update helper</step>
+    <step order="8">Create dead letter queue handler</step>
+    <step order="9">Register worker services in DI</step>
+    <step order="10">Configure Service Bus queues in appsettings</step>
+    <step order="11">Write unit tests for base infrastructure</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Workers/Office/OfficeWorkerBase.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Workers/Office/IOfficeJobHandler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Workers/Office/Messages/</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Workers/Office/OfficeWorkerBaseTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">dotnet build succeeds</criterion>
+    <criterion testable="true">Worker base class connects to Service Bus</criterion>
+    <criterion testable="true">Idempotency check prevents duplicate processing</criterion>
+    <criterion testable="true">Job status updates work correctly</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Follow existing worker patterns in the codebase. The base class should handle
+    common concerns (idempotency, status updates, error handling) so specific
+    handlers focus on business logic.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

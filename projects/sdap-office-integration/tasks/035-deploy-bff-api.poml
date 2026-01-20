@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="sdap-office-integration">
+  <metadata>
+    <title>Deploy BFF API to Azure</title>
+    <phase>3: Backend API Development</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>034</dependencies>
+    <blocks>045, 070, 071, 072, 073, 074, 075</blocks>
+    <tags>deploy, azure, bff-api</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task with explicit verification steps</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Deploy the updated BFF API with Office endpoints to the Azure development environment.
+    Verify all endpoints are accessible and working correctly in the deployed environment.
+  </prompt>
+
+  <role>
+    DevOps engineer specializing in Azure deployments. Expert in App Service,
+    configuration management, and deployment verification.
+  </role>
+
+  <goal>
+    The BFF API with Office endpoints is deployed and accessible in the Azure
+    development environment.
+  </goal>
+
+  <context>
+    <background>
+      The Office endpoints need to be deployed so the add-in can integrate with them.
+      The existing BFF API deployment pipeline should handle most of the work, but
+      any new configuration (Service Bus queues, etc.) needs to be verified.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/</file>
+      <file>infrastructure/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST deploy to development environment first</constraint>
+    <constraint source="spec">MUST verify all Office endpoints respond correctly</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify all unit tests pass locally</step>
+    <step order="2">Build release configuration</step>
+    <step order="3">Deploy to Azure App Service (dev environment)</step>
+    <step order="4">Verify app starts successfully (check logs)</step>
+    <step order="5">Test GET /office/health endpoint</step>
+    <step order="6">Verify Service Bus queues are created/accessible</step>
+    <step order="7">Test authenticated endpoint with valid token</step>
+    <step order="8">Document deployment in notes/deployment-log.md</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="az-cli">Azure CLI for deployment</tool>
+    <tool name="dotnet">Build</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment">BFF API deployed to Azure dev environment</output>
+    <output type="docs">projects/sdap-office-integration/notes/deployment-log.md (updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">App Service is running without errors</criterion>
+    <criterion testable="true">GET /office/health returns 200</criterion>
+    <criterion testable="true">Authenticated requests succeed</criterion>
+    <criterion testable="true">Logs show no startup errors</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use the azure-deploy skill for deployment operations. The existing CI/CD pipeline
+    may handle most of this - verify the pipeline includes the new Office endpoints.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Use the azure-deploy skill for deployment operations.
+    </protocol>
+  </execution>
+</task>

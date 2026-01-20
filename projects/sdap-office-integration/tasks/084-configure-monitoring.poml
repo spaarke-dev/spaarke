@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="084" project="sdap-office-integration">
+  <metadata>
+    <title>Configure monitoring and alerting</title>
+    <phase>7: Deployment &amp; Go-Live</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>080</dependencies>
+    <blocks>090</blocks>
+    <tags>monitoring, alerting, azure</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Configuration with explicit monitoring requirements</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Configure monitoring and alerting for the Office integration in production.
+    Set up Application Insights dashboards, create alerts for critical metrics,
+    and establish runbooks for common issues.
+  </prompt>
+
+  <role>
+    DevOps engineer specializing in observability. Expert in Application Insights
+    and Azure Monitor alerting.
+  </role>
+
+  <goal>
+    Comprehensive monitoring and alerting configured to ensure early detection
+    of issues and rapid response to production problems.
+  </goal>
+
+  <context>
+    <background>
+      Production monitoring is critical for maintaining service reliability.
+      The Office integration has specific SLAs (response time, availability)
+      that must be monitored with appropriate alerts.
+    </background>
+    <relevant-files>
+      <file>infrastructure/</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST monitor API response times (p95 &lt; 2s)</constraint>
+    <constraint source="spec">MUST alert on worker processing failures</constraint>
+    <constraint source="spec">MUST track job completion rates</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review Application Insights configuration</step>
+    <step order="2">Create custom metrics for Office endpoints</step>
+    <step order="3">Create dashboard for Office integration health</step>
+    <step order="4">Configure alert: API response time > 2s (p95)</step>
+    <step order="5">Configure alert: Error rate > 1%</step>
+    <step order="6">Configure alert: Worker processing failures</step>
+    <step order="7">Configure alert: Redis connection failures</step>
+    <step order="8">Configure alert: Service Bus queue depth</step>
+    <step order="9">Create runbook for common alert responses</step>
+    <step order="10">Configure alert notification channels (email, Teams)</step>
+    <step order="11">Test alerting with simulated failures</step>
+    <step order="12">Document monitoring setup</step>
+    <step order="13">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="az-cli">Azure CLI</tool>
+    <tool name="azure-portal">Azure Portal</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">Application Insights alerts configured</output>
+    <output type="config">Monitoring dashboard created</output>
+    <output type="docs">projects/sdap-office-integration/notes/monitoring-runbook.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Dashboard shows key metrics</criterion>
+    <criterion testable="true">Alerts trigger for threshold violations</criterion>
+    <criterion testable="true">Notifications reach configured channels</criterion>
+    <criterion testable="true">Runbook covers common scenarios</criterion>
+    <criterion testable="true">Test alerts fire and resolve correctly</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Focus on actionable alerts - avoid alert fatigue. Each alert should have
+    a clear runbook response. Consider on-call rotation for critical alerts.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

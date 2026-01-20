@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="064" project="sdap-office-integration">
+  <metadata>
+    <title>Implement job status update service</title>
+    <phase>5: Background Workers</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>060, 023</dependencies>
+    <blocks>065</blocks>
+    <tags>bff-api, worker, job</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Service implementation bridging workers and SSE</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement the job status update service that workers use to broadcast status
+    changes to connected SSE clients. Use Redis pub/sub for real-time notification
+    distribution.
+  </prompt>
+
+  <role>
+    .NET developer specializing in real-time systems. Expert in Redis pub/sub
+    and event-driven architecture.
+  </role>
+
+  <goal>
+    A service that bridges worker status updates to SSE clients for real-time
+    job progress notification.
+  </goal>
+
+  <context>
+    <background>
+      When workers update job status, connected SSE clients should receive updates
+      immediately. The job status service publishes updates to Redis pub/sub,
+      and the SSE endpoint subscribes to receive and forward them to clients.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Office/JobStatusService.cs (to create)</file>
+      <file>projects/sdap-office-integration/spec.md (SSE requirements)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST deliver updates within 1 second</constraint>
+    <constraint source="spec">MUST use Redis pub/sub for distribution</constraint>
+    <constraint source="ADR-009">MUST use Redis via IDistributedCache/IConnectionMultiplexer</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create IJobStatusService interface</step>
+    <step order="2">Create JobStatusService implementing Redis pub/sub</step>
+    <step order="3">Implement PublishStatusUpdate(jobId, status) method</step>
+    <step order="4">Implement SubscribeToJob(jobId) for SSE endpoint</step>
+    <step order="5">Create status update event DTOs</step>
+    <step order="6">Update SSE endpoint to use subscribe method</step>
+    <step order="7">Update workers to call PublishStatusUpdate</step>
+    <step order="8">Handle Redis connection failures gracefully</step>
+    <step order="9">Add monitoring/metrics for update latency</step>
+    <step order="10">Write unit tests</step>
+    <step order="11">Write integration tests with Redis</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/IJobStatusService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/JobStatusService.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Services/Office/JobStatusServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Status updates are published to Redis</criterion>
+    <criterion testable="true">SSE endpoint receives subscribed updates</criterion>
+    <criterion testable="true">Update latency is under 1 second</criterion>
+    <criterion testable="true">Redis failures don't crash workers</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Redis pub/sub is ephemeral - if a client is disconnected when an update is
+    published, they won't receive it. The SSE endpoint should send the current
+    status on connection, then stream subsequent updates.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

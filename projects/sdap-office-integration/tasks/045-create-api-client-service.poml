@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="045" project="sdap-office-integration">
+  <metadata>
+    <title>Create shared API client service</title>
+    <phase>4: Office Add-in Development</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>040, 035</dependencies>
+    <blocks>049, 050, 051, 052</blocks>
+    <tags>frontend, typescript, api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>API client implementation with typed methods for all endpoints</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create a typed API client service for the Office add-in that wraps all /office/*
+    endpoint calls. Include authentication header injection, error handling, and
+    TypeScript interfaces matching server DTOs.
+  </prompt>
+
+  <role>
+    Frontend developer specializing in API clients. Expert in TypeScript, fetch API,
+    and error handling patterns.
+  </role>
+
+  <goal>
+    A fully typed OfficeApiClient that provides methods for all Office API endpoints
+    with proper authentication and error handling.
+  </goal>
+
+  <context>
+    <background>
+      The API client abstracts HTTP communication with the BFF API. It handles token
+      injection, request/response serialization, and error mapping. The client should
+      be easy to use from React components.
+    </background>
+    <relevant-files>
+      <file>src/client/office-addins/shared/api/OfficeApiClient.ts (to create)</file>
+      <file>projects/sdap-office-integration/spec.md (API contracts)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST inject bearer token from AuthService</constraint>
+    <constraint source="spec">MUST type all request/response interfaces</constraint>
+    <constraint source="spec">MUST handle ProblemDetails errors</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create TypeScript interfaces for all DTOs (matching server)</step>
+    <step order="2">Create OfficeApiClient class</step>
+    <step order="3">Inject AuthService for token acquisition</step>
+    <step order="4">Implement base fetch wrapper with auth header</step>
+    <step order="5">Implement save(request: SaveRequest): Promise&lt;SaveResponse&gt;</step>
+    <step order="6">Implement getJobStatus(jobId: string): Promise&lt;JobStatusResponse&gt;</step>
+    <step order="7">Implement searchEntities(query: string): Promise&lt;EntitySearchResult[]&gt;</step>
+    <step order="8">Implement searchDocuments(query: string): Promise&lt;DocumentSearchResult[]&gt;</step>
+    <step order="9">Implement quickCreate(type: string, data: object): Promise&lt;QuickCreateResponse&gt;</step>
+    <step order="10">Implement shareLinks(docIds: string[]): Promise&lt;ShareLinksResponse&gt;</step>
+    <step order="11">Implement shareAttach(docIds: string[]): Promise&lt;ShareAttachResponse&gt;</step>
+    <step order="12">Implement getRecent(): Promise&lt;RecentItemsResponse&gt;</step>
+    <step order="13">Handle ProblemDetails errors and map to typed errors</step>
+    <step order="14">Write unit tests</step>
+    <step order="15">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Package management and build</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/api/OfficeApiClient.ts</output>
+    <output type="code">src/client/office-addins/shared/api/types.ts</output>
+    <output type="code">src/client/office-addins/shared/api/errors.ts</output>
+    <output type="test">src/client/office-addins/shared/api/__tests__/OfficeApiClient.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All endpoint methods are implemented</criterion>
+    <criterion testable="true">Auth token is injected in all requests</criterion>
+    <criterion testable="true">TypeScript types match server DTOs</criterion>
+    <criterion testable="true">ProblemDetails errors are properly handled</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Consider using a code generator (OpenAPI) to generate types from the server API
+    specification for consistency. The types should exactly match the server DTOs.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

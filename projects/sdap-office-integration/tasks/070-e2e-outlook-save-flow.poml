@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="sdap-office-integration">
+  <metadata>
+    <title>E2E test: Outlook save flow</title>
+    <phase>6: Integration &amp; Testing</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>057, 066</dependencies>
+    <blocks>078</blocks>
+    <tags>testing, e2e-test, outlook</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task with explicit E2E coverage requirements</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create end-to-end tests for the complete Outlook save flow. Test saving emails
+    and attachments to Spaarke with entity associations, verifying the full journey
+    from add-in UI through API to worker processing.
+  </prompt>
+
+  <role>
+    QA engineer specializing in Office add-in testing. Expert in E2E testing
+    patterns and Office.js test frameworks.
+  </role>
+
+  <goal>
+    Comprehensive E2E test suite validating the Outlook save flow works correctly
+    from user interaction to job completion.
+  </goal>
+
+  <context>
+    <background>
+      The Outlook save flow is a core user journey: select email/attachments,
+      choose entity association, save to Spaarke, and monitor progress. E2E tests
+      verify this works correctly across all components.
+    </background>
+    <relevant-files>
+      <file>src/client/office-addins/outlook/</file>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/Office/</file>
+      <file>tests/e2e/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST test both NAA and Dialog fallback auth paths</constraint>
+    <constraint source="spec">MUST verify SSE status updates are received</constraint>
+    <constraint source="spec">MUST test attachment size limit enforcement</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/e2e-testing.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create E2E test project structure if not exists</step>
+    <step order="2">Configure test environment with mock Outlook host</step>
+    <step order="3">Test: Save single email without attachments</step>
+    <step order="4">Test: Save email with single attachment (&lt;25MB)</step>
+    <step order="5">Test: Save email with multiple attachments</step>
+    <step order="6">Test: Save email with large attachment (verify 25MB limit)</step>
+    <step order="7">Test: Entity picker typeahead and selection</step>
+    <step order="8">Test: Quick Create entity during save flow</step>
+    <step order="9">Test: SSE job status updates are received</step>
+    <step order="10">Test: Polling fallback when SSE unavailable</step>
+    <step order="11">Test: Error handling for API failures</step>
+    <step order="12">Test: Duplicate email detection</step>
+    <step order="13">Document test scenarios and coverage</step>
+    <step order="14">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build and run tests</tool>
+    <tool name="playwright">E2E test framework</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/e2e/outlook-save-flow.spec.ts</output>
+    <output type="test">tests/e2e/fixtures/outlook-mocks.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All E2E tests pass</criterion>
+    <criterion testable="true">Save flow completes successfully end-to-end</criterion>
+    <criterion testable="true">Status updates are received via SSE</criterion>
+    <criterion testable="true">Error states are handled gracefully</criterion>
+    <criterion testable="true">Attachment limits are enforced</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Save Email Flow">
+      <url>https://outlook.office.com/mail/ (with add-in sideloaded)</url>
+      <steps>
+        <step>Open an email in reading pane</step>
+        <step>Click Spaarke add-in button in ribbon</step>
+        <step>Verify task pane opens</step>
+        <step>Select entity from picker</step>
+        <step>Click Save button</step>
+        <step>Verify progress indicator appears</step>
+        <step>Verify success message appears</step>
+      </steps>
+      <expected>Email saved to Spaarke with status updates shown</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Use Playwright with Office add-in test helpers. Consider mocking the
+    Office.js runtime for faster test execution while keeping some tests
+    against real Office client.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

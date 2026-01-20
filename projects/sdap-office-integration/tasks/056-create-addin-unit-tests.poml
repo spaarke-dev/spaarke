@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="056" project="sdap-office-integration">
+  <metadata>
+    <title>Create add-in unit tests</title>
+    <phase>4: Office Add-in Development</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>040, 041, 042, 043, 044, 045, 046, 047, 048, 049, 050, 051, 052, 053, 054, 055</dependencies>
+    <blocks>057, 058</blocks>
+    <tags>testing, unit-test, frontend</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing task with explicit coverage requirements</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create comprehensive unit tests for all add-in components, services, and hooks.
+    Ensure at least 80% code coverage with tests for components, user flows,
+    and edge cases.
+  </prompt>
+
+  <role>
+    Frontend developer specializing in testing. Expert in Jest, React Testing Library,
+    and component testing patterns.
+  </role>
+
+  <goal>
+    Comprehensive unit test suite achieving at least 80% coverage with well-organized,
+    maintainable tests.
+  </goal>
+
+  <context>
+    <background>
+      Unit tests ensure code quality and enable confident refactoring. The add-in
+      has multiple components, services, and user flows that need verification.
+      Mock Office.js APIs for testing.
+    </background>
+    <relevant-files>
+      <file>src/client/office-addins/shared/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">MUST achieve 80% code coverage minimum</constraint>
+    <constraint source="spec">MUST test all user flows</constraint>
+    <constraint source="spec">MUST mock Office.js APIs</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Set up Jest and React Testing Library</step>
+    <step order="2">Create Office.js mock utilities</step>
+    <step order="3">Write tests for AuthService (NAA + Dialog)</step>
+    <step order="4">Write tests for host adapters (Outlook + Word)</step>
+    <step order="5">Write tests for API client</step>
+    <step order="6">Write tests for EntityPicker component</step>
+    <step order="7">Write tests for AttachmentSelector component</step>
+    <step order="8">Write tests for SaveView flow</step>
+    <step order="9">Write tests for ShareView flow</step>
+    <step order="10">Write tests for QuickCreateDialog</step>
+    <step order="11">Write tests for JobStatusView</step>
+    <step order="12">Write tests for notification system</step>
+    <step order="13">Run coverage report and verify 80%+</step>
+    <step order="14">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Package management and test runner</tool>
+    <tool name="jest">Test framework</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">src/client/office-addins/shared/**/__tests__/*.test.ts</output>
+    <output type="code">src/client/office-addins/shared/__mocks__/office-js.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All tests pass</criterion>
+    <criterion testable="true">Code coverage is at least 80%</criterion>
+    <criterion testable="true">All user flows have test coverage</criterion>
+    <criterion testable="true">Office.js APIs are properly mocked</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Mock Office.js to avoid needing the actual Office environment for unit tests.
+    Integration testing with real Office clients is separate (Phase 6).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

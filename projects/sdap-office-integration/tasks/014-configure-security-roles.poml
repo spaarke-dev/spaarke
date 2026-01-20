@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="sdap-office-integration">
+  <metadata>
+    <title>Configure security roles</title>
+    <phase>2: Dataverse Schema</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>013</dependencies>
+    <blocks>015</blocks>
+    <tags>dataverse, security, config</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Security configuration task with explicit role definitions</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Configure Dataverse security roles for the new Office integration tables. Users need
+    appropriate CRUD permissions on EmailArtifact, AttachmentArtifact, and ProcessingJob
+    based on their existing Spaarke roles.
+  </prompt>
+
+  <role>
+    Dataverse security administrator. Expert in role-based access control and
+    Spaarke permission model.
+  </role>
+
+  <goal>
+    Security roles are configured so that users can create and view their own email
+    artifacts and jobs, while admins can manage all records.
+  </goal>
+
+  <context>
+    <background>
+      Spaarke uses role-based security with existing roles for different user types.
+      The new Office tables need to be added to these roles with appropriate permissions.
+      Users should only see their own email artifacts unless they have elevated permissions.
+    </background>
+    <relevant-files>
+      <file>projects/sdap-office-integration/spec.md (security requirements)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Users MUST only see their own EmailArtifacts (user-level)</constraint>
+    <constraint source="spec">ProcessingJobs MUST be visible to job owner</constraint>
+    <constraint source="spec">Admins MUST have full access to all Office tables</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Identify existing Spaarke security roles to update</step>
+    <step order="2">Add EmailArtifact permissions to standard user role (Create, Read-User, Write-User, Delete-User)</step>
+    <step order="3">Add AttachmentArtifact permissions to standard user role (same as EmailArtifact)</step>
+    <step order="4">Add ProcessingJob permissions to standard user role (Create, Read-User)</step>
+    <step order="5">Add full permissions on all three tables to admin role</step>
+    <step order="6">Add service account role with full permissions for background workers</step>
+    <step order="7">Test permissions with a standard user account</step>
+    <step order="8">Test permissions with an admin account</step>
+    <step order="9">Document role configurations in notes/security-roles.md</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="power-platform">Power Apps maker portal for security role editor</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">Updated security roles in Dataverse solution</output>
+    <output type="docs">projects/sdap-office-integration/notes/security-roles.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Standard users can create EmailArtifacts</criterion>
+    <criterion testable="true">Standard users can only read their own EmailArtifacts</criterion>
+    <criterion testable="true">Admins can read all EmailArtifacts</criterion>
+    <criterion testable="true">Service account can update ProcessingJobs</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The service account role is used by background workers to update job status.
+    Ensure this account has the necessary permissions without exposing unnecessary
+    privileges.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>
