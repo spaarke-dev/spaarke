@@ -107,7 +107,7 @@ See [builder-scopes/INDEX.md](builder-scopes/INDEX.md) for full inventory.
 - [x] PCF v2.25.0: Left palette open by default
 - [x] PCF v2.25.0: Fixed header with Fluent V9 styling
 - [x] Commit and push (PR #142)
-- [ ] **Deploy API to Azure** for end-to-end testing
+- [x] **Deploy API to Azure** (2026-01-20) - https://spe-api-dev-67e2xz.azurewebsites.net
 
 **Files Modified**:
 - `FallbackPrompts.cs` - IntentClassification prompt
@@ -264,10 +264,9 @@ curl -X POST https://spe-api-dev-67e2xz.azurewebsites.net/api/ai-playbook-builde
 4. Created PR #142 with all changes
 5. Documented architecture and created this checklist
 
-**Next Session**:
-1. Deploy API to Azure
-2. End-to-end test conversational experience
-3. Begin Phase 2 (tool schema integration) if Phase 1 validated
+**Next Steps**:
+1. End-to-end test conversational experience in Dataverse
+2. Begin Phase 2 (tool schema integration) if Phase 1 validated
 
 ---
 
