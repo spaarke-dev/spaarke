@@ -465,7 +465,7 @@ You have access to the following pre-built scopes:
 
 ---
 
-### Phase 4: Dataverse Persistence (IN PROGRESS)
+### Phase 4: Dataverse Persistence (COMPLETE ✅)
 
 **Goal**: Store builder scopes in Dataverse for dynamic updates
 
@@ -477,10 +477,10 @@ Target state: Import JSON into Dataverse. GetBuilderScopePromptAsync loads from 
 - [x] Create Dataverse import utility (`BuilderScopeImporter.cs`)
 - [x] Add admin endpoints for scope import (`BuilderScopeAdminEndpoints.cs`)
 - [x] Copy 23 builder scope JSON files to API project (`builder-scopes/`)
-- [ ] Deploy via Kudu portal (see note below)
-- [ ] Test import of 23 builder scope records via `/api/admin/builder-scopes/import`
-- [ ] Verify GetBuilderScopePromptAsync loads from Dataverse
-- [ ] Implement cache invalidation endpoint
+- [x] Deploy via Kudu portal
+- [x] Test import of 23 builder scope records via `/api/admin/builder-scopes/import`
+- [x] Verify GetBuilderScopePromptAsync loads from Dataverse (tested via /classify-intent and /generate-plan)
+- [ ] Implement cache invalidation endpoint (optional)
 - [ ] Add admin UI for scope editing (future)
 
 **Files Created**:
@@ -798,11 +798,31 @@ All Knowledge Scope Integration tasks complete:
 **Deployment Issue**:
 Azure CLI `az webapp deploy` and `az webapp deployment source config-zip` both succeed but the running app doesn't update. The `/api/admin/builder-scopes/status` endpoint returns 404.
 
-**Next Steps**:
-1. Deploy via Kudu portal (manual zip push)
-2. Test status endpoint: `curl https://spe-api-dev-67e2xz.azurewebsites.net/api/admin/builder-scopes/status`
-3. Test import endpoint with authentication
-4. Verify scopes are created in Dataverse
+**Phase 4 Completion**:
+1. ✅ Deployed via Kudu portal (Azure CLI unreliable)
+2. ✅ Status endpoint verified: 23 JSON files found
+3. ✅ Fixed Knowledge import (JsonElement? for content property)
+4. ✅ All 23 scopes imported to Dataverse:
+   - 5 Actions, 5 Skills, 4 Knowledge, 9 Tools
+5. ✅ Tested `/classify-intent` and `/generate-plan` endpoints - working
+
+**Commits**:
+- `4e7aa20` feat(ai-playbook): add Phase 4 Dataverse persistence infrastructure
+- `31504c4` fix(ai-playbook): handle JSON object content in Knowledge scope imports
+
+---
+
+### Phase 4 Summary
+
+All Dataverse Persistence tasks complete:
+- ✅ Import utility with admin endpoints
+- ✅ 23 builder scope JSON files deployed
+- ✅ All scopes imported to Dataverse
+- ✅ API endpoints use scopes from Dataverse
+
+**Optional future enhancements**:
+- Cache invalidation endpoint
+- Admin UI for scope editing
 
 ---
 
