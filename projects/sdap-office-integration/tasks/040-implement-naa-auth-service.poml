@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement NAA authentication service</title>
     <phase>4: Office Add-in Development</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>6</estimated-hours>
     <dependencies>006, 001</dependencies>
     <blocks>041, 045</blocks>
@@ -92,6 +92,29 @@
   <notes>
     The redirect URI for NAA is brk-multihub://localhost which is handled by the
     Office host. Test in actual Office clients, not just browser.
+
+    ## Completion Notes (2026-01-20)
+
+    Implemented NaaAuthService with:
+    - MSAL.js 3.x createNestablePublicClientApplication for NAA support
+    - Silent token acquisition with popup fallback
+    - Token caching via MSAL's built-in sessionStorage cache
+    - NAA support detection based on Office platform and version
+    - Comprehensive error handling with NaaAuthError class
+    - Auth state change notification system for UI binding
+    - Unit tests with full mocking of MSAL and Office.js
+
+    Files created:
+    - src/client/office-addins/shared/auth/authConfig.ts
+    - src/client/office-addins/shared/auth/NaaAuthService.ts
+    - src/client/office-addins/shared/auth/index.ts
+    - src/client/office-addins/shared/auth/__tests__/NaaAuthService.test.ts
+
+    Also added jest configuration for testing:
+    - jest.config.js
+    - jest.setup.js
+    - Added jest dependencies to package.json
+    - Added jest types to tsconfig.json
   </notes>
 
   <execution>

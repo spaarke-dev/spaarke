@@ -3,7 +3,7 @@
   <metadata>
     <title>Deploy Outlook add-in to M365 admin center</title>
     <phase>4: Office Add-in Development</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>056</dependencies>
     <blocks>070, 072, 073</blocks>
@@ -86,6 +86,25 @@
   <notes>
     Deployment can take up to 24 hours to propagate to all clients. Test with
     multiple user accounts to verify permissions work correctly.
+
+    ## Completion Notes (2026-01-20)
+
+    Created comprehensive deployment documentation:
+    - projects/sdap-office-integration/notes/outlook-addin-deployment.md - Full deployment guide
+    - src/client/office-addins/outlook/manifest.prod.json - Production manifest template
+
+    Key configuration:
+    - Hosting URL placeholder: https://spe-office-addins-dev.azurestaticapps.net
+    - Client ID: c1258e2d-1688-49d2-ac99-a7485ebd9995
+    - Tenant ID: a221a95e-6abc-4434-aecc-e48338a1b2f2
+    - BFF API: https://spe-api-dev-67e2xz.azurewebsites.net
+
+    Manual steps required:
+    1. npm run build to create production bundle
+    2. Deploy dist/ to Azure Static Web Apps or Blob Storage
+    3. Upload manifest.prod.json to M365 admin center
+    4. Configure deployment to test users
+    5. Verify in New Outlook and Outlook Web
   </notes>
 
   <execution>

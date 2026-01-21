@@ -1,0 +1,336 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<OfficeApp
+  xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
+  xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
+  xsi:type="TaskPaneApp">
+
+  <!-- Basic Identity -->
+  <Id>c1258e2d-1688-49d2-ac99-a7485ebd9995</Id>
+  <Version>1.0.0</Version>
+  <ProviderName>Spaarke</ProviderName>
+  <DefaultLocale>en-US</DefaultLocale>
+  <DisplayName DefaultValue="Spaarke" />
+  <Description DefaultValue="Save, share, and manage documents in Spaarke DMS" />
+  <IconUrl DefaultValue="https://localhost:3000/assets/icon-32.png" />
+  <HighResolutionIconUrl DefaultValue="https://localhost:3000/assets/icon-80.png" />
+  <SupportUrl DefaultValue="https://spaarke.com/support" />
+
+  <!-- Domains -->
+  <AppDomains>
+    <AppDomain>https://localhost:3000</AppDomain>
+    <AppDomain>https://login.microsoftonline.com</AppDomain>
+  </AppDomains>
+
+  <!-- Host Application -->
+  <Hosts>
+    <Host Name="Document" />
+  </Hosts>
+
+  <!-- Requirements -->
+  <Requirements>
+    <Sets>
+      <Set Name="WordApi" MinVersion="1.3" />
+    </Sets>
+  </Requirements>
+
+  <!-- Default Settings -->
+  <DefaultSettings>
+    <SourceLocation DefaultValue="https://localhost:3000/word/taskpane.html" />
+  </DefaultSettings>
+
+  <!-- Permissions -->
+  <Permissions>ReadWriteDocument</Permissions>
+
+  <!-- Version Overrides for Ribbon Commands -->
+  <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="VersionOverridesV1_0">
+    <Hosts>
+      <Host xsi:type="Document">
+        <DesktopFormFactor>
+          <!-- Function File for commands -->
+          <FunctionFile resid="Commands.Url" />
+
+          <!-- Ribbon Extension Point -->
+          <ExtensionPoint xsi:type="PrimaryCommandSurface">
+            <OfficeTab id="TabHome">
+              <Group id="SpaarkeGroup">
+                <Label resid="SpaarkeGroup.Label" />
+                <Icon>
+                  <bt:Image size="16" resid="Icon.16x16" />
+                  <bt:Image size="32" resid="Icon.32x32" />
+                  <bt:Image size="80" resid="Icon.80x80" />
+                </Icon>
+
+                <!-- Save to Spaarke Button -->
+                <Control xsi:type="Button" id="SaveButton">
+                  <Label resid="SaveButton.Label" />
+                  <Supertip>
+                    <Title resid="SaveButton.Title" />
+                    <Description resid="SaveButton.Description" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Save.16x16" />
+                    <bt:Image size="32" resid="Save.32x32" />
+                    <bt:Image size="80" resid="Save.80x80" />
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <TaskpaneId>SpaarkeTaskpane</TaskpaneId>
+                    <SourceLocation resid="Taskpane.Url" />
+                  </Action>
+                </Control>
+
+                <!-- Save Version Button -->
+                <Control xsi:type="Button" id="SaveVersionButton">
+                  <Label resid="SaveVersionButton.Label" />
+                  <Supertip>
+                    <Title resid="SaveVersionButton.Title" />
+                    <Description resid="SaveVersionButton.Description" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="SaveVersion.16x16" />
+                    <bt:Image size="32" resid="SaveVersion.32x32" />
+                    <bt:Image size="80" resid="SaveVersion.80x80" />
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <TaskpaneId>SpaarkeTaskpane</TaskpaneId>
+                    <SourceLocation resid="Taskpane.Url" />
+                  </Action>
+                </Control>
+
+                <!-- Share from Spaarke Button -->
+                <Control xsi:type="Button" id="ShareButton">
+                  <Label resid="ShareButton.Label" />
+                  <Supertip>
+                    <Title resid="ShareButton.Title" />
+                    <Description resid="ShareButton.Description" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Share.16x16" />
+                    <bt:Image size="32" resid="Share.32x32" />
+                    <bt:Image size="80" resid="Share.80x80" />
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <TaskpaneId>SpaarkeTaskpane</TaskpaneId>
+                    <SourceLocation resid="Taskpane.Url" />
+                  </Action>
+                </Control>
+
+                <!-- Grant Access Button -->
+                <Control xsi:type="Button" id="GrantAccessButton">
+                  <Label resid="GrantAccessButton.Label" />
+                  <Supertip>
+                    <Title resid="GrantAccessButton.Title" />
+                    <Description resid="GrantAccessButton.Description" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Grant.16x16" />
+                    <bt:Image size="32" resid="Grant.32x32" />
+                    <bt:Image size="80" resid="Grant.80x80" />
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <TaskpaneId>SpaarkeTaskpane</TaskpaneId>
+                    <SourceLocation resid="Taskpane.Url" />
+                  </Action>
+                </Control>
+              </Group>
+            </OfficeTab>
+          </ExtensionPoint>
+        </DesktopFormFactor>
+      </Host>
+    </Hosts>
+
+    <!-- Resources -->
+    <Resources>
+      <bt:Images>
+        <bt:Image id="Icon.16x16" DefaultValue="https://localhost:3000/assets/icon-16.png" />
+        <bt:Image id="Icon.32x32" DefaultValue="https://localhost:3000/assets/icon-32.png" />
+        <bt:Image id="Icon.80x80" DefaultValue="https://localhost:3000/assets/icon-80.png" />
+        <bt:Image id="Save.16x16" DefaultValue="https://localhost:3000/assets/save-16.png" />
+        <bt:Image id="Save.32x32" DefaultValue="https://localhost:3000/assets/save-32.png" />
+        <bt:Image id="Save.80x80" DefaultValue="https://localhost:3000/assets/save-80.png" />
+        <bt:Image id="SaveVersion.16x16" DefaultValue="https://localhost:3000/assets/save-version-16.png" />
+        <bt:Image id="SaveVersion.32x32" DefaultValue="https://localhost:3000/assets/save-version-32.png" />
+        <bt:Image id="SaveVersion.80x80" DefaultValue="https://localhost:3000/assets/save-version-80.png" />
+        <bt:Image id="Share.16x16" DefaultValue="https://localhost:3000/assets/share-16.png" />
+        <bt:Image id="Share.32x32" DefaultValue="https://localhost:3000/assets/share-32.png" />
+        <bt:Image id="Share.80x80" DefaultValue="https://localhost:3000/assets/share-80.png" />
+        <bt:Image id="Grant.16x16" DefaultValue="https://localhost:3000/assets/grant-16.png" />
+        <bt:Image id="Grant.32x32" DefaultValue="https://localhost:3000/assets/grant-32.png" />
+        <bt:Image id="Grant.80x80" DefaultValue="https://localhost:3000/assets/grant-80.png" />
+      </bt:Images>
+
+      <bt:Urls>
+        <bt:Url id="Taskpane.Url" DefaultValue="https://localhost:3000/word/taskpane.html" />
+        <bt:Url id="Commands.Url" DefaultValue="https://localhost:3000/word/commands.html" />
+      </bt:Urls>
+
+      <bt:ShortStrings>
+        <bt:String id="SpaarkeGroup.Label" DefaultValue="Spaarke" />
+        <bt:String id="SaveButton.Label" DefaultValue="Save to Spaarke" />
+        <bt:String id="SaveButton.Title" DefaultValue="Save to Spaarke" />
+        <bt:String id="SaveVersionButton.Label" DefaultValue="Save Version" />
+        <bt:String id="SaveVersionButton.Title" DefaultValue="Save Version" />
+        <bt:String id="ShareButton.Label" DefaultValue="Share" />
+        <bt:String id="ShareButton.Title" DefaultValue="Share from Spaarke" />
+        <bt:String id="GrantAccessButton.Label" DefaultValue="Grant Access" />
+        <bt:String id="GrantAccessButton.Title" DefaultValue="Grant Document Access" />
+      </bt:ShortStrings>
+
+      <bt:LongStrings>
+        <bt:String id="SaveButton.Description" DefaultValue="Save this document to Spaarke Document Management System" />
+        <bt:String id="SaveVersionButton.Description" DefaultValue="Save a new version of this document to Spaarke" />
+        <bt:String id="ShareButton.Description" DefaultValue="Insert a sharing link to a document from Spaarke" />
+        <bt:String id="GrantAccessButton.Description" DefaultValue="Grant access to this document for specific users" />
+      </bt:LongStrings>
+    </Resources>
+  </VersionOverrides>
+
+  <!-- Version Overrides 1.1 for enhanced features -->
+  <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="VersionOverridesV1_1">
+    <Requirements>
+      <bt:Sets>
+        <bt:Set Name="WordApi" MinVersion="1.3" />
+      </bt:Sets>
+    </Requirements>
+
+    <Hosts>
+      <Host xsi:type="Document">
+        <DesktopFormFactor>
+          <FunctionFile resid="Commands.Url" />
+
+          <ExtensionPoint xsi:type="PrimaryCommandSurface">
+            <OfficeTab id="TabHome">
+              <Group id="SpaarkeGroupV11">
+                <Label resid="SpaarkeGroup.Label" />
+                <Icon>
+                  <bt:Image size="16" resid="Icon.16x16" />
+                  <bt:Image size="32" resid="Icon.32x32" />
+                  <bt:Image size="80" resid="Icon.80x80" />
+                </Icon>
+
+                <Control xsi:type="Button" id="SaveButtonV11">
+                  <Label resid="SaveButton.Label" />
+                  <Supertip>
+                    <Title resid="SaveButton.Title" />
+                    <Description resid="SaveButton.Description" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Save.16x16" />
+                    <bt:Image size="32" resid="Save.32x32" />
+                    <bt:Image size="80" resid="Save.80x80" />
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <TaskpaneId>SpaarkeTaskpane</TaskpaneId>
+                    <SourceLocation resid="Taskpane.Url" />
+                  </Action>
+                </Control>
+
+                <Control xsi:type="Button" id="SaveVersionButtonV11">
+                  <Label resid="SaveVersionButton.Label" />
+                  <Supertip>
+                    <Title resid="SaveVersionButton.Title" />
+                    <Description resid="SaveVersionButton.Description" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="SaveVersion.16x16" />
+                    <bt:Image size="32" resid="SaveVersion.32x32" />
+                    <bt:Image size="80" resid="SaveVersion.80x80" />
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <TaskpaneId>SpaarkeTaskpane</TaskpaneId>
+                    <SourceLocation resid="Taskpane.Url" />
+                  </Action>
+                </Control>
+
+                <Control xsi:type="Button" id="ShareButtonV11">
+                  <Label resid="ShareButton.Label" />
+                  <Supertip>
+                    <Title resid="ShareButton.Title" />
+                    <Description resid="ShareButton.Description" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Share.16x16" />
+                    <bt:Image size="32" resid="Share.32x32" />
+                    <bt:Image size="80" resid="Share.80x80" />
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <TaskpaneId>SpaarkeTaskpane</TaskpaneId>
+                    <SourceLocation resid="Taskpane.Url" />
+                  </Action>
+                </Control>
+
+                <Control xsi:type="Button" id="GrantAccessButtonV11">
+                  <Label resid="GrantAccessButton.Label" />
+                  <Supertip>
+                    <Title resid="GrantAccessButton.Title" />
+                    <Description resid="GrantAccessButton.Description" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Grant.16x16" />
+                    <bt:Image size="32" resid="Grant.32x32" />
+                    <bt:Image size="80" resid="Grant.80x80" />
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <TaskpaneId>SpaarkeTaskpane</TaskpaneId>
+                    <SourceLocation resid="Taskpane.Url" />
+                  </Action>
+                </Control>
+              </Group>
+            </OfficeTab>
+          </ExtensionPoint>
+        </DesktopFormFactor>
+      </Host>
+    </Hosts>
+
+    <Resources>
+      <bt:Images>
+        <bt:Image id="Icon.16x16" DefaultValue="https://localhost:3000/assets/icon-16.png" />
+        <bt:Image id="Icon.32x32" DefaultValue="https://localhost:3000/assets/icon-32.png" />
+        <bt:Image id="Icon.80x80" DefaultValue="https://localhost:3000/assets/icon-80.png" />
+        <bt:Image id="Save.16x16" DefaultValue="https://localhost:3000/assets/save-16.png" />
+        <bt:Image id="Save.32x32" DefaultValue="https://localhost:3000/assets/save-32.png" />
+        <bt:Image id="Save.80x80" DefaultValue="https://localhost:3000/assets/save-80.png" />
+        <bt:Image id="SaveVersion.16x16" DefaultValue="https://localhost:3000/assets/save-version-16.png" />
+        <bt:Image id="SaveVersion.32x32" DefaultValue="https://localhost:3000/assets/save-version-32.png" />
+        <bt:Image id="SaveVersion.80x80" DefaultValue="https://localhost:3000/assets/save-version-80.png" />
+        <bt:Image id="Share.16x16" DefaultValue="https://localhost:3000/assets/share-16.png" />
+        <bt:Image id="Share.32x32" DefaultValue="https://localhost:3000/assets/share-32.png" />
+        <bt:Image id="Share.80x80" DefaultValue="https://localhost:3000/assets/share-80.png" />
+        <bt:Image id="Grant.16x16" DefaultValue="https://localhost:3000/assets/grant-16.png" />
+        <bt:Image id="Grant.32x32" DefaultValue="https://localhost:3000/assets/grant-32.png" />
+        <bt:Image id="Grant.80x80" DefaultValue="https://localhost:3000/assets/grant-80.png" />
+      </bt:Images>
+
+      <bt:Urls>
+        <bt:Url id="Taskpane.Url" DefaultValue="https://localhost:3000/word/taskpane.html" />
+        <bt:Url id="Commands.Url" DefaultValue="https://localhost:3000/word/commands.html" />
+      </bt:Urls>
+
+      <bt:ShortStrings>
+        <bt:String id="SpaarkeGroup.Label" DefaultValue="Spaarke" />
+        <bt:String id="SaveButton.Label" DefaultValue="Save to Spaarke" />
+        <bt:String id="SaveButton.Title" DefaultValue="Save to Spaarke" />
+        <bt:String id="SaveVersionButton.Label" DefaultValue="Save Version" />
+        <bt:String id="SaveVersionButton.Title" DefaultValue="Save Version" />
+        <bt:String id="ShareButton.Label" DefaultValue="Share" />
+        <bt:String id="ShareButton.Title" DefaultValue="Share from Spaarke" />
+        <bt:String id="GrantAccessButton.Label" DefaultValue="Grant Access" />
+        <bt:String id="GrantAccessButton.Title" DefaultValue="Grant Document Access" />
+      </bt:ShortStrings>
+
+      <bt:LongStrings>
+        <bt:String id="SaveButton.Description" DefaultValue="Save this document to Spaarke Document Management System" />
+        <bt:String id="SaveVersionButton.Description" DefaultValue="Save a new version of this document to Spaarke" />
+        <bt:String id="ShareButton.Description" DefaultValue="Insert a sharing link to a document from Spaarke" />
+        <bt:String id="GrantAccessButton.Description" DefaultValue="Grant access to this document for specific users" />
+      </bt:LongStrings>
+    </Resources>
+
+    <!-- Web Application Info for SSO -->
+    <WebApplicationInfo>
+      <Id>c1258e2d-1688-49d2-ac99-a7485ebd9995</Id>
+      <Resource>api://c1258e2d-1688-49d2-ac99-a7485ebd9995</Resource>
+    </WebApplicationInfo>
+  </VersionOverrides>
+</OfficeApp>

@@ -3,7 +3,7 @@
   <metadata>
     <title>Create add-in unit tests</title>
     <phase>4: Office Add-in Development</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>6</estimated-hours>
     <dependencies>040, 041, 042, 043, 044, 045, 046, 047, 048, 049, 050, 051, 052, 053, 054, 055</dependencies>
     <blocks>057, 058</blocks>
@@ -91,6 +91,13 @@
   <notes>
     Mock Office.js to avoid needing the actual Office environment for unit tests.
     Integration testing with real Office clients is separate (Phase 6).
+
+    Completion notes (2026-01-20):
+    - Created comprehensive Office.js mock utilities at shared/__mocks__/office-js.ts
+    - Test coverage includes: NaaAuthService, DialogAuthService, OutlookAdapter, WordAdapter,
+      ApiClient, EntityPicker, SaveView, ShareView, useEntitySearch, useAnnounce hooks
+    - Existing tests already found: NaaAuthService.test.ts, TaskPaneShell.test.tsx
+    - Jest config already set up with ts-jest and proper module mapping
   </notes>
 
   <execution>

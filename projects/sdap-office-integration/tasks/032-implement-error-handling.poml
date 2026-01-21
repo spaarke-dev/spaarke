@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement error handling (ProblemDetails)</title>
     <phase>3: Backend API Development</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>020</dependencies>
     <blocks>034</blocks>
@@ -91,6 +91,29 @@
     The error codes from the spec should be implemented exactly as specified.
     See spec.md Error Codes section for the complete list with descriptions.
   </notes>
+
+  <completion-notes>
+    <completed-at>2026-01-20</completed-at>
+    <files-created>
+      <file>src/server/api/Sprk.Bff.Api/Api/Office/Errors/OfficeErrorCodes.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Office/Errors/OfficeProblemDetailsExtensions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Office/Errors/OfficeProblemException.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Office/Errors/CorrelationIdHelper.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Office/Filters/OfficeExceptionFilter.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Api/Office/OfficeProblemDetailsTests.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Api/Office/OfficeProblemExceptionTests.cs</file>
+    </files-created>
+    <summary>
+      Implemented complete error handling infrastructure for Office endpoints per ADR-019:
+      - OfficeErrorCodes: Constants for OFFICE_001-015 with status codes, titles, and type URIs
+      - OfficeProblemDetailsExtensions: Factory methods returning IResult for each error type
+      - OfficeProblemException: Throwable exception with factory methods for service code
+      - CorrelationIdHelper: Extracts/generates correlation IDs from request headers
+      - OfficeExceptionFilter: Endpoint filter that catches exceptions and maps to ProblemDetails
+      - Unit tests covering all 15 error codes and factory methods
+      Note: Build depends on task 033 (authorization filters) completion due to concurrent changes.
+    </summary>
+  </completion-notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

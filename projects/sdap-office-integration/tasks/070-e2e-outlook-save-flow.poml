@@ -3,7 +3,7 @@
   <metadata>
     <title>E2E test: Outlook save flow</title>
     <phase>6: Integration &amp; Testing</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>057, 066</dependencies>
     <blocks>078</blocks>

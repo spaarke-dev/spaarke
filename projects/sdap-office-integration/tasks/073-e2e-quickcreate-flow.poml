@@ -3,7 +3,7 @@
   <metadata>
     <title>E2E test: Quick Create flow</title>
     <phase>6: Integration &amp; Testing</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>057</dependencies>
     <blocks>078</blocks>

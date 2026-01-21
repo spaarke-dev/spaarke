@@ -3,7 +3,7 @@
   <metadata>
     <title>Create host adapter interface</title>
     <phase>4: Office Add-in Development</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>006</dependencies>
     <blocks>043, 044</blocks>

@@ -3,7 +3,7 @@
   <metadata>
     <title>Deploy workers to Azure</title>
     <phase>5: Background Workers</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>065</dependencies>
     <blocks>070, 071, 074</blocks>

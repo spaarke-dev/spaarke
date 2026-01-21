@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement GET /office/jobs/{id}/stream SSE endpoint</title>
     <phase>3: Backend API Development</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>6</estimated-hours>
     <dependencies>022</dependencies>
     <blocks>034, 052</blocks>
@@ -104,4 +104,29 @@
       Follow the task-execute skill for mandatory pre-execution checklist.
     </protocol>
   </execution>
+
+  <completion>
+    <completed-at>2026-01-20</completed-at>
+    <files-modified>
+      <file>src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Office/IOfficeService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Office/SseHelper.cs (new)</file>
+    </files-modified>
+    <notes>
+      Implemented SSE endpoint at GET /office/jobs/{id}/stream with:
+      - SseHelper class for SSE message formatting (connected, progress, stage-update, heartbeat, job-complete, job-failed, error events)
+      - Channel-based producer pattern to handle async enumerable with proper error handling
+      - 15-second heartbeat interval per spec.md
+      - Last-Event-ID header support for reconnection with sequence-based event IDs
+      - Automatic connection close on job completion/failure
+      - Graceful client disconnect handling
+      - Defense-in-depth job ownership verification
+      - ProblemDetails error responses per ADR-019
+
+      Uses polling with 500ms interval for now. TODO comment added for future Redis pub/sub or SignalR backplane integration.
+
+      Tests (steps 11-12) deferred to task 034 (API unit tests) per task structure.
+    </notes>
+  </completion>
 </task>

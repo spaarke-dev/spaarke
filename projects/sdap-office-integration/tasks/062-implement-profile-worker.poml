@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement profile summary worker</title>
     <phase>5: Background Workers</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>060</dependencies>
     <blocks>065</blocks>

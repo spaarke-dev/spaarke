@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement rate limiting</title>
     <phase>3: Backend API Development</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>020</dependencies>
     <blocks>034</blocks>
@@ -97,4 +97,30 @@
       Follow the task-execute skill for mandatory pre-execution checklist.
     </protocol>
   </execution>
+
+  <completion>
+    <completed-date>2026-01-20</completed-date>
+    <summary>
+      Implemented endpoint filter-based rate limiting for Office endpoints per ADR-008
+      (use endpoint filters, not global middleware). Created sliding window algorithm
+      using Redis/IDistributedCache for distributed rate limiting state.
+    </summary>
+    <files-created>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/OfficeRateLimitOptions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/OfficeRateLimitFilter.cs</file>
+    </files-created>
+    <files-modified>
+      <file>src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Errors/ProblemDetailsHelper.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/OfficeModule.cs</file>
+    </files-modified>
+    <rate-limits-configured>
+      <limit endpoint="/office/save" requests="10" period="1 minute" />
+      <limit endpoint="/office/quickcreate/*" requests="5" period="1 minute" />
+      <limit endpoint="/office/search/*" requests="30" period="1 minute" />
+      <limit endpoint="/office/jobs/*" requests="60" period="1 minute" />
+      <limit endpoint="/office/share/*" requests="20" period="1 minute" />
+      <limit endpoint="/office/recent" requests="30" period="1 minute" />
+    </rate-limits-configured>
+  </completion>
 </task>

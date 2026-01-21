@@ -3,7 +3,7 @@
   <metadata>
     <title>Integration test: SSE job status</title>
     <phase>6: Integration &amp; Testing</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>066</dependencies>
     <blocks>078</blocks>

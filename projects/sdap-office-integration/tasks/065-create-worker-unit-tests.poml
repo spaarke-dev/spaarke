@@ -3,7 +3,7 @@
   <metadata>
     <title>Create worker unit tests</title>
     <phase>5: Background Workers</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>061, 062, 063, 064</dependencies>
     <blocks>066</blocks>

@@ -1,0 +1,223 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/teams-manifest/MicrosoftTeams.schema.json",
+  "manifestVersion": "devPreview",
+  "id": "c1258e2d-1688-49d2-ac99-a7485ebd9995",
+  "version": "1.0.0",
+  "name": {
+    "short": "Spaarke",
+    "full": "Spaarke Document Management for Outlook"
+  },
+  "description": {
+    "short": "Save, share, and manage emails in Spaarke DMS",
+    "full": "Spaarke Office Add-in for Outlook enables users to save emails and attachments to Spaarke Document Management System, share documents, and manage access permissions directly from their inbox."
+  },
+  "developer": {
+    "name": "Spaarke",
+    "websiteUrl": "https://spaarke.com",
+    "privacyUrl": "https://spaarke.com/privacy",
+    "termsOfUseUrl": "https://spaarke.com/terms"
+  },
+  "icons": {
+    "outline": "assets/icon-outline.png",
+    "color": "assets/icon-color.png"
+  },
+  "accentColor": "#0078D4",
+  "localizationInfo": {
+    "defaultLanguageTag": "en-US"
+  },
+  "authorization": {
+    "permissions": {
+      "resourceSpecific": []
+    }
+  },
+  "extensions": [
+    {
+      "requirements": {
+        "scopes": ["mail"],
+        "capabilities": [
+          {
+            "name": "Mailbox",
+            "minVersion": "1.8"
+          }
+        ]
+      },
+      "runtimes": [
+        {
+          "id": "TaskpaneRuntime",
+          "type": "general",
+          "code": {
+            "page": "https://spe-office-addins-dev.azurestaticapps.net/outlook/taskpane.html"
+          },
+          "lifetime": "short",
+          "actions": [
+            {
+              "id": "openTaskPane",
+              "type": "openPage"
+            }
+          ]
+        },
+        {
+          "id": "CommandRuntime",
+          "type": "general",
+          "code": {
+            "page": "https://spe-office-addins-dev.azurestaticapps.net/outlook/commands.html",
+            "script": "https://spe-office-addins-dev.azurestaticapps.net/outlook/commands.bundle.js"
+          },
+          "lifetime": "short",
+          "actions": [
+            {
+              "id": "saveToSpaarke",
+              "type": "executeFunction"
+            },
+            {
+              "id": "shareFromSpaarke",
+              "type": "executeFunction"
+            },
+            {
+              "id": "grantAccess",
+              "type": "executeFunction"
+            }
+          ]
+        }
+      ],
+      "ribbons": [
+        {
+          "contexts": ["mailRead"],
+          "tabs": [
+            {
+              "builtInTabId": "TabDefault",
+              "groups": [
+                {
+                  "id": "SpaarkeReadGroup",
+                  "label": "Spaarke",
+                  "icons": [
+                    {
+                      "size": 16,
+                      "url": "https://spe-office-addins-dev.azurestaticapps.net/assets/icon-16.png"
+                    },
+                    {
+                      "size": 32,
+                      "url": "https://spe-office-addins-dev.azurestaticapps.net/assets/icon-32.png"
+                    },
+                    {
+                      "size": 80,
+                      "url": "https://spe-office-addins-dev.azurestaticapps.net/assets/icon-80.png"
+                    }
+                  ],
+                  "controls": [
+                    {
+                      "id": "SaveToSpaarkeButton",
+                      "type": "button",
+                      "label": "Save to Spaarke",
+                      "icons": [
+                        {
+                          "size": 16,
+                          "url": "https://spe-office-addins-dev.azurestaticapps.net/assets/save-16.png"
+                        },
+                        {
+                          "size": 32,
+                          "url": "https://spe-office-addins-dev.azurestaticapps.net/assets/save-32.png"
+                        },
+                        {
+                          "size": 80,
+                          "url": "https://spe-office-addins-dev.azurestaticapps.net/assets/save-80.png"
+                        }
+                      ],
+                      "supertip": {
+                        "title": "Save to Spaarke",
+                        "description": "Save this email and its attachments to Spaarke Document Management System"
+                      },
+                      "actionId": "openTaskPane"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "contexts": ["mailCompose"],
+          "tabs": [
+            {
+              "builtInTabId": "TabDefault",
+              "groups": [
+                {
+                  "id": "SpaarkeComposeGroup",
+                  "label": "Spaarke",
+                  "icons": [
+                    {
+                      "size": 16,
+                      "url": "https://spe-office-addins-dev.azurestaticapps.net/assets/icon-16.png"
+                    },
+                    {
+                      "size": 32,
+                      "url": "https://spe-office-addins-dev.azurestaticapps.net/assets/icon-32.png"
+                    },
+                    {
+                      "size": 80,
+                      "url": "https://spe-office-addins-dev.azurestaticapps.net/assets/icon-80.png"
+                    }
+                  ],
+                  "controls": [
+                    {
+                      "id": "ShareFromSpaarkeButton",
+                      "type": "button",
+                      "label": "Share from Spaarke",
+                      "icons": [
+                        {
+                          "size": 16,
+                          "url": "https://spe-office-addins-dev.azurestaticapps.net/assets/share-16.png"
+                        },
+                        {
+                          "size": 32,
+                          "url": "https://spe-office-addins-dev.azurestaticapps.net/assets/share-32.png"
+                        },
+                        {
+                          "size": 80,
+                          "url": "https://spe-office-addins-dev.azurestaticapps.net/assets/share-80.png"
+                        }
+                      ],
+                      "supertip": {
+                        "title": "Share from Spaarke",
+                        "description": "Insert a sharing link to a document from Spaarke"
+                      },
+                      "actionId": "openTaskPane"
+                    },
+                    {
+                      "id": "GrantAccessButton",
+                      "type": "button",
+                      "label": "Grant Access",
+                      "icons": [
+                        {
+                          "size": 16,
+                          "url": "https://spe-office-addins-dev.azurestaticapps.net/assets/grant-16.png"
+                        },
+                        {
+                          "size": 32,
+                          "url": "https://spe-office-addins-dev.azurestaticapps.net/assets/grant-32.png"
+                        },
+                        {
+                          "size": 80,
+                          "url": "https://spe-office-addins-dev.azurestaticapps.net/assets/grant-80.png"
+                        }
+                      ],
+                      "supertip": {
+                        "title": "Grant Document Access",
+                        "description": "Grant recipients access to a Spaarke document before sending"
+                      },
+                      "actionId": "openTaskPane"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "webApplicationInfo": {
+    "id": "c1258e2d-1688-49d2-ac99-a7485ebd9995",
+    "resource": "api://c1258e2d-1688-49d2-ac99-a7485ebd9995"
+  }
+}

@@ -12,6 +12,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api;
 using Sprk.Bff.Api.Api.Admin;
 using Sprk.Bff.Api.Api.Ai;
+using Sprk.Bff.Api.Api.Office;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Authorization;
 using Sprk.Bff.Api.Infrastructure.DI;
@@ -221,6 +222,9 @@ builder.Services.AddDocumentsModule();
 
 // Workers module (Service Bus + BackgroundService)
 builder.Services.AddWorkersModule(builder.Configuration);
+
+// Office Add-in module (Office integration endpoints)
+builder.Services.AddOfficeModule();
 
 // ============================================================================
 // DISTRIBUTED CACHE - Redis for production, in-memory for local dev (ADR-004, ADR-009)
@@ -577,6 +581,10 @@ builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.
 // RAG indexing job handler - for background document indexing to Azure AI Search
 // Uses FileIndexingService with app-only authentication (idempotency: rag-index-{driveId}-{itemId})
 builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.RagIndexingJobHandler>();
+
+// Profile summary job handler - for Office add-in AI document profiling (Task 062)
+// Uses AppOnlyAnalysisService with Document Profile playbook, queues indexing on success
+builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.ProfileSummaryJobHandler>();
 
 // Configure Service Bus job processing
 var serviceBusConnectionString = builder.Configuration.GetConnectionString("ServiceBus");
@@ -1257,6 +1265,9 @@ app.MapDocumentOperationsEndpoints();
 
 // Email-to-document conversion endpoints (Email-to-Document Automation project)
 app.MapEmailEndpoints();
+
+// Office Add-in endpoints (Outlook and Word integration)
+app.MapOfficeEndpoints();
 
 // Analysis endpoints (if enabled)
 if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&

@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement POST /office/save endpoint</title>
     <phase>3: Backend API Development</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>6</estimated-hours>
     <dependencies>020</dependencies>
     <blocks>030, 034</blocks>

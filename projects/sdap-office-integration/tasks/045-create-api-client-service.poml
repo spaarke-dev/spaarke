@@ -3,7 +3,7 @@
   <metadata>
     <title>Create shared API client service</title>
     <phase>4: Office Add-in Development</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>040, 035</dependencies>
     <blocks>049, 050, 051, 052</blocks>

@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement GET /office/jobs/{id} endpoint</title>
     <phase>3: Backend API Development</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>020</dependencies>
     <blocks>023, 034</blocks>

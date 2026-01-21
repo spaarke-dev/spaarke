@@ -3,7 +3,7 @@
   <metadata>
     <title>Create user documentation</title>
     <phase>7: Deployment &amp; Go-Live</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>081</dependencies>
     <blocks>090</blocks>
