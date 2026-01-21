@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<OfficeApp
+  xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
+  xmlns:mailappor="http://schemas.microsoft.com/office/mailappversionoverrides/1.0"
+  xsi:type="MailApp">
+
+  <!-- Basic Identity -->
+  <Id>5e4d66d0-2603-44ea-acbc-400d3b881c90</Id>
+  <Version>1.0.0</Version>
+  <ProviderName>Spaarke</ProviderName>
+  <DefaultLocale>en-US</DefaultLocale>
+  <DisplayName DefaultValue="Spaarke Outlook" />
+  <Description DefaultValue="Save and share emails with Spaarke DMS" />
+  <IconUrl DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-outlook.png" />
+  <HighResolutionIconUrl DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-outlook.png" />
+  <SupportUrl DefaultValue="https://spaarke.com/support" />
+
+  <!-- Domains -->
+  <AppDomains>
+    <AppDomain>https://icy-desert-0bfdbb61e.6.azurestaticapps.net</AppDomain>
+    <AppDomain>https://login.microsoftonline.com</AppDomain>
+  </AppDomains>
+
+  <!-- Host Application -->
+  <Hosts>
+    <Host Name="Mailbox" />
+  </Hosts>
+
+  <!-- Requirements -->
+  <Requirements>
+    <Sets>
+      <Set Name="Mailbox" MinVersion="1.8" />
+    </Sets>
+  </Requirements>
+
+  <!-- Form Settings -->
+  <FormSettings>
+    <Form xsi:type="ItemRead">
+      <DesktopSettings>
+        <SourceLocation DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/taskpane.html" />
+        <RequestedHeight>250</RequestedHeight>
+      </DesktopSettings>
+    </Form>
+  </FormSettings>
+
+  <!-- Permissions -->
+  <Permissions>ReadWriteMailbox</Permissions>
+
+  <!-- Rule for read mode -->
+  <Rule xsi:type="RuleCollection" Mode="Or">
+    <Rule xsi:type="ItemIs" ItemType="Message" FormType="Read" />
+  </Rule>
+
+  <!-- Version Overrides for Ribbon Commands -->
+  <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides" xsi:type="VersionOverridesV1_0">
+    <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides/1.1" xsi:type="VersionOverridesV1_1">
+
+      <Requirements>
+        <bt:Sets>
+          <bt:Set Name="Mailbox" MinVersion="1.8" />
+        </bt:Sets>
+      </Requirements>
+
+      <Hosts>
+        <Host xsi:type="MailHost">
+
+          <!-- Desktop Form Factor -->
+          <DesktopFormFactor>
+
+            <!-- Function File for Commands -->
+            <FunctionFile resid="Commands.Url" />
+
+            <!-- Message Read Extension Point -->
+            <ExtensionPoint xsi:type="MessageReadCommandSurface">
+              <OfficeTab id="TabDefault">
+                <Group id="SpaarkeReadGroup">
+                  <Label resid="GroupLabel" />
+                  <Icon>
+                    <bt:Image size="16" resid="Icon16" />
+                    <bt:Image size="32" resid="Icon32" />
+                    <bt:Image size="80" resid="Icon80" />
+                  </Icon>
+
+                  <Control xsi:type="Button" id="SaveButton">
+                    <Label resid="SaveLabel" />
+                    <Supertip>
+                      <Title resid="SaveTitle" />
+                      <Description resid="SaveDescription" />
+                    </Supertip>
+                    <Icon>
+                      <bt:Image size="16" resid="Icon16" />
+                      <bt:Image size="32" resid="Icon32" />
+                      <bt:Image size="80" resid="Icon80" />
+                    </Icon>
+                    <Action xsi:type="ShowTaskpane">
+                      <SourceLocation resid="Taskpane.Url" />
+                    </Action>
+                  </Control>
+
+                </Group>
+              </OfficeTab>
+            </ExtensionPoint>
+
+            <!-- Message Compose Extension Point -->
+            <ExtensionPoint xsi:type="MessageComposeCommandSurface">
+              <OfficeTab id="TabDefault">
+                <Group id="SpaarkeComposeGroup">
+                  <Label resid="GroupLabel" />
+                  <Icon>
+                    <bt:Image size="16" resid="Icon16" />
+                    <bt:Image size="32" resid="Icon32" />
+                    <bt:Image size="80" resid="Icon80" />
+                  </Icon>
+
+                  <Control xsi:type="Button" id="ShareButton">
+                    <Label resid="ShareLabel" />
+                    <Supertip>
+                      <Title resid="ShareTitle" />
+                      <Description resid="ShareDescription" />
+                    </Supertip>
+                    <Icon>
+                      <bt:Image size="16" resid="Icon16" />
+                      <bt:Image size="32" resid="Icon32" />
+                      <bt:Image size="80" resid="Icon80" />
+                    </Icon>
+                    <Action xsi:type="ShowTaskpane">
+                      <SourceLocation resid="Taskpane.Url" />
+                    </Action>
+                  </Control>
+
+                </Group>
+              </OfficeTab>
+            </ExtensionPoint>
+
+          </DesktopFormFactor>
+        </Host>
+      </Hosts>
+
+      <!-- Resources -->
+      <Resources>
+        <bt:Images>
+          <bt:Image id="Icon16" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-outlook.png" />
+          <bt:Image id="Icon32" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-outlook.png" />
+          <bt:Image id="Icon80" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-outlook.png" />
+        </bt:Images>
+
+        <bt:Urls>
+          <bt:Url id="Commands.Url" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/commands.html" />
+          <bt:Url id="Taskpane.Url" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/taskpane.html" />
+        </bt:Urls>
+
+        <bt:ShortStrings>
+          <bt:String id="GroupLabel" DefaultValue="Spaarke" />
+          <bt:String id="SaveLabel" DefaultValue="Save to Spaarke" />
+          <bt:String id="SaveTitle" DefaultValue="Save to Spaarke" />
+          <bt:String id="ShareLabel" DefaultValue="Share" />
+          <bt:String id="ShareTitle" DefaultValue="Share from Spaarke" />
+        </bt:ShortStrings>
+
+        <bt:LongStrings>
+          <bt:String id="SaveDescription" DefaultValue="Save email to Spaarke DMS" />
+          <bt:String id="ShareDescription" DefaultValue="Share document from Spaarke" />
+        </bt:LongStrings>
+      </Resources>
+
+      <!-- Web Application Info for SSO -->
+      <WebApplicationInfo>
+        <Id>c1258e2d-1688-49d2-ac99-a7485ebd9995</Id>
+        <Resource>api://1e40baad-e065-4aea-a8d4-4b7ab273458c</Resource>
+      </WebApplicationInfo>
+
+    </VersionOverrides>
+  </VersionOverrides>
+</OfficeApp>
