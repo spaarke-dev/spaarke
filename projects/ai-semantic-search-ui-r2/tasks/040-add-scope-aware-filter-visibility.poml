@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="040" status="pending">
+  <title>Add scope-aware filter visibility</title>
+  <description>
+    Implement scope-aware filter visibility to hide irrelevant filters based on
+    the control's searchScope property (e.g., hide Matter Type when scope=matter).
+  </description>
+  <phase>6</phase>
+  <phase-name>Error Handling &amp; States</phase-name>
+  <tags>filters, scope</tags>
+  <dependencies>021</dependencies>
+  <parallel-group>none</parallel-group>
+  <parallel-safe>false</parallel-safe>
+
+  <constraints>
+    <constraint source="spec.md">Hide Matter Type when searchScope=matter</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>projects/ai-semantic-search-ui-r2/spec.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Pass searchScope prop to FilterPanel</step>
+    <step order="2">Define filter visibility rules based on scope</step>
+    <step order="3">Conditionally render Matter Type filter</step>
+    <step order="4">Hide Document Type if scope implies single type</step>
+    <step order="5">Adjust layout when filters hidden</step>
+    <step order="6">Test on Matter form (scope=matter)</step>
+    <step order="7">Test on global search page (scope=all)</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Matter Type hidden when scope=matter</criterion>
+    <criterion>All filters visible when scope=all</criterion>
+    <criterion>Layout adjusts cleanly</criterion>
+    <criterion>Hidden filters not included in API request</criterion>
+  </acceptance-criteria>
+</task>

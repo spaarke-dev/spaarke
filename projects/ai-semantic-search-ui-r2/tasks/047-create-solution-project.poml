@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="047" status="pending">
+  <title>Create solution project</title>
+  <description>
+    Configure the Dataverse solution project (SpaarkeSemanticSearch) to package
+    the PCF control for deployment.
+  </description>
+  <phase>8</phase>
+  <phase-name>Solution &amp; Deployment</phase-name>
+  <tags>solution, deployment</tags>
+  <dependencies>all implementation</dependencies>
+  <parallel-group>none</parallel-group>
+  <parallel-safe>false</parallel-safe>
+
+  <constraints>
+    <constraint source="deployment">Use unmanaged solution for dev</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Create src/solutions/SpaarkeSemanticSearch/ directory</step>
+    <step order="2">Initialize solution with pac solution init</step>
+    <step order="3">Add PCF control to solution with pac solution add-reference</step>
+    <step order="4">Configure solution.xml with appropriate settings</step>
+    <step order="5">Set publisher prefix (sprk)</step>
+    <step order="6">Verify solution structure</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Solution project created</criterion>
+    <criterion>PCF control referenced</criterion>
+    <criterion>Publisher prefix set correctly</criterion>
+    <criterion>Solution builds without errors</criterion>
+  </acceptance-criteria>
+</task>

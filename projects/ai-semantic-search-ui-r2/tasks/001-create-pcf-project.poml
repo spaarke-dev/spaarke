@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="001" status="pending">
+  <title>Create PCF project scaffold</title>
+  <description>
+    Scaffold the SemanticSearchControl PCF project using PAC CLI with proper directory structure.
+  </description>
+  <phase>1</phase>
+  <phase-name>Project Setup &amp; Foundation</phase-name>
+  <tags>pcf, setup, scaffolding</tags>
+  <dependencies>none</dependencies>
+  <parallel-group>none</parallel-group>
+  <parallel-safe>false</parallel-safe>
+
+  <constraints>
+    <constraint source="ADR-006">PCF over webresources - native PCF control required</constraint>
+    <constraint source="ADR-022">React 16 APIs; platform-library declarations</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>.claude/patterns/pcf/control-initialization.md</file>
+    <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+  </knowledge-files>
+
+  <reference-implementations>
+    <reference>src/client/pcf/DocumentRelationshipViewer/</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">Navigate to src/client/pcf/</step>
+    <step order="2">Run: pac pcf init --namespace Sprk --name SemanticSearchControl --template dataset</step>
+    <step order="3">Create directory structure per spec: components/, hooks/, services/, types/</step>
+    <step order="4">Initialize npm with package.json (copy patterns from DocumentRelationshipViewer)</step>
+    <step order="5">Verify build: npm install &amp;&amp; npm run build</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>SemanticSearchControl folder exists at src/client/pcf/SemanticSearchControl/</criterion>
+    <criterion>Control builds without errors</criterion>
+    <criterion>Directory structure matches spec</criterion>
+  </acceptance-criteria>
+</task>

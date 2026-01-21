@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="013" status="pending">
+  <title>Create SimilarityBadge component</title>
+  <description>
+    Create a badge component that displays the similarity/relevance score with color coding.
+    Green for high relevance (>=80%), yellow for medium (60-79%), gray for lower.
+  </description>
+  <phase>2</phase>
+  <phase-name>Core Components</phase-name>
+  <tags>pcf, react, component, badge</tags>
+  <dependencies>011</dependencies>
+  <parallel-group>phase2-components-c</parallel-group>
+  <parallel-safe>true</parallel-safe>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent design tokens for colors</constraint>
+    <constraint source="spec.md">Color thresholds: >=80% green, 60-79% yellow, &lt;60% gray</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Create components/SimilarityBadge.tsx</step>
+    <step order="2">Define ISimilarityBadgeProps (score: number)</step>
+    <step order="3">Use Fluent Badge component</step>
+    <step order="4">Calculate color based on score thresholds</step>
+    <step order="5">Map to Fluent token colors (success, warning, neutral)</step>
+    <step order="6">Display score as percentage (e.g., "87%")</step>
+    <step order="7">Add tooltip with "Relevance score"</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>SimilarityBadge renders score as percentage</criterion>
+    <criterion>High scores (>=80%) show green/success color</criterion>
+    <criterion>Medium scores (60-79%) show yellow/warning color</criterion>
+    <criterion>Low scores (&lt;60%) show gray/neutral color</criterion>
+  </acceptance-criteria>
+</task>

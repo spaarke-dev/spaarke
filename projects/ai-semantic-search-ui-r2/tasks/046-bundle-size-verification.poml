@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="046" status="pending">
+  <title>Bundle size verification</title>
+  <description>
+    Verify the control bundle size is under 1MB (excluding platform libraries).
+    Optimize if necessary.
+  </description>
+  <phase>7</phase>
+  <phase-name>Testing &amp; Polish</phase-name>
+  <tags>performance, bundle-size</tags>
+  <dependencies>all implementation</dependencies>
+  <parallel-group>none</parallel-group>
+  <parallel-safe>false</parallel-safe>
+
+  <constraints>
+    <constraint source="spec.md">Bundle size &lt; 1MB (5MB absolute max)</constraint>
+    <constraint source="ADR-022">Platform libraries not bundled</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+    <file>projects/ai-semantic-search-ui-r2/spec.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Run production build</step>
+    <step order="2">Check bundle.js file size</step>
+    <step order="3">Verify React/Fluent not included in bundle</step>
+    <step order="4">Analyze bundle with webpack-bundle-analyzer if needed</step>
+    <step order="5">Identify any large dependencies</step>
+    <step order="6">Optimize imports if size exceeds limit</step>
+    <step order="7">Document final bundle size</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Bundle size &lt; 1MB</criterion>
+    <criterion>React and Fluent not in bundle</criterion>
+    <criterion>No unnecessary dependencies</criterion>
+    <criterion>Size documented in README</criterion>
+  </acceptance-criteria>
+</task>

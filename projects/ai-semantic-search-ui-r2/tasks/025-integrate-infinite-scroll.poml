@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="025" status="pending">
+  <title>Integrate infinite scroll with results</title>
+  <description>
+    Connect the useInfiniteScroll hook with ResultsList component to enable
+    automatic loading of more results as user scrolls.
+  </description>
+  <phase>4</phase>
+  <phase-name>Infinite Scroll &amp; Performance</phase-name>
+  <tags>integration, infinite-scroll</tags>
+  <dependencies>024, 020</dependencies>
+  <parallel-group>none</parallel-group>
+  <parallel-safe>false</parallel-safe>
+
+  <constraints>
+    <constraint source="spec.md">Stop loading when results.length >= totalCount</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>projects/ai-semantic-search-ui-r2/spec.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Import useInfiniteScroll in ResultsList</step>
+    <step order="2">Call hook with loadMore from useSemanticSearch</step>
+    <step order="3">Attach sentinelRef to sentinel div</step>
+    <step order="4">Pass isLoading and hasMore to hook</step>
+    <step order="5">Verify scroll triggers load-more</step>
+    <step order="6">Test with slow network to verify loading guard</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Scrolling near bottom triggers load-more</criterion>
+    <criterion>New results append to list</criterion>
+    <criterion>Loading stops at end of results</criterion>
+    <criterion>No duplicate requests during loading</criterion>
+  </acceptance-criteria>
+</task>

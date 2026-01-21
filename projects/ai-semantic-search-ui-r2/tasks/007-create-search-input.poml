@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="007" status="pending">
+  <title>Create SearchInput component</title>
+  <description>
+    Create the search input component with text input and search button using Fluent v9 components.
+    Supports placeholder text configuration and triggers search on button click.
+  </description>
+  <phase>2</phase>
+  <phase-name>Core Components</phase-name>
+  <tags>pcf, react, component, search</tags>
+  <dependencies>006</dependencies>
+  <parallel-group>phase2-components-a</parallel-group>
+  <parallel-safe>true</parallel-safe>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent v9 Input and Button components</constraint>
+    <constraint source="spec.md">Filter changes require explicit Search click</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Create components/SearchInput.tsx</step>
+    <step order="2">Define ISearchInputProps interface (onSearch, placeholder, disabled)</step>
+    <step order="3">Use Fluent Input component with search icon</step>
+    <step order="4">Add Search button with primary appearance</step>
+    <step order="5">Handle Enter key to trigger search</step>
+    <step order="6">Implement controlled input with local state</step>
+    <step order="7">Call onSearch callback with query text</step>
+    <step order="8">Add loading state for button (spinner while searching)</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>SearchInput renders with input and button</criterion>
+    <criterion>Placeholder text is configurable</criterion>
+    <criterion>Enter key triggers search</criterion>
+    <criterion>Button click triggers search</criterion>
+    <criterion>Loading state shows spinner on button</criterion>
+  </acceptance-criteria>
+</task>

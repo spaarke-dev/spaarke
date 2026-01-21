@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="033" status="pending">
+  <title>Add action menu to ResultCard</title>
+  <description>
+    Add a menu/dropdown to the ResultCard that provides multiple action options:
+    Open (modal - primary), Open in New Tab, Open File.
+  </description>
+  <phase>5</phase>
+  <phase-name>Navigation &amp; Actions</phase-name>
+  <tags>ui, actions</tags>
+  <dependencies>030, 031, 032</dependencies>
+  <parallel-group>none</parallel-group>
+  <parallel-safe>false</parallel-safe>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent Menu component</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    <file>projects/ai-semantic-search-ui-r2/spec.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Import Menu, MenuItem, MenuTrigger from Fluent</step>
+    <step order="2">Create "Open" split button as primary action</step>
+    <step order="3">Primary click calls handleOpenRecordModal</step>
+    <step order="4">Add menu items: "Open in New Tab", "Open File"</step>
+    <step order="5">Add appropriate icons to each menu item</step>
+    <step order="6">Style menu with design tokens</step>
+    <step order="7">Test all menu actions</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Action menu displays on ResultCard</criterion>
+    <criterion>Primary action opens modal (most common use case)</criterion>
+    <criterion>Menu provides alternative actions</criterion>
+    <criterion>Icons and labels clear</criterion>
+  </acceptance-criteria>
+</task>

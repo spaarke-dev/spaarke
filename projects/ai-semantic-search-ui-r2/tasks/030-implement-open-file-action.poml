@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="030" status="pending">
+  <title>Implement Open File action</title>
+  <description>
+    Implement the Open File action that opens the SPE document file URL in a new browser tab.
+    SPE file URLs are pre-authenticated and can be opened directly.
+  </description>
+  <phase>5</phase>
+  <phase-name>Navigation &amp; Actions</phase-name>
+  <tags>navigation, actions</tags>
+  <dependencies>012</dependencies>
+  <parallel-group>phase5-actions</parallel-group>
+  <parallel-safe>true</parallel-safe>
+
+  <constraints>
+    <constraint source="spec.md">Use window.open with _blank target</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>projects/ai-semantic-search-ui-r2/spec.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Create handleOpenFile function in ResultCard</step>
+    <step order="2">Extract fileUrl from result</step>
+    <step order="3">Call window.open(fileUrl, "_blank")</step>
+    <step order="4">Add click handler to File button</step>
+    <step order="5">Use appropriate icon (DocumentArrowRight or similar)</step>
+    <step order="6">Test opening various file types</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Clicking Open File opens document in new tab</criterion>
+    <criterion>Various file types handled correctly</criterion>
+    <criterion>Button has appropriate icon</criterion>
+  </acceptance-criteria>
+</task>

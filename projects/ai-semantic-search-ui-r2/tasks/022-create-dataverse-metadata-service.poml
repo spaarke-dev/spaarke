@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="022" status="pending">
+  <title>Create DataverseMetadataService</title>
+  <description>
+    Create a service to fetch optionset values from Dataverse for populating filter dropdowns.
+    Retrieves Document Type, Matter Type, and File Type options.
+  </description>
+  <phase>3</phase>
+  <phase-name>API Integration &amp; State</phase-name>
+  <tags>dataverse, service, metadata</tags>
+  <dependencies>017</dependencies>
+  <parallel-group>phase3-services</parallel-group>
+  <parallel-safe>true</parallel-safe>
+
+  <constraints>
+    <constraint source="spec.md">Fetch optionset values on init</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>projects/ai-semantic-search-ui-r2/spec.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Create services/DataverseMetadataService.ts</step>
+    <step order="2">Use Xrm.WebApi for Dataverse calls</step>
+    <step order="3">Implement getDocumentTypeOptions()</step>
+    <step order="4">Implement getMatterTypeOptions()</step>
+    <step order="5">Implement getFileTypeOptions() - may be static list</step>
+    <step order="6">Return options as { value: string, label: string }[]</step>
+    <step order="7">Cache results to avoid repeated API calls</step>
+    <step order="8">Handle missing optionsets gracefully</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>DataverseMetadataService.ts exists</criterion>
+    <criterion>Optionset values fetched from Dataverse</criterion>
+    <criterion>Options formatted for dropdown consumption</criterion>
+    <criterion>Results cached after first fetch</criterion>
+  </acceptance-criteria>
+</task>

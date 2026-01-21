@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="017" status="pending">
+  <title>Copy MsalAuthProvider from DocumentRelationshipViewer</title>
+  <description>
+    Adapt the MSAL authentication provider from DocumentRelationshipViewer for use in
+    SemanticSearchControl. Handles silent token acquisition with popup fallback.
+  </description>
+  <phase>3</phase>
+  <phase-name>API Integration &amp; State</phase-name>
+  <tags>auth, msal, service</tags>
+  <dependencies>005</dependencies>
+  <parallel-group>phase3-services</parallel-group>
+  <parallel-safe>true</parallel-safe>
+
+  <constraints>
+    <constraint source="spec.md">Silent token acquisition with popup fallback</constraint>
+    <constraint source="spec.md">tenantId from control property</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>projects/ai-semantic-search-ui-r2/spec.md</file>
+  </knowledge-files>
+
+  <reference-implementations>
+    <reference>src/client/pcf/DocumentRelationshipViewer/services/MsalAuthProvider.ts</reference>
+    <reference>src/client/pcf/DocumentRelationshipViewer/services/msalConfig.ts</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">Copy MsalAuthProvider.ts to services/</step>
+    <step order="2">Copy msalConfig.ts to services/</step>
+    <step order="3">Update clientId for BFF API app registration</step>
+    <step order="4">Update scopes for semantic search API</step>
+    <step order="5">Accept tenantId as parameter (from control property)</step>
+    <step order="6">Implement getAccessToken() method</step>
+    <step order="7">Handle InteractionRequiredAuthError with popup</step>
+    <step order="8">Add error handling for popup blocked scenario</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>MsalAuthProvider.ts exists in services/</criterion>
+    <criterion>getAccessToken() returns valid token</criterion>
+    <criterion>Silent acquisition works for authenticated users</criterion>
+    <criterion>Popup fallback triggers when needed</criterion>
+  </acceptance-criteria>
+</task>

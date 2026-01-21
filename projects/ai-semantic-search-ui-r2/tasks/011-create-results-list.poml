@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="011" status="pending">
+  <title>Create ResultsList component</title>
+  <description>
+    Create the results list container that holds result cards with infinite scroll support.
+    This is the main scrollable area for search results.
+  </description>
+  <phase>2</phase>
+  <phase-name>Core Components</phase-name>
+  <tags>pcf, react, component, results</tags>
+  <dependencies>006</dependencies>
+  <parallel-group>phase2-components-a</parallel-group>
+  <parallel-safe>true</parallel-safe>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent v9 styling</constraint>
+    <constraint source="spec.md">DOM cap at 200 items</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    <file>projects/ai-semantic-search-ui-r2/spec.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Create components/ResultsList.tsx</step>
+    <step order="2">Define IResultsListProps (results, isLoading, onLoadMore, hasMore, totalCount)</step>
+    <step order="3">Create scrollable container with makeStyles</step>
+    <step order="4">Map results to ResultCard components</step>
+    <step order="5">Add sentinel div for intersection observer (load-more trigger)</step>
+    <step order="6">Show "Showing X of Y results" header</step>
+    <step order="7">Add placeholder for infinite scroll integration</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>ResultsList renders scrollable container</criterion>
+    <criterion>Results count header displays correctly</criterion>
+    <criterion>Sentinel element present for intersection observer</criterion>
+    <criterion>Empty list handled gracefully</criterion>
+  </acceptance-criteria>
+</task>

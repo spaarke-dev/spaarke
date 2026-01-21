@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="042" status="pending">
+  <title>Unit tests for components</title>
+  <description>
+    Write unit tests for React components: ResultCard, FilterPanel, SearchInput,
+    EmptyState, ErrorState, and SimilarityBadge.
+  </description>
+  <phase>7</phase>
+  <phase-name>Testing &amp; Polish</phase-name>
+  <tags>testing, unit-tests, components</tags>
+  <dependencies>007, 008, 012, 015, 016</dependencies>
+  <parallel-group>phase7-testing</parallel-group>
+  <parallel-safe>true</parallel-safe>
+
+  <constraints>
+    <constraint source="testing">Use React Testing Library</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>.claude/constraints/testing.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Create __tests__/components/ directory</step>
+    <step order="2">Write SearchInput.test.tsx</step>
+    <step order="3">Test input, button click, Enter key</step>
+    <step order="4">Write FilterPanel.test.tsx</step>
+    <step order="5">Test filter rendering and scope visibility</step>
+    <step order="6">Write ResultCard.test.tsx</step>
+    <step order="7">Test card rendering and action buttons</step>
+    <step order="8">Write SimilarityBadge.test.tsx</step>
+    <step order="9">Test color coding thresholds</step>
+    <step order="10">Write EmptyState.test.tsx and ErrorState.test.tsx</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Key components have test coverage</criterion>
+    <criterion>User interactions tested</criterion>
+    <criterion>Prop variations tested</criterion>
+    <criterion>Tests pass</criterion>
+  </acceptance-criteria>
+</task>

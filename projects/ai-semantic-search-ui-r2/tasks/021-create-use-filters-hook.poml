@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="021" status="pending">
+  <title>Create useFilters hook</title>
+  <description>
+    Create a React hook for managing filter state. Tracks selected values for each filter
+    and provides functions to update and clear filters.
+  </description>
+  <phase>3</phase>
+  <phase-name>API Integration &amp; State</phase-name>
+  <tags>react, hooks, filters</tags>
+  <dependencies>019</dependencies>
+  <parallel-group>none</parallel-group>
+  <parallel-safe>false</parallel-safe>
+
+  <constraints>
+    <constraint source="spec.md">Filter changes require explicit Search click</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>projects/ai-semantic-search-ui-r2/spec.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Create hooks/useFilters.ts</step>
+    <step order="2">Define filter state interface</step>
+    <step order="3">Initialize state with empty/default values</step>
+    <step order="4">Implement setDocumentTypes(types: string[])</step>
+    <step order="5">Implement setMatterTypes(types: string[])</step>
+    <step order="6">Implement setFileTypes(types: string[])</step>
+    <step order="7">Implement setDateRange(range: DateRange)</step>
+    <step order="8">Implement clearFilters()</step>
+    <step order="9">Implement hasActiveFilters computed value</step>
+    <step order="10">Return { filters, setters, clearFilters, hasActiveFilters }</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>useFilters hook manages filter state</criterion>
+    <criterion>All filter types can be updated</criterion>
+    <criterion>clearFilters resets all values</criterion>
+    <criterion>hasActiveFilters correctly reflects state</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="037" status="pending">
+  <title>Implement error handling</title>
+  <description>
+    Implement comprehensive error handling for API errors, showing user-friendly
+    messages via the ErrorState component.
+  </description>
+  <phase>6</phase>
+  <phase-name>Error Handling &amp; States</phase-name>
+  <tags>error-handling</tags>
+  <dependencies>016, 020</dependencies>
+  <parallel-group>none</parallel-group>
+  <parallel-safe>false</parallel-safe>
+
+  <constraints>
+    <constraint source="spec.md">User-friendly error messages</constraint>
+    <constraint source="spec.md">No stack traces in UI</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>projects/ai-semantic-search-ui-r2/spec.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Define error types (NetworkError, ServerError, AuthError)</step>
+    <step order="2">Update SemanticSearchApiService to throw typed errors</step>
+    <step order="3">Catch errors in useSemanticSearch</step>
+    <step order="4">Map error types to user-friendly messages</step>
+    <step order="5">Set error state with message</step>
+    <step order="6">Pass error to ResultsList for ErrorState display</step>
+    <step order="7">Test various error scenarios</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>API errors caught and displayed</criterion>
+    <criterion>Messages are user-friendly</criterion>
+    <criterion>No technical details exposed</criterion>
+    <criterion>Different error types handled appropriately</criterion>
+  </acceptance-criteria>
+</task>

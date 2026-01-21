@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="024" status="pending">
+  <title>Create useInfiniteScroll hook</title>
+  <description>
+    Create a React hook that uses Intersection Observer API to detect when the user
+    scrolls near the bottom of the results list, triggering load-more.
+  </description>
+  <phase>4</phase>
+  <phase-name>Infinite Scroll &amp; Performance</phase-name>
+  <tags>react, hooks, infinite-scroll</tags>
+  <dependencies>none</dependencies>
+  <parallel-group>none</parallel-group>
+  <parallel-safe>false</parallel-safe>
+
+  <constraints>
+    <constraint source="spec.md">Intersection Observer with threshold 0.1, rootMargin 100px</constraint>
+    <constraint source="spec.md">Loading guard - ignore events while loading</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>projects/ai-semantic-search-ui-r2/spec.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Create hooks/useInfiniteScroll.ts</step>
+    <step order="2">Define hook parameters (onLoadMore, isLoading, hasMore)</step>
+    <step order="3">Create ref for sentinel element</step>
+    <step order="4">Set up IntersectionObserver with threshold 0.1</step>
+    <step order="5">Add rootMargin: "100px" for early trigger</step>
+    <step order="6">Check isLoading and hasMore before calling onLoadMore</step>
+    <step order="7">Clean up observer on unmount</step>
+    <step order="8">Return { sentinelRef }</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>useInfiniteScroll hook returns sentinel ref</criterion>
+    <criterion>onLoadMore called when sentinel visible</criterion>
+    <criterion>Loading guard prevents duplicate calls</criterion>
+    <criterion>Observer cleaned up on unmount</criterion>
+  </acceptance-criteria>
+</task>

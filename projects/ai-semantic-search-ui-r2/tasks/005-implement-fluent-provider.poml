@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="005" status="pending">
+  <title>Implement FluentProvider wrapper</title>
+  <description>
+    Implement theme detection from Dataverse context (fluentDesignLanguage) and wrap the control
+    in FluentProvider with the appropriate theme (light, dark, high-contrast).
+  </description>
+  <phase>1</phase>
+  <phase-name>Project Setup &amp; Foundation</phase-name>
+  <tags>pcf, fluent, theming</tags>
+  <dependencies>004</dependencies>
+  <parallel-group>none</parallel-group>
+  <parallel-safe>false</parallel-safe>
+
+  <constraints>
+    <constraint source="ADR-021">Must use Fluent v9 theming system</constraint>
+    <constraint source="ADR-021">Must support light, dark, and high-contrast modes</constraint>
+    <constraint source="ADR-021">No hard-coded colors</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>.claude/patterns/pcf/theme-management.md</file>
+    <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+  </knowledge-files>
+
+  <reference-implementations>
+    <reference>src/client/pcf/DocumentRelationshipViewer/DocumentRelationshipViewer/index.ts</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">Create theme resolution utility (resolveTheme function)</step>
+    <step order="2">Read fluentDesignLanguage from context.fluentDesignLanguage</step>
+    <step order="3">Map Dataverse theme to Fluent theme (webLightTheme, webDarkTheme, etc.)</step>
+    <step order="4">Handle missing/unknown themes with fallback to webLightTheme</step>
+    <step order="5">Update renderComponent() to use resolved theme</step>
+    <step order="6">Test theme switching (if possible in dev environment)</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>FluentProvider receives correct theme from context</criterion>
+    <criterion>Control renders correctly in light mode</criterion>
+    <criterion>Control renders correctly in dark mode</criterion>
+    <criterion>No hard-coded colors in rendered output</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="039" status="pending">
+  <title>Integrate empty state</title>
+  <description>
+    Integrate the EmptyState component to display when search returns no results,
+    with query echo and helpful suggestions.
+  </description>
+  <phase>6</phase>
+  <phase-name>Error Handling &amp; States</phase-name>
+  <tags>empty-state</tags>
+  <dependencies>015, 020</dependencies>
+  <parallel-group>none</parallel-group>
+  <parallel-safe>false</parallel-safe>
+
+  <constraints>
+    <constraint source="spec.md">Echo query in message</constraint>
+    <constraint source="spec.md">Show clear filters option if filters active</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>projects/ai-semantic-search-ui-r2/spec.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Track hasSearched state in useSemanticSearch</step>
+    <step order="2">Detect empty results (results.length === 0 && hasSearched)</step>
+    <step order="3">Pass query and hasActiveFilters to EmptyState</step>
+    <step order="4">Show EmptyState in ResultsList when appropriate</step>
+    <step order="5">Connect "Clear filters" button to clearFilters()</step>
+    <step order="6">Test empty state with various scenarios</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>EmptyState shows when no results</criterion>
+    <criterion>Query echoed in message</criterion>
+    <criterion>Clear filters button works when filters active</criterion>
+    <criterion>Not shown before first search</criterion>
+  </acceptance-criteria>
+</task>

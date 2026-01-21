@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="027" status="pending">
+  <title>Add loading-more state</title>
+  <description>
+    Add visual feedback for the load-more operation with an inline spinner
+    at the bottom of the results list.
+  </description>
+  <phase>4</phase>
+  <phase-name>Infinite Scroll &amp; Performance</phase-name>
+  <tags>ux, loading</tags>
+  <dependencies>025, 026</dependencies>
+  <parallel-group>none</parallel-group>
+  <parallel-safe>false</parallel-safe>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent Spinner component</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Add isLoadingMore state to useSemanticSearch</step>
+    <step order="2">Set isLoadingMore=true during loadMore()</step>
+    <step order="3">Reset isLoadingMore on success or error</step>
+    <step order="4">Pass isLoadingMore to ResultsList</step>
+    <step order="5">Show Fluent Spinner below results when loading</step>
+    <step order="6">Style spinner with appropriate spacing</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Spinner shows during load-more</criterion>
+    <criterion>Spinner disappears when loading completes</criterion>
+    <criterion>Spinner positioned at bottom of list</criterion>
+    <criterion>Uses Fluent design tokens</criterion>
+  </acceptance-criteria>
+</task>

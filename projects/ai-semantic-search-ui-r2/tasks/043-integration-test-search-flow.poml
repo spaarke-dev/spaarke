@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="043" status="pending">
+  <title>Integration test: search flow</title>
+  <description>
+    Write integration tests for the complete search flow from input to results display,
+    testing the full component tree with mocked API.
+  </description>
+  <phase>7</phase>
+  <phase-name>Testing &amp; Polish</phase-name>
+  <tags>testing, integration-tests</tags>
+  <dependencies>020</dependencies>
+  <parallel-group>none</parallel-group>
+  <parallel-safe>false</parallel-safe>
+
+  <constraints>
+    <constraint source="testing">Mock API calls</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>.claude/constraints/testing.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Create __tests__/integration/ directory</step>
+    <step order="2">Set up test renderer with providers</step>
+    <step order="3">Mock SemanticSearchApiService</step>
+    <step order="4">Write searchFlow.test.tsx</step>
+    <step order="5">Test: type query, click search, see results</step>
+    <step order="6">Test: apply filters, search, see filtered results</step>
+    <step order="7">Test: scroll, load more results</step>
+    <step order="8">Test: empty results, error scenarios</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Full search flow tested end-to-end</criterion>
+    <criterion>Filter application tested</criterion>
+    <criterion>Pagination tested</criterion>
+    <criterion>Error handling tested</criterion>
+  </acceptance-criteria>
+</task>

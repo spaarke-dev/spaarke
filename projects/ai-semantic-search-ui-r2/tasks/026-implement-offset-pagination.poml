@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="026" status="pending">
+  <title>Implement offset-based pagination</title>
+  <description>
+    Ensure the pagination logic correctly tracks offset and appends results.
+    Verify the search hook correctly manages offset state.
+  </description>
+  <phase>4</phase>
+  <phase-name>Infinite Scroll &amp; Performance</phase-name>
+  <tags>pagination, state</tags>
+  <dependencies>020, 025</dependencies>
+  <parallel-group>none</parallel-group>
+  <parallel-safe>false</parallel-safe>
+
+  <constraints>
+    <constraint source="spec.md">offset = currentResults.length</constraint>
+    <constraint source="spec.md">Clear results on new search</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>projects/ai-semantic-search-ui-r2/spec.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Verify useSemanticSearch calculates offset correctly</step>
+    <step order="2">Ensure new search resets offset to 0</step>
+    <step order="3">Test loadMore increments offset by limit</step>
+    <step order="4">Verify results array grows correctly</step>
+    <step order="5">Test edge case: last page has fewer items</step>
+    <step order="6">Verify totalCount updates from each response</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Initial search uses offset=0</criterion>
+    <criterion>Load-more uses offset=results.length</criterion>
+    <criterion>New search clears previous results</criterion>
+    <criterion>Edge cases handled correctly</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="029" status="pending">
+  <title>Performance testing</title>
+  <description>
+    Verify smooth scrolling performance and memory usage with large result sets.
+    Test edge cases and measure render times.
+  </description>
+  <phase>4</phase>
+  <phase-name>Infinite Scroll &amp; Performance</phase-name>
+  <tags>testing, performance</tags>
+  <dependencies>028</dependencies>
+  <parallel-group>none</parallel-group>
+  <parallel-safe>false</parallel-safe>
+
+  <constraints>
+    <constraint source="spec.md">Results render within 100ms of API response</constraint>
+    <constraint source="spec.md">Initial render &lt; 500ms to interactive</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>projects/ai-semantic-search-ui-r2/spec.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Test scroll performance with 200 items</step>
+    <step order="2">Measure time from API response to render complete</step>
+    <step order="3">Check for memory leaks during repeated searches</step>
+    <step order="4">Verify scroll position preserved after load-more</step>
+    <step order="5">Test rapid scroll (multiple load-more in quick succession)</step>
+    <step order="6">Profile with browser dev tools</step>
+    <step order="7">Document any optimizations needed</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Smooth scrolling with 200 items</criterion>
+    <criterion>Render time &lt; 100ms for new results</criterion>
+    <criterion>No memory leaks detected</criterion>
+    <criterion>Scroll position maintained</criterion>
+  </acceptance-criteria>
+</task>

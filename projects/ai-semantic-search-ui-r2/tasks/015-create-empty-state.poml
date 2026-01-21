@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="015" status="pending">
+  <title>Create EmptyState component</title>
+  <description>
+    Create a component to display when no search results are found. Shows helpful message
+    with the query echo and suggestions for improving search.
+  </description>
+  <phase>2</phase>
+  <phase-name>Core Components</phase-name>
+  <tags>pcf, react, component, empty-state</tags>
+  <dependencies>006</dependencies>
+  <parallel-group>phase2-components-a</parallel-group>
+  <parallel-safe>true</parallel-safe>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent v9 typography and icons</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Create components/EmptyState.tsx</step>
+    <step order="2">Define IEmptyStateProps (query: string, hasFilters: boolean)</step>
+    <step order="3">Add search illustration/icon</step>
+    <step order="4">Display "No results found" heading</step>
+    <step order="5">Echo the search query: 'No results for "{query}"'</step>
+    <step order="6">Show suggestions: try different terms, clear filters</step>
+    <step order="7">Add "Clear filters" button if hasFilters=true</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>EmptyState renders centered content</criterion>
+    <criterion>Query is echoed in the message</criterion>
+    <criterion>Suggestions displayed</criterion>
+    <criterion>Clear filters button shown when applicable</criterion>
+  </acceptance-criteria>
+</task>

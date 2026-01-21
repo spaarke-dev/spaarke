@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="012" status="pending">
+  <title>Create ResultCard component</title>
+  <description>
+    Create the individual result card component that displays document name, similarity score,
+    metadata, and highlighted snippet. Includes action buttons for Open File and Open Record.
+  </description>
+  <phase>2</phase>
+  <phase-name>Core Components</phase-name>
+  <tags>pcf, react, component, results</tags>
+  <dependencies>011</dependencies>
+  <parallel-group>phase2-components-c</parallel-group>
+  <parallel-safe>true</parallel-safe>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent v9 Card component</constraint>
+    <constraint source="spec.md">Show: name, similarity badge, type, matter, date, snippet</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    <file>projects/ai-semantic-search-ui-r2/spec.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Create components/ResultCard.tsx</step>
+    <step order="2">Define IResultCardProps (result: SearchResult, onOpenFile, onOpenRecord)</step>
+    <step order="3">Use Fluent Card component as container</step>
+    <step order="4">Add file type icon based on extension</step>
+    <step order="5">Display document name as title</step>
+    <step order="6">Add SimilarityBadge component slot</step>
+    <step order="7">Show metadata row: type, matter, date</step>
+    <step order="8">Add HighlightedSnippet component slot</step>
+    <step order="9">Add action buttons: Open File, Open Record (with menu)</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>ResultCard renders document information</criterion>
+    <criterion>File type icon displays correctly</criterion>
+    <criterion>Metadata row shows type, matter, date</criterion>
+    <criterion>Action buttons present and clickable</criterion>
+  </acceptance-criteria>
+</task>

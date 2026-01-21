@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="035" status="pending">
+  <title>Create LoadingState component</title>
+  <description>
+    Create a loading state component that displays skeleton cards during initial search,
+    providing visual feedback that results are being loaded.
+  </description>
+  <phase>6</phase>
+  <phase-name>Error Handling &amp; States</phase-name>
+  <tags>ui, loading, skeleton</tags>
+  <dependencies>none</dependencies>
+  <parallel-group>phase6-states</parallel-group>
+  <parallel-safe>true</parallel-safe>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent Skeleton component</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Create components/LoadingState.tsx</step>
+    <step order="2">Define ILoadingStateProps (count: number)</step>
+    <step order="3">Use Fluent Skeleton component</step>
+    <step order="4">Create skeleton layout matching ResultCard structure</step>
+    <step order="5">Show specified number of skeleton cards</step>
+    <step order="6">Add animation for visual feedback</step>
+    <step order="7">Style with design tokens</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>LoadingState renders skeleton cards</criterion>
+    <criterion>Skeleton matches ResultCard layout</criterion>
+    <criterion>Animation provides loading feedback</criterion>
+    <criterion>Configurable number of skeletons</criterion>
+  </acceptance-criteria>
+</task>

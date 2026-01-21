@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="019" status="pending">
+  <title>Define TypeScript interfaces</title>
+  <description>
+    Create TypeScript interfaces for search request/response types, filter types,
+    and component props. These form the type foundation for the entire control.
+  </description>
+  <phase>3</phase>
+  <phase-name>API Integration &amp; State</phase-name>
+  <tags>types, typescript</tags>
+  <dependencies>none</dependencies>
+  <parallel-group>phase3-services</parallel-group>
+  <parallel-safe>true</parallel-safe>
+
+  <constraints>
+    <constraint source="spec.md">Match API contract exactly</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>projects/ai-semantic-search-ui-r2/spec.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Create types/search.ts</step>
+    <step order="2">Define SearchRequest interface</step>
+    <step order="3">Define SearchFilters interface</step>
+    <step order="4">Define SearchOptions interface</step>
+    <step order="5">Define SearchResult interface</step>
+    <step order="6">Define SearchResponse interface</step>
+    <step order="7">Create types/props.ts</step>
+    <step order="8">Define ISemanticSearchControlProps interface</step>
+    <step order="9">Define filter option types (FilterOption, DateRange)</step>
+    <step order="10">Export all types from index.ts barrel</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>types/search.ts exports all API types</criterion>
+    <criterion>types/props.ts exports component prop interfaces</criterion>
+    <criterion>Types match spec.md API contract</criterion>
+    <criterion>All types properly exported</criterion>
+  </acceptance-criteria>
+</task>

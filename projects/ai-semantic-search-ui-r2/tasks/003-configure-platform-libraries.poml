@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="003" status="pending">
+  <title>Configure platform libraries</title>
+  <description>
+    Set up featureconfig.json to enable React and Fluent platform libraries, ensuring the control
+    uses Dataverse-provided runtime libraries instead of bundling.
+  </description>
+  <phase>1</phase>
+  <phase-name>Project Setup &amp; Foundation</phase-name>
+  <tags>pcf, configuration, platform-libraries</tags>
+  <dependencies>001</dependencies>
+  <parallel-group>phase1-config</parallel-group>
+  <parallel-safe>true</parallel-safe>
+
+  <constraints>
+    <constraint source="ADR-022">React 16 APIs only; platform libraries required</constraint>
+    <constraint source="ADR-022">Bundle size must exclude React/Fluent (platform provided)</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+    <file>.claude/patterns/pcf/control-initialization.md</file>
+  </knowledge-files>
+
+  <reference-implementations>
+    <reference>src/client/pcf/DocumentRelationshipViewer/featureconfig.json</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">Create featureconfig.json in control root</step>
+    <step order="2">Set pcfReactPlatformLibraries: true</step>
+    <step order="3">Update package.json to mark react, react-dom, @fluentui/react-components as devDependencies</step>
+    <step order="4">Add externals configuration to prevent bundling platform libs</step>
+    <step order="5">Verify build excludes React/Fluent from bundle</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>featureconfig.json exists with pcfReactPlatformLibraries: true</criterion>
+    <criterion>package.json has correct devDependencies</criterion>
+    <criterion>Build output does not include React or Fluent (check bundle.js size)</criterion>
+  </acceptance-criteria>
+</task>

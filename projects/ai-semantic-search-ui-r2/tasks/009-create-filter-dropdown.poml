@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="009" status="pending">
+  <title>Create FilterDropdown component</title>
+  <description>
+    Create a reusable dropdown component for filter selection (Document Type, Matter Type, File Type).
+    Supports multi-select and single-select modes.
+  </description>
+  <phase>2</phase>
+  <phase-name>Core Components</phase-name>
+  <tags>pcf, react, component, filters</tags>
+  <dependencies>008</dependencies>
+  <parallel-group>phase2-components-b</parallel-group>
+  <parallel-safe>true</parallel-safe>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent v9 Dropdown or Combobox</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Create components/FilterDropdown.tsx</step>
+    <step order="2">Define IFilterDropdownProps (label, options, selected, onChange, multiSelect)</step>
+    <step order="3">Use Fluent Dropdown component</step>
+    <step order="4">Support multiselect mode for arrays</step>
+    <step order="5">Display selected count when multiselect</step>
+    <step order="6">Handle loading state while options load</step>
+    <step order="7">Style with design tokens</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>FilterDropdown renders with label and options</criterion>
+    <criterion>Single-select mode works</criterion>
+    <criterion>Multi-select mode shows selected count</criterion>
+    <criterion>Loading state displays placeholder</criterion>
+  </acceptance-criteria>
+</task>

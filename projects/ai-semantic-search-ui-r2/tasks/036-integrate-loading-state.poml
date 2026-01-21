@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="036" status="pending">
+  <title>Integrate loading state</title>
+  <description>
+    Integrate the LoadingState component with the search flow to show skeleton
+    cards during initial search execution.
+  </description>
+  <phase>6</phase>
+  <phase-name>Error Handling &amp; States</phase-name>
+  <tags>integration, loading</tags>
+  <dependencies>035, 020</dependencies>
+  <parallel-group>none</parallel-group>
+  <parallel-safe>false</parallel-safe>
+
+  <constraints>
+    <constraint source="spec.md">Show skeleton during initial search</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>projects/ai-semantic-search-ui-r2/spec.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Add isInitialLoading state to useSemanticSearch</step>
+    <step order="2">Differentiate initial load from load-more</step>
+    <step order="3">Pass isInitialLoading to ResultsList</step>
+    <step order="4">Show LoadingState when isInitialLoading=true</step>
+    <step order="5">Hide LoadingState once results arrive</step>
+    <step order="6">Test with slow network to verify display</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Skeleton shows during first search</criterion>
+    <criterion>Skeleton replaced by results on load</criterion>
+    <criterion>Load-more uses inline spinner (not skeleton)</criterion>
+  </acceptance-criteria>
+</task>

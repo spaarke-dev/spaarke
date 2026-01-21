@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="048" status="pending">
+  <title>Build and package solution</title>
+  <description>
+    Build the solution and generate unmanaged solution zip file for deployment.
+  </description>
+  <phase>8</phase>
+  <phase-name>Solution &amp; Deployment</phase-name>
+  <tags>solution, build</tags>
+  <dependencies>047</dependencies>
+  <parallel-group>none</parallel-group>
+  <parallel-safe>false</parallel-safe>
+
+  <constraints>
+    <constraint source="deployment">Generate unmanaged solution only</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Navigate to solution directory</step>
+    <step order="2">Run: dotnet build</step>
+    <step order="3">Verify build succeeds</step>
+    <step order="4">Locate output zip file</step>
+    <step order="5">Verify zip contains control files</step>
+    <step order="6">Document build artifacts location</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Solution builds successfully</criterion>
+    <criterion>Zip file generated</criterion>
+    <criterion>Zip contains control package</criterion>
+    <criterion>No build errors or warnings</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="041" status="pending">
+  <title>Unit tests for hooks</title>
+  <description>
+    Write unit tests for the React hooks: useSemanticSearch, useFilters, and useInfiniteScroll.
+    Test state management, edge cases, and error handling.
+  </description>
+  <phase>7</phase>
+  <phase-name>Testing &amp; Polish</phase-name>
+  <tags>testing, unit-tests, hooks</tags>
+  <dependencies>020, 021, 024</dependencies>
+  <parallel-group>phase7-testing</parallel-group>
+  <parallel-safe>true</parallel-safe>
+
+  <constraints>
+    <constraint source="testing">Use React Testing Library hooks utilities</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>.claude/constraints/testing.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Create __tests__/hooks/ directory</step>
+    <step order="2">Write useSemanticSearch.test.ts</step>
+    <step order="3">Test search execution and state updates</step>
+    <step order="4">Test loadMore and pagination</step>
+    <step order="5">Test error handling</step>
+    <step order="6">Write useFilters.test.ts</step>
+    <step order="7">Test filter updates and clear</step>
+    <step order="8">Write useInfiniteScroll.test.ts</step>
+    <step order="9">Test intersection observer setup</step>
+    <step order="10">Test loading guards</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>All hooks have test coverage</criterion>
+    <criterion>Edge cases tested</criterion>
+    <criterion>Error scenarios covered</criterion>
+    <criterion>Tests pass</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="020" status="pending">
+  <title>Create useSemanticSearch hook</title>
+  <description>
+    Create the main React hook for managing search state and execution.
+    Handles search execution, pagination state, and result accumulation.
+  </description>
+  <phase>3</phase>
+  <phase-name>API Integration &amp; State</phase-name>
+  <tags>react, hooks, search</tags>
+  <dependencies>018, 019</dependencies>
+  <parallel-group>none</parallel-group>
+  <parallel-safe>false</parallel-safe>
+
+  <constraints>
+    <constraint source="spec.md">offset/limit pagination</constraint>
+    <constraint source="spec.md">Clear results on new search</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>projects/ai-semantic-search-ui-r2/spec.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Create hooks/useSemanticSearch.ts</step>
+    <step order="2">Define hook parameters (apiService, scope, scopeId)</step>
+    <step order="3">Manage state: results[], totalCount, isLoading, error, hasMore</step>
+    <step order="4">Implement search(query, filters) function</step>
+    <step order="5">Clear results when query or filters change</step>
+    <step order="6">Implement loadMore() for pagination</step>
+    <step order="7">Calculate offset from results.length</step>
+    <step order="8">Append new results to existing array</step>
+    <step order="9">Update hasMore based on totalCount</step>
+    <step order="10">Return { results, totalCount, isLoading, error, search, loadMore, hasMore }</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>useSemanticSearch hook manages search state</criterion>
+    <criterion>search() clears previous results</criterion>
+    <criterion>loadMore() appends to results</criterion>
+    <criterion>hasMore correctly reflects pagination state</criterion>
+    <criterion>Error state captured and exposed</criterion>
+  </acceptance-criteria>
+</task>

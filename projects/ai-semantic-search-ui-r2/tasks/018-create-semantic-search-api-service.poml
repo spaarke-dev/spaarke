@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="018" status="pending">
+  <title>Create SemanticSearchApiService</title>
+  <description>
+    Create the API service for calling the semantic search endpoint (/api/ai/search/semantic).
+    Handles request building, authentication headers, and response parsing.
+  </description>
+  <phase>3</phase>
+  <phase-name>API Integration &amp; State</phase-name>
+  <tags>api, service, search</tags>
+  <dependencies>017, 019</dependencies>
+  <parallel-group>none</parallel-group>
+  <parallel-safe>false</parallel-safe>
+
+  <constraints>
+    <constraint source="spec.md">POST to /api/ai/search/semantic</constraint>
+    <constraint source="spec.md">Include Authorization: Bearer token header</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>projects/ai-semantic-search-ui-r2/spec.md</file>
+  </knowledge-files>
+
+  <reference-implementations>
+    <reference>src/client/pcf/DocumentRelationshipViewer/services/</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">Create services/SemanticSearchApiService.ts</step>
+    <step order="2">Define constructor with apiBaseUrl and authProvider</step>
+    <step order="3">Implement search(request: SearchRequest): Promise&lt;SearchResponse&gt;</step>
+    <step order="4">Build request body per API contract</step>
+    <step order="5">Get access token from MsalAuthProvider</step>
+    <step order="6">Add Authorization header</step>
+    <step order="7">Handle HTTP errors (4xx, 5xx) with typed error responses</step>
+    <step order="8">Parse and validate response</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>SemanticSearchApiService.ts exists</criterion>
+    <criterion>search() method sends correct request format</criterion>
+    <criterion>Authorization header included</criterion>
+    <criterion>Response parsed to SearchResponse type</criterion>
+    <criterion>Errors thrown with user-friendly messages</criterion>
+  </acceptance-criteria>
+</task>

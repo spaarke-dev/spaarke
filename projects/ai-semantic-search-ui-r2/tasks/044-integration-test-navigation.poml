@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="044" status="pending">
+  <title>Integration test: navigation</title>
+  <description>
+    Write integration tests to verify Xrm.Navigation calls are made correctly
+    when users interact with result card actions.
+  </description>
+  <phase>7</phase>
+  <phase-name>Testing &amp; Polish</phase-name>
+  <tags>testing, integration-tests, navigation</tags>
+  <dependencies>030, 031, 032, 033</dependencies>
+  <parallel-group>none</parallel-group>
+  <parallel-safe>false</parallel-safe>
+
+  <constraints>
+    <constraint source="testing">Mock Xrm.Navigation global</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>.claude/constraints/testing.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Create mock for Xrm.Navigation.navigateTo</step>
+    <step order="2">Write navigationActions.test.tsx</step>
+    <step order="3">Test: click Open Record, verify navigateTo called with target: 2</step>
+    <step order="4">Test: click Open in New Tab, verify target: 1</step>
+    <step order="5">Test: click Open File, verify window.open called</step>
+    <step order="6">Test: click View All, verify pageType: "custom"</step>
+    <step order="7">Verify correct entity/record IDs passed</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Navigation calls verified for each action</criterion>
+    <criterion>Correct parameters passed</criterion>
+    <criterion>Mock assertions pass</criterion>
+  </acceptance-criteria>
+</task>

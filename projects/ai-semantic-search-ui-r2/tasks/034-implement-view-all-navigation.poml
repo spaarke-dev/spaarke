@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="034" status="pending">
+  <title>Implement View All navigation</title>
+  <description>
+    Implement navigation to the full Custom Page for viewing all search results
+    when the DOM cap is reached. Uses Xrm.Navigation.navigateTo with pageType: "custom".
+  </description>
+  <phase>5</phase>
+  <phase-name>Navigation &amp; Actions</phase-name>
+  <tags>navigation, custom-page</tags>
+  <dependencies>028</dependencies>
+  <parallel-group>none</parallel-group>
+  <parallel-safe>false</parallel-safe>
+
+  <constraints>
+    <constraint source="spec.md">Use Xrm.Navigation.navigateTo with pageType: "custom"</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>projects/ai-semantic-search-ui-r2/spec.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Create handleViewAll function</step>
+    <step order="2">Build navigateTo parameters with pageType: "custom"</step>
+    <step order="3">Set name to custom page logical name</step>
+    <step order="4">Pass current query and filters as page parameters if possible</step>
+    <step order="5">Connect to "View all" link in DOM cap message</step>
+    <step order="6">Test navigation to Custom Page</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>"View all" link navigates to Custom Page</criterion>
+    <criterion>Custom Page receives context (query, scope)</criterion>
+    <criterion>Navigation works from both form section and dialog</criterion>
+  </acceptance-criteria>
+</task>

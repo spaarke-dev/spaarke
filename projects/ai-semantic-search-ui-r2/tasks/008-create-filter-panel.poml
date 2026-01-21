@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="008" status="pending">
+  <title>Create FilterPanel component</title>
+  <description>
+    Create the filter panel container that holds filter dropdowns. Supports scope-aware visibility
+    (hides irrelevant filters when scoped to a specific context).
+  </description>
+  <phase>2</phase>
+  <phase-name>Core Components</phase-name>
+  <tags>pcf, react, component, filters</tags>
+  <dependencies>006</dependencies>
+  <parallel-group>phase2-components-a</parallel-group>
+  <parallel-safe>true</parallel-safe>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent v9 layout components</constraint>
+    <constraint source="spec.md">Hide irrelevant filters when scoped</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    <file>projects/ai-semantic-search-ui-r2/spec.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Create components/FilterPanel.tsx</step>
+    <step order="2">Define IFilterPanelProps interface (filters, onChange, searchScope, visible)</step>
+    <step order="3">Create responsive layout using makeStyles</step>
+    <step order="4">Add slots for: Document Type, Matter Type, Date Range, File Type</step>
+    <step order="5">Implement scope-aware visibility (hide Matter Type when scope=matter)</step>
+    <step order="6">Support show/hide via showFilters prop</step>
+    <step order="7">Add "Clear filters" button</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>FilterPanel renders filter slots</criterion>
+    <criterion>Filters hidden when showFilters=false</criterion>
+    <criterion>Matter Type hidden when searchScope=matter</criterion>
+    <criterion>Clear filters button resets all filters</criterion>
+  </acceptance-criteria>
+</task>

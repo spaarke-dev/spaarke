@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="049" status="pending">
+  <title>Deploy to dev environment</title>
+  <description>
+    Deploy the solution to the Dataverse dev environment and verify the control
+    is available for use in forms and Custom Pages.
+  </description>
+  <phase>8</phase>
+  <phase-name>Solution &amp; Deployment</phase-name>
+  <tags>deployment, dataverse</tags>
+  <dependencies>048</dependencies>
+  <parallel-group>none</parallel-group>
+  <parallel-safe>false</parallel-safe>
+
+  <constraints>
+    <constraint source="deployment">Deploy to spaarkedev1.crm.dynamics.com</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Connect to dev environment: pac auth create</step>
+    <step order="2">Import solution: pac solution import</step>
+    <step order="3">Verify import succeeded</step>
+    <step order="4">Publish customizations</step>
+    <step order="5">Verify control appears in component library</step>
+    <step order="6">Add control to a test form</step>
+    <step order="7">Test basic functionality in environment</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Solution imported successfully</criterion>
+    <criterion>Control visible in component library</criterion>
+    <criterion>Control renders on test form</criterion>
+    <criterion>Basic search functionality works</criterion>
+  </acceptance-criteria>
+</task>

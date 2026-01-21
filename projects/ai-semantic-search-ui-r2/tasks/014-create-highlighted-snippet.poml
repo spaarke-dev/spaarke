@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="014" status="pending">
+  <title>Create HighlightedSnippet component</title>
+  <description>
+    Create a component that displays content snippets with search term highlighting.
+    Highlights are marked up in the API response and need to be rendered safely.
+  </description>
+  <phase>2</phase>
+  <phase-name>Core Components</phase-name>
+  <tags>pcf, react, component, highlight</tags>
+  <dependencies>011</dependencies>
+  <parallel-group>phase2-components-c</parallel-group>
+  <parallel-safe>true</parallel-safe>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent tokens for highlight colors</constraint>
+    <constraint source="security">Sanitize any HTML in snippets</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Create components/HighlightedSnippet.tsx</step>
+    <step order="2">Define IHighlightedSnippetProps (snippets: string[])</step>
+    <step order="3">Parse highlight markers from API (e.g., &lt;em&gt; tags)</step>
+    <step order="4">Render highlighted text with styled spans</step>
+    <step order="5">Use token-based background color for highlights</step>
+    <step order="6">Handle multiple snippets with ellipsis separator</step>
+    <step order="7">Truncate long snippets with "..." indicator</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>HighlightedSnippet renders text with highlights</criterion>
+    <criterion>Highlight styling uses design tokens</criterion>
+    <criterion>Multiple snippets separated correctly</criterion>
+    <criterion>Long text truncates appropriately</criterion>
+  </acceptance-criteria>
+</task>

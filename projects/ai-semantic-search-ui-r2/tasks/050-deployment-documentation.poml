@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="050" status="pending">
+  <title>Deployment documentation</title>
+  <description>
+    Document the deployment process, configuration requirements, and troubleshooting
+    steps for the SemanticSearchControl.
+  </description>
+  <phase>8</phase>
+  <phase-name>Solution &amp; Deployment</phase-name>
+  <tags>documentation, deployment</tags>
+  <dependencies>049</dependencies>
+  <parallel-group>none</parallel-group>
+  <parallel-safe>false</parallel-safe>
+
+  <knowledge-files>
+    <file>projects/ai-semantic-search-ui-r2/spec.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Document build prerequisites</step>
+    <step order="2">Document solution import process</step>
+    <step order="3">Document control configuration (properties)</step>
+    <step order="4">Document external domain allowlist requirements</step>
+    <step order="5">Document authentication setup</step>
+    <step order="6">Add troubleshooting section</step>
+    <step order="7">Update project README with deployment info</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Deployment guide complete</criterion>
+    <criterion>All properties documented</criterion>
+    <criterion>External domain requirements clear</criterion>
+    <criterion>Troubleshooting section helpful</criterion>
+  </acceptance-criteria>
+</task>

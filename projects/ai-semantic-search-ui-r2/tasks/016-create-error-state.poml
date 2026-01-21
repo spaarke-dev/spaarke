@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="016" status="pending">
+  <title>Create ErrorState component</title>
+  <description>
+    Create a component to display when search encounters an error. Shows user-friendly
+    message with retry button.
+  </description>
+  <phase>2</phase>
+  <phase-name>Core Components</phase-name>
+  <tags>pcf, react, component, error-state</tags>
+  <dependencies>006</dependencies>
+  <parallel-group>phase2-components-a</parallel-group>
+  <parallel-safe>true</parallel-safe>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent v9 MessageBar or custom layout</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Create components/ErrorState.tsx</step>
+    <step order="2">Define IErrorStateProps (message: string, onRetry: () =&gt; void)</step>
+    <step order="3">Add error icon</step>
+    <step order="4">Display user-friendly error message</step>
+    <step order="5">Add "Try Again" button</step>
+    <step order="6">Style with warning/error tokens</step>
+    <step order="7">Handle network errors vs server errors with different messages</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>ErrorState renders error message</criterion>
+    <criterion>Try Again button present and functional</criterion>
+    <criterion>Styling uses error/warning tokens</criterion>
+    <criterion>Message is user-friendly (no stack traces)</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="006" status="pending">
+  <title>Create base component structure</title>
+  <description>
+    Create SemanticSearchControl.tsx as the main component with layout skeleton including
+    search input area, filter panel area, and results list area.
+  </description>
+  <phase>1</phase>
+  <phase-name>Project Setup &amp; Foundation</phase-name>
+  <tags>pcf, react, component</tags>
+  <dependencies>005</dependencies>
+  <parallel-group>none</parallel-group>
+  <parallel-safe>false</parallel-safe>
+
+  <constraints>
+    <constraint source="ADR-021">All styling via makeStyles with design tokens</constraint>
+    <constraint source="ADR-021">Fluent v9 components only</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    <file>projects/ai-semantic-search-ui-r2/spec.md</file>
+  </knowledge-files>
+
+  <reference-implementations>
+    <reference>src/client/pcf/DocumentRelationshipViewer/DocumentRelationshipViewer/components/</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">Create SemanticSearchControl.tsx in control directory</step>
+    <step order="2">Define ISemanticSearchControlProps interface</step>
+    <step order="3">Create styles using makeStyles with tokens</step>
+    <step order="4">Implement layout with three regions: header (search), sidebar (filters), main (results)</step>
+    <step order="5">Add placeholder content for each region</step>
+    <step order="6">Handle compactMode prop for different layouts</step>
+    <step order="7">Connect component to index.ts renderComponent()</step>
+    <step order="8">Verify rendering in Dataverse test harness</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>SemanticSearchControl.tsx renders without errors</criterion>
+    <criterion>Layout shows three distinct regions</criterion>
+    <criterion>Styling uses design tokens (no hard-coded colors)</criterion>
+    <criterion>compactMode changes layout appropriately</criterion>
+  </acceptance-criteria>
+</task>

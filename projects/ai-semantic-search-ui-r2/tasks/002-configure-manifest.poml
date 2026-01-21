@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="002" status="pending">
+  <title>Configure control manifest</title>
+  <description>
+    Define all control properties in ControlManifest.Input.xml including apiBaseUrl, tenantId, searchScope,
+    scopeId, showFilters, resultsLimit, placeholder, compactMode, and selectedDocumentId.
+  </description>
+  <phase>1</phase>
+  <phase-name>Project Setup &amp; Foundation</phase-name>
+  <tags>pcf, manifest, configuration</tags>
+  <dependencies>001</dependencies>
+  <parallel-group>phase1-config</parallel-group>
+  <parallel-safe>true</parallel-safe>
+
+  <constraints>
+    <constraint source="ADR-022">Must declare platform-library for React and Fluent</constraint>
+    <constraint source="spec.md">External domains must be allowlisted</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+    <file>projects/ai-semantic-search-ui-r2/spec.md</file>
+  </knowledge-files>
+
+  <reference-implementations>
+    <reference>src/client/pcf/DocumentRelationshipViewer/DocumentRelationshipViewer/ControlManifest.Input.xml</reference>
+  </reference-implementations>
+
+  <steps>
+    <step order="1">Open ControlManifest.Input.xml</step>
+    <step order="2">Add property: apiBaseUrl (SingleLine.Text, input)</step>
+    <step order="3">Add property: tenantId (SingleLine.Text, input)</step>
+    <step order="4">Add property: searchScope (Enum: all/matter/custom, input)</step>
+    <step order="5">Add property: scopeId (SingleLine.Text, bound)</step>
+    <step order="6">Add property: showFilters (TwoOptions, input, default true)</step>
+    <step order="7">Add property: resultsLimit (Whole.None, input, default 25)</step>
+    <step order="8">Add property: placeholder (SingleLine.Text, input)</step>
+    <step order="9">Add property: compactMode (TwoOptions, input, default false)</step>
+    <step order="10">Add property: selectedDocumentId (SingleLine.Text, output)</step>
+    <step order="11">Add platform-library declarations for React 16.14.0 and Fluent 9.46.2</step>
+    <step order="12">Add external-service-usage with allowed domains</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>All 9 properties defined correctly</criterion>
+    <criterion>Platform libraries declared</criterion>
+    <criterion>External domains allowlisted (dev API, login.microsoftonline.com)</criterion>
+    <criterion>Control builds with manifest</criterion>
+  </acceptance-criteria>
+</task>

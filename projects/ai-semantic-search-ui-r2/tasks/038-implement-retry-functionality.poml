@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="038" status="pending">
+  <title>Implement retry functionality</title>
+  <description>
+    Implement the retry functionality for the ErrorState "Try Again" button,
+    re-executing the last search operation.
+  </description>
+  <phase>6</phase>
+  <phase-name>Error Handling &amp; States</phase-name>
+  <tags>error-handling, retry</tags>
+  <dependencies>037</dependencies>
+  <parallel-group>none</parallel-group>
+  <parallel-safe>false</parallel-safe>
+
+  <constraints>
+    <constraint source="spec.md">"Try Again" button re-executes search</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>projects/ai-semantic-search-ui-r2/spec.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Store last search parameters in useSemanticSearch</step>
+    <step order="2">Create retry() function that re-executes with stored params</step>
+    <step order="3">Clear error state before retry</step>
+    <step order="4">Pass retry to ErrorState component</step>
+    <step order="5">Connect retry to "Try Again" button onClick</step>
+    <step order="6">Test retry after various error types</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>"Try Again" button re-executes search</criterion>
+    <criterion>Same query and filters used for retry</criterion>
+    <criterion>Error clears while retrying</criterion>
+    <criterion>Success after retry works correctly</criterion>
+  </acceptance-criteria>
+</task>

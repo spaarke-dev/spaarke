@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="023" status="pending">
+  <title>Integrate filters with Dataverse metadata</title>
+  <description>
+    Connect the FilterPanel and FilterDropdown components with DataverseMetadataService
+    to populate filter options dynamically from Dataverse.
+  </description>
+  <phase>3</phase>
+  <phase-name>API Integration &amp; State</phase-name>
+  <tags>integration, filters, dataverse</tags>
+  <dependencies>021, 022</dependencies>
+  <parallel-group>none</parallel-group>
+  <parallel-safe>false</parallel-safe>
+
+  <constraints>
+    <constraint source="spec.md">Dynamic filter population from Dataverse</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>projects/ai-semantic-search-ui-r2/spec.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Create hooks/useFilterOptions.ts</step>
+    <step order="2">Fetch options on component mount</step>
+    <step order="3">Manage loading state for each filter</step>
+    <step order="4">Pass options to FilterDropdown components</step>
+    <step order="5">Show loading placeholder while fetching</step>
+    <step order="6">Handle fetch errors with fallback empty options</step>
+    <step order="7">Integrate into FilterPanel component</step>
+    <step order="8">Verify dropdowns populate correctly</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Filter dropdowns populate from Dataverse</criterion>
+    <criterion>Loading state shown during fetch</criterion>
+    <criterion>Errors handled gracefully</criterion>
+    <criterion>Options persist after initial load</criterion>
+  </acceptance-criteria>
+</task>

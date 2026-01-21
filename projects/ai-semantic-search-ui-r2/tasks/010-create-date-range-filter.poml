@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="010" status="pending">
+  <title>Create DateRangeFilter component</title>
+  <description>
+    Create a date range picker component for filtering by document creation date.
+    Supports from/to date selection with optional "any" state.
+  </description>
+  <phase>2</phase>
+  <phase-name>Core Components</phase-name>
+  <tags>pcf, react, component, filters, date</tags>
+  <dependencies>008</dependencies>
+  <parallel-group>phase2-components-b</parallel-group>
+  <parallel-safe>true</parallel-safe>
+
+  <constraints>
+    <constraint source="ADR-021">Use Fluent v9 date components if available</constraint>
+    <constraint source="spec.md">Date range applies to document createdOn field</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Create components/DateRangeFilter.tsx</step>
+    <step order="2">Define IDateRangeFilterProps (from, to, onChange)</step>
+    <step order="3">Use Fluent Input type="date" or DatePicker if available</step>
+    <step order="4">Create two date inputs: From and To</step>
+    <step order="5">Allow null values for open-ended ranges</step>
+    <step order="6">Validate that From &lt;= To when both set</step>
+    <step order="7">Add quick presets (Last 30 days, Last 90 days, This year)</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>DateRangeFilter renders from/to inputs</criterion>
+    <criterion>Date selection updates filter state</criterion>
+    <criterion>Validation prevents invalid ranges</criterion>
+    <criterion>Presets populate dates correctly</criterion>
+  </acceptance-criteria>
+</task>

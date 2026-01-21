@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="032" status="pending">
+  <title>Implement Open Record (New Tab)</title>
+  <description>
+    Implement the alternative Open Record action that opens the Dataverse record in a new
+    browser tab using Xrm.Navigation.navigateTo with target: 1.
+  </description>
+  <phase>5</phase>
+  <phase-name>Navigation &amp; Actions</phase-name>
+  <tags>navigation, actions, dataverse</tags>
+  <dependencies>012</dependencies>
+  <parallel-group>phase5-actions</parallel-group>
+  <parallel-safe>true</parallel-safe>
+
+  <constraints>
+    <constraint source="spec.md">Use Xrm.Navigation.navigateTo with target: 1</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>projects/ai-semantic-search-ui-r2/spec.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Create handleOpenRecordNewTab function</step>
+    <step order="2">Extract entityLogicalName and recordId from result</step>
+    <step order="3">Build navigateTo parameters</step>
+    <step order="4">Set target: 1 for new tab</step>
+    <step order="5">Handle navigation result/error</step>
+    <step order="6">Test new tab navigation in Dataverse</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Selecting "Open in New Tab" opens record in new tab</criterion>
+    <criterion>New tab shows correct record form</criterion>
+    <criterion>Original search page remains open</criterion>
+  </acceptance-criteria>
+</task>

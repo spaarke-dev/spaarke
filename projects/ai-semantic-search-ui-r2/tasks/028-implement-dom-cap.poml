@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="028" status="pending">
+  <title>Implement DOM cap (200 items)</title>
+  <description>
+    Enforce maximum 200 items in the DOM for performance. When results exceed cap,
+    show "Showing first 200 of X results" with a "View all" link.
+  </description>
+  <phase>4</phase>
+  <phase-name>Infinite Scroll &amp; Performance</phase-name>
+  <tags>performance, dom</tags>
+  <dependencies>026</dependencies>
+  <parallel-group>none</parallel-group>
+  <parallel-safe>false</parallel-safe>
+
+  <constraints>
+    <constraint source="spec.md">Maximum 200 items rendered in DOM</constraint>
+    <constraint source="spec.md">Show "Showing first 200 of {totalCount}" message</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>projects/ai-semantic-search-ui-r2/spec.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Define DOM_CAP constant = 200</step>
+    <step order="2">Modify useSemanticSearch to stop loading at cap</step>
+    <step order="3">Add isAtCap computed value</step>
+    <step order="4">Show cap message in ResultsList when isAtCap=true</step>
+    <step order="5">Add "View all" link to cap message</step>
+    <step order="6">Disable infinite scroll when at cap</step>
+    <step order="7">Test with large result sets</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Loading stops at 200 items</criterion>
+    <criterion>Cap message displays correctly</criterion>
+    <criterion>"View all" link navigates to Custom Page</criterion>
+    <criterion>Infinite scroll disabled at cap</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<task id="045" status="pending">
+  <title>Dark mode testing</title>
+  <description>
+    Verify all components render correctly in dark mode and high-contrast mode.
+    Ensure no hard-coded colors and all styling uses design tokens.
+  </description>
+  <phase>7</phase>
+  <phase-name>Testing &amp; Polish</phase-name>
+  <tags>testing, theming, dark-mode</tags>
+  <dependencies>all components</dependencies>
+  <parallel-group>none</parallel-group>
+  <parallel-safe>false</parallel-safe>
+
+  <constraints>
+    <constraint source="ADR-021">No hard-coded colors</constraint>
+    <constraint source="ADR-021">Support light, dark, high-contrast</constraint>
+  </constraints>
+
+  <knowledge-files>
+    <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+  </knowledge-files>
+
+  <steps>
+    <step order="1">Set up theme testing with all three themes</step>
+    <step order="2">Render control with webDarkTheme</step>
+    <step order="3">Visual inspection of all components</step>
+    <step order="4">Check for hard-coded colors in styles</step>
+    <step order="5">Test high-contrast theme</step>
+    <step order="6">Fix any theme-related issues found</step>
+    <step order="7">Document any known limitations</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>All components render correctly in dark mode</criterion>
+    <criterion>No hard-coded colors found</criterion>
+    <criterion>High-contrast mode accessible</criterion>
+    <criterion>Theme switching works dynamically</criterion>
+  </acceptance-criteria>
+</task>
