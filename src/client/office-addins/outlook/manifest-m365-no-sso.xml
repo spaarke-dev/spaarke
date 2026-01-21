@@ -165,16 +165,6 @@
         </bt:LongStrings>
       </Resources>
 
-      <!-- Web Application Info for SSO -->
-      <WebApplicationInfo>
-        <Id>c1258e2d-1688-49d2-ac99-a7485ebd9995</Id>
-        <Resource>api://icy-desert-0bfdbb61e.6.azurestaticapps.net/c1258e2d-1688-49d2-ac99-a7485ebd9995</Resource>
-        <Scopes>
-          <Scope>User.Read</Scope>
-          <Scope>profile</Scope>
-        </Scopes>
-      </WebApplicationInfo>
-
     </VersionOverrides>
   </VersionOverrides>
 </OfficeApp>
