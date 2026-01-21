@@ -493,4 +493,92 @@ public class OpenAiClient : IOpenAiClient
             throw;
         }
     }
+
+    /// <summary>
+    /// Execute a chat completion with function calling tools.
+    /// Used for agentic workflows where the model can call tools.
+    /// Protected by circuit breaker - throws OpenAiCircuitBrokenException when open.
+    /// </summary>
+    /// <param name="messages">The conversation messages including system, user, assistant, and tool messages.</param>
+    /// <param name="tools">The available tools the model can call.</param>
+    /// <param name="model">Optional model override. Defaults to configured model.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Chat completion result with either content or tool calls.</returns>
+    /// <exception cref="OpenAiCircuitBrokenException">Thrown when circuit breaker is open.</exception>
+    public async Task<ChatCompletionResult> GetChatCompletionWithToolsAsync(
+        IEnumerable<ChatMessage> messages,
+        IEnumerable<ChatTool> tools,
+        string? model = null,
+        CancellationToken cancellationToken = default)
+    {
+        var deploymentName = model ?? _options.SummarizeModel;
+        var chatClient = _client.GetChatClient(deploymentName);
+
+        var chatOptions = new ChatCompletionOptions
+        {
+            MaxOutputTokenCount = _options.MaxOutputTokens,
+            Temperature = _options.Temperature
+        };
+
+        // Add tools to the options
+        foreach (var tool in tools)
+        {
+            chatOptions.Tools.Add(tool);
+        }
+
+        var messageList = messages.ToList();
+
+        _logger.LogDebug(
+            "Starting chat completion with tools. Model={Model}, MessageCount={MessageCount}, ToolCount={ToolCount}",
+            deploymentName, messageList.Count, chatOptions.Tools.Count);
+
+        try
+        {
+            var response = await _circuitBreaker.ExecuteAsync(async ct =>
+            {
+                return await chatClient.CompleteChatAsync(messageList, chatOptions, ct);
+            }, cancellationToken);
+
+            var completion = response.Value;
+
+            // Check if the model wants to call tools
+            if (completion.FinishReason == ChatFinishReason.ToolCalls && completion.ToolCalls.Count > 0)
+            {
+                _logger.LogInformation(
+                    "Chat completion returned {ToolCallCount} tool calls",
+                    completion.ToolCalls.Count);
+
+                return new ChatCompletionResult
+                {
+                    Content = null,
+                    ToolCalls = completion.ToolCalls.ToList(),
+                    FinishReason = completion.FinishReason
+                };
+            }
+
+            // Model returned content (no tool calls)
+            var content = completion.Content.FirstOrDefault()?.Text ?? string.Empty;
+
+            _logger.LogDebug(
+                "Chat completion finished. Model={Model}, ResponseLength={Length}, FinishReason={FinishReason}",
+                deploymentName, content.Length, completion.FinishReason);
+
+            return new ChatCompletionResult
+            {
+                Content = content,
+                ToolCalls = [],
+                FinishReason = completion.FinishReason
+            };
+        }
+        catch (BrokenCircuitException)
+        {
+            _logger.LogWarning("OpenAI circuit breaker is open. Rejecting chat completion with tools request.");
+            throw new OpenAiCircuitBrokenException(BreakDuration);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get chat completion with tools. Model={Model}", deploymentName);
+            throw;
+        }
+    }
 }

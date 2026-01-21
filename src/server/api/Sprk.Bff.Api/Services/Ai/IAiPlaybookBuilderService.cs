@@ -56,6 +56,21 @@ public interface IAiPlaybookBuilderService
     IAsyncEnumerable<Models.Ai.TestExecutionEvent> ExecuteTestAsync(
         Models.Ai.TestPlaybookRequest request,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Generate a structured clarification question based on a low-confidence classification result.
+    /// Used when intent classification confidence is below threshold.
+    /// </summary>
+    /// <param name="message">The original user message that needs clarification.</param>
+    /// <param name="canvasContext">Current canvas context for disambiguation.</param>
+    /// <param name="lowConfidenceResult">The initial low-confidence classification result.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A structured clarification question with options and suggestions.</returns>
+    Task<Models.Ai.ClarificationQuestion> GenerateClarificationAsync(
+        string message,
+        CanvasContext? canvasContext,
+        Models.Ai.AiIntentResult? lowConfidenceResult,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -77,6 +92,17 @@ public record BuilderRequest
 
     /// <summary>Previous messages in the conversation.</summary>
     public BuilderChatMessage[]? ChatHistory { get; init; }
+
+    /// <summary>
+    /// User's response to a clarification request (if this is a continuation of a clarification flow).
+    /// When provided, the service will re-classify using this context.
+    /// </summary>
+    public Models.Ai.ClarificationResponse? ClarificationResponse { get; init; }
+
+    /// <summary>
+    /// Indicates whether this request is a response to a clarification question.
+    /// </summary>
+    public bool IsClarificationResponse => ClarificationResponse != null;
 }
 
 /// <summary>
@@ -273,6 +299,12 @@ public record IntentClassification
 
     /// <summary>Clarification question if needed.</summary>
     public string? ClarificationQuestion { get; init; }
+
+    /// <summary>
+    /// Conversational message from the AI to display to the user.
+    /// This is the AI's friendly explanation of what it's doing.
+    /// </summary>
+    public string? Message { get; init; }
 }
 
 /// <summary>

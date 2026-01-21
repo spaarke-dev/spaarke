@@ -1,10 +1,10 @@
 # RAG Architecture Guide
 
-> **Version**: 1.2
+> **Version**: 1.4
 > **Created**: 2025-12-29
-> **Updated**: 2026-01-16
-> **Project**: AI Document Intelligence R3 + RAG Pipeline R1
-> **Status**: R3 Phases 1-5 Complete, RAG Pipeline Phase 1 Complete
+> **Updated**: 2026-01-20
+> **Project**: AI Document Intelligence R3 + RAG Pipeline R1 + Semantic Search Foundation R1
+> **Status**: R3 Phases 1-5 Complete, RAG Pipeline Phase 1 Complete, Semantic Search R1 Complete
 
 ---
 
@@ -15,13 +15,14 @@
 3. [File Indexing Pipeline](#file-indexing-pipeline)
 4. [Deployment Models](#deployment-models)
 5. [Hybrid Search Pipeline](#hybrid-search-pipeline)
-6. [Index Schema](#index-schema)
-7. [Service Architecture](#service-architecture)
-8. [Job Processing](#job-processing)
-9. [Embedding Cache](#embedding-cache)
-10. [Security and Isolation](#security-and-isolation)
-11. [Performance Characteristics](#performance-characteristics)
-12. [Integration Points](#integration-points)
+6. [Semantic Search API](#semantic-search-api) *(R1 - NEW)*
+7. [Index Schema](#index-schema)
+8. [Service Architecture](#service-architecture)
+9. [Job Processing](#job-processing)
+10. [Embedding Cache](#embedding-cache)
+11. [Security and Isolation](#security-and-isolation)
+12. [Performance Characteristics](#performance-characteristics)
+13. [Integration Points](#integration-points)
 
 ---
 
@@ -406,6 +407,171 @@ User Query: "What are the payment terms for contracts?"
 
 ---
 
+## Semantic Search API
+
+> **Added in**: Semantic Search Foundation R1 (2026-01-20)
+
+The Semantic Search API provides a **general-purpose search capability** for searching documents across entity scopes (Matter, Project, Invoice, Account, Contact). It builds on the RAG hybrid search pipeline but exposes a simplified, entity-aware API.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Semantic Search Endpoints                     │
+├─────────────────────────────────────────────────────────────────┤
+│  SemanticSearchEndpoints.cs                                      │
+│  ├── POST /api/ai/search        → Hybrid semantic search         │
+│  └── POST /api/ai/search/count  → Document count (pagination)    │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    SemanticSearchService                         │
+├─────────────────────────────────────────────────────────────────┤
+│  ISemanticSearchService (SemanticSearchService.cs)               │
+│  ├── SearchAsync()      → Execute hybrid search                  │
+│  ├── CountAsync()       → Count matching documents               │
+│  ├── BuildFilters()     → Construct OData filters                │
+│  └── BuildSearchQuery() → Build Azure AI Search query            │
+│                                                                  │
+│  Extensibility Hooks (R1: no-op implementations):               │
+│  ├── IQueryPreprocessor  → Future query expansion                │
+│  └── IResultPostprocessor → Future result enrichment            │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    Shared Infrastructure                         │
+├─────────────────────────────────────────────────────────────────┤
+│  IEmbeddingService      → Generate query embeddings              │
+│  IKnowledgeDeploymentService → Route to correct index           │
+│  IAiSearchClientFactory → Get SearchClient for tenant           │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/ai/search` | POST | Execute hybrid semantic search |
+| `/api/ai/search/count` | POST | Get count of matching documents |
+
+### Scoping Models
+
+Semantic Search supports two scoping models for R1:
+
+| Scope | Description | Required Fields |
+|-------|-------------|-----------------|
+| `entity` | Search within a parent entity (Matter, Project, etc.) | `entityType`, `entityId` |
+| `documentIds` | Search specific documents by ID list | `documentIds[]` (max 100) |
+
+**Note**: `scope=all` is NOT supported in R1 and returns HTTP 400.
+
+### Hybrid Search Modes
+
+The API supports three search modes via `options.hybridMode`:
+
+| Mode | Description | When to Use |
+|------|-------------|-------------|
+| `rrf` (default) | Reciprocal Rank Fusion (vector + keyword) | Best overall relevance |
+| `vector` | Vector search only | When semantic similarity is priority |
+| `keyword` | Keyword search only | When exact term matching is needed |
+
+### Request Schema
+
+```json
+{
+  "query": "search terms",
+  "scope": "entity",
+  "entityType": "matter",
+  "entityId": "guid-of-matter",
+  "options": {
+    "hybridMode": "rrf",
+    "top": 10,
+    "skip": 0,
+    "minRelevanceScore": 0.5,
+    "documentTypes": ["contract", "invoice"],
+    "fileTypes": [".pdf", ".docx"],
+    "tags": ["legal"],
+    "dateRange": {
+      "from": "2024-01-01",
+      "to": "2024-12-31"
+    },
+    "includeContent": true
+  }
+}
+```
+
+### Response Schema
+
+```json
+{
+  "results": [
+    {
+      "documentId": "chunk-id",
+      "speFileId": "spe-file-id",
+      "fileName": "Contract.pdf",
+      "documentType": "contract",
+      "content": "Chunk content...",
+      "combinedScore": 0.85,
+      "parentEntityType": "matter",
+      "parentEntityId": "matter-guid",
+      "parentEntityName": "Smith vs. Jones",
+      "highlights": ["<em>payment</em> terms..."]
+    }
+  ],
+  "metadata": {
+    "totalResults": 42,
+    "returnedResults": 10,
+    "searchDurationMs": 245,
+    "searchMode": "rrf",
+    "embeddingGenerated": true
+  }
+}
+```
+
+### Authorization
+
+Semantic Search uses `SemanticSearchAuthorizationFilter` for security trimming:
+
+1. **Entity Scope**: Validates user has access to the parent entity via Dataverse permissions
+2. **DocumentIds Scope**: Validates user has access to each specified document
+
+### AI Tool Integration
+
+The `SemanticSearchToolHandler` integrates semantic search with the AI Tool Framework for Copilot integration:
+
+```csharp
+// Tool definition
+{
+  "name": "search_documents",
+  "description": "Search documents using natural language",
+  "parameters": {
+    "query": "string - search query",
+    "scope": "string - entity or documentIds",
+    "entityType": "string - matter, project, etc.",
+    "entityId": "string - entity GUID"
+  }
+}
+```
+
+### Graceful Degradation
+
+If embedding generation fails:
+1. Log warning with error details
+2. Fall back to keyword-only search
+3. Return results with `metadata.embeddingGenerated = false`
+
+### Performance Targets
+
+| Metric | Target | Notes |
+|--------|--------|-------|
+| Search P50 | < 500ms | End-to-end including embedding |
+| Search P95 | < 1000ms | With cold embedding cache |
+| Count P50 | < 200ms | No embedding required |
+
+---
+
 ## Index Schema
 
 ### Field Definitions
@@ -427,6 +593,9 @@ User Query: "What are the payment terms for contracts?"
 | `metadata` | String | No | No | JSON metadata blob |
 | `createdAt` | DateTimeOffset | No | Yes | Creation timestamp |
 | `updatedAt` | DateTimeOffset | No | Yes | Last update timestamp |
+| `parentEntityType` | String | No | Yes | Parent entity type (matter, project, etc.) *(R1)* |
+| `parentEntityId` | String | No | Yes | Parent entity GUID *(R1)* |
+| `parentEntityName` | String | Yes | No | Parent entity display name *(R1)* |
 
 ### Vector Configuration
 
@@ -530,11 +699,32 @@ public interface IRagService
 
 ## Job Processing
 
-The RAG pipeline supports async job processing via `RagIndexingJobHandler` for background file indexing.
+The RAG pipeline supports async job processing via a single `sdap-jobs` Azure Service Bus queue. All background indexing flows through `ServiceBusJobProcessor` which routes to job handlers by type.
 
-### Job Handler Architecture
+### Job Processing Architecture
 
 ```
+┌─────────────────────────────────────────────────────────────────┐
+│  Entry Points                                                    │
+├─────────────────────────────────────────────────────────────────┤
+│  PCF FileUpload  ──► POST /api/ai/rag/index-file (direct)       │
+│  Email Processing ──► sdap-jobs queue (async)                   │
+│  API Endpoint    ──► POST /api/ai/rag/enqueue-indexing (async)  │
+│  Bulk Admin      ──► POST /api/ai/rag/admin/bulk-index (async)  │
+└─────────────────────────────────────────────────────────────────┘
+                              │ (async paths)
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  ServiceBusJobProcessor (sdap-jobs queue)                        │
+├─────────────────────────────────────────────────────────────────┤
+│  - Deserializes JobContract from Service Bus message            │
+│  - Routes to handler by JobType                                  │
+│  - Handles retries, dead-letter queue                           │
+│  - JobType: "RagIndexing" → RagIndexingJobHandler               │
+│  - JobType: "BulkRagIndexing" → BulkRagIndexingJobHandler       │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │  RagIndexingJobHandler                                           │
 ├─────────────────────────────────────────────────────────────────┤
@@ -826,6 +1016,7 @@ When the circuit is open, returns `503 Service Unavailable` with error code `ai_
 ---
 
 *Document created: 2025-12-29*
-*Updated: 2026-01-16*
+*Updated: 2026-01-20 - Semantic Search API section added*
 *AI Document Intelligence R3 - Phases 1-5 Complete*
 *RAG Pipeline R1 - Phase 1 Complete*
+*Semantic Search Foundation R1 - Complete (hybrid search API, entity scoping, AI Tool integration)*

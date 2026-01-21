@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="ai-semantic-search-foundation-r1">
+  <metadata>
+    <title>Unit tests for SearchFilterBuilder</title>
+    <phase>5: Testing &amp; Validation</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>011</dependencies>
+    <blocks>045</blocks>
+    <tags>testing, unit-tests</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Test writing, follows established patterns</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Write comprehensive unit tests for SearchFilterBuilder covering all filter
+    combinations, edge cases, and security scenarios (injection prevention).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in unit testing with xUnit.
+  </role>
+
+  <goal>
+    Comprehensive test coverage for SearchFilterBuilder:
+    - Tenant isolation always included
+    - Entity scope filters
+    - DocumentIds scope filters
+    - Optional filters (documentTypes, fileTypes, tags, dateRange)
+    - Filter injection prevention
+  </goal>
+
+  <context>
+    <background>
+      SearchFilterBuilder is critical for correct and secure query construction.
+      Tests must verify all filter combinations generate valid OData syntax and
+      that user input is properly escaped to prevent injection attacks.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SearchFilterBuilder.cs</file>
+      <file>tests/unit/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="testing">Use xUnit for test framework</constraint>
+    <constraint source="testing">Target 80%+ code coverage</constraint>
+    <constraint source="testing">Test injection prevention explicitly</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>tests/unit/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SearchFilterBuilder.cs</file>
+    </files>
+    <patterns>
+      <pattern name="Existing Unit Tests" location="tests/unit/">
+        Follow existing unit test patterns
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create SearchFilterBuilderTests.cs in tests/unit/</step>
+    <step order="2">Test: Tenant filter always included</step>
+    <step order="3">Test: Entity scope generates correct filter</step>
+    <step order="4">Test: DocumentIds scope uses search.in()</step>
+    <step order="5">Test: documentTypes filter</step>
+    <step order="6">Test: fileTypes filter</step>
+    <step order="7">Test: tags filter</step>
+    <step order="8">Test: dateRange filter (createdAt, updatedAt)</step>
+    <step order="9">Test: Combined filters</step>
+    <step order="10">Test: Single quote escaping (injection prevention)</step>
+    <step order="11">Run tests with dotnet test</step>
+    <step order="12">Verify code coverage</step>
+    <step order="13">Update TASK-INDEX.md: change task 040 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/unit/SemanticSearch/SearchFilterBuilderTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Test file exists with comprehensive tests</criterion>
+    <criterion testable="true">Tenant filter test passes</criterion>
+    <criterion testable="true">Entity scope tests pass</criterion>
+    <criterion testable="true">DocumentIds scope tests pass</criterion>
+    <criterion testable="true">Optional filter tests pass</criterion>
+    <criterion testable="true">Injection prevention test passes</criterion>
+    <criterion testable="true">All tests pass with dotnet test</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

@@ -4,6 +4,9 @@ using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Xunit;
 
+// Explicit alias for Services.Ai.OperationType (ModelSelector's enum)
+using SvcOperationType = Sprk.Bff.Api.Services.Ai.OperationType;
+
 namespace Sprk.Bff.Api.Tests.Services.Ai;
 
 /// <summary>
@@ -26,7 +29,7 @@ public class BuildPlanGenerationServiceTests
 
         // Default model selection returns o1-mini for plan generation
         _mockModelSelector
-            .Setup(x => x.SelectModel(OperationType.PlanGeneration))
+            .Setup(x => x.SelectModel(SvcOperationType.PlanGeneration))
             .Returns("o1-mini");
 
         _service = new BuildPlanGenerationService(
@@ -92,7 +95,7 @@ public class BuildPlanGenerationServiceTests
         await _service.GenerateBuildPlanAsync(context);
 
         // Assert
-        _mockModelSelector.Verify(x => x.SelectModel(OperationType.PlanGeneration), Times.Once);
+        _mockModelSelector.Verify(x => x.SelectModel(SvcOperationType.PlanGeneration), Times.Once);
         Assert.Equal("o1-mini", capturedModel);
     }
 

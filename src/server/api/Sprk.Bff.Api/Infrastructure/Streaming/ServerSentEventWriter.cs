@@ -103,6 +103,7 @@ public static class ServerSentEventWriter
 
     /// <summary>
     /// Write an error event.
+    /// Task 050: Added correlationId parameter for error tracing support.
     /// </summary>
     public static Task WriteErrorAsync(
         HttpResponse response,
@@ -110,8 +111,9 @@ public static class ServerSentEventWriter
         string? code = null,
         bool isRecoverable = true,
         string? suggestedAction = null,
+        string? correlationId = null,
         CancellationToken cancellationToken = default) =>
-        WriteEventAsync(response, ErrorEvent.Create(message, code, isRecoverable, suggestedAction), cancellationToken);
+        WriteEventAsync(response, ErrorEvent.Create(message, code, isRecoverable, suggestedAction, correlationId), cancellationToken);
 
     /// <summary>
     /// Write a clarification event.

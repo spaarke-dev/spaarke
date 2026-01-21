@@ -1,9 +1,9 @@
 # AI Azure Resources
 
-> **Last Updated**: January 16, 2026
+> **Last Updated**: January 20, 2026
 > **Purpose**: Quick reference for AI-related Azure resource IDs and configuration.
 > **Secrets**: Actual secrets stored in `config/ai-config.local.json` (gitignored)
-> **Verified**: AI Search & Visualization Module (2026-01-12), RAG Pipeline R1 (2026-01-16)
+> **Verified**: AI Search & Visualization Module (2026-01-12), RAG Pipeline R1 (2026-01-16), Semantic Search R1 (2026-01-20)
 
 ---
 
@@ -217,11 +217,17 @@ Current production index with 3072-dim vectors and document visualization suppor
 | **Semantic Config** | `knowledge-semantic-config` |
 | **Multi-Tenant Fields** | `tenantId`, `deploymentId`, `deploymentModel` |
 | **File Fields** | `speFileId` (required), `documentId` (optional for orphans), `fileName`, `fileType` |
+| **Parent Entity Fields** | `parentEntityType`, `parentEntityId`, `parentEntityName` *(R1 - NEW)* |
 
 **New Features (AI Search & Visualization Module - 2026-01-12)**:
 - **Document-level vectors**: `documentVector3072` enables similarity search across entire documents
 - **Orphan file support**: Files without Dataverse records supported (`documentId` nullable)
 - **File metadata**: `speFileId`, `fileName`, `fileType` for better identification
+
+**New Features (Semantic Search Foundation R1 - 2026-01-20)**:
+- **Parent entity scoping**: `parentEntityType`, `parentEntityId`, `parentEntityName` enable entity-scoped search
+- **Entity types supported**: matter, project, invoice, account, contact
+- **Semantic Search API**: `/api/ai/search` endpoint with hybrid RRF, vector-only, and keyword-only modes
 
 **Index Definition**: [`infrastructure/ai-search/spaarke-knowledge-index-v2.json`](../../infrastructure/ai-search/spaarke-knowledge-index-v2.json)
 
@@ -430,4 +436,4 @@ The RAG Pipeline (Phase 1 Complete) adds file indexing capabilities:
 ---
 
 *Created: December 9, 2025*
-*Updated: January 17, 2026 (RAG Pipeline R1, Service Bus)*
+*Updated: January 20, 2026 (Semantic Search Foundation R1)*

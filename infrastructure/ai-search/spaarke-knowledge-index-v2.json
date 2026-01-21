@@ -198,6 +198,31 @@
       "filterable": true,
       "sortable": true,
       "facetable": false
+    },
+    {
+      "name": "parentEntityType",
+      "type": "Edm.String",
+      "searchable": false,
+      "filterable": true,
+      "sortable": false,
+      "facetable": true
+    },
+    {
+      "name": "parentEntityId",
+      "type": "Edm.String",
+      "searchable": false,
+      "filterable": true,
+      "sortable": false,
+      "facetable": false
+    },
+    {
+      "name": "parentEntityName",
+      "type": "Edm.String",
+      "searchable": true,
+      "filterable": false,
+      "sortable": true,
+      "facetable": false,
+      "analyzer": "standard.lucene"
     }
   ],
   "vectorSearch": {

@@ -153,6 +153,9 @@ export class VisualizationApiService {
     /**
      * Build a map of node ID to primary relationship data.
      * For each node, finds the highest-priority relationship from connected edges.
+     * Assigns relationships to BOTH source and target of each edge since edge direction
+     * varies by relationship type (semantic edges go from center outward, while
+     * same_matter edges go from document to parent hub).
      */
     private buildNodeRelationshipMap(
         edges: ApiDocumentEdge[]
@@ -169,19 +172,21 @@ export class VisualizationApiService {
         const nodeRelationships = new Map<string, { type: string; label: string; similarity: number }>();
 
         for (const edge of edges) {
-            // Edges connect source → target, so the source node has this relationship
-            const nodeId = edge.source;
             const relType = edge.data.relationshipType;
             const relLabel = getRelationshipLabel(relType, edge.data.relationshipLabel);
             const similarity = edge.data.similarity;
 
-            const existing = nodeRelationships.get(nodeId);
-            const existingPriority = existing ? (relationshipPriority[existing.type] ?? 99) : 99;
-            const newPriority = relationshipPriority[relType] ?? 99;
+            // Assign relationship to BOTH nodes in the edge
+            // The source document will be filtered out later (it has isSource=true and doesn't show relationship label)
+            for (const nodeId of [edge.source, edge.target]) {
+                const existing = nodeRelationships.get(nodeId);
+                const existingPriority = existing ? (relationshipPriority[existing.type] ?? 99) : 99;
+                const newPriority = relationshipPriority[relType] ?? 99;
 
-            // Update if this relationship has higher priority (lower number)
-            if (newPriority < existingPriority) {
-                nodeRelationships.set(nodeId, { type: relType, label: relLabel, similarity });
+                // Update if this relationship has higher priority (lower number)
+                if (newPriority < existingPriority) {
+                    nodeRelationships.set(nodeId, { type: relType, label: relLabel, similarity });
+                }
             }
         }
 
@@ -215,6 +220,7 @@ export class VisualizationApiService {
             speFileId: apiNode.data.speFileId,
             name: apiNode.data.label,
             fileType,
+            documentType: apiNode.data.documentType,
             // Use similarity from relationship data if available (for direct relationships),
             // otherwise use the API node similarity (for semantic)
             similarity: relationshipData?.similarity ?? apiNode.data.similarity,
@@ -228,6 +234,8 @@ export class VisualizationApiService {
             fileUrl: apiNode.data.fileUrl,
             recordUrl: apiNode.data.recordUrl,
             sharedKeywords: apiNode.data.extractedKeywords,
+            createdOn: apiNode.data.createdOn,
+            modifiedOn: apiNode.data.modifiedOn,
         };
 
         return {

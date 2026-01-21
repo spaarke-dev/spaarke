@@ -1,0 +1,60 @@
+<task id="013" project="ai-playbook-node-builder-r3">
+  <metadata>
+    <title>Phase 2 AI Intent Integration Testing</title>
+    <phase>2</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>testing, integration-test, ai</tags>
+    <dependencies>012</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Perform integration testing of AI intent classification and clarification flow against real Azure OpenAI.</goal>
+
+    <context>
+      Phase 2 features need end-to-end testing with actual AI calls to verify classification accuracy and clarification relevance.
+    </context>
+
+    <constraints>
+      - Test with various user message types
+      - Verify confidence thresholds
+      - Test clarification round-trip
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/AiPlaybookBuilderService.cs" reason="Service to test" />
+      <file path="scripts/Test-SdapBffApi.ps1" reason="API testing" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create test cases covering all intent types</step>
+    <step order="2">Test high-confidence classification (clear intents)</step>
+    <step order="3">Test low-confidence classification (ambiguous messages)</step>
+    <step order="4">Verify clarification questions are relevant</step>
+    <step order="5">Test clarification response and re-classification</step>
+    <step order="6">Test model selection (4o vs 4o-mini)</step>
+    <step order="7">Document classification accuracy</step>
+    <step order="8">Deploy updates to development environment</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Run tests and deploy</tool>
+    <tool name="Write">Document test results</tool>
+  </tools>
+
+  <outputs>
+    <output type="tests">Integration test results</output>
+    <output type="documentation">Classification accuracy report</output>
+    <output type="deployment">API deployed with Phase 2 features</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Clear intents classified with >0.8 confidence</criterion>
+    <criterion>Ambiguous messages trigger clarification</criterion>
+    <criterion>Clarification questions are contextually appropriate</criterion>
+    <criterion>Model selection affects response (4o more detailed)</criterion>
+  </acceptance-criteria>
+</task>

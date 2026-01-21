@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="ai-semantic-search-foundation-r1">
+  <metadata>
+    <title>Update KnowledgeDocument model with parent entity fields</title>
+    <phase>1: Index Schema &amp; Infrastructure</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>003</blocks>
+    <tags>bff-api, ai, models</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Model change affects indexing and search throughout codebase</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Update the KnowledgeDocument model to include the new parent entity fields
+    (parentEntityType, parentEntityId, parentEntityName). These fields map to the
+    Azure AI Search index schema changes from task 001.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in C# models and Azure AI Search SDK.
+    Follow ADR-013 for AI architecture patterns.
+  </role>
+
+  <goal>
+    KnowledgeDocument.cs updated with ParentEntityType, ParentEntityId, ParentEntityName
+    properties that map to the index schema. Build succeeds.
+  </goal>
+
+  <context>
+    <background>
+      The KnowledgeDocument class is the C# representation of documents indexed in Azure AI Search.
+      Adding the parent entity fields enables the indexing service to populate these values when
+      documents are processed, and the search service to include them in results.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs</file>
+      <file>infrastructure/ai-search/spaarke-knowledge-index-v2.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">Keep models simple; no unnecessary abstractions</constraint>
+    <constraint source="spec">ParentEntityType is nullable string, valid values: matter, project, invoice, account, contact</constraint>
+    <constraint source="spec">ParentEntityId is nullable string (GUID format)</constraint>
+    <constraint source="spec">ParentEntityName is nullable string</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs</file>
+      <file>infrastructure/ai-search/spaarke-knowledge-index-v2.json</file>
+    </files>
+    <patterns>
+      <pattern name="Existing Model Pattern" location="src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs">
+        Follow existing property patterns with SearchableField/SimpleField attributes
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read current KnowledgeDocument.cs model</step>
+    <step order="2">Review index schema for field attribute requirements</step>
+    <step order="3">Add ParentEntityType property (string?, filterable)</step>
+    <step order="4">Add ParentEntityId property (string?, filterable)</step>
+    <step order="5">Add ParentEntityName property (string?, searchable)</step>
+    <step order="6">Add appropriate Azure Search SDK attributes</step>
+    <step order="7">Add XML documentation for new properties</step>
+    <step order="8">Run dotnet build to verify compilation</step>
+    <step order="9">Update TASK-INDEX.md: change task 002 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ParentEntityType property exists with correct attributes</criterion>
+    <criterion testable="true">ParentEntityId property exists with correct attributes</criterion>
+    <criterion testable="true">ParentEntityName property exists with correct attributes</criterion>
+    <criterion testable="true">Properties are nullable (allow old documents without values)</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

@@ -23,6 +23,7 @@ using Sprk.Bff.Api.Infrastructure.Startup;
 using Sprk.Bff.Api.Infrastructure.Validation;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.SemanticSearch;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -377,6 +378,10 @@ if (analysisEnabled && documentIntelligenceEnabled)
     // AI Playbook Builder Service - conversational AI assistance for playbook building (ai-playbook-node-builder-r2 project)
     builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IAiPlaybookBuilderService, Sprk.Bff.Api.Services.Ai.AiPlaybookBuilderService>();
 
+    // Builder Agent Service - agentic loop for "Claude Code for Playbooks" pattern with function calling (ai-playbook-node-builder-r2 Phase 2)
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.Builder.BuilderToolExecutor>();
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.Builder.IBuilderAgentService, Sprk.Bff.Api.Services.Ai.Builder.BuilderAgentService>();
+
     // Model Selector - tiered AI model selection for cost optimization (ai-playbook-node-builder-r2 project)
     // Maps operation types to optimal models: mini for fast ops, o1-mini for reasoning, gpt-4o for generation
     builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.IModelSelector, Sprk.Bff.Api.Services.Ai.ModelSelector>();
@@ -477,6 +482,10 @@ if (analysisEnabled && documentIntelligenceEnabled)
     {
         Console.WriteLine("⚠ Tool framework disabled (ToolFramework:Enabled = false)");
     }
+
+    // Semantic Search - Hybrid search for AI knowledge base (ADR-013)
+    builder.Services.AddSemanticSearch();
+    Console.WriteLine("✓ Semantic search enabled");
 
     Console.WriteLine("✓ Analysis services enabled");
 }
@@ -586,6 +595,10 @@ builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.
 // Uses AppOnlyAnalysisService with Document Profile playbook, queues indexing on success
 builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.ProfileSummaryJobHandler>();
 
+// Bulk RAG indexing job handler - for admin-initiated and scheduled bulk document indexing
+// Queries documents from Dataverse, processes with bounded concurrency, tracks progress via BatchJobStatusStore
+builder.Services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.BulkRagIndexingJobHandler>();
+
 // Configure Service Bus job processing
 var serviceBusConnectionString = builder.Configuration.GetConnectionString("ServiceBus");
 if (string.IsNullOrWhiteSpace(serviceBusConnectionString))
@@ -610,11 +623,17 @@ builder.Services.Configure<Sprk.Bff.Api.Services.Jobs.EmbeddingMigrationOptions>
     builder.Configuration.GetSection(Sprk.Bff.Api.Services.Jobs.EmbeddingMigrationOptions.SectionName));
 builder.Services.AddHostedService<Sprk.Bff.Api.Services.Jobs.EmbeddingMigrationService>();
 
+// Scheduled RAG indexing service - periodic catch-up indexing for unindexed documents
+builder.Services.Configure<Sprk.Bff.Api.Services.Jobs.ScheduledRagIndexingOptions>(
+    builder.Configuration.GetSection(Sprk.Bff.Api.Services.Jobs.ScheduledRagIndexingOptions.SectionName));
+builder.Services.AddHostedService<Sprk.Bff.Api.Services.Jobs.ScheduledRagIndexingService>();
+
 builder.Logging.AddConsole();
 Console.WriteLine("✓ Job processing configured with Service Bus (queue: sdap-jobs)");
 Console.WriteLine("✓ Email polling backup service configured");
 Console.WriteLine("✓ Document vector backfill service registered (enable via config)");
 Console.WriteLine("✓ Embedding migration service registered (enable via config)");
+Console.WriteLine("✓ Scheduled RAG indexing service registered (enable via config)");
 
 // ============================================================================
 // HEALTH CHECKS - Redis availability monitoring
@@ -999,12 +1018,14 @@ builder.Services.AddOpenTelemetry()
     .WithMetrics(metrics =>
     {
         metrics.AddMeter("Sprk.Bff.Api.Ai");   // AI telemetry (summarization, RAG, tools, export)
+        metrics.AddMeter("Sprk.Bff.Api.Rag");  // RAG telemetry (indexing jobs, search operations)
         metrics.AddMeter("Sprk.Bff.Api.Cache"); // Cache metrics (hits, misses, latency)
         metrics.AddMeter("Sprk.Bff.Api.CircuitBreaker"); // Circuit breaker metrics
     })
     .WithTracing(tracing =>
     {
         tracing.AddSource("Sprk.Bff.Api.Ai"); // AI distributed tracing
+        tracing.AddSource("Sprk.Bff.Api.Rag"); // RAG distributed tracing
     });
 
 // ============================================================================
@@ -1212,6 +1233,37 @@ app.MapGet("/debug/document/{id:guid}", async (Guid id, IDataverseService datave
     }
 }).AllowAnonymous();
 
+// DEBUG: Test querying children by parent ID (temporary - for debugging email relationships)
+app.MapGet("/debug/children/{parentId:guid}", async (Guid parentId, IDataverseService dataverseService, ILogger<Program> logger) =>
+{
+    logger.LogInformation("[DEBUG-ENDPOINT] Testing GetDocumentsByParentAsync for parent {ParentId}", parentId);
+    try
+    {
+        var children = await dataverseService.GetDocumentsByParentAsync(parentId);
+        var childList = children.ToList();
+        return Results.Ok(new
+        {
+            status = "OK",
+            parentDocumentId = parentId.ToString(),
+            childCount = childList.Count,
+            children = childList.Select(c => new
+            {
+                documentId = c.Id,
+                name = c.Name,
+                fileName = c.FileName,
+                isEmailArchive = c.IsEmailArchive,
+                parentDocumentId = c.ParentDocumentId,
+                createdOn = c.CreatedOn
+            })
+        });
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "[DEBUG-ENDPOINT] Error querying children for parent {ParentId}", parentId);
+        return Results.Ok(new { status = "ERROR", parentDocumentId = parentId.ToString(), error = ex.Message, innerError = ex.InnerException?.Message });
+    }
+}).AllowAnonymous();
+
 // Lightweight ping endpoint for warm-up agents (Task 021)
 // Must be fast (<100ms), unauthenticated, and expose no sensitive info
 app.MapGet("/ping", () => Results.Text("pong"))
@@ -1284,6 +1336,14 @@ if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
 
 // RAG endpoints for knowledge base operations (R3)
 app.MapRagEndpoints();
+
+// Semantic Search endpoints for hybrid search (R1)
+// Only map if semantic search services are registered (requires DocumentIntelligence + Analysis enabled)
+if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
+    app.Configuration.GetValue<bool>("Analysis:Enabled", true))
+{
+    app.MapSemanticSearchEndpoints();
+}
 
 // Visualization endpoints for document relationship discovery
 app.MapVisualizationEndpoints();

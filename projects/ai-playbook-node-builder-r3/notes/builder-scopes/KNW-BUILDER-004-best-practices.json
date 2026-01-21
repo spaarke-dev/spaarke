@@ -1,0 +1,171 @@
+{
+  "id": "d1e2f3a4-b5c6-4d5e-9f0a-004004004004",
+  "name": "SYS-KNW-BUILDER-004-BestPractices",
+  "displayName": "Best Practices",
+  "description": "Design guidelines and best practices for building effective playbooks. Covers node design, scope usage, performance optimization, and common pitfalls to avoid.",
+  "scopeType": "Knowledge",
+  "ownerType": 1,
+  "isImmutable": true,
+  "content": {
+    "sourceType": "inline",
+    "contentType": "guidelines",
+    "guidelines": {
+      "nodeDesign": {
+        "title": "Node Design Best Practices",
+        "items": [
+          {
+            "practice": "Single Responsibility",
+            "description": "Each node should do one thing well. Avoid cramming multiple analysis tasks into one node.",
+            "example": "Instead of 'Extract All Info', create separate nodes for 'Extract Parties', 'Extract Dates', 'Extract Amounts'."
+          },
+          {
+            "practice": "Clear Naming",
+            "description": "Use action-oriented labels that describe what the node does.",
+            "good": "Extract Key Terms, Analyze Risk, Generate Summary",
+            "bad": "Node 1, Processing, Analysis"
+          },
+          {
+            "practice": "Descriptive Output Variables",
+            "description": "Use camelCase variable names that clearly indicate content.",
+            "good": "keyTermsExtracted, riskAssessment, partySummary",
+            "bad": "output1, data, result"
+          },
+          {
+            "practice": "Explicit Output Schemas",
+            "description": "Define output schemas for AI Analysis nodes to ensure consistent structure.",
+            "benefit": "Enables downstream nodes to reliably access expected fields."
+          },
+          {
+            "practice": "Reasonable Node Count",
+            "description": "Aim for 5-12 nodes per playbook. Fewer may be too simplistic; more may be over-engineered.",
+            "warning": "Very complex playbooks should be split into sub-playbooks."
+          }
+        ]
+      },
+      "scopeUsage": {
+        "title": "Scope Selection Guidelines",
+        "items": [
+          {
+            "practice": "Prefer Reuse Over Creation",
+            "description": "Search for existing scopes before creating new ones. Target >50% reuse rate.",
+            "rationale": "System scopes are tested, optimized, and maintained. Custom scopes require ongoing maintenance."
+          },
+          {
+            "practice": "Use Skills for Domain Expertise",
+            "description": "Add Skills to AI Analysis nodes when domain-specific knowledge is needed.",
+            "example": "Add 'Real Estate Domain' skill when analyzing lease documents."
+          },
+          {
+            "practice": "Attach Knowledge for Context",
+            "description": "Link Knowledge sources when the analysis needs reference data or company-specific standards.",
+            "example": "Link 'Company Policies' knowledge when checking compliance."
+          },
+          {
+            "practice": "Extend vs. Save As",
+            "description": "Use Extend when you want to inherit future improvements. Use Save As when you need to diverge from base behavior.",
+            "extend": "Adding company-specific terms to a system skill",
+            "saveAs": "Completely rewriting a system action's prompt"
+          }
+        ]
+      },
+      "flowDesign": {
+        "title": "Flow Design Best Practices",
+        "items": [
+          {
+            "practice": "Left-to-Right Flow",
+            "description": "Arrange nodes in reading order (left to right) for clarity.",
+            "tip": "Use the autoLayout tool to arrange nodes automatically."
+          },
+          {
+            "practice": "Always End with Deliver",
+            "description": "Every playbook flow should terminate in a Deliver node.",
+            "warning": "Nodes without a path to Deliver will not produce output."
+          },
+          {
+            "practice": "Handle All Condition Branches",
+            "description": "Condition nodes must have both true and false paths connected.",
+            "tip": "If one branch needs no action, connect it to a minimal processing path."
+          },
+          {
+            "practice": "Avoid Deep Nesting",
+            "description": "Limit condition nesting to 2-3 levels maximum.",
+            "alternative": "Use multiple sequential conditions instead of deep nesting."
+          },
+          {
+            "practice": "Use Assemble Before Deliver",
+            "description": "Combine outputs from multiple analysis nodes in an Assemble node before delivering.",
+            "benefit": "Ensures all outputs are properly structured in the final result."
+          }
+        ]
+      },
+      "performance": {
+        "title": "Performance Optimization",
+        "items": [
+          {
+            "practice": "Parallelize Independent Analysis",
+            "description": "Nodes without dependencies can run in parallel for faster execution.",
+            "example": "Party extraction and date extraction can run simultaneously."
+          },
+          {
+            "practice": "Use Appropriate Models",
+            "description": "Use faster/cheaper models (gpt-4o-mini) for simple tasks, powerful models (gpt-4o) for complex analysis.",
+            "simple": "Entity extraction, classification",
+            "complex": "Nuanced risk assessment, multi-factor analysis"
+          },
+          {
+            "practice": "Limit Loop Iterations",
+            "description": "Set reasonable maxIterations on Loop nodes to prevent runaway processing.",
+            "recommendation": "Start with 50-100, increase only if needed."
+          },
+          {
+            "practice": "Early Exit Conditions",
+            "description": "Use conditions early in the flow to skip unnecessary processing.",
+            "example": "Check document type first, skip irrelevant analysis for non-matching types."
+          }
+        ]
+      },
+      "pitfalls": {
+        "title": "Common Pitfalls to Avoid",
+        "items": [
+          {
+            "pitfall": "Missing Action Scope",
+            "description": "AI Analysis nodes without an Action scope will fail.",
+            "fix": "Always link an Action scope that defines the system prompt."
+          },
+          {
+            "pitfall": "Circular Dependencies",
+            "description": "Creating cycles in the node graph will cause infinite loops.",
+            "fix": "Validate canvas before saving; the validator detects cycles."
+          },
+          {
+            "pitfall": "Duplicate Output Variables",
+            "description": "Multiple nodes using the same output variable will overwrite each other.",
+            "fix": "Use unique, descriptive variable names for each node."
+          },
+          {
+            "pitfall": "Orphan Nodes",
+            "description": "Nodes not connected to the flow will never execute.",
+            "fix": "Run validation to identify orphan nodes."
+          },
+          {
+            "pitfall": "Overly Complex Prompts",
+            "description": "Trying to do too much in one Action prompt leads to poor results.",
+            "fix": "Split into focused, single-purpose prompts."
+          },
+          {
+            "pitfall": "Ignoring Error Handling",
+            "description": "Not planning for failures in external API calls or human review timeouts.",
+            "fix": "Add condition nodes to handle error cases gracefully."
+          }
+        ]
+      }
+    },
+    "lastUpdated": "2026-01-19",
+    "version": "1.0.0"
+  },
+  "metadata": {
+    "tags": ["builder", "knowledge", "guidelines", "best-practices", "reference"],
+    "version": "1.0.0",
+    "category": "builder-reference"
+  }
+}

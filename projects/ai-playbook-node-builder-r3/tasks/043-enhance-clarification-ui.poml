@@ -1,0 +1,76 @@
+<task id="043" project="ai-playbook-node-builder-r3">
+  <metadata>
+    <title>Enhance Clarification UI with Options</title>
+    <phase>5</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>pcf, frontend, fluent-ui</tags>
+    <dependencies>012</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <notes>
+    Completed 2026-01-19:
+    - Created ClarificationOptions.tsx component with Fluent UI v9
+    - Extended ChatMessage type with clarification data (ClarificationData interface)
+    - Updated aiAssistantStore onClarification handler to store structured data
+    - Added respondToClarification action to handle user responses
+    - Integrated ClarificationOptions into ChatHistory.tsx
+    - Full dark mode support via Fluent UI tokens (ADR-021 compliant)
+    - Option buttons display with numbered badges
+    - "Other" option expands to text input with submit button
+    - Selected response shows compact view after responding
+    - TypeScript build passes with no errors
+  </notes>
+
+  <prompt>
+    <goal>Enhance the existing clarification display in AI Assistant to support multiple-choice options and better formatting.</goal>
+
+    <context>
+      When AI needs clarification, it can provide options. The UI should display these options as selectable buttons/radio buttons rather than requiring typed responses.
+    </context>
+
+    <constraints>
+      - Enhance existing clarification display, don't replace
+      - Support multiple-choice responses
+      - Support free-text fallback
+      - Maintain chat flow aesthetics
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/client/pcf/PlaybookBuilderHost/control/components/AiAssistant/" reason="Existing AI Assistant" />
+      <file path=".claude/adr/ADR-021-fluent-design-system.md" reason="UI requirements" />
+      <file path="src/client/pcf/CLAUDE.md" reason="PCF context" />
+      <file path="docs/guides/PCF-DEPLOYMENT-GUIDE.md" reason="Packaging guide" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing clarification display in AI Assistant</step>
+    <step order="2">Create ClarificationOptions component for multiple-choice</step>
+    <step order="3">Display options as selectable buttons</step>
+    <step order="4">Add "Other" option with text input</step>
+    <step order="5">Style to match chat message aesthetics</step>
+    <step order="6">Handle option selection and send response</step>
+    <step order="7">Add dark mode support</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">Enhance AI Assistant</tool>
+    <tool name="Write">Create ClarificationOptions component</tool>
+    <tool name="Bash">Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Enhanced clarification UI</output>
+    <output type="code">ClarificationOptions component</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Multiple-choice options displayed as buttons</criterion>
+    <criterion>Option selection sends response automatically</criterion>
+    <criterion>"Other" allows free-text input</criterion>
+    <criterion>Styling matches chat flow</criterion>
+  </acceptance-criteria>
+</task>

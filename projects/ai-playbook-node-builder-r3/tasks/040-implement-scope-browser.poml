@@ -1,0 +1,90 @@
+<task id="040" project="ai-playbook-node-builder-r3">
+  <metadata>
+    <title>Implement Scope Browser Component</title>
+    <phase>5</phase>
+    <estimate>4-5 hours</estimate>
+    <tags>pcf, frontend, fluent-ui</tags>
+    <dependencies>004</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create a ScopeBrowser component in PCF for browsing, filtering, and selecting scopes.</goal>
+
+    <context>
+      Users need to browse available scopes when configuring playbook nodes. The browser should support filtering by type and text search.
+    </context>
+
+    <constraints>
+      - Use Fluent UI v9 components per ADR-021
+      - Use React 16 APIs per ADR-022
+      - Support dark mode
+      - Integrate with aiAssistantStore
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/client/pcf/PlaybookBuilderHost/control/components/" reason="Existing components" />
+      <file path="src/client/pcf/PlaybookBuilderHost/control/stores/aiAssistantStore.ts" reason="Store to extend" />
+      <file path=".claude/adr/ADR-021-fluent-design-system.md" reason="UI requirements" />
+      <file path=".claude/adr/ADR-022-pcf-platform-libraries.md" reason="React constraints" />
+      <file path=".claude/patterns/pcf/dialog-patterns.md" reason="PCF dialog patterns" />
+      <file path="src/client/pcf/CLAUDE.md" reason="PCF development context" />
+      <file path="docs/guides/PCF-DEPLOYMENT-GUIDE.md" reason="Packaging guide" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create ScopeBrowser folder in components/</step>
+    <step order="2">Create ScopeBrowser.tsx with Fluent UI v9 components</step>
+    <step order="3">Add type filter dropdown (Action, Skill, Knowledge, Tool, All)</step>
+    <step order="4">Add search input with debounce</step>
+    <step order="5">Add scope list with virtualization for performance</step>
+    <step order="6">Add scope detail panel on selection</step>
+    <step order="7">Integrate with aiAssistantStore for search API calls</step>
+    <step order="8">Add dark mode support</step>
+    <step order="9">Write component tests</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create component files</tool>
+    <tool name="Edit">Update store if needed</tool>
+    <tool name="Bash">Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">ScopeBrowser component</output>
+    <output type="code">Store integration</output>
+    <output type="tests">Component tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Component renders with Fluent UI v9 styling</criterion>
+    <criterion>Type filter works correctly</criterion>
+    <criterion>Text search filters results with debounce</criterion>
+    <criterion>Dark mode supported</criterion>
+    <criterion>Selection triggers callback with scope data</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Scope Browser Renders">
+      <url>https://{org}.crm.dynamics.com/main.aspx?pagetype=entityrecord&amp;etn=sprk_playbook</url>
+      <steps>
+        <step>Navigate to Playbook Builder form</step>
+        <step>Open AI Assistant panel</step>
+        <step>Click "Browse Scopes" button</step>
+        <step>Verify scope browser dialog opens</step>
+      </steps>
+      <expected>Scope browser dialog shows with filter and search options</expected>
+    </test>
+    <test name="Dark Mode Compliance">
+      <steps>
+        <step>Toggle dark mode in Dataverse settings</step>
+        <step>Open scope browser</step>
+        <step>Verify colors adapt to dark theme</step>
+      </steps>
+      <expected>All colors use semantic tokens per ADR-021</expected>
+    </test>
+  </ui-tests>
+</task>

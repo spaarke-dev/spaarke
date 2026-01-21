@@ -189,6 +189,7 @@ public record DoneEvent : BuilderSseEvent
 
 /// <summary>
 /// Error event - error occurred during processing.
+/// Task 050: Added correlationId for error tracing support.
 /// </summary>
 public record ErrorEvent : BuilderSseEvent
 {
@@ -208,18 +209,24 @@ public record ErrorEvent : BuilderSseEvent
     [JsonPropertyName("suggestedAction")]
     public string? SuggestedAction { get; init; }
 
+    /// <summary>Correlation ID for support and tracing (HttpContext.TraceIdentifier).</summary>
+    [JsonPropertyName("correlationId")]
+    public string? CorrelationId { get; init; }
+
     /// <summary>Create an error event.</summary>
     public static ErrorEvent Create(
         string message,
         string? code = null,
         bool isRecoverable = true,
-        string? suggestedAction = null) => new()
+        string? suggestedAction = null,
+        string? correlationId = null) => new()
         {
             Type = BuilderSseEventTypes.Error,
             Message = message,
             Code = code,
             IsRecoverable = isRecoverable,
-            SuggestedAction = suggestedAction
+            SuggestedAction = suggestedAction,
+            CorrelationId = correlationId
         };
 }
 

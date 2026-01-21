@@ -150,6 +150,27 @@ public class RagTelemetry : IDisposable
         _indexingJobDuplicates.Add(1, tags);
     }
 
+    /// <summary>
+    /// Record bulk RAG indexing job completion.
+    /// </summary>
+    /// <param name="processedCount">Number of documents successfully indexed.</param>
+    /// <param name="errorCount">Number of documents that failed to index.</param>
+    /// <param name="skippedCount">Number of documents skipped (already indexed).</param>
+    /// <param name="duration">Total job execution duration.</param>
+    public void RecordBulkRagIndexingCompleted(int processedCount, int errorCount, int skippedCount, TimeSpan duration)
+    {
+        var tags = new TagList
+        {
+            { "job.type", "bulk" },
+            { "job.status", errorCount > 0 && processedCount == 0 ? "failed" : errorCount > 0 ? "partial" : "success" }
+        };
+
+        _indexingJobSuccesses.Add(processedCount, tags);
+        _indexingJobFailures.Add(errorCount, tags);
+        _indexingJobDuplicates.Add(skippedCount, tags);
+        _indexingJobDuration.Record(duration.TotalMilliseconds, tags);
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // RAG Search Methods
     // ═══════════════════════════════════════════════════════════════════════════

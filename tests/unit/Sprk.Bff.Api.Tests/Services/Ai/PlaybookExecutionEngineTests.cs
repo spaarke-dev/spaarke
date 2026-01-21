@@ -37,19 +37,19 @@ public class PlaybookExecutionEngineTests
         string message,
         ConversationMessage[]? history = null,
         CanvasNode[]? nodes = null) => new()
-    {
-        CurrentMessage = message,
-        History = history ?? [],
-        SessionState = new SessionState
         {
-            SessionId = Guid.NewGuid().ToString("N"),
-            CanvasState = new CanvasState
+            CurrentMessage = message,
+            History = history ?? [],
+            SessionState = new SessionState
             {
-                Nodes = nodes ?? [],
-                Edges = []
+                SessionId = Guid.NewGuid().ToString("N"),
+                CanvasState = new CanvasState
+                {
+                    Nodes = nodes ?? [],
+                    Edges = []
+                }
             }
-        }
-    };
+        };
 
     private static ConversationMessage CreateHistoryMessage(ConversationRole role, string content) => new()
     {

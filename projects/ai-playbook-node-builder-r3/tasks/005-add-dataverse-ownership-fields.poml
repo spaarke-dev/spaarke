@@ -1,0 +1,82 @@
+<task id="005" project="ai-playbook-node-builder-r3">
+  <metadata>
+    <title>Add Ownership Fields to Dataverse Scope Entities</title>
+    <phase>1</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>dataverse, schema</tags>
+    <dependencies>none</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <notes>
+    <completed>2026-01-19</completed>
+    <summary>Created detailed field specification document for manual Dataverse field creation. Document located at: projects/ai-playbook-node-builder-r3/notes/dataverse-ownership-fields-spec.md</summary>
+    <deliverables>
+      - Global option set spec: sprk_scopeownertype (System=1, Customer=2)
+      - Field specs for all 4 entities: sprk_ownertype, sprk_isimmutable, sprk_parentscope, sprk_basedon
+      - Self-referencing lookup relationship specifications
+      - Manual creation steps for Power Platform UI
+      - Web API script patterns for automated deployment
+      - Verification checklist
+    </deliverables>
+    <next-steps>Execute manual field creation in Dataverse using the specification document, OR proceed with task 006 which depends on these fields existing.</next-steps>
+  </notes>
+
+  <prompt>
+    <goal>Add ownership-related fields to all Dataverse scope entities (sprk_analysisaction, sprk_analysisskill, sprk_analysisknowledge, sprk_analysistool).</goal>
+
+    <context>
+      Need to track scope ownership (System vs Customer) and lineage (Save As, Extend). These fields enable the ownership validation in CRUD operations.
+
+      Fields to add:
+      - sprk_ownertype (OptionSet: System=1, Customer=2)
+      - sprk_isimmutable (Boolean)
+      - sprk_parentscope (Lookup - self-reference for Extend)
+      - sprk_basedon (Lookup - self-reference for Save As)
+    </context>
+
+    <constraints>
+      - Use unmanaged solution per ADR-022
+      - Use Spaarke publisher (sprk_ prefix)
+      - Additive changes only - no breaking changes
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="docs/guides/DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md" reason="Schema update process" />
+      <file path=".claude/adr/ADR-022-pcf-platform-libraries.md" reason="Unmanaged solution requirement" />
+      <file path=".claude/skills/dataverse-deploy/SKILL.md" reason="Deployment workflow" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Document the field specifications (names, types, options)</step>
+    <step order="2">Create unmanaged solution in Dataverse for schema updates</step>
+    <step order="3">Add sprk_ownertype optionset (System=1, Customer=2)</step>
+    <step order="4">Add fields to sprk_analysisaction entity</step>
+    <step order="5">Add fields to sprk_analysisskill entity</step>
+    <step order="6">Add fields to sprk_analysisknowledge entity</step>
+    <step order="7">Add fields to sprk_analysistool entity</step>
+    <step order="8">Publish customizations</step>
+    <step order="9">Export solution for source control</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">PAC CLI for solution operations</tool>
+    <tool name="Write">Document field specifications</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse">Four scope entities with ownership fields</output>
+    <output type="solution">Exported unmanaged solution</output>
+    <output type="documentation">Field specifications document</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All four entities have sprk_ownertype, sprk_isimmutable fields</criterion>
+    <criterion>Self-referencing lookups work for parentscope and basedon</criterion>
+    <criterion>Solution exports cleanly</criterion>
+    <criterion>No breaking changes to existing data</criterion>
+  </acceptance-criteria>
+</task>

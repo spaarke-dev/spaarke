@@ -68,6 +68,8 @@ export interface DocumentNodeData {
     name: string;
     /** File extension (e.g., "pdf", "docx") */
     fileType: string;
+    /** Document type/classification (e.g., "Contract", "Invoice", "Email") */
+    documentType?: string;
     /** File size in bytes */
     size?: number;
     /** Similarity score to source document (0-1) */
@@ -90,6 +92,10 @@ export interface DocumentNodeData {
     recordUrl?: string;
     /** Shared keywords with connected documents */
     sharedKeywords?: string[];
+    /** Document creation timestamp (ISO string) */
+    createdOn?: string;
+    /** Document last modified timestamp (ISO string) */
+    modifiedOn?: string;
     /** Compact mode - show icon only (set by DocumentGraph) */
     compactMode?: boolean;
 }

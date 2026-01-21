@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="ai-semantic-search-foundation-r1">
+  <metadata>
+    <title>Implement no-op preprocessor and postprocessor for R1</title>
+    <phase>2: Core Search Service</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>012</dependencies>
+    <blocks>015</blocks>
+    <tags>bff-api, ai, services</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Simple pass-through implementations for extensibility hooks</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Implement no-op (pass-through) implementations of IQueryPreprocessor and IResultPostprocessor.
+    These provide the extensibility hooks for future agentic RAG features while doing nothing in R1.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in interface implementation patterns.
+    Follow ADR-010 for DI minimalism.
+  </role>
+
+  <goal>
+    NoOpQueryPreprocessor and NoOpResultPostprocessor classes that pass through input unchanged.
+    Ready for R2 replacement with actual processing logic.
+  </goal>
+
+  <context>
+    <background>
+      The extensibility interfaces enable future features like:
+      - Query expansion (synonyms, related terms)
+      - Result reranking (custom scoring)
+      - Citation injection
+      For R1, these are no-op to keep scope focused on core search.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/IQueryPreprocessor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/IResultPostprocessor.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">Simple implementations, no unnecessary complexity</constraint>
+    <constraint source="spec">R1: No query preprocessing, no result post-processing</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>projects/ai-semantic-search-foundation-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read IQueryPreprocessor interface</step>
+    <step order="2">Read IResultPostprocessor interface</step>
+    <step order="3">Create NoOpQueryPreprocessor implementing IQueryPreprocessor</step>
+    <step order="4">Implement ProcessAsync to return query unchanged</step>
+    <step order="5">Create NoOpResultPostprocessor implementing IResultPostprocessor</step>
+    <step order="6">Implement ProcessAsync to return results unchanged</step>
+    <step order="7">Add XML documentation explaining R1 no-op behavior</step>
+    <step order="8">Run dotnet build to verify compilation</step>
+    <step order="9">Update TASK-INDEX.md: change task 014 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/NoOpQueryPreprocessor.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/NoOpResultPostprocessor.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">NoOpQueryPreprocessor implements IQueryPreprocessor</criterion>
+    <criterion testable="true">NoOpResultPostprocessor implements IResultPostprocessor</criterion>
+    <criterion testable="true">ProcessAsync methods return input unchanged</criterion>
+    <criterion testable="true">XML documentation explains R1 no-op behavior</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

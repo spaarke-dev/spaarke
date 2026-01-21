@@ -244,7 +244,7 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
             (async () => {
                 try {
                     const token = await getAuthToken();
-                    const response = await fetch(`${apiBaseUrl}/api/ai/rag/index-file`, {
+                    const response = await fetch(`${apiBaseUrl}/ai/rag/index-file`, {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
@@ -572,7 +572,7 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
             {/* Footer */}
             <div className={styles.footer}>
                 <span className={styles.versionText}>
-                    v3.10.1 • Built 2026-01-16
+                    v3.11.0 • Built 2026-01-19
                 </span>
                 <div className={styles.footerButtons}>
                     <Button

@@ -1,0 +1,63 @@
+<task id="010" project="ai-playbook-node-builder-r3">
+  <metadata>
+    <title>Design AI Intent Classification Schema</title>
+    <phase>2</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>ai, design</tags>
+    <dependencies>none</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Design the structured output schema for AI-powered intent classification that will replace the rule-based ParseIntent() method.</goal>
+
+    <context>
+      Current ParseIntent() uses regex/keyword matching. Need to design a schema for Azure OpenAI structured output that captures:
+      - Operation type (build, modify, test, explain, search)
+      - Parameters (node types, scope references, etc.)
+      - Confidence score (for clarification triggering)
+      - Clarification questions (when confidence low)
+    </context>
+
+    <constraints>
+      - Schema must be compatible with Azure OpenAI structured output
+      - Must support all existing intent types
+      - Include confidence scoring for clarification flow
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/AiPlaybookBuilderService.cs" reason="Current ParseIntent" />
+      <file path=".claude/adr/ADR-013-ai-architecture.md" reason="AI patterns" />
+      <file path=".claude/patterns/ai/analysis-scopes.md" reason="Scope patterns" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Analyze current ParseIntent() to identify all intent types</step>
+    <step order="2">Define IntentResult class with operation, parameters, confidence</step>
+    <step order="3">Define OperationType enum (Build, Modify, Test, Explain, Search, Clarify)</step>
+    <step order="4">Define parameter schemas for each operation type</step>
+    <step order="5">Define clarification question schema</step>
+    <step order="6">Document JSON schema for structured output</step>
+    <step order="7">Create example prompts and expected outputs</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Analyze existing code</tool>
+    <tool name="Write">Create schema documentation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">IntentResult, OperationType, and parameter classes</output>
+    <output type="documentation">JSON schema and example prompts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Schema covers all existing intent types</criterion>
+    <criterion>Confidence score included (0.0-1.0)</criterion>
+    <criterion>Clarification questions supported</criterion>
+    <criterion>Example prompts produce valid outputs</criterion>
+  </acceptance-criteria>
+</task>

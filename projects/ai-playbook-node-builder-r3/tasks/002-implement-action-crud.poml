@@ -1,0 +1,68 @@
+<task id="002" project="ai-playbook-node-builder-r3">
+  <metadata>
+    <title>Implement Action CRUD Operations in ScopeResolverService</title>
+    <phase>1</phase>
+    <estimate>3-4 hours</estimate>
+    <tags>bff-api, dataverse, scope-management</tags>
+    <dependencies>001</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Implement Create, Update, Delete operations for AnalysisAction in ScopeResolverService with Dataverse integration and ownership validation.</goal>
+
+    <context>
+      After extending the interface (task 001), implement the actual CRUD operations for Actions. Must enforce ownership rules: SYS- scopes are immutable, CUST- scopes are editable.
+
+      Use existing IDataverseService for Dataverse operations.
+    </context>
+
+    <constraints>
+      - Use existing IDataverseService patterns
+      - Validate ownership before Update/Delete (throw if SYS-)
+      - Auto-generate CUST- prefix for new customer scopes
+      - Follow error handling patterns from ADR-019
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs" reason="Service to extend" />
+      <file path="src/server/shared/Spaarke.Dataverse/IDataverseService.cs" reason="Dataverse operations" />
+      <file path=".claude/patterns/dataverse/entity-operations.md" reason="CRUD patterns" />
+      <file path=".claude/adr/ADR-019-problemdetails.md" reason="Error handling" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read ScopeResolverService.cs current implementation</step>
+    <step order="2">Implement CreateActionAsync - validate input, generate ID if needed, set ownership</step>
+    <step order="3">Implement UpdateActionAsync - load existing, validate ownership, update fields</step>
+    <step order="4">Implement DeleteActionAsync - load existing, validate ownership, delete</step>
+    <step order="5">Add private helper method for ownership validation</step>
+    <step order="6">Add logging for all CRUD operations</step>
+    <step order="7">Write unit tests for Action CRUD</step>
+    <step order="8">Verify compilation and tests pass</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Examine existing code</tool>
+    <tool name="Edit">Implement CRUD methods</tool>
+    <tool name="Write">Create test file if needed</tool>
+    <tool name="Bash">Run tests with dotnet test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">CreateActionAsync, UpdateActionAsync, DeleteActionAsync implementations</output>
+    <output type="code">Ownership validation helper method</output>
+    <output type="tests">Unit tests for Action CRUD operations</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>CreateActionAsync creates record in Dataverse with CUST- prefix</criterion>
+    <criterion>UpdateActionAsync rejects updates to SYS- scopes</criterion>
+    <criterion>UpdateActionAsync allows updates to CUST- scopes</criterion>
+    <criterion>DeleteActionAsync rejects deletion of SYS- scopes</criterion>
+    <criterion>Unit tests verify ownership validation</criterion>
+  </acceptance-criteria>
+</task>

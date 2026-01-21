@@ -2,9 +2,9 @@
  * Scope List Component - DataGrid display for scope items
  *
  * Displays scopes in a sortable, filterable grid with ownership badges,
- * action menus, and drag support.
+ * action menus, drag support, and row selection.
  *
- * @version 1.0.0
+ * @version 1.1.0
  */
 
 import * as React from 'react';
@@ -57,6 +57,10 @@ export interface ScopeListProps {
   onExtend?: (scope: ScopeItem) => void;
   onDelete?: (scope: ScopeItem) => void;
   onDragStart?: (scope: ScopeItem) => void;
+  /** Callback when a row is clicked for selection */
+  onRowClick?: (scope: ScopeItem) => void;
+  /** ID of the currently selected scope (for highlighting) */
+  selectedScopeId?: string;
   readOnly?: boolean;
 }
 
@@ -76,6 +80,12 @@ const useStyles = makeStyles({
     cursor: 'pointer',
     '&:hover': {
       backgroundColor: tokens.colorNeutralBackground1Hover,
+    },
+  },
+  rowSelected: {
+    backgroundColor: tokens.colorNeutralBackground1Selected,
+    '&:hover': {
+      backgroundColor: tokens.colorNeutralBackground1Selected,
     },
   },
   rowDraggable: {
@@ -174,6 +184,8 @@ export const ScopeList: React.FC<ScopeListProps> = ({
   onExtend,
   onDelete,
   onDragStart,
+  onRowClick,
+  selectedScopeId,
   readOnly = false,
 }) => {
   const styles = useStyles();
@@ -310,6 +322,31 @@ export const ScopeList: React.FC<ScopeListProps> = ({
     [styles, onView, onSaveAs, onExtend, onDelete, onDragStart, readOnly, formatDate]
   );
 
+  // Build row class names based on state
+  const getRowClassName = useCallback(
+    (itemId: string) => {
+      const classNames = [styles.row];
+      if (onDragStart) {
+        classNames.push(styles.rowDraggable);
+      }
+      if (selectedScopeId === itemId) {
+        classNames.push(styles.rowSelected);
+      }
+      return classNames.join(' ');
+    },
+    [styles.row, styles.rowDraggable, styles.rowSelected, selectedScopeId, onDragStart]
+  );
+
+  // Handle row click
+  const handleRowClick = useCallback(
+    (item: ScopeItem) => {
+      if (onRowClick) {
+        onRowClick(item);
+      }
+    },
+    [onRowClick]
+  );
+
   return (
     <div className={styles.container}>
       <DataGrid
@@ -330,9 +367,10 @@ export const ScopeList: React.FC<ScopeListProps> = ({
           {({ item, rowId }) => (
             <DataGridRow<ScopeItem>
               key={rowId}
-              className={`${styles.row} ${onDragStart ? styles.rowDraggable : ''}`}
+              className={getRowClassName(item.id)}
               draggable={!!onDragStart}
               onDragStart={(e: React.DragEvent<HTMLDivElement>) => handleDragStart(item, e)}
+              onClick={() => handleRowClick(item)}
             >
               {({ renderCell }) => <DataGridCell>{renderCell(item)}</DataGridCell>}
             </DataGridRow>

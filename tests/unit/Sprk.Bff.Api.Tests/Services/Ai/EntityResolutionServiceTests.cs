@@ -4,6 +4,9 @@ using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Xunit;
 
+// Explicit alias for Services.Ai.OperationType (ModelSelector's enum)
+using SvcOperationType = Sprk.Bff.Api.Services.Ai.OperationType;
+
 namespace Sprk.Bff.Api.Tests.Services.Ai;
 
 /// <summary>
@@ -27,7 +30,7 @@ public class EntityResolutionServiceTests
         _mockLogger = new Mock<ILogger<EntityResolutionService>>();
 
         _mockModelSelector
-            .Setup(x => x.SelectModel(OperationType.EntityResolution))
+            .Setup(x => x.SelectModel(SvcOperationType.EntityResolution))
             .Returns("gpt-4o-mini");
 
         _service = new EntityResolutionService(

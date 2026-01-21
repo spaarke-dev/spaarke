@@ -1,21 +1,24 @@
 # RAG Configuration Reference
 
-> **Version**: 1.1
+> **Version**: 1.3
 > **Created**: 2025-12-29
-> **Updated**: 2026-01-16
-> **Project**: AI Document Intelligence R3 + RAG Pipeline R1
+> **Updated**: 2026-01-20
+> **Project**: AI Document Intelligence R3 + RAG Pipeline R1 + Semantic Search Foundation R1
 
 ---
 
 ## Table of Contents
 
 1. [App Service Configuration](#app-service-configuration)
+   - [Scheduled RAG Indexing](#scheduled-rag-indexing-catch-up-service)
+   - [Bulk Indexing Admin Endpoints](#bulk-indexing-admin-endpoints)
 2. [Index Configuration](#index-configuration)
 3. [Deployment Model Configuration](#deployment-model-configuration)
 4. [Embedding Cache Configuration](#embedding-cache-configuration)
 5. [Search Options](#search-options)
-6. [Environment Variables](#environment-variables)
-7. [Code Configuration Examples](#code-configuration-examples)
+6. [Semantic Search Configuration](#semantic-search-configuration) *(R1 - NEW)*
+7. [Environment Variables](#environment-variables)
+8. [Code Configuration Examples](#code-configuration-examples)
 
 ---
 
@@ -76,6 +79,62 @@ $env:ServiceBus__ConnectionString = "<your-connection-string>"
 **Key Vault Reference (Production)**:
 ```
 ServiceBus__ConnectionString=@Microsoft.KeyVault(SecretUri=https://spaarke-spekvcert.vault.azure.net/secrets/servicebus-connection-string/)
+```
+
+### Scheduled RAG Indexing (Catch-up Service)
+
+The scheduled indexing service runs periodically to catch up on documents not indexed during upload. It submits bulk indexing jobs to the queue for background processing.
+
+| Setting | Required | Default | Description |
+|---------|----------|---------|-------------|
+| `ScheduledRagIndexing__Enabled` | No | `false` | Enable scheduled bulk indexing |
+| `ScheduledRagIndexing__IntervalMinutes` | No | `60` | Interval between indexing runs |
+| `ScheduledRagIndexing__MaxDocumentsPerRun` | No | `100` | Max documents per batch |
+| `ScheduledRagIndexing__MaxConcurrency` | No | `5` | Concurrent document processing |
+| `ScheduledRagIndexing__TenantId` | Yes* | - | Tenant ID (*required if enabled) |
+
+**Configuration Example:**
+
+```json
+{
+  "ScheduledRagIndexing": {
+    "Enabled": false,
+    "IntervalMinutes": 60,
+    "MaxDocumentsPerRun": 100,
+    "MaxConcurrency": 5,
+    "TenantId": "your-tenant-id"
+  }
+}
+```
+
+**Notes:**
+- Only enable in production if you need catch-up indexing for documents missed on upload
+- The service queries documents where `sprk_hasfile=true` AND `sprk_ragindexedon=null`
+- Uses app-only authentication (Pattern 6) for Dataverse and SPE access
+- Progress tracked via `BatchJobStatusStore` (Redis)
+
+### Bulk Indexing Admin Endpoints
+
+Admin endpoints for manual bulk document indexing (requires `SystemAdmin` authorization):
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/ai/rag/admin/bulk-index` | POST | Submit bulk indexing job |
+| `/api/ai/rag/admin/bulk-index/{jobId}/status` | GET | Get job progress |
+
+**Bulk Indexing Request:**
+```json
+{
+  "tenantId": "required-tenant-id",
+  "filter": "unindexed",      // "unindexed" or "all"
+  "matterId": "optional",     // Filter by Matter ID
+  "createdAfter": null,       // Date filter
+  "createdBefore": null,      // Date filter
+  "documentType": null,       // e.g., ".pdf"
+  "maxDocuments": 1000,       // Batch limit
+  "maxConcurrency": 5,        // Parallel processing
+  "forceReindex": false       // Re-index already indexed docs
+}
 ```
 
 ### RAG Indexing API Key (Job Queue Pattern)
@@ -400,6 +459,117 @@ cache_hit_rate{cacheType="embedding"}
 
 ---
 
+## Semantic Search Configuration
+
+> **Added in**: Semantic Search Foundation R1 (2026-01-20)
+
+Semantic Search provides entity-scoped document search via the `/api/ai/search` endpoint.
+
+### Enabling Semantic Search
+
+Semantic Search requires both `DocumentIntelligence` and `Analysis` to be enabled:
+
+| Setting | Required | Default | Description |
+|---------|----------|---------|-------------|
+| `DocumentIntelligence__Enabled` | Yes | `false` | Enables AI Search infrastructure |
+| `Analysis__Enabled` | Yes | `true` | Enables analysis features (includes semantic search) |
+
+**Note**: Semantic Search endpoints are only mapped if BOTH settings are `true`. See [conditional endpoint mapping](#conditional-endpoint-mapping).
+
+### SemanticSearchRequest Options
+
+| Property | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `query` | string | Yes | - | Search query text |
+| `scope` | string | Yes | - | Scoping mode: `entity` or `documentIds` |
+| `entityType` | string | Conditional | - | Required when `scope=entity` (matter, project, invoice, account, contact) |
+| `entityId` | string | Conditional | - | Required when `scope=entity` |
+| `documentIds` | string[] | Conditional | - | Required when `scope=documentIds` (max 100) |
+| `options.hybridMode` | string | No | `rrf` | Search mode: `rrf`, `vector`, or `keyword` |
+| `options.top` | int | No | 10 | Maximum results (1-100) |
+| `options.skip` | int | No | 0 | Pagination offset |
+| `options.minRelevanceScore` | float | No | 0.0 | Minimum score threshold (0-1) |
+| `options.documentTypes` | string[] | No | null | Filter by document type |
+| `options.fileTypes` | string[] | No | null | Filter by file extension |
+| `options.tags` | string[] | No | null | Filter by tags |
+| `options.dateRange.from` | DateTime | No | null | Created date filter (start) |
+| `options.dateRange.to` | DateTime | No | null | Created date filter (end) |
+| `options.includeContent` | bool | No | true | Include chunk content in results |
+
+### Example Semantic Search Request
+
+```json
+{
+  "query": "What are the payment terms in the contract?",
+  "scope": "entity",
+  "entityType": "matter",
+  "entityId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "options": {
+    "hybridMode": "rrf",
+    "top": 10,
+    "minRelevanceScore": 0.5,
+    "documentTypes": ["contract"],
+    "includeContent": true
+  }
+}
+```
+
+### Example DocumentIds Scope Request
+
+```json
+{
+  "query": "payment schedule",
+  "scope": "documentIds",
+  "documentIds": [
+    "doc-id-1",
+    "doc-id-2",
+    "doc-id-3"
+  ],
+  "options": {
+    "top": 20
+  }
+}
+```
+
+### Validation Error Codes
+
+| Error Code | HTTP Status | Description |
+|------------|-------------|-------------|
+| `QUERY_TOO_LONG` | 400 | Query exceeds maximum length |
+| `INVALID_SCOPE` | 400 | Invalid scope value (must be `entity` or `documentIds`) |
+| `SCOPE_NOT_SUPPORTED` | 400 | `scope=all` is not supported in R1 |
+| `ENTITY_TYPE_REQUIRED` | 400 | Missing entityType when scope=entity |
+| `ENTITY_ID_REQUIRED` | 400 | Missing entityId when scope=entity |
+| `DOCUMENT_IDS_REQUIRED` | 400 | Missing documentIds when scope=documentIds |
+
+### Conditional Endpoint Mapping
+
+Semantic Search endpoints are only registered when both conditions are met:
+
+```csharp
+// Program.cs
+if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
+    app.Configuration.GetValue<bool>("Analysis:Enabled", true))
+{
+    app.MapSemanticSearchEndpoints();
+}
+```
+
+This prevents 500 errors when the service is disabled but endpoints are still mapped.
+
+### DI Registration
+
+Semantic Search services are registered via `AddSemanticSearch()`:
+
+```csharp
+// Registered services (Program.cs)
+services.AddSingleton<IQueryPreprocessor, NoOpQueryPreprocessor>();     // R1: no-op
+services.AddSingleton<IResultPostprocessor, NoOpResultPostprocessor>(); // R1: no-op
+services.AddScoped<ISemanticSearchService, SemanticSearchService>();
+```
+
+---
+
 ## Environment Variables
 
 ### Dataverse Environment Variables
@@ -511,6 +681,7 @@ public async Task SetupEnterpriseCustomer(string tenantId)
 ---
 
 *Document created: 2025-12-29*
-*Updated: 2026-01-16*
+*Updated: 2026-01-20*
 *AI Document Intelligence R3 - Phase 1 Complete*
 *RAG Pipeline R1 - Phase 1 Complete*
+*Semantic Search Foundation R1 - Complete (configuration section added)*

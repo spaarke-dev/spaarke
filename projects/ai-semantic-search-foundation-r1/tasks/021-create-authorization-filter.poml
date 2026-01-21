@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="ai-semantic-search-foundation-r1">
+  <metadata>
+    <title>Create SemanticSearchAuthorizationFilter endpoint filter</title>
+    <phase>3: API Endpoints &amp; Authorization</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>022</blocks>
+    <tags>bff-api, ai, auth, security</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Security-critical authorization filter, must be correct</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create an endpoint filter for semantic search authorization that validates:
+    1. Scope is valid (entity or documentIds only for R1, scope=all returns 400)
+    2. For entity scope: user has access to the entity
+    3. For documentIds scope: user has access to all specified documents
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in .NET endpoint filters and authorization.
+    Follow ADR-008 for endpoint filter patterns.
+  </role>
+
+  <goal>
+    SemanticSearchAuthorizationFilter implementing IEndpointFilter that validates
+    scope and user permissions BEFORE search execution. Returns 400/403 on failure.
+  </goal>
+
+  <context>
+    <background>
+      ADR-008 specifies using endpoint filters for resource authorization instead of
+      global middleware. The filter must:
+      - Reject scope=all with 400 (not supported in R1)
+      - Validate entity access for scope=entity
+      - Validate document access for scope=documentIds
+      This happens BEFORE the search service is called.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/</file>
+      <file>projects/ai-semantic-search-foundation-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008">Use IEndpointFilter pattern</constraint>
+    <constraint source="ADR-019">Return ProblemDetails with errorCode on failure</constraint>
+    <constraint source="spec">scope=all returns 400 SCOPE_ALL_NOT_SUPPORTED</constraint>
+    <constraint source="spec">Unauthorized entity access returns 403 ENTITY_ACCESS_DENIED</constraint>
+    <constraint source="spec">Unauthorized document access returns 403 DOCUMENT_ACCESS_DENIED</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>projects/ai-semantic-search-foundation-r1/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/</file>
+    </files>
+    <patterns>
+      <pattern name="Existing Auth Filters" location="src/server/api/Sprk.Bff.Api/Api/Filters/">
+        Follow existing authorization filter patterns
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec.md Security Trimming section for authorization rules</step>
+    <step order="2">Read existing authorization filters in Api/Filters/</step>
+    <step order="3">Create SemanticSearchAuthorizationFilter.cs implementing IEndpointFilter</step>
+    <step order="4">Implement InvokeAsync with request body deserialization</step>
+    <step order="5">Add scope validation (reject scope=all with 400)</step>
+    <step order="6">Add entity authorization check for scope=entity</step>
+    <step order="7">Add document authorization check for scope=documentIds</step>
+    <step order="8">Return ProblemDetails with appropriate error codes on failure</step>
+    <step order="9">Call next(context) on success</step>
+    <step order="10">Apply filter to endpoints in SemanticSearchEndpoints.cs</step>
+    <step order="11">Run dotnet build to verify compilation</step>
+    <step order="12">Update TASK-INDEX.md: change task 021 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Filters/SemanticSearchAuthorizationFilter.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/SemanticSearchEndpoints.cs (modified to apply filter)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SemanticSearchAuthorizationFilter implements IEndpointFilter</criterion>
+    <criterion testable="true">scope=all returns 400 with SCOPE_ALL_NOT_SUPPORTED</criterion>
+    <criterion testable="true">Entity access validated for scope=entity</criterion>
+    <criterion testable="true">Document access validated for scope=documentIds</criterion>
+    <criterion testable="true">ProblemDetails returned with correlation ID</criterion>
+    <criterion testable="true">Filter applied to both search endpoints</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

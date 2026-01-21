@@ -1,8 +1,9 @@
 # RAG Troubleshooting Guide
 
-> **Version**: 1.0
+> **Version**: 1.1
 > **Created**: 2025-12-29
-> **Project**: AI Document Intelligence R3
+> **Updated**: 2026-01-20
+> **Project**: AI Document Intelligence R3 + Semantic Search Foundation R1
 
 ---
 
@@ -10,12 +11,13 @@
 
 1. [Common Issues](#common-issues)
 2. [Search Issues](#search-issues)
-3. [Indexing Issues](#indexing-issues)
-4. [Embedding Issues](#embedding-issues)
-5. [Deployment Model Issues](#deployment-model-issues)
-6. [Performance Issues](#performance-issues)
-7. [Diagnostic Commands](#diagnostic-commands)
-8. [Logging and Monitoring](#logging-and-monitoring)
+3. [Semantic Search Issues](#semantic-search-issues) *(R1 - NEW)*
+4. [Indexing Issues](#indexing-issues)
+5. [Embedding Issues](#embedding-issues)
+6. [Deployment Model Issues](#deployment-model-issues)
+7. [Performance Issues](#performance-issues)
+8. [Diagnostic Commands](#diagnostic-commands)
+9. [Logging and Monitoring](#logging-and-monitoring)
 
 ---
 
@@ -196,6 +198,152 @@ curl -X GET "https://spaarke-search-dev.search.windows.net/indexes/spaarke-knowl
 1. Increase AI Search replicas for high load
 2. Reduce topK parameter
 3. Add filters to narrow search scope
+
+---
+
+## Semantic Search Issues
+
+> **Added in**: Semantic Search Foundation R1 (2026-01-20)
+
+### Semantic Search Endpoints Return 500
+
+**Symptom**: POST `/api/ai/search` returns HTTP 500 after deployment.
+
+**Common Cause**: Endpoint mapped but services not registered (configuration mismatch).
+
+**Check 1: Configuration Match**
+
+The semantic search endpoints require BOTH settings to be enabled:
+- `DocumentIntelligence__Enabled=true`
+- `Analysis__Enabled=true` (defaults to `true` if not set)
+
+```bash
+# Verify both settings
+az webapp config appsettings list \
+  --name spe-api-dev-67e2xz \
+  --resource-group spe-infrastructure-westus2 \
+  --query "[?name=='DocumentIntelligence__Enabled' || name=='Analysis__Enabled']"
+```
+
+**Check 2: Service Registration**
+
+Look for startup log confirming semantic search services:
+```
+✓ Semantic Search services registered
+```
+
+**Resolution**:
+1. Ensure both `DocumentIntelligence__Enabled` and `Analysis__Enabled` are `true`
+2. If services are disabled intentionally, the endpoint won't be mapped (returns 404, not 500)
+3. Restart the App Service after configuration changes
+
+---
+
+### Invalid Scope Error (400)
+
+**Symptom**: Request returns HTTP 400 with error code `INVALID_SCOPE` or `SCOPE_NOT_SUPPORTED`.
+
+**Common Causes**:
+- Using `scope=all` (not supported in R1)
+- Typo in scope value
+
+**Check**: Verify request body:
+
+```json
+{
+  "scope": "entity",   // ✅ Valid: entity, documentIds
+  "scope": "all"       // ❌ Invalid: returns SCOPE_NOT_SUPPORTED
+}
+```
+
+**Resolution**:
+1. Use `scope=entity` with `entityType` and `entityId`
+2. Use `scope=documentIds` with `documentIds[]` array
+3. For cross-entity search, submit multiple requests per entity
+
+---
+
+### Missing Entity Type or ID (400)
+
+**Symptom**: Request returns HTTP 400 with `ENTITY_TYPE_REQUIRED` or `ENTITY_ID_REQUIRED`.
+
+**Cause**: Using `scope=entity` without required fields.
+
+**Resolution**: Include all required fields:
+
+```json
+{
+  "query": "search terms",
+  "scope": "entity",
+  "entityType": "matter",      // Required when scope=entity
+  "entityId": "guid-here"       // Required when scope=entity
+}
+```
+
+---
+
+### No Results with Entity Scope
+
+**Symptom**: Search returns empty results even when documents should exist.
+
+**Check 1: Parent Entity Fields Indexed**
+
+Verify documents have parent entity fields populated:
+
+```bash
+curl -X POST "https://spaarke-search-dev.search.windows.net/indexes/spaarke-knowledge-index-v2/docs/search?api-version=2024-07-01" \
+  -H "Content-Type: application/json" \
+  -H "api-key: <your-api-key>" \
+  -d '{
+    "search": "*",
+    "filter": "parentEntityType eq '\''matter'\'' and parentEntityId eq '\''your-entity-id'\''",
+    "count": true,
+    "top": 5
+  }'
+```
+
+**Check 2: Documents Re-indexed After Schema Update**
+
+If documents were indexed before R1, they won't have `parentEntityType`, `parentEntityId`, `parentEntityName` fields.
+
+**Resolution**:
+1. Re-index documents to populate parent entity fields
+2. Verify entity type matches exactly (case-sensitive)
+3. Lower `minRelevanceScore` to test if results exist at all
+
+---
+
+### Embedding Generation Fallback
+
+**Symptom**: Search works but `metadata.embeddingGenerated` is `false`.
+
+**Meaning**: Embedding generation failed; search fell back to keyword-only mode.
+
+**Check**: Look for warning logs:
+```
+Warning: Embedding generation failed for semantic search query. Falling back to keyword-only.
+```
+
+**Resolution**:
+1. Check Azure OpenAI service health
+2. Verify `text-embedding-3-large` deployment exists
+3. Check rate limits haven't been exceeded
+4. The search still works but may have lower relevance
+
+---
+
+### Authorization Failures (403)
+
+**Symptom**: Request returns HTTP 403 Forbidden.
+
+**Cause**: User doesn't have access to the parent entity or specified documents.
+
+**Check**: `SemanticSearchAuthorizationFilter` logs show which entity/document failed authorization.
+
+**Resolution**:
+1. Verify user has read access to the parent entity in Dataverse
+2. For `scope=documentIds`, verify user has access to ALL specified document IDs
+3. Check tenant ID matches the user's token
 
 ---
 
@@ -533,4 +681,6 @@ exceptions
 ---
 
 *Document created: 2025-12-29*
+*Updated: 2026-01-20*
 *AI Document Intelligence R3 - Phase 1 Complete*
+*Semantic Search Foundation R1 - Complete (troubleshooting section added)*

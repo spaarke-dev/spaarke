@@ -1,0 +1,297 @@
+{
+  "id": "d1e2f3a4-b5c6-4d5e-9f0a-003003003003",
+  "name": "SYS-KNW-BUILDER-003-NodeSchema",
+  "displayName": "Node Schema",
+  "description": "Complete schema definitions for all playbook node types. Provides validation rules, required fields, and configuration options for each node type.",
+  "scopeType": "Knowledge",
+  "ownerType": 1,
+  "isImmutable": true,
+  "content": {
+    "sourceType": "inline",
+    "contentType": "schema",
+    "schemas": {
+      "common": {
+        "description": "Fields common to all node types",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier for the node"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["aiAnalysis", "condition", "assemble", "deliver", "loop", "transform", "humanReview", "externalApi"],
+            "description": "Node type identifier"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Display label shown on canvas"
+          },
+          "position": {
+            "type": "object",
+            "properties": {
+              "x": { "type": "number" },
+              "y": { "type": "number" }
+            },
+            "required": ["x", "y"]
+          },
+          "data": {
+            "type": "object",
+            "description": "Node-specific configuration data"
+          }
+        },
+        "required": ["id", "type", "label"]
+      },
+      "aiAnalysis": {
+        "description": "AI-powered document analysis node",
+        "extends": "common",
+        "data": {
+          "action": {
+            "type": "string",
+            "description": "ID of Action scope defining system prompt",
+            "required": true
+          },
+          "skills": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "IDs of Skill scopes to include"
+          },
+          "knowledge": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "IDs of Knowledge scopes for RAG context"
+          },
+          "outputVariable": {
+            "type": "string",
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+            "description": "Variable name for storing results",
+            "required": true
+          },
+          "outputSchema": {
+            "type": "object",
+            "description": "JSON Schema defining expected output structure"
+          },
+          "model": {
+            "type": "string",
+            "enum": ["gpt-4o", "gpt-4o-mini", "o1-mini"],
+            "default": "gpt-4o",
+            "description": "AI model to use for analysis"
+          }
+        }
+      },
+      "condition": {
+        "description": "Branching logic node",
+        "extends": "common",
+        "data": {
+          "expression": {
+            "type": "string",
+            "description": "JavaScript-like expression to evaluate",
+            "required": true,
+            "examples": ["riskLevel === 'HIGH'", "confidence > 0.8", "documentType === 'LEASE'"]
+          },
+          "trueLabel": {
+            "type": "string",
+            "default": "Yes",
+            "description": "Label for the true branch"
+          },
+          "falseLabel": {
+            "type": "string",
+            "default": "No",
+            "description": "Label for the false branch"
+          }
+        }
+      },
+      "assemble": {
+        "description": "Combine multiple node outputs",
+        "extends": "common",
+        "data": {
+          "inputVariables": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Variable names to combine",
+            "required": true
+          },
+          "outputVariable": {
+            "type": "string",
+            "description": "Variable for combined result",
+            "required": true
+          },
+          "format": {
+            "type": "string",
+            "enum": ["object", "array", "template"],
+            "default": "object",
+            "description": "How to combine inputs"
+          },
+          "template": {
+            "type": "string",
+            "description": "Handlebars template for formatting (if format=template)"
+          }
+        }
+      },
+      "deliver": {
+        "description": "Output final results",
+        "extends": "common",
+        "data": {
+          "deliveryType": {
+            "type": "string",
+            "enum": ["dataverse", "api", "blob", "email"],
+            "default": "dataverse",
+            "description": "Where to send results",
+            "required": true
+          },
+          "destination": {
+            "type": "string",
+            "description": "Target location (entity name, URL, container, email)"
+          },
+          "format": {
+            "type": "string",
+            "enum": ["json", "html", "pdf", "csv"],
+            "default": "json"
+          },
+          "fieldMappings": {
+            "type": "object",
+            "additionalProperties": { "type": "string" },
+            "description": "Map variables to destination fields"
+          }
+        }
+      },
+      "loop": {
+        "description": "Iterate over collections",
+        "extends": "common",
+        "data": {
+          "collectionVariable": {
+            "type": "string",
+            "description": "Variable containing array to iterate",
+            "required": true
+          },
+          "itemVariable": {
+            "type": "string",
+            "description": "Variable name for current item",
+            "required": true
+          },
+          "maxIterations": {
+            "type": "integer",
+            "default": 100,
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "Safety limit on iterations"
+          },
+          "parallel": {
+            "type": "boolean",
+            "default": false,
+            "description": "Process items in parallel"
+          }
+        }
+      },
+      "transform": {
+        "description": "Data transformation node",
+        "extends": "common",
+        "data": {
+          "transformType": {
+            "type": "string",
+            "enum": ["map", "filter", "reduce", "custom"],
+            "required": true
+          },
+          "inputVariable": {
+            "type": "string",
+            "description": "Source data variable",
+            "required": true
+          },
+          "outputVariable": {
+            "type": "string",
+            "description": "Transformed result variable",
+            "required": true
+          },
+          "expression": {
+            "type": "string",
+            "description": "Transformation expression/code"
+          }
+        }
+      },
+      "humanReview": {
+        "description": "Pause for human approval",
+        "extends": "common",
+        "data": {
+          "reviewPrompt": {
+            "type": "string",
+            "description": "Instructions for the reviewer",
+            "required": true
+          },
+          "timeoutHours": {
+            "type": "number",
+            "default": 24,
+            "description": "Hours before auto-escalation"
+          },
+          "escalationPath": {
+            "type": "string",
+            "description": "Who to escalate to on timeout"
+          },
+          "requiredActions": {
+            "type": "array",
+            "items": { "type": "string" },
+            "default": ["approve", "reject"],
+            "description": "Available reviewer actions"
+          }
+        }
+      },
+      "externalApi": {
+        "description": "Call external service",
+        "extends": "common",
+        "data": {
+          "endpoint": {
+            "type": "string",
+            "format": "uri",
+            "description": "API URL",
+            "required": true
+          },
+          "method": {
+            "type": "string",
+            "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"],
+            "default": "POST"
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          },
+          "body": {
+            "type": "string",
+            "description": "Request body template"
+          },
+          "responseMapping": {
+            "type": "object",
+            "description": "Map response fields to variables"
+          },
+          "timeout": {
+            "type": "integer",
+            "default": 30000,
+            "description": "Request timeout in milliseconds"
+          }
+        }
+      }
+    },
+    "edge": {
+      "description": "Connection between nodes",
+      "properties": {
+        "id": { "type": "string" },
+        "source": { "type": "string", "description": "Source node ID" },
+        "target": { "type": "string", "description": "Target node ID" },
+        "sourceHandle": { "type": "string", "description": "Source port (for conditions)" },
+        "targetHandle": { "type": "string" },
+        "label": { "type": "string" },
+        "type": {
+          "type": "string",
+          "enum": ["default", "success", "failure", "true", "false"]
+        }
+      },
+      "required": ["id", "source", "target"]
+    },
+    "lastUpdated": "2026-01-19",
+    "version": "1.0.0"
+  },
+  "metadata": {
+    "tags": ["builder", "knowledge", "schema", "validation", "reference"],
+    "version": "1.0.0",
+    "category": "builder-reference"
+  }
+}

@@ -1,0 +1,124 @@
+<task id="050" project="ai-playbook-node-builder-r3">
+  <metadata>
+    <title>Comprehensive Error Handling Review</title>
+    <phase>6</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>quality, error-handling</tags>
+    <dependencies>045</dependencies>
+    <status>completed</status>
+    <completed>2026-01-19</completed>
+  </metadata>
+
+  <prompt>
+    <goal>Review and enhance error handling across all new code from Phases 1-5.</goal>
+
+    <context>
+      Before final testing, ensure all new code has proper error handling with user-friendly messages, appropriate logging, and retry logic where needed.
+    </context>
+
+    <constraints>
+      - Use ProblemDetails for API errors per ADR-019
+      - User-friendly messages in frontend
+      - Retry logic for transient failures
+      - Correlation IDs for tracing
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-019-problemdetails.md" reason="Error handling pattern" />
+      <file path=".claude/patterns/api/error-handling.md" reason="Error patterns" />
+      <file path=".claude/patterns/pcf/error-handling.md" reason="PCF error patterns" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review ScopeResolverService CRUD methods for error handling</step>
+    <step order="2">Review AiPlaybookBuilderService for AI call failures</step>
+    <step order="3">Review test execution for failure scenarios</step>
+    <step order="4">Review frontend components for error states</step>
+    <step order="5">Add retry logic for transient failures (AI calls, Dataverse)</step>
+    <step order="6">Ensure correlation IDs included in all errors</step>
+    <step order="7">Test error scenarios manually</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Review code</tool>
+    <tool name="Edit">Add error handling</tool>
+    <tool name="Bash">Test error scenarios</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Enhanced error handling across all new code</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All API errors return ProblemDetails</criterion>
+    <criterion>Frontend shows user-friendly error messages</criterion>
+    <criterion>Transient failures have retry logic</criterion>
+    <criterion>Errors include correlation IDs</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2026-01-19">
+      ## Task 050 Completion Summary
+
+      ### Error Handling Review Findings
+
+      **1. ScopeResolverService CRUD (Already Well-Implemented)**
+      - Uses ArgumentNullException.ThrowIfNull() and ArgumentException.ThrowIfNullOrWhiteSpace()
+      - Logs warnings for not-found items
+      - Throws KeyNotFoundException for missing items during update/delete
+      - Uses custom ScopeOwnershipException for ownership validation
+
+      **2. AiPlaybookBuilderService (Good Error Handling with Fallbacks)**
+      - Catches JsonException specifically for JSON parsing failures
+      - Catches OpenAiCircuitBrokenException for circuit breaker scenarios
+      - Has fallback methods: CreateFallbackResult(), CreateFallbackClarification()
+      - Graceful degradation to rule-based fallback when AI fails
+
+      **3. AiPlaybookBuilderEndpoints (Enhanced)**
+      - Uses ProblemDetails via Results.Problem() for server errors
+      - TraceIdentifier included in logs
+      - SSE error events include error codes
+
+      **4. Frontend (Already Has ErrorDisplay Component)**
+      - ErrorDisplay.tsx provides standardized error presentation
+      - Supports error severity levels (error, warning, info)
+      - Has correlation ID display with copy functionality
+      - Retry button for retryable errors
+
+      **5. Retry Logic (Already Implemented with Polly)**
+      - RetryPolicies.cs provides GetAzureOpenAiRetryPolicy(), GetDataverseRetryPolicy()
+      - Exponential backoff with jitter (1s, 2s, 4s, capped at 30s max, 3 retries)
+      - OpenAiClient uses circuit breaker pattern with Polly 8.x ResiliencePipeline
+      - Custom OpenAiCircuitBrokenException with RetryAfter property
+
+      ### Improvements Made
+
+      **6. Correlation ID Enhancement (Task 050)**
+      - Added `correlationId` property to ErrorEvent record in BuilderSseEvents.cs
+      - Updated ServerSentEventWriter.WriteErrorAsync() to accept correlationId parameter
+      - Updated all SSE error responses in AiPlaybookBuilderEndpoints to include context.TraceIdentifier:
+        - ProcessBuilderMessage (PROCESSING_ERROR)
+        - HandleClarificationResponse (CLARIFICATION_ERROR)
+        - TestPlaybookExecution (TEST_EXECUTION_ERROR)
+        - QuickTestPlaybookExecution (QUICK_TEST_ERROR)
+        - ProductionTestPlaybookExecution (PRODUCTION_TEST_ERROR)
+
+      ### Acceptance Criteria Verification
+
+      - [x] All API errors return ProblemDetails - Using Results.Problem() for non-streaming endpoints
+      - [x] Frontend shows user-friendly error messages - ErrorDisplay component with error code mapping
+      - [x] Transient failures have retry logic - Polly policies with exponential backoff + circuit breaker
+      - [x] Errors include correlation IDs - Added to all SSE error events
+
+      ### Files Modified
+      - Models/Ai/BuilderSseEvents.cs - Added correlationId property to ErrorEvent
+      - Infrastructure/Streaming/ServerSentEventWriter.cs - Added correlationId parameter
+      - Api/Ai/AiPlaybookBuilderEndpoints.cs - Pass correlation IDs to all error responses
+
+      Build verified: dotnet build succeeded with 0 errors.
+    </note>
+  </notes>
+</task>

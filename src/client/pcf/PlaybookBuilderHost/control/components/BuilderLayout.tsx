@@ -35,7 +35,7 @@ import { ExecutionOverlay } from './Execution';
 import { useCanvasStore, type PlaybookNodeType } from '../stores/canvasStore';
 import { useExecutionStore } from '../stores/executionStore';
 import { useAiAssistantStore } from '../stores/aiAssistantStore';
-import { AiAssistantModal, ChatHistory, ChatInput } from './AiAssistant';
+import { AiAssistantModal, ChatHistory, ChatInput, SuggestionBar } from './AiAssistant';
 
 const useStyles = makeStyles({
   container: {
@@ -209,8 +209,8 @@ const paletteItems: PaletteItem[] = [
 export const BuilderLayout = React.memo(function BuilderLayout() {
   const styles = useStyles();
 
-  // Panel states - left collapsed by default, right auto-opens on selection
-  const [leftPanelOpen, setLeftPanelOpen] = useState(false);
+  // Panel states - left open by default, right auto-opens on selection
+  const [leftPanelOpen, setLeftPanelOpen] = useState(true);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
 
   // Track selected node for auto-opening properties panel
@@ -349,6 +349,7 @@ export const BuilderLayout = React.memo(function BuilderLayout() {
       {/* AI Assistant Modal */}
       <AiAssistantModal>
         <ChatHistory />
+        <SuggestionBar onSelectSuggestion={handleSendMessage} />
         <ChatInput onSendMessage={handleSendMessage} />
       </AiAssistantModal>
     </div>

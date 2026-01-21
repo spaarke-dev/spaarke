@@ -26,7 +26,7 @@ import type { DocumentNode } from "./types/graph";
 import { RELATIONSHIP_TYPES, type RelationshipTypeKey } from "./types/api";
 
 // Control version - must match ControlManifest.Input.xml
-const CONTROL_VERSION = "1.0.24";
+const CONTROL_VERSION = "1.0.29";
 
 /**
  * Props for the DocumentRelationshipViewer component
@@ -61,15 +61,24 @@ const useStyles = makeStyles({
     header: {
         display: "flex",
         alignItems: "center",
-        gap: tokens.spacingHorizontalS,
-        padding: tokens.spacingVerticalM,
+        justifyContent: "space-between",
+        gap: tokens.spacingHorizontalM,
+        padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+        backgroundColor: tokens.colorNeutralBackground2,
         borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
+        position: "sticky",
+        top: 0,
+        zIndex: 10,
     },
     headerTitle: {
-        flex: 1,
         display: "flex",
         alignItems: "center",
         gap: tokens.spacingHorizontalS,
+        fontSize: tokens.fontSizeBase200,
+        fontWeight: tokens.fontWeightSemibold,
+        textTransform: "uppercase",
+        letterSpacing: "0.5px",
+        color: tokens.colorNeutralForeground2,
     },
     graphContainer: {
         flex: 1,
@@ -278,16 +287,12 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
         [onDocumentSelect, notifyOutputChanged]
     );
 
-    // Handle relationship type filter toggle
-    const handleFilterToggle = React.useCallback(
-        (key: RelationshipTypeKey) => {
-            setSelectedRelationshipTypes((prev) => {
-                if (prev.includes(key)) {
-                    return prev.filter((k) => k !== key);
-                } else {
-                    return [...prev, key];
-                }
-            });
+    // Handle relationship type filter changes via Menu's onCheckedValueChange
+    const handleCheckedValueChange = React.useCallback(
+        (_event: unknown, data: { name: string; checkedItems: string[] }) => {
+            if (data.name === "filter") {
+                setSelectedRelationshipTypes(data.checkedItems);
+            }
         },
         []
     );
@@ -340,7 +345,10 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
                         )}
                     </div>
                     <div className={styles.filterContainer}>
-                        <Menu checkedValues={checkedItems}>
+                        <Menu
+                            checkedValues={checkedItems}
+                            onCheckedValueChange={handleCheckedValueChange}
+                        >
                             <MenuTrigger disableButtonEnhancement>
                                 <Button
                                     appearance="subtle"
@@ -357,7 +365,6 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
                                             key={option.key}
                                             name="filter"
                                             value={option.key}
-                                            onClick={() => handleFilterToggle(option.key)}
                                         >
                                             {option.label}
                                         </MenuItemCheckbox>

@@ -1,0 +1,60 @@
+<task id="044" project="ai-playbook-node-builder-r3">
+  <metadata>
+    <title>Add Model Selection UI to AI Panel</title>
+    <phase>5</phase>
+    <estimate>1-2 hours</estimate>
+    <tags>pcf, frontend, fluent-ui</tags>
+    <dependencies>011</dependencies>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+    <goal>Add model selection dropdown to AI Assistant panel for choosing between GPT-4o (Powerful) and GPT-4o-mini (Fast).</goal>
+
+    <context>
+      Users may want to choose AI model for different tasks. Most operations use GPT-4o-mini by default, but complex tasks benefit from GPT-4o.
+    </context>
+
+    <constraints>
+      - Hidden by default (advanced mode toggle)
+      - Persist selection in store
+      - Clear labels for model differences
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/client/pcf/PlaybookBuilderHost/control/components/AiAssistant/" reason="AI Assistant panel" />
+      <file path="src/client/pcf/PlaybookBuilderHost/control/stores/aiAssistantStore.ts" reason="Store to extend" />
+      <file path="src/client/pcf/CLAUDE.md" reason="PCF context" />
+      <file path="docs/guides/PCF-DEPLOYMENT-GUIDE.md" reason="Packaging guide" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add modelSelection state to aiAssistantStore</step>
+    <step order="2">Add showAdvancedOptions state to store</step>
+    <step order="3">Add settings/gear icon to AI panel header</step>
+    <step order="4">Create dropdown with model options (GPT-4o, GPT-4o-mini)</step>
+    <step order="5">Add descriptive labels (Powerful vs Fast)</step>
+    <step order="6">Persist selection in store</step>
+    <step order="7">Pass model selection to API calls</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">Update AI Assistant and store</tool>
+    <tool name="Bash">Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Model selection UI</output>
+    <output type="code">Store with model state</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Settings icon shows in AI panel header</criterion>
+    <criterion>Dropdown allows model selection</criterion>
+    <criterion>Selection persists across sessions</criterion>
+    <criterion>API calls use selected model</criterion>
+  </acceptance-criteria>
+</task>

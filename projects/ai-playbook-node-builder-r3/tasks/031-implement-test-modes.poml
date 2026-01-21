@@ -1,0 +1,89 @@
+<task id="031" project="ai-playbook-node-builder-r3">
+  <metadata>
+    <title>Implement Test Execution Modes (Mock, Quick, Production)</title>
+    <phase>4</phase>
+    <estimate>4-5 hours</estimate>
+    <tags>bff-api, testing</tags>
+    <dependencies>030, 007</dependencies>
+    <status>completed</status>
+    <completed-date>2026-01-19</completed-date>
+  </metadata>
+
+  <notes>
+    <note date="2026-01-19">
+      Task completed successfully. Implementation summary:
+      - TestMode enum already existed in TestPlaybookModels.cs (Mock, Quick, Production)
+      - TestPlaybookRequest already existed with mode, playbook, test data
+      - MockTestExecutor, QuickTestExecutor, ProductionTestExecutor already implemented in Testing/
+      - Updated AiPlaybookBuilderService to:
+        - Inject IMockTestExecutor and IPlaybookService dependencies
+        - Delegate Mock mode to dedicated MockTestExecutor (no external calls)
+        - Load canvas from PlaybookService when PlaybookId provided
+        - Add ConvertLayoutToCanvasState helper method
+      - Added 8 unit tests for test execution modes:
+        - ExecuteTestAsync_MockMode_DelegatesToMockTestExecutor
+        - ExecuteTestAsync_MockMode_NoExternalCalls
+        - ExecuteTestAsync_QuickMode_ExecutesNodesWithAi
+        - ExecuteTestAsync_ProductionMode_ExecutesNodesWithAi
+        - ExecuteTestAsync_EmptyCanvas_ReturnsError
+        - ExecuteTestAsync_WithPlaybookId_LoadsCanvasFromPlaybookService
+        - ExecuteTestAsync_PlaybookNotFound_ReturnsError
+        - ExecuteTestAsync_WithMaxNodes_LimitsExecution
+      All tests pass. Build succeeds.
+    </note>
+  </notes>
+
+  <prompt>
+    <goal>Implement three test execution modes for playbooks: Mock (simulated), Quick (temp storage), Production (real data).</goal>
+
+    <context>
+      Test modes allow users to validate playbooks before production use:
+      - Mock: Generate sample data, no external calls
+      - Quick: Upload test document to temp container, execute once
+      - Production: Execute against real data with full observability
+    </context>
+
+    <constraints>
+      - Use existing PlaybookOrchestrationService for execution
+      - Mock mode must not make any external calls
+      - Quick mode must use playbook-test-documents container
+      - Production mode requires explicit user confirmation
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs" reason="Orchestration service" />
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/AiPlaybookBuilderService.cs" reason="Builder service" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define TestMode enum (Mock, Quick, Production)</step>
+    <step order="2">Define TestExecutionRequest with mode, playbook, test data</step>
+    <step order="3">Implement MockTestExecutor - generate sample outputs based on node types</step>
+    <step order="4">Implement QuickTestExecutor - upload to temp, execute, cleanup</step>
+    <step order="5">Implement ProductionTestExecutor - execute with observability</step>
+    <step order="6">Add ExecuteTestAsync method to AiPlaybookBuilderService</step>
+    <step order="7">Wire to PlaybookOrchestrationService for actual execution</step>
+    <step order="8">Write unit tests for each mode</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">Implement test modes</tool>
+    <tool name="Bash">Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">TestMode enum and executors</output>
+    <output type="code">ExecuteTestAsync method</output>
+    <output type="tests">Unit tests for test modes</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Mock mode returns simulated results without external calls</criterion>
+    <criterion>Quick mode uploads to temp container and executes</criterion>
+    <criterion>Production mode executes with full logging</criterion>
+    <criterion>Each mode produces appropriate test report</criterion>
+  </acceptance-criteria>
+</task>

@@ -41,3 +41,27 @@ export {
 
 // Templates
 export { TemplateLibraryDialog } from './Templates';
+
+// SaveAsDialog
+export { SaveAsDialog, type SaveAsDialogProps } from './SaveAsDialog';
+
+// ScopeBrowser
+export {
+  ScopeBrowser,
+  ScopeList,
+  ScopeFormDialog,
+  type ScopeBrowserProps,
+  type ScopeListProps,
+  type ScopeFormDialogProps,
+  type ScopeItem,
+  type ScopeType,
+  type OwnershipType,
+  type ScopeFormData,
+  type DialogMode,
+} from './ScopeBrowser';
+
+// TestModeSelector
+export {
+  TestModeSelector,
+  type TestModeSelectorProps,
+} from './TestModeSelector';

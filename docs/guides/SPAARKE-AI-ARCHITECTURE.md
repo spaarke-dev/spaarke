@@ -1,12 +1,13 @@
 # Spaarke AI Architecture
 
-> **Version**: 1.7
-> **Date**: January 12, 2026
-> **Status**: Production (R3 Phases 1-5 Complete + Document Visualization)
+> **Version**: 1.8
+> **Date**: January 20, 2026
+> **Status**: Production (R3 Phases 1-5 Complete + Document Visualization + Semantic Search R1)
 > **Author**: Spaarke Engineering
 > **Related**: [SPAARKE-AI-STRATEGY.md](../../reference/architecture/SPAARKE-AI-STRATEGY.md)
 > **R3 Updates**: RAG Foundation, Analysis Orchestration, Export Services, Monitoring/Resilience, Security
 > **2026-01-12**: Document Relationship Visualization module added (3072-dim vectors, orphan file support)
+> **2026-01-20**: Semantic Search Foundation R1 - Hybrid search API with entity scoping
 
 ---
 
@@ -2894,6 +2895,323 @@ Response: DocumentGraphResponse
 
 ---
 
+## 17. Playbook Builder AI Assistant Scope Patterns (2026-01-19)
+
+### 17.1 Overview
+
+The AI Playbook Builder Assistant uses a scope-based architecture for AI operations. Scopes define reusable AI capabilities that can be composed into playbook workflows. This section documents the builder-specific scope patterns used by `AiPlaybookBuilderService` and `ScopeResolverService`.
+
+### 17.2 Scope Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         Playbook Builder Scope System                        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  User Message                                                               │
+│  ────────────────                                                           │
+│  "Add an AI node for lease clause extraction"                               │
+│         │                                                                   │
+│         ▼                                                                   │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ AiPlaybookBuilderService                                            │   │
+│  │ • Intent classification via Azure OpenAI (GPT-4o / GPT-4o-mini)     │   │
+│  │ • Clarification flow for ambiguous requests                         │   │
+│  │ • Tool call generation for canvas operations                        │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│         │                                                                   │
+│         ▼                                                                   │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ ScopeResolverService                                                │   │
+│  │ • Resolve scope by ID or search query                               │   │
+│  │ • CRUD operations for customer scopes                               │   │
+│  │ • Ownership validation (SYS- vs CUST-)                              │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│         │                                                                   │
+│         ▼                                                                   │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐             │
+│  │ Actions (ACT-)  │  │ Skills (SKL-)   │  │ Tools (TL-)     │             │
+│  │ • AI operations │  │ • Workflow      │  │ • Canvas ops    │             │
+│  │ • Intent class. │  │   patterns      │  │ • Node manip.   │             │
+│  │ • Entity extract│  │ • Domain guides │  │ • Edge creation │             │
+│  └─────────────────┘  └─────────────────┘  └─────────────────┘             │
+│         │                    │                    │                        │
+│         └────────────────────┼────────────────────┘                        │
+│                              ▼                                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ Knowledge (KNW-)                                                    │   │
+│  │ • Scope catalog                                                     │   │
+│  │ • Reference playbooks                                               │   │
+│  │ • Node schema definitions                                           │   │
+│  │ • Best practices                                                    │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 17.3 Scope Types and Prefixes
+
+| Type | Prefix | Purpose | Examples |
+|------|--------|---------|----------|
+| **Actions** | `ACT-` | AI operations and transformations | `ACT-LEASE-CLASSIFY`, `ACT-BUILDER-001` |
+| **Skills** | `SKL-` | Reusable workflow patterns and domain expertise | `SKL-CONTRACT-REVIEW`, `SKL-BUILDER-003` |
+| **Tools** | `TL-` | Canvas manipulation and node operations | `TL-BUILDER-001` (addNode), `TL-BUILDER-003` (createEdge) |
+| **Knowledge** | `KNW-` | Reference data, catalogs, and best practices | `KNW-SCOPE-CATALOG`, `KNW-BUILDER-004` |
+
+### 17.4 Ownership Model
+
+Scopes follow a two-tier ownership model enforced by `ScopeResolverService`:
+
+| Prefix | Owner Type | Dataverse Field | Immutable | Operations Allowed |
+|--------|------------|-----------------|-----------|-------------------|
+| `SYS-` | System | `sprk_ownertype = 1` | Yes | Read, Save As |
+| `CUST-` | Customer | `sprk_ownertype = 2` | No | Full CRUD |
+
+**Ownership enforcement pattern:**
+
+```csharp
+// ScopeResolverService.UpdateScopeAsync
+public async Task<AnalysisScope> UpdateScopeAsync(
+    Guid id,
+    UpdateScopeRequest request,
+    CancellationToken ct)
+{
+    var existing = await GetScopeAsync(id, ct);
+
+    // Ownership validation
+    if (existing.IsImmutable || existing.OwnerType == OwnerType.System)
+    {
+        throw new InvalidOperationException(
+            "Cannot update system scope. Use 'Save As' to create a customer copy.");
+    }
+
+    // Proceed with update...
+}
+```
+
+### 17.5 Builder-Specific Scopes (23 Total)
+
+The Playbook Builder uses 23 specialized scopes for AI-assisted playbook construction:
+
+**Actions (ACT-BUILDER-*)**
+
+| ID | Name | Purpose | Model |
+|----|------|---------|-------|
+| ACT-BUILDER-001 | Intent Classification | Parse user message into operation + parameters | GPT-4o-mini |
+| ACT-BUILDER-002 | Node Configuration | Generate node config from requirements | GPT-4o |
+| ACT-BUILDER-003 | Scope Selection | Select appropriate existing scope | GPT-4o-mini |
+| ACT-BUILDER-004 | Scope Creation | Generate new scope definition | GPT-4o |
+| ACT-BUILDER-005 | Build Plan Generation | Create structured plan from description | GPT-4o |
+
+**Skills (SKL-BUILDER-*)**
+
+| ID | Name | Purpose |
+|----|------|---------|
+| SKL-BUILDER-001 | Lease Analysis Pattern | How to build lease analysis playbooks |
+| SKL-BUILDER-002 | Contract Review Pattern | Contract review playbook patterns |
+| SKL-BUILDER-003 | Risk Assessment Pattern | Risk workflow patterns |
+| SKL-BUILDER-004 | Node Type Guide | When to use each node type |
+| SKL-BUILDER-005 | Scope Matching | Find/create appropriate scopes |
+
+**Tools (TL-BUILDER-*)**
+
+| ID | Name | Canvas Operation |
+|----|------|------------------|
+| TL-BUILDER-001 | addNode | Add node to canvas |
+| TL-BUILDER-002 | removeNode | Remove node from canvas |
+| TL-BUILDER-003 | createEdge | Connect two nodes |
+| TL-BUILDER-004 | updateNodeConfig | Configure node properties |
+| TL-BUILDER-005 | linkScope | Wire scope to node |
+| TL-BUILDER-006 | createScope | Create new scope in Dataverse |
+| TL-BUILDER-007 | searchScopes | Find existing scopes |
+| TL-BUILDER-008 | autoLayout | Arrange canvas nodes |
+| TL-BUILDER-009 | validateCanvas | Validate playbook structure |
+
+**Knowledge (KNW-BUILDER-*)**
+
+| ID | Name | Content |
+|----|------|---------|
+| KNW-BUILDER-001 | Scope Catalog | Available system scopes |
+| KNW-BUILDER-002 | Reference Playbooks | Example playbook patterns |
+| KNW-BUILDER-003 | Node Schema | Valid node configurations |
+| KNW-BUILDER-004 | Best Practices | Design guidelines |
+
+### 17.6 Intent Classification Pattern
+
+The `AiPlaybookBuilderService` uses structured output for intent classification:
+
+```csharp
+// Intent classification with confidence scoring
+public async Task<IntentResult> ClassifyIntentWithAiAsync(
+    string message,
+    string model,
+    CancellationToken ct)
+{
+    var schema = new
+    {
+        operation = "string",    // add_node, remove_node, search_scopes, etc.
+        parameters = "object",   // Operation-specific parameters
+        confidence = "number",   // 0.0 to 1.0
+        clarificationNeeded = "boolean",
+        suggestedQuestions = "array"
+    };
+
+    var result = await _openAiClient.GetStructuredOutputAsync<IntentResult>(
+        message,
+        schema,
+        model,  // GPT-4o or GPT-4o-mini
+        ct);
+
+    // Trigger clarification flow if confidence below threshold
+    if (result.Confidence < 0.8 || result.ClarificationNeeded)
+    {
+        return new IntentResult
+        {
+            RequiresClarification = true,
+            Questions = result.SuggestedQuestions ?? GenerateQuestions(result)
+        };
+    }
+
+    return result;
+}
+```
+
+### 17.7 Scope Search Pattern
+
+Semantic scope search uses the same RAG infrastructure:
+
+```csharp
+// ScopeResolverService.SearchScopesAsync
+public async Task<IReadOnlyList<ScopeSearchResult>> SearchScopesAsync(
+    string query,
+    ScopeSearchOptions options,
+    CancellationToken ct)
+{
+    // Build filter for scope type and owner
+    var filter = BuildScopeFilter(options.Types, options.OwnerTypes);
+
+    // Vector search against scope embeddings
+    var results = await _ragService.SearchAsync(
+        query,
+        new RagSearchOptions
+        {
+            TenantId = options.TenantId,
+            Filter = filter,
+            TopK = options.Limit,
+            MinScore = options.MinSimilarity
+        },
+        ct);
+
+    return results.Select(r => new ScopeSearchResult
+    {
+        ScopeId = r.DocumentId,
+        Name = r.Metadata["name"],
+        Type = r.Metadata["scopeType"],
+        Similarity = r.Score,
+        Description = r.Content
+    }).ToList();
+}
+```
+
+### 17.8 Save As / Extend Pattern
+
+Lineage tracking for scope derivatives:
+
+```csharp
+// Save As - creates copy with basedon reference
+public async Task<AnalysisScope> SaveScopeAsAsync(
+    Guid sourceId,
+    string newName,
+    CancellationToken ct)
+{
+    var source = await GetScopeAsync(sourceId, ct);
+
+    var newScope = new CreateScopeRequest
+    {
+        Name = $"CUST-{newName}",
+        Type = source.Type,
+        Configuration = source.Configuration,
+        BasedOn = sourceId,           // Lineage tracking
+        OwnerType = OwnerType.Customer
+    };
+
+    return await CreateScopeAsync(newScope, ct);
+}
+
+// Extend - creates child with parentscope reference (inherits updates)
+public async Task<AnalysisScope> ExtendScopeAsync(
+    Guid parentId,
+    ExtendScopeRequest request,
+    CancellationToken ct)
+{
+    var parent = await GetScopeAsync(parentId, ct);
+
+    var childScope = new CreateScopeRequest
+    {
+        Name = $"CUST-{request.Name}",
+        Type = parent.Type,
+        Configuration = MergeConfigurations(parent.Configuration, request.Extensions),
+        ParentScope = parentId,       // Inheritance tracking
+        OwnerType = OwnerType.Customer
+    };
+
+    return await CreateScopeAsync(childScope, ct);
+}
+```
+
+### 17.9 Dataverse Schema
+
+Scope entities include ownership and lineage fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `sprk_analysisactionid` | Unique Identifier | Primary key |
+| `sprk_name` | Text | Scope name (with prefix) |
+| `sprk_scopetype` | OptionSet | Action/Skill/Tool/Knowledge |
+| `sprk_ownertype` | OptionSet | System (1) / Customer (2) |
+| `sprk_isimmutable` | Boolean | True for SYS- scopes |
+| `sprk_parentscope` | Lookup (self) | For Extend relationships |
+| `sprk_basedon` | Lookup (self) | For Save As relationships |
+| `sprk_configuration` | Multiline Text | JSON configuration |
+
+### 17.10 Caching Strategy
+
+Builder scope prompts use `IMemoryCache` per ADR-014:
+
+```csharp
+// AiPlaybookBuilderService - Prompt caching
+private readonly IMemoryCache _promptCache;
+
+public async Task<string> GetBuilderPromptAsync(string scopeId, CancellationToken ct)
+{
+    var cacheKey = $"builder:prompt:{scopeId}";
+
+    if (!_promptCache.TryGetValue(cacheKey, out string prompt))
+    {
+        var scope = await _scopeResolver.GetScopeAsync(Guid.Parse(scopeId), ct);
+        prompt = scope.Configuration.Prompt;
+
+        _promptCache.Set(cacheKey, prompt, new MemoryCacheEntryOptions
+        {
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(30)
+        });
+    }
+
+    return prompt;
+}
+```
+
+### 17.11 Performance Targets
+
+| Operation | Target | Implementation |
+|-----------|--------|----------------|
+| Intent classification | < 2s | GPT-4o-mini with 500-1500ms typical |
+| Scope search | < 1s | In-memory for stub, vector search production |
+| Scope CRUD | < 500ms | Direct Dataverse operations |
+| Prompt cache hit | < 10ms | IMemoryCache with 30-min TTL |
+
+---
+
 ## Related Documents
 
 - [SPAARKE-AI-STRATEGY.md](../../reference/architecture/SPAARKE-AI-STRATEGY.md) - Strategic context, Microsoft Foundry, use cases
@@ -2901,11 +3219,15 @@ Response: DocumentGraphResponse
 - [ADR-004: Async Job Contract](../../reference/adr/ADR-004-async-job-contract.md)
 - [ADR-009: Redis-first Caching](../../reference/adr/ADR-009-caching-redis-first.md)
 - [BFF API Patterns](../architecture/sdap-bff-api-patterns.md)
+- [RAG Architecture](RAG-ARCHITECTURE.md) - RAG pipeline, indexing, and Semantic Search API details
 - [AI Search & Visualization Module](../../projects/ai-azure-search-module/README.md) - Project documentation
+- [Playbook Builder Full-Screen Setup](PLAYBOOK-BUILDER-FULLSCREEN-SETUP.md) - PCF control deployment and AI Assistant usage
 
 ---
 
 *Document Owner: Spaarke Engineering*
-*Last Updated: January 12, 2026*
+*Last Updated: January 20, 2026*
 *R3 Updates: RAG Deployment Models (Section 8), Knowledge Index Schema (Section 9.2), Tool Framework (Section 10), Playbook System (Section 11), Export Services (Section 12)*
 *2026-01-12: Document Relationship Visualization (Section 16)*
+*2026-01-19: Playbook Builder AI Assistant Scope Patterns (Section 17)*
+*2026-01-20: Semantic Search Foundation R1 - See [RAG-ARCHITECTURE.md](RAG-ARCHITECTURE.md#semantic-search-api) for details*

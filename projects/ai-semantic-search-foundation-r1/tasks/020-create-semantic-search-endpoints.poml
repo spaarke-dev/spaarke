@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="ai-semantic-search-foundation-r1">
+  <metadata>
+    <title>Create SemanticSearchEndpoints with search and count methods</title>
+    <phase>3: API Endpoints &amp; Authorization</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>015</dependencies>
+    <blocks>021, 022</blocks>
+    <tags>bff-api, ai, endpoints</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>API endpoints, must follow ADR-001 Minimal API patterns exactly</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create the SemanticSearchEndpoints class with POST /api/ai/search/semantic and
+    POST /api/ai/search/semantic/count endpoints. Follow ADR-001 Minimal API patterns
+    with MapGroup registration.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in .NET Minimal APIs and the BFF API patterns.
+    Follow ADR-001 for endpoint patterns and ADR-008 for endpoint filters.
+  </role>
+
+  <goal>
+    SemanticSearchEndpoints class with two endpoints:
+    - POST /api/ai/search/semantic - Returns search results
+    - POST /api/ai/search/semantic/count - Returns count only
+    Both wired to SemanticSearchService with proper request validation.
+  </goal>
+
+  <context>
+    <background>
+      Minimal API endpoints follow a specific pattern in this codebase:
+      - Static class with Map extension method
+      - MapGroup for route prefix
+      - Individual MapPost/MapGet for each endpoint
+      - Endpoint filters for authorization
+      The search endpoints accept POST with JSON body and return JSON response.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/</file>
+      <file>projects/ai-semantic-search-foundation-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Use MapGroup with static Map extension method</constraint>
+    <constraint source="ADR-001">Handler methods as static delegates or separate methods</constraint>
+    <constraint source="ADR-008">Add endpoint filters for authorization (task 021)</constraint>
+    <constraint source="spec">Content-Type: application/json for both request and response</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/</file>
+    </files>
+    <patterns>
+      <pattern name="Existing AI Endpoints" location="src/server/api/Sprk.Bff.Api/Api/Ai/">
+        Follow existing AI endpoint patterns for structure
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec.md API Design section for endpoint requirements</step>
+    <step order="2">Read existing AI endpoints in Api/Ai/ for patterns</step>
+    <step order="3">Create SemanticSearchEndpoints.cs in Api/Ai/</step>
+    <step order="4">Implement MapSemanticSearchEndpoints extension method</step>
+    <step order="5">Create MapGroup for /api/ai/search/semantic prefix</step>
+    <step order="6">Implement POST / handler (search)</step>
+    <step order="7">Implement POST /count handler</step>
+    <step order="8">Add rate limiting attribute (RequireRateLimiting("ai-stream"))</step>
+    <step order="9">Register endpoints in Program.cs or AiModule</step>
+    <step order="10">Run dotnet build to verify compilation</step>
+    <step order="11">Update TASK-INDEX.md: change task 020 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/SemanticSearchEndpoints.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SemanticSearchEndpoints.cs exists</criterion>
+    <criterion testable="true">POST /api/ai/search/semantic endpoint exists</criterion>
+    <criterion testable="true">POST /api/ai/search/semantic/count endpoint exists</criterion>
+    <criterion testable="true">MapGroup pattern used correctly</criterion>
+    <criterion testable="true">Rate limiting applied</criterion>
+    <criterion testable="true">Endpoints registered in app startup</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

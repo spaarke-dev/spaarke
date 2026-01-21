@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using Sprk.Bff.Api.Models.Ai;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -133,6 +134,16 @@ public sealed record FileIndexRequest
     /// sender, or custom classification tags.
     /// </remarks>
     public Dictionary<string, string>? Metadata { get; init; }
+
+    /// <summary>
+    /// Optional parent entity context for entity-scoped search.
+    /// </summary>
+    /// <remarks>
+    /// When provided, enables filtering search results by the business entity
+    /// (Matter, Project, Invoice, Account, Contact) that owns this document.
+    /// Null for documents not associated with a specific entity.
+    /// </remarks>
+    public ParentEntityContext? ParentEntity { get; init; }
 }
 
 /// <summary>
@@ -188,6 +199,16 @@ public sealed record ContentIndexRequest
     /// Optional additional metadata to store with indexed chunks.
     /// </summary>
     public Dictionary<string, string>? Metadata { get; init; }
+
+    /// <summary>
+    /// Optional parent entity context for entity-scoped search.
+    /// </summary>
+    /// <remarks>
+    /// When provided, enables filtering search results by the business entity
+    /// (Matter, Project, Invoice, Account, Contact) that owns this document.
+    /// Null for documents not associated with a specific entity.
+    /// </remarks>
+    public ParentEntityContext? ParentEntity { get; init; }
 }
 
 /// <summary>

@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="044" project="ai-semantic-search-foundation-r1">
+  <metadata>
+    <title>Integration tests for authorization filter</title>
+    <phase>5: Testing &amp; Validation</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>021</dependencies>
+    <blocks>045</blocks>
+    <tags>testing, integration-tests, security</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Security test writing</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Write integration tests specifically for the authorization filter to verify
+    security boundaries are enforced correctly.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in security testing.
+  </role>
+
+  <goal>
+    Security-focused integration tests verifying:
+    - Tenant isolation enforced
+    - Entity access denied for unauthorized users
+    - Document access denied for unauthorized users
+    - Cross-tenant access blocked
+  </goal>
+
+  <context>
+    <background>
+      Security tests are critical for verifying authorization is enforced correctly.
+      Tests should attempt unauthorized access and verify it's blocked with correct
+      error codes.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/SemanticSearchAuthorizationFilter.cs</file>
+      <file>tests/integration/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="security">Must test all authorization paths</constraint>
+    <constraint source="testing">Use test users with different permissions</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>tests/integration/</file>
+      <file>.claude/patterns/auth/uac-access-control.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create SemanticSearchAuthorizationTests.cs</step>
+    <step order="2">Setup test users with different permission levels</step>
+    <step order="3">Test: User can search their own entity</step>
+    <step order="4">Test: User cannot search other user's entity</step>
+    <step order="5">Test: User can search their own documents</step>
+    <step order="6">Test: User cannot search other user's documents</step>
+    <step order="7">Test: Cross-tenant access blocked</step>
+    <step order="8">Test: ENTITY_ACCESS_DENIED error code correct</step>
+    <step order="9">Test: DOCUMENT_ACCESS_DENIED error code correct</step>
+    <step order="10">Run tests with dotnet test</step>
+    <step order="11">Update TASK-INDEX.md: change task 044 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/SemanticSearch/SemanticSearchAuthorizationTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Authorization tests exist</criterion>
+    <criterion testable="true">Unauthorized access blocked</criterion>
+    <criterion testable="true">Error codes correct</criterion>
+    <criterion testable="true">All tests pass</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

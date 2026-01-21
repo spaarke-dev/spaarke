@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="ai-semantic-search-foundation-r1">
+  <metadata>
+    <title>Create SearchFilterBuilder for OData filter construction</title>
+    <phase>2: Core Search Service</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>012</blocks>
+    <tags>bff-api, ai, services</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Critical for correct query generation and security filtering</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create a SearchFilterBuilder static class that constructs OData filter expressions for Azure AI Search.
+    The builder must handle tenant isolation, entity scoping, document filters, and date ranges
+    while preventing filter injection attacks.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Azure AI Search OData filters and security.
+    Follow ADR-013 for AI architecture and spec.md for filter requirements.
+  </role>
+
+  <goal>
+    SearchFilterBuilder class that generates correct OData filter strings for all
+    search scenarios: tenant isolation, entity scope, document ID scope, and optional filters.
+    Filter injection prevented through proper escaping.
+  </goal>
+
+  <context>
+    <background>
+      Azure AI Search uses OData filter syntax for query filtering. The filter builder must:
+      1. ALWAYS include tenantId filter (security)
+      2. Add scope filters based on request (entity scope OR documentIds)
+      3. Add optional filters (documentTypes, fileTypes, tags, dateRange)
+      4. Escape user input to prevent filter injection
+    </background>
+    <relevant-files>
+      <file>projects/ai-semantic-search-foundation-r1/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">ALWAYS include: tenantId eq '{tenantId}'</constraint>
+    <constraint source="spec">scope=entity: add parentEntityType eq '{type}' and parentEntityId eq '{id}'</constraint>
+    <constraint source="spec">scope=documentIds: add documentId in ('{id1}', '{id2}', ...)</constraint>
+    <constraint source="spec">Filters combined with 'and'; arrays use 'search.in()'</constraint>
+    <constraint source="security">Escape single quotes in user input</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>projects/ai-semantic-search-foundation-r1/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs</file>
+    </files>
+    <patterns>
+      <pattern name="Existing Filter Pattern" location="src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs">
+        Reference existing filter construction for patterns to follow
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec.md Search Execution Contract for filter requirements</step>
+    <step order="2">Read existing RagService.cs for filter construction patterns</step>
+    <step order="3">Create SearchFilterBuilder static class in Services/Ai/SemanticSearch/</step>
+    <step order="4">Implement BuildFilter method accepting tenantId, scope, filters</step>
+    <step order="5">Implement tenant isolation filter (always applied)</step>
+    <step order="6">Implement entity scope filter (parentEntityType and parentEntityId)</step>
+    <step order="7">Implement documentIds scope filter using search.in()</step>
+    <step order="8">Implement optional filters (documentTypes, fileTypes, tags, dateRange)</step>
+    <step order="9">Add EscapeODataValue helper method to prevent injection</step>
+    <step order="10">Add XML documentation for all public members</step>
+    <step order="11">Run dotnet build to verify compilation</step>
+    <step order="12">Update TASK-INDEX.md: change task 011 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SearchFilterBuilder.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SearchFilterBuilder.BuildFilter method exists</criterion>
+    <criterion testable="true">Tenant filter always included in output</criterion>
+    <criterion testable="true">Entity scope filter correctly generated</criterion>
+    <criterion testable="true">DocumentIds scope filter uses search.in()</criterion>
+    <criterion testable="true">Optional filters correctly appended</criterion>
+    <criterion testable="true">Single quotes escaped in user input</criterion>
+    <criterion testable="true">dotnet build succeeds without errors</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>
