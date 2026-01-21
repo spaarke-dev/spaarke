@@ -115,8 +115,14 @@ module.exports = async (env, options) => {
       new CopyWebpackPlugin({
         patterns: [
           { from: './public/index.html', to: 'index.html' },
-          { from: './outlook/manifest.json', to: 'outlook/manifest.json' },
-          { from: './word/manifest.xml', to: 'word/manifest.xml' },
+          {
+            from: mode === 'production' ? './outlook/manifest.prod.json' : './outlook/manifest.json',
+            to: 'outlook/manifest.json'
+          },
+          {
+            from: mode === 'production' ? './word/manifest.prod.xml' : './word/manifest.xml',
+            to: 'word/manifest.xml'
+          },
           { from: './shared/assets', to: 'assets', noErrorOnMissing: true },
         ],
       }),
