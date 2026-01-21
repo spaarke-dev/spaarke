@@ -347,6 +347,67 @@ BASED on <context><relevant-files>:
 
 ### Step 8: Execute Task Steps (with Progress Tracking)
 
+#### Step 8.0: Multi-File Work Decomposition (RECOMMENDED)
+
+**MUST: For multi-file work, decompose tasks into a dependency graph and delegate to subagents in parallel where safe.**
+
+```
+BEFORE starting implementation steps, ANALYZE the work:
+
+IF task involves modifying 4+ files:
+  1. DECOMPOSE into independent sub-tasks:
+     - Group files by module/component
+     - Identify which changes depend on others
+     - Create dependency graph
+
+  2. IDENTIFY parallel-safe work:
+     - Files in different modules → CAN parallelize
+     - Files with no shared interfaces → CAN parallelize
+     - Files where one imports from another → MUST serialize
+
+  3. DELEGATE to subagents:
+     - Use Task tool with subagent_type="general-purpose"
+     - Send ONE message with MULTIPLE Task tool calls for parallel work
+     - Each subagent handles one module/component
+     - Provide each subagent with:
+       • Specific files to modify
+       • Relevant constraints from task POML
+       • Expected changes (from task steps)
+
+  4. COORDINATE results:
+     - Use TaskOutput tool to check completion
+     - Merge changes if needed
+     - Run integration checks after all subagents complete
+
+EXAMPLE - Task modifies 6 files:
+  Files: EndpointA.cs, EndpointB.cs, EndpointC.cs (API)
+         ComponentA.tsx, ComponentB.tsx (PCF)
+         SharedTypes.ts (shared)
+
+  Dependency analysis:
+    SharedTypes.ts → ComponentA.tsx, ComponentB.tsx (shared must complete first)
+    EndpointA.cs, EndpointB.cs, EndpointC.cs (all independent)
+
+  Execution strategy:
+    Phase 1 (serial): SharedTypes.ts
+    Phase 2 (parallel):
+      - Subagent 1: EndpointA.cs, EndpointB.cs, EndpointC.cs
+      - Subagent 2: ComponentA.tsx
+      - Subagent 3: ComponentB.tsx
+
+  Task tool call (Phase 2):
+    Send ONE message with THREE Task tool calls:
+    - Task 1: "Implement API endpoints A, B, C"
+    - Task 2: "Update ComponentA with new types"
+    - Task 3: "Update ComponentB with new types"
+
+WHEN NOT to parallelize:
+  - Task has only 1-3 files (overhead not worth it)
+  - Files have tight coupling (shared state, imports)
+  - Sequential logic required (create then use)
+  - Context usage is already > 50% (subagents add context)
+```
+
 ```
 FOR each <step> in <steps>:
 

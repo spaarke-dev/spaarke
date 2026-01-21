@@ -359,6 +359,12 @@ FOR each phase in PLAN.md:
       - <outputs> with expected artifacts
       - <acceptance-criteria> with verification steps
 
+IDENTIFY task dependencies and parallel opportunities:
+  - Mark explicit dependencies in task <metadata><dependencies>
+  - Group independent tasks that CAN run in parallel
+  - Flag tasks that BLOCK multiple downstream tasks (critical path)
+  - See task-create Step 3.8 for parallel task grouping
+
 ADD deployment tasks (per task-create Step 3.6):
   - After each phase that produces deployable artifacts
   - Tag: deploy
@@ -399,9 +405,19 @@ ADD wrap-up task (mandatory per task-create Step 3.7):
 
 CREATE: projects/{project-name}/tasks/TASK-INDEX.md
   - Registry of all tasks with status
-  - Dependencies graph
-  - Critical path
+  - Dependencies graph (which tasks block which)
+  - Critical path (longest dependency chain)
   - High-risk items
+  - **Parallel Groups**: Tasks that CAN run simultaneously
+    Example format:
+    ```markdown
+    ## Parallel Execution Groups
+
+    | Group | Tasks | Prerequisite | Notes |
+    |-------|-------|--------------|-------|
+    | A | 020, 021, 022 | 010 complete | Independent API endpoints |
+    | B | 031, 032 | 030 complete | Separate UI components |
+    ```
 ```
 
 **Output to User:**
@@ -531,6 +547,20 @@ IF user said 'y':
        - ADRs (via adr-aware based on tags)
        - Context from PLAN.md and README.md
     3. EXECUTE task steps, updating current-task.md after each step
+
+PARALLEL TASK EXECUTION (when dependencies allow):
+  If multiple tasks have no dependencies (or all dependencies satisfied):
+  → CAN execute in parallel using Task tool with multiple subagent invocations
+  → Example: Tasks 020, 021, 022 all have "dependencies: 010" satisfied
+  → Send ONE message with THREE Task tool calls (subagent_type: general-purpose)
+  → Each subagent runs task-execute for one task independently
+  → Monitor completion via TaskOutput tool
+
+  REQUIREMENTS for parallel execution:
+  - All tasks must have dependencies satisfied (check TASK-INDEX.md)
+  - Tasks must NOT modify the same files (check <relevant-files>)
+  - Each task uses its own task-execute invocation
+  - Track parallel tasks in current-task.md "Parallel Execution" section
 
 IF user said 'stop':
   → OUTPUT:

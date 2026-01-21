@@ -2,7 +2,7 @@
 
 > **Status**: Accepted
 > **Domain**: UI/UX Design System
-> **Last Updated**: 2025-12-22
+> **Last Updated**: 2026-01-20
 
 ---
 
@@ -21,13 +21,15 @@ All Spaarke UI must follow the **Microsoft Fluent UI v9.x design system**. This 
 | Technology | Version | Package |
 |------------|---------|---------|
 | **Fluent UI** | v9.x | `@fluentui/react-components` |
-| **React** | 18.2.x | `react`, `react-dom` |
+| **React** | 16.14.0 (manifest) / 17.0.2 (model-driven runtime) | `react`, `react-dom` (devDependencies) |
 | **Icons** | Latest | `@fluentui/react-icons` |
+
+> **Important**: Dataverse provides React as a platform library. Use React 16 APIs (`ReactDOM.render`). See [ADR-022](ADR-022-pcf-platform-libraries.md) for details.
 
 ### MUST
 
 - **MUST** use `@fluentui/react-components` (Fluent v9) exclusively
-- **MUST** use React ^18.2.0 (not React 19)
+- **MUST** use React 16 APIs (`ReactDOM.render()`, `unmountComponentAtNode()`) - NOT React 18 `createRoot`
 - **MUST** import icons from `@fluentui/react-icons`
 - **MUST** wrap all UI in `FluentProvider` with theme
 - **MUST** use Fluent design tokens for colors, spacing, typography
@@ -42,7 +44,8 @@ All Spaarke UI must follow the **Microsoft Fluent UI v9.x design system**. This 
 
 - **MUST NOT** use Fluent v8 (`@fluentui/react`)
 - **MUST NOT** hard-code colors (hex, rgb, named colors)
-- **MUST NOT** use React 19.x in PCF controls
+- **MUST NOT** use React 18.x or 19.x APIs (`createRoot`, `hydrateRoot`, concurrent features)
+- **MUST NOT** import from `react-dom/client` (React 18 entry point)
 - **MUST NOT** import from granular `@fluentui/react-*` packages
 - **MUST NOT** bundle React/Fluent in PCF artifacts
 - **MUST NOT** use alternative UI libraries (MUI, Ant Design, etc.)
@@ -141,7 +144,10 @@ import { DocumentAdd20Regular } from "@fluentui/react-icons";
     "@spaarke/ui-components": "workspace:*"
   },
   "devDependencies": {
-    "@types/react": "^18.2.0",
+    "@types/react": "^16.14.0",
+    "@types/react-dom": "^16.9.0",
+    "react": "^16.14.0",
+    "react-dom": "^16.14.0",
     "@fluentui/react-components": "^9.46.0",
     "@fluentui/react-icons": "^2.0.0"
   }
@@ -200,6 +206,7 @@ const theme = isDark ? spaarkeDark : spaarkeLight;
 | [ADR-006](ADR-006-pcf-over-webresources.md) | PCF technology choice |
 | [ADR-011](ADR-011-dataset-pcf.md) | Dataset PCF uses Fluent v9 |
 | [ADR-012](ADR-012-shared-components.md) | Shared component library |
+| [ADR-022](ADR-022-pcf-platform-libraries.md) | **React 16 APIs required** - this ADR takes precedence for React version |
 
 ---
 

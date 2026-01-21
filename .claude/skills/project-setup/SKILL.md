@@ -347,6 +347,37 @@ When tasks can run in parallel (no dependencies), each task MUST still use task-
 
 See [task-execute SKILL.md](../../.claude/skills/task-execute/SKILL.md) for complete protocol.
 
+### 🚨 MUST: Multi-File Work Decomposition
+
+**For tasks modifying 4+ files, Claude Code MUST:**
+
+1. **Decompose into dependency graph**:
+   - Group files by module/component
+   - Identify which changes depend on others
+   - Separate parallel-safe work from sequential work
+
+2. **Delegate to subagents in parallel where safe**:
+   - Use Task tool with `subagent_type="general-purpose"`
+   - Send ONE message with MULTIPLE Task tool calls for independent work
+   - Each subagent handles one module/component
+   - Provide each subagent with specific files and constraints
+
+3. **Parallelize when**:
+   - Files are in different modules → CAN parallelize
+   - Files have no shared interfaces → CAN parallelize
+   - Work is independent (no imports between files) → CAN parallelize
+
+4. **Serialize when**:
+   - Files have tight coupling (shared state, imports)
+   - One file must be created before another uses it
+   - Sequential logic required
+
+**Example**: Task modifies 6 files (3 API endpoints + 2 PCF components + 1 shared types)
+- Phase 1 (serial): SharedTypes.ts (dependency of others)
+- Phase 2 (parallel): 3 subagents handle API endpoints, Component A, Component B
+
+See [task-execute SKILL.md Step 8.0](../../.claude/skills/task-execute/SKILL.md) for complete protocol.
+
 ---
 
 ## Key Technical Constraints

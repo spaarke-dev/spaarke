@@ -332,13 +332,18 @@ Move React/Fluent to `devDependencies` (type-checking only):
 ```json
 {
   "devDependencies": {
-    "@types/react": "^18.2.0",
+    "@types/react": "^16.14.0",
+    "@types/react-dom": "^16.9.0",
+    "react": "^16.14.0",
+    "react-dom": "^16.14.0",
     "@fluentui/react-components": "^9.46.0"
   }
 }
 ```
 
-**Remove** from `dependencies`: `react`, `react-dom`, any `@fluentui/react-*` packages.
+> **Note**: Use React 16 types to match the platform runtime. See [ADR-022](../../adr/ADR-022-pcf-platform-libraries.md).
+
+**Remove** from `dependencies`: any `react`, `react-dom`, or `@fluentui/react-*` packages (keep in devDependencies only).
 
 > **Full details**: See [`docs/guides/PCF-DEPLOYMENT-GUIDE.md`](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md)
 

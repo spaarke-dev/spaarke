@@ -287,6 +287,52 @@ FOR each task with tags: pcf, frontend, fluent-ui, e2e-test:
     - Use {placeholder} syntax for environment-specific values
 ```
 
+### Step 3.8: Identify Parallel Task Groups (REQUIRED)
+
+**Purpose:** Enable efficient parallel execution by grouping independent tasks.
+
+```
+FOR each phase:
+  ANALYZE task dependencies to identify parallel groups:
+
+  PARALLEL GROUP = Tasks where:
+    - All have the SAME prerequisite task(s) (or none)
+    - NO task depends on another in the same group
+    - Tasks do NOT modify the same files (check <relevant-files>)
+    - Tasks are in the same phase or adjacent phases
+
+  EXAMPLE dependency analysis:
+    Task 020: dependencies="010"
+    Task 021: dependencies="010"
+    Task 022: dependencies="010"
+    → These three CAN run in parallel (Group A)
+
+    Task 023: dependencies="020,021"
+    → This MUST wait for both 020 and 021 (serial)
+
+  CREATE Parallel Groups list:
+    Group A: [020, 021, 022] - prereq: 010
+    Group B: [031, 032] - prereq: 030
+
+  FOR each task in a parallel group:
+    ADD to <metadata>:
+      <parallel-group>{group-letter}</parallel-group>
+      <parallel-safe>true</parallel-safe>
+
+  FOR tasks NOT safe to parallelize:
+    ADD to <metadata>:
+      <parallel-safe>false</parallel-safe>
+      <parallel-reason>{why: shared files, sequential logic, etc.}</parallel-reason>
+
+  DOCUMENT in TASK-INDEX.md "Parallel Execution Groups" section
+
+WHY THIS MATTERS:
+  - Claude Code can spawn multiple Task subagents in parallel
+  - Independent tasks complete faster when run simultaneously
+  - Dependencies prevent race conditions and merge conflicts
+  - Explicit grouping prevents accidental parallel execution of conflicting tasks
+```
+
 ### Step 3.7: Add Mandatory Project Wrap-up Task (REQUIRED)
 
 ```
@@ -347,6 +393,8 @@ For each task, create `tasks/{NNN}-{task-slug}.poml` as a **valid XML document**
     <tags>{context tags for Claude Code focus - see Standard Tag Vocabulary}</tags>
     <rigor-hint>{FULL | STANDARD | MINIMAL}</rigor-hint>
     <rigor-reason>{Why this level - from Step 3.5.5 decision tree}</rigor-reason>
+    <parallel-group>{A/B/C/... or "none" - from Step 3.8}</parallel-group>
+    <parallel-safe>{true/false - can this run in parallel?}</parallel-safe>
   </metadata>
 
   <prompt>
@@ -444,11 +492,31 @@ UPDATE projects/{project-name}/CLAUDE.md:
   - Update "Next Action" to reference first task
 
 CREATE tasks/TASK-INDEX.md:
-  | ID | Title | Phase | Status | Dependencies |
-  |----|-------|-------|--------|--------------|
-  | 001 | ... | 1 | not-started | none |
-  | 002 | ... | 1 | not-started | 001 |
+  | ID | Title | Phase | Status | Dependencies | Parallel |
+  |----|-------|-------|--------|--------------|----------|
+  | 001 | ... | 1 | 🔲 | none | — |
+  | 002 | ... | 1 | 🔲 | 001 | — |
+  | 020 | ... | 2 | 🔲 | 010 | Group A |
+  | 021 | ... | 2 | 🔲 | 010 | Group A |
   ...
+
+  ADD "Parallel Execution Groups" section:
+  ```markdown
+  ## Parallel Execution Groups
+
+  Tasks in the same group can run simultaneously once prerequisites are met.
+
+  | Group | Tasks | Prerequisite | Files Touched | Safe to Parallelize |
+  |-------|-------|--------------|---------------|---------------------|
+  | A | 020, 021, 022 | 010 ✅ | Separate endpoints | ✅ Yes |
+  | B | 031, 032 | 030 ✅ | Separate components | ✅ Yes |
+
+  **How to Execute Parallel Groups:**
+  1. Check all prerequisites are complete (✅ in Status)
+  2. Invoke Task tool with multiple subagents in ONE message
+  3. Each subagent runs task-execute for one task
+  4. Wait for all to complete before next group
+  ```
 ```
 
 ### Step 6: Output Summary
@@ -641,3 +709,7 @@ Before completing task-create, verify:
 - [ ] UI tests include dark mode compliance check for Fluent UI tasks (ADR-021)
 - [ ] Each task has `<rigor-hint>` and `<rigor-reason>` in metadata (Step 3.5.5)
 - [ ] Rigor levels match task characteristics (FULL for code, STANDARD for tests, MINIMAL for docs)
+- [ ] Parallel groups identified and documented (Step 3.8)
+- [ ] Each task has `<parallel-group>` and `<parallel-safe>` in metadata
+- [ ] TASK-INDEX.md includes "Parallel Execution Groups" section
+- [ ] No tasks in same parallel group modify the same files

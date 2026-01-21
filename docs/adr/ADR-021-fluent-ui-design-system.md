@@ -54,11 +54,11 @@ This ADR serves as the **authoritative reference** for all UI/UX design decision
 | Rule | Description |
 |------|-------------|
 | **Fluent v9 Only** | Use `@fluentui/react-components` (v9.x) exclusively. No Fluent v8 (`@fluentui/react`). |
-| **React 18.2.x** | Standardize on React ^18.2.0 for all PCF controls |
+| **React 16 APIs** | Use React 16.14.0 APIs (`ReactDOM.render`, `unmountComponentAtNode`). Runtime is 16.14.0 (canvas) or 17.0.2 (model-driven). See [ADR-022](./ADR-022-pcf-platform-libraries.md). |
 | **Semantic Tokens** | Use Fluent design tokens for all styling. No hard-coded colors or pixel values. |
 | **Dark Mode Ready** | All components must render correctly in light, dark, and high-contrast modes |
 | **Accessibility First** | WCAG 2.1 AA compliance required for all interactive components |
-| **Platform Libraries** | PCF controls should use platform-library declarations to avoid bundling React/Fluent |
+| **Platform Libraries** | PCF controls MUST use platform-library declarations to avoid bundling React/Fluent |
 
 ---
 
@@ -251,8 +251,10 @@ PCF controls should externalize React and Fluent to reduce bundle size and ensur
     "@spaarke/ui-components": "workspace:*"
   },
   "devDependencies": {
-    "@types/react": "^18.2.0",
-    "@types/react-dom": "^18.2.0",
+    "@types/react": "^16.14.0",
+    "@types/react-dom": "^16.9.0",
+    "react": "^16.14.0",
+    "react-dom": "^16.14.0",
     "@fluentui/react-components": "^9.46.0",
     "@fluentui/react-icons": "^2.0.0"
   }
@@ -269,7 +271,8 @@ PCF controls should externalize React and Fluent to reduce bundle size and ensur
 - Bundle React/Fluent in PCF artifact
 - Mix platform-library with bundled React
 - Import from granular `@fluentui/react-*` packages
-- Use React 19.x (not yet stable for PCF runtime)
+- Use React 18.x or 19.x APIs (`createRoot`, `hydrateRoot`, concurrent features) - platform provides React 16/17 only
+- Import from `react-dom/client` (React 18 entry point)
 
 See [PCF V9 Packaging Guide](../guides/PCF-V9-PACKAGING.md) for detailed instructions.
 
@@ -460,7 +463,8 @@ Use this checklist for PRs that add or modify UI components:
 - [ ] `platform-library` declared for React and Fluent
 - [ ] React/Fluent in `devDependencies` only
 - [ ] Bundle size under 5MB
-- [ ] Uses `createRoot` pattern (React 18)
+- [ ] Uses `ReactDOM.render()` pattern (React 16) - NOT `createRoot`
+- [ ] No imports from `react-dom/client`
 
 **Ribbon/Command Bar (if applicable):**
 - [ ] SVG icons with `currentColor`
@@ -486,7 +490,9 @@ When creating or modifying UI code:
 **Red flags to catch in code review:**
 - `@fluentui/react` imports (v8 - should be v9)
 - Hard-coded hex colors (`#ffffff`, `rgb(0,0,0)`)
-- `react@^19.x` in package.json
+- `react@^18.x` or `react@^19.x` in dependencies (should be devDependencies with ^16.14.0)
+- `@types/react@^18` or `@types/react@^19` (should be ^16.14.0)
+- `createRoot` or `import from 'react-dom/client'` (use `ReactDOM.render()`)
 - Missing `FluentProvider` wrapper
 - Icon buttons without `aria-label`
 - `font-family`, `font-size` in CSS (use tokens)
@@ -508,4 +514,5 @@ When creating or modifying UI code:
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
 | 2025-12-22 | 1.0 | Initial ADR creation - consolidated UI/UX standards | Spaarke Engineering |
+| 2026-01-20 | 1.1 | Aligned React version with ADR-022: React 16.14.0 APIs required (not React 18). Updated package.json examples, compliance checklist, and red flags. | Spaarke Engineering |
 
