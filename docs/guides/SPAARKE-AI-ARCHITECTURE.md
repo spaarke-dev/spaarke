@@ -1,12 +1,13 @@
 # Spaarke AI Architecture
 
-> **Version**: 1.7
-> **Date**: January 12, 2026
-> **Status**: Production (R3 Phases 1-5 Complete + Document Visualization)
+> **Version**: 1.8
+> **Date**: January 20, 2026
+> **Status**: Production (R3 Phases 1-5 Complete + Document Visualization + Semantic Search R1)
 > **Author**: Spaarke Engineering
 > **Related**: [SPAARKE-AI-STRATEGY.md](../../reference/architecture/SPAARKE-AI-STRATEGY.md)
 > **R3 Updates**: RAG Foundation, Analysis Orchestration, Export Services, Monitoring/Resilience, Security
 > **2026-01-12**: Document Relationship Visualization module added (3072-dim vectors, orphan file support)
+> **2026-01-20**: Semantic Search Foundation R1 - Hybrid search API with entity scoping
 
 ---
 
@@ -3218,13 +3219,15 @@ public async Task<string> GetBuilderPromptAsync(string scopeId, CancellationToke
 - [ADR-004: Async Job Contract](../../reference/adr/ADR-004-async-job-contract.md)
 - [ADR-009: Redis-first Caching](../../reference/adr/ADR-009-caching-redis-first.md)
 - [BFF API Patterns](../architecture/sdap-bff-api-patterns.md)
+- [RAG Architecture](RAG-ARCHITECTURE.md) - RAG pipeline, indexing, and Semantic Search API details
 - [AI Search & Visualization Module](../../projects/ai-azure-search-module/README.md) - Project documentation
 - [Playbook Builder Full-Screen Setup](PLAYBOOK-BUILDER-FULLSCREEN-SETUP.md) - PCF control deployment and AI Assistant usage
 
 ---
 
 *Document Owner: Spaarke Engineering*
-*Last Updated: January 19, 2026*
+*Last Updated: January 20, 2026*
 *R3 Updates: RAG Deployment Models (Section 8), Knowledge Index Schema (Section 9.2), Tool Framework (Section 10), Playbook System (Section 11), Export Services (Section 12)*
 *2026-01-12: Document Relationship Visualization (Section 16)*
 *2026-01-19: Playbook Builder AI Assistant Scope Patterns (Section 17)*
+*2026-01-20: Semantic Search Foundation R1 - See [RAG-ARCHITECTURE.md](RAG-ARCHITECTURE.md#semantic-search-api) for details*
