@@ -4,7 +4,8 @@
   "description": "Spaarke Office Add-ins for Outlook and Word integration with SDAP",
   "private": true,
   "scripts": {
-    "build": "webpack --mode production --no-bail",
+    "build": "webpack --mode production --no-bail --stats errors-only",
+    "build:ci": "webpack --mode production",
     "build:dev": "webpack --mode development",
     "start": "webpack serve --mode development",
     "start:outlook": "webpack serve --mode development --env addin=outlook",

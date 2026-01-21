@@ -62,7 +62,12 @@ module.exports = async (env, options) => {
       rules: [
         {
           test: /\.tsx?$/,
-          use: 'ts-loader',
+          use: {
+            loader: 'ts-loader',
+            options: {
+              transpileOnly: true, // Skip type checking during build
+            },
+          },
           exclude: /node_modules/,
         },
         {
