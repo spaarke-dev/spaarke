@@ -46,7 +46,7 @@
           "id": "TaskpaneRuntime",
           "type": "general",
           "code": {
-            "page": "https://spe-office-addins-dev.azurestaticapps.net/outlook/taskpane.html"
+            "page": "https://addins.spaarke.com/outlook/taskpane.html"
           },
           "lifetime": "short",
           "actions": [
@@ -60,8 +60,8 @@
           "id": "CommandRuntime",
           "type": "general",
           "code": {
-            "page": "https://spe-office-addins-dev.azurestaticapps.net/outlook/commands.html",
-            "script": "https://spe-office-addins-dev.azurestaticapps.net/outlook/commands.bundle.js"
+            "page": "https://addins.spaarke.com/outlook/commands.html",
+            "script": "https://addins.spaarke.com/outlook/commands.bundle.js"
           },
           "lifetime": "short",
           "actions": [
@@ -93,15 +93,15 @@
                   "icons": [
                     {
                       "size": 16,
-                      "url": "https://spe-office-addins-dev.azurestaticapps.net/assets/icon-16.png"
+                      "url": "https://addins.spaarke.com/assets/icon-16.png"
                     },
                     {
                       "size": 32,
-                      "url": "https://spe-office-addins-dev.azurestaticapps.net/assets/icon-32.png"
+                      "url": "https://addins.spaarke.com/assets/icon-32.png"
                     },
                     {
                       "size": 80,
-                      "url": "https://spe-office-addins-dev.azurestaticapps.net/assets/icon-80.png"
+                      "url": "https://addins.spaarke.com/assets/icon-80.png"
                     }
                   ],
                   "controls": [
@@ -112,15 +112,15 @@
                       "icons": [
                         {
                           "size": 16,
-                          "url": "https://spe-office-addins-dev.azurestaticapps.net/assets/save-16.png"
+                          "url": "https://addins.spaarke.com/assets/save-16.png"
                         },
                         {
                           "size": 32,
-                          "url": "https://spe-office-addins-dev.azurestaticapps.net/assets/save-32.png"
+                          "url": "https://addins.spaarke.com/assets/save-32.png"
                         },
                         {
                           "size": 80,
-                          "url": "https://spe-office-addins-dev.azurestaticapps.net/assets/save-80.png"
+                          "url": "https://addins.spaarke.com/assets/save-80.png"
                         }
                       ],
                       "supertip": {
@@ -147,15 +147,15 @@
                   "icons": [
                     {
                       "size": 16,
-                      "url": "https://spe-office-addins-dev.azurestaticapps.net/assets/icon-16.png"
+                      "url": "https://addins.spaarke.com/assets/icon-16.png"
                     },
                     {
                       "size": 32,
-                      "url": "https://spe-office-addins-dev.azurestaticapps.net/assets/icon-32.png"
+                      "url": "https://addins.spaarke.com/assets/icon-32.png"
                     },
                     {
                       "size": 80,
-                      "url": "https://spe-office-addins-dev.azurestaticapps.net/assets/icon-80.png"
+                      "url": "https://addins.spaarke.com/assets/icon-80.png"
                     }
                   ],
                   "controls": [
@@ -166,15 +166,15 @@
                       "icons": [
                         {
                           "size": 16,
-                          "url": "https://spe-office-addins-dev.azurestaticapps.net/assets/share-16.png"
+                          "url": "https://addins.spaarke.com/assets/share-16.png"
                         },
                         {
                           "size": 32,
-                          "url": "https://spe-office-addins-dev.azurestaticapps.net/assets/share-32.png"
+                          "url": "https://addins.spaarke.com/assets/share-32.png"
                         },
                         {
                           "size": 80,
-                          "url": "https://spe-office-addins-dev.azurestaticapps.net/assets/share-80.png"
+                          "url": "https://addins.spaarke.com/assets/share-80.png"
                         }
                       ],
                       "supertip": {
@@ -190,15 +190,15 @@
                       "icons": [
                         {
                           "size": 16,
-                          "url": "https://spe-office-addins-dev.azurestaticapps.net/assets/grant-16.png"
+                          "url": "https://addins.spaarke.com/assets/grant-16.png"
                         },
                         {
                           "size": 32,
-                          "url": "https://spe-office-addins-dev.azurestaticapps.net/assets/grant-32.png"
+                          "url": "https://addins.spaarke.com/assets/grant-32.png"
                         },
                         {
                           "size": 80,
-                          "url": "https://spe-office-addins-dev.azurestaticapps.net/assets/grant-80.png"
+                          "url": "https://addins.spaarke.com/assets/grant-80.png"
                         }
                       ],
                       "supertip": {

@@ -1,0 +1,51 @@
+name: Deploy Office Add-ins to Azure Static Web App
+
+on:
+  push:
+    branches:
+      - master
+      - work/SDAP-outlook-office-add-in
+    paths:
+      - 'src/client/office-addins/**'
+      - '.github/workflows/deploy-office-addins.yml'
+  workflow_dispatch:
+
+jobs:
+  build_and_deploy:
+    runs-on: ubuntu-latest
+    name: Build and Deploy Office Add-ins
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          lfs: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: src/client/office-addins/package-lock.json
+
+      - name: Install dependencies
+        working-directory: src/client/office-addins
+        run: npm ci
+
+      - name: Build Office Add-ins
+        working-directory: src/client/office-addins
+        run: npm run build
+        env:
+          NODE_ENV: production
+          ADDIN_CLIENT_ID: c1258e2d-1688-49d2-ac99-a7485ebd9995
+          TENANT_ID: a221a95e-6abc-4434-aecc-e48338a1b2f2
+          BFF_API_CLIENT_ID: 1e40baad-e065-4aea-a8d4-4b7ab273458c
+          BFF_API_BASE_URL: https://spe-api-dev-67e2xz.azurewebsites.net
+
+      - name: Deploy to Azure Static Web App
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: "upload"
+          app_location: "src/client/office-addins/dist"
+          skip_app_build: true

@@ -13,13 +13,13 @@
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Spaarke" />
   <Description DefaultValue="Save, share, and manage documents in Spaarke DMS" />
-  <IconUrl DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/assets/icon-32.png" />
-  <HighResolutionIconUrl DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/assets/icon-80.png" />
+  <IconUrl DefaultValue="https://addins.spaarke.com/assets/icon-32.png" />
+  <HighResolutionIconUrl DefaultValue="https://addins.spaarke.com/assets/icon-80.png" />
   <SupportUrl DefaultValue="https://spaarke.com/support" />
 
   <!-- Domains -->
   <AppDomains>
-    <AppDomain>https://spe-office-addins-prod.azurestaticapps.net</AppDomain>
+    <AppDomain>https://addins.spaarke.com</AppDomain>
     <AppDomain>https://login.microsoftonline.com</AppDomain>
   </AppDomains>
 
@@ -37,7 +37,7 @@
 
   <!-- Default Settings -->
   <DefaultSettings>
-    <SourceLocation DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/word/taskpane.html" />
+    <SourceLocation DefaultValue="https://addins.spaarke.com/word/taskpane.html" />
   </DefaultSettings>
 
   <!-- Permissions -->
@@ -143,26 +143,26 @@
     <!-- Resources -->
     <Resources>
       <bt:Images>
-        <bt:Image id="Icon.16x16" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/assets/icon-16.png" />
-        <bt:Image id="Icon.32x32" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/assets/icon-32.png" />
-        <bt:Image id="Icon.80x80" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/assets/icon-80.png" />
-        <bt:Image id="Save.16x16" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/assets/save-16.png" />
-        <bt:Image id="Save.32x32" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/assets/save-32.png" />
-        <bt:Image id="Save.80x80" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/assets/save-80.png" />
-        <bt:Image id="SaveVersion.16x16" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/assets/save-version-16.png" />
-        <bt:Image id="SaveVersion.32x32" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/assets/save-version-32.png" />
-        <bt:Image id="SaveVersion.80x80" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/assets/save-version-80.png" />
-        <bt:Image id="Share.16x16" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/assets/share-16.png" />
-        <bt:Image id="Share.32x32" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/assets/share-32.png" />
-        <bt:Image id="Share.80x80" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/assets/share-80.png" />
-        <bt:Image id="Grant.16x16" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/assets/grant-16.png" />
-        <bt:Image id="Grant.32x32" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/assets/grant-32.png" />
-        <bt:Image id="Grant.80x80" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/assets/grant-80.png" />
+        <bt:Image id="Icon.16x16" DefaultValue="https://addins.spaarke.com/assets/icon-16.png" />
+        <bt:Image id="Icon.32x32" DefaultValue="https://addins.spaarke.com/assets/icon-32.png" />
+        <bt:Image id="Icon.80x80" DefaultValue="https://addins.spaarke.com/assets/icon-80.png" />
+        <bt:Image id="Save.16x16" DefaultValue="https://addins.spaarke.com/assets/save-16.png" />
+        <bt:Image id="Save.32x32" DefaultValue="https://addins.spaarke.com/assets/save-32.png" />
+        <bt:Image id="Save.80x80" DefaultValue="https://addins.spaarke.com/assets/save-80.png" />
+        <bt:Image id="SaveVersion.16x16" DefaultValue="https://addins.spaarke.com/assets/save-version-16.png" />
+        <bt:Image id="SaveVersion.32x32" DefaultValue="https://addins.spaarke.com/assets/save-version-32.png" />
+        <bt:Image id="SaveVersion.80x80" DefaultValue="https://addins.spaarke.com/assets/save-version-80.png" />
+        <bt:Image id="Share.16x16" DefaultValue="https://addins.spaarke.com/assets/share-16.png" />
+        <bt:Image id="Share.32x32" DefaultValue="https://addins.spaarke.com/assets/share-32.png" />
+        <bt:Image id="Share.80x80" DefaultValue="https://addins.spaarke.com/assets/share-80.png" />
+        <bt:Image id="Grant.16x16" DefaultValue="https://addins.spaarke.com/assets/grant-16.png" />
+        <bt:Image id="Grant.32x32" DefaultValue="https://addins.spaarke.com/assets/grant-32.png" />
+        <bt:Image id="Grant.80x80" DefaultValue="https://addins.spaarke.com/assets/grant-80.png" />
       </bt:Images>
 
       <bt:Urls>
-        <bt:Url id="Taskpane.Url" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/word/taskpane.html" />
-        <bt:Url id="Commands.Url" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/word/commands.html" />
+        <bt:Url id="Taskpane.Url" DefaultValue="https://addins.spaarke.com/word/taskpane.html" />
+        <bt:Url id="Commands.Url" DefaultValue="https://addins.spaarke.com/word/commands.html" />
       </bt:Urls>
 
       <bt:ShortStrings>
@@ -285,26 +285,26 @@
 
     <Resources>
       <bt:Images>
-        <bt:Image id="Icon.16x16" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/assets/icon-16.png" />
-        <bt:Image id="Icon.32x32" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/assets/icon-32.png" />
-        <bt:Image id="Icon.80x80" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/assets/icon-80.png" />
-        <bt:Image id="Save.16x16" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/assets/save-16.png" />
-        <bt:Image id="Save.32x32" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/assets/save-32.png" />
-        <bt:Image id="Save.80x80" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/assets/save-80.png" />
-        <bt:Image id="SaveVersion.16x16" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/assets/save-version-16.png" />
-        <bt:Image id="SaveVersion.32x32" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/assets/save-version-32.png" />
-        <bt:Image id="SaveVersion.80x80" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/assets/save-version-80.png" />
-        <bt:Image id="Share.16x16" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/assets/share-16.png" />
-        <bt:Image id="Share.32x32" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/assets/share-32.png" />
-        <bt:Image id="Share.80x80" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/assets/share-80.png" />
-        <bt:Image id="Grant.16x16" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/assets/grant-16.png" />
-        <bt:Image id="Grant.32x32" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/assets/grant-32.png" />
-        <bt:Image id="Grant.80x80" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/assets/grant-80.png" />
+        <bt:Image id="Icon.16x16" DefaultValue="https://addins.spaarke.com/assets/icon-16.png" />
+        <bt:Image id="Icon.32x32" DefaultValue="https://addins.spaarke.com/assets/icon-32.png" />
+        <bt:Image id="Icon.80x80" DefaultValue="https://addins.spaarke.com/assets/icon-80.png" />
+        <bt:Image id="Save.16x16" DefaultValue="https://addins.spaarke.com/assets/save-16.png" />
+        <bt:Image id="Save.32x32" DefaultValue="https://addins.spaarke.com/assets/save-32.png" />
+        <bt:Image id="Save.80x80" DefaultValue="https://addins.spaarke.com/assets/save-80.png" />
+        <bt:Image id="SaveVersion.16x16" DefaultValue="https://addins.spaarke.com/assets/save-version-16.png" />
+        <bt:Image id="SaveVersion.32x32" DefaultValue="https://addins.spaarke.com/assets/save-version-32.png" />
+        <bt:Image id="SaveVersion.80x80" DefaultValue="https://addins.spaarke.com/assets/save-version-80.png" />
+        <bt:Image id="Share.16x16" DefaultValue="https://addins.spaarke.com/assets/share-16.png" />
+        <bt:Image id="Share.32x32" DefaultValue="https://addins.spaarke.com/assets/share-32.png" />
+        <bt:Image id="Share.80x80" DefaultValue="https://addins.spaarke.com/assets/share-80.png" />
+        <bt:Image id="Grant.16x16" DefaultValue="https://addins.spaarke.com/assets/grant-16.png" />
+        <bt:Image id="Grant.32x32" DefaultValue="https://addins.spaarke.com/assets/grant-32.png" />
+        <bt:Image id="Grant.80x80" DefaultValue="https://addins.spaarke.com/assets/grant-80.png" />
       </bt:Images>
 
       <bt:Urls>
-        <bt:Url id="Taskpane.Url" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/word/taskpane.html" />
-        <bt:Url id="Commands.Url" DefaultValue="https://spe-office-addins-prod.azurestaticapps.net/word/commands.html" />
+        <bt:Url id="Taskpane.Url" DefaultValue="https://addins.spaarke.com/word/taskpane.html" />
+        <bt:Url id="Commands.Url" DefaultValue="https://addins.spaarke.com/word/commands.html" />
       </bt:Urls>
 
       <bt:ShortStrings>
