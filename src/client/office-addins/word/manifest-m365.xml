@@ -8,7 +8,7 @@
 
   <!-- Basic Identity -->
   <Id>b3965ea0-6942-4f17-81b3-2c645bd05ebf</Id>
-  <Version>1.0.0</Version>
+  <Version>1.0.0.0</Version>
   <ProviderName>Spaarke</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Spaarke Word" />
