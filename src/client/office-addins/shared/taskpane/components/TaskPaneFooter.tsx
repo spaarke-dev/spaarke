@@ -62,6 +62,8 @@ export type ConnectionStatus = 'connected' | 'disconnected' | 'connecting';
 export interface TaskPaneFooterProps {
   /** Application version string */
   version?: string;
+  /** Build date string (e.g., "Jan 22, 2026") */
+  buildDate?: string;
   /** Application name */
   appName?: string;
   /** Connection status to show */
@@ -110,7 +112,8 @@ function getStatusText(status: ConnectionStatus): string {
 }
 
 export const TaskPaneFooter: React.FC<TaskPaneFooterProps> = ({
-  version = '1.0.0',
+  version = '1.0.1',
+  buildDate,
   appName = 'Spaarke DMS',
   connectionStatus,
   showHelpLink = false,
@@ -149,7 +152,7 @@ export const TaskPaneFooter: React.FC<TaskPaneFooterProps> = ({
             Help
           </Link>
         )}
-        <span>v{version}</span>
+        <span>v{version}{buildDate ? ` (${buildDate})` : ''}</span>
       </div>
     </footer>
   );

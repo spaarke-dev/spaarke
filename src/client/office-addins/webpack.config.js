@@ -8,6 +8,13 @@ require('dotenv').config({ path: path.resolve(__dirname, '.env') });
 
 const isProduction = process.env.NODE_ENV === 'production';
 
+// Build date for version display
+const BUILD_DATE = new Date().toLocaleDateString('en-US', {
+  year: 'numeric',
+  month: 'short',
+  day: 'numeric',
+});
+
 // Environment variables for add-in configuration
 // Defaults are hardcoded as fallback if .env is not loaded
 const ENV_CONFIG = {
@@ -116,11 +123,12 @@ module.exports = async (env, options) => {
         patterns: [
           { from: './public/index.html', to: 'index.html' },
           {
-            from: mode === 'production' ? './outlook/manifest.prod.json' : './outlook/manifest.json',
-            to: 'outlook/manifest.json'
+            // Use manifest-working.xml for both dev and prod (validated with M365 Admin Center)
+            from: mode === 'production' ? './outlook/manifest-working.xml' : './outlook/manifest.json',
+            to: mode === 'production' ? 'outlook/manifest.xml' : 'outlook/manifest.json'
           },
           {
-            from: mode === 'production' ? './word/manifest.prod.xml' : './word/manifest.xml',
+            from: mode === 'production' ? './word/manifest-working.xml' : './word/manifest.xml',
             to: 'word/manifest.xml'
           },
           { from: './shared/assets', to: 'assets', noErrorOnMissing: true },
@@ -133,6 +141,7 @@ module.exports = async (env, options) => {
         'process.env.TENANT_ID': JSON.stringify(ENV_CONFIG.TENANT_ID),
         'process.env.BFF_API_CLIENT_ID': JSON.stringify(ENV_CONFIG.BFF_API_CLIENT_ID),
         'process.env.BFF_API_BASE_URL': JSON.stringify(ENV_CONFIG.BFF_API_BASE_URL),
+        'process.env.BUILD_DATE': JSON.stringify(BUILD_DATE),
       }),
       ...(mode === 'production'
         ? [

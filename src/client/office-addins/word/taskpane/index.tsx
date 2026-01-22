@@ -4,6 +4,10 @@ import { App } from '@shared/taskpane';
 import { WordHostAdapter } from '../WordHostAdapter';
 import { authService, apiClient } from '@shared/services';
 
+// Version information - synced with manifest version
+const APP_VERSION = '1.0.1';
+const BUILD_DATE = process.env.BUILD_DATE || 'Jan 22, 2026';
+
 // Configuration from environment or build-time injection
 const CONFIG = {
   clientId: process.env.ADDIN_CLIENT_ID || '',
@@ -45,7 +49,12 @@ async function init() {
     const root = createRoot(container);
     root.render(
       <React.StrictMode>
-        <App hostAdapter={hostAdapter} title="Spaarke for Word" />
+        <App
+          hostAdapter={hostAdapter}
+          title="Spaarke for Word"
+          version={APP_VERSION}
+          buildDate={BUILD_DATE}
+        />
       </React.StrictMode>
     );
   }

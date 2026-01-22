@@ -48,6 +48,8 @@ export interface AppProps {
   initialTab?: NavigationTab;
   /** Application version */
   version?: string;
+  /** Build date string */
+  buildDate?: string;
   /** Whether to show error details (development mode) */
   showErrorDetails?: boolean;
 }
@@ -56,7 +58,8 @@ export const App: React.FC<AppProps> = ({
   hostAdapter,
   title,
   initialTab = 'save',
-  version = '1.0.0',
+  version = '1.0.1',
+  buildDate,
   showErrorDetails = process.env.NODE_ENV === 'development',
 }) => {
   const styles = useStyles();
@@ -191,6 +194,7 @@ export const App: React.FC<AppProps> = ({
           hostType={hostType}
           isAuthenticated={false}
           version={version}
+          buildDate={buildDate}
           connectionStatus={connectionStatus}
           showNavigation={false}
           themePreference={preference}
@@ -216,6 +220,7 @@ export const App: React.FC<AppProps> = ({
         onSignOut={handleSignOut}
         onSettings={handleSettings}
         version={version}
+        buildDate={buildDate}
         connectionStatus={connectionStatus}
         showNavigation={true}
         selectedTab={currentTab}

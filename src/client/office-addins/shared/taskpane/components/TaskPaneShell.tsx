@@ -69,6 +69,8 @@ export interface TaskPaneShellProps {
   isLoading?: boolean;
   /** Version string for footer */
   version?: string;
+  /** Build date string for footer */
+  buildDate?: string;
   /** Application name for footer */
   appName?: string;
   /** Connection status for footer */
@@ -131,7 +133,8 @@ export const TaskPaneShell: React.FC<TaskPaneShellProps> = ({
   onSignOut,
   onSettings,
   isLoading = false,
-  version = '1.0.0',
+  version = '1.0.1',
+  buildDate,
   appName = 'Spaarke DMS',
   connectionStatus,
   showNavigation = true,
@@ -231,6 +234,7 @@ export const TaskPaneShell: React.FC<TaskPaneShellProps> = ({
       {/* Footer */}
       <TaskPaneFooter
         version={version}
+        buildDate={buildDate}
         appName={appName}
         connectionStatus={connectionStatus}
         showHelpLink={true}
