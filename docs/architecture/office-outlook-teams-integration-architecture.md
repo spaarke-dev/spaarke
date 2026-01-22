@@ -105,20 +105,193 @@ The SDAP Office Add-ins provide integration between Microsoft Office application
 ### 1. Office Add-ins
 
 #### Outlook Add-in
-- **Manifest Format**: Unified JSON manifest (GA for Outlook)
-- **Manifest Location**: `src/client/office-addins/outlook/manifest.json`
+- **Manifest Format**: XML manifest (recommended for M365 Admin Center deployment)
+- **Manifest Location**: `src/client/office-addins/outlook/manifest-working.xml`
 - **Entry Points**:
   - Task Pane: `outlook/taskpane.html`
-  - Commands: `outlook/commands.html`
 - **Capabilities**: Read emails, access attachments, compose integration
 
 #### Word Add-in
-- **Manifest Format**: XML manifest (Unified is preview for Word)
-- **Manifest Location**: `src/client/office-addins/word/manifest.xml`
+- **Manifest Format**: XML manifest
+- **Manifest Location**: `src/client/office-addins/word/manifest-working.xml`
 - **Entry Points**:
   - Task Pane: `word/taskpane.html`
-  - Commands: `word/commands.html`
 - **Capabilities**: Access document content, save to SPE, version tracking
+
+---
+
+## Manifest Format Requirements
+
+> **CRITICAL**: These requirements were validated through production testing. Non-compliance causes M365 Admin Center validation failures.
+
+### Common Requirements (All Add-ins)
+
+| Element | Requirement | Example |
+|---------|-------------|---------|
+| **Version** | Must be 4-part format | `1.0.0.0` (NOT `1.0.0`) |
+| **Icon URLs** | Must return HTTP 200 | All icon sizes must be accessible |
+| **DefaultLocale** | Required | `en-US` |
+| **SupportUrl** | Recommended | `https://spaarke.com/support` |
+| **AppDomains** | Required | List all domains the add-in uses |
+
+### Outlook Add-in Manifest (MailApp)
+
+**Working Structure** (validated with M365 Admin Center + sideloading):
+
+```xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
+  xmlns:mailappor="http://schemas.microsoft.com/office/mailappversionoverrides/1.0"
+  xsi:type="MailApp">
+
+  <Id>{GUID}</Id>
+  <Version>1.0.0.0</Version>
+  <ProviderName>Spaarke</ProviderName>
+  <DefaultLocale>en-US</DefaultLocale>
+  <DisplayName DefaultValue="Spaarke Outlook"/>
+  <Description DefaultValue="..."/>
+  <IconUrl DefaultValue="https://.../icon-32.png"/>
+  <HighResolutionIconUrl DefaultValue="https://.../icon-64.png"/>
+  <SupportUrl DefaultValue="https://..."/>
+
+  <AppDomains>
+    <AppDomain>https://your-domain.azurestaticapps.net</AppDomain>
+  </AppDomains>
+
+  <Hosts>
+    <Host Name="Mailbox"/>
+  </Hosts>
+
+  <Requirements>
+    <Sets>
+      <Set Name="Mailbox" MinVersion="1.1"/>
+    </Sets>
+  </Requirements>
+
+  <FormSettings>
+    <Form xsi:type="ItemRead">
+      <DesktopSettings>
+        <SourceLocation DefaultValue="https://.../taskpane.html"/>
+        <RequestedHeight>250</RequestedHeight>
+      </DesktopSettings>
+    </Form>
+  </FormSettings>
+
+  <Permissions>ReadWriteItem</Permissions>
+
+  <Rule xsi:type="RuleCollection" Mode="Or">
+    <Rule xsi:type="ItemIs" ItemType="Message" FormType="Read"/>
+    <Rule xsi:type="ItemIs" ItemType="Message" FormType="Edit"/>
+  </Rule>
+
+  <DisableEntityHighlighting>false</DisableEntityHighlighting>
+
+  <!-- SINGLE VersionOverrides V1.0 - NOT nested -->
+  <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides"
+    xsi:type="VersionOverridesV1_0">
+    <Requirements>
+      <bt:Sets DefaultMinVersion="1.3">
+        <bt:Set Name="Mailbox"/>
+      </bt:Sets>
+    </Requirements>
+    <Hosts>
+      <Host xsi:type="MailHost">
+        <DesktopFormFactor>
+          <!-- NO FunctionFile element -->
+          <ExtensionPoint xsi:type="MessageReadCommandSurface">
+            <!-- Button definition -->
+          </ExtensionPoint>
+        </DesktopFormFactor>
+      </Host>
+    </Hosts>
+    <Resources>
+      <!-- Images, URLs, Strings -->
+    </Resources>
+  </VersionOverrides>
+</OfficeApp>
+```
+
+**Critical Outlook-Specific Rules**:
+
+| Rule | Reason |
+|------|--------|
+| **NO FunctionFile** | Causes validation failures in M365 Admin Center |
+| **Single VersionOverrides** | Do NOT nest V1.1 inside V1.0 |
+| **RuleCollection Mode="Or"** | Use collection, not single Rule |
+| **DisableEntityHighlighting** | Must be present |
+| **FormType="Read"** for MessageReadCommandSurface | Match extension point to form type |
+
+### Word Add-in Manifest (TaskPaneApp)
+
+**Working Structure**:
+
+```xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
+  xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
+  xsi:type="TaskPaneApp">
+
+  <Id>{GUID}</Id>
+  <Version>1.0.0.0</Version>
+  <!-- ... basic metadata ... -->
+
+  <AppDomains>
+    <AppDomain>https://your-domain.azurestaticapps.net</AppDomain>
+  </AppDomains>
+
+  <Hosts>
+    <Host Name="Document"/>
+  </Hosts>
+
+  <Requirements>
+    <Sets>
+      <Set Name="WordApi" MinVersion="1.1"/>
+    </Sets>
+  </Requirements>
+
+  <DefaultSettings>
+    <SourceLocation DefaultValue="https://.../taskpane.html"/>
+  </DefaultSettings>
+
+  <Permissions>ReadWriteDocument</Permissions>
+
+  <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
+    xsi:type="VersionOverridesV1_0">
+    <Hosts>
+      <Host xsi:type="Document">
+        <DesktopFormFactor>
+          <ExtensionPoint xsi:type="PrimaryCommandSurface">
+            <!-- Button definition -->
+          </ExtensionPoint>
+        </DesktopFormFactor>
+      </Host>
+    </Hosts>
+    <Resources>
+      <!-- Images, URLs, Strings -->
+    </Resources>
+  </VersionOverrides>
+</OfficeApp>
+```
+
+### Manifest Validation Checklist
+
+Before uploading to M365 Admin Center:
+
+- [ ] Version is 4-part format: `X.X.X.X`
+- [ ] All icon URLs return HTTP 200
+- [ ] AppDomains includes all external domains
+- [ ] DefaultLocale is set
+- [ ] SupportUrl is valid
+- [ ] Outlook: NO FunctionFile element
+- [ ] Outlook: Single VersionOverrides V1.0 (not nested)
+- [ ] Outlook: RuleCollection (not single Rule)
+- [ ] Outlook: DisableEntityHighlighting present
+- [ ] Word: PrimaryCommandSurface extension point
+- [ ] All resource IDs (resid) have matching definitions
 
 ### 2. Host Adapter Layer
 

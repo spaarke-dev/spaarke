@@ -147,21 +147,38 @@ pac security-role list --environment {env-id} | Select-String "Spaarke Office Ad
 
 ### 5. Manifest Configuration
 
-#### Outlook Manifest (manifest.prod.json)
+> **CRITICAL**: Use `manifest-working.xml` files. These have been validated to work with M365 Admin Center Centralized Deployment. Other manifest variants may fail validation.
+
+#### Outlook Manifest (manifest-working.xml)
 - [ ] All URLs updated for production:
   - [ ] Taskpane URL: `https://spe-office-addins-prod.azurestaticapps.net/outlook/taskpane.html`
-  - [ ] Commands URL: `https://spe-office-addins-prod.azurestaticapps.net/outlook/commands.html`
-  - [ ] Icon URLs point to production static hosting
-- [ ] Manifest validates: `npx office-addin-manifest validate manifest.prod.json`
-- [ ] Version number updated
+  - [ ] Icon URLs (16, 32, 64, 80) point to production static hosting
+  - [ ] AppDomain includes production URL
+- [ ] **Version format is 4-part**: `1.0.0.0` (NOT `1.0.0`)
+- [ ] **All icon URLs return HTTP 200** (test each in browser)
+- [ ] **NO FunctionFile element** (causes validation failures)
+- [ ] **Single VersionOverrides V1.0** (not nested V1.0/V1.1)
+- [ ] **RuleCollection Mode="Or"** (not single Rule element)
+- [ ] **DisableEntityHighlighting element present**
+- [ ] **MessageReadCommandSurface** for reading emails
+- [ ] **MessageComposeCommandSurface** for composing emails (optional)
+- [ ] Manifest validates: `npx office-addin-manifest validate manifest-working.xml`
 
-#### Word Manifest (manifest.prod.xml)
+#### Word Manifest (manifest-working.xml)
 - [ ] All URLs updated for production:
   - [ ] SourceLocation: `https://spe-office-addins-prod.azurestaticapps.net/word/taskpane.html`
   - [ ] IconUrl and HighResolutionIconUrl point to production
   - [ ] AppDomain includes production URL
-- [ ] Manifest validates: `npx office-addin-manifest validate manifest.prod.xml`
-- [ ] Version number updated
+- [ ] **Version format is 4-part**: `1.0.0.0` (NOT `1.0.0`)
+- [ ] **All icon URLs return HTTP 200**
+- [ ] **PrimaryCommandSurface extension point**
+- [ ] Manifest validates: `npx office-addin-manifest validate manifest-working.xml`
+
+#### Common Manifest Requirements
+- [ ] DefaultLocale is set (e.g., `en-US`)
+- [ ] SupportUrl is valid and accessible
+- [ ] All resource IDs (resid) have matching definitions in Resources section
+- [ ] GUID in `<Id>` element is unique (different from other add-ins in tenant)
 
 ### 6. Security Review
 
@@ -225,7 +242,8 @@ pac security-role list --environment {env-id} | Select-String "Spaarke Office Ad
 - [ ] Navigate to M365 Admin Center > Settings > Integrated apps
 - [ ] Click "Upload custom apps"
 - [ ] Select "Office Add-in"
-- [ ] Upload `manifest.prod.json`
+- [ ] Upload `outlook/manifest-working.xml` (NOT .json)
+- [ ] Manifest validation passes (no errors)
 - [ ] Select deployment scope:
   - [ ] Pilot group (recommended for initial deployment)
   - [ ] Entire organization (after successful pilot)
@@ -236,10 +254,13 @@ pac security-role list --environment {env-id} | Select-String "Spaarke Office Ad
 - [ ] Navigate to M365 Admin Center > Settings > Integrated apps
 - [ ] Click "Upload custom apps"
 - [ ] Select "Office Add-in"
-- [ ] Upload `manifest.prod.xml`
+- [ ] Upload `word/manifest-working.xml`
+- [ ] Manifest validation passes (no errors)
 - [ ] Select same deployment scope as Outlook
 - [ ] Review permissions and deploy
 - [ ] Note deployment timestamp: _______________
+
+> **Troubleshooting**: If manifest validation fails, check the [Manifest Format Requirements](office-addins-admin-guide.md#manifest-format-requirements) section.
 
 ---
 

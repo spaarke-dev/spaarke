@@ -33,8 +33,10 @@ The Spaarke Office Add-ins enable users to save emails, attachments, and documen
 
 | Add-in | Host Application | Manifest Type | Key Capabilities |
 |--------|------------------|---------------|------------------|
-| **Spaarke Outlook Add-in** | New Outlook, Outlook Web | Unified JSON | Save emails, save attachments, share documents, grant external access |
+| **Spaarke Outlook Add-in** | New Outlook, Outlook Web, Classic Outlook | XML | Save emails, save attachments, share documents, grant external access |
 | **Spaarke Word Add-in** | Word Desktop, Word Web | XML | Save documents, version management, share documents, grant external access |
+
+> **Note**: XML manifests are recommended for M365 Admin Center Centralized Deployment. See [Manifest Format Requirements](#manifest-format-requirements) for details.
 
 ### 1.3 Supported Platforms
 
@@ -231,7 +233,7 @@ az ad app permission list-grants --id c1258e2d-1688-49d2-ac99-a7485ebd9995 --que
 
 Complete the [Office Add-ins Deployment Checklist](office-addins-deployment-checklist.md) before proceeding.
 
-### 5.2 Deploy Outlook Add-in (Unified Manifest)
+### 5.2 Deploy Outlook Add-in (XML Manifest)
 
 #### Step 1: Access M365 Admin Center
 
@@ -243,9 +245,11 @@ Complete the [Office Add-ins Deployment Checklist](office-addins-deployment-chec
 
 1. Click **Upload custom apps**
 2. Select **Office Add-in**
-3. Choose **Upload manifest file (.json)**
-4. Browse to: `manifest.prod.json` (Outlook unified manifest)
+3. Choose **Upload manifest file (.xml)**
+4. Browse to: `outlook/manifest-working.xml`
 5. Click **Upload**
+
+> **CRITICAL**: Use the `manifest-working.xml` file. Other manifest files may fail validation. See [Manifest Format Requirements](#manifest-format-requirements) for what makes a manifest valid.
 
 #### Step 3: Configure Deployment Scope
 
@@ -263,9 +267,51 @@ Complete the [Office Add-ins Deployment Checklist](office-addins-deployment-chec
 
 ### 5.3 Deploy Word Add-in (XML Manifest)
 
-Follow the same process as Outlook, but:
-- Upload the XML manifest file (`manifest.prod.xml`)
+Follow the same process as Outlook:
+- Upload the XML manifest file (`word/manifest-working.xml`)
 - Select **Upload manifest file (.xml)**
+
+### Manifest Format Requirements
+
+> **CRITICAL**: These requirements were validated through production testing. Non-compliance causes M365 Admin Center validation failures.
+
+#### Common Requirements (All Add-ins)
+
+| Element | Requirement | Example |
+|---------|-------------|---------|
+| **Version** | Must be 4-part format | `1.0.0.0` (NOT `1.0.0`) |
+| **Icon URLs** | Must return HTTP 200 | All icon sizes must be accessible |
+| **DefaultLocale** | Required | `en-US` |
+| **SupportUrl** | Recommended | `https://spaarke.com/support` |
+| **AppDomains** | Required | List all domains the add-in uses |
+
+#### Outlook-Specific Requirements (MailApp)
+
+| Rule | Reason |
+|------|--------|
+| **NO FunctionFile** | Causes validation failures in M365 Admin Center |
+| **Single VersionOverrides V1.0** | Do NOT nest V1.1 inside V1.0 |
+| **RuleCollection Mode="Or"** | Use collection, not single Rule |
+| **DisableEntityHighlighting** | Must be present |
+| **Use MessageReadCommandSurface** | For reading emails |
+| **Use MessageComposeCommandSurface** | For composing emails |
+
+#### Pre-Upload Validation Checklist
+
+Before uploading any manifest to M365 Admin Center:
+
+- [ ] Version is 4-part format: `X.X.X.X`
+- [ ] All icon URLs return HTTP 200 (test each URL in browser)
+- [ ] AppDomains includes all external domains
+- [ ] DefaultLocale is set
+- [ ] SupportUrl is valid
+- [ ] Outlook: NO FunctionFile element
+- [ ] Outlook: Single VersionOverrides V1.0 (not nested)
+- [ ] Outlook: RuleCollection (not single Rule)
+- [ ] Outlook: DisableEntityHighlighting present
+- [ ] All resource IDs (resid) have matching definitions in Resources
+
+For detailed manifest structure, see [Office Add-ins Architecture](../architecture/office-outlook-teams-integration-architecture.md#manifest-format-requirements).
 
 ### 5.4 Pilot Deployment (Recommended)
 
@@ -547,10 +593,12 @@ For detailed monitoring procedures, see the [Monitoring Runbook](../../projects/
 
 | Symptom | Cause | Resolution |
 |---------|-------|------------|
+| Blank task pane showing "Loading..." | React bundle not deployed | Rebuild and redeploy: `npm run build` then push to GitHub (triggers deployment) |
 | Blank task pane | HTTPS certificate issue | Verify static hosting SSL |
 | Task pane won't load | URL mismatch | Check manifest URLs match hosting |
 | "We couldn't load the add-in" | Network issue | Check firewall/proxy settings |
 | Icons not showing | Asset URLs incorrect | Verify icon URLs resolve |
+| Add-in added but not in toolbar | Viewing wrong context | For Outlook: add-in only appears when reading/composing based on manifest ExtensionPoints |
 
 #### Save/Processing Issues
 
