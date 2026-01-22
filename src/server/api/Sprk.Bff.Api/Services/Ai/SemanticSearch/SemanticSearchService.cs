@@ -43,7 +43,8 @@ public sealed class SemanticSearchService : ISemanticSearchService
     private const string VectorFieldName = "contentVector3072";
 
     // Search fields for keyword queries
-    private static readonly string[] SearchFields = ["content", "fileName", "knowledgeSourceName", "parentEntityName"];
+    // Note: parentEntityName not in index yet (R1.1+ feature) - using only fields present in current index
+    private static readonly string[] SearchFields = ["content", "fileName", "knowledgeSourceName"];
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SemanticSearchService"/> class.
