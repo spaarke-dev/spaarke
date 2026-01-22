@@ -40,7 +40,69 @@ Use this checklist before deploying Spaarke Office Add-ins to your organization.
   - `*.crm.dynamics.com` (443/HTTPS)
   - `*.sharepoint.com` (443/HTTPS)
 
-### 2. Azure AD Configuration
+### 2. Dataverse Configuration
+
+#### Dataverse Tables (Office Add-in Entities)
+- [ ] **ProcessingJob table created** (`sprk_processingjob`)
+  - Primary key: `sprk_processingjobid` (GUID)
+  - Primary name field: `sprk_name` (String, 200 chars)
+  - 19 total fields including status, stages, progress, correlation tracking
+  - Choice fields: `sprk_jobtype` (7 values), `sprk_status` (5 values)
+  - Lookup fields: `sprk_initiatedby` (systemuser), `sprk_document` (sprk_document)
+  - Indexes: `sprk_idempotencykey` (alternate key), `sprk_status`
+- [ ] **EmailArtifact table created** (`sprk_emailartifact`)
+  - Primary key: `sprk_emailartifactid` (GUID)
+  - Primary name field: `sprk_name` (String, 400 chars)
+  - 15 total fields for email metadata (subject, sender, recipients, dates, etc.)
+  - Choice field: `sprk_importance` (Low=0, Normal=1, High=2)
+  - Lookup fields: `sprk_document` (sprk_document)
+  - Indexes: `sprk_messageid`, `sprk_internetheadershash`
+- [ ] **AttachmentArtifact table created** (`sprk_attachmentartifact`)
+  - Primary key: `sprk_attachmentartifactid` (GUID)
+  - Primary name field: `sprk_name` (String, 260 chars)
+  - 8 total fields for attachment metadata (filename, content type, size, etc.)
+  - Lookup fields: `sprk_emailartifact`, `sprk_document`
+- [ ] **Relationships configured**:
+  - [ ] `sprk_processingjob_sprk_document_1n` (ProcessingJob → Document)
+  - [ ] `sprk_processingjob_systemuser_1n` (ProcessingJob → SystemUser)
+  - [ ] `sprk_emailartifact_sprk_document_1n` (EmailArtifact → Document)
+  - [ ] `sprk_attachmentartifact_sprk_emailartifact_1n` (AttachmentArtifact → EmailArtifact)
+  - [ ] `sprk_attachmentartifact_sprk_document_1n` (AttachmentArtifact → Document)
+- [ ] **Tables added to solution** "Spaarke Office Add In"
+- [ ] **Forms created** for each table (basic form with all fields)
+
+**Reference**: See `projects/sdap-office-integration/notes/DATAVERSE-TABLE-SCHEMAS.md` for complete schema definitions.
+
+**Verification**:
+```powershell
+# Verify tables exist in Dataverse
+pac org who
+pac entity list --environment {env-id} | Select-String "sprk_processingjob|sprk_emailartifact|sprk_attachmentartifact"
+```
+
+#### Security Role Configuration
+- [ ] Security role created: "Spaarke Office Add In User"
+- [ ] Role added to "Spaarke Office Add In" solution
+- [ ] **User-level permissions** configured for Office tables:
+  - [ ] `sprk_processingjob`: Create, Read, Write, Append
+  - [ ] `sprk_emailartifact`: Create, Read, Write, Append
+  - [ ] `sprk_attachmentartifact`: Create, Read, Write, Append
+  - [ ] `sprk_document`: Create, Read, Write, Append
+- [ ] **Organization-level Read permissions** for lookup entities:
+  - [ ] `sprk_matter`: Read
+  - [ ] `sprk_project`: Read
+  - [ ] `sprk_contact`: Read
+  - [ ] `sprk_account`: Read
+- [ ] Role assigned to all Office add-in users
+- [ ] Service principal (app user) verified to have System Administrator role
+
+**Verification**:
+```powershell
+# Verify security role exists
+pac security-role list --environment {env-id} | Select-String "Spaarke Office Add In User"
+```
+
+### 3. Azure AD Configuration
 
 #### Add-in App Registration
 - [ ] App registration exists: `Spaarke Office Add-in`
@@ -60,7 +122,7 @@ Use this checklist before deploying Spaarke Office Add-ins to your organization.
 - [ ] `user_impersonation` scope exposed
 - [ ] Client secret stored in Key Vault
 
-### 3. BFF API Configuration
+### 4. BFF API Configuration
 
 #### App Service Settings
 - [ ] Environment set to `Production`
@@ -83,7 +145,7 @@ Use this checklist before deploying Spaarke Office Add-ins to your organization.
 - [ ] Background workers running (check logs)
 - [ ] Service Bus queues processing messages
 
-### 4. Manifest Configuration
+### 5. Manifest Configuration
 
 #### Outlook Manifest (manifest.prod.json)
 - [ ] All URLs updated for production:
@@ -101,7 +163,7 @@ Use this checklist before deploying Spaarke Office Add-ins to your organization.
 - [ ] Manifest validates: `npx office-addin-manifest validate manifest.prod.xml`
 - [ ] Version number updated
 
-### 5. Security Review
+### 6. Security Review
 
 - [ ] Azure AD permissions are minimal required
 - [ ] No secrets in manifest files
@@ -110,7 +172,7 @@ Use this checklist before deploying Spaarke Office Add-ins to your organization.
 - [ ] Content Security Policy headers on static hosting
 - [ ] Dataverse security roles configured for users
 
-### 6. Testing
+### 7. Testing
 
 #### Staging Environment
 - [ ] Add-in loads in test Outlook account
@@ -128,7 +190,7 @@ Use this checklist before deploying Spaarke Office Add-ins to your organization.
 - [ ] Word Desktop (Mac) - verified
 - [ ] Word Web - verified
 
-### 7. Monitoring Setup
+### 8. Monitoring Setup
 
 - [ ] Application Insights alerts configured
 - [ ] Action Group created for notifications
@@ -136,7 +198,7 @@ Use this checklist before deploying Spaarke Office Add-ins to your organization.
 - [ ] Teams webhook configured (optional)
 - [ ] Dashboard created: "SDAP Office Integration"
 
-### 8. Documentation and Communication
+### 9. Documentation and Communication
 
 - [ ] User documentation available
 - [ ] Admin documentation available
@@ -145,7 +207,7 @@ Use this checklist before deploying Spaarke Office Add-ins to your organization.
 - [ ] Deployment window communicated to stakeholders
 - [ ] Pilot group identified (if phased rollout)
 
-### 9. Rollback Plan
+### 10. Rollback Plan
 
 - [ ] Previous manifest versions backed up
 - [ ] Previous static assets available
@@ -244,6 +306,7 @@ Use this checklist before deploying Spaarke Office Add-ins to your organization.
 | Section | Items | Completed |
 |---------|-------|-----------|
 | Infrastructure | 5 | /5 |
+| Dataverse | 18 | /18 |
 | Azure AD | 10 | /10 |
 | BFF API | 7 | /7 |
 | Manifests | 8 | /8 |
@@ -252,7 +315,7 @@ Use this checklist before deploying Spaarke Office Add-ins to your organization.
 | Monitoring | 5 | /5 |
 | Documentation | 6 | /6 |
 | Rollback | 5 | /5 |
-| **Total** | **60** | **/60** |
+| **Total** | **78** | **/78** |
 
 **Checklist completed by**: ____________________
 **Date**: ____________________

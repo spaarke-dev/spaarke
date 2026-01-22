@@ -129,4 +129,48 @@ public interface IDataverseService
     /// <param name="ct">Cancellation token</param>
     /// <returns>List of document entities in this email thread</returns>
     Task<IEnumerable<DocumentEntity>> GetDocumentsByConversationIndexAsync(string conversationIndexPrefix, Guid? excludeDocumentId = null, CancellationToken ct = default);
+
+    // ========================================
+    // Office Add-in Operations (SDAP Project)
+    // ========================================
+
+    /// <summary>
+    /// Create a new ProcessingJob record for tracking async operations.
+    /// </summary>
+    Task<Guid> CreateProcessingJobAsync(object request, CancellationToken ct = default);
+
+    /// <summary>
+    /// Update an existing ProcessingJob with new status/progress.
+    /// </summary>
+    Task UpdateProcessingJobAsync(Guid id, object request, CancellationToken ct = default);
+
+    /// <summary>
+    /// Get a ProcessingJob by ID.
+    /// </summary>
+    Task<object?> GetProcessingJobAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>
+    /// Get a ProcessingJob by idempotency key (for duplicate detection).
+    /// </summary>
+    Task<object?> GetProcessingJobByIdempotencyKeyAsync(string idempotencyKey, CancellationToken ct = default);
+
+    /// <summary>
+    /// Create a new EmailArtifact record for tracking saved email metadata.
+    /// </summary>
+    Task<Guid> CreateEmailArtifactAsync(object request, CancellationToken ct = default);
+
+    /// <summary>
+    /// Get an EmailArtifact by ID.
+    /// </summary>
+    Task<object?> GetEmailArtifactAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>
+    /// Create a new AttachmentArtifact record for tracking saved email attachments.
+    /// </summary>
+    Task<Guid> CreateAttachmentArtifactAsync(object request, CancellationToken ct = default);
+
+    /// <summary>
+    /// Get an AttachmentArtifact by ID.
+    /// </summary>
+    Task<object?> GetAttachmentArtifactAsync(Guid id, CancellationToken ct = default);
 }

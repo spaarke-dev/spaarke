@@ -11,15 +11,18 @@ When modifying a component, check this table for potential downstream effects:
 
 | If You Change... | Check Impact On... |
 |------------------|-------------------|
-| BFF API endpoints | PCF controls, tests, API documentation |
-| BFF authentication | PCF auth config, Dataverse plugin auth |
+| BFF API endpoints | PCF controls, Office add-ins, tests, API documentation |
+| BFF authentication | PCF auth config, Office add-in auth, Dataverse plugin auth |
 | PCF control API calls | BFF endpoint contracts |
-| Dataverse entity schema | BFF Dataverse queries, PCF form bindings |
+| Dataverse entity schema | BFF Dataverse queries, PCF form bindings, Office workers |
 | Bicep modules | Environment configs, deployment pipelines |
 | Shared libraries | All consumers (search for ProjectReference) |
 | Email processing options | Webhook handler, polling service, job handler |
 | Email filter rules schema | EmailFilterService, EmailRuleSeedService |
 | Webhook endpoint | Dataverse Service Endpoint registration |
+| Office add-in entity models | UploadFinalizationWorker, IDataverseService, Dataverse schema |
+| ProcessingJob schema | UploadFinalizationWorker, Office add-in tracking |
+| EmailArtifact/AttachmentArtifact schema | UploadFinalizationWorker, Office add-in metadata |
 
 ---
 
@@ -291,6 +294,108 @@ sprk_document (Parent - Email .eml)
 - `EmailEndpoints.cs` — POST /api/v1/emails/{emailId}/save-as-document, webhook receiver
 - `EmailProcessingOptions.cs` — Attachment size limits, blocked extensions, signature patterns
 - `AttachmentFilterService.cs` — Regex-based filtering for signature images, tracking pixels
+
+### Pattern 5B: Office Add-in Document Processing Flow
+
+**Full Documentation**: See [office-outlook-teams-integration-architecture.md](office-outlook-teams-integration-architecture.md) for complete architecture.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  Office Add-in (Outlook/Word) - User uploads file or saves email            │
+└─────────────────────────────────────────────────────────────────────────────┘
+          │
+          │ POST /api/office/upload (with metadata)
+          ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│               OfficeEndpoints (Initial Upload)                               │
+│  1. Validate user token (OBO) → 2. Create ProcessingJob (Pending)          │
+│  3. Upload file to SPE → 4. Create sprk_document record                    │
+│  5. Publish message to Service Bus (office-jobs queue)                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+          │
+          ↓ Service Bus Queue: office-jobs
+┌─────────────────────────────────────────────────────────────────────────────┐
+│            UploadFinalizationWorker (Background Processing)                  │
+│  1. Dequeue message → 2. Load ProcessingJob (by IdempotencyKey)            │
+│  3. Process stages (metadata, entities, AI analysis)                        │
+│  4. Update ProcessingJob status and progress                                │
+│  5. Create EmailArtifact (if email metadata present)                        │
+│  6. Create AttachmentArtifact records (if attachments present)              │
+│  7. Update sprk_document with final metadata                                │
+└─────────────────────────────────────────────────────────────────────────────┘
+          │                              │                              │
+          ↓                              ↓                              ↓
+┌─────────────────┐      ┌────────────────────────┐      ┌───────────────────┐
+│ SPE Container   │      │ Dataverse              │      │ Dataverse Entities│
+│ /office/*.docx  │      │ sprk_document          │      │ sprk_processingjob│
+│ /office/*.xlsx  │      │                        │      │ sprk_emailartifact│
+│ /office/*.msg   │      │                        │      │ sprk_attachment   │
+│                 │      │                        │      │   artifact        │
+└─────────────────┘      └────────────────────────┘      └───────────────────┘
+```
+
+**Components involved:**
+
+| Component | File Location | Purpose |
+|-----------|---------------|---------|
+| Office Upload Endpoint | `Api/Office/OfficeEndpoints.cs` | Receive file upload from Office add-in |
+| Upload Finalization Worker | `Workers/Office/UploadFinalizationWorker.cs` | Async processing, Dataverse integration |
+| Processing Job Models | `Models/ProcessingJob.cs` | Track job status, stages, progress |
+| Email Artifact Models | `Models/EmailArtifact.cs` | Email metadata entity |
+| Attachment Artifact Models | `Models/AttachmentArtifact.cs` | Attachment metadata entity |
+| Dataverse Service | `Spaarke.Dataverse/IDataverseService.cs` | CRUD operations for Office entities |
+| Dataverse Service Impl | `Spaarke.Dataverse/DataverseServiceClientImpl.cs` | ServiceClient SDK implementation |
+
+**Dataverse Entity Relationships:**
+```
+sprk_processingjob
+├─ sprk_jobtype = 0 (DocumentSave)
+├─ sprk_status = 0→1→2 (Pending→InProgress→Completed)
+├─ sprk_progress = 0→100
+├─ sprk_idempotencykey (SHA256 hash, indexed)
+└─ sprk_document → {document-id} (Lookup)
+
+sprk_emailartifact
+├─ sprk_subject, sprk_sender, sprk_recipients (searchable)
+├─ sprk_messageid (indexed for duplicate detection)
+├─ sprk_internetheadershash (SHA256, indexed)
+├─ sprk_bodypreview (first 2000 chars)
+└─ sprk_document → {document-id} (Lookup)
+
+sprk_attachmentartifact
+├─ sprk_originalfilename (up to 260 chars)
+├─ sprk_contenttype (MIME type)
+├─ sprk_size (bytes)
+├─ sprk_isinline (for embedded images)
+├─ sprk_emailartifact → {email-artifact-id} (Lookup)
+└─ sprk_document → {document-id} (Lookup)
+```
+
+**Change Impact:**
+| Change | Impact |
+|--------|--------|
+| Modify OfficeEndpoints signature | Update Office add-in API client (TypeScript) |
+| Change ProcessingJob schema | Update Models/ProcessingJob.cs, Dataverse table, worker logic |
+| Modify EmailArtifact schema | Update Models/EmailArtifact.cs, Dataverse table, worker logic |
+| Change IDataverseService interface | Update DataverseServiceClientImpl, DataverseWebApiService |
+| Modify UploadFinalizationWorker stages | Update worker implementation, test scenarios |
+| Add Office entity fields | Update entity models, Dataverse schema, worker mappings |
+| Change Service Bus queue name | Update appsettings.json, UploadFinalizationWorker config |
+
+**Key Files:**
+- `OfficeEndpoints.cs` — POST /api/office/upload, GET /api/office/status/{jobId}
+- `UploadFinalizationWorker.cs` — Background worker, Dataverse integration
+- `ProcessingJob.cs` — Entity model with 19 fields, JobType/Status enums
+- `EmailArtifact.cs` — Entity model with email metadata fields
+- `AttachmentArtifact.cs` — Entity model with attachment metadata
+- `IDataverseService.cs` — Extended with 8 Office-specific methods
+- `DataverseServiceClientImpl.cs` — Reflection-based entity creation
+
+**Security Model:**
+- **M365 Add-in Deployment**: Centralized deployment via M365 Admin Center
+- **BFF API Authorization**: OBO token exchange for user context
+- **Dataverse Security**: Custom "Spaarke Office Add In User" role with table permissions
+- **Three-Layer Defense**: Add-in registration, API auth, data-level access control
 
 ### Pattern 6: Analysis Export Flow (R3 Phase 3)
 
@@ -847,6 +952,10 @@ src/ ─────────────✗────→ tests/ (no test c
 | BFF Auth | `src/server/api/Sprk.Bff.Api/Infrastructure/Auth/` | Same test project |
 | **BFF Email Services** | `src/server/api/Sprk.Bff.Api/Services/Email/` | `tests/unit/Sprk.Bff.Api.Tests/Services/Email/` |
 | **Email Models** | `src/server/api/Sprk.Bff.Api/Models/Email/` | — |
+| **BFF Office Workers** | `src/server/api/Sprk.Bff.Api/Workers/Office/` | `tests/unit/Sprk.Bff.Api.Tests/Workers/Office/` |
+| **Office Endpoints** | `src/server/api/Sprk.Bff.Api/Api/Office/` | Same test project |
+| **Office Entity Models** | `src/server/api/Sprk.Bff.Api/Models/` | — |
+| **Dataverse Service** | `src/server/shared/Spaarke.Dataverse/` | `tests/unit/Spaarke.Dataverse.Tests/` |
 | **BFF AI Services** | `src/server/api/Sprk.Bff.Api/Services/Ai/` | `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/` |
 | **AI Export Services** | `src/server/api/Sprk.Bff.Api/Services/Ai/Export/` | `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/` |
 | **AI Endpoints** | `src/server/api/Sprk.Bff.Api/Api/Ai/` | Same test project |

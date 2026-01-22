@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head><title>Icon Generator</title></head>
+<body>
+<canvas id="c16" width="16" height="16"></canvas>
+<canvas id="c32" width="32" height="32"></canvas>
+<canvas id="c80" width="80" height="80"></canvas>
+<script>
+function createIcon(id, size) {
+    const canvas = document.getElementById(id);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#0078D4';
+    ctx.fillRect(0, 0, size, size);
+    ctx.fillStyle = 'white';
+    ctx.font = Math.floor(size * 0.6) + 'px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('S', size/2, size/2);
+    const link = document.createElement('a');
+    link.download = 'icon-' + size + '.png';
+    link.href = canvas.toDataURL();
+    link.click();
+}
+createIcon('c16', 16);
+setTimeout(() => createIcon('c32', 32), 100);
+setTimeout(() => createIcon('c80', 80), 200);
+</script>
+</body>
+</html>

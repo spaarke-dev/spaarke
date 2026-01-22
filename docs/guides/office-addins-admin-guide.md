@@ -121,8 +121,11 @@ Before deploying the add-ins, ensure the following are in place:
 - [ ] Static assets deployed to Azure Static Web Apps
 - [ ] Azure AD app registrations configured (see Section 4)
 - [ ] Redis Cache provisioned and accessible
-- [ ] Service Bus namespace and queues created
+- [ ] Service Bus namespace and queues created (`office-jobs` queue)
 - [ ] Application Insights configured
+- [ ] **Dataverse tables created**: `sprk_processingjob`, `sprk_emailartifact`, `sprk_attachmentartifact`
+- [ ] **Dataverse security role configured**: "Spaarke Office Add In User" (see Section 7.5)
+- [ ] **Users assigned security role**: All Office add-in users
 
 ### 3.2 Administrative Access Requirements
 
@@ -406,7 +409,55 @@ Users must have appropriate Dataverse security roles to use the add-in:
 |------|--------------|
 | **Spaarke User** | Create/read documents, search entities |
 | **Spaarke Power User** | Above + Quick Create entities |
+| **Spaarke Office Add In User** | Office add-in operations, create Office entities |
 | **Spaarke Administrator** | Full access |
+
+#### Configuring the "Spaarke Office Add In User" Security Role
+
+The "Spaarke Office Add In User" role provides access to Office add-in-specific Dataverse tables. This role should be assigned to all users who will use the Outlook or Word add-ins.
+
+**Required Tables and Permissions**:
+
+| Table | Permission Level | Operations | Why Required |
+|-------|------------------|------------|--------------|
+| `sprk_document` | User | Create, Read, Write, Append | Save documents and view existing |
+| `sprk_processingjob` | User | Create, Read, Write | Track async job status |
+| `sprk_emailartifact` | User | Create, Read, Write | Save email metadata |
+| `sprk_attachmentartifact` | User | Create, Read, Write | Save attachment metadata |
+| `sprk_matter` | Organization | Read | Associate documents with matters |
+| `sprk_project` | Organization | Read | Associate documents with projects |
+| `sprk_contact` | Organization | Read | Associate documents with contacts |
+| `sprk_account` | Organization | Read | Associate documents with accounts |
+
+**Setup Instructions**:
+
+1. Navigate to Power Platform Admin Center > Your environment > Settings > Users + permissions > Security roles
+2. Click "New role" (or edit existing "Spaarke Office Add In User")
+3. Select the **Custom Entities** tab
+4. For each table listed above, set the permission level:
+   - **User level**: Four circles filled (Create, Read, Write, Append)
+   - **Organization level**: All five circles filled (Read only for lookup entities)
+5. Save the security role
+6. Assign to users via Power Platform Admin Center > Users > Manage security roles
+
+**Permission Level Explanation**:
+
+- **User level**: Users can only access records they own or that are shared with them
+- **Organization level**: Users can access all records in the organization (for read-only lookups)
+
+**Verification**:
+
+```powershell
+# Verify security role configuration
+pac admin list --environment {env-id}
+pac security-role list --environment {env-id}
+```
+
+After configuration, users should be able to:
+- Save emails and attachments from Outlook
+- Save documents from Word
+- View job processing status
+- Search and associate documents with entities
 
 ### 7.6 Audit Logging
 

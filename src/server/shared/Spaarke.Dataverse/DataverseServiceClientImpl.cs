@@ -925,6 +925,268 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         };
     }
 
+    // ========================================
+    // Office Add-in Operations (SDAP Project)
+    // ========================================
+
+    public async Task<Guid> CreateProcessingJobAsync(object request, CancellationToken ct = default)
+    {
+        var entity = new Entity("sprk_processingjob");
+
+        // Use dynamic/reflection to get properties from request object
+        var props = request.GetType().GetProperties();
+        foreach (var prop in props)
+        {
+            var value = prop.GetValue(request);
+            if (value == null) continue;
+
+            var fieldName = $"sprk_{prop.Name.ToLower()}";
+
+            if (value is Guid guidValue)
+            {
+                entity[fieldName] = guidValue;
+            }
+            else if (value is int intValue)
+            {
+                entity[fieldName] = intValue;
+            }
+            else if (value is bool boolValue)
+            {
+                entity[fieldName] = boolValue;
+            }
+            else if (value is DateTime dateValue)
+            {
+                entity[fieldName] = dateValue;
+            }
+            else if (value is string strValue)
+            {
+                entity[fieldName] = strValue;
+            }
+        }
+
+        entity["statecode"] = new OptionSetValue(0); // Active
+
+        var jobId = await _serviceClient.CreateAsync(entity, ct);
+        _logger.LogInformation("ProcessingJob created with ID: {JobId}", jobId);
+        return jobId;
+    }
+
+    public async Task UpdateProcessingJobAsync(Guid id, object request, CancellationToken ct = default)
+    {
+        var entity = new Entity("sprk_processingjob", id);
+
+        var props = request.GetType().GetProperties();
+        foreach (var prop in props)
+        {
+            var value = prop.GetValue(request);
+            if (value == null) continue;
+
+            var fieldName = $"sprk_{prop.Name.ToLower()}";
+
+            if (value is Guid guidValue)
+            {
+                entity[fieldName] = guidValue;
+            }
+            else if (value is int intValue)
+            {
+                entity[fieldName] = intValue;
+            }
+            else if (value is bool boolValue)
+            {
+                entity[fieldName] = boolValue;
+            }
+            else if (value is DateTime dateValue)
+            {
+                entity[fieldName] = dateValue;
+            }
+            else if (value is string strValue)
+            {
+                entity[fieldName] = strValue;
+            }
+        }
+
+        await _serviceClient.UpdateAsync(entity, ct);
+        _logger.LogInformation("ProcessingJob {JobId} updated", id);
+    }
+
+    public async Task<object?> GetProcessingJobAsync(Guid id, CancellationToken ct = default)
+    {
+        var entity = await _serviceClient.RetrieveAsync(
+            "sprk_processingjob",
+            id,
+            new ColumnSet(true),
+            ct);
+
+        if (entity == null) return null;
+
+        // Return a dynamic object with the data
+        return new
+        {
+            Id = entity.Id,
+            Name = entity.GetAttributeValue<string>("sprk_name"),
+            JobType = entity.GetAttributeValue<OptionSetValue>("sprk_jobtype")?.Value,
+            Status = entity.GetAttributeValue<OptionSetValue>("sprk_status")?.Value,
+            Progress = entity.GetAttributeValue<int?>("sprk_progress"),
+            IdempotencyKey = entity.GetAttributeValue<string>("sprk_idempotencykey"),
+            CorrelationId = entity.GetAttributeValue<string>("sprk_correlationid")
+        };
+    }
+
+    public async Task<object?> GetProcessingJobByIdempotencyKeyAsync(string idempotencyKey, CancellationToken ct = default)
+    {
+        var query = new QueryExpression("sprk_processingjob")
+        {
+            ColumnSet = new ColumnSet(true),
+            Criteria = new FilterExpression
+            {
+                Conditions =
+                {
+                    new ConditionExpression("sprk_idempotencykey", ConditionOperator.Equal, idempotencyKey)
+                }
+            },
+            TopCount = 1
+        };
+
+        var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
+        var entity = results.Entities.FirstOrDefault();
+
+        if (entity == null) return null;
+
+        return new
+        {
+            Id = entity.Id,
+            Name = entity.GetAttributeValue<string>("sprk_name"),
+            JobType = entity.GetAttributeValue<OptionSetValue>("sprk_jobtype")?.Value,
+            Status = entity.GetAttributeValue<OptionSetValue>("sprk_status")?.Value,
+            Progress = entity.GetAttributeValue<int?>("sprk_progress"),
+            IdempotencyKey = entity.GetAttributeValue<string>("sprk_idempotencykey"),
+            CorrelationId = entity.GetAttributeValue<string>("sprk_correlationid")
+        };
+    }
+
+    public async Task<Guid> CreateEmailArtifactAsync(object request, CancellationToken ct = default)
+    {
+        var entity = new Entity("sprk_emailartifact");
+
+        var props = request.GetType().GetProperties();
+        foreach (var prop in props)
+        {
+            var value = prop.GetValue(request);
+            if (value == null) continue;
+
+            var fieldName = $"sprk_{prop.Name.ToLower()}";
+
+            if (value is Guid guidValue)
+            {
+                entity[fieldName] = guidValue;
+            }
+            else if (value is int intValue)
+            {
+                entity[fieldName] = intValue;
+            }
+            else if (value is bool boolValue)
+            {
+                entity[fieldName] = boolValue;
+            }
+            else if (value is DateTime dateValue)
+            {
+                entity[fieldName] = dateValue;
+            }
+            else if (value is string strValue)
+            {
+                entity[fieldName] = strValue;
+            }
+        }
+
+        entity["statecode"] = new OptionSetValue(0); // Active
+
+        var artifactId = await _serviceClient.CreateAsync(entity, ct);
+        _logger.LogInformation("EmailArtifact created with ID: {ArtifactId}", artifactId);
+        return artifactId;
+    }
+
+    public async Task<object?> GetEmailArtifactAsync(Guid id, CancellationToken ct = default)
+    {
+        var entity = await _serviceClient.RetrieveAsync(
+            "sprk_emailartifact",
+            id,
+            new ColumnSet(true),
+            ct);
+
+        if (entity == null) return null;
+
+        return new
+        {
+            Id = entity.Id,
+            Name = entity.GetAttributeValue<string>("sprk_name"),
+            Subject = entity.GetAttributeValue<string>("sprk_subject"),
+            Sender = entity.GetAttributeValue<string>("sprk_sender"),
+            DocumentId = entity.GetAttributeValue<EntityReference>("sprk_document")?.Id
+        };
+    }
+
+    public async Task<Guid> CreateAttachmentArtifactAsync(object request, CancellationToken ct = default)
+    {
+        var entity = new Entity("sprk_attachmentartifact");
+
+        var props = request.GetType().GetProperties();
+        foreach (var prop in props)
+        {
+            var value = prop.GetValue(request);
+            if (value == null) continue;
+
+            var fieldName = $"sprk_{prop.Name.ToLower()}";
+
+            if (value is Guid guidValue)
+            {
+                entity[fieldName] = guidValue;
+            }
+            else if (value is int intValue)
+            {
+                entity[fieldName] = intValue;
+            }
+            else if (value is bool boolValue)
+            {
+                entity[fieldName] = boolValue;
+            }
+            else if (value is DateTime dateValue)
+            {
+                entity[fieldName] = dateValue;
+            }
+            else if (value is string strValue)
+            {
+                entity[fieldName] = strValue;
+            }
+        }
+
+        entity["statecode"] = new OptionSetValue(0); // Active
+
+        var artifactId = await _serviceClient.CreateAsync(entity, ct);
+        _logger.LogInformation("AttachmentArtifact created with ID: {ArtifactId}", artifactId);
+        return artifactId;
+    }
+
+    public async Task<object?> GetAttachmentArtifactAsync(Guid id, CancellationToken ct = default)
+    {
+        var entity = await _serviceClient.RetrieveAsync(
+            "sprk_attachmentartifact",
+            id,
+            new ColumnSet(true),
+            ct);
+
+        if (entity == null) return null;
+
+        return new
+        {
+            Id = entity.Id,
+            Name = entity.GetAttributeValue<string>("sprk_name"),
+            OriginalFilename = entity.GetAttributeValue<string>("sprk_originalfilename"),
+            ContentType = entity.GetAttributeValue<string>("sprk_contenttype"),
+            DocumentId = entity.GetAttributeValue<EntityReference>("sprk_document")?.Id,
+            EmailArtifactId = entity.GetAttributeValue<EntityReference>("sprk_emailartifact")?.Id
+        };
+    }
+
     public void Dispose()
     {
         if (!_disposed)

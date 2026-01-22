@@ -7,19 +7,19 @@
   xsi:type="TaskPaneApp">
 
   <!-- Basic Identity -->
-  <Id>c1258e2d-1688-49d2-ac99-a7485ebd9995</Id>
+  <Id>b3965ea0-6942-4f17-81b3-2c645bd05ebf</Id>
   <Version>1.0.0</Version>
   <ProviderName>Spaarke</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
-  <DisplayName DefaultValue="Spaarke" />
+  <DisplayName DefaultValue="Spaarke Word Add-in" />
   <Description DefaultValue="Save, share, and manage documents in Spaarke DMS" />
-  <IconUrl DefaultValue="https://addins.spaarke.com/assets/icon-32.png" />
-  <HighResolutionIconUrl DefaultValue="https://addins.spaarke.com/assets/icon-80.png" />
+  <IconUrl DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-word.png" />
+  <HighResolutionIconUrl DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-word.png" />
   <SupportUrl DefaultValue="https://spaarke.com/support" />
 
   <!-- Domains -->
   <AppDomains>
-    <AppDomain>https://addins.spaarke.com</AppDomain>
+    <AppDomain>https://icy-desert-0bfdbb61e.6.azurestaticapps.net</AppDomain>
     <AppDomain>https://login.microsoftonline.com</AppDomain>
   </AppDomains>
 
@@ -37,7 +37,7 @@
 
   <!-- Default Settings -->
   <DefaultSettings>
-    <SourceLocation DefaultValue="https://addins.spaarke.com/word/taskpane.html" />
+    <SourceLocation DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/word/taskpane.html" />
   </DefaultSettings>
 
   <!-- Permissions -->
@@ -143,26 +143,26 @@
     <!-- Resources -->
     <Resources>
       <bt:Images>
-        <bt:Image id="Icon.16x16" DefaultValue="https://addins.spaarke.com/assets/icon-16.png" />
-        <bt:Image id="Icon.32x32" DefaultValue="https://addins.spaarke.com/assets/icon-32.png" />
-        <bt:Image id="Icon.80x80" DefaultValue="https://addins.spaarke.com/assets/icon-80.png" />
-        <bt:Image id="Save.16x16" DefaultValue="https://addins.spaarke.com/assets/save-16.png" />
-        <bt:Image id="Save.32x32" DefaultValue="https://addins.spaarke.com/assets/save-32.png" />
-        <bt:Image id="Save.80x80" DefaultValue="https://addins.spaarke.com/assets/save-80.png" />
-        <bt:Image id="SaveVersion.16x16" DefaultValue="https://addins.spaarke.com/assets/save-version-16.png" />
-        <bt:Image id="SaveVersion.32x32" DefaultValue="https://addins.spaarke.com/assets/save-version-32.png" />
-        <bt:Image id="SaveVersion.80x80" DefaultValue="https://addins.spaarke.com/assets/save-version-80.png" />
-        <bt:Image id="Share.16x16" DefaultValue="https://addins.spaarke.com/assets/share-16.png" />
-        <bt:Image id="Share.32x32" DefaultValue="https://addins.spaarke.com/assets/share-32.png" />
-        <bt:Image id="Share.80x80" DefaultValue="https://addins.spaarke.com/assets/share-80.png" />
-        <bt:Image id="Grant.16x16" DefaultValue="https://addins.spaarke.com/assets/grant-16.png" />
-        <bt:Image id="Grant.32x32" DefaultValue="https://addins.spaarke.com/assets/grant-32.png" />
-        <bt:Image id="Grant.80x80" DefaultValue="https://addins.spaarke.com/assets/grant-80.png" />
+        <bt:Image id="Icon.16x16" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-word.png" />
+        <bt:Image id="Icon.32x32" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-word.png" />
+        <bt:Image id="Icon.80x80" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-word.png" />
+        <bt:Image id="Save.16x16" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-word.png" />
+        <bt:Image id="Save.32x32" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-word.png" />
+        <bt:Image id="Save.80x80" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-word.png" />
+        <bt:Image id="SaveVersion.16x16" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-word.png" />
+        <bt:Image id="SaveVersion.32x32" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-word.png" />
+        <bt:Image id="SaveVersion.80x80" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-word.png" />
+        <bt:Image id="Share.16x16" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-word.png" />
+        <bt:Image id="Share.32x32" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-word.png" />
+        <bt:Image id="Share.80x80" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-word.png" />
+        <bt:Image id="Grant.16x16" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-word.png" />
+        <bt:Image id="Grant.32x32" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-word.png" />
+        <bt:Image id="Grant.80x80" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-word.png" />
       </bt:Images>
 
       <bt:Urls>
-        <bt:Url id="Taskpane.Url" DefaultValue="https://addins.spaarke.com/word/taskpane.html" />
-        <bt:Url id="Commands.Url" DefaultValue="https://addins.spaarke.com/word/commands.html" />
+        <bt:Url id="Taskpane.Url" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/word/taskpane.html" />
+        <bt:Url id="Commands.Url" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/word/commands.html" />
       </bt:Urls>
 
       <bt:ShortStrings>
@@ -285,26 +285,26 @@
 
     <Resources>
       <bt:Images>
-        <bt:Image id="Icon.16x16" DefaultValue="https://addins.spaarke.com/assets/icon-16.png" />
-        <bt:Image id="Icon.32x32" DefaultValue="https://addins.spaarke.com/assets/icon-32.png" />
-        <bt:Image id="Icon.80x80" DefaultValue="https://addins.spaarke.com/assets/icon-80.png" />
-        <bt:Image id="Save.16x16" DefaultValue="https://addins.spaarke.com/assets/save-16.png" />
-        <bt:Image id="Save.32x32" DefaultValue="https://addins.spaarke.com/assets/save-32.png" />
-        <bt:Image id="Save.80x80" DefaultValue="https://addins.spaarke.com/assets/save-80.png" />
-        <bt:Image id="SaveVersion.16x16" DefaultValue="https://addins.spaarke.com/assets/save-version-16.png" />
-        <bt:Image id="SaveVersion.32x32" DefaultValue="https://addins.spaarke.com/assets/save-version-32.png" />
-        <bt:Image id="SaveVersion.80x80" DefaultValue="https://addins.spaarke.com/assets/save-version-80.png" />
-        <bt:Image id="Share.16x16" DefaultValue="https://addins.spaarke.com/assets/share-16.png" />
-        <bt:Image id="Share.32x32" DefaultValue="https://addins.spaarke.com/assets/share-32.png" />
-        <bt:Image id="Share.80x80" DefaultValue="https://addins.spaarke.com/assets/share-80.png" />
-        <bt:Image id="Grant.16x16" DefaultValue="https://addins.spaarke.com/assets/grant-16.png" />
-        <bt:Image id="Grant.32x32" DefaultValue="https://addins.spaarke.com/assets/grant-32.png" />
-        <bt:Image id="Grant.80x80" DefaultValue="https://addins.spaarke.com/assets/grant-80.png" />
+        <bt:Image id="Icon.16x16" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-word.png" />
+        <bt:Image id="Icon.32x32" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-word.png" />
+        <bt:Image id="Icon.80x80" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-word.png" />
+        <bt:Image id="Save.16x16" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-word.png" />
+        <bt:Image id="Save.32x32" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-word.png" />
+        <bt:Image id="Save.80x80" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-word.png" />
+        <bt:Image id="SaveVersion.16x16" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-word.png" />
+        <bt:Image id="SaveVersion.32x32" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-word.png" />
+        <bt:Image id="SaveVersion.80x80" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-word.png" />
+        <bt:Image id="Share.16x16" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-word.png" />
+        <bt:Image id="Share.32x32" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-word.png" />
+        <bt:Image id="Share.80x80" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-word.png" />
+        <bt:Image id="Grant.16x16" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-word.png" />
+        <bt:Image id="Grant.32x32" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-word.png" />
+        <bt:Image id="Grant.80x80" DefaultValue="https://learn.microsoft.com/en-us/office/dev/add-ins/images/nav-word.png" />
       </bt:Images>
 
       <bt:Urls>
-        <bt:Url id="Taskpane.Url" DefaultValue="https://addins.spaarke.com/word/taskpane.html" />
-        <bt:Url id="Commands.Url" DefaultValue="https://addins.spaarke.com/word/commands.html" />
+        <bt:Url id="Taskpane.Url" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/word/taskpane.html" />
+        <bt:Url id="Commands.Url" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/word/commands.html" />
       </bt:Urls>
 
       <bt:ShortStrings>

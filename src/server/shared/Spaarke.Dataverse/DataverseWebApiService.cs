@@ -905,6 +905,51 @@ public class DataverseWebApiService : IDataverseService
             "Use DataverseServiceClientImpl for full metadata support.");
     }
 
+    // ========================================
+    // Office Add-in Operations (SDAP Project)
+    // Stubs - Not implemented in Web API service
+    // ========================================
+
+    public Task<Guid> CreateProcessingJobAsync(object request, CancellationToken ct = default)
+    {
+        throw new NotImplementedException("Office add-in operations require DataverseServiceClientImpl");
+    }
+
+    public Task UpdateProcessingJobAsync(Guid id, object request, CancellationToken ct = default)
+    {
+        throw new NotImplementedException("Office add-in operations require DataverseServiceClientImpl");
+    }
+
+    public Task<object?> GetProcessingJobAsync(Guid id, CancellationToken ct = default)
+    {
+        throw new NotImplementedException("Office add-in operations require DataverseServiceClientImpl");
+    }
+
+    public Task<object?> GetProcessingJobByIdempotencyKeyAsync(string idempotencyKey, CancellationToken ct = default)
+    {
+        throw new NotImplementedException("Office add-in operations require DataverseServiceClientImpl");
+    }
+
+    public Task<Guid> CreateEmailArtifactAsync(object request, CancellationToken ct = default)
+    {
+        throw new NotImplementedException("Office add-in operations require DataverseServiceClientImpl");
+    }
+
+    public Task<object?> GetEmailArtifactAsync(Guid id, CancellationToken ct = default)
+    {
+        throw new NotImplementedException("Office add-in operations require DataverseServiceClientImpl");
+    }
+
+    public Task<Guid> CreateAttachmentArtifactAsync(object request, CancellationToken ct = default)
+    {
+        throw new NotImplementedException("Office add-in operations require DataverseServiceClientImpl");
+    }
+
+    public Task<object?> GetAttachmentArtifactAsync(Guid id, CancellationToken ct = default)
+    {
+        throw new NotImplementedException("Office add-in operations require DataverseServiceClientImpl");
+    }
+
     private class ODataCollectionResponse
     {
         [JsonPropertyName("value")]

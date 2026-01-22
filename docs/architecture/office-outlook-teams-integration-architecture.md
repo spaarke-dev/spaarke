@@ -1,7 +1,7 @@
 # Office Add-ins Integration Architecture
 
-> **Last Updated**: January 2026
-> **Status**: In Development
+> **Last Updated**: January 21, 2026
+> **Status**: Production Ready
 > **Project**: SDAP Office Integration
 
 ---
@@ -261,61 +261,87 @@ All UI components use **Fluent UI v9** per ADR-021:
 
 ## Dataverse Schema
 
-### EmailArtifact Table
+> **Reference**: [DATAVERSE-TABLE-SCHEMAS.md](../../projects/sdap-office-integration/notes/DATAVERSE-TABLE-SCHEMAS.md)
 
-Stores metadata for saved emails.
+### EmailArtifact Table (`sprk_emailartifact`)
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `spe_emailartifactid` | GUID (PK) | Unique identifier |
-| `spe_subject` | String (500) | Email subject |
-| `spe_sender` | String (320) | Sender email address |
-| `spe_sendername` | String (200) | Sender display name |
-| `spe_recipients` | Multiline | JSON array of recipients |
-| `spe_receiveddate` | DateTime | When email was received |
-| `spe_sentdate` | DateTime | When email was sent |
-| `spe_conversationid` | String (200) | Exchange conversation ID |
-| `spe_internetmessageid` | String (998) | RFC 2822 message ID |
-| `spe_specontainerid` | String (100) | SPE container ID |
-| `spe_spefileid` | String (100) | SPE file/folder ID |
-| `spe_hasattachments` | Boolean | Whether email has attachments |
-| `spe_attachmentcount` | Integer | Number of attachments |
-| `spe_processingstate` | OptionSet | Pending/Processing/Completed/Failed |
-| `spe_extractedtopics` | Multiline | AI-extracted topics (JSON) |
-| `spe_extractedentities` | Multiline | AI-extracted entities (JSON) |
-| `spe_summary` | Multiline | AI-generated summary |
+Stores metadata and body snapshots for emails saved from Outlook.
 
-### AttachmentArtifact Table
+| Column | Type | Max Length | Description |
+|--------|------|------------|-------------|
+| `sprk_emailartifactid` | GUID (PK) | - | Unique identifier |
+| `sprk_name` | String (Primary) | 400 | Auto-generated from Subject + Date |
+| `sprk_subject` | String | 400 | Email subject line (searchable) |
+| `sprk_sender` | String | 320 | Sender email address (searchable) |
+| `sprk_recipients` | Multiline | 10000 | JSON array of recipient objects |
+| `sprk_ccrecipients` | Multiline | 10000 | JSON array of CC recipient objects |
+| `sprk_sentdate` | DateTime | - | When email was sent |
+| `sprk_receiveddate` | DateTime | - | When email was received |
+| `sprk_messageid` | String (indexed) | 256 | Internet message ID from headers |
+| `sprk_internetheadershash` | String (indexed) | 64 | SHA256 hash for duplicate detection |
+| `sprk_conversationid` | String | 256 | Email conversation/thread ID |
+| `sprk_importance` | Choice | - | Low=0, Normal=1, High=2 |
+| `sprk_hasattachments` | Yes/No | - | Boolean flag |
+| `sprk_bodypreview` | Multiline | 2000 | First 2000 chars of email body (searchable) |
+| `sprk_document` | Lookup | - | Lookup to Document (`sprk_document`) |
 
-Stores metadata for email attachments.
+**Indexes**:
+- `sprk_messageid` (duplicate detection)
+- `sprk_internetheadershash` (duplicate detection)
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `spe_attachmentartifactid` | GUID (PK) | Unique identifier |
-| `spe_emailartifact` | Lookup | Parent email reference |
-| `spe_filename` | String (255) | Original filename |
-| `spe_contenttype` | String (100) | MIME type |
-| `spe_size` | Integer | File size in bytes |
-| `spe_spefileid` | String (100) | SPE file ID |
-| `spe_spedriveitemid` | String (100) | Graph drive item ID |
-| `spe_isprocessed` | Boolean | AI processing complete |
-| `spe_extractedtext` | Multiline | OCR/parsed text |
+### AttachmentArtifact Table (`sprk_attachmentartifact`)
 
-### ProcessingJob Table
+Tracks email attachments saved as separate documents.
 
-Tracks AI processing jobs.
+| Column | Type | Max Length | Description |
+|--------|------|------------|-------------|
+| `sprk_attachmentartifactid` | GUID (PK) | - | Unique identifier |
+| `sprk_name` | String (Primary) | 260 | Original filename |
+| `sprk_originalfilename` | String | 260 | Filename from email (searchable) |
+| `sprk_contenttype` | String | 100 | MIME type (e.g., application/pdf) |
+| `sprk_size` | Whole Number | - | File size in bytes |
+| `sprk_contentid` | String | 256 | For inline attachments (embedded images) |
+| `sprk_isinline` | Yes/No | - | True for embedded images in HTML |
+| `sprk_emailartifact` | Lookup | - | Lookup to EmailArtifact (N:1) |
+| `sprk_document` | Lookup | - | Lookup to Document (N:1) |
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `spe_processingjobid` | GUID (PK) | Unique identifier |
-| `spe_jobtype` | OptionSet | Email/Attachment/Document |
-| `spe_status` | OptionSet | Queued/Running/Completed/Failed |
-| `spe_targetid` | String (100) | ID of item being processed |
-| `spe_targettype` | String (50) | Entity type being processed |
-| `spe_startedat` | DateTime | Processing start time |
-| `spe_completedat` | DateTime | Processing completion time |
-| `spe_errormessage` | Multiline | Error details if failed |
-| `spe_progress` | Integer | Percentage complete (0-100) |
+**Relationships**:
+- `sprk_attachmentartifact_EmailArtifact_1n` (Many attachments to one email)
+- `sprk_attachmentartifact_Document_1n` (Many attachments to one document)
+
+### ProcessingJob Table (`sprk_processingjob`)
+
+Tracks async processing jobs following **ADR-004** job contract pattern.
+
+| Column | Type | Max Length | Description |
+|--------|------|------------|-------------|
+| `sprk_processingjobid` | GUID (PK) | - | Unique identifier |
+| `sprk_name` | String (Primary) | 100 | Auto-generated job ID (GUID) |
+| `sprk_jobtype` | Choice | - | DocumentSave=0, EmailSave=1, ShareLinks=2, QuickCreate=3, ProfileSummary=4, Indexing=5, DeepAnalysis=6 |
+| `sprk_status` | Choice (Required) | - | Pending=0, InProgress=1, Completed=2, Failed=3, Cancelled=4 |
+| `sprk_stages` | Multiline | 10000 | JSON array of stage definitions |
+| `sprk_currentstage` | String | 100 | Name of currently executing stage |
+| `sprk_stagestatus` | Multiline | 10000 | JSON object of stage statuses |
+| `sprk_progress` | Whole Number | - | 0-100 percentage |
+| `sprk_starteddate` | DateTime | - | When job began processing |
+| `sprk_completeddate` | DateTime | - | When job finished (success or failure) |
+| `sprk_errorcode` | String | 50 | Error code if failed (e.g., OFFICE_001) |
+| `sprk_errormessage` | Multiline | 2000 | Detailed error message |
+| `sprk_retrycount` | Whole Number | - | Number of retry attempts |
+| `sprk_idempotencykey` | String (indexed) | 64 | SHA256 hash for duplicate prevention |
+| `sprk_correlationid` | String | 36 | GUID for distributed tracing |
+| `sprk_initiatedby` | Lookup | - | Lookup to User (`systemuser`) |
+| `sprk_document` | Lookup | - | Lookup to Document (`sprk_document`) |
+| `sprk_payload` | Multiline | 50000 | JSON input data for the job |
+| `sprk_result` | Multiline | 50000 | JSON output data from the job |
+
+**Indexes**:
+- `sprk_idempotencykey` (duplicate job prevention)
+- `sprk_status` (active job queries)
+
+**Relationships**:
+- `sprk_processingjob_SystemUser_1n` (Many jobs to one user)
+- `sprk_processingjob_Document_1n` (Many jobs to one document)
 
 ---
 

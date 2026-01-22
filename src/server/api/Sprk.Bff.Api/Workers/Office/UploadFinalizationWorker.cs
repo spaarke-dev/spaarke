@@ -38,6 +38,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     private readonly ServiceBusClient _serviceBusClient;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ServiceBusOptions _serviceBusOptions;
+    private readonly Spaarke.Dataverse.IDataverseService _dataverseService;
 
     private const string QueueName = "office-upload-finalization";
     private const string ProfileQueueName = "office-profile";
@@ -58,7 +59,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         IDistributedCache cache,
         ServiceBusClient serviceBusClient,
         IServiceScopeFactory scopeFactory,
-        IOptions<ServiceBusOptions> serviceBusOptions)
+        IOptions<ServiceBusOptions> serviceBusOptions,
+        Spaarke.Dataverse.IDataverseService dataverseService)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _speFileStore = speFileStore ?? throw new ArgumentNullException(nameof(speFileStore));
@@ -66,6 +68,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         _serviceBusClient = serviceBusClient ?? throw new ArgumentNullException(nameof(serviceBusClient));
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _serviceBusOptions = serviceBusOptions?.Value ?? throw new ArgumentNullException(nameof(serviceBusOptions));
+        _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -554,24 +557,23 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             documentId,
             metadata.Subject);
 
-        // TODO: Implement actual Dataverse record creation
-        // Create sprk_emailartifact record with:
-        // - sprk_document = documentId
-        // - sprk_outlookmessageid = metadata.OutlookMessageId
-        // - sprk_internetmessageid = metadata.InternetMessageId
-        // - sprk_conversationid = metadata.ConversationId
-        // - sprk_subject = metadata.Subject
-        // - sprk_sender = metadata.SenderEmail
-        // - sprk_sendername = metadata.SenderName
-        // - sprk_recipients = metadata.RecipientsJson
-        // - sprk_sentdate = metadata.SentDate
-        // - sprk_receiveddate = metadata.ReceivedDate
-        // - sprk_bodypreview = metadata.BodyPreview
-        // - sprk_hasattachments = metadata.HasAttachments
-        // - sprk_importance = metadata.Importance
+        var request = new
+        {
+            Name = $"{metadata.Subject} - {metadata.SentDate:yyyy-MM-dd}",
+            Subject = metadata.Subject,
+            Sender = metadata.SenderEmail,
+            Recipients = metadata.RecipientsJson,
+            SentDate = metadata.SentDate,
+            ReceivedDate = metadata.ReceivedDate,
+            MessageId = metadata.InternetMessageId,
+            ConversationId = metadata.ConversationId,
+            BodyPreview = metadata.BodyPreview,
+            HasAttachments = metadata.HasAttachments,
+            Importance = metadata.Importance,
+            DocumentId = documentId
+        };
 
-        await Task.Delay(50, cancellationToken);
-        var emailArtifactId = Guid.NewGuid();
+        var emailArtifactId = await _dataverseService.CreateEmailArtifactAsync(request, cancellationToken);
 
         _logger.LogInformation(
             "EmailArtifact created: EmailArtifactId={EmailArtifactId}, DocumentId={DocumentId}",
@@ -589,18 +591,18 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             documentId,
             metadata.OriginalFileName);
 
-        // TODO: Implement actual Dataverse record creation
-        // Create sprk_attachmentartifact record with:
-        // - sprk_document = documentId
-        // - sprk_emailartifact = metadata.EmailArtifactId (if from email)
-        // - sprk_outlookattachmentid = metadata.OutlookAttachmentId
-        // - sprk_originalfilename = metadata.OriginalFileName
-        // - sprk_contenttype = metadata.ContentType
-        // - sprk_size = metadata.Size
-        // - sprk_isinline = metadata.IsInline
+        var request = new
+        {
+            Name = metadata.OriginalFileName,
+            OriginalFilename = metadata.OriginalFileName,
+            ContentType = metadata.ContentType,
+            Size = (int)metadata.Size, // Convert long to int for Dataverse
+            IsInline = metadata.IsInline,
+            EmailArtifactId = metadata.EmailArtifactId,
+            DocumentId = documentId
+        };
 
-        await Task.Delay(50, cancellationToken);
-        var attachmentArtifactId = Guid.NewGuid();
+        var attachmentArtifactId = await _dataverseService.CreateAttachmentArtifactAsync(request, cancellationToken);
 
         _logger.LogInformation(
             "AttachmentArtifact created: AttachmentArtifactId={AttachmentArtifactId}, DocumentId={DocumentId}",

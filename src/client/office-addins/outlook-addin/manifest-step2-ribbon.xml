@@ -9,11 +9,11 @@
   <Version>1.0.0.0</Version>
   <ProviderName>Spaarke</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
-  <DisplayName DefaultValue="Spaarke Outlook" />
-  <Description DefaultValue="Save and share emails with Spaarke DMS" />
-  <IconUrl DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/assets/icon-32.png" />
-  <HighResolutionIconUrl DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/assets/icon-64.png" />
-  <SupportUrl DefaultValue="https://spaarke.com/support" />
+  <DisplayName DefaultValue="Spaarke Test" />
+  <Description DefaultValue="Test add-in" />
+  <IconUrl DefaultValue="https://officedev.github.io/Office-Add-in-samples/Samples/hello-world/outlook-hello-world/assets/icon-32.png" />
+  <HighResolutionIconUrl DefaultValue="https://officedev.github.io/Office-Add-in-samples/Samples/hello-world/outlook-hello-world/assets/icon-64.png" />
+  <SupportUrl DefaultValue="https://learn.microsoft.com/office/dev/add-ins/" />
 
   <Hosts>
     <Host Name="Mailbox" />
@@ -38,12 +38,14 @@
 
   <Rule xsi:type="ItemIs" ItemType="Message" FormType="Read" />
 
-  <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides" xsi:type="VersionOverridesV1_0">
-
+  <!-- VersionOverrides for Ribbon Button -->
+  <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides/1.1" xsi:type="VersionOverridesV1_1">
+    
     <Hosts>
       <Host xsi:type="MailHost">
         <DesktopFormFactor>
-
+          
+          <!-- Read Mode Button -->
           <ExtensionPoint xsi:type="MessageReadCommandSurface">
             <OfficeTab id="TabDefault">
               <Group id="msgReadGroup">
@@ -78,9 +80,9 @@
 
     <Resources>
       <bt:Images>
-        <bt:Image id="Icon.16x16" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/assets/icon-16.png" />
-        <bt:Image id="Icon.32x32" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/assets/icon-32.png" />
-        <bt:Image id="Icon.80x80" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/assets/icon-80.png" />
+        <bt:Image id="Icon.16x16" DefaultValue="https://officedev.github.io/Office-Add-in-samples/Samples/hello-world/outlook-hello-world/assets/icon-16.png" />
+        <bt:Image id="Icon.32x32" DefaultValue="https://officedev.github.io/Office-Add-in-samples/Samples/hello-world/outlook-hello-world/assets/icon-32.png" />
+        <bt:Image id="Icon.80x80" DefaultValue="https://officedev.github.io/Office-Add-in-samples/Samples/hello-world/outlook-hello-world/assets/icon-80.png" />
       </bt:Images>
       <bt:Urls>
         <bt:Url id="Taskpane.Url" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/taskpane.html" />

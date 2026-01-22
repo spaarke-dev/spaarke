@@ -124,6 +124,7 @@ module.exports = async (env, options) => {
             to: 'word/manifest.xml'
           },
           { from: './shared/assets', to: 'assets', noErrorOnMissing: true },
+          { from: './staticwebapp.config.json', to: 'staticwebapp.config.json', noErrorOnMissing: true },
         ],
       }),
       // Define environment variables for client-side code
