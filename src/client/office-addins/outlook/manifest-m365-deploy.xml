@@ -67,6 +67,9 @@
         <!-- Desktop Form Factor -->
         <DesktopFormFactor>
 
+          <!-- Function File for Commands -->
+          <FunctionFile resid="Commands.Url" />
+
           <!-- Message Read Extension Point -->
           <ExtensionPoint xsi:type="MessageReadCommandSurface">
             <OfficeTab id="TabDefault">
@@ -96,6 +99,35 @@
             </OfficeTab>
           </ExtensionPoint>
 
+          <!-- Message Compose Extension Point -->
+          <ExtensionPoint xsi:type="MessageComposeCommandSurface">
+            <OfficeTab id="TabDefault">
+              <Group id="msgComposeGroup">
+                <Label resid="GroupLabel" />
+                <Icon>
+                  <bt:Image size="16" resid="Icon.16x16" />
+                  <bt:Image size="32" resid="Icon.32x32" />
+                  <bt:Image size="80" resid="Icon.80x80" />
+                </Icon>
+                <Control xsi:type="Button" id="msgComposeOpenPaneButton">
+                  <Label resid="TaskpaneButton.Label" />
+                  <Supertip>
+                    <Title resid="TaskpaneButton.Label" />
+                    <Description resid="TaskpaneButton.Tooltip" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16x16" />
+                    <bt:Image size="32" resid="Icon.32x32" />
+                    <bt:Image size="80" resid="Icon.80x80" />
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <SourceLocation resid="Taskpane.Url" />
+                  </Action>
+                </Control>
+              </Group>
+            </OfficeTab>
+          </ExtensionPoint>
+
         </DesktopFormFactor>
       </Host>
     </Hosts>
@@ -107,6 +139,7 @@
         <bt:Image id="Icon.80x80" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/assets/icon-80.png" />
       </bt:Images>
       <bt:Urls>
+        <bt:Url id="Commands.Url" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/commands.html" />
         <bt:Url id="Taskpane.Url" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/taskpane.html" />
       </bt:Urls>
       <bt:ShortStrings>
