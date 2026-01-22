@@ -6,15 +6,15 @@
   },
   "routes": [
     {
-      "route": "/*",
-      "headers": {
-        "Cache-Control": "public, max-age=3600"
-      }
-    },
-    {
       "route": "/assets/*",
       "headers": {
         "Cache-Control": "public, max-age=86400"
+      }
+    },
+    {
+      "route": "/*",
+      "headers": {
+        "Cache-Control": "public, max-age=3600"
       }
     }
   ]
