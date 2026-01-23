@@ -216,6 +216,32 @@ builder.Services.AddAuthorization(options =>
 
     options.AddPolicy("canmanagecontainers", p =>
         p.Requirements.Add(new ResourceAccessRequirement("create_container")));
+
+    // ====================================================================================
+    // ADMIN POLICIES (system-level operations)
+    // ====================================================================================
+    // SystemAdmin: Required for bulk operations, admin endpoints
+    // Requires authenticated user with "Admin" or "SystemAdmin" role in Azure AD
+    // Can also be granted via app role assignment in Azure AD Enterprise Application
+    options.AddPolicy("SystemAdmin", p =>
+    {
+        p.RequireAuthenticatedUser();
+        p.RequireAssertion(context =>
+        {
+            // Check for role claims from Azure AD
+            var hasAdminRole = context.User.IsInRole("Admin") ||
+                               context.User.IsInRole("SystemAdmin") ||
+                               context.User.HasClaim(c => c.Type == "roles" && c.Value == "Admin") ||
+                               context.User.HasClaim(c => c.Type == "roles" && c.Value == "SystemAdmin");
+
+            // For development, also allow if user has specific scope
+            var hasAdminScope = context.User.HasClaim(c =>
+                c.Type == "http://schemas.microsoft.com/identity/claims/scope" &&
+                c.Value.Contains("admin", StringComparison.OrdinalIgnoreCase));
+
+            return hasAdminRole || hasAdminScope;
+        });
+    });
 });
 
 // Documents module (endpoints + filters)

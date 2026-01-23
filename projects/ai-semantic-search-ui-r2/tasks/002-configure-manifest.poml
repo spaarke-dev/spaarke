@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<task id="002" status="pending">
+<task id="002" status="completed">
   <title>Configure control manifest</title>
   <description>
     Define all control properties in ControlManifest.Input.xml including apiBaseUrl, tenantId, searchScope,

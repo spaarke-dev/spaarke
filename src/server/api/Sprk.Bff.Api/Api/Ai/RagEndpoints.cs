@@ -1,6 +1,9 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Email;
 using Sprk.Bff.Api.Services.Ai;
@@ -105,6 +108,20 @@ public static class RagEndpoints
             .WithSummary("Index a file into the knowledge base via unified pipeline")
             .WithDescription("Downloads file via OBO authentication, extracts text, chunks, generates embeddings, and indexes to Azure AI Search.")
             .Produces<FileIndexingResult>()
+            .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(500);
+
+        // POST /api/ai/rag/send-to-index - Index documents by ID (for Dataverse ribbon button)
+        // Uses user OBO authentication to access files
+        // Updates Dataverse sprk_searchindexed fields after successful indexing
+        group.MapPost("/send-to-index", SendToIndex)
+            .AddTenantAuthorizationFilter()
+            .RequireRateLimiting("ai-batch")
+            .WithName("RagSendToIndex")
+            .WithSummary("Index documents by ID for semantic search")
+            .WithDescription("Indexes one or more documents by DocumentId. Gets file details from Dataverse, indexes via OBO auth, and updates Dataverse tracking fields. Designed for Dataverse ribbon button integration.")
+            .Produces<SendToIndexResponse>()
             .ProducesProblem(400)
             .ProducesProblem(401)
             .ProducesProblem(500);
@@ -458,6 +475,182 @@ public static class RagEndpoints
     }
 
     /// <summary>
+    /// Index documents by DocumentId for semantic search.
+    /// Designed for Dataverse ribbon button integration.
+    /// </summary>
+    /// <remarks>
+    /// - Gets document details from Dataverse (including parent entity lookups)
+    /// - Indexes file via OBO authentication
+    /// - Updates Dataverse with search index tracking fields (sprk_searchindexed, etc.)
+    /// - Returns results for each document processed
+    /// </remarks>
+    private static async Task<IResult> SendToIndex(
+        [FromBody] SendToIndexRequest request,
+        IFileIndexingService fileIndexingService,
+        IDataverseService dataverseService,
+        IOptions<AnalysisOptions> analysisOptions,
+        HttpContext httpContext,
+        ILoggerFactory loggerFactory,
+        CancellationToken cancellationToken)
+    {
+        var logger = loggerFactory.CreateLogger("RagEndpoints");
+
+        // Validate request
+        if (request.DocumentIds == null || request.DocumentIds.Count == 0)
+        {
+            return Results.BadRequest(new ProblemDetails
+            {
+                Title = "Invalid Request",
+                Detail = "DocumentIds is required and must contain at least one document ID",
+                Status = 400
+            });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.TenantId))
+        {
+            return Results.BadRequest(new ProblemDetails
+            {
+                Title = "Invalid Request",
+                Detail = "TenantId is required",
+                Status = 400
+            });
+        }
+
+        var results = new List<SendToIndexDocumentResult>();
+        var indexName = analysisOptions.Value.SharedIndexName;
+
+        foreach (var documentId in request.DocumentIds)
+        {
+            try
+            {
+                // Step 1: Get document from Dataverse
+                var document = await dataverseService.GetDocumentAsync(documentId, cancellationToken);
+                if (document == null)
+                {
+                    results.Add(new SendToIndexDocumentResult
+                    {
+                        DocumentId = documentId,
+                        Success = false,
+                        ErrorMessage = "Document not found"
+                    });
+                    continue;
+                }
+
+                // Step 2: Validate document has file
+                if (string.IsNullOrEmpty(document.GraphDriveId) || string.IsNullOrEmpty(document.GraphItemId))
+                {
+                    results.Add(new SendToIndexDocumentResult
+                    {
+                        DocumentId = documentId,
+                        Success = false,
+                        ErrorMessage = "Document does not have an associated file (missing DriveId or ItemId)"
+                    });
+                    continue;
+                }
+
+                // Step 3: Build parent entity context from document lookups
+                ParentEntityContext? parentEntity = null;
+                if (!string.IsNullOrEmpty(document.MatterId))
+                {
+                    parentEntity = new ParentEntityContext(
+                        EntityType: "matter",
+                        EntityId: document.MatterId,
+                        EntityName: document.MatterName ?? "Unknown Matter"
+                    );
+                }
+                else if (!string.IsNullOrEmpty(document.ProjectId))
+                {
+                    parentEntity = new ParentEntityContext(
+                        EntityType: "project",
+                        EntityId: document.ProjectId,
+                        EntityName: document.ProjectName ?? "Unknown Project"
+                    );
+                }
+                else if (!string.IsNullOrEmpty(document.InvoiceId))
+                {
+                    parentEntity = new ParentEntityContext(
+                        EntityType: "invoice",
+                        EntityId: document.InvoiceId,
+                        EntityName: document.InvoiceName ?? "Unknown Invoice"
+                    );
+                }
+
+                // Step 4: Build file index request
+                var indexRequest = new FileIndexRequest
+                {
+                    TenantId = request.TenantId,
+                    DriveId = document.GraphDriveId,
+                    ItemId = document.GraphItemId,
+                    FileName = document.FileName ?? document.Name,
+                    DocumentId = documentId,
+                    ParentEntity = parentEntity
+                };
+
+                // Step 5: Index via OBO authentication
+                var indexResult = await fileIndexingService.IndexFileAsync(indexRequest, httpContext, cancellationToken);
+
+                if (indexResult.Success)
+                {
+                    // Step 6: Update Dataverse with search index fields
+                    var updateRequest = new UpdateDocumentRequest
+                    {
+                        SearchIndexed = true,
+                        SearchIndexName = indexName,
+                        SearchIndexedOn = DateTime.UtcNow
+                    };
+
+                    await dataverseService.UpdateDocumentAsync(documentId, updateRequest, cancellationToken);
+
+                    logger.LogInformation(
+                        "Document {DocumentId} indexed successfully: {ChunksIndexed} chunks to {IndexName}",
+                        documentId, indexResult.ChunksIndexed, indexName);
+
+                    results.Add(new SendToIndexDocumentResult
+                    {
+                        DocumentId = documentId,
+                        Success = true,
+                        ChunksIndexed = indexResult.ChunksIndexed,
+                        IndexName = indexName,
+                        ParentEntityType = parentEntity?.EntityType,
+                        ParentEntityId = parentEntity?.EntityId
+                    });
+                }
+                else
+                {
+                    logger.LogWarning(
+                        "Document {DocumentId} indexing failed: {Error}",
+                        documentId, indexResult.ErrorMessage);
+
+                    results.Add(new SendToIndexDocumentResult
+                    {
+                        DocumentId = documentId,
+                        Success = false,
+                        ErrorMessage = indexResult.ErrorMessage
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error processing document {DocumentId} for indexing", documentId);
+                results.Add(new SendToIndexDocumentResult
+                {
+                    DocumentId = documentId,
+                    Success = false,
+                    ErrorMessage = ex.Message
+                });
+            }
+        }
+
+        return Results.Ok(new SendToIndexResponse
+        {
+            TotalRequested = request.DocumentIds.Count,
+            SuccessCount = results.Count(r => r.Success),
+            FailedCount = results.Count(r => !r.Success),
+            Results = results
+        });
+    }
+
+    /// <summary>
     /// Enqueue a file for background RAG indexing via job queue.
     /// Uses API key header validation for security (consistent with email webhook pattern).
     /// </summary>
@@ -554,6 +747,7 @@ public static class RagEndpoints
                 KnowledgeSourceId = request.KnowledgeSourceId,
                 KnowledgeSourceName = request.KnowledgeSourceName,
                 Metadata = request.Metadata,
+                ParentEntity = request.ParentEntity,
                 Source = "EnqueueEndpoint",
                 EnqueuedAt = DateTimeOffset.UtcNow
             }));
@@ -975,4 +1169,87 @@ public record BulkIndexingStatusResponse
     /// Last few errors encountered (for debugging).
     /// </summary>
     public List<string> RecentErrors { get; init; } = [];
+}
+
+/// <summary>
+/// Request model for send-to-index endpoint (Dataverse ribbon button integration).
+/// </summary>
+public record SendToIndexRequest
+{
+    /// <summary>
+    /// List of Dataverse document IDs to index.
+    /// </summary>
+    public required List<string> DocumentIds { get; init; }
+
+    /// <summary>
+    /// Tenant ID for multi-tenant isolation.
+    /// </summary>
+    public required string TenantId { get; init; }
+}
+
+/// <summary>
+/// Response from send-to-index endpoint.
+/// </summary>
+public record SendToIndexResponse
+{
+    /// <summary>
+    /// Total number of documents requested for indexing.
+    /// </summary>
+    public int TotalRequested { get; init; }
+
+    /// <summary>
+    /// Number of documents successfully indexed.
+    /// </summary>
+    public int SuccessCount { get; init; }
+
+    /// <summary>
+    /// Number of documents that failed to index.
+    /// </summary>
+    public int FailedCount { get; init; }
+
+    /// <summary>
+    /// Per-document results.
+    /// </summary>
+    public List<SendToIndexDocumentResult> Results { get; init; } = [];
+}
+
+/// <summary>
+/// Result for a single document in send-to-index operation.
+/// </summary>
+public record SendToIndexDocumentResult
+{
+    /// <summary>
+    /// The document ID that was processed.
+    /// </summary>
+    public required string DocumentId { get; init; }
+
+    /// <summary>
+    /// Whether the indexing succeeded.
+    /// </summary>
+    public bool Success { get; init; }
+
+    /// <summary>
+    /// Number of chunks indexed (if successful).
+    /// </summary>
+    public int ChunksIndexed { get; init; }
+
+    /// <summary>
+    /// Name of the search index used.
+    /// </summary>
+    public string? IndexName { get; init; }
+
+    /// <summary>
+    /// Parent entity type if document was associated with an entity.
+    /// </summary>
+    public string? ParentEntityType { get; init; }
+
+    /// <summary>
+    /// Parent entity ID if document was associated with an entity.
+    /// </summary>
+    public string? ParentEntityId { get; init; }
+
+    /// <summary>
+    /// Error message if indexing failed.
+    /// </summary>
+    public string? ErrorMessage { get; init; }
 }

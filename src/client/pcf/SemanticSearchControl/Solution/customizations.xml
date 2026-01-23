@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ImportExportXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    OrganizationVersion="9.2.25124.178" OrganizationSchemaType="Standard"
+    CRMServerServiceabilityVersion="9.2.25124.00180">
+  <Entities />
+  <Roles />
+  <Workflows />
+  <FieldSecurityProfiles />
+  <Templates />
+  <EntityMaps />
+  <EntityRelationships />
+  <OrganizationSettings />
+  <optionsets />
+  <CustomControls>
+    <CustomControl>
+      <Name>sprk_Sprk.SemanticSearchControl</Name>
+      <FileName>/Controls/sprk_Sprk.SemanticSearchControl/ControlManifest.xml</FileName>
+    </CustomControl>
+  </CustomControls>
+  <EntityDataProviders />
+  <Languages>
+    <Language>1033</Language>
+  </Languages>
+</ImportExportXml>

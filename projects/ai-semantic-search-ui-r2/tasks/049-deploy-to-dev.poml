@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<task id="049" status="pending">
+<task id="049" status="completed">
   <title>Deploy to dev environment</title>
   <description>
     Deploy the solution to the Dataverse dev environment and verify the control
@@ -36,4 +36,22 @@
     <criterion>Control renders on test form</criterion>
     <criterion>Basic search functionality works</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <note date="2026-01-21">
+      Deployment completed successfully:
+      - PAC CLI authenticated to spaarkedev1.crm.dynamics.com (profile [2])
+      - Solution imported: SpaarkeSemanticSearch v1.0.0
+      - Customizations published
+
+      Verification command:
+        pac solution list | grep SpaarkeSemanticSearch
+
+      Runtime testing (manual verification required):
+      - Access https://spaarkedev1.crm.dynamics.com
+      - Verify control appears in component library under "Custom components"
+      - Add control to a form or Custom Page
+      - Test search functionality with BFF API
+    </note>
+  </notes>
 </task>

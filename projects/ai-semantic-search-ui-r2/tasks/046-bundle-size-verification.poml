@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<task id="046" status="pending">
+<task id="046" status="completed">
   <title>Bundle size verification</title>
   <description>
     Verify the control bundle size is under 1MB (excluding platform libraries).
@@ -38,4 +38,17 @@
     <criterion>No unnecessary dependencies</criterion>
     <criterion>Size documented in README</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <note date="2026-01-21">
+      Bundle size verification results:
+      - bundle.js: 26,798 bytes (26.8 KB)
+      - ✅ Well under 1MB limit (2.7% of limit)
+      - ✅ React externalized via platform library config
+      - ✅ Fluent UI v9 externalized via platform library config
+      - No optimization needed - bundle is minimal
+
+      ADR-022 compliance confirmed: Platform libraries provided by Dataverse at runtime.
+    </note>
+  </notes>
 </task>

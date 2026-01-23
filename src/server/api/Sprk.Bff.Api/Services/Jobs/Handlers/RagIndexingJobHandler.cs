@@ -114,7 +114,8 @@ public class RagIndexingJobHandler : IJobHandler
                     DocumentId = payload.DocumentId,
                     KnowledgeSourceId = payload.KnowledgeSourceId,
                     KnowledgeSourceName = payload.KnowledgeSourceName,
-                    Metadata = payload.Metadata
+                    Metadata = payload.Metadata,
+                    ParentEntity = payload.ParentEntity
                 };
 
                 // Call FileIndexingService using app-only authentication
@@ -280,6 +281,13 @@ public class RagIndexingJobPayload
     /// Optional metadata dictionary for extensibility.
     /// </summary>
     public Dictionary<string, string>? Metadata { get; set; }
+
+    /// <summary>
+    /// Optional parent entity context for entity-scoped search.
+    /// When provided, enables filtering search results by the business entity
+    /// (Matter, Project, Invoice, Account, Contact) that owns this document.
+    /// </summary>
+    public ParentEntityContext? ParentEntity { get; set; }
 
     /// <summary>
     /// Source of the indexing request: "EmailAttachment", "DocumentEvent", "Manual", etc.

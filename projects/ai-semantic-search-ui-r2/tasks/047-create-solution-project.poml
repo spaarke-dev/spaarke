@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<task id="047" status="pending">
+<task id="047" status="completed">
   <title>Create solution project</title>
   <description>
     Configure the Dataverse solution project (SpaarkeSemanticSearch) to package
@@ -35,4 +35,15 @@
     <criterion>Publisher prefix set correctly</criterion>
     <criterion>Solution builds without errors</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <note date="2026-01-21">
+      Solution project created at src/client/pcf/SemanticSearchControl/Solution/
+      - solution.xml: Version 1.0.0, Publisher Spaarke (sprk prefix)
+      - customizations.xml: References sprk_Sprk.SemanticSearchControl
+      - [Content_Types].xml: Includes .xml, .js, .css extensions
+      - pack.ps1: PowerShell packaging script
+      - Controls/sprk_Sprk.SemanticSearchControl/: Contains bundle.js, ControlManifest.xml, styles.css
+    </note>
+  </notes>
 </task>

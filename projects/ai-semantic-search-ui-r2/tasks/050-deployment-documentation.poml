@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<task id="050" status="pending">
+<task id="050" status="completed">
   <title>Deployment documentation</title>
   <description>
     Document the deployment process, configuration requirements, and troubleshooting
@@ -32,4 +32,22 @@
     <criterion>External domain requirements clear</criterion>
     <criterion>Troubleshooting section helpful</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <note date="2026-01-21">
+      Created comprehensive DEPLOYMENT.md with:
+      - Build prerequisites (Node.js, PAC CLI)
+      - Solution import process with commands
+      - All 8 control properties documented with examples
+      - External domain allowlist requirements
+      - Authentication setup (MSAL, tenant configuration)
+      - Troubleshooting section (10+ common issues)
+      - Version management guide (5 locations)
+      - Quick reference commands
+
+      Updated project README with:
+      - Quick Start section with full deployment workflow
+      - Link to DEPLOYMENT.md in Related Documents
+    </note>
+  </notes>
 </task>

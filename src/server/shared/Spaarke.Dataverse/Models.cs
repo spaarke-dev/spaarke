@@ -160,6 +160,25 @@ public class UpdateDocumentRequest
     /// EmailArchive=659490003, EmailAttachment=659490004, Import=659490005, SystemGenerated=659490006.
     /// </summary>
     public int? SourceType { get; set; }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Search Index Tracking Fields
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Whether the document has been indexed for semantic search. Maps to sprk_searchindexed.
+    /// </summary>
+    public bool? SearchIndexed { get; set; }
+
+    /// <summary>
+    /// Name of the search index where document is stored. Maps to sprk_searchindexname.
+    /// </summary>
+    public string? SearchIndexName { get; set; }
+
+    /// <summary>
+    /// Timestamp when document was last indexed. Maps to sprk_searchindexedon.
+    /// </summary>
+    public DateTime? SearchIndexedOn { get; set; }
 }
 
 /// <summary>

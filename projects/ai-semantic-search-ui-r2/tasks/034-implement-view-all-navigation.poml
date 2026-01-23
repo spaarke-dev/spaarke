@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<task id="034" status="pending">
+<task id="034" status="completed">
   <title>Implement View All navigation</title>
   <description>
     Implement navigation to the full Custom Page for viewing all search results

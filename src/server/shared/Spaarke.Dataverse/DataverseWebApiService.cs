@@ -420,6 +420,11 @@ public class DataverseWebApiService : IDataverseService
         if (request.SourceType.HasValue)
             payload["sprk_sourcetype"] = request.SourceType.Value;
 
+        // Search index tracking fields
+        if (request.SearchIndexed.HasValue) payload["sprk_searchindexed"] = request.SearchIndexed.Value;
+        if (request.SearchIndexName != null) payload["sprk_searchindexname"] = request.SearchIndexName;
+        if (request.SearchIndexedOn.HasValue) payload["sprk_searchindexedon"] = request.SearchIndexedOn.Value;
+
         var url = $"{_entitySetName}({guid})";
 
         // Log the actual payload for debugging email field persistence

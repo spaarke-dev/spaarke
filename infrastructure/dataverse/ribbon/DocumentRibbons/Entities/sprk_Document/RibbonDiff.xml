@@ -10,10 +10,22 @@
         <Button Alt="$LocLabels:Spaarke.Document.AddMultiple.Button.Alt" Command="Spaarke.Document.AddMultiple.Command" Id="Spaarke.Document.AddMultiple.Button" Image32by32="/_imgs/ribbon/DocumentAdd_32.png" Image16by16="/_imgs/ribbon/DocumentAdd_16.png" LabelText="$LocLabels:Spaarke.Document.AddMultiple.Button.LabelText" Sequence="5" TemplateAlias="o1" ToolTipTitle="$LocLabels:Spaarke.Document.AddMultiple.Button.ToolTipTitle" ToolTipDescription="$LocLabels:Spaarke.Document.AddMultiple.Button.ToolTipDescription" />
       </CommandUIDefinition>
     </CustomAction>
+    <!-- Subgrid: Send to Index (Semantic Search) -->
+    <CustomAction Id="sprk.Document.SendToIndex.Subgrid.CustomAction" Location="Mscrm.SubGrid.sprk_document.MainTab.Management.Controls._children" Sequence="6">
+      <CommandUIDefinition>
+        <Button Id="sprk.Document.SendToIndex.Subgrid.Button" Command="sprk.Document.SendToIndex.Subgrid.Command" Alt="$LocLabels:sprk.Document.SendToIndex.LabelText" LabelText="$LocLabels:sprk.Document.SendToIndex.LabelText" ToolTipTitle="$LocLabels:sprk.Document.SendToIndex.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Document.SendToIndex.ToolTipDescription" Image16by16="/_imgs/ribbon/Search_16.png" Image32by32="/_imgs/ribbon/Search_32.png" TemplateAlias="o1" Sequence="6" />
+      </CommandUIDefinition>
+    </CustomAction>
 
     <!-- ========================================== -->
     <!-- GRID BUTTONS                              -->
     <!-- ========================================== -->
+    <!-- Grid: Send to Index (Semantic Search) -->
+    <CustomAction Id="sprk.Document.SendToIndex.Grid.CustomAction" Location="Mscrm.HomepageGrid.sprk_document.MainTab.Actions.Controls._children" Sequence="100">
+      <CommandUIDefinition>
+        <Button Id="sprk.Document.SendToIndex.Grid.Button" Command="sprk.Document.SendToIndex.Grid.Command" Alt="$LocLabels:sprk.Document.SendToIndex.LabelText" LabelText="$LocLabels:sprk.Document.SendToIndex.LabelText" ToolTipTitle="$LocLabels:sprk.Document.SendToIndex.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Document.SendToIndex.ToolTipDescription" Image16by16="/_imgs/ribbon/Search_16.png" Image32by32="/_imgs/ribbon/Search_32.png" TemplateAlias="o1" Sequence="100" />
+      </CommandUIDefinition>
+    </CustomAction>
     <!-- Grid: Theme Menu -->
     <CustomAction Id="sprk.ThemeMenu.FlyoutAnchor.CustomAction" Location="Mscrm.HomepageGrid.sprk_document.MainTab.Actions.Controls._children" Sequence="900">
       <CommandUIDefinition>
@@ -83,6 +95,12 @@
     <CustomAction Id="sprk.Document.Download.Button.CustomAction" Location="Mscrm.Form.sprk_document.MainTab.Save.Controls._children" Sequence="73">
       <CommandUIDefinition>
         <Button Id="sprk.Document.Download.Button" Command="sprk.Document.Download.Command" Alt="$LocLabels:sprk.Document.Download.LabelText" LabelText="$LocLabels:sprk.Document.Download.LabelText" ToolTipTitle="$LocLabels:sprk.Document.Download.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Document.Download.ToolTipDescription" Image16by16="/_imgs/ribbon/Download_16.png" Image32by32="/_imgs/ribbon/Download_32.png" TemplateAlias="o1" Sequence="73" />
+      </CommandUIDefinition>
+    </CustomAction>
+    <!-- Form: Send to Index Button (Sequence 74 - semantic search indexing) -->
+    <CustomAction Id="sprk.Document.SendToIndex.Form.CustomAction" Location="Mscrm.Form.sprk_document.MainTab.Save.Controls._children" Sequence="74">
+      <CommandUIDefinition>
+        <Button Id="sprk.Document.SendToIndex.Form.Button" Command="sprk.Document.SendToIndex.Form.Command" Alt="$LocLabels:sprk.Document.SendToIndex.LabelText" LabelText="$LocLabels:sprk.Document.SendToIndex.LabelText" ToolTipTitle="$LocLabels:sprk.Document.SendToIndex.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Document.SendToIndex.ToolTipDescription" Image16by16="/_imgs/ribbon/Search_16.png" Image32by32="/_imgs/ribbon/Search_32.png" TemplateAlias="o1" Sequence="74" />
       </CommandUIDefinition>
     </CustomAction>
   </CustomActions>
@@ -247,6 +265,46 @@
         </JavaScriptFunction>
       </Actions>
     </CommandDefinition>
+    <!-- Send to Index Command - Form Context -->
+    <CommandDefinition Id="sprk.Document.SendToIndex.Form.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Document.SendToIndex.Form.EnableRule" />
+      </EnableRules>
+      <DisplayRules>
+        <DisplayRule Id="sprk.Document.Form.DisplayRule" />
+      </DisplayRules>
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_DocumentOperations.js" FunctionName="Spaarke.Document.sendToIndex">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <!-- Send to Index Command - Grid Context -->
+    <CommandDefinition Id="sprk.Document.SendToIndex.Grid.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Document.SendToIndex.Grid.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_DocumentOperations.js" FunctionName="Spaarke.Document.sendToIndex">
+          <CrmParameter Value="SelectedControl" />
+          <CrmParameter Value="SelectedControlSelectedItemIds" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+    <!-- Send to Index Command - Subgrid Context -->
+    <CommandDefinition Id="sprk.Document.SendToIndex.Subgrid.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Document.SendToIndex.Subgrid.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_DocumentOperations.js" FunctionName="Spaarke.Document.sendToIndex">
+          <CrmParameter Value="SelectedControl" />
+          <CrmParameter Value="SelectedControlSelectedItemIds" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
   </CommandDefinitions>
   <RuleDefinitions>
     <TabDisplayRules />
@@ -294,6 +352,18 @@
       <!-- Download: always enabled -->
       <EnableRule Id="sprk.Document.Download.EnableRule">
         <CustomRule FunctionName="Spaarke.Document.canDownload" Library="$webresource:sprk_DocumentOperations.js" Default="true" />
+      </EnableRule>
+      <!-- Send to Index (Form): enabled when document has a file -->
+      <EnableRule Id="sprk.Document.SendToIndex.Form.EnableRule">
+        <CustomRule FunctionName="Spaarke.Document.canSendToIndex" Library="$webresource:sprk_DocumentOperations.js" Default="true" />
+      </EnableRule>
+      <!-- Send to Index (Grid): enabled when records are selected -->
+      <EnableRule Id="sprk.Document.SendToIndex.Grid.EnableRule">
+        <SelectionCountRule AppliesTo="SelectedEntity" Minimum="1" Maximum="100" />
+      </EnableRule>
+      <!-- Send to Index (Subgrid): enabled when records are selected -->
+      <EnableRule Id="sprk.Document.SendToIndex.Subgrid.EnableRule">
+        <SelectionCountRule AppliesTo="SelectedEntity" Minimum="1" Maximum="100" />
       </EnableRule>
     </EnableRules>
   </RuleDefinitions>
@@ -444,6 +514,22 @@
     <LocLabel Id="sprk.Document.Download.ToolTipDescription">
       <Titles>
         <Title description="Download a copy of this document to your local computer." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <!-- Send to Index Labels -->
+    <LocLabel Id="sprk.Document.SendToIndex.LabelText">
+      <Titles>
+        <Title description="Send to Index" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.SendToIndex.ToolTipTitle">
+      <Titles>
+        <Title description="Send to Search Index" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.Document.SendToIndex.ToolTipDescription">
+      <Titles>
+        <Title description="Index this document for semantic search. The document will be searchable using AI-powered search queries." languagecode="1033" />
       </Titles>
     </LocLabel>
   </LocLabels>

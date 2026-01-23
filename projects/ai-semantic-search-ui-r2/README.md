@@ -61,12 +61,21 @@ cd src/client/pcf/SemanticSearchControl
 # Install dependencies
 npm install
 
-# Build the control
-npm run build
+# Build the control (production mode)
+npm run build:prod
 
-# Deploy to Dataverse
-pac pcf push --publisher-prefix sprk
+# Copy build artifacts to Solution folder
+cp out/controls/SemanticSearchControl/bundle.js Solution/Controls/sprk_Sprk.SemanticSearchControl/
+cp out/controls/SemanticSearchControl/ControlManifest.xml Solution/Controls/sprk_Sprk.SemanticSearchControl/
+
+# Pack solution
+cd Solution && powershell -File pack.ps1
+
+# Import to Dataverse
+pac solution import --path "bin/SpaarkeSemanticSearch_v1.0.0.zip" --publish-changes
 ```
+
+**Full deployment guide**: [DEPLOYMENT.md](DEPLOYMENT.md)
 
 ## API Endpoint
 
@@ -106,6 +115,8 @@ pac pcf push --publisher-prefix sprk
 | [design.md](design.md) | Original design document |
 | [plan.md](plan.md) | Implementation plan with phases |
 | [CLAUDE.md](CLAUDE.md) | AI context and constraints |
+| [DEPLOYMENT.md](DEPLOYMENT.md) | Deployment guide and troubleshooting |
+| [FINAL-DEPLOYMENT-PLAN.md](FINAL-DEPLOYMENT-PLAN.md) | User testing enablement checklist |
 | [TASK-INDEX.md](tasks/TASK-INDEX.md) | Task tracking |
 
 ---

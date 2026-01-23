@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<task id="004" status="pending">
+<task id="004" status="completed">
   <title>Set up index.ts entry point</title>
   <description>
     Implement the PCF control entry point using React 16 render pattern (ReactDOM.render, NOT createRoot).

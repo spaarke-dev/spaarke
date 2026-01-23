@@ -274,6 +274,17 @@ public class BulkRagIndexingJobHandler : IJobHandler
                 return DocumentIndexOutcome.Skipped;
             }
 
+            // Build parent entity context if matter is associated
+            ParentEntityContext? parentEntity = null;
+            if (!string.IsNullOrEmpty(doc.MatterId))
+            {
+                parentEntity = new ParentEntityContext(
+                    EntityType: "matter",
+                    EntityId: doc.MatterId,
+                    EntityName: doc.MatterName ?? "Unknown Matter"
+                );
+            }
+
             // Build the file index request
             var request = new FileIndexRequest
             {
@@ -282,6 +293,7 @@ public class BulkRagIndexingJobHandler : IJobHandler
                 ItemId = doc.ItemId,
                 FileName = doc.FileName,
                 DocumentId = doc.DocumentId,
+                ParentEntity = parentEntity,
                 Metadata = new Dictionary<string, string>
                 {
                     ["source"] = "BulkIndexing",
@@ -344,8 +356,8 @@ public class BulkRagIndexingJobHandler : IJobHandler
             "sprk_hasfile eq true" // Only documents with associated files
         };
 
-        // Filter by unindexed (default behavior)
-        if (payload.Filter == "unindexed" || string.IsNullOrEmpty(payload.Filter))
+        // Filter by unindexed (default behavior) - skip this filter when ForceReindex is true
+        if (!payload.ForceReindex && (payload.Filter == "unindexed" || string.IsNullOrEmpty(payload.Filter)))
         {
             // sprk_ragindexedon is null means not indexed
             filters.Add("sprk_ragindexedon eq null");
@@ -375,22 +387,54 @@ public class BulkRagIndexingJobHandler : IJobHandler
 
         var filterStr = string.Join(" and ", filters);
 
-        // Select fields needed for indexing
+        // Select fields needed for indexing, including parent entity (matter) via $expand
         var selectFields = "sprk_documentid,sprk_filename,sprk_graphdriveid,sprk_graphitemid,_sprk_matterid_value";
-        var url = $"sprk_documents?$select={selectFields}&$filter={filterStr}&$top={maxDocuments}&$orderby=createdon asc";
+        var expandClause = "sprk_Matter($select=sprk_name,sprk_matterid)";
+        var url = $"sprk_documents?$select={selectFields}&$expand={expandClause}&$filter={filterStr}&$top={maxDocuments}&$orderby=createdon asc";
 
-        _logger.LogDebug("Querying documents with URL: {Url}", url);
+        _logger.LogInformation("Querying documents with URL: {Url}", url);
 
         var response = await _httpClient.GetAsync(url, ct);
-        response.EnsureSuccessStatusCode();
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync(ct);
+            _logger.LogError(
+                "Dataverse query failed with status {StatusCode}: {ErrorBody}",
+                response.StatusCode, errorBody);
+            throw new HttpRequestException($"Dataverse query failed: {response.StatusCode} - {errorBody}");
+        }
 
         var json = await response.Content.ReadAsStringAsync(ct);
+        _logger.LogInformation("Dataverse query returned {Length} bytes", json.Length);
         var data = JsonSerializer.Deserialize<JsonElement>(json);
 
         if (data.TryGetProperty("value", out var items))
         {
             foreach (var item in items.EnumerateArray())
             {
+                // Extract parent entity (matter) from expanded navigation property
+                string? matterId = null;
+                string? matterName = null;
+
+                if (item.TryGetProperty("sprk_Matter", out var matterObj) &&
+                    matterObj.ValueKind == JsonValueKind.Object)
+                {
+                    matterId = matterObj.TryGetProperty("sprk_matterid", out var mId)
+                        ? mId.GetString()
+                        : null;
+                    matterName = matterObj.TryGetProperty("sprk_name", out var mName)
+                        ? mName.GetString()
+                        : null;
+                }
+
+                // Fallback to lookup value if expand didn't work
+                if (string.IsNullOrEmpty(matterId) &&
+                    item.TryGetProperty("_sprk_matterid_value", out var lookupValue))
+                {
+                    matterId = lookupValue.GetString();
+                }
+
                 var docInfo = new DocumentInfo
                 {
                     DocumentId = item.TryGetProperty("sprk_documentid", out var id)
@@ -404,7 +448,9 @@ public class BulkRagIndexingJobHandler : IJobHandler
                         : string.Empty,
                     ItemId = item.TryGetProperty("sprk_graphitemid", out var itemId)
                         ? itemId.GetString() ?? string.Empty
-                        : string.Empty
+                        : string.Empty,
+                    MatterId = matterId,
+                    MatterName = matterName
                 };
 
                 if (!string.IsNullOrEmpty(docInfo.DocumentId) &&
@@ -487,6 +533,16 @@ public class BulkRagIndexingJobHandler : IJobHandler
         public string FileName { get; set; } = string.Empty;
         public string DriveId { get; set; } = string.Empty;
         public string ItemId { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Parent entity (matter) ID for entity-scoped search.
+        /// </summary>
+        public string? MatterId { get; set; }
+
+        /// <summary>
+        /// Parent entity (matter) display name for search result presentation.
+        /// </summary>
+        public string? MatterName { get; set; }
     }
 }
 

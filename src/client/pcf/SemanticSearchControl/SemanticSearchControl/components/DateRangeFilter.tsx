@@ -1,0 +1,279 @@
+/**
+ * DateRangeFilter component
+ *
+ * Date range picker for filtering by document creation date.
+ * Supports from/to selection with quick presets.
+ *
+ * @see ADR-021 for Fluent UI v9 requirements
+ */
+
+import * as React from "react";
+import { useState, useCallback, useMemo } from "react";
+import {
+    makeStyles,
+    tokens,
+    Input,
+    Label,
+    Button,
+    Menu,
+    MenuTrigger,
+    MenuPopover,
+    MenuList,
+    MenuItem,
+    useId,
+} from "@fluentui/react-components";
+import { CalendarRegular, ChevronDownRegular } from "@fluentui/react-icons";
+import { IDateRangeFilterProps, DateRange } from "../types";
+
+const useStyles = makeStyles({
+    container: {
+        display: "flex",
+        flexDirection: "column",
+        gap: tokens.spacingVerticalXS,
+    },
+    label: {
+        fontWeight: tokens.fontWeightSemibold,
+        fontSize: tokens.fontSizeBase200,
+    },
+    inputGroup: {
+        display: "flex",
+        alignItems: "center",
+        gap: tokens.spacingHorizontalS,
+    },
+    dateInput: {
+        flex: 1,
+        minWidth: "120px",
+    },
+    separator: {
+        color: tokens.colorNeutralForeground3,
+    },
+    presets: {
+        marginTop: tokens.spacingVerticalXS,
+    },
+    clearButton: {
+        marginLeft: tokens.spacingHorizontalS,
+    },
+});
+
+/**
+ * Quick date presets
+ */
+const DATE_PRESETS = [
+    { label: "Last 30 days", days: 30 },
+    { label: "Last 90 days", days: 90 },
+    { label: "This year", days: -1 }, // Special case: start of year
+    { label: "Last year", days: -2 }, // Special case: previous year
+];
+
+/**
+ * Get date string in YYYY-MM-DD format
+ */
+function formatDateForInput(date: Date): string {
+    return date.toISOString().split("T")[0];
+}
+
+/**
+ * Calculate preset date range
+ */
+function calculatePresetRange(days: number): DateRange {
+    const today = new Date();
+    const to = formatDateForInput(today);
+
+    if (days === -1) {
+        // This year
+        const startOfYear = new Date(today.getFullYear(), 0, 1);
+        return { from: formatDateForInput(startOfYear), to };
+    }
+
+    if (days === -2) {
+        // Last year
+        const lastYearStart = new Date(today.getFullYear() - 1, 0, 1);
+        const lastYearEnd = new Date(today.getFullYear() - 1, 11, 31);
+        return {
+            from: formatDateForInput(lastYearStart),
+            to: formatDateForInput(lastYearEnd),
+        };
+    }
+
+    // Days ago
+    const from = new Date(today);
+    from.setDate(from.getDate() - days);
+    return { from: formatDateForInput(from), to };
+}
+
+/**
+ * DateRangeFilter component for date filtering.
+ *
+ * @param props.label - Label text for the filter
+ * @param props.value - Current date range (null for any)
+ * @param props.onChange - Callback when range changes
+ * @param props.disabled - Whether the filter is disabled
+ */
+export const DateRangeFilter: React.FC<IDateRangeFilterProps> = ({
+    label,
+    value,
+    onChange,
+    disabled,
+}) => {
+    const styles = useStyles();
+    const fromId = useId("date-from");
+    const toId = useId("date-to");
+
+    // Local state for individual date inputs
+    const [fromDate, setFromDate] = useState<string>(value?.from ?? "");
+    const [toDate, setToDate] = useState<string>(value?.to ?? "");
+    const [validationError, setValidationError] = useState<string | null>(null);
+
+    // Sync local state with prop changes
+    React.useEffect(() => {
+        setFromDate(value?.from ?? "");
+        setToDate(value?.to ?? "");
+    }, [value]);
+
+    // Validate and update range
+    const updateRange = useCallback(
+        (from: string, to: string) => {
+            // Clear error
+            setValidationError(null);
+
+            // If both empty, set to null
+            if (!from && !to) {
+                onChange(null);
+                return;
+            }
+
+            // Validate: from must be <= to if both set
+            if (from && to && from > to) {
+                setValidationError("From date must be before To date");
+                return;
+            }
+
+            onChange({
+                from: from || null,
+                to: to || null,
+            });
+        },
+        [onChange]
+    );
+
+    // Handle from date change
+    const handleFromChange = useCallback(
+        (ev: React.ChangeEvent<HTMLInputElement>) => {
+            const newFrom = ev.target.value;
+            setFromDate(newFrom);
+            updateRange(newFrom, toDate);
+        },
+        [toDate, updateRange]
+    );
+
+    // Handle to date change
+    const handleToChange = useCallback(
+        (ev: React.ChangeEvent<HTMLInputElement>) => {
+            const newTo = ev.target.value;
+            setToDate(newTo);
+            updateRange(fromDate, newTo);
+        },
+        [fromDate, updateRange]
+    );
+
+    // Handle preset selection
+    const handlePresetSelect = useCallback(
+        (days: number) => {
+            const range = calculatePresetRange(days);
+            setFromDate(range.from ?? "");
+            setToDate(range.to ?? "");
+            onChange(range);
+            setValidationError(null);
+        },
+        [onChange]
+    );
+
+    // Handle clear
+    const handleClear = useCallback(() => {
+        setFromDate("");
+        setToDate("");
+        onChange(null);
+        setValidationError(null);
+    }, [onChange]);
+
+    // Check if has value
+    const hasValue = useMemo(() => {
+        return Boolean(fromDate || toDate);
+    }, [fromDate, toDate]);
+
+    return (
+        <div className={styles.container}>
+            <Label className={styles.label}>{label}</Label>
+            <div className={styles.inputGroup}>
+                <Input
+                    id={fromId}
+                    className={styles.dateInput}
+                    type="date"
+                    value={fromDate}
+                    onChange={handleFromChange}
+                    disabled={disabled}
+                    contentBefore={<CalendarRegular />}
+                    placeholder="From"
+                    aria-label="From date"
+                />
+                <span className={styles.separator}>to</span>
+                <Input
+                    id={toId}
+                    className={styles.dateInput}
+                    type="date"
+                    value={toDate}
+                    onChange={handleToChange}
+                    disabled={disabled}
+                    contentBefore={<CalendarRegular />}
+                    placeholder="To"
+                    aria-label="To date"
+                />
+                {hasValue && (
+                    <Button
+                        appearance="subtle"
+                        size="small"
+                        onClick={handleClear}
+                        disabled={disabled}
+                        className={styles.clearButton}
+                    >
+                        Clear
+                    </Button>
+                )}
+            </div>
+            {validationError && (
+                <span style={{ color: tokens.colorPaletteRedForeground1, fontSize: tokens.fontSizeBase200 }}>
+                    {validationError}
+                </span>
+            )}
+            <div className={styles.presets}>
+                <Menu>
+                    <MenuTrigger disableButtonEnhancement>
+                        <Button
+                            appearance="subtle"
+                            size="small"
+                            icon={<ChevronDownRegular />}
+                            iconPosition="after"
+                            disabled={disabled}
+                        >
+                            Quick select
+                        </Button>
+                    </MenuTrigger>
+                    <MenuPopover>
+                        <MenuList>
+                            {DATE_PRESETS.map((preset) => (
+                                <MenuItem
+                                    key={preset.label}
+                                    onClick={() => handlePresetSelect(preset.days)}
+                                >
+                                    {preset.label}
+                                </MenuItem>
+                            ))}
+                        </MenuList>
+                    </MenuPopover>
+                </Menu>
+            </div>
+        </div>
+    );
+};
+
+export default DateRangeFilter;
