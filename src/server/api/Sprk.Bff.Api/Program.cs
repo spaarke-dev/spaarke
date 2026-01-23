@@ -784,7 +784,7 @@ builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        // Support both explicit origins from config and Dataverse/PowerApps wildcard patterns
+        // Support both explicit origins from config and Dataverse/PowerApps/Office Add-in wildcard patterns
         policy.SetIsOriginAllowed(origin =>
         {
             // Check explicit allowed origins from configuration
@@ -802,6 +802,10 @@ builder.Services.AddCors(options =>
                 if (uri.Host.EndsWith(".powerapps.com", StringComparison.OrdinalIgnoreCase) ||
                     uri.Host == "powerapps.com")
                     return true;
+
+                // Allow Azure Static Web Apps origins (*.azurestaticapps.net) - Office Add-ins
+                if (uri.Host.EndsWith(".azurestaticapps.net", StringComparison.OrdinalIgnoreCase))
+                    return true;
             }
 
             return false;
@@ -813,7 +817,8 @@ builder.Services.AddCors(options =>
                   "Content-Type",
                   "Accept",
                   "X-Requested-With",
-                  "X-Correlation-Id")
+                  "X-Correlation-Id",
+                  "X-Idempotency-Key")
               .WithExposedHeaders(
                   "request-id",
                   "client-request-id",

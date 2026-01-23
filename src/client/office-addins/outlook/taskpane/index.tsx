@@ -5,7 +5,7 @@ import { OutlookAdapter } from '@shared/adapters/OutlookAdapter';
 import { authService, apiClient } from '@shared/services';
 
 // Version information - synced with manifest version
-const APP_VERSION = '1.0.5';
+const APP_VERSION = '1.0.6';
 const BUILD_DATE = process.env.BUILD_DATE || 'Jan 23, 2026';
 
 // Configuration from environment or build-time injection
