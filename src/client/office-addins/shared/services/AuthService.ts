@@ -45,12 +45,84 @@ export interface AuthConfig {
   fallbackRedirectUri?: string;
 }
 
+// Storage keys for token persistence across add-in reloads
+const TOKEN_STORAGE_KEY = 'spaarke-auth-token';
+const TOKEN_EXPIRY_KEY = 'spaarke-auth-expiry';
+const ACCOUNT_STORAGE_KEY = 'spaarke-auth-account';
+
 class AuthService implements IAuthService {
   private msalInstance: IPublicClientApplication | null = null;
   private isNaaSupported: boolean = false;
   private currentAccount: AccountInfo | null = null;
   private cachedAccessToken: string | null = null;
   private tokenExpiresAt: number | null = null; // Unix timestamp in milliseconds
+
+  /**
+   * Save token and account to sessionStorage for persistence across add-in reloads.
+   */
+  private saveToStorage(): void {
+    try {
+      if (this.cachedAccessToken && this.tokenExpiresAt) {
+        sessionStorage.setItem(TOKEN_STORAGE_KEY, this.cachedAccessToken);
+        sessionStorage.setItem(TOKEN_EXPIRY_KEY, this.tokenExpiresAt.toString());
+      }
+      if (this.currentAccount) {
+        sessionStorage.setItem(ACCOUNT_STORAGE_KEY, JSON.stringify(this.currentAccount));
+      }
+      console.log('[AuthService] Saved auth state to sessionStorage');
+    } catch (e) {
+      console.warn('[AuthService] Failed to save to sessionStorage:', e);
+    }
+  }
+
+  /**
+   * Load token and account from sessionStorage.
+   */
+  private loadFromStorage(): void {
+    try {
+      const token = sessionStorage.getItem(TOKEN_STORAGE_KEY);
+      const expiry = sessionStorage.getItem(TOKEN_EXPIRY_KEY);
+      const accountJson = sessionStorage.getItem(ACCOUNT_STORAGE_KEY);
+
+      if (token && expiry) {
+        const expiryTime = parseInt(expiry, 10);
+        const now = Date.now();
+        const bufferMs = 5 * 60 * 1000; // 5 minutes
+
+        // Only restore if token is still valid (with buffer)
+        if ((expiryTime - bufferMs) > now) {
+          this.cachedAccessToken = token;
+          this.tokenExpiresAt = expiryTime;
+          console.log('[AuthService] Restored token from storage (expires in',
+            Math.round((expiryTime - now) / 1000 / 60), 'minutes)');
+        } else {
+          console.log('[AuthService] Stored token expired, will need re-auth');
+          this.clearStorage();
+        }
+      }
+
+      if (accountJson) {
+        this.currentAccount = JSON.parse(accountJson) as AccountInfo;
+        console.log('[AuthService] Restored account from storage:', this.currentAccount.username);
+      }
+    } catch (e) {
+      console.warn('[AuthService] Failed to load from sessionStorage:', e);
+    }
+  }
+
+  /**
+   * Clear stored auth state from sessionStorage.
+   */
+  private clearStorage(): void {
+    try {
+      sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+      sessionStorage.removeItem(TOKEN_EXPIRY_KEY);
+      sessionStorage.removeItem(ACCOUNT_STORAGE_KEY);
+      console.log('[AuthService] Cleared auth state from sessionStorage');
+    } catch (e) {
+      console.warn('[AuthService] Failed to clear sessionStorage:', e);
+    }
+  }
 
   async initialize(config: AuthConfig): Promise<void> {
     const mergedConfig = { ...AUTH_CONFIG, ...config };
@@ -88,10 +160,16 @@ class AuthService implements IAuthService {
       await this.msalInstance.initialize();
     }
 
-    // Check for existing account
-    const accounts = this.msalInstance.getAllAccounts();
-    if (accounts.length > 0 && accounts[0]) {
-      this.currentAccount = accounts[0];
+    // Try to restore auth state from sessionStorage first (for add-in reloads)
+    this.loadFromStorage();
+
+    // If no stored account, check MSAL for existing accounts
+    if (!this.currentAccount) {
+      const accounts = this.msalInstance.getAllAccounts();
+      if (accounts.length > 0 && accounts[0]) {
+        this.currentAccount = accounts[0];
+        console.log('[AuthService] Found existing MSAL account:', this.currentAccount.username);
+      }
     }
   }
 
@@ -169,6 +247,9 @@ class AuthService implements IAuthService {
     this.currentAccount = null;
     this.cachedAccessToken = null;
     this.tokenExpiresAt = null;
+
+    // Clear persisted storage
+    this.clearStorage();
 
     if (!this.isNaaSupported) {
       // For Dialog API, just clear local state - no MSAL logout needed
@@ -333,6 +414,10 @@ class AuthService implements IAuthService {
                     console.log('[AuthService] Account set:', this.currentAccount);
                     console.log('[AuthService] Access token cached, expires at:',
                       new Date(this.tokenExpiresAt).toLocaleTimeString());
+
+                    // Persist to sessionStorage for add-in reloads
+                    this.saveToStorage();
+
                     resolve({
                       ...message,
                       account: this.currentAccount,
