@@ -1,13 +1,30 @@
 /**
  * Spaarke Document Operations
- * Version: 1.24.0
+ * Version: 1.26.1
  * Description: Document checkout/checkin operations via BFF API with MSAL authentication
  *
  * ADR-006 Exception: Approved for ribbon button invocation
  *
  * Dependencies: MSAL.js (loaded from CDN)
  *
- * Copyright (c) 2025 Spaarke
+ * Changes in 1.26.1:
+ * - FIX: showChoiceDialog now uses window.top.document to escape iframe context
+ *   (Dataverse runs web resources in iframes; dialog was appearing in wrong frame)
+ *
+ * Changes in 1.26.0:
+ * - Added 10-record limit for manual Send to Index (front-end only)
+ * - Added showReindexNotification() for user feedback on indexing operations
+ * - Check-in now notifies user that re-indexing will occur (future: trigger re-index)
+ *
+ * Changes in 1.25.1:
+ * - Fixed syntax error: replaced optional chaining (?.) with traditional syntax
+ *   for Dataverse web resource compatibility (script failed to parse in 1.25.0)
+ *
+ * Changes in 1.25.0:
+ * - Fixed SendToIndex to use Azure AD tenantId (from MSAL) instead of Dataverse organizationId
+ *   This aligns with PCF controls for consistent tenantId in AI Search index
+ *
+ * Copyright (c) 2025-2026 Spaarke
  */
 
 "use strict";
@@ -50,7 +67,7 @@ Spaarke.Document.Config = {
     },
 
     // Version
-    version: "1.24.0",
+    version: "1.26.1",
 
     // Document Status Codes (statuscode field values)
     statusCode: {
@@ -58,7 +75,10 @@ Spaarke.Document.Config = {
         CHECKED_IN: 421500002,
         CHECKED_OUT: 421500001,
         LOCKED: 2
-    }
+    },
+
+    // Manual indexing limits (front-end only - backend has no limits for admin operations)
+    maxManualIndexRecords: 10
 };
 
 // =============================================================================
@@ -373,27 +393,31 @@ Spaarke.Document.Utils = {
  */
 Spaarke.Document.showChoiceDialog = function(config) {
     return new Promise(function(resolve) {
+        // CRITICAL: Use top window's document to escape iframe context
+        // Dataverse runs web resources in iframes, so document.body would be wrong
+        var targetDoc = window.top ? window.top.document : document;
+
         // Create overlay
-        var overlay = document.createElement('div');
+        var overlay = targetDoc.createElement('div');
         overlay.className = 'sprk-choice-dialog-overlay';
         overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.4);' +
             'display:flex;align-items:center;justify-content:center;z-index:10000;font-family:"Segoe UI",sans-serif;';
 
         // Create dialog surface
-        var dialog = document.createElement('div');
+        var dialog = targetDoc.createElement('div');
         dialog.className = 'sprk-choice-dialog';
         dialog.style.cssText = 'background:#fff;border-radius:8px;box-shadow:0 25px 65px rgba(0,0,0,0.35);' +
             'max-width:480px;width:90%;max-height:90vh;overflow:auto;';
 
         // Dialog header
-        var header = document.createElement('div');
+        var header = targetDoc.createElement('div');
         header.style.cssText = 'padding:20px 24px 0;display:flex;justify-content:space-between;align-items:center;';
 
-        var title = document.createElement('h2');
+        var title = targetDoc.createElement('h2');
         title.style.cssText = 'margin:0;font-size:20px;font-weight:600;color:#242424;';
         title.textContent = config.title;
 
-        var closeBtn = document.createElement('button');
+        var closeBtn = targetDoc.createElement('button');
         closeBtn.style.cssText = 'background:none;border:none;font-size:20px;cursor:pointer;color:#616161;padding:4px;';
         closeBtn.innerHTML = '&times;';
         closeBtn.onclick = function() { cleanup(null); };
@@ -402,11 +426,11 @@ Spaarke.Document.showChoiceDialog = function(config) {
         header.appendChild(closeBtn);
 
         // Dialog content
-        var content = document.createElement('div');
+        var content = targetDoc.createElement('div');
         content.style.cssText = 'padding:16px 24px;';
 
         // Message
-        var messageDiv = document.createElement('div');
+        var messageDiv = targetDoc.createElement('div');
         messageDiv.style.cssText = 'color:#424242;font-size:14px;line-height:1.5;margin-bottom:16px;';
         if (typeof config.message === 'string') {
             messageDiv.innerHTML = config.message;
@@ -416,12 +440,12 @@ Spaarke.Document.showChoiceDialog = function(config) {
         content.appendChild(messageDiv);
 
         // Options container
-        var optionsDiv = document.createElement('div');
+        var optionsDiv = targetDoc.createElement('div');
         optionsDiv.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
 
         // Create option buttons (ADR-023 style: outline buttons with icon + title + description)
         config.options.forEach(function(option) {
-            var btn = document.createElement('button');
+            var btn = targetDoc.createElement('button');
             btn.style.cssText = 'display:flex;align-items:center;gap:12px;width:100%;padding:12px 16px;' +
                 'background:#fff;border:1px solid #d1d1d1;border-radius:4px;cursor:pointer;text-align:left;' +
                 'transition:all 0.1s ease;min-height:64px;';
@@ -430,21 +454,21 @@ Spaarke.Document.showChoiceDialog = function(config) {
             btn.onclick = function() { cleanup(option.id); };
 
             // Icon
-            var iconSpan = document.createElement('span');
+            var iconSpan = targetDoc.createElement('span');
             iconSpan.style.cssText = 'font-size:24px;color:#0078d4;flex-shrink:0;width:24px;text-align:center;';
             iconSpan.innerHTML = option.icon;
             btn.appendChild(iconSpan);
 
             // Text container
-            var textDiv = document.createElement('div');
+            var textDiv = targetDoc.createElement('div');
             textDiv.style.cssText = 'display:flex;flex-direction:column;gap:2px;overflow:hidden;';
 
-            var titleSpan = document.createElement('span');
+            var titleSpan = targetDoc.createElement('span');
             titleSpan.style.cssText = 'font-weight:600;color:#242424;font-size:14px;';
             titleSpan.textContent = option.title;
             textDiv.appendChild(titleSpan);
 
-            var descSpan = document.createElement('span');
+            var descSpan = targetDoc.createElement('span');
             descSpan.style.cssText = 'color:#616161;font-size:12px;line-height:1.4;';
             descSpan.textContent = option.description;
             textDiv.appendChild(descSpan);
@@ -456,10 +480,10 @@ Spaarke.Document.showChoiceDialog = function(config) {
         content.appendChild(optionsDiv);
 
         // Dialog footer with Cancel button
-        var footer = document.createElement('div');
+        var footer = targetDoc.createElement('div');
         footer.style.cssText = 'padding:16px 24px 20px;display:flex;justify-content:flex-end;border-top:1px solid #e0e0e0;margin-top:8px;';
 
-        var cancelBtn = document.createElement('button');
+        var cancelBtn = targetDoc.createElement('button');
         cancelBtn.style.cssText = 'padding:8px 20px;background:#fff;border:1px solid #d1d1d1;border-radius:4px;' +
             'cursor:pointer;font-size:14px;color:#242424;';
         cancelBtn.textContent = config.cancelText || 'Cancel';
@@ -476,8 +500,8 @@ Spaarke.Document.showChoiceDialog = function(config) {
 
         // Cleanup function
         function cleanup(result) {
-            document.body.removeChild(overlay);
-            document.removeEventListener('keydown', escHandler);
+            targetDoc.body.removeChild(overlay);
+            targetDoc.removeEventListener('keydown', escHandler);
             resolve(result);
         }
 
@@ -487,10 +511,10 @@ Spaarke.Document.showChoiceDialog = function(config) {
                 cleanup(null);
             }
         }
-        document.addEventListener('keydown', escHandler);
+        targetDoc.addEventListener('keydown', escHandler);
 
         // Add to DOM
-        document.body.appendChild(overlay);
+        targetDoc.body.appendChild(overlay);
 
         // Focus first option button for accessibility
         var firstBtn = optionsDiv.querySelector('button');
@@ -879,12 +903,15 @@ Spaarke.Document.checkinDocument = async function(primaryControl) {
             // Clear cache
             Spaarke.Document.clearCheckoutStatusCache(docInfo.id);
 
-            // v1.19.0: Show dialog, then navigate to refresh page
+            // v1.26.0: Show success dialog with re-indexing notification
             var capturedDocId = docInfo.id;
-            console.log("[Spaarke.Document] Showing success dialog...");
+            console.log("[Spaarke.Document] Showing success dialog with re-index notification...");
 
             await Xrm.Navigation.openAlertDialog({
-                text: "Document checked in successfully.",
+                title: "Document Checked In",
+                text: "Document checked in successfully.\n\n" +
+                      "The document will be re-indexed to update semantic search relationships. " +
+                      "This process runs in the background.",
                 confirmButtonLabel: "OK"
             });
 
@@ -1935,6 +1962,46 @@ Spaarke.Document.canRefresh = function(primaryControl) {
 };
 
 // =============================================================================
+// RE-INDEX NOTIFICATIONS
+// =============================================================================
+
+/**
+ * Shows re-indexing notification dialog to user
+ * Called when user action triggers re-indexing (check-in, manual send-to-index)
+ *
+ * @param {string} trigger - Trigger type: "checkin" | "manual" | "auto"
+ * @param {number} [count=1] - Number of documents being re-indexed
+ * @returns {Promise<void>}
+ */
+Spaarke.Document.showReindexNotification = async function(trigger, count) {
+    count = count || 1;
+
+    var messages = {
+        checkin: "Your document is being re-indexed to update semantic search relationships.\n\n" +
+                 "This process runs in the background and may take a few moments to complete.",
+        manual: count === 1
+            ? "Document is being sent to the search index.\n\n" +
+              "This process runs in the background and may take a few moments to complete."
+            : count + " documents are being sent to the search index.\n\n" +
+              "This process runs in the background and may take a few moments to complete.",
+        auto: "Document metadata has changed. Re-indexing to update search results.\n\n" +
+              "This process runs in the background."
+    };
+
+    var titles = {
+        checkin: "Re-Indexing Document",
+        manual: "Indexing in Progress",
+        auto: "Automatic Re-Index"
+    };
+
+    await Xrm.Navigation.openAlertDialog({
+        title: titles[trigger] || "Indexing",
+        text: messages[trigger] || "Document indexing in progress.",
+        confirmButtonLabel: "OK"
+    });
+};
+
+// =============================================================================
 // SEND TO INDEX (Semantic Search)
 // =============================================================================
 
@@ -1992,11 +2059,38 @@ Spaarke.Document.sendToIndex = async function(primaryControl, selectedItemIds) {
             return;
         }
 
-        // Get tenant ID from global context
-        var globalContext = Xrm.Utility.getGlobalContext();
-        var tenantId = globalContext.organizationSettings ?
-            globalContext.organizationSettings.organizationId :
-            globalContext.getOrgUniqueName();
+        // Check 10-record limit for manual indexing (front-end only)
+        // Backend has no hard limits to support admin bulk operations
+        var maxRecords = Spaarke.Document.Config.maxManualIndexRecords;
+        if (documentIds.length > maxRecords) {
+            console.log("[Spaarke.Document] SendToIndex - Selection exceeds limit:", documentIds.length, ">", maxRecords);
+            await Xrm.Navigation.openAlertDialog({
+                title: "Selection Limit Exceeded",
+                text: "The manual Send to Index is limited to " + maxRecords + " records at a time.\n\n" +
+                      "You selected " + documentIds.length + " records.\n\n" +
+                      "Contact your administrator for large volume bulk indexing projects.",
+                confirmButtonLabel: "OK"
+            });
+            return;
+        }
+
+        // Get tenant ID from MSAL account (Azure AD tenant ID)
+        // This must match the tenantId used by PCF controls for indexing and visualization
+        // Previously used Dataverse organizationId which caused tenantId mismatch
+        // NOTE: Using traditional syntax (not ?.) for Dataverse web resource compatibility
+        var tenantId = (Spaarke.Document._currentAccount && Spaarke.Document._currentAccount.tenantId) ||
+            Spaarke.Document.Config.msal.tenantId;
+
+        if (!tenantId) {
+            console.error("[Spaarke.Document] SendToIndex - No tenantId available from MSAL account");
+            await Xrm.Navigation.openAlertDialog({
+                text: "Unable to determine tenant ID. Please try the operation again.",
+                confirmButtonLabel: "OK"
+            });
+            return;
+        }
+
+        console.log("[Spaarke.Document] SendToIndex - Using Azure AD tenantId:", tenantId);
 
         // Show progress
         var progressMsg = documentIds.length === 1
@@ -2155,6 +2249,12 @@ Spaarke.Document.hasSelection = function(selectedControl) {
 // =============================================================================
 
 console.log("[Spaarke.Document] Operations module loaded v" + Spaarke.Document.Config.version);
+
+// v1.26.0 Changes:
+// - Added 10-record limit for manual Send to Index (front-end limit only)
+// - Added showReindexNotification() helper for user feedback on indexing operations
+// - Updated check-in success message to inform user about re-indexing
+// - Added Config.maxManualIndexRecords constant (backend has no limits for admin operations)
 
 // v1.23.0 Changes:
 // - CRITICAL FIX: Pre-fetch MSAL token at start of openInWeb/openInDesktop

@@ -659,6 +659,10 @@ builder.Services.Configure<Sprk.Bff.Api.Services.Jobs.ScheduledRagIndexingOption
     builder.Configuration.GetSection(Sprk.Bff.Api.Services.Jobs.ScheduledRagIndexingOptions.SectionName));
 builder.Services.AddHostedService<Sprk.Bff.Api.Services.Jobs.ScheduledRagIndexingService>();
 
+// Reindexing options - controls check-in triggered re-indexing
+builder.Services.Configure<Sprk.Bff.Api.Configuration.ReindexingOptions>(
+    builder.Configuration.GetSection(Sprk.Bff.Api.Configuration.ReindexingOptions.SectionName));
+
 builder.Logging.AddConsole();
 Console.WriteLine("✓ Job processing configured with Service Bus (queue: sdap-jobs)");
 Console.WriteLine("✓ Email polling backup service configured");

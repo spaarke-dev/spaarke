@@ -1,6 +1,6 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="UniversalDocumentUpload" version="3.11.0" display-name-key="Universal Document Upload" description-key="Tabbed multi-file upload with AI Summary, keywords, and entity extraction (v3.11.0)" control-type="standard">
+  <control namespace="Spaarke.Controls" constructor="UniversalDocumentUpload" version="3.12.0" display-name-key="Universal Document Upload" description-key="Tabbed multi-file upload with AI Summary, keywords, and entity extraction (v3.12.0)" control-type="standard">
     <external-service-usage enabled="false">
     </external-service-usage>
     <!--

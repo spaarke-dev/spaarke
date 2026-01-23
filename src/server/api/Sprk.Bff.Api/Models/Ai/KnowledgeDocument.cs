@@ -192,7 +192,7 @@ public class KnowledgeDocument
     /// Nullable to support legacy documents without entity association.
     /// </remarks>
     [SearchableField(AnalyzerName = LexicalAnalyzerName.Values.StandardLucene, IsSortable = true)]
-    [JsonPropertyName("parentEntityName")]
+    [JsonPropertyName("parentEntityname")]
     public string? ParentEntityName { get; set; }
 }
 

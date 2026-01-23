@@ -10,6 +10,7 @@
 ## Table of Contents
 
 1. [App Service Configuration](#app-service-configuration)
+   - [Automatic Re-indexing on Check-in](#automatic-re-indexing-on-check-in) *(NEW)*
    - [Scheduled RAG Indexing](#scheduled-rag-indexing-catch-up-service)
    - [Bulk Indexing Admin Endpoints](#bulk-indexing-admin-endpoints)
 2. [Index Configuration](#index-configuration)
@@ -81,6 +82,73 @@ $env:ServiceBus__ConnectionString = "<your-connection-string>"
 ```
 ServiceBus__ConnectionString=@Microsoft.KeyVault(SecretUri=https://spaarke-spekvcert.vault.azure.net/secrets/servicebus-connection-string/)
 ```
+
+### Automatic Re-indexing on Check-in
+
+> **Added in**: Semantic Search UI R2 (v1.26.0)
+
+Documents are automatically re-indexed when users check them in after editing, keeping the search index current without manual intervention.
+
+| Setting | Required | Default | Description |
+|---------|----------|---------|-------------|
+| `Reindexing__Enabled` | No | `true` | Master switch for automatic re-indexing |
+| `Reindexing__TenantId` | Yes* | - | **Azure AD tenant ID** for index routing (*required if Enabled=true) |
+| `Reindexing__TriggerOnCheckin` | No | `true` | Whether check-in triggers re-indexing |
+
+**Configuration Example:**
+
+```json
+{
+  "Reindexing": {
+    "Enabled": true,
+    "TenantId": "a221a95e-6abc-4434-aecc-e48338a1b2f2",
+    "TriggerOnCheckin": true
+  }
+}
+```
+
+**Azure App Service Configuration:**
+
+```bash
+az webapp config appsettings set \
+  --name spe-api-dev-67e2xz \
+  --resource-group spe-infrastructure-westus2 \
+  --settings "Reindexing__Enabled=true" "Reindexing__TenantId=a221a95e-6abc-4434-aecc-e48338a1b2f2" "Reindexing__TriggerOnCheckin=true"
+```
+
+> **⚠️ Critical - Azure AD Tenant ID Required**:
+> The `Reindexing__TenantId` must be the **Azure AD tenant ID** (e.g., `a221a95e-6abc-4434-aecc-e48338a1b2f2`), NOT the Dataverse organization ID. This ID:
+> - Must match the `tenantId` used by the PCF SemanticSearchControl
+> - Must match the `tenantId` used by the `sprk_DocumentOperations.js` web resource
+> - Is used for consistent AI Search index identification across all components
+>
+> The Azure AD tenant ID can be found via:
+> - Azure Portal → Azure Active Directory → Overview → Tenant ID
+> - MSAL authentication response (`tenantId` claim)
+
+**Behavior:**
+
+| Scenario | Behavior |
+|----------|----------|
+| Enabled=true, TenantId set | Re-index job enqueued after check-in |
+| Enabled=true, TenantId missing | Warning logged, no re-indexing |
+| Enabled=false | No re-indexing regardless of other settings |
+| Job enqueueing fails | Warning logged, check-in succeeds (fire-and-forget) |
+
+**Check-in Response:**
+
+When a document is checked in, the response indicates whether re-indexing was triggered:
+
+```json
+{
+  "success": true,
+  "newVersionNumber": "2.0",
+  "aiAnalysisTriggered": true,
+  "correlationId": "..."
+}
+```
+
+---
 
 ### Scheduled RAG Indexing (Catch-up Service)
 
@@ -619,7 +687,7 @@ The ribbon buttons are configured in the `DocumentRibbons` solution.
 
 **Solution Details**:
 - **Name**: DocumentRibbons
-- **Version**: 1.3.0.0
+- **Version**: 1.4.0.0
 - **Publisher**: Spaarke
 - **Location**: `infrastructure/dataverse/ribbon/DocumentRibbons/`
 
@@ -627,7 +695,9 @@ The ribbon buttons are configured in the `DocumentRibbons` solution.
 
 | Web Resource | Version | Description |
 |--------------|---------|-------------|
-| `sprk_/scripts/sprk_DocumentOperations.js` | 1.24.0 | Ribbon button handlers |
+| `sprk_/scripts/sprk_DocumentOperations.js` | 1.26.0 | Ribbon button handlers |
+
+> **⚠️ 10-Record Limit**: The "Send to Index" ribbon button limits selections to 10 documents per operation. This prevents UI timeouts and ensures responsive feedback to users. For bulk indexing, use the Admin Bulk Index endpoints.
 
 **Environment Variable Dependencies**:
 
@@ -820,8 +890,8 @@ public async Task SetupEnterpriseCustomer(string tenantId)
 ---
 
 *Document created: 2025-12-29*
-*Updated: 2026-01-23*
+*Updated: 2026-01-23 - Automatic re-indexing configuration, 10-record limit for Send to Index*
 *AI Document Intelligence R3 - Phase 1 Complete*
 *RAG Pipeline R1 - Phase 1 Complete*
 *Semantic Search Foundation R1 - Complete (configuration section added)*
-*Semantic Search UI R2 - PCF control and ribbon button configuration added*
+*Semantic Search UI R2 - PCF control v1.0.15, web resource v1.26.0, automatic re-indexing on check-in*

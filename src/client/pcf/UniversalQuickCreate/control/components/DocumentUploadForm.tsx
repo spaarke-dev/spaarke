@@ -219,6 +219,22 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
     const aiComplete = uploadCompleted && runAiSummary && aiSummary.documents.length > 0 && !aiSummary.isProcessing;
 
     /**
+     * Convert Dataverse entity logical name to semantic search entity type.
+     * Maps "sprk_matter" → "matter", "sprk_project" → "project", etc.
+     */
+    const getEntityTypeFromLogicalName = (logicalName: string): string | null => {
+        // Map Dataverse logical names to semantic search entity types
+        const entityTypeMap: Record<string, string> = {
+            'sprk_matter': 'matter',
+            'sprk_project': 'project',
+            'sprk_invoice': 'invoice',
+            'account': 'account',
+            'contact': 'contact'
+        };
+        return entityTypeMap[logicalName.toLowerCase()] ?? null;
+    };
+
+    /**
      * Index documents to RAG for semantic search.
      * Non-blocking: failures are logged as warnings, not shown to users.
      *
@@ -238,6 +254,14 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
             return;
         }
 
+        // Build parent entity context for entity-scoped search
+        const entityType = getEntityTypeFromLogicalName(parentContext.parentEntityName);
+        const parentEntity = entityType ? {
+            entityType: entityType,
+            entityId: parentContext.parentRecordId,
+            entityName: parentContext.parentDisplayName
+        } : null;
+
         // Index each document independently (non-blocking, fire-and-forget)
         for (const doc of documents) {
             // Fire and forget - don't await, don't block on failures
@@ -255,21 +279,22 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
                             itemId: doc.itemId,
                             fileName: doc.fileName,
                             tenantId: tenantId,
-                            documentId: doc.documentId
+                            documentId: doc.documentId,
+                            parentEntity: parentEntity
                         })
                     });
 
                     if (!response.ok) {
                         console.warn(`RAG indexing failed for ${doc.fileName}: ${response.status} ${response.statusText}`);
                     } else {
-                        logInfo('DocumentUploadForm', 'RAG indexing enqueued', { fileName: doc.fileName });
+                        logInfo('DocumentUploadForm', 'RAG indexing enqueued', { fileName: doc.fileName, entityType });
                     }
                 } catch (err) {
                     console.warn(`RAG indexing failed for ${doc.fileName}:`, err);
                 }
             })();
         }
-    }, [apiBaseUrl, getAuthToken, getTenantId]);
+    }, [apiBaseUrl, getAuthToken, getTenantId, parentContext]);
 
     // Auto-switch to Summary tab when upload completes with AI summaries
     React.useEffect(() => {
@@ -572,7 +597,7 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({
             {/* Footer */}
             <div className={styles.footer}>
                 <span className={styles.versionText}>
-                    v3.11.0 • Built 2026-01-19
+                    v3.12.0 • Built 2026-01-23
                 </span>
                 <div className={styles.footerButtons}>
                     <Button

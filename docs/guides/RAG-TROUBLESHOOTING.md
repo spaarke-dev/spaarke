@@ -12,14 +12,15 @@
 1. [Common Issues](#common-issues)
 2. [Search Issues](#search-issues)
 3. [Semantic Search Issues](#semantic-search-issues) *(R1)*
-4. [Send to Index Issues](#send-to-index-issues) *(R2 - NEW)*
-5. [PCF Control Issues](#pcf-control-issues) *(R2 - NEW)*
-6. [Indexing Issues](#indexing-issues)
-7. [Embedding Issues](#embedding-issues)
-8. [Deployment Model Issues](#deployment-model-issues)
-9. [Performance Issues](#performance-issues)
-10. [Diagnostic Commands](#diagnostic-commands)
-11. [Logging and Monitoring](#logging-and-monitoring)
+4. [Send to Index Issues](#send-to-index-issues) *(R2)*
+5. [Automatic Re-indexing Issues](#automatic-re-indexing-issues) *(R2 - NEW)*
+6. [PCF Control Issues](#pcf-control-issues) *(R2)*
+7. [Indexing Issues](#indexing-issues)
+8. [Embedding Issues](#embedding-issues)
+9. [Deployment Model Issues](#deployment-model-issues)
+10. [Performance Issues](#performance-issues)
+11. [Diagnostic Commands](#diagnostic-commands)
+12. [Logging and Monitoring](#logging-and-monitoring)
 
 ---
 
@@ -378,7 +379,7 @@ Verify the user has:
 - Read access to related entities (Matter, Project, Invoice)
 
 **Resolution**:
-1. Import/re-import `DocumentRibbons` solution (v1.3.0.0+)
+1. Import/re-import `DocumentRibbons` solution (v1.4.0.0+)
 2. Publish all customizations
 3. Clear browser cache and refresh
 4. Verify user security roles
@@ -398,7 +399,7 @@ pac env variable get --name "sprk_BffApiBaseUrl"
 
 **Check 2: Web Resource Version**
 
-Verify `sprk_DocumentOperations.js` is version 1.24.0 or later:
+Verify `sprk_DocumentOperations.js` is version 1.26.0 or later:
 - Navigate to Settings > Customizations > Web Resources
 - Find `sprk_/scripts/sprk_DocumentOperations.js`
 - Check the display name includes version
@@ -470,6 +471,143 @@ The API response includes the index operation result. If `success: true` but fie
 1. Add missing fields to `sprk_document` entity
 2. Grant Update permission on `sprk_document`
 3. Check BFF API logs for Dataverse update errors
+
+---
+
+## Automatic Re-indexing Issues
+
+> **Added in**: Semantic Search UI R2 (v1.26.0)
+
+### Re-index Not Triggered on Check-in
+
+**Symptom**: Documents are checked in successfully but `aiAnalysisTriggered` is always `false` in the response.
+
+**Check 1: Reindexing Configuration**
+
+```bash
+# Verify configuration is set
+az webapp config appsettings list \
+  --name spe-api-dev-67e2xz \
+  --resource-group spe-infrastructure-westus2 \
+  --query "[?name=='Reindexing__Enabled' || name=='Reindexing__TenantId' || name=='Reindexing__TriggerOnCheckin']"
+```
+
+**Check 2: TenantId Configured**
+
+The `Reindexing__TenantId` must be set. Look for this log warning:
+```
+Warning: Re-indexing TenantId not configured - skipping re-index for check-in
+```
+
+**Check 3: TriggerOnCheckin Enabled**
+
+Both `Enabled` and `TriggerOnCheckin` must be `true`:
+```json
+{
+  "Reindexing": {
+    "Enabled": true,
+    "TriggerOnCheckin": true
+  }
+}
+```
+
+**Resolution**:
+1. Set `Reindexing__Enabled=true`
+2. Set `Reindexing__TenantId` to your Azure AD tenant ID
+3. Set `Reindexing__TriggerOnCheckin=true`
+4. Restart the App Service
+
+---
+
+### Wrong TenantId - Documents Not Searchable
+
+**Symptom**: Re-indexing triggers, but documents don't appear in semantic search results.
+
+**Common Cause**: Using Dataverse organization ID instead of Azure AD tenant ID.
+
+**Check**: Compare IDs in these locations:
+
+| Location | Expected Value | How to Check |
+|----------|----------------|--------------|
+| `Reindexing__TenantId` | Azure AD tenant ID | App Service settings |
+| `sprk_DocumentOperations.js` | Azure AD tenant ID (from MSAL) | `Config.msal.tenantId` |
+| PCF Control `tenantId` prop | Azure AD tenant ID | Form configuration |
+
+**How to Find Azure AD Tenant ID**:
+1. Azure Portal → Azure Active Directory → Overview → **Tenant ID**
+2. Or from MSAL authentication response (`tenantId` claim)
+
+**Wrong IDs**:
+- ❌ Dataverse organization ID (e.g., `org123456.crm.dynamics.com`)
+- ❌ Dataverse environment ID
+- ❌ Power Platform environment ID
+
+**Correct ID**:
+- ✅ Azure AD tenant ID (e.g., `a221a95e-6abc-4434-aecc-e48338a1b2f2`)
+
+**Resolution**:
+1. Verify all three locations use the same Azure AD tenant ID
+2. If documents were indexed with wrong tenant ID, re-index them
+
+---
+
+### Re-index Job Failures
+
+**Symptom**: Check-in succeeds with `aiAnalysisTriggered: true`, but document not appearing in search.
+
+**Check 1: Job Status**
+
+The re-indexing job is fire-and-forget. Check for processing errors in logs:
+```
+Error: Failed to enqueue re-index job for document {DocumentId} after check-in
+```
+
+**Check 2: Service Bus Queue**
+
+```bash
+# Check for dead-letter messages
+az servicebus queue show \
+  --namespace-name spaarke-servicebus-dev \
+  --resource-group spe-infrastructure-westus2 \
+  --name sdap-jobs \
+  --query "countDetails.deadLetterMessageCount"
+```
+
+**Check 3: Job Handler Logs**
+
+Look for `RagIndexingJobHandler` processing logs:
+```
+Information: Processing RAG indexing job for document {documentId}
+Information: RAG indexing completed for document {documentId}, chunks: {count}
+```
+
+**Common Errors**:
+
+| Error | Cause | Resolution |
+|-------|-------|------------|
+| "File download failed" | SPE access issue | Check app-only permissions |
+| "Text extraction failed" | Unsupported file type | Verify file type is supported |
+| "Embedding generation failed" | OpenAI service issue | Check Azure OpenAI health |
+
+**Resolution**:
+1. Check Application Insights for job processing errors
+2. Verify Service Bus queue is processing messages
+3. Check for dead-letter queue messages
+
+---
+
+### Check-in Performance Degradation
+
+**Symptom**: Check-in operations slower than expected.
+
+**Note**: Re-indexing should NOT slow down check-in. The job is enqueued **fire-and-forget** - the API response returns immediately without waiting for indexing.
+
+**Check**: If check-in is slow, look for other causes:
+- SharePoint Embedded API latency
+- Dataverse update latency
+- Network issues
+
+The re-indexing job enqueueing should add < 10ms to check-in response time.
 
 ---
 
@@ -957,7 +1095,7 @@ exceptions
 ---
 
 *Document created: 2025-12-29*
-*Updated: 2026-01-23*
+*Updated: 2026-01-23 - Automatic re-indexing troubleshooting added*
 *AI Document Intelligence R3 - Phase 1 Complete*
 *Semantic Search Foundation R1 - Complete (troubleshooting section added)*
-*Semantic Search UI R2 - Send to Index and PCF control troubleshooting added*
+*Semantic Search UI R2 - Send to Index, automatic re-indexing, and PCF control troubleshooting*

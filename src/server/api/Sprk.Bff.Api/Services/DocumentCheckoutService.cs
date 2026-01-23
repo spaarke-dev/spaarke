@@ -298,14 +298,27 @@ public class DocumentCheckoutService
             _logger.LogWarning(ex, "Failed to get preview URL after check-in for document {DocumentId}", documentId);
         }
 
-        // 5. TODO: Trigger AI analysis (fire-and-forget)
-        var aiTriggered = false; // Will be implemented in task 052
+        // 5. Re-indexing is triggered in the endpoint after successful check-in
+        // See DocumentOperationsEndpoints.CheckInDocument for job enqueueing
+        var aiTriggered = false; // Set to true by endpoint after enqueueing job
 
         _logger.LogInformation(
             "Document {DocumentId} checked in successfully. Version: {VersionNumber}",
             documentId, document.VersionNumber);
 
-        return CheckInResult.Success(
+        // Build file info for potential re-indexing
+        DocumentFileInfo? fileInfo = null;
+        if (!string.IsNullOrEmpty(document.DriveId) && !string.IsNullOrEmpty(document.ItemId))
+        {
+            fileInfo = new DocumentFileInfo(
+                DriveId: document.DriveId,
+                ItemId: document.ItemId,
+                FileName: document.FileName ?? document.DocumentName ?? "unknown",
+                DocumentId: documentId
+            );
+        }
+
+        return new SuccessCheckInResult(
             new CheckInResponse(
                 Success: true,
                 VersionNumber: document.VersionNumber,
@@ -315,7 +328,10 @@ public class DocumentCheckoutService
                 CorrelationId: correlationId
             ),
             correlationId
-        );
+        )
+        {
+            FileInfo = fileInfo
+        };
     }
 
     /// <summary>
@@ -1011,7 +1027,22 @@ public record SuccessCheckInResult(CheckInResponse Response, string CorrelationI
 {
     public new CheckInResponse Response { get; } = Response;
     public new int StatusCode => 200;
+
+    /// <summary>
+    /// Document file info for re-indexing (populated after successful check-in).
+    /// </summary>
+    public DocumentFileInfo? FileInfo { get; init; }
 }
+
+/// <summary>
+/// Document file information needed for re-indexing after check-in.
+/// </summary>
+public record DocumentFileInfo(
+    string DriveId,
+    string ItemId,
+    string FileName,
+    Guid DocumentId
+);
 
 public record NotFoundCheckInResult(string CorrelationId)
     : CheckInResult(false, CorrelationId)

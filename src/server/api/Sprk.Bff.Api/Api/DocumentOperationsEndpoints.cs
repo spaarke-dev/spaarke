@@ -1,8 +1,13 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services;
+using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Jobs.Handlers;
 
 namespace Sprk.Bff.Api.Api;
 
@@ -136,12 +141,15 @@ public static class DocumentOperationsEndpoints
     /// <summary>
     /// POST /api/documents/{documentId}/checkin
     /// Releases the lock and creates a new version.
+    /// Triggers re-indexing for semantic search if enabled.
     /// </summary>
     private static async Task<IResult> CheckInDocument(
         Guid documentId,
         [FromBody] CheckInRequest? request,
         HttpContext httpContext,
         [FromServices] DocumentCheckoutService checkoutService,
+        [FromServices] JobSubmissionService jobSubmissionService,
+        [FromServices] IOptions<ReindexingOptions> reindexingOptions,
         [FromServices] ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -162,9 +170,24 @@ public static class DocumentOperationsEndpoints
                 ct
             );
 
+            // If check-in successful, trigger re-indexing
+            if (result is SuccessCheckInResult success)
+            {
+                var reindexTriggered = await TryEnqueueReindexJobAsync(
+                    success.FileInfo,
+                    reindexingOptions.Value,
+                    jobSubmissionService,
+                    correlationId,
+                    logger,
+                    ct);
+
+                // Update response with reindex status
+                var response = success.Response with { AiAnalysisTriggered = reindexTriggered };
+                return TypedResults.Ok(response);
+            }
+
             return result switch
             {
-                SuccessCheckInResult success => TypedResults.Ok(success.Response),
                 NotFoundCheckInResult => TypedResults.Problem(
                     statusCode: 404,
                     title: "Document Not Found",
@@ -205,6 +228,83 @@ public static class DocumentOperationsEndpoints
                     ["exceptionType"] = ex.GetType().Name
                 }
             );
+        }
+    }
+
+    /// <summary>
+    /// Enqueue a RAG indexing job for re-indexing after document check-in.
+    /// Fire-and-forget - does not block check-in response.
+    /// </summary>
+    private static async Task<bool> TryEnqueueReindexJobAsync(
+        DocumentFileInfo? fileInfo,
+        ReindexingOptions options,
+        JobSubmissionService jobSubmissionService,
+        string correlationId,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        // Check if reindexing is enabled
+        if (!options.Enabled || !options.TriggerOnCheckin)
+        {
+            logger.LogDebug("Re-indexing disabled or check-in trigger disabled");
+            return false;
+        }
+
+        // Validate tenant configuration
+        if (string.IsNullOrWhiteSpace(options.TenantId))
+        {
+            logger.LogWarning("Re-indexing TenantId not configured - skipping re-index for check-in");
+            return false;
+        }
+
+        // Validate file info available
+        if (fileInfo == null)
+        {
+            logger.LogWarning("No file info available for re-indexing after check-in");
+            return false;
+        }
+
+        try
+        {
+            // Build job payload
+            var jobPayload = JsonDocument.Parse(JsonSerializer.Serialize(new RagIndexingJobPayload
+            {
+                TenantId = options.TenantId,
+                DriveId = fileInfo.DriveId,
+                ItemId = fileInfo.ItemId,
+                FileName = fileInfo.FileName,
+                DocumentId = fileInfo.DocumentId.ToString(),
+                Source = "CheckinTrigger",
+                EnqueuedAt = DateTimeOffset.UtcNow
+            }));
+
+            // Create and submit job
+            var idempotencyKey = $"checkin-reindex-{fileInfo.DocumentId}-{DateTimeOffset.UtcNow.Ticks}";
+            var job = new JobContract
+            {
+                JobType = RagIndexingJobHandler.JobTypeName,
+                SubjectId = fileInfo.ItemId,
+                CorrelationId = correlationId,
+                IdempotencyKey = idempotencyKey,
+                Payload = jobPayload,
+                MaxAttempts = 3
+            };
+
+            await jobSubmissionService.SubmitJobAsync(job, ct);
+
+            logger.LogInformation(
+                "Enqueued re-index job {JobId} for document {DocumentId} after check-in",
+                job.JobId, fileInfo.DocumentId);
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            // Log but don't fail check-in - re-indexing is not critical
+            logger.LogError(ex,
+                "Failed to enqueue re-index job for document {DocumentId} after check-in",
+                fileInfo?.DocumentId);
+            return false;
         }
     }
 

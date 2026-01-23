@@ -376,6 +376,18 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         if (request.InvoiceLookup.HasValue)
             document["sprk_invoice"] = new EntityReference("sprk_invoice", request.InvoiceLookup.Value);
 
+        // ═══════════════════════════════════════════════════════════════════════════
+        // Search Index Tracking Fields (RAG/Semantic Search)
+        // ═══════════════════════════════════════════════════════════════════════════
+        if (request.SearchIndexed.HasValue)
+            document["sprk_searchindexed"] = request.SearchIndexed.Value;
+
+        if (request.SearchIndexName != null)
+            document["sprk_searchindexname"] = request.SearchIndexName;
+
+        if (request.SearchIndexedOn.HasValue)
+            document["sprk_searchindexedon"] = request.SearchIndexedOn.Value;
+
         await _serviceClient.UpdateAsync(document, ct);
         _logger.LogInformation("Document updated: {DocumentId} ({FieldCount} fields)", id, document.Attributes.Count);
     }

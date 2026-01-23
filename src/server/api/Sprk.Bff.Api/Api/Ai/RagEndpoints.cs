@@ -405,9 +405,15 @@ public static class RagEndpoints
     /// Index a file into the knowledge base via unified pipeline.
     /// Uses OBO authentication to access user's files.
     /// </summary>
+    /// <remarks>
+    /// When DocumentId is provided, Dataverse tracking fields (sprk_searchindexed,
+    /// sprk_searchindexedon, sprk_searchindexname) are updated after successful indexing.
+    /// </remarks>
     private static async Task<IResult> IndexFile(
         FileIndexRequest request,
         IFileIndexingService fileIndexingService,
+        IDataverseService dataverseService,
+        IOptions<AnalysisOptions> analysisOptions,
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
@@ -461,6 +467,20 @@ public static class RagEndpoints
                     title: "Indexing Failed",
                     detail: result.ErrorMessage,
                     statusCode: 500);
+            }
+
+            // Update Dataverse tracking fields when DocumentId is provided
+            if (!string.IsNullOrEmpty(request.DocumentId))
+            {
+                var indexName = analysisOptions.Value.SharedIndexName;
+                var updateRequest = new UpdateDocumentRequest
+                {
+                    SearchIndexed = true,
+                    SearchIndexName = indexName,
+                    SearchIndexedOn = DateTime.UtcNow
+                };
+
+                await dataverseService.UpdateDocumentAsync(request.DocumentId, updateRequest, cancellationToken);
             }
 
             return Results.Ok(result);

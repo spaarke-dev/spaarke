@@ -1,13 +1,30 @@
 /**
  * Spaarke Document Operations
- * Version: 1.26.0
+ * Version: 1.26.1
  * Description: Document checkout/checkin operations via BFF API with MSAL authentication
  *
  * ADR-006 Exception: Approved for ribbon button invocation
  *
  * Dependencies: MSAL.js (loaded from CDN)
  *
- * Copyright (c) 2025 Spaarke
+ * Changes in 1.26.1:
+ * - FIX: showChoiceDialog now uses window.top.document to escape iframe context
+ *   (Dataverse runs web resources in iframes; dialog was appearing in wrong frame)
+ *
+ * Changes in 1.26.0:
+ * - Added 10-record limit for manual Send to Index (front-end only)
+ * - Added showReindexNotification() for user feedback on indexing operations
+ * - Check-in now notifies user that re-indexing will occur (future: trigger re-index)
+ *
+ * Changes in 1.25.1:
+ * - Fixed syntax error: replaced optional chaining (?.) with traditional syntax
+ *   for Dataverse web resource compatibility (script failed to parse in 1.25.0)
+ *
+ * Changes in 1.25.0:
+ * - Fixed SendToIndex to use Azure AD tenantId (from MSAL) instead of Dataverse organizationId
+ *   This aligns with PCF controls for consistent tenantId in AI Search index
+ *
+ * Copyright (c) 2025-2026 Spaarke
  */
 
 "use strict";
@@ -50,7 +67,7 @@ Spaarke.Document.Config = {
     },
 
     // Version
-    version: "1.26.0",
+    version: "1.26.1",
 
     // Document Status Codes (statuscode field values)
     statusCode: {
@@ -58,7 +75,10 @@ Spaarke.Document.Config = {
         CHECKED_IN: 421500002,
         CHECKED_OUT: 421500001,
         LOCKED: 2
-    }
+    },
+
+    // Manual indexing limits (front-end only - backend has no limits for admin operations)
+    maxManualIndexRecords: 10
 };
 
 // =============================================================================
@@ -493,7 +513,7 @@ Spaarke.Document.showChoiceDialog = function(config) {
         }
         targetDoc.addEventListener('keydown', escHandler);
 
-        // Add to DOM - use top window's body to escape iframe
+        // Add to DOM
         targetDoc.body.appendChild(overlay);
 
         // Focus first option button for accessibility
@@ -883,12 +903,15 @@ Spaarke.Document.checkinDocument = async function(primaryControl) {
             // Clear cache
             Spaarke.Document.clearCheckoutStatusCache(docInfo.id);
 
-            // v1.19.0: Show dialog, then navigate to refresh page
+            // v1.26.0: Show success dialog with re-indexing notification
             var capturedDocId = docInfo.id;
-            console.log("[Spaarke.Document] Showing success dialog...");
+            console.log("[Spaarke.Document] Showing success dialog with re-index notification...");
 
             await Xrm.Navigation.openAlertDialog({
-                text: "Document checked in successfully.",
+                title: "Document Checked In",
+                text: "Document checked in successfully.\n\n" +
+                      "The document will be re-indexed to update semantic search relationships. " +
+                      "This process runs in the background.",
                 confirmButtonLabel: "OK"
             });
 
@@ -1939,17 +1962,299 @@ Spaarke.Document.canRefresh = function(primaryControl) {
 };
 
 // =============================================================================
+// RE-INDEX NOTIFICATIONS
+// =============================================================================
+
+/**
+ * Shows re-indexing notification dialog to user
+ * Called when user action triggers re-indexing (check-in, manual send-to-index)
+ *
+ * @param {string} trigger - Trigger type: "checkin" | "manual" | "auto"
+ * @param {number} [count=1] - Number of documents being re-indexed
+ * @returns {Promise<void>}
+ */
+Spaarke.Document.showReindexNotification = async function(trigger, count) {
+    count = count || 1;
+
+    var messages = {
+        checkin: "Your document is being re-indexed to update semantic search relationships.\n\n" +
+                 "This process runs in the background and may take a few moments to complete.",
+        manual: count === 1
+            ? "Document is being sent to the search index.\n\n" +
+              "This process runs in the background and may take a few moments to complete."
+            : count + " documents are being sent to the search index.\n\n" +
+              "This process runs in the background and may take a few moments to complete.",
+        auto: "Document metadata has changed. Re-indexing to update search results.\n\n" +
+              "This process runs in the background."
+    };
+
+    var titles = {
+        checkin: "Re-Indexing Document",
+        manual: "Indexing in Progress",
+        auto: "Automatic Re-Index"
+    };
+
+    await Xrm.Navigation.openAlertDialog({
+        title: titles[trigger] || "Indexing",
+        text: messages[trigger] || "Document indexing in progress.",
+        confirmButtonLabel: "OK"
+    });
+};
+
+// =============================================================================
+// SEND TO INDEX (Semantic Search)
+// =============================================================================
+
+/**
+ * Send document(s) to semantic search index
+ * Called from ribbon button on form, grid, and subgrid
+ *
+ * @param {object} primaryControl - Form context (for form) or SelectedControl (for grid/subgrid)
+ * @param {string[]} [selectedItemIds] - Selected record IDs (for grid/subgrid)
+ */
+Spaarke.Document.sendToIndex = async function(primaryControl, selectedItemIds) {
+    // Initialize if not done
+    if (!Spaarke.Document.Config.bffApiUrl) {
+        Spaarke.Document.init();
+    }
+
+    try {
+        var documentIds = [];
+        var isGridContext = false;
+
+        // Determine context: form or grid/subgrid
+        if (selectedItemIds && selectedItemIds.length > 0) {
+            // Grid or subgrid context
+            documentIds = selectedItemIds.map(function(id) {
+                return id.replace(/[{}]/g, "");
+            });
+            isGridContext = true;
+            console.log("[Spaarke.Document] SendToIndex - grid context with", documentIds.length, "documents");
+        } else if (primaryControl && primaryControl.data && primaryControl.data.entity) {
+            // Form context
+            var docInfo = Spaarke.Document.Utils.getDocumentInfo(primaryControl);
+            documentIds = [docInfo.id];
+            console.log("[Spaarke.Document] SendToIndex - form context for document:", docInfo.id);
+        } else if (primaryControl && primaryControl.getGrid) {
+            // SelectedControl from grid/subgrid
+            var selectedRows = primaryControl.getGrid().getSelectedRows();
+            if (selectedRows && selectedRows.getLength() > 0) {
+                selectedRows.forEach(function(row) {
+                    var rowData = row.getData();
+                    if (rowData && rowData.entity) {
+                        var id = rowData.entity.getId().replace(/[{}]/g, "");
+                        documentIds.push(id);
+                    }
+                });
+            }
+            isGridContext = true;
+            console.log("[Spaarke.Document] SendToIndex - SelectedControl context with", documentIds.length, "documents");
+        }
+
+        if (documentIds.length === 0) {
+            await Xrm.Navigation.openAlertDialog({
+                text: "Please select at least one document to send to the search index.",
+                confirmButtonLabel: "OK"
+            });
+            return;
+        }
+
+        // Check 10-record limit for manual indexing (front-end only)
+        // Backend has no hard limits to support admin bulk operations
+        var maxRecords = Spaarke.Document.Config.maxManualIndexRecords;
+        if (documentIds.length > maxRecords) {
+            console.log("[Spaarke.Document] SendToIndex - Selection exceeds limit:", documentIds.length, ">", maxRecords);
+            await Xrm.Navigation.openAlertDialog({
+                title: "Selection Limit Exceeded",
+                text: "The manual Send to Index is limited to " + maxRecords + " records at a time.\n\n" +
+                      "You selected " + documentIds.length + " records.\n\n" +
+                      "Contact your administrator for large volume bulk indexing projects.",
+                confirmButtonLabel: "OK"
+            });
+            return;
+        }
+
+        // Get tenant ID from MSAL account (Azure AD tenant ID)
+        // This must match the tenantId used by PCF controls for indexing and visualization
+        // Previously used Dataverse organizationId which caused tenantId mismatch
+        // NOTE: Using traditional syntax (not ?.) for Dataverse web resource compatibility
+        var tenantId = (Spaarke.Document._currentAccount && Spaarke.Document._currentAccount.tenantId) ||
+            Spaarke.Document.Config.msal.tenantId;
+
+        if (!tenantId) {
+            console.error("[Spaarke.Document] SendToIndex - No tenantId available from MSAL account");
+            await Xrm.Navigation.openAlertDialog({
+                text: "Unable to determine tenant ID. Please try the operation again.",
+                confirmButtonLabel: "OK"
+            });
+            return;
+        }
+
+        console.log("[Spaarke.Document] SendToIndex - Using Azure AD tenantId:", tenantId);
+
+        // Show progress
+        var progressMsg = documentIds.length === 1
+            ? "Sending document to search index..."
+            : "Sending " + documentIds.length + " documents to search index...";
+        Xrm.Utility.showProgressIndicator(progressMsg);
+
+        // Get access token
+        var token = await Spaarke.Document.getAccessToken();
+
+        // Call BFF API to send to index
+        var correlationId = Spaarke.Document.Utils.newGuid();
+        var response = await fetch(
+            Spaarke.Document.Config.bffApiUrl + "/api/ai/rag/send-to-index",
+            {
+                method: "POST",
+                headers: {
+                    "Authorization": "Bearer " + token,
+                    "X-Correlation-Id": correlationId,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    documentIds: documentIds,
+                    tenantId: tenantId
+                })
+            }
+        );
+
+        Xrm.Utility.closeProgressIndicator();
+
+        if (response.ok) {
+            var data = await response.json();
+            console.log("[Spaarke.Document] SendToIndex response:", data);
+
+            // Build result message
+            var resultMsg;
+            if (data.successCount === data.totalRequested) {
+                resultMsg = data.totalRequested === 1
+                    ? "Document successfully sent to search index."
+                    : data.totalRequested + " documents successfully sent to search index.";
+            } else if (data.successCount === 0) {
+                resultMsg = "Failed to index documents. Please try again.";
+                if (data.results && data.results.length > 0 && data.results[0].error) {
+                    resultMsg += "\n\nError: " + data.results[0].error;
+                }
+            } else {
+                resultMsg = data.successCount + " of " + data.totalRequested + " documents indexed successfully.";
+                if (data.failedCount > 0) {
+                    resultMsg += "\n" + data.failedCount + " document(s) failed.";
+                }
+            }
+
+            await Xrm.Navigation.openAlertDialog({
+                text: resultMsg,
+                confirmButtonLabel: "OK"
+            });
+
+            // Refresh form if in form context
+            if (!isGridContext && primaryControl && primaryControl.data) {
+                var docId = documentIds[0];
+                Spaarke.Document.refreshForm(primaryControl, docId);
+            } else if (isGridContext && primaryControl && primaryControl.refresh) {
+                // Refresh grid
+                primaryControl.refresh();
+            }
+
+        } else {
+            var errorData;
+            try {
+                errorData = await response.json();
+            } catch (e) {
+                errorData = { detail: "Unknown error occurred" };
+            }
+
+            var errorMessage = errorData.detail || errorData.title || "Failed to send document(s) to index";
+            await Xrm.Navigation.openErrorDialog({
+                message: errorMessage
+            });
+        }
+
+    } catch (error) {
+        console.error("[Spaarke.Document] SendToIndex error:", error);
+        Xrm.Utility.closeProgressIndicator();
+
+        await Xrm.Navigation.openErrorDialog({
+            message: "Failed to send to index: " + error.message
+        });
+    }
+};
+
+/**
+ * Enable rule for Send to Index button
+ * Always enabled (can index any document with a file)
+ * @param {object} [primaryControl] - Form or SelectedControl context
+ * @returns {boolean}
+ */
+Spaarke.Document.canSendToIndex = function(primaryControl) {
+    // Initialize on ribbon load
+    if (!Spaarke.Document.Config.bffApiUrl) {
+        Spaarke.Document.init();
+    }
+
+    try {
+        // For form context, check if document has a file
+        if (primaryControl && primaryControl.getAttribute) {
+            var hasFileAttr = primaryControl.getAttribute("sprk_hasfile");
+            if (hasFileAttr) {
+                var hasFile = hasFileAttr.getValue();
+                console.log("[Spaarke.Document] canSendToIndex - hasFile:", hasFile);
+                return hasFile === true;
+            }
+            // Fallback - check if there's a filename
+            var fileNameAttr = primaryControl.getAttribute("sprk_filename");
+            if (fileNameAttr) {
+                var fileName = fileNameAttr.getValue();
+                console.log("[Spaarke.Document] canSendToIndex - fileName:", fileName);
+                return !!fileName;
+            }
+        }
+
+        // For grid context, enable if any selection (we'll validate on click)
+        if (primaryControl && primaryControl.getGrid) {
+            var selectedRows = primaryControl.getGrid().getSelectedRows();
+            return selectedRows && selectedRows.getLength() > 0;
+        }
+    } catch (e) {
+        console.log("[Spaarke.Document] canSendToIndex error:", e);
+    }
+
+    // Default to enabled (for grids/subgrids where we can't easily check)
+    return true;
+};
+
+/**
+ * Selection count rule for Send to Index button on grid/subgrid
+ * Enables when 1 or more records are selected
+ * @param {object} selectedControl - SelectedControl (grid context)
+ * @returns {boolean}
+ */
+Spaarke.Document.hasSelection = function(selectedControl) {
+    try {
+        if (selectedControl && selectedControl.getGrid) {
+            var selectedRows = selectedControl.getGrid().getSelectedRows();
+            var hasSelection = selectedRows && selectedRows.getLength() > 0;
+            console.log("[Spaarke.Document] hasSelection:", hasSelection);
+            return hasSelection;
+        }
+    } catch (e) {
+        console.log("[Spaarke.Document] hasSelection error:", e);
+    }
+    return false;
+};
+
+// =============================================================================
 // MODULE EXPORTS
 // =============================================================================
 
 console.log("[Spaarke.Document] Operations module loaded v" + Spaarke.Document.Config.version);
 
 // v1.26.0 Changes:
-// - FIX: showChoiceDialog now uses window.top.document to escape iframe context
-// - Dataverse runs web resources in iframes, so document.body was wrong target
-// - All createElement and body references now use targetDoc (top window)
-// - Dialog now renders over the full page correctly
-// - Removed debug logging from v1.24.0/v1.25.0
+// - Added 10-record limit for manual Send to Index (front-end limit only)
+// - Added showReindexNotification() helper for user feedback on indexing operations
+// - Updated check-in success message to inform user about re-indexing
+// - Added Config.maxManualIndexRecords constant (backend has no limits for admin operations)
 
 // v1.23.0 Changes:
 // - CRITICAL FIX: Pre-fetch MSAL token at start of openInWeb/openInDesktop

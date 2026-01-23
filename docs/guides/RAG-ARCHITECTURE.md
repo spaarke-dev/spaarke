@@ -606,8 +606,9 @@ The Semantic Search UI provides **user-facing components** for searching and ind
 │  ├── Form (single document)                                     │
 │  └── Subgrid (multi-select)                                     │
 │                                                                 │
-│  sprk_DocumentOperations.js (v1.24.0)                          │
+│  sprk_DocumentOperations.js (v1.26.0)                          │
 │  └── sendToIndex() → POST /api/ai/rag/send-to-index            │
+│  └── 10-record limit per selection                             │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
                               │
@@ -680,20 +681,22 @@ The `SemanticSearchControl` is a PowerApps Component Framework (PCF) control tha
 
 Ribbon buttons enable users to manually index documents for semantic search directly from the Dataverse UI.
 
-**Solution**: `DocumentRibbons` (v1.3.0.0)
+**Solution**: `DocumentRibbons` (v1.4.0.0)
 **Location**: `infrastructure/dataverse/ribbon/DocumentRibbons/`
 
 #### Button Configurations
 
 | Button | Location | Selection | Description |
 |--------|----------|-----------|-------------|
-| Grid Button | Document grid command bar | Multi-select | Index selected documents |
+| Grid Button | Document grid command bar | Multi-select (max 10) | Index selected documents |
 | Form Button | Document form command bar | Single | Index current document |
-| Subgrid Button | Related documents subgrid | Multi-select | Index from subgrid |
+| Subgrid Button | Related documents subgrid | Multi-select (max 10) | Index from subgrid |
+
+> **⚠️ 10-Record Limit**: Manual "Send to Index" is limited to 10 documents per operation to ensure responsive UI and prevent timeout issues. For bulk indexing needs, use the Admin Bulk Index endpoints.
 
 #### JavaScript Web Resource
 
-**File**: `sprk_DocumentOperations.js` (v1.24.0)
+**File**: `sprk_DocumentOperations.js` (v1.26.0)
 **Location**: `infrastructure/dataverse/webresources/sprk_DocumentOperations.js`
 
 **Key Functions**:
@@ -775,6 +778,106 @@ The `/api/ai/rag/send-to-index` endpoint orchestrates document indexing from Dat
 | SemanticSearchControl | MSAL OBO token → BFF API |
 | Ribbon Button | Dataverse session → BFF API (OBO) |
 | Send to Index Endpoint | JWT + TenantAuthorizationFilter |
+
+### Automatic Re-indexing on Check-in
+
+> **Added in**: Semantic Search UI R2 (v1.26.0)
+
+Documents are **automatically re-indexed** when users check them in after editing. This ensures the search index stays current without requiring manual "Send to Index" actions.
+
+#### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Document Check-in Flow                        │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  User edits document in Office Online                            │
+│        │                                                         │
+│        ▼                                                         │
+│  POST /api/documents/{id}/checkin                                │
+│        │                                                         │
+│        ├─► 1. Release SharePoint lock (Graph API)               │
+│        │                                                         │
+│        ├─► 2. Create new version                                 │
+│        │                                                         │
+│        └─► 3. Enqueue re-index job (fire-and-forget)            │
+│                    │                                             │
+│                    ▼                                             │
+│            JobSubmissionService                                  │
+│                    │                                             │
+│                    ▼                                             │
+│            sdap-jobs queue (RagIndexing job)                     │
+│                    │                                             │
+│                    ▼                                             │
+│            RagIndexingJobHandler                                 │
+│            └── IndexFileAppOnlyAsync()                           │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### Configuration
+
+Automatic re-indexing is controlled via `ReindexingOptions` in `appsettings.json`:
+
+```json
+{
+  "Reindexing": {
+    "Enabled": true,
+    "TenantId": "a221a95e-6abc-4434-aecc-e48338a1b2f2",
+    "TriggerOnCheckin": true
+  }
+}
+```
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `Enabled` | `true` | Master switch for all automatic re-indexing |
+| `TenantId` | Required | **Azure AD tenant ID** for index routing. Must match PCF control and web resource tenant IDs |
+| `TriggerOnCheckin` | `true` | Whether check-in triggers re-indexing |
+
+> **⚠️ Important**: The `TenantId` must be the **Azure AD tenant ID** (e.g., `a221a95e-6abc-4434-aecc-e48338a1b2f2`), NOT the Dataverse organization ID. This ensures consistent index access across all components.
+
+#### Job Payload
+
+The check-in endpoint enqueues a `RagIndexingJobPayload`:
+
+```csharp
+new RagIndexingJobPayload
+{
+    TenantId = options.TenantId,        // Azure AD tenant ID
+    DriveId = fileInfo.DriveId,          // SharePoint Embedded drive
+    ItemId = fileInfo.ItemId,            // SharePoint Embedded item
+    FileName = fileInfo.FileName,        // For logging
+    DocumentId = documentId.ToString(),  // Dataverse document GUID
+    Source = "CheckinTrigger",           // Job source tracking
+    EnqueuedAt = DateTimeOffset.UtcNow   // Timestamp
+}
+```
+
+#### Behavior
+
+| Scenario | Behavior |
+|----------|----------|
+| Re-indexing enabled | Job enqueued after successful check-in, response includes `aiAnalysisTriggered: true` |
+| Re-indexing disabled | No job enqueued, response includes `aiAnalysisTriggered: false` |
+| TenantId not configured | Warning logged, no job enqueued |
+| Job enqueueing fails | Warning logged, check-in still succeeds (fire-and-forget) |
+
+#### Check-in Response
+
+The check-in response now includes re-indexing status:
+
+```json
+{
+  "success": true,
+  "documentId": "guid",
+  "newVersionNumber": "2.0",
+  "checkedInAt": "2026-01-23T12:00:00Z",
+  "aiAnalysisTriggered": true,
+  "correlationId": "..."
+}
+```
 
 ---
 
@@ -1232,8 +1335,8 @@ When the circuit is open, returns `503 Service Unavailable` with error code `ai_
 ---
 
 *Document created: 2025-12-29*
-*Updated: 2026-01-23 - Semantic Search UI R2 section added*
+*Updated: 2026-01-23 - Automatic re-indexing on check-in, 10-record limit for Send to Index*
 *AI Document Intelligence R3 - Phases 1-5 Complete*
 *RAG Pipeline R1 - Phase 1 Complete*
 *Semantic Search Foundation R1 - Complete (hybrid search API, entity scoping, AI Tool integration)*
-*Semantic Search UI R2 - In Progress (PCF control v1.0.15, Send to Index ribbon buttons, BFF endpoint)*
+*Semantic Search UI R2 - In Progress (PCF v1.0.15, Send to Index v1.26.0, automatic re-indexing on check-in)*
