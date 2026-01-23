@@ -1,7 +1,7 @@
 # Spaarke Office Add-ins Deployment Checklist
 
-> **Version**: 1.0
-> **Last Updated**: January 2026
+> **Version**: 1.1
+> **Last Updated**: January 22, 2026
 > **Purpose**: Pre-deployment verification for IT Administrators
 
 ---
@@ -108,8 +108,9 @@ pac security-role list --environment {env-id} | Select-String "Spaarke Office Ad
 - [ ] App registration exists: `Spaarke Office Add-in`
 - [ ] Client ID: `c1258e2d-1688-49d2-ac99-a7485ebd9995`
 - [ ] Redirect URIs configured:
-  - [ ] `brk-multihub://localhost` (NAA broker)
-  - [ ] `https://spe-office-addins-prod.azurestaticapps.net/taskpane.html` (fallback)
+  - [ ] `brk-multihub://localhost` (reserved for future NAA support)
+  - [ ] `https://spe-office-addins-prod.azurestaticapps.net/taskpane.html` (SPA redirect)
+  - [ ] `https://spe-office-addins-prod.azurestaticapps.net/auth-dialog.html` (Dialog API authentication)
 - [ ] API permissions added:
   - [ ] `api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation` (delegated)
   - [ ] `User.Read` (delegated)
@@ -180,6 +181,28 @@ pac security-role list --environment {env-id} | Select-String "Spaarke Office Ad
 - [ ] All resource IDs (resid) have matching definitions in Resources section
 - [ ] GUID in `<Id>` element is unique (different from other add-ins in tenant)
 
+#### Manifest Format Decision (V1 vs V2)
+
+**V1 (Current - XML Manifest)**: Use for all production deployments.
+
+| Aspect | Status |
+|--------|--------|
+| Manifest Format | XML (separate per Office host) |
+| Authentication | Dialog API (popup for initial sign-in) |
+| M365 Admin Support | Full support |
+| Stability | Production-proven |
+
+**V2 (Future - Unified Manifest)**: Not yet available for production.
+
+| Aspect | Status |
+|--------|--------|
+| Manifest Format | JSON (single file for Office + Teams) |
+| Authentication | NAA (Nested App Authentication) |
+| M365 Admin Support | Preview only |
+| Requirement | NAA must be GA (not yet as of Jan 2026) |
+
+**Current Recommendation**: ✅ Use XML manifests for V1 production deployment.
+
 ### 6. Security Review
 
 - [ ] Azure AD permissions are minimal required
@@ -194,7 +217,8 @@ pac security-role list --environment {env-id} | Select-String "Spaarke Office Ad
 #### Staging Environment
 - [ ] Add-in loads in test Outlook account
 - [ ] Add-in loads in test Word account
-- [ ] Authentication works (NAA primary, Dialog fallback)
+- [ ] Authentication works (Dialog API - popup appears on first sign-in)
+- [ ] Subsequent requests use cached token (no popup)
 - [ ] Save flow completes successfully
 - [ ] Search returns expected results
 - [ ] Share flow generates valid links
@@ -328,15 +352,15 @@ pac security-role list --environment {env-id} | Select-String "Spaarke Office Ad
 |---------|-------|-----------|
 | Infrastructure | 5 | /5 |
 | Dataverse | 18 | /18 |
-| Azure AD | 10 | /10 |
+| Azure AD | 11 | /11 |
 | BFF API | 7 | /7 |
-| Manifests | 8 | /8 |
+| Manifests | 9 | /9 |
 | Security | 6 | /6 |
-| Testing | 8 | /8 |
+| Testing | 9 | /9 |
 | Monitoring | 5 | /5 |
 | Documentation | 6 | /6 |
 | Rollback | 5 | /5 |
-| **Total** | **78** | **/78** |
+| **Total** | **81** | **/81** |
 
 **Checklist completed by**: ____________________
 **Date**: ____________________

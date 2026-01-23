@@ -49,6 +49,8 @@ class AuthService implements IAuthService {
   private msalInstance: IPublicClientApplication | null = null;
   private isNaaSupported: boolean = false;
   private currentAccount: AccountInfo | null = null;
+  private cachedAccessToken: string | null = null;
+  private tokenExpiresAt: number | null = null; // Unix timestamp in milliseconds
 
   async initialize(config: AuthConfig): Promise<void> {
     const mergedConfig = { ...AUTH_CONFIG, ...config };
@@ -100,18 +102,62 @@ class AuthService implements IAuthService {
 
     const scopes = [`api://${AUTH_CONFIG.bffApiClientId}/user_impersonation`];
 
-    try {
-      if (this.isNaaSupported) {
-        // NAA: Use popup with broker
-        const result = await this.msalInstance.acquireTokenPopup({
+    // When NAA is disabled, use Dialog API exclusively
+    // MSAL's acquireTokenSilent still tries NAA internally in Office context, so skip it
+    if (!this.isNaaSupported) {
+      // Check if we already have an authenticated account from a previous dialog session
+      if (this.currentAccount) {
+        console.log('[AuthService] Already authenticated via Dialog API, account:', this.currentAccount.username);
+        // Return a minimal result - the token will be fetched via getAccessToken when needed
+        return {
+          account: this.currentAccount,
+          accessToken: '',  // Token fetched separately via dialog
           scopes,
-        });
-        this.currentAccount = result.account;
-        return result;
-      } else {
-        // Dialog API fallback
-        return await this.signInWithDialog(scopes);
+          expiresOn: null,
+          tenantId: AUTH_CONFIG.tenantId,
+          uniqueId: this.currentAccount.localAccountId,
+          authority: `https://login.microsoftonline.com/${AUTH_CONFIG.tenantId}`,
+          idToken: '',
+          idTokenClaims: {},
+          fromCache: true,
+          tokenType: 'Bearer',
+          correlationId: '',
+        } as AuthenticationResult;
       }
+
+      // No cached account, open dialog for authentication
+      console.log('[AuthService] No cached account, opening auth dialog');
+      try {
+        return await this.signInWithDialog(scopes);
+      } catch (error) {
+        console.error('Sign in failed:', error);
+        return null;
+      }
+    }
+
+    // NAA path (currently disabled but kept for future use)
+    try {
+      // Try silent first with NAA
+      if (this.currentAccount) {
+        try {
+          console.log('[AuthService] Attempting silent token acquisition for cached account');
+          const result = await this.msalInstance.acquireTokenSilent({
+            scopes,
+            account: this.currentAccount,
+          });
+          console.log('[AuthService] Silent auth succeeded - no dialog needed');
+          return result;
+        } catch (silentError) {
+          console.log('[AuthService] Silent auth failed, falling back to interactive:', silentError);
+        }
+      }
+
+      // Interactive auth with NAA
+      const result = await this.msalInstance.acquireTokenPopup({
+        scopes,
+      });
+      this.currentAccount = result.account;
+      return result;
     } catch (error) {
       console.error('Sign in failed:', error);
       return null;
@@ -119,7 +165,19 @@ class AuthService implements IAuthService {
   }
 
   async signOut(): Promise<void> {
-    if (!this.msalInstance || !this.currentAccount) {
+    // Clear cached auth state
+    this.currentAccount = null;
+    this.cachedAccessToken = null;
+    this.tokenExpiresAt = null;
+
+    if (!this.isNaaSupported) {
+      // For Dialog API, just clear local state - no MSAL logout needed
+      console.log('[AuthService] Signed out (Dialog API mode)');
+      return;
+    }
+
+    // NAA path - use MSAL logout
+    if (!this.msalInstance) {
       return;
     }
 
@@ -127,7 +185,6 @@ class AuthService implements IAuthService {
       await this.msalInstance.logoutPopup({
         account: this.currentAccount,
       });
-      this.currentAccount = null;
     } catch (error) {
       console.error('Sign out failed:', error);
     }
@@ -138,7 +195,37 @@ class AuthService implements IAuthService {
   }
 
   async getAccessToken(scopes: string[]): Promise<string | null> {
-    if (!this.msalInstance || !this.currentAccount) {
+    if (!this.currentAccount) {
+      return null;
+    }
+
+    // When NAA is disabled, use cached token from dialog auth
+    if (!this.isNaaSupported) {
+      // Check if token is still valid (with 5 minute buffer for clock skew)
+      const now = Date.now();
+      const bufferMs = 5 * 60 * 1000; // 5 minutes
+      const isTokenValid = this.cachedAccessToken &&
+        this.tokenExpiresAt &&
+        (this.tokenExpiresAt - bufferMs) > now;
+
+      if (isTokenValid) {
+        console.log('[AuthService] Returning cached access token (expires in',
+          Math.round((this.tokenExpiresAt! - now) / 1000 / 60), 'minutes)');
+        return this.cachedAccessToken;
+      }
+
+      // Token expired or missing - need to re-authenticate via dialog
+      if (this.cachedAccessToken && this.tokenExpiresAt) {
+        console.log('[AuthService] Token expired, triggering re-authentication');
+      } else {
+        console.log('[AuthService] No cached token, triggering dialog auth');
+      }
+      const result = await this.signInWithDialog(scopes);
+      return result?.accessToken || null;
+    }
+
+    // NAA path
+    if (!this.msalInstance) {
       return null;
     }
 
@@ -168,21 +255,27 @@ class AuthService implements IAuthService {
   }
 
   private async checkNaaSupport(): Promise<boolean> {
-    // NAA is supported in Office.js 1.3+ and specific Office versions
-    try {
-      if (typeof Office !== 'undefined' && Office.context) {
-        // Check if running in a context that supports NAA
-        // NAA requires Office 2016 or later on Windows/Mac, or Office on the web
-        const hostInfo = Office.context.diagnostics;
-        if (hostInfo) {
-          // NAA is generally available in recent Office versions
-          // This is a simplified check - production code should be more thorough
-          return true;
-        }
-      }
-    } catch {
-      // Office.js not ready or NAA not supported
-    }
+    // NAA (Nested App Authentication) DISABLED
+    //
+    // NAA requires dynamic broker redirect URIs in the format: brk-{GUID}://auth
+    // The GUID is dynamically generated by the Office host at runtime and varies
+    // per session/host. This GUID cannot be pre-registered in Azure AD because:
+    //   1. It's not the app's client ID - it's generated by Office
+    //   2. Each Office host instance generates different GUIDs
+    //   3. Azure AD requires exact redirect URI matches
+    //
+    // Error when attempting NAA:
+    //   AADSTS700046: Invalid Reply Address. Reply Address must have scheme
+    //   brk-{dynamic-guid}:// and be of Single Page Application type.
+    //
+    // Using Dialog API fallback instead, which works reliably across all Office hosts.
+    // Dialog API opens a popup window for auth, which is slightly more intrusive
+    // but works universally without Azure AD configuration issues.
+    //
+    // To re-enable NAA in the future, Microsoft would need to provide a way to
+    // register wildcard broker URIs or use a fixed broker URI format.
+    console.log('[AuthService] NAA disabled - using Dialog API fallback');
+    console.log('[AuthService] Reason: NAA requires dynamic broker URIs that cannot be pre-registered in Azure AD');
     return false;
   }
 
@@ -204,20 +297,51 @@ class AuthService implements IAuthService {
 
           dialog.addEventHandler(
             Office.EventType.DialogMessageReceived,
-            (arg: { message?: string; error?: number }) => {
+            (arg: { message?: string | object; error?: number }) => {
+              console.log('[AuthService] Dialog message received:', arg);
               dialog.close();
 
               if (arg.message) {
                 try {
-                  const message = JSON.parse(arg.message);
+                  // Handle both string and object message formats
+                  // Outlook web returns object, desktop may return string
+                  const message = typeof arg.message === 'string'
+                    ? JSON.parse(arg.message)
+                    : arg.message;
+                  console.log('[AuthService] Parsed message:', message);
                   if (message.success) {
-                    // Token received from dialog
-                    this.currentAccount = message.account;
-                    resolve(message as AuthenticationResult);
+                    // Token received from dialog - construct proper AccountInfo
+                    this.currentAccount = {
+                      homeAccountId: message.account?.homeAccountId || '',
+                      environment: 'login.microsoftonline.com',
+                      tenantId: AUTH_CONFIG.tenantId,
+                      username: message.account?.username || '',
+                      localAccountId: message.account?.homeAccountId || '',
+                      name: message.account?.name,
+                    } as AccountInfo;
+                    // Cache the access token and expiration for later use
+                    this.cachedAccessToken = message.accessToken || null;
+                    // Parse expiration - message.expiresOn can be Date string or Unix timestamp
+                    if (message.expiresOn) {
+                      this.tokenExpiresAt = typeof message.expiresOn === 'number'
+                        ? message.expiresOn
+                        : new Date(message.expiresOn).getTime();
+                    } else {
+                      // Default to 1 hour from now if not provided
+                      this.tokenExpiresAt = Date.now() + (60 * 60 * 1000);
+                    }
+                    console.log('[AuthService] Account set:', this.currentAccount);
+                    console.log('[AuthService] Access token cached, expires at:',
+                      new Date(this.tokenExpiresAt).toLocaleTimeString());
+                    resolve({
+                      ...message,
+                      account: this.currentAccount,
+                    } as AuthenticationResult);
                   } else {
                     reject(new Error(message.error));
                   }
-                } catch {
+                } catch (e) {
+                  console.error('[AuthService] Parse error:', e);
                   reject(new Error('Failed to parse auth response'));
                 }
               }

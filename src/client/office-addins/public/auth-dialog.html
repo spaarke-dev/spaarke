@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Spaarke Authentication</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f3f2f1;
+        }
+        .container {
+            text-align: center;
+            padding: 40px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #e1e1e1;
+            border-top: 4px solid #0078d4;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 16px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        h2 { color: #323130; margin: 0 0 8px; }
+        p { color: #605e5c; margin: 0; }
+        .error { color: #d13438; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="spinner" id="spinner"></div>
+        <h2 id="status">Signing in...</h2>
+        <p id="message">Please wait while we authenticate you.</p>
+    </div>
+
+    <!-- Office.js for dialog messaging -->
+    <script src="https://appsforoffice.microsoft.com/lib/1.1/hosted/office.js"></script>
+
+    <!-- MSAL Browser -->
+    <script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
+
+    <script>
+        // Configuration - should match main app config
+        const msalConfig = {
+            auth: {
+                clientId: 'c1258e2d-1688-49d2-ac99-a7485ebd9995',
+                authority: 'https://login.microsoftonline.com/a221a95e-6abc-4434-aecc-e48338a1b2f2',
+                redirectUri: window.location.origin + '/auth-dialog.html'
+            },
+            cache: {
+                cacheLocation: 'sessionStorage'
+            }
+        };
+
+        const scopes = ['User.Read', 'api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation'];
+
+        function updateStatus(title, message, isError = false) {
+            document.getElementById('status').textContent = title;
+            document.getElementById('message').textContent = message;
+            if (isError) {
+                document.getElementById('message').classList.add('error');
+                document.getElementById('spinner').style.display = 'none';
+            }
+        }
+
+        function sendMessageToParent(message) {
+            console.log('[Auth Dialog] Sending message to parent:', message);
+
+            // Check if we're in browser testing mode (opened as popup with window.opener)
+            // In this case, use postMessage even if Office.js is loaded
+            const isBrowserTestMode = window.opener && !window.opener.closed;
+
+            if (isBrowserTestMode) {
+                console.log('[Auth Dialog] Browser test mode detected - using postMessage');
+                window.opener.postMessage(message, window.location.origin);
+                setTimeout(() => window.close(), 500);
+                return;
+            }
+
+            // Try Office dialog API for real Office environment
+            if (typeof Office !== 'undefined' && Office.context && Office.context.ui && Office.context.ui.messageParent) {
+                console.log('[Auth Dialog] Using Office.context.ui.messageParent');
+                Office.context.ui.messageParent(JSON.stringify(message));
+            } else {
+                console.log('[Auth Dialog] No valid communication method found');
+            }
+        }
+
+        async function handleAuth() {
+            try {
+                const msalInstance = new msal.PublicClientApplication(msalConfig);
+                await msalInstance.initialize();
+
+                // Check if this is a redirect response
+                const response = await msalInstance.handleRedirectPromise();
+
+                if (response) {
+                    // We have a response from redirect - send to parent
+                    updateStatus('Success!', 'Signed in successfully.');
+                    sendMessageToParent({
+                        success: true,
+                        accessToken: response.accessToken,
+                        expiresOn: response.expiresOn ? response.expiresOn.getTime() : null,
+                        account: {
+                            username: response.account?.username,
+                            name: response.account?.name,
+                            homeAccountId: response.account?.homeAccountId
+                        }
+                    });
+                } else {
+                    // No response - initiate login redirect
+                    updateStatus('Redirecting...', 'Opening Microsoft login...');
+                    await msalInstance.loginRedirect({
+                        scopes: scopes
+                    });
+                }
+            } catch (error) {
+                console.error('Auth error:', error);
+                updateStatus('Error', error.message || 'Authentication failed', true);
+                sendMessageToParent({
+                    success: false,
+                    error: error.message || 'Authentication failed'
+                });
+            }
+        }
+
+        // Initialize when page is ready
+        // Always try Office.onReady first (it works even outside Office, just resolves immediately)
+        // This ensures consistent behavior across all environments
+        if (typeof Office !== 'undefined' && Office.onReady) {
+            console.log('[Auth Dialog] Waiting for Office.onReady...');
+            Office.onReady(() => {
+                console.log('[Auth Dialog] Office.onReady complete, starting auth...');
+                handleAuth();
+            });
+        } else {
+            // Office.js not loaded - run immediately
+            console.log('[Auth Dialog] No Office.js, starting auth immediately...');
+            handleAuth();
+        }
+    </script>
+</body>
+</html>

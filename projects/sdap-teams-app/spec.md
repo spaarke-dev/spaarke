@@ -148,6 +148,49 @@ Build a Microsoft Teams app that positions Spaarke as the DMS front door within 
 
 ---
 
+## Authentication Approach
+
+### V1: Teams SSO + Existing Office Dialog API
+
+This project uses **Teams SSO** for Teams app authentication, which is distinct from the Office Add-in authentication approach:
+
+| Platform | Auth Method | Manifest Format | Token Flow |
+|----------|-------------|-----------------|------------|
+| **Teams App (this project)** | Teams SSO | Teams App Manifest (JSON) | Teams token → OBO → BFF API |
+| **Office Add-ins (Outlook/Word)** | Dialog API | XML Manifest | MSAL.js popup → Token → BFF API |
+
+**Teams SSO** uses the Teams SDK to acquire tokens silently, with fallback to consent popup. The token is then exchanged for a Spaarke session via `/teams/auth/exchange`.
+
+**Office Add-ins** (SDAP-office-integration project) currently use:
+- **Dialog API authentication**: MSAL.js opens a dialog window (`auth-dialog.html`) that completes the OAuth flow
+- **XML Manifest format**: Separate manifests per Office host (Outlook, Word)
+- **NAA (Nested App Authentication)**: Not yet GA; Dialog API is the production-standard approach
+
+### V2: Unified Manifest (Future)
+
+Microsoft is converging on a **Unified Manifest** (JSON format) that works across Office Add-ins and Teams:
+
+| Feature | XML Manifest (V1) | Unified Manifest (V2) |
+|---------|-------------------|----------------------|
+| Format | XML per host | Single JSON |
+| Platforms | Individual Office hosts | Office + Teams + Outlook.com |
+| Authentication | NAA or Dialog API | SSO-first with NAA |
+| Distribution | Separate sideload per host | Single package for all platforms |
+
+**When to adopt Unified Manifest:**
+- When NAA becomes GA (Microsoft roadmap TBD)
+- For new projects targeting Office + Teams together
+- When Microsoft deprecates XML manifest support
+
+**Current recommendation:**
+- V1 Teams app: Use Teams App Manifest (JSON, Teams-native)
+- V1 Office Add-ins: Use XML Manifest with Dialog API
+- V2+: Evaluate Unified Manifest for combined Office+Teams deployment
+
+See `docs/architecture/office-outlook-teams-integration-architecture.md` for detailed authentication architecture.
+
+---
+
 ## Architecture Overview
 
 ### Component Diagram

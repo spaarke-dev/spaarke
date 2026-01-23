@@ -1,6 +1,6 @@
 # Office Add-ins Integration Architecture
 
-> **Last Updated**: January 21, 2026
+> **Last Updated**: January 22, 2026
 > **Status**: Production Ready
 > **Project**: SDAP Office Integration
 
@@ -56,10 +56,10 @@ The SDAP Office Add-ins provide integration between Microsoft Office application
 │  │  └──────────────────────────────┬───────────────────────────────┘   │   │
 │  │                                 │                                    │   │
 │  │  ┌──────────────────────────────▼───────────────────────────────┐   │   │
-│  │  │                      AuthService (NAA)                        │   │   │
+│  │  │                 AuthService (Dialog API - V1)                 │   │   │
 │  │  │  ┌──────────────┐  ┌──────────────┐  ┌────────────────────┐  │   │   │
-│  │  │  │ MSAL.js 3.x  │  │  NAA Auth    │  │  Dialog Fallback   │  │   │   │
-│  │  │  │ (Browser)    │  │  Primary     │  │  (Legacy hosts)    │  │   │   │
+│  │  │  │ MSAL.js 3.x  │  │ Dialog API   │  │  Token Cache       │  │   │   │
+│  │  │  │ (auth-dialog)│  │ (Primary)    │  │  (Memory+Expiry)   │  │   │   │
 │  │  │  └──────────────┘  └──────────────┘  └────────────────────┘  │   │   │
 │  │  └──────────────────────────────────────────────────────────────┘   │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
@@ -322,25 +322,43 @@ interface IHostAdapter {
 
 ### 3. Authentication Service
 
-**Pattern**: Nested App Authentication (NAA) with Dialog API fallback
+**Pattern**: Dialog API (Primary) with NAA support (Future)
+
+> **V1 Status (January 2026)**: Dialog API is the production authentication method. NAA (Nested App Authentication) requires dynamic broker redirect URIs (`brk-{GUID}://`) that cannot be pre-registered in Azure AD, making it impractical for current deployments.
 
 ```typescript
 // AuthService.ts - Core authentication flow
 class AuthService {
-  // Primary: NAA (Nested App Authentication)
+  private isNaaSupported: boolean = false; // NAA disabled in V1
+  private cachedAccessToken: string | null = null;
+  private tokenExpiresAt: number | null = null;
+
+  // V1: Dialog API with token caching
   async getAccessToken(): Promise<string> {
-    if (this.supportsNAA()) {
-      return this.getNAAToken();
+    // Check cached token validity (with 5-minute buffer)
+    if (this.cachedAccessToken && this.tokenExpiresAt) {
+      const bufferMs = 5 * 60 * 1000;
+      if ((this.tokenExpiresAt - bufferMs) > Date.now()) {
+        return this.cachedAccessToken;
+      }
     }
+    // Token expired or missing - authenticate via dialog
     return this.getDialogToken();
   }
 
-  // Fallback: Dialog API for legacy hosts
+  // Dialog API: Opens popup for MSAL authentication
   private async getDialogToken(): Promise<string> {
-    // Opens popup for MSAL authentication
+    // Opens auth-dialog.html which handles MSAL.js redirect flow
+    // Returns token via Office.context.ui.messageParent()
   }
 }
 ```
+
+**Token Lifecycle**:
+- Tokens are cached in memory with expiration tracking
+- 5-minute buffer ensures tokens are refreshed before expiry
+- Re-authentication triggers automatically when token expires
+- Same browser session = silent auth (no login prompts)
 
 **Configuration**:
 ```typescript
@@ -349,9 +367,21 @@ const AUTH_CONFIG = {
   tenantId: 'a221a95e-6abc-4434-aecc-e48338a1b2f2',
   bffApiClientId: '1e40baad-e065-4aea-a8d4-4b7ab273458c',
   bffApiBaseUrl: 'https://spe-api-dev-67e2xz.azurewebsites.net',
-  redirectUri: 'brk-multihub://localhost',
+  redirectUri: 'brk-multihub://localhost', // For future NAA
+  fallbackRedirectUri: '', // Production SPA redirect
 };
 ```
+
+**Why Dialog API (Not NAA) in V1**:
+
+| Concern | NAA | Dialog API |
+|---------|-----|------------|
+| Azure AD Configuration | Requires dynamic `brk-{GUID}://` URIs that vary per Office host session | Standard SPA redirect URIs |
+| Microsoft GA Status | Not yet GA (as of Jan 2026) | Production-ready, used for years |
+| Cross-host Support | Varies by Office version | Works universally |
+| User Experience | Seamless (no popup) | Popup window for auth |
+
+**Future NAA Support**: When Microsoft provides a stable broker URI format (e.g., fixed `brk-multihub://`), NAA can be re-enabled for seamless authentication.
 
 ### 4. UI Components
 
@@ -520,7 +550,60 @@ Tracks async processing jobs following **ADR-004** job contract pattern.
 
 ## Authentication Flow
 
-### NAA Flow (Primary - Modern Hosts)
+### V1: Dialog API Flow (Primary - Production)
+
+The Dialog API is the current production authentication method, providing reliable cross-platform support:
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Add-in    │     │ Auth Dialog │     │  Azure AD   │     │   BFF API   │
+│ (TaskPane)  │     │(auth-dialog)│     │             │     │             │
+└──────┬──────┘     └──────┬──────┘     └──────┬──────┘     └──────┬──────┘
+       │                   │                   │                   │
+       │ 1. Check cached   │                   │                   │
+       │    token valid?   │                   │                   │
+       │    ──────────>    │                   │                   │
+       │                   │                   │                   │
+       │ If expired or missing:                │                   │
+       │ 2. displayDialogAsync                 │                   │
+       │──────────────────>│                   │                   │
+       │                   │                   │                   │
+       │                   │ 3. MSAL.js loginRedirect              │
+       │                   │──────────────────>│                   │
+       │                   │                   │                   │
+       │                   │ 4. User authenticates (popup)         │
+       │                   │<─────────────────>│                   │
+       │                   │                   │                   │
+       │                   │ 5. Token + expiresOn                  │
+       │                   │<──────────────────│                   │
+       │                   │                   │                   │
+       │ 6. messageParent  │                   │                   │
+       │<──────────────────│                   │                   │
+       │   (token cached)  │                   │                   │
+       │                   │                   │                   │
+       │ 7. API Call + Bearer Token            │                   │
+       │──────────────────────────────────────────────────────────>│
+       │                   │                   │                   │
+       │                   │                   │ 8. OBO Exchange   │
+       │                   │                   │<──────────────────│
+       │                   │                   │                   │
+       │                   │                   │ 9. Graph Token    │
+       │                   │                   │──────────────────>│
+       │                   │                   │                   │
+       │ 10. API Response                      │                   │
+       │<──────────────────────────────────────────────────────────│
+```
+
+**Key V1 Flow Characteristics**:
+- Token cached in memory with expiration timestamp
+- 5-minute buffer ensures proactive refresh
+- Same browser session = token reuse (no popup)
+- Dialog only opens when token missing or expired
+- Works across all Office hosts and versions
+
+### Future: NAA Flow (Nested App Authentication)
+
+NAA provides seamless authentication without popups, but requires Azure AD configuration changes not yet available:
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
@@ -528,40 +611,22 @@ Tracks async processing jobs following **ADR-004** job contract pattern.
 │  (MSAL.js)  │     │   Host      │     │             │     │             │
 └──────┬──────┘     └──────┬──────┘     └──────┬──────┘     └──────┬──────┘
        │                   │                   │                   │
-       │ 1. getAccessToken │                   │                   │
+       │ 1. acquireTokenSilent                 │                   │
        │──────────────────>│                   │                   │
-       │                   │                   │                   │
-       │                   │ 2. Token Request  │                   │
+       │                   │ 2. Broker request │                   │
        │                   │──────────────────>│                   │
+       │                   │ 3. Token          │                   │
+       │<──────────────────│<──────────────────│                   │
        │                   │                   │                   │
-       │                   │ 3. Access Token   │                   │
-       │                   │<──────────────────│                   │
-       │                   │                   │                   │
-       │ 4. Token (nested) │                   │                   │
-       │<──────────────────│                   │                   │
-       │                   │                   │                   │
-       │ 5. API Call + Bearer Token            │                   │
+       │ 4. API Call + Bearer Token            │                   │
        │──────────────────────────────────────────────────────────>│
-       │                   │                   │                   │
-       │                   │                   │ 6. OBO Exchange   │
-       │                   │                   │<──────────────────│
-       │                   │                   │                   │
-       │                   │                   │ 7. Graph Token    │
-       │                   │                   │──────────────────>│
-       │                   │                   │                   │
-       │ 8. API Response                       │                   │
-       │<──────────────────────────────────────────────────────────│
 ```
 
-### Dialog Flow (Fallback - Legacy Hosts)
-
-Used when NAA is not supported (older Office versions):
-
-1. Add-in opens popup dialog
-2. Dialog loads MSAL.js authentication page
-3. User authenticates in popup
-4. Token passed back to add-in via `Office.context.ui.messageParent()`
-5. Add-in uses token for API calls
+**NAA Blockers (as of January 2026)**:
+- Requires dynamic broker URIs: `brk-{GUID}://` where GUID is generated per Office session
+- These URIs cannot be pre-registered in Azure AD
+- Error: `AADSTS700046: Invalid Reply Address`
+- Microsoft has not yet provided a stable `brk-multihub://` URI for registration
 
 ---
 
@@ -661,12 +726,112 @@ npm run build
 
 ---
 
+## Manifest Format Strategy
+
+### V1: XML Manifest (Current Production)
+
+The current V1 implementation uses **XML manifests** for Office Add-ins:
+
+| Host | Manifest Type | Format | Location |
+|------|--------------|--------|----------|
+| Outlook | MailApp | XML | `outlook/manifest-working.xml` |
+| Word | TaskPaneApp | XML | `word/manifest-working.xml` |
+
+**Why XML Manifest for V1**:
+- Production-proven format used for years
+- Full M365 Admin Center support
+- Works with Dialog API authentication
+- No dependency on NAA or broker URIs
+- Widely documented with clear validation rules
+
+### V2: Unified Manifest (Future - Office + Teams)
+
+Microsoft is developing a **Unified Manifest** (JSON format) that works across platforms:
+
+| Feature | XML Manifest (V1) | Unified Manifest (V2) |
+|---------|-------------------|----------------------|
+| **Format** | XML per Office host | Single JSON file |
+| **Platforms** | Individual Office apps | Office + Teams + Outlook.com |
+| **Authentication** | Dialog API or NAA | SSO-first with NAA |
+| **Distribution** | Separate sideload per host | Single package deployment |
+| **Teams Integration** | Separate Teams app | Unified with Office Add-in |
+| **Status** | Production GA | Preview (as of Jan 2026) |
+
+**Unified Manifest Structure Preview**:
+```json
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/teams/vDevPreview/MicrosoftTeams.schema.json",
+  "manifestVersion": "devPreview",
+  "id": "{app-guid}",
+  "version": "1.0.0",
+  "name": {
+    "short": "Spaarke",
+    "full": "Spaarke Document Access Platform"
+  },
+  "developer": {
+    "name": "Spaarke",
+    "websiteUrl": "https://spaarke.com"
+  },
+  "extensions": [
+    {
+      "requirements": {
+        "capabilities": [{ "name": "Mailbox", "minVersion": "1.5" }]
+      },
+      "runtimes": [...],
+      "ribbons": [...]
+    }
+  ],
+  "webApplicationInfo": {
+    "id": "{client-id}",
+    "resource": "api://{domain}/{client-id}"
+  }
+}
+```
+
+### Migration Path: V1 → V2
+
+| Phase | Timeline | Action |
+|-------|----------|--------|
+| **V1 (Current)** | Now - 2026 | Use XML manifests with Dialog API |
+| **V2 Preparation** | When NAA GA | Test Unified Manifest in dev environment |
+| **V2 Migration** | Post-NAA GA | Convert to Unified Manifest for combined Office+Teams deployment |
+| **Legacy Support** | Ongoing | Maintain XML manifests for customers not on latest Office |
+
+**When to Migrate to Unified Manifest**:
+- ✅ NAA becomes GA with stable broker URI format
+- ✅ Microsoft deprecates XML manifest support (not announced)
+- ✅ Need unified Office + Teams deployment
+- ✅ Customer has latest Office 365 versions
+
+**When to Stay on XML Manifest**:
+- ❌ NAA not yet GA
+- ❌ Need to support older Office versions
+- ❌ Separate Office and Teams apps acceptable
+- ❌ Production stability priority
+
+### SDAP Teams App (Project 2/3)
+
+The SDAP Teams App uses a separate **Teams App Manifest** (JSON, Teams-native) since it targets Teams-specific surfaces:
+
+| Surface | Platform | Manifest |
+|---------|----------|----------|
+| Personal App | Teams | Teams App Manifest |
+| Configurable Tab | Teams | Teams App Manifest |
+| Messaging Extension | Teams | Teams App Manifest |
+| Message Action | Teams | Teams App Manifest |
+
+This will merge with the Office Add-in manifest when Unified Manifest becomes production-ready.
+
+---
+
 ## Related Documentation
 
 - [spec.md](../../projects/sdap-office-integration/spec.md) - Full project specification
 - [ADR-021](../../.claude/adr/ADR-021-fluent-ui-v9-design-system.md) - Fluent UI v9 requirements
 - [PCF Development Guide](../guides/PCF-V9-PACKAGING.md) - Shared component patterns
 - [Auth Standards](../standards/auth-standards.md) - Authentication patterns
+- [Office Add-ins Admin Guide](../guides/office-addins-admin-guide.md) - Deployment and administration
+- [Office Add-ins Deployment Checklist](../guides/office-addins-deployment-checklist.md) - Pre-deployment validation
 
 ---
 
@@ -674,4 +839,5 @@ npm run build
 
 | Date | Author | Changes |
 |------|--------|---------|
-| January 2026 | AI-Assisted | Initial architecture documentation |
+| January 22, 2026 | AI-Assisted | Updated auth to Dialog API primary; added Manifest Format Strategy section |
+| January 21, 2026 | AI-Assisted | Initial architecture documentation |

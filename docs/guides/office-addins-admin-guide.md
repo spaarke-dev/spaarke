@@ -1,7 +1,7 @@
 # Spaarke Office Add-ins Administrator Guide
 
-> **Version**: 1.0
-> **Last Updated**: January 2026
+> **Version**: 1.1
+> **Last Updated**: January 22, 2026
 > **Audience**: IT Administrators, System Administrators, DevOps Engineers
 
 ---
@@ -70,7 +70,7 @@ The Spaarke Office Add-ins enable users to save emails, attachments, and documen
 Users (Outlook/Word)
          |
          | Office Add-in (Task Pane)
-         | Nested App Authentication (NAA)
+         | Dialog API Authentication (V1)
          |
          v
 +---------------------------+
@@ -162,7 +162,9 @@ For Outlook Web and Word Web:
 
 ### 4.1 Office Add-in App Registration
 
-The Office add-in uses a public client (SPA) registration for Nested App Authentication (NAA).
+The Office add-in uses a public client (SPA) registration with Dialog API authentication.
+
+> **V1 Authentication Status (January 2026)**: The add-in uses **Dialog API** for authentication. NAA (Nested App Authentication) is not yet GA and requires dynamic broker redirect URIs that cannot be pre-registered in Azure AD.
 
 | Property | Value |
 |----------|-------|
@@ -175,8 +177,9 @@ The Office add-in uses a public client (SPA) registration for Nested App Authent
 
 | URI | Purpose |
 |-----|---------|
-| `brk-multihub://localhost` | NAA broker (required for NAA) |
-| `https://spe-office-addins-prod.azurestaticapps.net/taskpane.html` | Dialog API fallback |
+| `brk-multihub://localhost` | Reserved for future NAA support |
+| `https://spe-office-addins-prod.azurestaticapps.net/taskpane.html` | Production SPA redirect |
+| `https://spe-office-addins-prod.azurestaticapps.net/auth-dialog.html` | Dialog API authentication page |
 
 #### API Permissions (Delegated)
 
@@ -313,6 +316,37 @@ Before uploading any manifest to M365 Admin Center:
 
 For detailed manifest structure, see [Office Add-ins Architecture](../architecture/office-outlook-teams-integration-architecture.md#manifest-format-requirements).
 
+### Manifest Format Strategy (V1 vs V2)
+
+#### Current: XML Manifest (V1 Production)
+
+The Spaarke Office Add-ins use **XML manifests** for production deployment:
+
+| Benefit | Description |
+|---------|-------------|
+| **Production Proven** | XML format has been stable for years |
+| **M365 Admin Support** | Full support in M365 Admin Center |
+| **Dialog API Compatible** | Works with current authentication approach |
+| **Wide Office Support** | Compatible with all supported Office versions |
+
+#### Future: Unified Manifest (V2)
+
+Microsoft is developing a **Unified Manifest** (JSON format) that will work across Office + Teams:
+
+| Feature | XML Manifest (Current) | Unified Manifest (Future) |
+|---------|------------------------|---------------------------|
+| Format | XML per Office host | Single JSON file |
+| Platforms | Individual Office apps | Office + Teams + Outlook.com |
+| Authentication | Dialog API | SSO-first with NAA |
+| Distribution | Separate per host | Single package |
+
+**Migration Timing**: Unified Manifest will be considered when:
+- NAA becomes GA with stable broker URI format
+- Microsoft provides migration tooling
+- Production customer testing confirms stability
+
+**No Action Required Now**: Continue using XML manifests for all production deployments.
+
 ### 5.4 Pilot Deployment (Recommended)
 
 For initial rollout, deploy to a pilot group first:
@@ -412,20 +446,33 @@ Blocked files receive error code `OFFICE_006`.
 
 ### 7.1 Authentication Architecture
 
-The add-ins use **Nested App Authentication (NAA)**, the Microsoft-recommended pattern for Office Add-ins:
+The add-ins use **Dialog API Authentication** (V1), the production-standard approach for Office Add-ins:
 
-1. **Add-in obtains token**: Using MSAL.js 3.x `createNestablePublicClientApplication()`
-2. **Silent acquisition first**: Token retrieved from cache if valid
-3. **Interactive fallback**: Popup via Office Dialog API if silent fails
-4. **Token validated by BFF API**: Azure AD token validation
-5. **OBO for downstream calls**: BFF uses On-Behalf-Of for Graph/SPE calls
+1. **Check cached token**: AuthService checks if a valid cached token exists (with 5-minute expiry buffer)
+2. **Open dialog if needed**: If no valid token, opens `auth-dialog.html` via `Office.context.ui.displayDialogAsync()`
+3. **MSAL.js redirect flow**: Dialog handles OAuth redirect via MSAL.js 3.x
+4. **Token returned to parent**: Token + expiration sent via `Office.context.ui.messageParent()`
+5. **Token cached in memory**: Token cached with expiration for subsequent requests
+6. **OBO for downstream calls**: BFF uses On-Behalf-Of for Graph/SPE calls
+
+**Why Dialog API (Not NAA)**:
+| Aspect | NAA | Dialog API (Current) |
+|--------|-----|----------------------|
+| Azure AD Configuration | Requires dynamic `brk-{GUID}://` URIs | Standard SPA redirect URIs |
+| Microsoft GA Status | Not yet GA | Production-ready |
+| Cross-host Support | Varies by Office version | Works universally |
+| User Experience | Seamless | Popup for initial auth |
+| Token Caching | MSAL managed | AuthService managed |
+
+**Same-Session Behavior**: Once authenticated, users won't see the popup again in the same browser session unless the token expires.
 
 ### 7.2 Token Security
 
 | Aspect | Implementation |
 |--------|----------------|
-| Token storage | Browser localStorage (MSAL default) |
-| Token lifetime | 1 hour (access token), 24 hours (refresh token) |
+| Token storage | Memory only (AuthService cache) |
+| Token lifetime | 1 hour (access token) |
+| Expiry buffer | 5 minutes before expiry triggers re-auth |
 | Audience validation | BFF API validates `aud` claim |
 | Issuer validation | BFF API validates `iss` claim |
 
@@ -585,9 +632,10 @@ For detailed monitoring procedures, see the [Monitoring Runbook](../../projects/
 | Symptom | Cause | Resolution |
 |---------|-------|------------|
 | Sign-in popup blocked | Browser popup blocker | Allow popups for add-in domain |
-| "Invalid token" error | Token expired | User signs in again |
+| Sign-in popup appears every time | Token not caching | Check browser allows sessionStorage |
+| "Invalid token" error | Token expired | User signs in again (normal behavior) |
 | "Access denied" error | Missing permissions | Verify app registration permissions |
-| NAA not working | Unsupported client | Falls back to Dialog API automatically |
+| AADSTS700046 error | NAA broker URI not registered | Expected - add-in uses Dialog API, not NAA |
 
 #### Task Pane Issues
 
@@ -850,7 +898,9 @@ az webapp restart --name spe-api-prod-* --resource-group rg-spaarke-prod-westus2
 
 | Term | Definition |
 |------|------------|
-| **NAA** | Nested App Authentication - Microsoft's recommended auth pattern for Office Add-ins |
+| **Dialog API** | Office.js Dialog API - Opens popup window for authentication; current V1 production method |
+| **NAA** | Nested App Authentication - Future auth pattern for Office Add-ins; not yet GA as of Jan 2026 |
+| **Unified Manifest** | Single JSON manifest format for Office + Teams apps; coming in future versions |
 | **SSE** | Server-Sent Events - Real-time updates for job status |
 | **SPE** | SharePoint Embedded - Document storage platform |
 | **OBO** | On-Behalf-Of flow - Azure AD token exchange |
@@ -863,6 +913,7 @@ az webapp restart --name spe-api-prod-* --resource-group rg-spaarke-prod-westus2
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 1.1 | January 22, 2026 | AI-Assisted | Updated auth to Dialog API; added Unified Manifest section |
 | 1.0 | January 2026 | Spaarke Team | Initial release |
 
 ---
