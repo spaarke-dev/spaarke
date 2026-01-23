@@ -255,6 +255,22 @@ export const App: React.FC<AppProps> = ({
             onComplete={(docId, docUrl) => {
               console.log('Save complete:', docId, docUrl);
             }}
+            onQuickCreate={(entityType, searchQuery) => {
+              // Quick Create - opens Dataverse form in new window
+              const baseUrl = 'https://spaarkedev1.crm.dynamics.com';
+              const entityMap: Record<string, string> = {
+                Matter: 'sprk_matter',
+                Project: 'sprk_project',
+                Account: 'account',
+                Contact: 'contact',
+                Invoice: 'invoice',
+              };
+              const logicalName = entityMap[entityType] || entityType.toLowerCase();
+              // Open quick create form in Dataverse
+              const createUrl = `${baseUrl}/main.aspx?etn=${logicalName}&pagetype=entityrecord&cmdbar=false&navbar=off`;
+              window.open(createUrl, '_blank', 'width=600,height=700');
+              console.log('Quick create:', entityType, searchQuery);
+            }}
           />
         )}
 
