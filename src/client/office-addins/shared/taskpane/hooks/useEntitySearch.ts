@@ -227,8 +227,8 @@ export function useEntitySearch(options: UseEntitySearchOptions = {}): UseEntity
     minChars = 2,
     maxResults = 20,
     initialTypeFilter = [],
-    apiBaseUrl: _apiBaseUrl,
-    getAccessToken: _getAccessToken,
+    apiBaseUrl,
+    getAccessToken,
   } = options;
 
   // State
@@ -273,20 +273,54 @@ export function useEntitySearch(options: UseEntitySearchOptions = {}): UseEntity
       setError(null);
 
       try {
-        // TODO: Replace with actual API call when available
-        // const response = await fetch(
-        //   `${apiBaseUrl}/office/search/entities?q=${encodeURIComponent(searchQuery)}&type=${filter.join(',')}&limit=${maxResults}`,
-        //   {
-        //     headers: { Authorization: `Bearer ${await getAccessToken()}` },
-        //     signal: abortControllerRef.current.signal,
-        //   }
-        // );
-        // const data = await response.json();
+        // Use real API if apiBaseUrl and getAccessToken are provided
+        if (apiBaseUrl && getAccessToken) {
+          const token = await getAccessToken();
+          const typeParam = filter.length > 0 ? `&type=${filter.join(',')}` : '';
 
-        const data = await mockSearchEntities(searchQuery, filter, maxResults);
-        setResults(data.results);
-        setTotalCount(data.totalCount);
-        setHasMore(data.hasMore);
+          const response = await fetch(
+            `${apiBaseUrl}/office/search/entities?q=${encodeURIComponent(searchQuery)}${typeParam}&top=${maxResults}`,
+            {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              },
+              signal: abortControllerRef.current.signal,
+            }
+          );
+
+          if (!response.ok) {
+            throw new Error(`Search failed: ${response.status} ${response.statusText}`);
+          }
+
+          const data = await response.json();
+
+          // Map API response to EntitySearchResult format
+          const mappedResults: EntitySearchResult[] = (data.results || []).map((item: {
+            id: string;
+            entityType: string;
+            logicalName: string;
+            name: string;
+            displayInfo?: string;
+          }) => ({
+            id: item.id,
+            entityType: item.entityType as EntityType,
+            logicalName: item.logicalName,
+            name: item.name,
+            displayInfo: item.displayInfo,
+          }));
+
+          setResults(mappedResults);
+          setTotalCount(data.totalCount || mappedResults.length);
+          setHasMore(data.hasMore || false);
+        } else {
+          // Fall back to mock data if API is not configured
+          console.warn('[useEntitySearch] API not configured, using mock data');
+          const data = await mockSearchEntities(searchQuery, filter, maxResults);
+          setResults(data.results);
+          setTotalCount(data.totalCount);
+          setHasMore(data.hasMore);
+        }
       } catch (err) {
         if (err instanceof Error && err.name === 'AbortError') {
           // Request was cancelled, ignore
@@ -300,7 +334,7 @@ export function useEntitySearch(options: UseEntitySearchOptions = {}): UseEntity
         setIsLoading(false);
       }
     },
-    [minChars, maxResults]
+    [minChars, maxResults, apiBaseUrl, getAccessToken]
   );
 
   // Debounced search trigger

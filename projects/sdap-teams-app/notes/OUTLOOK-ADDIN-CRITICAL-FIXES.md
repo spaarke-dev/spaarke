@@ -13,9 +13,9 @@
 |---|-------|----------|--------|--------------|
 | 1 | CORS error on Save | **Critical** | **COMPLETED** | Azure App Service config |
 | 2 | Login required every time | **High** | **COMPLETED** | AuthService.ts |
-| 3 | Pin add-in pane | **Medium** | **COMPLETED** | manifest-*.xml |
+| 3 | Pin add-in pane | **Medium** | **COMPLETED** | manifest-working.xml v1.0.14.0 (nested V1.0/V1.1) |
 | 4 | Drag resize pane | **Low** | Deferred | Office limitation |
-| 5 | Associate with not working | **High** | Pending | useEntitySearch.ts, BFF API |
+| 5 | Associate with not working | **High** | **COMPLETED** | useEntitySearch.ts, SaveFlow.tsx |
 | 6 | Create new record | **Medium** | Pending | New component + API |
 
 ---
@@ -106,130 +106,120 @@ npm run build
 User wants to keep the add-in pane open while moving between emails without manually reopening it.
 
 ### Root Cause
-The manifest didn't include the `SupportsPinning` attribute.
+The manifest didn't include the `SupportsPinning` attribute and required a **nested** VersionOverrides structure.
 
 ### Fix Applied (2026-01-23)
 
-**Changes made to manifest-working.xml and manifest-dev.xml:**
+**Key insight from Microsoft documentation:**
+> Your manifest must include VersionOverrides elements for **both v1.0 and v1.1 versions** (nested).
 
-1. Updated Mailbox requirement from 1.1/1.3 to **1.5** (required for SupportsPinning)
-2. Added `<SupportsPinning>true</SupportsPinning>` to **both** Action elements:
-   - MessageReadCommandSurface Action
-   - MessageComposeCommandSurface Action
+Previous attempts failed because we were **replacing** V1.0 with V1.1 instead of **nesting** them.
 
-**Example:**
+**Working structure (v1.0.14.0):**
 ```xml
-<Action xsi:type="ShowTaskpane">
-  <SourceLocation resid="Taskpane.Url"/>
-  <SupportsPinning>true</SupportsPinning>
-</Action>
+<VersionOverrides xmlns="..." xsi:type="VersionOverridesV1_0">
+  <!-- V1.0 content for older clients (no SupportsPinning) -->
+  ...
+
+  <!-- Nested V1.1 for newer clients WITH SupportsPinning -->
+  <VersionOverrides xmlns=".../1.1" xsi:type="VersionOverridesV1_1">
+    <Action xsi:type="ShowTaskpane">
+      <SourceLocation resid="Taskpane.Url"/>
+      <SupportsPinning>true</SupportsPinning>
+    </Action>
+  </VersionOverrides>
+</VersionOverrides>
 ```
 
-### Files Modified
-- `src/client/office-addins/outlook/manifest-working.xml`
-- `src/client/office-addins/outlook/manifest-dev.xml`
+**Critical details:**
+- Outer V1.0 provides backward compatibility
+- Nested V1.1 requires Mailbox 1.5 and includes SupportsPinning
+- V1.1 elements need unique IDs (e.g., `msgReadCmdGroupV11`)
 
-### Deployment Required
-User must re-sideload the updated manifest for the pin feature to appear.
+### Word Add-in Note
+**SupportsPinning is Outlook-specific** - it does not apply to Word/Excel/PowerPoint add-ins.
+
+### Files Modified
+- `src/client/office-addins/outlook/manifest-working.xml` (v1.0.14.0)
 
 ### Verification
-1. Sideload the updated manifest in Outlook
-2. Open the add-in task pane
-3. A "pin" icon should appear in the task pane header
-4. Click pin to keep the pane open when navigating between emails
+1. ✅ Sideload manifest-working.xml v1.0.14.0
+2. ✅ Add-in installs successfully
+3. ✅ Pin icon appears in task pane header
+4. ✅ Pane stays open when navigating between emails
 
 ### Documentation
 - [Microsoft: Pin a task pane](https://learn.microsoft.com/en-us/office/dev/add-ins/outlook/pinnable-taskpane)
+- [GitHub: office-js-docs-pr/pinnable-taskpane.md](https://github.com/OfficeDev/office-js-docs-pr/blob/main/docs/outlook/pinnable-taskpane.md)
 
 ---
 
-## Issue 4: Drag Resize Pane (Deferred)
+## Issue 4: Drag Resize Pane (Not Applicable)
 
 ### Symptom
 User cannot drag to resize the add-in pane width.
 
 ### Analysis
-Task pane width resizing is controlled by Office, not the add-in. The user should be able to drag the left edge of the task pane to resize it - this is Office's native behavior.
+**Draggable width is NOT possible in Outlook add-ins** - this is an Outlook platform limitation.
 
-### Possible Causes
-- Office version/build differences
-- Outlook Web vs Desktop differences
-- CSS issues preventing proper content display
+However, draggable pane width **IS available** out of the box for other Office apps (e.g., Word add-in task panes can be resized).
 
-### Recommendation
-- This is an **Office platform behavior**, not controllable by the add-in
-- Focus on responsive CSS so content adapts to different pane widths
-- If critical, file feedback with Microsoft
+### Conclusion
+This is expected behavior for Outlook and cannot be changed by the add-in. No fix required.
 
-### Status: Deferred
-Document as Office limitation. Investigate further only if user can provide specific reproduction steps showing it worked in a previous version.
+### Status: Not Applicable (Outlook limitation)
 
 ---
 
-## Issue 5: "Associate with" Not Working (Pending)
+## Issue 5: "Associate with" Not Working (COMPLETED)
 
 ### Symptom
 The "Associate with" entity picker doesn't return results when searching.
 
 ### Root Cause
-The `useEntitySearch` hook uses **mock data** instead of calling the actual API:
+The `useEntitySearch` hook was using **mock data** instead of calling the actual BFF API.
 
-```typescript
-// src/client/office-addins/shared/taskpane/hooks/useEntitySearch.ts (line 286)
-const data = await mockSearchEntities(searchQuery, filter, maxResults);  // ← MOCK!
-```
+### Fix Applied (2026-01-23)
 
-### Fix Required
+**Changes made:**
 
-**Step 1: Implement actual API call in useEntitySearch.ts**
+1. **useEntitySearch.ts** - Updated `performSearch` to call real API when `apiBaseUrl` and `getAccessToken` are provided:
+   ```typescript
+   if (apiBaseUrl && getAccessToken) {
+     const token = await getAccessToken();
+     const response = await fetch(
+       `${apiBaseUrl}/office/search/entities?q=${encodeURIComponent(searchQuery)}&type=${filter.join(',')}&top=${maxResults}`,
+       { headers: { 'Authorization': `Bearer ${token}` } }
+     );
+     // ... process response
+   } else {
+     // Fallback to mock data if API not configured
+     console.warn('[useEntitySearch] API not configured, using mock data');
+   }
+   ```
 
-Replace `mockSearchEntities` call with real fetch:
+2. **SaveFlow.tsx** - Pass `apiBaseUrl` and `getAccessToken` to EntityPicker:
+   ```tsx
+   <EntityPicker
+     searchOptions={{
+       apiBaseUrl,
+       getAccessToken,
+     }}
+   />
+   ```
 
-```typescript
-const performSearch = useCallback(
-  async (searchQuery: string, filter: EntityType[]) => {
-    // ... validation ...
-    try {
-      const token = await getAccessToken();
-      const typeParam = filter.length > 0 ? `&types=${filter.join(',')}` : '';
+### Files Modified
+- `src/client/office-addins/shared/taskpane/hooks/useEntitySearch.ts`
+- `src/client/office-addins/shared/taskpane/components/SaveFlow.tsx`
 
-      const response = await fetch(
-        `${apiBaseUrl}/office/search/entities?q=${encodeURIComponent(searchQuery)}${typeParam}&limit=${maxResults}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          signal: abortControllerRef.current.signal,
-        }
-      );
+### API Endpoint
+BFF already has `GET /office/search/entities` endpoint at `OfficeEndpoints.cs:692`
 
-      if (!response.ok) throw new Error(`Search failed: ${response.status}`);
-
-      const data = await response.json();
-      setResults(data.results);
-      setTotalCount(data.totalCount);
-      setHasMore(data.hasMore);
-    } catch (err) {
-      // ... error handling ...
-    }
-  },
-  [apiBaseUrl, getAccessToken, minChars, maxResults]
-);
-```
-
-**Step 2: Verify/Create BFF API endpoint**
-
-Check if `/office/search/entities` endpoint exists. If not, create it in Program.cs.
-
-**Step 3: Pass access token getter to hook**
-
-Update hook initialization to include `getAccessToken` and `apiBaseUrl`.
-
-### Files to Modify
-- `src/client/office-addins/shared/taskpane/hooks/useEntitySearch.ts` - Replace mock with API call
-- `src/server/api/Sprk.Bff.Api/` - Verify/create endpoint
-- `src/client/office-addins/shared/taskpane/components/SaveFlow.tsx` - Pass options to hook
+### Verification
+1. Build and deploy the Office Add-in
+2. Sign in to the add-in
+3. Type 2+ characters in the "Associate With" search box
+4. Should see real Dataverse entities (Matters, Projects, Accounts, Contacts)
 
 ---
 

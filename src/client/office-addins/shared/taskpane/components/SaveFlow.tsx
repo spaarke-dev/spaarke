@@ -633,6 +633,10 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           disabled={isSaving}
           required={false}
           label="Associate With (optional)"
+          searchOptions={{
+            apiBaseUrl,
+            getAccessToken,
+          }}
         />
       </div>
 
