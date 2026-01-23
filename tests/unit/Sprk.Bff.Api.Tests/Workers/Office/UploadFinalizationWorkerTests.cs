@@ -26,6 +26,7 @@ public class UploadFinalizationWorkerTests
     private readonly Mock<IDistributedCache> _cacheMock;
     private readonly Mock<ServiceBusClient> _serviceBusClientMock;
     private readonly Mock<IServiceScopeFactory> _scopeFactoryMock;
+    private readonly Mock<Spaarke.Dataverse.IDataverseService> _dataverseServiceMock;
     private readonly ServiceBusOptions _serviceBusOptions;
 
     public UploadFinalizationWorkerTests()
@@ -35,6 +36,7 @@ public class UploadFinalizationWorkerTests
         _cacheMock = new Mock<IDistributedCache>();
         _serviceBusClientMock = new Mock<ServiceBusClient>();
         _scopeFactoryMock = new Mock<IServiceScopeFactory>();
+        _dataverseServiceMock = new Mock<Spaarke.Dataverse.IDataverseService>();
         _serviceBusOptions = new ServiceBusOptions
         {
             ConnectionString = "Endpoint=sb://test.servicebus.windows.net/;SharedAccessKeyName=test;SharedAccessKey=test"
@@ -353,7 +355,8 @@ public class UploadFinalizationWorkerTests
             _cacheMock.Object,
             _serviceBusClientMock.Object,
             _scopeFactoryMock.Object,
-            Options.Create(_serviceBusOptions));
+            Options.Create(_serviceBusOptions),
+            _dataverseServiceMock.Object);
     }
 
     private Mock<SpeFileStore> CreateMockSpeFileStore()
