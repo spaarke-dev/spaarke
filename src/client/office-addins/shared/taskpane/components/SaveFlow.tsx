@@ -625,19 +625,14 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           value={selectedEntity}
           onChange={handleEntitySelect}
           onQuickCreate={onQuickCreate}
-          placeholder="Search for Matter, Project, Account..."
+          placeholder="Search for Matter, Project, Account... (optional)"
           allowedTypes={allowedEntityTypes}
           showTypeFilter
           showRecent
           showQuickCreate={!!onQuickCreate}
           disabled={isSaving}
-          required
-          label="Associate With"
-          errorMessage={
-            !selectedEntity && flowState !== 'idle' && flowState !== 'selecting'
-              ? 'Please select an association target'
-              : undefined
-          }
+          required={false}
+          label="Associate With (optional)"
         />
       </div>
 

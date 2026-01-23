@@ -90,11 +90,24 @@ export const App: React.FC<AppProps> = ({
       setError(null);
       setConnectionStatus('connecting');
 
-      // Initialize host adapter
-      await hostAdapter.initialize();
+      // Initialize host adapter (may already be initialized in index.tsx)
+      if (!hostAdapter.isInitialized()) {
+        await hostAdapter.initialize();
+      }
 
-      // Get current context
-      const context = await hostAdapter.getCurrentContext();
+      // Build host context from new adapter methods
+      const itemId = await hostAdapter.getItemId();
+      const subject = await hostAdapter.getSubject();
+      const itemType = hostAdapter.getItemType();
+
+      const context: IHostContext = {
+        itemId,
+        itemType,
+        displayName: subject || 'No Subject',
+        metadata: {
+          hostType: hostAdapter.getHostType(),
+        },
+      };
       setHostContext(context);
 
       // Check authentication status
@@ -166,7 +179,7 @@ export const App: React.FC<AppProps> = ({
   };
 
   // Determine title and host type
-  const hostType: HostType = hostAdapter.hostType === 'outlook' ? 'outlook' : 'word';
+  const hostType: HostType = hostAdapter.getHostType() === 'outlook' ? 'outlook' : 'word';
   const displayTitle = title || (hostType === 'outlook' ? 'Spaarke for Outlook' : 'Spaarke for Word');
 
   // Get user info
@@ -233,12 +246,15 @@ export const App: React.FC<AppProps> = ({
         {/* Tab Content */}
         {currentTab === 'save' && (
           <SaveView
-            hostContext={hostContext}
-            onSave={handleSave}
-            isSaving={isSaving}
-            progress={saveProgress}
-            error={saveError}
-            success={saveSuccess}
+            hostAdapter={hostAdapter}
+            getAccessToken={async () => {
+              const token = await authService.getAccessToken(['user_impersonation']);
+              return token || '';
+            }}
+            apiBaseUrl={process.env.BFF_API_BASE_URL || 'https://spe-api-dev-67e2xz.azurewebsites.net'}
+            onComplete={(docId, docUrl) => {
+              console.log('Save complete:', docId, docUrl);
+            }}
           />
         )}
 

@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Spaarke Outlook Add-in - Browser Test Mode</title>
+
+    <!-- Fluent UI styling base -->
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+        #root {
+            height: 100%;
+        }
+        /* Test mode banner */
+        .test-banner {
+            background: #fff4ce;
+            border-bottom: 2px solid #ffb900;
+            padding: 8px 16px;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .test-banner strong {
+            color: #323130;
+        }
+        .test-banner .dismiss {
+            margin-left: auto;
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: #666;
+            font-size: 16px;
+        }
+    </style>
+
+    <!--
+        IMPORTANT: Mock Office.js MUST be loaded BEFORE the app bundle.
+        This intercepts the Office global before the app tries to use it.
+        Inline script ensures it loads synchronously before any other scripts.
+    -->
+    <script>
+    /**
+     * Mock Office.js for browser testing
+     * This simulates the Outlook environment so we can test the add-in UI without Outlook.
+     */
+
+    // Mock email data
+    const mockEmail = {
+      itemId: 'AAMkAGI2TG93AAA=',
+      subject: 'Test Email - Project Update for Q1 2026',
+      sender: {
+        emailAddress: 'john.smith@contoso.com',
+        displayName: 'John Smith'
+      },
+      dateTimeCreated: new Date('2026-01-20T10:30:00Z'),
+      body: {
+        contentType: 'HTML',
+        content: '<html><body><p>This is a test email body for browser testing.</p></body></html>'
+      },
+      attachments: [
+        {
+          id: 'att1',
+          name: 'Document.pdf',
+          contentType: 'application/pdf',
+          size: 102400,
+          isInline: false
+        },
+        {
+          id: 'att2',
+          name: 'Image.png',
+          contentType: 'image/png',
+          size: 51200,
+          isInline: false
+        }
+      ]
+    };
+
+    // Create mock Office namespace
+    window.Office = {
+      context: {
+        mailbox: {
+          item: {
+            itemId: mockEmail.itemId,
+            itemType: 'message',
+            subject: mockEmail.subject,
+            from: mockEmail.sender,
+            dateTimeCreated: mockEmail.dateTimeCreated,
+            dateTimeModified: mockEmail.dateTimeCreated,
+            internetMessageId: '<mock-message-id-12345@contoso.com>',
+            conversationId: 'AAQkAGI2TG93AAA=',
+            importance: 'normal',
+            to: [
+              { emailAddress: 'recipient@spaarke.com', displayName: 'Recipient User' }
+            ],
+            cc: [],
+            bcc: [],
+            body: {
+              getAsync: function(coercionType, callback) {
+                setTimeout(() => {
+                  callback({
+                    status: 'succeeded',
+                    value: mockEmail.body.content
+                  });
+                }, 100);
+              }
+            },
+            attachments: mockEmail.attachments,
+            getAttachmentContentAsync: function(attachmentId, callback) {
+              setTimeout(() => {
+                callback({
+                  status: 'succeeded',
+                  value: {
+                    format: 'base64',
+                    content: 'SGVsbG8gV29ybGQh' // "Hello World!" in base64
+                  }
+                });
+              }, 100);
+            }
+          },
+          userProfile: {
+            emailAddress: 'user@spaarke.com',
+            displayName: 'Test User'
+          },
+          // NOTE: diagnostics intentionally omitted to disable NAA detection
+          // This forces the Dialog API fallback which works better in browser testing
+          diagnostics: null
+        },
+        requirements: {
+          isSetSupported: function(setName, version) {
+            return true;
+          }
+        },
+        ui: {
+          displayDialogAsync: function(url, options, callback) {
+            console.log('[Mock Office.js] displayDialogAsync called - opening popup window');
+            console.log('[Mock Office.js] Auth URL:', url);
+
+            // Open a real popup for MSAL authentication
+            const width = options?.width || 600;
+            const height = options?.height || 800;
+            const left = (window.screen.width - width) / 2;
+            const top = (window.screen.height - height) / 2;
+
+            const popup = window.open(
+              url,
+              'msalAuth',
+              `width=${width},height=${height},left=${left},top=${top}`
+            );
+
+            // Store registered handlers
+            let messageHandler = null;
+            let messageListener = null;
+
+            // Create a mock dialog object
+            const mockDialog = {
+              close: function() {
+                if (popup && !popup.closed) {
+                  popup.close();
+                }
+                // Clean up message listener
+                if (messageListener) {
+                  window.removeEventListener('message', messageListener);
+                }
+                console.log('[Mock Office.js] Dialog closed');
+              },
+              addEventHandler: function(eventType, handler) {
+                console.log('[Mock Office.js] Dialog event handler added:', eventType);
+
+                if (eventType === Office.EventType.DialogMessageReceived) {
+                  messageHandler = handler;
+
+                  // Listen for postMessage from the auth popup
+                  messageListener = function(event) {
+                    // Verify origin for security
+                    if (event.origin !== window.location.origin) {
+                      console.log('[Mock Office.js] Ignoring message from different origin:', event.origin);
+                      return;
+                    }
+
+                    console.log('[Mock Office.js] Received postMessage from popup:', event.data);
+
+                    // Forward to the registered handler in Office.js dialog message format
+                    if (messageHandler && event.data) {
+                      messageHandler({
+                        message: typeof event.data === 'string' ? event.data : JSON.stringify(event.data),
+                        origin: event.origin
+                      });
+                    }
+                  };
+
+                  window.addEventListener('message', messageListener);
+                  console.log('[Mock Office.js] Now listening for postMessage from popup');
+                }
+
+                // Monitor popup for close
+                const checkClosed = setInterval(() => {
+                  if (popup && popup.closed) {
+                    clearInterval(checkClosed);
+                    // Clean up message listener
+                    if (messageListener) {
+                      window.removeEventListener('message', messageListener);
+                    }
+                    handler({ type: 'dialogClosed' });
+                  }
+                }, 500);
+              }
+            };
+
+            // Call callback with success
+            setTimeout(() => {
+              if (callback) {
+                callback({
+                  status: 'succeeded',
+                  value: mockDialog
+                });
+              }
+            }, 100);
+          }
+        },
+        host: 'Outlook',
+        platform: 'PC'
+      },
+
+      onReady: function(callback) {
+        // Simulate async Office.js initialization
+        setTimeout(() => {
+          console.log('[Mock Office.js] Office.onReady called - simulating Outlook host');
+          if (callback) {
+            callback({
+              host: 'Outlook',
+              platform: 'PC'
+            });
+          }
+        }, 50);
+
+        // Return a promise for async/await usage
+        return new Promise((resolve) => {
+          setTimeout(() => {
+            resolve({
+              host: 'Outlook',
+              platform: 'PC'
+            });
+          }, 50);
+        });
+      },
+
+      HostType: {
+        Word: 'Word',
+        Excel: 'Excel',
+        PowerPoint: 'PowerPoint',
+        Outlook: 'Outlook',
+        OneNote: 'OneNote',
+        Project: 'Project',
+        Access: 'Access'
+      },
+
+      CoercionType: {
+        Html: 'html',
+        Text: 'text'
+      },
+
+      AsyncResultStatus: {
+        Succeeded: 'succeeded',
+        Failed: 'failed'
+      },
+
+      MailboxEnums: {
+        Importance: {
+          Low: 'low',
+          Normal: 'normal',
+          High: 'high'
+        }
+      },
+
+      EventType: {
+        DialogMessageReceived: 'dialogMessageReceived',
+        DialogEventReceived: 'dialogEventReceived'
+      }
+    };
+
+    // Also set on globalThis for module contexts
+    globalThis.Office = window.Office;
+
+    console.log('[Mock Office.js] Loaded - Browser testing mode enabled');
+    console.log('[Mock Office.js] Mock email subject:', mockEmail.subject);
+    console.log('[Mock Office.js] Mock attachments:', mockEmail.attachments.length);
+    </script>
+</head>
+<body>
+    <!-- Test mode banner - dismissible -->
+    <div id="test-banner" class="test-banner">
+        <span>⚠️</span>
+        <strong>Browser Test Mode</strong>
+        <span>Using mock Office.js - Email data is simulated</span>
+        <button class="dismiss" onclick="document.getElementById('test-banner').style.display='none'">×</button>
+    </div>
+
+    <!-- React root -->
+    <div id="root"></div>
+
+    <!-- The webpack bundle will be injected here by HtmlWebpackPlugin -->
+</body>
+</html>

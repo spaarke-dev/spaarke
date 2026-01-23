@@ -1,8 +1,8 @@
 ---
-description: Deploy Azure infrastructure, BFF API, and configure App Service settings
-tags: [deploy, azure, infrastructure, bicep, api, app-service]
-techStack: [azure, bicep, dotnet, app-service]
-appliesTo: ["infrastructure/**", "deploy to azure", "deploy api", "azure deployment"]
+description: Deploy Azure infrastructure, BFF API, Static Web Apps, and configure App Service settings
+tags: [deploy, azure, infrastructure, bicep, api, app-service, static-web-app, office-addins]
+techStack: [azure, bicep, dotnet, app-service, swa]
+appliesTo: ["infrastructure/**", "deploy to azure", "deploy api", "azure deployment", "deploy office addins", "deploy static web app"]
 alwaysApply: false
 ---
 
@@ -19,6 +19,7 @@ alwaysApply: false
 |-----------------|------|-------------|
 | Azure Infrastructure | Azure CLI + Bicep | This skill |
 | BFF API | Azure CLI / GitHub Actions | This skill |
+| **Office Add-ins / SWA** | **SWA CLI + PowerShell** | **This skill** |
 | Dataverse/PCF | PAC CLI | Use `dataverse-deploy` skill |
 | Solution Import | PAC CLI | Use `dataverse-deploy` skill |
 
@@ -245,7 +246,119 @@ az webapp config appsettings set `
 
 ---
 
-## Deployment Type 3: Key Vault Secrets
+## Deployment Type 3: Office Add-ins (Static Web App)
+
+### When to Use
+
+- Deploying Office Add-in changes (Outlook, Word)
+- Updating taskpane UI or manifest
+- Dev iteration on add-in features
+
+### Resource Reference
+
+| Resource | Value |
+|----------|-------|
+| Static Web App Name | `spaarke-office-addins` |
+| Resource Group | `spe-infrastructure-westus2` |
+| URL | `https://icy-desert-0bfdbb61e.6.azurestaticapps.net` |
+| Source Directory | `src/client/office-addins` |
+| Dist Directory | `src/client/office-addins/dist` |
+
+### Dev Deployment (Recommended for Iteration)
+
+**Use the deployment script** - handles all the complexity:
+
+```powershell
+# Full build and deploy
+.\scripts\Deploy-OfficeAddins.ps1
+
+# Skip build (use existing dist)
+.\scripts\Deploy-OfficeAddins.ps1 -SkipBuild
+
+# Deploy to preview environment
+.\scripts\Deploy-OfficeAddins.ps1 -Environment preview
+
+# Verbose output
+.\scripts\Deploy-OfficeAddins.ps1 -Verbose
+```
+
+**What the script does:**
+1. Builds webpack production bundle (unless `-SkipBuild`)
+2. Gets fresh deployment token from Azure
+3. Deploys using SWA CLI with spinner workaround
+4. Verifies deployment and shows manifest version
+
+### Manual Deployment (Alternative)
+
+If you need to run steps manually:
+
+```powershell
+# Navigate to office-addins directory
+cd src/client/office-addins
+
+# 1. Build production bundle
+npx webpack --mode production
+
+# 2. Get fresh deployment token (tokens can expire/rotate)
+$token = az staticwebapp secrets list `
+  --name spaarke-office-addins `
+  --resource-group spe-infrastructure-westus2 `
+  --query properties.apiKey -o tsv
+
+# 3. Deploy with output to log file (avoids spinner hanging issue)
+Start-Process -FilePath 'powershell.exe' `
+  -ArgumentList "-NoProfile","-Command","npx swa deploy ./dist --deployment-token $token --env production *> deploy.log" `
+  -NoNewWindow -Wait
+
+# 4. Check deployment result
+Get-Content deploy.log
+
+# 5. Verify deployment (use cache-busting param)
+curl "https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/manifest.xml?v=$(Get-Date -Format 'HHmmss')"
+```
+
+### Why Direct Deploy Instead of GitHub Actions
+
+| Aspect | Direct Deploy | GitHub Actions |
+|--------|---------------|----------------|
+| Speed | ~30 seconds | 2-5 minutes (CI + deploy) |
+| Requires PR | No | Yes (merge to master) |
+| Best for | Dev iteration, debugging | Production releases |
+| Token | Fresh each time | Stored in secrets |
+
+**Use Direct Deploy when**:
+- Testing UI changes
+- Debugging add-in issues
+- Rapid iteration cycles
+- Any work that doesn't need PR review
+
+**Use GitHub Actions when**:
+- Ready for production release
+- Changes have been code-reviewed
+- Want deployment audit trail
+
+### Troubleshooting SWA Deployment
+
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| Spinner hangs forever | SWA CLI spinner blocks output | Use `Start-Process` with log redirect |
+| Old token rejected | Tokens rotate periodically | Get fresh token via `az staticwebapp secrets list` |
+| Deployment succeeds but old content | CDN caching | Add `?v=timestamp` to verify, wait 1-2 min |
+| 404 on deployed files | Wrong dist path | Verify `./dist` contains expected files |
+
+### Manifest Upload After Deploy
+
+After deploying code changes, if manifest changed:
+
+1. Download manifest: `https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/manifest.xml`
+2. Upload to M365 Admin Center → Integrated Apps → Upload custom app
+3. Wait 5-15 minutes for propagation to Outlook clients
+
+**Note**: Manifest version must be incremented (e.g., 1.0.1.0 → 1.0.2.0) for M365 to accept updates.
+
+---
+
+## Deployment Type 4: Key Vault Secrets
 
 ### Store Secrets
 
@@ -451,3 +564,12 @@ gh run download {run-id}
 - **Verify deployments** - After manual deploy, check `/healthz` and Deployment Center logs
 - **If CLI deploy fails silently** - Try restart first, then Kudu as last resort
 - **500 errors after deploy** - Check `/healthz` response body for DI scope or startup errors
+
+### Office Add-ins Specific
+
+- **Use the script** - Always use `.\scripts\Deploy-OfficeAddins.ps1` for SWA deployments
+- **SWA CLI spinner issue** - The script handles this; don't run `npx swa deploy` directly from bash
+- **Fresh tokens** - The script gets a fresh token each time; manual deploys should do the same
+- **CDN caching** - After deploy, use `?v=timestamp` parameter to verify new content
+- **Manifest changes** - After deploying manifest changes, remind user to upload to M365 Admin Center
+- **Version bumping** - Manifest version must be incremented for M365 to accept updates

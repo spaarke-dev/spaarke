@@ -26,7 +26,7 @@
 
   <!-- Domains -->
   <AppDomains>
-    <AppDomain>https://icy-desert-0bfdbb61e.6.azurestaticapps.net</AppDomain>
+    <AppDomain>https://agreeable-hill-00bcc911e-preview.westus2.1.azurestaticapps.net</AppDomain>
     <AppDomain>https://login.microsoftonline.com</AppDomain>
   </AppDomains>
 
@@ -46,7 +46,7 @@
   <FormSettings>
     <Form xsi:type="ItemRead">
       <DesktopSettings>
-        <SourceLocation DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/taskpane.html" />
+        <SourceLocation DefaultValue="https://agreeable-hill-00bcc911e-preview.westus2.1.azurestaticapps.net/outlook/taskpane.html" />
         <RequestedHeight>250</RequestedHeight>
       </DesktopSettings>
     </Form>
@@ -144,8 +144,8 @@
         <bt:Image id="Icon.80x80" DefaultValue="https://officedev.github.io/Office-Add-in-samples/Samples/hello-world/outlook-hello-world/assets/icon-80.png" />
       </bt:Images>
       <bt:Urls>
-        <bt:Url id="Commands.Url" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/commands.html" />
-        <bt:Url id="Taskpane.Url" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/taskpane.html" />
+        <bt:Url id="Commands.Url" DefaultValue="https://agreeable-hill-00bcc911e-preview.westus2.1.azurestaticapps.net/outlook/commands.html" />
+        <bt:Url id="Taskpane.Url" DefaultValue="https://agreeable-hill-00bcc911e-preview.westus2.1.azurestaticapps.net/outlook/taskpane.html" />
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="GroupLabel" DefaultValue="Spaarke" />

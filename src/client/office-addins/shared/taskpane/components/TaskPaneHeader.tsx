@@ -21,9 +21,10 @@ import {
   DocumentRegular,
   WeatherMoonRegular,
   WeatherSunnyRegular,
-  ContrastRegular,
+  ColorRegular,
 } from '@fluentui/react-icons';
 import type { ThemePreference } from '../hooks/useTheme';
+import type { HostType } from '../../adapters/types';
 
 /**
  * TaskPaneHeader - Header component for Office Add-in task pane.
@@ -83,7 +84,8 @@ const useStyles = makeStyles({
   },
 });
 
-export type HostType = 'outlook' | 'word';
+// Re-export HostType from adapters/types for backwards compatibility
+export type { HostType };
 
 export interface TaskPaneHeaderProps {
   /** Title displayed in header */
@@ -132,7 +134,7 @@ function getThemeIcon(preference: ThemePreference): React.ReactElement {
     case 'light':
       return <WeatherSunnyRegular />;
     default:
-      return <ContrastRegular />;
+      return <ColorRegular />;
   }
 }
 
@@ -177,7 +179,7 @@ export const TaskPaneHeader: React.FC<TaskPaneHeaderProps> = ({
             <MenuPopover>
               <MenuList>
                 <MenuItem
-                  icon={<ContrastRegular />}
+                  icon={<ColorRegular />}
                   onClick={() => onThemeChange('auto')}
                 >
                   Auto

@@ -325,7 +325,8 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
 
   // Computed values
   const isSaving = flowState === 'uploading' || flowState === 'processing';
-  const isValid = selectedEntity !== null;
+  // Association is optional - user can save without selecting an entity
+  const isValid = true;
 
   // Set selected entity and save to storage
   const setSelectedEntity = useCallback((entity: EntitySearchResult | null) => {
@@ -531,15 +532,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
 
   // Start save operation
   const startSave = useCallback(async (context: SaveFlowContext) => {
-    if (!selectedEntity) {
-      setError({
-        title: 'Association Required',
-        message: 'Please select a Matter, Project, Invoice, Account, or Contact to associate this document with.',
-        type: 'warning',
-        recoverable: true,
-      });
-      return;
-    }
+    // Association is optional - user can save without selecting an entity
 
     // Save context for retry
     savedContextRef.current = context;
@@ -562,11 +555,11 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         sourceType = 'WordDocument';
       }
 
-      // Build request
+      // Build request - association is optional
       const request: SaveRequest = {
         sourceType,
-        associationType: selectedEntity.entityType,
-        associationId: selectedEntity.id,
+        associationType: selectedEntity?.entityType || '',
+        associationId: selectedEntity?.id || '',
         content: {
           emailId: context.itemId,
           includeBody: includeBody && context.hostType === 'outlook',

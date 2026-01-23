@@ -7,9 +7,10 @@ import {
 } from '@fluentui/react-components';
 import {
   SaveRegular,
-  ShareRegular,
-  ClockRegular,
-  DocumentSearchRegular,
+  // V1: Disabled icons - uncomment for future releases
+  // ShareRegular,
+  // ClockRegular,
+  // DocumentSearchRegular,
 } from '@fluentui/react-icons';
 import type { HostType } from './TaskPaneHeader';
 
@@ -57,6 +58,7 @@ interface TabConfig {
 
 /**
  * All available tabs with their configuration.
+ * V1: Only Save tab is enabled. Share, Search, Recent are for future releases.
  */
 const TAB_CONFIGS: TabConfig[] = [
   {
@@ -65,24 +67,25 @@ const TAB_CONFIGS: TabConfig[] = [
     icon: <SaveRegular />,
     availableFor: ['outlook', 'word'],
   },
-  {
-    value: 'share',
-    label: 'Share',
-    icon: <ShareRegular />,
-    availableFor: ['outlook', 'word'],
-  },
-  {
-    value: 'search',
-    label: 'Search',
-    icon: <DocumentSearchRegular />,
-    availableFor: ['outlook', 'word'],
-  },
-  {
-    value: 'recent',
-    label: 'Recent',
-    icon: <ClockRegular />,
-    availableFor: ['outlook', 'word'],
-  },
+  // V1: Disabled - uncomment for future releases
+  // {
+  //   value: 'share',
+  //   label: 'Share',
+  //   icon: <ShareRegular />,
+  //   availableFor: ['outlook', 'word'],
+  // },
+  // {
+  //   value: 'search',
+  //   label: 'Search',
+  //   icon: <DocumentSearchRegular />,
+  //   availableFor: ['outlook', 'word'],
+  // },
+  // {
+  //   value: 'recent',
+  //   label: 'Recent',
+  //   icon: <ClockRegular />,
+  //   availableFor: ['outlook', 'word'],
+  // },
 ];
 
 export interface TaskPaneNavigationProps {

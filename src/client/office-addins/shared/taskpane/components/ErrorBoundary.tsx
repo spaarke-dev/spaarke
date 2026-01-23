@@ -90,49 +90,8 @@ const ErrorFallback: React.FC<{
   onReset?: () => void;
   showDetails?: boolean;
 }> = ({ error, errorInfo, onReset, showDetails = false }) => {
-  // Create styles inside the functional component
-  const styles = makeStyles({
-    container: {
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      height: '100%',
-      padding: tokens.spacingVerticalXL,
-      backgroundColor: tokens.colorNeutralBackground1,
-      color: tokens.colorNeutralForeground1,
-    },
-    card: {
-      maxWidth: '400px',
-      width: '100%',
-    },
-    icon: {
-      fontSize: '48px',
-      color: tokens.colorPaletteRedForeground1,
-    },
-    content: {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: tokens.spacingVerticalM,
-      padding: tokens.spacingHorizontalM,
-    },
-    errorDetails: {
-      backgroundColor: tokens.colorNeutralBackground3,
-      padding: tokens.spacingHorizontalM,
-      borderRadius: tokens.borderRadiusMedium,
-      fontFamily: tokens.fontFamilyMonospace,
-      fontSize: tokens.fontSizeBase200,
-      overflow: 'auto',
-      maxHeight: '150px',
-      whiteSpace: 'pre-wrap',
-      wordBreak: 'break-word',
-    },
-    actions: {
-      display: 'flex',
-      gap: tokens.spacingHorizontalS,
-      marginTop: tokens.spacingVerticalM,
-    },
-  })();
+  // Use the module-level useStyles hook
+  const styles = useStyles();
 
   return (
     <div className={styles.container}>

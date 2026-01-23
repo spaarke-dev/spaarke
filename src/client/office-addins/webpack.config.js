@@ -100,6 +100,12 @@ module.exports = async (env, options) => {
         filename: 'outlook/taskpane.html',
         chunks: ['outlook/taskpane'],
       }),
+      // Outlook taskpane TEST HTML (for browser testing with mock Office.js)
+      new HtmlWebpackPlugin({
+        template: './outlook/taskpane/taskpane-test.html',
+        filename: 'outlook/taskpane-test.html',
+        chunks: ['outlook/taskpane'],
+      }),
       // Word taskpane HTML
       new HtmlWebpackPlugin({
         template: './word/taskpane/taskpane.html',
@@ -122,6 +128,7 @@ module.exports = async (env, options) => {
       new CopyWebpackPlugin({
         patterns: [
           { from: './public/index.html', to: 'index.html' },
+          { from: './public/auth-dialog.html', to: 'auth-dialog.html' },
           {
             // Use manifest-working.xml for both dev and prod (validated with M365 Admin Center)
             from: mode === 'production' ? './outlook/manifest-working.xml' : './outlook/manifest.json',
@@ -132,6 +139,8 @@ module.exports = async (env, options) => {
             to: 'word/manifest.xml'
           },
           { from: './shared/assets', to: 'assets', noErrorOnMissing: true },
+          // Mock Office.js for browser testing
+          { from: './outlook/taskpane/mock-office.js', to: 'outlook/mock-office.js', noErrorOnMissing: true },
           { from: './staticwebapp.config.json', to: 'staticwebapp.config.json', noErrorOnMissing: true },
         ],
       }),
