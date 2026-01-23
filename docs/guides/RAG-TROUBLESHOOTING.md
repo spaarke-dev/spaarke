@@ -1,9 +1,9 @@
 # RAG Troubleshooting Guide
 
-> **Version**: 1.1
+> **Version**: 1.2
 > **Created**: 2025-12-29
-> **Updated**: 2026-01-20
-> **Project**: AI Document Intelligence R3 + Semantic Search Foundation R1
+> **Updated**: 2026-01-23
+> **Project**: AI Document Intelligence R3 + Semantic Search UI R2
 
 ---
 
@@ -11,13 +11,15 @@
 
 1. [Common Issues](#common-issues)
 2. [Search Issues](#search-issues)
-3. [Semantic Search Issues](#semantic-search-issues) *(R1 - NEW)*
-4. [Indexing Issues](#indexing-issues)
-5. [Embedding Issues](#embedding-issues)
-6. [Deployment Model Issues](#deployment-model-issues)
-7. [Performance Issues](#performance-issues)
-8. [Diagnostic Commands](#diagnostic-commands)
-9. [Logging and Monitoring](#logging-and-monitoring)
+3. [Semantic Search Issues](#semantic-search-issues) *(R1)*
+4. [Send to Index Issues](#send-to-index-issues) *(R2 - NEW)*
+5. [PCF Control Issues](#pcf-control-issues) *(R2 - NEW)*
+6. [Indexing Issues](#indexing-issues)
+7. [Embedding Issues](#embedding-issues)
+8. [Deployment Model Issues](#deployment-model-issues)
+9. [Performance Issues](#performance-issues)
+10. [Diagnostic Commands](#diagnostic-commands)
+11. [Logging and Monitoring](#logging-and-monitoring)
 
 ---
 
@@ -344,6 +346,280 @@ Warning: Embedding generation failed for semantic search query. Falling back to 
 1. Verify user has read access to the parent entity in Dataverse
 2. For `scope=documentIds`, verify user has access to ALL specified document IDs
 3. Check tenant ID matches the user's token
+
+---
+
+## Send to Index Issues
+
+> **Added in**: Semantic Search UI R2 (2026-01-23)
+
+### Ribbon Button Not Appearing
+
+**Symptom**: "Send to Index" button is not visible in the Document grid, form, or subgrid command bar.
+
+**Check 1: Solution Imported**
+
+```powershell
+# Check if DocumentRibbons solution is installed
+pac solution list | Select-String "DocumentRibbons"
+```
+
+**Check 2: Ribbon XML Published**
+
+```powershell
+# Re-publish all customizations
+pac solution publish
+```
+
+**Check 3: User Security Role**
+
+Verify the user has:
+- Read access to `sprk_document` entity
+- Read access to related entities (Matter, Project, Invoice)
+
+**Resolution**:
+1. Import/re-import `DocumentRibbons` solution (v1.3.0.0+)
+2. Publish all customizations
+3. Clear browser cache and refresh
+4. Verify user security roles
+
+---
+
+### Button Click Shows Error
+
+**Symptom**: Clicking "Send to Index" button shows an error notification.
+
+**Check 1: Environment Variable**
+
+```powershell
+# Verify BFF API URL is set
+pac env variable get --name "sprk_BffApiBaseUrl"
+```
+
+**Check 2: Web Resource Version**
+
+Verify `sprk_DocumentOperations.js` is version 1.24.0 or later:
+- Navigate to Settings > Customizations > Web Resources
+- Find `sprk_/scripts/sprk_DocumentOperations.js`
+- Check the display name includes version
+
+**Check 3: Browser Console**
+
+Open browser DevTools (F12) > Console and look for:
+- "sendToIndex: No documents selected" - no records selected
+- "sendToIndex: Environment variable not found" - missing `sprk_BffApiBaseUrl`
+- CORS errors - BFF API CORS configuration
+
+**Resolution**:
+1. Set `sprk_BffApiBaseUrl` environment variable
+2. Ensure at least one document is selected
+3. Check BFF API is running and accessible
+4. Verify CORS allows Dataverse origin
+
+---
+
+### Send to Index Returns Partial Failures
+
+**Symptom**: Response shows some documents succeeded, some failed.
+
+**Check Response**:
+
+```json
+{
+  "totalRequested": 5,
+  "successCount": 3,
+  "failedCount": 2,
+  "results": [
+    { "documentId": "...", "success": false, "errorMessage": "Document not found" },
+    { "documentId": "...", "success": false, "errorMessage": "Document does not have an associated file" }
+  ]
+}
+```
+
+**Common Errors**:
+
+| Error Message | Cause | Resolution |
+|--------------|-------|------------|
+| "Document not found" | Invalid document ID | Verify document exists in Dataverse |
+| "Document does not have an associated file" | No SPE file linked | Upload a file to the document first |
+| "File download failed" | SPE access issue | Check SPE container permissions |
+| "Text extraction failed" | Unsupported file type | Check supported file types in RAG-ARCHITECTURE.md |
+
+---
+
+### Dataverse Fields Not Updated After Indexing
+
+**Symptom**: Document indexes successfully but `sprk_searchindexed` remains false.
+
+**Check 1: Field Exists**
+
+Verify these fields exist on `sprk_document`:
+- `sprk_searchindexed` (Boolean)
+- `sprk_searchindexname` (String)
+- `sprk_searchindexedon` (DateTime)
+
+**Check 2: User Permissions**
+
+The user executing the ribbon button needs Update permission on `sprk_document`.
+
+**Check 3: API Response**
+
+The API response includes the index operation result. If `success: true` but fields not updated, check Dataverse service logs.
+
+**Resolution**:
+1. Add missing fields to `sprk_document` entity
+2. Grant Update permission on `sprk_document`
+3. Check BFF API logs for Dataverse update errors
+
+---
+
+## PCF Control Issues
+
+> **Added in**: Semantic Search UI R2 (2026-01-23)
+
+### Control Not Rendering
+
+**Symptom**: SemanticSearchControl shows blank or "Control failed to load".
+
+**Check 1: Control Version**
+
+Verify the control is imported:
+```powershell
+pac pcf list
+# Look for "sprk_SemanticSearchControl"
+```
+
+**Check 2: Form Configuration**
+
+In the form editor:
+- Control must be bound to a text field or use unbound mode
+- Required properties (`entityType`, `entityId`, `bffApiUrl`, `tenantId`) must be configured
+
+**Check 3: Browser Console**
+
+Open DevTools (F12) > Console and look for:
+- React errors
+- MSAL authentication errors
+- Network errors to BFF API
+
+**Resolution**:
+1. Re-import SemanticSearchControl solution
+2. Verify form configuration
+3. Check required properties are set correctly
+
+---
+
+### Authentication Errors in Control
+
+**Symptom**: Control shows "Authentication failed" or search returns 401.
+
+**Check 1: MSAL Configuration**
+
+The control uses MSAL for OBO authentication. Verify:
+- Client ID is registered in Azure AD
+- API permissions include BFF API scope
+- Redirect URI matches Dataverse URL
+
+**Check 2: Token Acquisition**
+
+Open browser DevTools > Network and filter by "token":
+- Look for failed token requests
+- Check error messages in response body
+
+**Check 3: BFF API Endpoint**
+
+Verify `bffApiUrl` property is correct:
+```
+https://spe-api-dev-67e2xz.azurewebsites.net/api
+```
+
+**Resolution**:
+1. Verify Azure AD app registration
+2. Check API permissions and admin consent
+3. Ensure BFF API URL is correct and accessible
+
+---
+
+### Search Returns No Results in Control
+
+**Symptom**: Searches execute but always return empty results.
+
+**Check 1: Entity Context**
+
+Verify `entityType` and `entityId` are correctly bound:
+- `entityType` should be the logical name (e.g., `sprk_matter`)
+- `entityId` should be bound to the record's primary key
+
+**Check 2: Documents Indexed**
+
+Verify documents exist in the index for this entity:
+```bash
+curl -X POST "https://spaarke-search-dev.search.windows.net/indexes/spaarke-knowledge-index-v2/docs/search?api-version=2024-07-01" \
+  -H "Content-Type: application/json" \
+  -H "api-key: <your-api-key>" \
+  -d '{
+    "search": "*",
+    "filter": "parentEntityType eq '\''matter'\'' and parentEntityId eq '\''your-entity-id'\''",
+    "count": true
+  }'
+```
+
+**Check 3: Network Requests**
+
+In DevTools > Network, find the `/api/ai/search` request:
+- Check request payload has correct `entityType` and `entityId`
+- Check response for error messages
+
+**Resolution**:
+1. Verify entity binding in form configuration
+2. Index documents using "Send to Index" button first
+3. Check parent entity fields are populated in index
+
+---
+
+### Control Styling Issues (Dark Mode)
+
+**Symptom**: Control doesn't adapt to dark mode or colors look wrong.
+
+**Check**: The control should use Fluent UI v9 theme tokens (ADR-021).
+
+**Common Issues**:
+- Hard-coded colors instead of theme tokens
+- Missing `FluentProvider` wrapper
+- Incorrect theme detection
+
+**Resolution**:
+1. Verify `ThemeService.ts` detects dark mode correctly
+2. Check all components use `tokens.colorNeutral*` instead of hard-coded colors
+3. Clear browser cache and refresh
+
+---
+
+### Infinite Scroll Not Working
+
+**Symptom**: Only first page of results loads, scroll doesn't load more.
+
+**Check 1: Results Count**
+
+Verify there are more results than the page size (default 10):
+- Check `metadata.totalResults` in API response
+- If total ≤ page size, no scroll loading needed
+
+**Check 2: Container Height**
+
+The results container needs a fixed height for scroll detection:
+- Check CSS for `overflow-y: auto` and `height: <value>`
+
+**Check 3: Hook State**
+
+In DevTools > React DevTools, check `useInfiniteScroll` hook state:
+- `hasMore` should be `true` if more results exist
+- `isLoading` should toggle on scroll
+
+**Resolution**:
+1. Verify results container has proper height/overflow CSS
+2. Check hook is detecting scroll events
+3. Verify API returns `totalResults` for pagination calculation
 
 ---
 
@@ -681,6 +957,7 @@ exceptions
 ---
 
 *Document created: 2025-12-29*
-*Updated: 2026-01-20*
+*Updated: 2026-01-23*
 *AI Document Intelligence R3 - Phase 1 Complete*
 *Semantic Search Foundation R1 - Complete (troubleshooting section added)*
+*Semantic Search UI R2 - Send to Index and PCF control troubleshooting added*

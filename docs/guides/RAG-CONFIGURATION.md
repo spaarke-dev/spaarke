@@ -1,9 +1,9 @@
 # RAG Configuration Reference
 
-> **Version**: 1.3
+> **Version**: 1.4
 > **Created**: 2025-12-29
-> **Updated**: 2026-01-20
-> **Project**: AI Document Intelligence R3 + RAG Pipeline R1 + Semantic Search Foundation R1
+> **Updated**: 2026-01-23
+> **Project**: AI Document Intelligence R3 + RAG Pipeline R1 + Semantic Search UI R2
 
 ---
 
@@ -16,9 +16,10 @@
 3. [Deployment Model Configuration](#deployment-model-configuration)
 4. [Embedding Cache Configuration](#embedding-cache-configuration)
 5. [Search Options](#search-options)
-6. [Semantic Search Configuration](#semantic-search-configuration) *(R1 - NEW)*
-7. [Environment Variables](#environment-variables)
-8. [Code Configuration Examples](#code-configuration-examples)
+6. [Semantic Search Configuration](#semantic-search-configuration) *(R1)*
+7. [Semantic Search UI Configuration](#semantic-search-ui-configuration) *(R2 - NEW)*
+8. [Environment Variables](#environment-variables)
+9. [Code Configuration Examples](#code-configuration-examples)
 
 ---
 
@@ -570,6 +571,144 @@ services.AddScoped<ISemanticSearchService, SemanticSearchService>();
 
 ---
 
+## Semantic Search UI Configuration
+
+> **Added in**: Semantic Search UI R2 (2026-01-23)
+
+Configuration for the PCF control and ribbon button integration.
+
+### PCF Control Configuration
+
+The SemanticSearchControl PCF requires the following configuration when added to a form:
+
+| Property | Required | Description |
+|----------|----------|-------------|
+| `entityType` | Yes | Logical name of the parent entity (e.g., `sprk_matter`, `sprk_project`) |
+| `entityId` | Yes | Bound to the record's primary key field |
+| `bffApiUrl` | Yes | BFF API base URL (from environment variable `sprk_BffApiBaseUrl`) |
+| `tenantId` | Yes | Organization ID for multi-tenant isolation |
+
+**Example Form Configuration**:
+
+```xml
+<!-- Form XML configuration for SemanticSearchControl -->
+<control id="semanticSearch" classid="{class-id}"
+         uniqueid="{unique-id}" isunbound="false">
+  <parameters>
+    <entityType>sprk_matter</entityType>
+    <entityId type="SingleLine.Text">sprk_matterid</entityId>
+    <bffApiUrl>https://spe-api-dev-67e2xz.azurewebsites.net/api</bffApiUrl>
+    <tenantId>{organizationId}</tenantId>
+  </parameters>
+</control>
+```
+
+### Send to Index Endpoint Configuration
+
+The `/api/ai/rag/send-to-index` endpoint uses existing BFF API configuration plus:
+
+| Setting | Required | Default | Description |
+|---------|----------|---------|-------------|
+| `Analysis__SharedIndexName` | No | `spaarke-knowledge-index-v2` | Index name for tracking in Dataverse |
+
+**Note**: The Send to Index endpoint uses OBO authentication from the user's session - no separate API key is required (unlike `/enqueue-indexing`).
+
+### Ribbon Button Configuration
+
+The ribbon buttons are configured in the `DocumentRibbons` solution.
+
+**Solution Details**:
+- **Name**: DocumentRibbons
+- **Version**: 1.3.0.0
+- **Publisher**: Spaarke
+- **Location**: `infrastructure/dataverse/ribbon/DocumentRibbons/`
+
+**Web Resource Configuration**:
+
+| Web Resource | Version | Description |
+|--------------|---------|-------------|
+| `sprk_/scripts/sprk_DocumentOperations.js` | 1.24.0 | Ribbon button handlers |
+
+**Environment Variable Dependencies**:
+
+The JavaScript web resource reads these Dataverse environment variables:
+
+| Variable | Schema Name | Purpose |
+|----------|-------------|---------|
+| BFF API URL | `sprk_BffApiBaseUrl` | Base URL for BFF API calls |
+
+**Setting the Environment Variable**:
+
+```powershell
+# Using PAC CLI
+pac env select --environment "Dev"
+pac env variable set --name "sprk_BffApiBaseUrl" --value "https://spe-api-dev-67e2xz.azurewebsites.net/api"
+```
+
+### Dataverse Document Fields
+
+The Send to Index operation updates these fields on the `sprk_document` entity:
+
+| Field | Schema Name | Type | Description |
+|-------|-------------|------|-------------|
+| Search Indexed | `sprk_searchindexed` | Boolean | True if document is indexed |
+| Search Index Name | `sprk_searchindexname` | String | Name of the search index |
+| Search Indexed On | `sprk_searchindexedon` | DateTime | UTC timestamp of last indexing |
+
+**Creating the Fields** (if not present):
+
+```powershell
+# Using PAC CLI
+pac modelbuilder build --tableName "sprk_document" --outputDirectory "./models"
+```
+
+Or add manually via make.powerapps.com:
+1. Navigate to Tables > Document
+2. Add columns:
+   - `sprk_searchindexed` (Yes/No, default: No)
+   - `sprk_searchindexname` (Single Line Text, max 256)
+   - `sprk_searchindexedon` (Date and Time)
+
+### PCF Control Deployment
+
+The SemanticSearchControl is deployed as a managed solution.
+
+**Build and Package**:
+
+```powershell
+cd src/client/pcf/SemanticSearchControl
+npm run build
+msbuild /t:rebuild /p:Configuration=Release
+```
+
+**Deploy via PAC CLI**:
+
+```powershell
+pac pcf push --publisher-prefix sprk
+```
+
+**Or import as solution**:
+
+```powershell
+# The solution zip is in Solution/bin/
+pac solution import --path Solution/bin/SpaarkeSemanticSearch_v1.0.15.zip
+```
+
+### Version Alignment
+
+Ensure version numbers are aligned across these files:
+
+| File | Field | Current |
+|------|-------|---------|
+| `ControlManifest.Input.xml` | `version` | 1.0.15 |
+| `Solution/src/Other/Solution.xml` | `Version` | 1.0.15 |
+| `Solution/bin/ControlManifest.xml` | `version` | 1.0.15 |
+| Control UI footer | Display version | 1.0.15 |
+
+See [PCF-V9-PACKAGING.md](PCF-V9-PACKAGING.md) for version bumping procedures.
+
+---
+
 ## Environment Variables
 
 ### Dataverse Environment Variables
@@ -681,7 +820,8 @@ public async Task SetupEnterpriseCustomer(string tenantId)
 ---
 
 *Document created: 2025-12-29*
-*Updated: 2026-01-20*
+*Updated: 2026-01-23*
 *AI Document Intelligence R3 - Phase 1 Complete*
 *RAG Pipeline R1 - Phase 1 Complete*
 *Semantic Search Foundation R1 - Complete (configuration section added)*
+*Semantic Search UI R2 - PCF control and ribbon button configuration added*
