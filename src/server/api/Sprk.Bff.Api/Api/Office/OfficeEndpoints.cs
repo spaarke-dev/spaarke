@@ -113,8 +113,8 @@ public static class OfficeEndpoints
             .WithDescription("Submit email, attachment, or document for saving to Spaarke DMS")
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.Save)
             .AddIdempotencyFilter() // Task 030 - Idempotency support per spec.md
-            // TODO: Task 033 - .AddOfficeAuthFilter()
-            // TODO: Task 033 - .AddEntityAccessFilter()
+                                    // TODO: Task 033 - .AddOfficeAuthFilter()
+                                    // TODO: Task 033 - .AddEntityAccessFilter()
             .Accepts<SaveRequest>("application/json")
             .Produces<SaveResponse>(StatusCodes.Status202Accepted)
             .Produces<SaveResponse>(StatusCodes.Status200OK) // For duplicate detection
@@ -1059,7 +1059,7 @@ public static class OfficeEndpoints
             .WithDescription("Creates a new Matter, Project, Invoice, Account, or Contact with minimal required fields. Supports inline entity creation from the Office add-in when the user needs a new association target.")
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.QuickCreate)
             .AddIdempotencyFilter() // Task 030 - Idempotency support per spec.md
-            // TODO: Task 033 - .AddOfficeAuthFilter()
+                                    // TODO: Task 033 - .AddOfficeAuthFilter()
             .Accepts<QuickCreateRequest>("application/json")
             .Produces<QuickCreateResponse>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -1222,7 +1222,7 @@ public static class OfficeEndpoints
             .WithDescription("Generates shareable URLs for selected documents that resolve through Spaarke access controls. Optionally creates invitations for external recipients.")
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.Share)
             .AddIdempotencyFilter() // Task 030 - Idempotency support per spec.md
-            // TODO: Task 033 - .AddOfficeAuthFilter()
+                                    // TODO: Task 033 - .AddOfficeAuthFilter()
             .Accepts<ShareLinksRequest>("application/json")
             .Produces<ShareLinksResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
