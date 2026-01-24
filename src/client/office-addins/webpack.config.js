@@ -130,12 +130,12 @@ module.exports = async (env, options) => {
           { from: './public/index.html', to: 'index.html' },
           { from: './public/auth-dialog.html', to: 'auth-dialog.html' },
           {
-            // Use manifest-working.xml for both dev and prod (validated with M365 Admin Center)
-            from: mode === 'production' ? './outlook/manifest-working.xml' : './outlook/manifest.json',
+            // Standardized manifest files (icy-desert SWA URLs)
+            from: mode === 'production' ? './outlook/outlook-manifest.xml' : './outlook/manifest.json',
             to: mode === 'production' ? 'outlook/manifest.xml' : 'outlook/manifest.json'
           },
           {
-            from: mode === 'production' ? './word/manifest-working.xml' : './word/manifest.xml',
+            from: './word/word-manifest.xml',
             to: 'word/manifest.xml'
           },
           { from: './shared/assets', to: 'assets', noErrorOnMissing: true },

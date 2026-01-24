@@ -4,16 +4,16 @@
   xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
   xmlns:mailappor="http://schemas.microsoft.com/office/mailappversionoverrides/1.0" xsi:type="MailApp">
   <Id>5e4d66d0-2603-44ea-acbc-400d3b881c90</Id>
-  <Version>1.0.14.0</Version>
+  <Version>1.0.15.0</Version>
   <ProviderName>Spaarke</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Spaarke Outlook"/>
   <Description DefaultValue="Save and share emails with Spaarke DMS"/>
-  <IconUrl DefaultValue="https://agreeable-hill-00bcc911e-preview.westus2.1.azurestaticapps.net/assets/icon-32.png"/>
-  <HighResolutionIconUrl DefaultValue="https://agreeable-hill-00bcc911e-preview.westus2.1.azurestaticapps.net/assets/icon-64.png"/>
+  <IconUrl DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/assets/icon-32.png"/>
+  <HighResolutionIconUrl DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/assets/icon-64.png"/>
   <SupportUrl DefaultValue="https://spaarke.com/support"/>
   <AppDomains>
-    <AppDomain>https://agreeable-hill-00bcc911e-preview.westus2.1.azurestaticapps.net</AppDomain>
+    <AppDomain>https://icy-desert-0bfdbb61e.6.azurestaticapps.net</AppDomain>
     <AppDomain>https://login.microsoftonline.com</AppDomain>
   </AppDomains>
   <Hosts>
@@ -27,7 +27,7 @@
   <FormSettings>
     <Form xsi:type="ItemRead">
       <DesktopSettings>
-        <SourceLocation DefaultValue="https://agreeable-hill-00bcc911e-preview.westus2.1.azurestaticapps.net/outlook/taskpane.html"/>
+        <SourceLocation DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/taskpane.html"/>
         <RequestedHeight>250</RequestedHeight>
       </DesktopSettings>
     </Form>
@@ -103,12 +103,12 @@
     </Hosts>
     <Resources>
       <bt:Images>
-        <bt:Image id="Icon.16x16" DefaultValue="https://agreeable-hill-00bcc911e-preview.westus2.1.azurestaticapps.net/assets/icon-16.png"/>
-        <bt:Image id="Icon.32x32" DefaultValue="https://agreeable-hill-00bcc911e-preview.westus2.1.azurestaticapps.net/assets/icon-32.png"/>
-        <bt:Image id="Icon.80x80" DefaultValue="https://agreeable-hill-00bcc911e-preview.westus2.1.azurestaticapps.net/assets/icon-80.png"/>
+        <bt:Image id="Icon.16x16" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/assets/icon-16.png"/>
+        <bt:Image id="Icon.32x32" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/assets/icon-32.png"/>
+        <bt:Image id="Icon.80x80" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/assets/icon-80.png"/>
       </bt:Images>
       <bt:Urls>
-        <bt:Url id="Taskpane.Url" DefaultValue="https://agreeable-hill-00bcc911e-preview.westus2.1.azurestaticapps.net/outlook/taskpane.html"/>
+        <bt:Url id="Taskpane.Url" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/taskpane.html"/>
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="CommandsGroup.Label" DefaultValue="Spaarke"/>
@@ -184,12 +184,12 @@
       </Hosts>
       <Resources>
         <bt:Images>
-          <bt:Image id="Icon.16x16" DefaultValue="https://agreeable-hill-00bcc911e-preview.westus2.1.azurestaticapps.net/assets/icon-16.png"/>
-          <bt:Image id="Icon.32x32" DefaultValue="https://agreeable-hill-00bcc911e-preview.westus2.1.azurestaticapps.net/assets/icon-32.png"/>
-          <bt:Image id="Icon.80x80" DefaultValue="https://agreeable-hill-00bcc911e-preview.westus2.1.azurestaticapps.net/assets/icon-80.png"/>
+          <bt:Image id="Icon.16x16" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/assets/icon-16.png"/>
+          <bt:Image id="Icon.32x32" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/assets/icon-32.png"/>
+          <bt:Image id="Icon.80x80" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/assets/icon-80.png"/>
         </bt:Images>
         <bt:Urls>
-          <bt:Url id="Taskpane.Url" DefaultValue="https://agreeable-hill-00bcc911e-preview.westus2.1.azurestaticapps.net/outlook/taskpane.html"/>
+          <bt:Url id="Taskpane.Url" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/taskpane.html"/>
         </bt:Urls>
         <bt:ShortStrings>
           <bt:String id="CommandsGroup.Label" DefaultValue="Spaarke"/>
