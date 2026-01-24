@@ -67,7 +67,11 @@
             }
         };
 
-        const scopes = ['User.Read', 'api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation'];
+        // Login scopes - get user info from Graph
+        const loginScopes = ['openid', 'profile', 'User.Read'];
+
+        // API scopes - for calling the BFF API (must be acquired separately)
+        const apiScopes = ['api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation'];
 
         function updateStatus(title, message, isError = false) {
             document.getElementById('status').textContent = title;
@@ -110,23 +114,45 @@
                 const response = await msalInstance.handleRedirectPromise();
 
                 if (response) {
-                    // We have a response from redirect - send to parent
-                    updateStatus('Success!', 'Signed in successfully.');
-                    sendMessageToParent({
-                        success: true,
-                        accessToken: response.accessToken,
-                        expiresOn: response.expiresOn ? response.expiresOn.getTime() : null,
-                        account: {
-                            username: response.account?.username,
-                            name: response.account?.name,
-                            homeAccountId: response.account?.homeAccountId
-                        }
-                    });
+                    // We have a response from redirect
+                    // The response.accessToken is for Graph (User.Read)
+                    // We need to acquire a separate token for the BFF API
+                    console.log('[Auth Dialog] Login complete, acquiring API token...');
+                    updateStatus('Authenticating...', 'Getting API access token...');
+
+                    try {
+                        // Acquire token silently for the BFF API
+                        const apiTokenResponse = await msalInstance.acquireTokenSilent({
+                            scopes: apiScopes,
+                            account: response.account
+                        });
+
+                        console.log('[Auth Dialog] API token acquired successfully');
+                        updateStatus('Success!', 'Signed in successfully.');
+
+                        sendMessageToParent({
+                            success: true,
+                            accessToken: apiTokenResponse.accessToken,
+                            expiresOn: apiTokenResponse.expiresOn ? apiTokenResponse.expiresOn.getTime() : null,
+                            account: {
+                                username: response.account?.username,
+                                name: response.account?.name,
+                                homeAccountId: response.account?.homeAccountId
+                            }
+                        });
+                    } catch (silentError) {
+                        console.log('[Auth Dialog] Silent token acquisition failed, trying redirect...');
+                        // If silent fails, try redirect for the API scope
+                        await msalInstance.acquireTokenRedirect({
+                            scopes: apiScopes,
+                            account: response.account
+                        });
+                    }
                 } else {
                     // No response - initiate login redirect
                     updateStatus('Redirecting...', 'Opening Microsoft login...');
                     await msalInstance.loginRedirect({
-                        scopes: scopes
+                        scopes: loginScopes
                     });
                 }
             } catch (error) {
