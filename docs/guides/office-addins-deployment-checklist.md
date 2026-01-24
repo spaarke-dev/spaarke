@@ -1,7 +1,7 @@
 # Spaarke Office Add-ins Deployment Checklist
 
-> **Version**: 1.1
-> **Last Updated**: January 22, 2026
+> **Version**: 1.2
+> **Last Updated**: January 24, 2026
 > **Purpose**: Pre-deployment verification for IT Administrators
 
 ---
@@ -21,8 +21,9 @@ Use this checklist before deploying Spaarke Office Add-ins to your organization.
   - Resource: `spe-api-prod-*` in `rg-spaarke-prod-westus2`
   - Health check passes: `GET /healthz` returns "Healthy"
 - [ ] Static Web Apps deployed for add-in hosting
-  - Resource: `spe-office-addins-prod`
-  - Taskpane URL accessible: `https://spe-office-addins-prod.azurestaticapps.net/outlook/taskpane.html`
+  - Dev Resource: `spaarke-office-addins` (`icy-desert-0bfdbb61e.6.azurestaticapps.net`)
+  - Prod Resource: `spe-office-addins-prod`
+  - Taskpane URL accessible: `https://{swa-hostname}/outlook/taskpane.html`
 - [ ] Redis Cache provisioned
   - Resource: `spaarke-redis-prod`
   - Connection verified from BFF API
@@ -109,19 +110,43 @@ pac security-role list --environment {env-id} | Select-String "Spaarke Office Ad
 - [ ] Client ID: `c1258e2d-1688-49d2-ac99-a7485ebd9995`
 - [ ] Redirect URIs configured:
   - [ ] `brk-multihub://localhost` (reserved for future NAA support)
-  - [ ] `https://spe-office-addins-prod.azurestaticapps.net/taskpane.html` (SPA redirect)
-  - [ ] `https://spe-office-addins-prod.azurestaticapps.net/auth-dialog.html` (Dialog API authentication)
+  - [ ] `https://icy-desert-0bfdbb61e.6.azurestaticapps.net/taskpane.html` (Dev SPA)
+  - [ ] `https://icy-desert-0bfdbb61e.6.azurestaticapps.net/auth-dialog.html` (Dev Dialog API)
+  - [ ] `https://spe-office-addins-prod.azurestaticapps.net/taskpane.html` (Prod SPA)
+  - [ ] `https://spe-office-addins-prod.azurestaticapps.net/auth-dialog.html` (Prod Dialog API)
 - [ ] API permissions added:
   - [ ] `api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation` (delegated)
   - [ ] `User.Read` (delegated)
 - [ ] Admin consent granted for organization
 
 #### BFF API App Registration
-- [ ] App registration exists: `Spaarke BFF API`
+- [ ] App registration exists: `Spaarke BFF API` (also known as `SDAP-BFF-SPE-API`)
 - [ ] Client ID: `1e40baad-e065-4aea-a8d4-4b7ab273458c`
 - [ ] App ID URI configured: `api://1e40baad-e065-4aea-a8d4-4b7ab273458c`
-- [ ] `user_impersonation` scope exposed
+- [ ] Scopes exposed:
+  - [ ] `SDAP.Access`
+  - [ ] `user_impersonation`
 - [ ] Client secret stored in Key Vault
+
+#### ⚠️ Authorized Client Applications (CRITICAL)
+
+> **This step is frequently missed and causes 401 Unauthorized errors.** The Office Add-in must be pre-authorized to call the BFF API.
+
+- [ ] **Office Add-in registered as authorized client**:
+  1. Go to Azure Portal → App registrations → `SDAP-BFF-SPE-API`
+  2. Navigate to **Expose an API** → **Authorized client applications**
+  3. Verify `c1258e2d-1688-49d2-ac99-a7485ebd9995` (Spaarke Office Add-in) is listed
+  4. If not listed, click **+ Add a client application**:
+     - Client ID: `c1258e2d-1688-49d2-ac99-a7485ebd9995`
+     - Check both scopes: `SDAP.Access` and `user_impersonation`
+     - Click **Add application**
+
+**Verification**:
+```powershell
+# Check authorized clients
+az ad app show --id 1e40baad-e065-4aea-a8d4-4b7ab273458c --query "api.preAuthorizedApplications[].appId" -o tsv
+# Should output: c1258e2d-1688-49d2-ac99-a7485ebd9995
+```
 
 ### 4. BFF API Configuration
 
@@ -142,19 +167,42 @@ pac security-role list --environment {env-id} | Select-String "Spaarke Office Ad
   - `Office__AttachmentLimits__MaxSingleFileMb`: 25
   - `Office__AttachmentLimits__MaxTotalMb`: 100
 
+#### CORS Configuration
+- [ ] BFF API allows CORS from Static Web App origins:
+  - [ ] `*.azurestaticapps.net` (Azure Static Web Apps)
+  - [ ] `*.crm.dynamics.com` (Dataverse)
+- [ ] Verify CORS with preflight test:
+  ```powershell
+  # Test CORS preflight
+  curl -X OPTIONS "https://spe-api-dev-67e2xz.azurewebsites.net/office/save" `
+    -H "Origin: https://icy-desert-0bfdbb61e.6.azurestaticapps.net" `
+    -H "Access-Control-Request-Method: POST" -v
+  # Should return: Access-Control-Allow-Origin header
+  ```
+
 #### Workers
 - [ ] Background workers running (check logs)
 - [ ] Service Bus queues processing messages
 
 ### 5. Manifest Configuration
 
-> **CRITICAL**: Use `manifest-working.xml` files. These have been validated to work with M365 Admin Center Centralized Deployment. Other manifest variants may fail validation.
+> **CRITICAL**: Use the standardized manifest files. These have been validated to work with M365 Admin Center Centralized Deployment.
 
-#### Outlook Manifest (manifest-working.xml)
-- [ ] All URLs updated for production:
-  - [ ] Taskpane URL: `https://spe-office-addins-prod.azurestaticapps.net/outlook/taskpane.html`
-  - [ ] Icon URLs (16, 32, 64, 80) point to production static hosting
-  - [ ] AppDomain includes production URL
+#### Manifest File Locations
+
+| Add-in | Source File | Build Output |
+|--------|-------------|--------------|
+| Outlook | `outlook/outlook-manifest.xml` | `dist/outlook/manifest.xml` |
+| Word | `word/word-manifest.xml` | `dist/word/manifest.xml` |
+
+> **Note**: Legacy `manifest-working.xml` files have been consolidated into the standardized files above.
+
+#### Outlook Manifest (outlook-manifest.xml)
+- [ ] All URLs updated for target environment:
+  - [ ] Dev: `https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/taskpane.html`
+  - [ ] Prod: `https://spe-office-addins-prod.azurestaticapps.net/outlook/taskpane.html`
+  - [ ] Icon URLs (16, 32, 64, 80) point to correct static hosting
+  - [ ] AppDomain includes hosting URL
 - [ ] **Version format is 4-part**: `1.0.0.0` (NOT `1.0.0`)
 - [ ] **All icon URLs return HTTP 200** (test each in browser)
 - [ ] **NO FunctionFile element** (causes validation failures)
@@ -163,17 +211,18 @@ pac security-role list --environment {env-id} | Select-String "Spaarke Office Ad
 - [ ] **DisableEntityHighlighting element present**
 - [ ] **MessageReadCommandSurface** for reading emails
 - [ ] **MessageComposeCommandSurface** for composing emails (optional)
-- [ ] Manifest validates: `npx office-addin-manifest validate manifest-working.xml`
+- [ ] Manifest validates: `npx office-addin-manifest validate outlook/outlook-manifest.xml`
 
-#### Word Manifest (manifest-working.xml)
-- [ ] All URLs updated for production:
-  - [ ] SourceLocation: `https://spe-office-addins-prod.azurestaticapps.net/word/taskpane.html`
-  - [ ] IconUrl and HighResolutionIconUrl point to production
-  - [ ] AppDomain includes production URL
+#### Word Manifest (word-manifest.xml)
+- [ ] All URLs updated for target environment:
+  - [ ] Dev: `https://icy-desert-0bfdbb61e.6.azurestaticapps.net/word/taskpane.html`
+  - [ ] Prod: `https://spe-office-addins-prod.azurestaticapps.net/word/taskpane.html`
+  - [ ] IconUrl and HighResolutionIconUrl point to correct hosting
+  - [ ] AppDomain includes hosting URL
 - [ ] **Version format is 4-part**: `1.0.0.0` (NOT `1.0.0`)
 - [ ] **All icon URLs return HTTP 200**
 - [ ] **PrimaryCommandSurface extension point**
-- [ ] Manifest validates: `npx office-addin-manifest validate manifest-working.xml`
+- [ ] Manifest validates: `npx office-addin-manifest validate word/word-manifest.xml`
 
 #### Common Manifest Requirements
 - [ ] DefaultLocale is set (e.g., `en-US`)
@@ -266,7 +315,7 @@ pac security-role list --environment {env-id} | Select-String "Spaarke Office Ad
 - [ ] Navigate to M365 Admin Center > Settings > Integrated apps
 - [ ] Click "Upload custom apps"
 - [ ] Select "Office Add-in"
-- [ ] Upload `outlook/manifest-working.xml` (NOT .json)
+- [ ] Upload `dist/outlook/manifest.xml` (built from `outlook/outlook-manifest.xml`)
 - [ ] Manifest validation passes (no errors)
 - [ ] Select deployment scope:
   - [ ] Pilot group (recommended for initial deployment)
@@ -278,7 +327,7 @@ pac security-role list --environment {env-id} | Select-String "Spaarke Office Ad
 - [ ] Navigate to M365 Admin Center > Settings > Integrated apps
 - [ ] Click "Upload custom apps"
 - [ ] Select "Office Add-in"
-- [ ] Upload `word/manifest-working.xml`
+- [ ] Upload `dist/word/manifest.xml` (built from `word/word-manifest.xml`)
 - [ ] Manifest validation passes (no errors)
 - [ ] Select same deployment scope as Outlook
 - [ ] Review permissions and deploy

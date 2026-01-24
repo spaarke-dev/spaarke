@@ -1,7 +1,7 @@
 # Spaarke Office Add-ins Administrator Guide
 
-> **Version**: 1.1
-> **Last Updated**: January 22, 2026
+> **Version**: 1.2
+> **Last Updated**: January 24, 2026
 > **Audience**: IT Administrators, System Administrators, DevOps Engineers
 
 ---
@@ -178,8 +178,12 @@ The Office add-in uses a public client (SPA) registration with Dialog API authen
 | URI | Purpose |
 |-----|---------|
 | `brk-multihub://localhost` | Reserved for future NAA support |
+| `https://icy-desert-0bfdbb61e.6.azurestaticapps.net/taskpane.html` | Dev SPA redirect |
+| `https://icy-desert-0bfdbb61e.6.azurestaticapps.net/auth-dialog.html` | Dev Dialog API authentication |
 | `https://spe-office-addins-prod.azurestaticapps.net/taskpane.html` | Production SPA redirect |
-| `https://spe-office-addins-prod.azurestaticapps.net/auth-dialog.html` | Dialog API authentication page |
+| `https://spe-office-addins-prod.azurestaticapps.net/auth-dialog.html` | Production Dialog API authentication |
+
+> **Note**: When adding new Static Web Apps, ensure their redirect URIs are added to the app registration.
 
 #### API Permissions (Delegated)
 
@@ -203,7 +207,37 @@ The BFF API uses a confidential client registration for token validation and On-
 
 | Scope | Description |
 |-------|-------------|
+| `SDAP.Access` | Access SDAP resources |
 | `user_impersonation` | Access Spaarke BFF API on behalf of user |
+
+#### Authorized Client Applications (CRITICAL)
+
+> **⚠️ CRITICAL CONFIGURATION**: The Office Add-in **MUST** be registered as an authorized client application in the BFF API's "Expose an API" configuration. Without this, the add-in will receive **401 Unauthorized** errors when calling the BFF API, even if all other permissions are correctly configured.
+
+| Authorized Client | Client ID | Required Scopes |
+|-------------------|-----------|-----------------|
+| **Spaarke Office Add-in** | `c1258e2d-1688-49d2-ac99-a7485ebd9995` | `SDAP.Access`, `user_impersonation` |
+| SDAP-PCF-CLIENT | `170c98e1-d486-4355-bcbe-170454e0207c` | `SDAP.Access`, `user_impersonation` |
+
+**Configuration Steps**:
+1. Go to Azure Portal → Azure Active Directory → App registrations
+2. Select **SDAP-BFF-SPE-API** (not the Office Add-in app)
+3. Navigate to **Expose an API** in the left menu
+4. Scroll to **Authorized client applications**
+5. Click **+ Add a client application**
+6. Enter Client ID: `c1258e2d-1688-49d2-ac99-a7485ebd9995`
+7. Check both scopes:
+   - ☑️ `api://1e40baad-e065-4aea-a8d4-4b7ab273458c/SDAP.Access`
+   - ☑️ `api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation`
+8. Click **Add application**
+
+**Verification**:
+```powershell
+# Verify authorized clients via Azure CLI
+az ad app show --id 1e40baad-e065-4aea-a8d4-4b7ab273458c --query "api.preAuthorizedApplications"
+```
+
+Expected output should include the Office Add-in client ID (`c1258e2d-1688-49d2-ac99-a7485ebd9995`).
 
 #### API Permissions (Delegated, for OBO)
 
@@ -490,9 +524,31 @@ The add-ins use **Dialog API Authentication** (V1), the production-standard appr
 | Requirement | Implementation |
 |-------------|----------------|
 | HTTPS only | All endpoints require TLS 1.2+ |
-| CORS | BFF API restricts to add-in domains |
+| CORS | BFF API allows specific origins (see below) |
 | Content Security Policy | Static hosting headers |
 | API authentication | Bearer token required on all `/office/*` endpoints |
+
+#### CORS Configuration (BFF API)
+
+The BFF API must allow CORS requests from Office Add-in hosting domains. The following origins are allowed:
+
+| Origin Pattern | Purpose |
+|----------------|---------|
+| `*.azurestaticapps.net` | Azure Static Web Apps (Office Add-ins) |
+| `*.crm.dynamics.com` | Dataverse / Model-driven apps |
+| `https://localhost:*` | Local development |
+
+**CORS is configured in `Program.cs`**:
+```csharp
+// Allow Azure Static Web Apps origins (*.azurestaticapps.net) - Office Add-ins
+if (uri.Host.EndsWith(".azurestaticapps.net", StringComparison.OrdinalIgnoreCase))
+    return true;
+```
+
+> **Troubleshooting CORS**: If you see "Failed to fetch" errors in the browser console, verify:
+> 1. The BFF API is running and accessible
+> 2. The add-in's origin matches one of the allowed patterns
+> 3. Preflight OPTIONS requests return correct `Access-Control-Allow-Origin` headers
 
 ### 7.5 Dataverse Security Roles
 
@@ -636,6 +692,8 @@ For detailed monitoring procedures, see the [Monitoring Runbook](../../projects/
 | "Invalid token" error | Token expired | User signs in again (normal behavior) |
 | "Access denied" error | Missing permissions | Verify app registration permissions |
 | AADSTS700046 error | NAA broker URI not registered | Expected - add-in uses Dialog API, not NAA |
+| **401 Unauthorized on /office/*** | **Office Add-in not authorized in BFF API** | **Add Office Add-in as authorized client in BFF API "Expose an API" (see Section 4.2)** |
+| 401 after successful sign-in | Token audience mismatch | Verify scopes in auth-dialog.html match BFF API exposed scopes |
 
 #### Task Pane Issues
 
@@ -913,6 +971,7 @@ az webapp restart --name spe-api-prod-* --resource-group rg-spaarke-prod-westus2
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
+| 1.2 | January 24, 2026 | AI-Assisted | Added authorized client config section; CORS documentation; dev environment URLs; consolidated manifest file names |
 | 1.1 | January 22, 2026 | AI-Assisted | Updated auth to Dialog API; added Unified Manifest section |
 | 1.0 | January 2026 | Spaarke Team | Initial release |
 

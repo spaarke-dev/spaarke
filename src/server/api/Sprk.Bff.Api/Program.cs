@@ -243,18 +243,22 @@ if (redisEnabled)
             "Set 'ConnectionStrings:Redis' or 'Redis:ConnectionString' in configuration.");
     }
 
+    var configOptions = StackExchange.Redis.ConfigurationOptions.Parse(redisConnectionString);
+    configOptions.AbortOnConnectFail = false;  // Don't crash if Redis temporarily unavailable
+    configOptions.ConnectTimeout = 5000;       // 5 second connection timeout
+    configOptions.SyncTimeout = 5000;          // 5 second operation timeout
+    configOptions.ConnectRetry = 3;            // Retry connection 3 times
+    configOptions.ReconnectRetryPolicy = new StackExchange.Redis.ExponentialRetry(1000);  // Exponential backoff (1s base)
+
+    // Register IConnectionMultiplexer for JobStatusService pub/sub
+    var connectionMultiplexer = StackExchange.Redis.ConnectionMultiplexer.Connect(configOptions);
+    builder.Services.AddSingleton<StackExchange.Redis.IConnectionMultiplexer>(connectionMultiplexer);
+
     builder.Services.AddStackExchangeRedisCache(options =>
     {
         options.Configuration = redisConnectionString;
         options.InstanceName = builder.Configuration["Redis:InstanceName"] ?? "sdap:";
-
-        // Connection resilience options for production reliability
-        options.ConfigurationOptions = StackExchange.Redis.ConfigurationOptions.Parse(redisConnectionString);
-        options.ConfigurationOptions.AbortOnConnectFail = false;  // Don't crash if Redis temporarily unavailable
-        options.ConfigurationOptions.ConnectTimeout = 5000;       // 5 second connection timeout
-        options.ConfigurationOptions.SyncTimeout = 5000;          // 5 second operation timeout
-        options.ConfigurationOptions.ConnectRetry = 3;            // Retry connection 3 times
-        options.ConfigurationOptions.ReconnectRetryPolicy = new StackExchange.Redis.ExponentialRetry(1000);  // Exponential backoff (1s base)
+        options.ConfigurationOptions = configOptions;
     });
 
     builder.Logging.AddSimpleConsole().Services.Configure<Microsoft.Extensions.Logging.Console.SimpleConsoleFormatterOptions>(options =>
@@ -271,6 +275,7 @@ else
 {
     // Use in-memory cache for local development only
     builder.Services.AddDistributedMemoryCache();
+
 
     var logger = LoggerFactory.Create(config => config.AddConsole()).CreateLogger("Program");
     logger.LogWarning(

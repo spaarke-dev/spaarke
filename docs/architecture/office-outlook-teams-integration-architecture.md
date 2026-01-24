@@ -1,6 +1,6 @@
 # Office Add-ins Integration Architecture
 
-> **Last Updated**: January 22, 2026
+> **Last Updated**: January 24, 2026
 > **Status**: Production Ready
 > **Project**: SDAP Office Integration
 
@@ -106,17 +106,26 @@ The SDAP Office Add-ins provide integration between Microsoft Office application
 
 #### Outlook Add-in
 - **Manifest Format**: XML manifest (recommended for M365 Admin Center deployment)
-- **Manifest Location**: `src/client/office-addins/outlook/manifest-working.xml`
+- **Manifest Location**: `src/client/office-addins/outlook/outlook-manifest.xml`
+- **Build Output**: `dist/outlook/manifest.xml`
 - **Entry Points**:
   - Task Pane: `outlook/taskpane.html`
 - **Capabilities**: Read emails, access attachments, compose integration
 
 #### Word Add-in
 - **Manifest Format**: XML manifest
-- **Manifest Location**: `src/client/office-addins/word/manifest-working.xml`
+- **Manifest Location**: `src/client/office-addins/word/word-manifest.xml`
+- **Build Output**: `dist/word/manifest.xml`
 - **Entry Points**:
   - Task Pane: `word/taskpane.html`
 - **Capabilities**: Access document content, save to SPE, version tracking
+
+### Azure Static Web App (Add-in Hosting)
+
+| Environment | Resource Name | Hostname |
+|-------------|---------------|----------|
+| Dev | `spaarke-office-addins` | `icy-desert-0bfdbb61e.6.azurestaticapps.net` |
+| Prod | `spe-office-addins-prod` | `spe-office-addins-prod.azurestaticapps.net` |
 
 ---
 
@@ -437,7 +446,26 @@ All UI components use **Fluent UI v9** per ADR-021:
 | **Service Name** | spe-api-dev-67e2xz |
 | **URL** | `https://spe-api-dev-67e2xz.azurewebsites.net` |
 | **Application ID** | `1e40baad-e065-4aea-a8d4-4b7ab273458c` |
+| **App ID URI** | `api://1e40baad-e065-4aea-a8d4-4b7ab273458c` |
 | **Runtime** | .NET 8 |
+
+**Exposed API Scopes**:
+
+| Scope | Description |
+|-------|-------------|
+| `SDAP.Access` | Access SDAP resources |
+| `user_impersonation` | Access Spaarke BFF API on behalf of user |
+
+> **CRITICAL: Authorized Client Applications**
+>
+> The Office Add-in client ID **MUST** be registered as an authorized client application in the BFF API's "Expose an API" configuration. Without this, the add-in will receive 401 Unauthorized errors when calling the BFF API.
+>
+> | Authorized Client | Client ID | Required Scopes |
+> |-------------------|-----------|-----------------|
+> | **Spaarke Office Add-in** | `c1258e2d-1688-49d2-ac99-a7485ebd9995` | `SDAP.Access`, `user_impersonation` |
+> | SDAP-PCF-CLIENT | `170c98e1-d486-4355-bcbe-170454e0207c` | `SDAP.Access`, `user_impersonation` |
+>
+> **To configure**: Azure Portal → App registrations → SDAP-BFF-SPE-API → Expose an API → Authorized client applications → Add the Office Add-in client ID with both scopes selected.
 
 **Office Integration Endpoints**:
 
@@ -839,5 +867,6 @@ This will merge with the Office Add-in manifest when Unified Manifest becomes pr
 
 | Date | Author | Changes |
 |------|--------|---------|
+| January 24, 2026 | AI-Assisted | Added authorized client configuration requirement; documented CORS; updated manifest file locations; added SWA hostnames |
 | January 22, 2026 | AI-Assisted | Updated auth to Dialog API primary; added Manifest Format Strategy section |
 | January 21, 2026 | AI-Assisted | Initial architecture documentation |

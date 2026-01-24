@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Office;
@@ -61,7 +62,13 @@ public static class OfficeModule
         // Singleton for efficient Redis pub/sub handling
         // Bridges background workers to SSE clients for real-time job status updates
         // Redis connection is injected via IConnectionMultiplexer (optional - graceful degradation)
-        services.AddSingleton<IJobStatusService, JobStatusService>();
+        // Use factory to gracefully handle case when Redis is not configured
+        services.AddSingleton<IJobStatusService>(sp =>
+        {
+            var redis = sp.GetService<StackExchange.Redis.IConnectionMultiplexer>();
+            var logger = sp.GetRequiredService<ILogger<JobStatusService>>();
+            return new JobStatusService(redis, logger);
+        });
 
         // ============================================================================
         // Authorization Filters (to be added in task 033)
