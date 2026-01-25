@@ -216,7 +216,7 @@
       "facetable": false
     },
     {
-      "name": "parentEntityName",
+      "name": "parentEntityname",
       "type": "Edm.String",
       "searchable": true,
       "filterable": false,
