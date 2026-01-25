@@ -547,17 +547,62 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
     try {
       const accessToken = await getAccessToken();
 
-      // Determine source type
-      let sourceType: SourceType;
+      // Determine content type for server API
+      let contentType: 'Email' | 'Attachment' | 'Document';
       if (context.hostType === 'outlook') {
-        sourceType = selectedAttachmentIds.size > 0 ? 'OutlookAttachment' : 'OutlookEmail';
+        contentType = selectedAttachmentIds.size > 0 ? 'Attachment' : 'Email';
       } else {
-        sourceType = 'WordDocument';
+        contentType = 'Document';
       }
 
-      // Build request - association is optional
+      // Build request in server-expected format
+      // Server requires: contentType, targetEntity, and type-specific metadata
+      const serverRequest: Record<string, unknown> = {
+        contentType,
+        triggerAiProcessing: processingOptions.deepAnalysis || processingOptions.ragIndex,
+      };
+
+      // Add target entity if an association was selected
+      if (selectedEntity?.id) {
+        serverRequest.targetEntity = {
+          entityType: selectedEntity.entityType,
+          entityId: selectedEntity.id,
+          displayName: selectedEntity.name,
+        };
+      }
+
+      // Add content-type-specific metadata
+      if (contentType === 'Email') {
+        serverRequest.email = {
+          subject: context.itemName || 'Untitled Email',
+          senderEmail: 'unknown@placeholder.com', // Will be fetched by server from Graph
+          body: includeBody ? context.emailBody : undefined,
+          isBodyHtml: true,
+          // The server will use itemId to fetch full email details via Graph API
+          internetMessageId: context.itemId, // Pass email ID for server to fetch details
+        };
+      } else if (contentType === 'Attachment') {
+        const attachmentId = Array.from(selectedAttachmentIds)[0];
+        const attachment = context.attachments.find(a => a.id === attachmentId);
+        serverRequest.attachment = {
+          attachmentId: attachmentId,
+          fileName: attachment?.name || 'attachment',
+          contentType: attachment?.contentType,
+          size: attachment?.size,
+        };
+      } else if (contentType === 'Document') {
+        serverRequest.document = {
+          fileName: context.itemName || 'document.docx',
+          title: context.itemName,
+          contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        };
+      }
+
+      // Build legacy request for idempotency key computation (keep format stable)
       const request: SaveRequest = {
-        sourceType,
+        sourceType: context.hostType === 'outlook'
+          ? (selectedAttachmentIds.size > 0 ? 'OutlookAttachment' : 'OutlookEmail')
+          : 'WordDocument',
         associationType: selectedEntity?.entityType || '',
         associationId: selectedEntity?.id || '',
         content: {
@@ -570,7 +615,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         processing: processingOptions,
       };
 
-      // Compute idempotency key
+      // Compute idempotency key from legacy format for consistency
       const idempotencyKey = await computeIdempotencyKey(request);
 
       // Submit save request
@@ -581,7 +626,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           Authorization: `Bearer ${accessToken}`,
           'X-Idempotency-Key': idempotencyKey,
         },
-        body: JSON.stringify(request),
+        body: JSON.stringify(serverRequest),
         signal: abortControllerRef.current.signal,
       });
 
