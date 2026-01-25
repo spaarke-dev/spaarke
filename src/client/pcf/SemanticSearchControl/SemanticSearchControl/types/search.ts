@@ -7,8 +7,11 @@
 
 /**
  * Search scope modes
+ * - "all": Search across all documents (standalone search page)
+ * - "matter", "project", "invoice", "account", "contact": Entity-scoped search
+ * - "custom": Custom scope using documentIds (future)
  */
-export type SearchScope = "all" | "matter" | "custom";
+export type SearchScope = "all" | "matter" | "project" | "invoice" | "account" | "contact" | "custom";
 
 /**
  * Date range filter

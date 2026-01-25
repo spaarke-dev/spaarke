@@ -162,8 +162,57 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     const placeholder =
         context.parameters.placeholder?.raw ?? "Search documents...";
     const apiBaseUrl = context.parameters.apiBaseUrl?.raw ?? "";
-    const searchScope = (context.parameters.searchScope?.raw ?? "all") as SearchScope;
-    const scopeId = context.parameters.scopeId?.raw ?? null;
+
+    // Auto-detect entity context from page (when on a record form)
+    // Uses the record's GUID directly instead of relying on bound field
+    // Note: context.page exists at runtime but isn't in @types/powerapps-component-framework
+    const pageContext = (context as unknown as { page?: { entityId?: string; entityTypeName?: string } }).page;
+    const pageEntityId = pageContext?.entityId ?? null;
+    const pageEntityTypeName = pageContext?.entityTypeName ?? null;
+
+    // DEBUG: Log page context detection
+    console.log("[SemanticSearchControl] Page context detection:", {
+        pageContext,
+        pageEntityId,
+        pageEntityTypeName,
+        fullContext: context,
+    });
+
+    // Map Dataverse entity logical names to API entity types
+    const getEntityTypeFromLogicalName = (logicalName: string | null): string | null => {
+        if (!logicalName) return null;
+        const mapping: Record<string, string> = {
+            "sprk_matter": "matter",
+            "sprk_project": "project",
+            "sprk_invoice": "invoice",
+            "account": "account",
+            "contact": "contact",
+        };
+        return mapping[logicalName.toLowerCase()] ?? null;
+    };
+
+    // Determine search scope and entity context
+    // Priority: 1) Page context (record form), 2) Parameter binding (fallback)
+    const configuredScope = (context.parameters.searchScope?.raw ?? "all") as SearchScope;
+    const parameterScopeId = context.parameters.scopeId?.raw ?? null;
+
+    // Use page context when available, otherwise fall back to parameters
+    const detectedEntityType = getEntityTypeFromLogicalName(pageEntityTypeName);
+    const searchScope: SearchScope = pageEntityId && detectedEntityType
+        ? (detectedEntityType as SearchScope)  // Use detected entity type as scope
+        : configuredScope;
+
+    // Use page entityId (GUID) when on a record form, otherwise use bound parameter
+    const scopeId = pageEntityId ?? parameterScopeId;
+
+    // DEBUG: Log final scope determination
+    console.log("[SemanticSearchControl] Scope determination:", {
+        detectedEntityType,
+        configuredScope,
+        parameterScopeId,
+        finalSearchScope: searchScope,
+        finalScopeId: scopeId,
+    });
 
     // Query input state
     const [queryInput, setQueryInput] = useState("");
@@ -414,7 +463,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
             {/* Version Footer (always visible) */}
             <div className={styles.versionFooter}>
-                <Text size={100}>v1.0.15 • Built 2026-01-22</Text>
+                <Text size={100}>v1.0.16 • Built 2026-01-24</Text>
             </div>
         </div>
     );

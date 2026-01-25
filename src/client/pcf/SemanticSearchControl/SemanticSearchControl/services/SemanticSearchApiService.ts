@@ -63,6 +63,13 @@ export class SemanticSearchApiService {
             // Transform PCF request format to API format
             const apiRequest = this.transformRequest(request);
 
+            // DEBUG: Log the API request
+            console.log("[SemanticSearchApiService] API request:", {
+                endpoint,
+                pcfRequest: request,
+                apiRequest,
+            });
+
             // Build request
             const response = await fetch(endpoint, {
                 method: "POST",
@@ -80,6 +87,14 @@ export class SemanticSearchApiService {
 
             // Parse response
             const data: SearchResponse = await response.json();
+
+            // DEBUG: Log the API response
+            console.log("[SemanticSearchApiService] API response:", {
+                totalCount: data.totalCount,
+                resultsCount: data.results?.length ?? 0,
+                metadata: data.metadata,
+            });
+
             return this.validateResponse(data);
         } catch (error) {
             // Re-throw SearchError as-is
@@ -235,12 +250,13 @@ export class SemanticSearchApiService {
     /**
      * Transform PCF request format to API request format.
      *
-     * PCF uses: scope = "all" | "matter" | "custom" with scopeId
+     * PCF uses: scope = "all" | "matter" | "project" | ... | "custom" with scopeId
      * API uses: scope = "entity" | "documentIds" with entityType/entityId
      *
      * Mapping:
-     * - PCF "matter" + scopeId → API "entity" + entityType="matter" + entityId=scopeId
-     * - PCF "all" → Not supported in R1
+     * - PCF entity scopes (matter, project, invoice, account, contact) + scopeId
+     *   → API "entity" + entityType + entityId=scopeId
+     * - PCF "all" → Not supported in R1 (API returns proper error)
      * - PCF "custom" → Would need documentIds (not implemented)
      */
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -252,9 +268,13 @@ export class SemanticSearchApiService {
 
         switch (request.scope) {
             case "matter":
-                // Matter scope maps to entity scope with entityType=matter
+            case "project":
+            case "invoice":
+            case "account":
+            case "contact":
+                // Entity scopes map to API entity scope with corresponding entityType
                 apiScope = "entity";
-                entityType = "matter";
+                entityType = request.scope;
                 entityId = request.scopeId ?? undefined;
                 break;
             case "all":
