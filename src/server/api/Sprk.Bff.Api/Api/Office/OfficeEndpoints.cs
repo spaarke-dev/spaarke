@@ -254,34 +254,36 @@ public static class OfficeEndpoints
         string correlationId,
         ILogger logger)
     {
-        // Validate association is provided (mandatory per spec - no "Document Only" saves)
-        if (request.TargetEntity is null)
+        // Association (TargetEntity) is optional - users can save documents without association
+        // If provided, validate entity type and ID
+        if (request.TargetEntity is not null)
         {
-            logger.LogWarning(
-                "Save request missing required association target, correlation {CorrelationId}",
-                correlationId);
-            return ProblemDetailsHelper.OfficeAssociationRequired(correlationId);
-        }
+            // Validate association entity type is valid
+            var validEntityTypes = new[] { "account", "contact", "sprk_matter", "sprk_project", "sprk_invoice" };
+            if (!validEntityTypes.Contains(request.TargetEntity.EntityType.ToLowerInvariant()))
+            {
+                logger.LogWarning(
+                    "Save request has invalid association type {EntityType}, correlation {CorrelationId}",
+                    request.TargetEntity.EntityType,
+                    correlationId);
+                return ProblemDetailsHelper.OfficeInvalidAssociationType(correlationId);
+            }
 
-        // Validate association entity type is valid
-        var validEntityTypes = new[] { "account", "contact", "sprk_matter", "sprk_project", "sprk_invoice" };
-        if (!validEntityTypes.Contains(request.TargetEntity.EntityType.ToLowerInvariant()))
-        {
-            logger.LogWarning(
-                "Save request has invalid association type {EntityType}, correlation {CorrelationId}",
-                request.TargetEntity.EntityType,
-                correlationId);
-            return ProblemDetailsHelper.OfficeInvalidAssociationType(correlationId);
+            // Validate association entity ID is not empty
+            if (request.TargetEntity.EntityId == Guid.Empty)
+            {
+                logger.LogWarning(
+                    "Save request has empty association ID, correlation {CorrelationId}",
+                    correlationId);
+                return ProblemDetailsHelper.OfficeInvalidAssociationTarget(
+                    request.TargetEntity.EntityType,
+                    correlationId);
+            }
         }
-
-        // Validate association entity ID is not empty
-        if (request.TargetEntity.EntityId == Guid.Empty)
+        else
         {
-            logger.LogWarning(
-                "Save request has empty association ID, correlation {CorrelationId}",
-                correlationId);
-            return ProblemDetailsHelper.OfficeInvalidAssociationTarget(
-                request.TargetEntity.EntityType,
+            logger.LogInformation(
+                "Save request without association (document-only), correlation {CorrelationId}",
                 correlationId);
         }
 

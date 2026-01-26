@@ -508,9 +508,12 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         string userId,
         CancellationToken cancellationToken)
     {
+        var hasAssociation = !string.IsNullOrEmpty(payload.AssociationType) && payload.AssociationId.HasValue;
         _logger.LogDebug(
-            "Creating Document record with association {AssociationType}:{AssociationId}",
-            payload.AssociationType,
+            hasAssociation
+                ? "Creating Document record with association {AssociationType}:{AssociationId}"
+                : "Creating Document record without association (document-only save)",
+            payload.AssociationType ?? "none",
             payload.AssociationId);
 
         // TODO: Implement actual Dataverse record creation
@@ -518,7 +521,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         // 1. Create sprk_document record
         // 2. Set sprk_graphdriveid = driveId
         // 3. Set sprk_graphitemid = itemId
-        // 4. Set appropriate association lookup based on AssociationType
+        // 4. Set appropriate association lookup based on AssociationType (if provided)
         // 5. Set metadata fields (filename, size, content type)
 
         // Stub implementation - return generated GUID

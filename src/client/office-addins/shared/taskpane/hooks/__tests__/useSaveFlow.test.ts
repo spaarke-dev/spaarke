@@ -256,17 +256,25 @@ describe('useSaveFlow', () => {
   });
 
   describe('Save Operation', () => {
-    it('requires entity selection before save', async () => {
+    it('allows saving without entity selection (document-only save)', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 202,
+        json: async () => mockSaveResponse,
+      });
+
       const { result } = renderHook(() =>
         useSaveFlow({ getAccessToken: mockGetAccessToken })
       );
 
+      // Save without selecting an entity - should work (document-only save)
       await act(async () => {
         await result.current.startSave(mockContext);
       });
 
-      expect(result.current.error).not.toBeNull();
-      expect(result.current.error?.title).toBe('Association Required');
+      // Should not have an error - document-only saves are allowed
+      expect(result.current.error).toBeNull();
+      expect(mockFetch).toHaveBeenCalled();
     });
 
     it('transitions to uploading state on save', async () => {

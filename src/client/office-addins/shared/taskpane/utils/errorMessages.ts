@@ -59,13 +59,7 @@ const ERROR_CODE_MAP: Record<string, ErrorMessage> = {
     type: 'error',
     recoverable: false,
   },
-  OFFICE_003: {
-    title: 'Association Required',
-    message: 'Please select a Matter, Project, Invoice, Account, or Contact to associate this document with.',
-    type: 'warning',
-    recoverable: true,
-    action: 'Select an entity to continue.',
-  },
+  // OFFICE_003 removed - association is now optional (users can save documents without association)
   OFFICE_004: {
     title: 'File Too Large',
     message: 'The attachment exceeds the 25MB size limit. Please reduce the file size or upload it separately.',

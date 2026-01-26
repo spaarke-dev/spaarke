@@ -76,13 +76,15 @@ public record UploadFinalizationPayload
 
     /// <summary>
     /// Target association type (Matter, Project, Invoice, Account, Contact).
+    /// Null if saving document without association.
     /// </summary>
-    public required string AssociationType { get; init; }
+    public string? AssociationType { get; init; }
 
     /// <summary>
     /// Target association entity ID.
+    /// Null if saving document without association.
     /// </summary>
-    public required Guid AssociationId { get; init; }
+    public Guid? AssociationId { get; init; }
 
     /// <summary>
     /// Target container ID for SPE storage.
