@@ -167,9 +167,28 @@ dotnet publish -c Release /p:PublishProfile=Azure
 
 ### Deploy to App Service
 
-#### Option A: Azure CLI (Primary for Dev)
+#### Option A: Deployment Script (Recommended for Dev)
 
-**Use for dev iteration** - quick deployments without committing:
+**Use the deployment script** - handles build, package, deploy, and verification:
+
+```powershell
+# Full build and deploy (~1 min)
+.\scripts\Deploy-BffApi.ps1
+
+# Deploy existing build (faster, ~30 sec)
+.\scripts\Deploy-BffApi.ps1 -SkipBuild
+```
+
+**What the script does:**
+1. Builds the API in Release mode (unless `-SkipBuild`)
+2. Creates deployment zip package
+3. Deploys via Azure CLI
+4. Waits for app restart
+5. Verifies health check passes
+
+#### Option A-alt: Manual Azure CLI
+
+If you need to run steps manually:
 
 ```powershell
 # Build and package
@@ -560,9 +579,18 @@ gh run download {run-id}
 - **For Dataverse** - Always use `dataverse-deploy` skill instead of this one
 - **Check health first** - Before troubleshooting, verify `/healthz` endpoint
 - **Key Vault references** - Use `@Microsoft.KeyVault(SecretUri=...)` syntax in App Settings
-- **Dev deploys** - Use Azure CLI for quick dev iteration; GitHub Actions for production releases
+- **Dev deploys** - Use deployment scripts for quick iteration; GitHub Actions for production releases
 - **Verify deployments** - After manual deploy, check `/healthz` and Deployment Center logs
 - **If CLI deploy fails silently** - Try restart first, then Kudu as last resort
+
+### Deployment Scripts (Preferred for Dev)
+
+| Component | Script | Usage |
+|-----------|--------|-------|
+| **BFF API** | `.\scripts\Deploy-BffApi.ps1` | Full build+deploy in ~1 min |
+| **Office Add-ins** | `.\scripts\Deploy-OfficeAddins.ps1` | Full build+deploy in ~30 sec |
+
+Both scripts support `-SkipBuild` flag to deploy existing builds faster.
 - **500 errors after deploy** - Check `/healthz` response body for DI scope or startup errors
 
 ### Office Add-ins Specific
