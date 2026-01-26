@@ -59,13 +59,21 @@ export interface SearchResult {
     name: string;
     fileType: string;
     documentType: string;
+    /** Parent entity name (e.g., matter name) - maps to API parentEntityName */
     matterName: string | null;
+    /** Parent entity ID - maps to API parentEntityId */
     matterId: string | null;
-    createdOn: string;
+    /** Creation timestamp - maps to API createdAt */
+    createdAt: string | null;
+    /** Combined relevance score (0-1 normalized) */
     combinedScore: number;
     highlights: string[];
     fileUrl: string;
     recordUrl: string;
+    /** Parent entity type - maps to API parentEntityType */
+    parentEntityType?: string;
+    /** Parent entity ID - maps to API parentEntityId */
+    parentEntityId?: string;
     entityLogicalName?: string;
     recordId?: string;
 }

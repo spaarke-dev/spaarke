@@ -205,10 +205,14 @@ export const ResultCard: React.FC<IResultCardProps> = ({
                                     </Text>
                                 </>
                             )}
-                            <Text className={styles.metaSeparator}>|</Text>
-                            <Text className={styles.metaItem}>
-                                {formatDate(result.createdOn)}
-                            </Text>
+                            {result.createdAt && (
+                                <>
+                                    <Text className={styles.metaSeparator}>|</Text>
+                                    <Text className={styles.metaItem}>
+                                        {formatDate(result.createdAt)}
+                                    </Text>
+                                </>
+                            )}
                         </div>
                     </div>
                 }

@@ -351,49 +351,101 @@ public sealed class SemanticSearchService : ISemanticSearchService
 
     /// <summary>
     /// Processes search results into response format.
+    /// Deduplicates by documentId, keeping only the highest-scoring chunk per document.
+    /// Normalizes semantic reranker scores from 0-4 range to 0-1 range.
     /// </summary>
     private async Task<IReadOnlyList<SearchResult>> ProcessSearchResultsAsync(
         SearchResults<KnowledgeDocument> searchResults,
         bool includeHighlights,
         CancellationToken cancellationToken)
     {
-        var results = new List<SearchResult>();
+        // Dictionary to track best result per document (by documentId)
+        var documentResults = new Dictionary<string, SearchResult>(StringComparer.OrdinalIgnoreCase);
 
         await foreach (var result in searchResults.GetResultsAsync().WithCancellation(cancellationToken))
         {
             if (result.Document == null) continue;
 
             var doc = result.Document;
-            var combinedScore = result.Score ?? 0;
+            var rawScore = result.Score ?? 0;
 
-            // Use semantic reranker score if available
+            // Use semantic reranker score if available (0-4 range)
             if (result.SemanticSearch?.RerankerScore.HasValue == true)
             {
-                combinedScore = result.SemanticSearch.RerankerScore.Value;
+                rawScore = result.SemanticSearch.RerankerScore.Value;
             }
 
-            results.Add(new SearchResult
+            // Normalize score to 0-1 range
+            // Semantic reranker scores are typically 0-4, so divide by 4
+            // Clamp to ensure we stay within 0-1 bounds
+            var normalizedScore = Math.Clamp(rawScore / 4.0, 0.0, 1.0);
+
+            var documentId = doc.DocumentId ?? doc.SpeFileId ?? Guid.NewGuid().ToString();
+
+            // Check if we already have a result for this document
+            if (documentResults.TryGetValue(documentId, out var existingResult))
             {
-                DocumentId = doc.DocumentId,
-                SpeFileId = doc.SpeFileId,
-                Name = doc.FileName,
-                DocumentType = doc.DocumentType,
-                FileType = doc.FileType,
-                CombinedScore = combinedScore,
-                Similarity = null, // Reserved for R2
-                KeywordScore = null, // Reserved for R2
-                Highlights = includeHighlights ? GetHighlights(result) : null,
-                ParentEntityType = doc.ParentEntityType,
-                ParentEntityId = doc.ParentEntityId,
-                ParentEntityName = doc.ParentEntityName,
-                FileUrl = null, // To be populated by endpoint if needed
-                RecordUrl = null, // To be populated by endpoint if needed
-                CreatedAt = doc.CreatedAt,
-                UpdatedAt = doc.UpdatedAt
-            });
+                // Keep the higher scoring result
+                if (normalizedScore > existingResult.CombinedScore)
+                {
+                    documentResults[documentId] = CreateSearchResult(doc, normalizedScore, includeHighlights ? GetHighlights(result) : null);
+                }
+                // Optionally merge highlights from multiple chunks
+                else if (includeHighlights && existingResult.Highlights != null)
+                {
+                    var newHighlights = GetHighlights(result);
+                    if (newHighlights != null && newHighlights.Count > 0)
+                    {
+                        // Keep existing result but add unique highlights (up to 3 total)
+                        var mergedHighlights = existingResult.Highlights
+                            .Concat(newHighlights)
+                            .Distinct()
+                            .Take(3)
+                            .ToList();
+                        documentResults[documentId] = existingResult with { Highlights = mergedHighlights };
+                    }
+                }
+            }
+            else
+            {
+                // First result for this document
+                documentResults[documentId] = CreateSearchResult(doc, normalizedScore, includeHighlights ? GetHighlights(result) : null);
+            }
         }
 
-        return results;
+        // Return results sorted by score descending
+        return documentResults.Values
+            .OrderByDescending(r => r.CombinedScore)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Creates a SearchResult from a KnowledgeDocument.
+    /// </summary>
+    private static SearchResult CreateSearchResult(
+        KnowledgeDocument doc,
+        double normalizedScore,
+        IReadOnlyList<string>? highlights)
+    {
+        return new SearchResult
+        {
+            DocumentId = doc.DocumentId,
+            SpeFileId = doc.SpeFileId,
+            Name = doc.FileName,
+            DocumentType = doc.DocumentType,
+            FileType = doc.FileType,
+            CombinedScore = normalizedScore,
+            Similarity = null, // Reserved for R2
+            KeywordScore = null, // Reserved for R2
+            Highlights = highlights,
+            ParentEntityType = doc.ParentEntityType,
+            ParentEntityId = doc.ParentEntityId,
+            ParentEntityName = doc.ParentEntityName,
+            FileUrl = null, // To be populated by endpoint if needed
+            RecordUrl = null, // To be populated by endpoint if needed
+            CreatedAt = doc.CreatedAt,
+            UpdatedAt = doc.UpdatedAt
+        };
     }
 
     /// <summary>
