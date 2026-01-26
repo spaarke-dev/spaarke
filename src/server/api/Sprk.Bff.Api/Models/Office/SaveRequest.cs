@@ -230,6 +230,23 @@ public record AttachmentReference
     /// MIME content type.
     /// </summary>
     public string? ContentType { get; init; }
+
+    /// <summary>
+    /// Base64-encoded attachment content.
+    /// Retrieved client-side via Office.js getAttachmentContentAsync().
+    /// </summary>
+    public string? ContentBase64 { get; init; }
+
+    /// <summary>
+    /// Whether this is an inline attachment (embedded in HTML body via cid: reference).
+    /// </summary>
+    public bool IsInline { get; init; }
+
+    /// <summary>
+    /// Content-ID for inline attachments (without angle brackets).
+    /// Used for cid: references in HTML body.
+    /// </summary>
+    public string? ContentId { get; init; }
 }
 
 /// <summary>

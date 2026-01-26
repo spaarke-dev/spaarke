@@ -1,5 +1,14 @@
+using System.Text.Json;
+using Azure.Messaging.ServiceBus;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using MimeKit;
+using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Office;
+using Sprk.Bff.Api.Workers.Office;
+using Sprk.Bff.Api.Workers.Office.Messages;
+using Spaarke.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Office;
 
@@ -21,13 +30,34 @@ namespace Sprk.Bff.Api.Services.Office;
 public class OfficeService : IOfficeService
 {
     private readonly IJobStatusService _jobStatusService;
+    private readonly IDataverseService _dataverseService;
+    private readonly SpeFileStore _speFileStore;
+    private readonly ServiceBusClient _serviceBusClient;
+    private readonly ServiceBusOptions _serviceBusOptions;
+    private readonly EmailProcessingOptions _emailProcessingOptions;
     private readonly ILogger<OfficeService> _logger;
+
+    // In-memory job storage for development/testing (fallback when Dataverse unavailable)
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, JobStatusResponse> _jobStore = new();
+
+    // Queue names for Office workers
+    private const string UploadFinalizationQueueName = "office-upload-finalization";
 
     public OfficeService(
         IJobStatusService jobStatusService,
+        IDataverseService dataverseService,
+        SpeFileStore speFileStore,
+        ServiceBusClient serviceBusClient,
+        IOptions<ServiceBusOptions> serviceBusOptions,
+        IOptions<EmailProcessingOptions> emailProcessingOptions,
         ILogger<OfficeService> logger)
     {
         _jobStatusService = jobStatusService;
+        _dataverseService = dataverseService;
+        _speFileStore = speFileStore;
+        _serviceBusClient = serviceBusClient;
+        _serviceBusOptions = serviceBusOptions.Value;
+        _emailProcessingOptions = emailProcessingOptions.Value;
         _logger = logger;
     }
 
@@ -77,38 +107,236 @@ public class OfficeService : IOfficeService
             };
 
             // Step 4: Create a new ProcessingJob record in Dataverse
-            // TODO: Replace with actual Dataverse SDK call when ProcessingJob table exists
-            // The record should include:
-            // - sprk_jobtype (option set)
-            // - sprk_status = Queued (option set)
-            // - sprk_payload (JSON blob with request)
-            // - sprk_idempotencykey (indexed string)
-            // - sprk_createdby (system user lookup)
-            // - sprk_association (lookup to target entity)
-
-            var jobId = Guid.NewGuid();
+            var jobId = Guid.Empty;
 
             _logger.LogInformation(
-                "Creating ProcessingJob {JobId} for {ContentType} save with association {AssociationType}:{AssociationId}",
-                jobId,
+                "Creating ProcessingJob for {ContentType} save with association {AssociationType}:{AssociationId}",
                 request.ContentType,
                 request.TargetEntity?.EntityType,
                 request.TargetEntity?.EntityId);
 
-            // Simulate Dataverse record creation
-            await Task.Delay(10, cancellationToken);
+            // Serialize the request payload for storage
+            var payload = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                ContentType = request.ContentType.ToString(),
+                TargetEntity = request.TargetEntity,
+                ContainerId = request.ContainerId,
+                FolderPath = request.FolderPath,
+                Email = request.Email,
+                Attachment = request.Attachment,
+                Document = request.Document,
+                TriggerAiProcessing = request.TriggerAiProcessing
+            });
 
-            // Step 5: Queue background job for processing
-            // TODO: Implement Service Bus message publishing (ADR-001)
-            // Workers will:
-            // - Upload content to SPE
-            // - Create EmailArtifact/AttachmentArtifact/Document record
-            // - Trigger AI processing if enabled
-            // - Update job status via SSE
+            try
+            {
+                // Create ProcessingJob in Dataverse using existing IDataverseService
+                jobId = await _dataverseService.CreateProcessingJobAsync(new
+                {
+                    Name = $"{request.ContentType} Save - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
+                    JobType = (int)jobType,
+                    Status = 0, // Queued
+                    Progress = 0,
+                    IdempotencyKey = idempotencyKey,
+                    CorrelationId = Guid.NewGuid().ToString(),
+                    Payload = payload
+                }, cancellationToken);
 
-            _logger.LogInformation(
-                "ProcessingJob {JobId} created and queued for background processing",
-                jobId);
+                _logger.LogInformation(
+                    "ProcessingJob {JobId} created in Dataverse for {ContentType}",
+                    jobId,
+                    request.ContentType);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Failed to create ProcessingJob in Dataverse, falling back to in-memory storage");
+
+                // Fallback to in-memory for development/testing when Dataverse is unavailable
+                jobId = Guid.NewGuid();
+            }
+
+            // Also store in-memory for job status polling (fast access)
+            var correlationId = Guid.NewGuid().ToString();
+            var jobRecord = new JobStatusResponse
+            {
+                JobId = jobId,
+                Status = JobStatus.Queued,
+                JobType = jobType,
+                Progress = 0,
+                CurrentPhase = "Queued",
+                CompletedPhases = new List<CompletedPhase>(),
+                CreatedAt = DateTimeOffset.UtcNow,
+                CreatedBy = userId
+            };
+            _jobStore[jobId] = jobRecord;
+
+            // Step 5: Upload content to SPE and queue finalization job
+            // Following existing document flow per architecture docs:
+            // 1. Create Document → 2. Upload to SPE → 3. Associate Document to SPE → 4. Trigger AI
+            Stream? contentStream = null;
+            string fileName;
+            long fileSize = 0;
+
+            try
+            {
+                // Build file content based on content type
+                switch (request.ContentType)
+                {
+                    case SaveContentType.Email when request.Email != null:
+                        // Build .eml file from email metadata using MimeKit
+                        contentStream = BuildEmlFromMetadata(request.Email);
+                        fileName = GenerateEmlFileName(request.Email);
+                        fileSize = contentStream.Length;
+                        break;
+
+                    case SaveContentType.Attachment when request.Attachment != null:
+                        // Decode base64 attachment content
+                        if (!string.IsNullOrEmpty(request.Attachment.ContentBase64))
+                        {
+                            var bytes = Convert.FromBase64String(request.Attachment.ContentBase64);
+                            contentStream = new MemoryStream(bytes);
+                            fileSize = bytes.Length;
+                        }
+                        else
+                        {
+                            throw new InvalidOperationException("Attachment content is required for attachment saves");
+                        }
+                        fileName = request.Attachment.FileName;
+                        break;
+
+                    case SaveContentType.Document when request.Document != null:
+                        // Decode base64 document content
+                        if (!string.IsNullOrEmpty(request.Document.ContentBase64))
+                        {
+                            var bytes = Convert.FromBase64String(request.Document.ContentBase64);
+                            contentStream = new MemoryStream(bytes);
+                            fileSize = bytes.Length;
+                        }
+                        else
+                        {
+                            throw new InvalidOperationException("Document content is required for document saves");
+                        }
+                        fileName = request.Document.FileName;
+                        break;
+
+                    default:
+                        throw new InvalidOperationException($"Unsupported content type: {request.ContentType}");
+                }
+
+                // Get the container ID (use provided or default from configuration)
+                var containerId = request.ContainerId;
+                if (string.IsNullOrEmpty(containerId))
+                {
+                    containerId = _emailProcessingOptions.DefaultContainerId;
+                    if (string.IsNullOrEmpty(containerId))
+                    {
+                        throw new InvalidOperationException(
+                            "ContainerId is required for save operations. Either provide ContainerId in request or configure EmailProcessing:DefaultContainerId.");
+                    }
+                    _logger.LogDebug("Using default container ID from configuration: {ContainerId}", containerId);
+                }
+
+                // Upload to SPE
+                var (uploadSuccess, driveId, itemId, webUrl, uploadError) = await UploadToSpeAsync(
+                    containerId,
+                    request.FolderPath,
+                    fileName,
+                    contentStream,
+                    cancellationToken);
+
+                if (!uploadSuccess || string.IsNullOrEmpty(driveId) || string.IsNullOrEmpty(itemId))
+                {
+                    // Update job status to failed
+                    await UpdateJobStatusInDataverseAsync(jobId, JobStatus.Failed, "UploadFailed", 0, uploadError, cancellationToken);
+
+                    return new SaveResponse
+                    {
+                        Success = false,
+                        Error = new SaveError
+                        {
+                            Code = "OFFICE_012",
+                            Message = "Failed to upload file to storage",
+                            Details = uploadError,
+                            Retryable = true
+                        }
+                    };
+                }
+
+                // Update job status to uploading complete
+                await UpdateJobStatusInDataverseAsync(jobId, JobStatus.Running, "FileUploaded", 30, null, cancellationToken);
+                _jobStore[jobId] = jobRecord with
+                {
+                    Status = JobStatus.Running,
+                    Progress = 30,
+                    CurrentPhase = "FileUploaded"
+                };
+
+                // Create Document record with SPE pointers
+                var documentId = await CreateDocumentWithSpePointersAsync(
+                    request,
+                    driveId,
+                    itemId,
+                    fileName,
+                    fileSize,
+                    userId,
+                    cancellationToken);
+
+                // Update job status to records created
+                await UpdateJobStatusInDataverseAsync(jobId, JobStatus.Running, "RecordsCreated", 50, null, cancellationToken);
+                _jobStore[jobId] = _jobStore[jobId] with
+                {
+                    Progress = 50,
+                    CurrentPhase = "RecordsCreated"
+                };
+
+                // Queue finalization job for additional processing (AI, RAG, etc.)
+                if (request.TriggerAiProcessing)
+                {
+                    await QueueUploadFinalizationAsync(
+                        jobId,
+                        idempotencyKey,
+                        correlationId,
+                        userId,
+                        request,
+                        driveId,
+                        itemId,
+                        fileName,
+                        fileSize,
+                        cancellationToken);
+                }
+                else
+                {
+                    // No AI processing - mark job as complete
+                    await UpdateJobStatusInDataverseAsync(jobId, JobStatus.Completed, "Complete", 100, null, cancellationToken);
+                    _jobStore[jobId] = _jobStore[jobId] with
+                    {
+                        Status = JobStatus.Completed,
+                        Progress = 100,
+                        CurrentPhase = "Complete",
+                        CompletedAt = DateTimeOffset.UtcNow,
+                        Result = new JobResult
+                        {
+                            Artifact = new CreatedArtifact
+                            {
+                                Type = ArtifactType.Document,
+                                Id = documentId,
+                                WebUrl = webUrl ?? GenerateDataverseUrl(documentId)
+                            }
+                        }
+                    };
+                }
+
+                _logger.LogInformation(
+                    "ProcessingJob {JobId} created, file uploaded to SPE, document {DocumentId} created",
+                    jobId,
+                    documentId);
+            }
+            finally
+            {
+                contentStream?.Dispose();
+            }
 
             // Step 6: Return success response with job tracking URLs
             return new SaveResponse
@@ -124,21 +352,169 @@ public class OfficeService : IOfficeService
         {
             _logger.LogError(
                 ex,
-                "Failed to create save job for {ContentType} by user {UserId}",
+                "Failed to create save job for {ContentType} by user {UserId}: {ErrorMessage}",
                 request.ContentType,
-                userId);
+                userId,
+                ex.Message);
 
+            // Include the actual exception message to aid debugging
+            // In production, consider returning a generic message and logging details server-side only
             return new SaveResponse
             {
                 Success = false,
                 Error = new SaveError
                 {
                     Code = "OFFICE_INTERNAL",
-                    Message = "An unexpected error occurred while processing the save request.",
-                    Details = ex.Message,
+                    Message = $"Save failed: {ex.Message}",
+                    Details = ex.ToString(), // Full stack trace for debugging
                     Retryable = true
                 }
             };
+        }
+    }
+
+    /// <summary>
+    /// DEPRECATED: Simulates job progress for testing/development when Service Bus is unavailable.
+    /// Production flow now uses actual SPE upload and Service Bus queueing via SaveAsync.
+    /// Only use this for local development without Service Bus configured.
+    /// </summary>
+    [Obsolete("Use SaveAsync with Service Bus flow instead. This is only for local development without Service Bus.")]
+    private async Task SimulateJobProgressAsync(Guid jobId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Wait briefly then start "Running"
+            await Task.Delay(500, cancellationToken);
+            if (!_jobStore.TryGetValue(jobId, out var job)) return;
+
+            job = job with
+            {
+                Status = JobStatus.Running,
+                Progress = 10,
+                CurrentPhase = "RecordsCreated",
+                StartedAt = DateTimeOffset.UtcNow
+            };
+            _jobStore[jobId] = job;
+
+            // Simulate RecordsCreated phase
+            await Task.Delay(1000, cancellationToken);
+            if (!_jobStore.TryGetValue(jobId, out job)) return;
+
+            var completedPhases = new List<CompletedPhase>(job.CompletedPhases ?? new List<CompletedPhase>())
+            {
+                new CompletedPhase
+                {
+                    Name = "RecordsCreated",
+                    CompletedAt = DateTimeOffset.UtcNow,
+                    DurationMs = 1000
+                }
+            };
+
+            job = job with
+            {
+                Progress = 30,
+                CurrentPhase = "FileUploaded",
+                CompletedPhases = completedPhases
+            };
+            _jobStore[jobId] = job;
+
+            // Simulate FileUploaded phase
+            await Task.Delay(1500, cancellationToken);
+            if (!_jobStore.TryGetValue(jobId, out job)) return;
+
+            completedPhases = new List<CompletedPhase>(job.CompletedPhases ?? new List<CompletedPhase>())
+            {
+                new CompletedPhase
+                {
+                    Name = "FileUploaded",
+                    CompletedAt = DateTimeOffset.UtcNow,
+                    DurationMs = 1500
+                }
+            };
+
+            // Create actual Document record in Dataverse
+            // In production, this would be done by the background worker after SPE upload
+            Guid documentId;
+            string documentUrl;
+
+            try
+            {
+                var createRequest = new Spaarke.Dataverse.CreateDocumentRequest
+                {
+                    Name = $"Simulated Document - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
+                    ContainerId = "simulation", // Placeholder - no actual container
+                    Description = "Document created by simulation (no actual file uploaded)"
+                };
+
+                var documentIdString = await _dataverseService.CreateDocumentAsync(createRequest, cancellationToken);
+                documentId = Guid.Parse(documentIdString);
+
+                _logger.LogInformation(
+                    "Simulation created actual Document in Dataverse: {DocumentId}",
+                    documentId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Simulation failed to create Document in Dataverse, using fake ID");
+                documentId = Guid.NewGuid();
+            }
+
+            // Use correct Dataverse URL format for the document
+            // AppId for Spaarke app in dev environment
+            const string dataverseBaseUrl = "https://spaarkedev1.crm.dynamics.com";
+            const string appId = "729afe6d-ca73-f011-b4cb-6045bdd8b757";
+            documentUrl = $"{dataverseBaseUrl}/main.aspx?appid={appId}&pagetype=entityrecord&etn=sprk_document&id={documentId}";
+
+            job = job with
+            {
+                Status = JobStatus.Completed,
+                Progress = 100,
+                CurrentPhase = "Complete",
+                CompletedPhases = completedPhases,
+                CompletedAt = DateTimeOffset.UtcNow,
+                Result = new JobResult
+                {
+                    Artifact = new CreatedArtifact
+                    {
+                        Type = ArtifactType.Document,
+                        Id = documentId,
+                        WebUrl = documentUrl
+                    }
+                }
+            };
+            _jobStore[jobId] = job;
+
+            _logger.LogInformation(
+                "Simulated job {JobId} completed with document {DocumentId}",
+                jobId,
+                documentId);
+        }
+        catch (OperationCanceledException)
+        {
+            // Job was cancelled
+            _logger.LogDebug("Simulated job {JobId} was cancelled", jobId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error simulating job progress for {JobId}", jobId);
+
+            // Mark job as failed
+            if (_jobStore.TryGetValue(jobId, out var job))
+            {
+                job = job with
+                {
+                    Status = JobStatus.Failed,
+                    Error = new JobError
+                    {
+                        Code = "OFFICE_INTERNAL",
+                        Message = "Internal error during processing",
+                        Retryable = true
+                    }
+                };
+                _jobStore[jobId] = job;
+            }
         }
     }
 
@@ -163,31 +539,566 @@ public class OfficeService : IOfficeService
     }
 
     /// <summary>
+    /// Builds an RFC 5322 compliant .eml file from Office add-in email metadata.
+    /// Uses MimeKit for proper MIME message construction.
+    /// </summary>
+    private static Stream BuildEmlFromMetadata(EmailMetadata metadata)
+    {
+        var message = new MimeMessage();
+
+        // Set sender
+        message.From.Add(new MailboxAddress(metadata.SenderName ?? "", metadata.SenderEmail));
+
+        // Set recipients
+        if (metadata.Recipients != null)
+        {
+            foreach (var recipient in metadata.Recipients)
+            {
+                var mailbox = new MailboxAddress(recipient.Name ?? "", recipient.Email);
+                switch (recipient.Type)
+                {
+                    case RecipientType.To:
+                        message.To.Add(mailbox);
+                        break;
+                    case RecipientType.Cc:
+                        message.Cc.Add(mailbox);
+                        break;
+                    case RecipientType.Bcc:
+                        message.Bcc.Add(mailbox);
+                        break;
+                }
+            }
+        }
+
+        // Set subject
+        message.Subject = metadata.Subject;
+
+        // Set dates
+        if (metadata.SentDate.HasValue)
+        {
+            message.Date = metadata.SentDate.Value;
+        }
+
+        // Set message ID if it's a valid RFC 2822 Message-ID format
+        // Note: Exchange item IDs (AAMkA...) are NOT valid Message-IDs
+        // Valid format: <something@something> or just something@something
+        if (!string.IsNullOrEmpty(metadata.InternetMessageId))
+        {
+            // Check if it looks like an RFC 2822 Message-ID (contains @ and doesn't look like base64)
+            var msgId = metadata.InternetMessageId;
+            if (msgId.Contains('@') && !msgId.StartsWith("AAMk", StringComparison.OrdinalIgnoreCase))
+            {
+                // Strip angle brackets if present, MimeKit will add them
+                if (msgId.StartsWith("<") && msgId.EndsWith(">"))
+                {
+                    msgId = msgId[1..^1];
+                }
+                message.MessageId = msgId;
+            }
+            // If it's an Exchange item ID, store it in a custom header for reference
+            else
+            {
+                message.Headers.Add("X-Exchange-Item-Id", metadata.InternetMessageId);
+            }
+        }
+
+        // Build body with attachments
+        var bodyBuilder = new BodyBuilder();
+        if (metadata.IsBodyHtml && !string.IsNullOrEmpty(metadata.Body))
+        {
+            bodyBuilder.HtmlBody = metadata.Body;
+        }
+        else if (!string.IsNullOrEmpty(metadata.Body))
+        {
+            bodyBuilder.TextBody = metadata.Body;
+        }
+
+        // Add attachments from client-side content
+        if (metadata.Attachments != null)
+        {
+            foreach (var attachment in metadata.Attachments)
+            {
+                if (string.IsNullOrEmpty(attachment.ContentBase64))
+                {
+                    continue; // Skip attachments without content
+                }
+
+                try
+                {
+                    var contentBytes = Convert.FromBase64String(attachment.ContentBase64);
+                    var contentType = ContentType.Parse(attachment.ContentType ?? "application/octet-stream");
+
+                    if (attachment.IsInline && !string.IsNullOrEmpty(attachment.ContentId))
+                    {
+                        // Inline attachment (embedded image in HTML body)
+                        var linkedResource = bodyBuilder.LinkedResources.Add(
+                            attachment.FileName,
+                            contentBytes,
+                            contentType);
+                        linkedResource.ContentId = attachment.ContentId;
+                    }
+                    else
+                    {
+                        // Regular attachment
+                        bodyBuilder.Attachments.Add(
+                            attachment.FileName,
+                            contentBytes,
+                            contentType);
+                    }
+                }
+                catch (FormatException)
+                {
+                    // Skip invalid base64 content
+                }
+            }
+        }
+
+        message.Body = bodyBuilder.ToMessageBody();
+
+        // Write to stream
+        var stream = new MemoryStream();
+        message.WriteTo(stream);
+        stream.Position = 0;
+        return stream;
+    }
+
+    /// <summary>
+    /// Generates a sanitized filename for the .eml file.
+    /// Format: YYYY-MM-DD_Subject.eml (max 100 chars, special chars removed)
+    /// </summary>
+    private static string GenerateEmlFileName(EmailMetadata metadata)
+    {
+        var datePrefix = metadata.SentDate?.ToString("yyyy-MM-dd") ?? DateTime.UtcNow.ToString("yyyy-MM-dd");
+        var sanitizedSubject = SanitizeFileName(metadata.Subject);
+
+        // Limit subject to 80 chars to leave room for date and extension
+        if (sanitizedSubject.Length > 80)
+        {
+            sanitizedSubject = sanitizedSubject[..80];
+        }
+
+        return $"{datePrefix}_{sanitizedSubject}.eml";
+    }
+
+    /// <summary>
+    /// Sanitizes a string for use as a filename.
+    /// </summary>
+    private static string SanitizeFileName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return "untitled";
+        }
+
+        var invalid = Path.GetInvalidFileNameChars();
+        var sanitized = new string(name.Where(c => !invalid.Contains(c)).ToArray());
+        return string.IsNullOrWhiteSpace(sanitized) ? "untitled" : sanitized.Trim();
+    }
+
+    /// <summary>
+    /// Uploads content to SPE and returns the DriveId and ItemId.
+    /// </summary>
+    private async Task<(bool Success, string? DriveId, string? ItemId, string? WebUrl, string? Error)> UploadToSpeAsync(
+        string containerId,
+        string? folderPath,
+        string fileName,
+        Stream content,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogDebug(
+            "Uploading to SPE container {ContainerId}, path {FolderPath}/{FileName}",
+            containerId,
+            folderPath ?? "root",
+            fileName);
+
+        try
+        {
+            // Resolve container to drive ID
+            var driveId = await _speFileStore.ResolveDriveIdAsync(containerId, cancellationToken);
+
+            // Build the full path
+            var path = string.IsNullOrEmpty(folderPath)
+                ? fileName
+                : $"{folderPath.TrimEnd('/')}/{fileName}";
+
+            // Upload using SpeFileStore (ADR-007)
+            var result = await _speFileStore.UploadSmallAsync(driveId, path, content, cancellationToken);
+
+            if (result != null)
+            {
+                _logger.LogInformation(
+                    "File uploaded to SPE: DriveId={DriveId}, ItemId={ItemId}",
+                    driveId,
+                    result.Id);
+
+                return (true, driveId, result.Id, result.WebUrl, null);
+            }
+
+            return (false, null, null, null, "Upload returned null result");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "SPE upload failed for {FileName}", fileName);
+            return (false, null, null, null, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Queues a job to the Service Bus for background processing.
+    /// </summary>
+    private async Task QueueUploadFinalizationAsync(
+        Guid jobId,
+        string idempotencyKey,
+        string correlationId,
+        string userId,
+        SaveRequest request,
+        string driveId,
+        string itemId,
+        string fileName,
+        long fileSize,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogDebug(
+            "Queueing upload finalization job {JobId} for {ContentType}",
+            jobId,
+            request.ContentType);
+
+        // Build the payload for the worker
+        var payload = new UploadFinalizationPayload
+        {
+            ContentType = request.ContentType,
+            AssociationType = request.TargetEntity?.EntityType,
+            AssociationId = request.TargetEntity?.EntityId,
+            ContainerId = driveId, // Use resolved drive ID
+            FolderPath = request.FolderPath,
+            TempFileLocation = $"spe://{driveId}/{itemId}", // Reference the already-uploaded SPE file
+            FileName = fileName,
+            FileSize = fileSize,
+            MimeType = GetMimeType(request),
+            TriggerAiProcessing = request.TriggerAiProcessing,
+            EmailMetadata = request.ContentType == SaveContentType.Email && request.Email != null
+                ? new EmailArtifactPayload
+                {
+                    InternetMessageId = request.Email.InternetMessageId,
+                    ConversationId = request.Email.ConversationId,
+                    Subject = request.Email.Subject,
+                    SenderEmail = request.Email.SenderEmail,
+                    SenderName = request.Email.SenderName,
+                    RecipientsJson = request.Email.Recipients != null
+                        ? JsonSerializer.Serialize(request.Email.Recipients)
+                        : null,
+                    SentDate = request.Email.SentDate,
+                    ReceivedDate = request.Email.ReceivedDate,
+                    BodyPreview = request.Email.Body?[..Math.Min(request.Email.Body.Length, 500)],
+                    HasAttachments = request.Email.Attachments?.Count > 0,
+                    Importance = 1 // Normal
+                }
+                : null,
+            AttachmentMetadata = request.ContentType == SaveContentType.Attachment && request.Attachment != null
+                ? new AttachmentArtifactPayload
+                {
+                    OutlookAttachmentId = request.Attachment.AttachmentId,
+                    OriginalFileName = request.Attachment.FileName,
+                    ContentType = request.Attachment.ContentType,
+                    Size = request.Attachment.Size ?? 0,
+                    IsInline = false
+                }
+                : null,
+            AiOptions = new AiProcessingOptions
+            {
+                ProfileSummary = request.TriggerAiProcessing,
+                RagIndex = request.TriggerAiProcessing,
+                DeepAnalysis = false
+            }
+        };
+
+        // Create the job message
+        var message = new OfficeJobMessage
+        {
+            JobId = jobId,
+            JobType = OfficeJobType.UploadFinalization,
+            SubjectId = itemId,
+            CorrelationId = correlationId,
+            IdempotencyKey = idempotencyKey,
+            Attempt = 1,
+            MaxAttempts = 3,
+            UserId = userId,
+            Payload = JsonSerializer.SerializeToElement(payload)
+        };
+
+        // Send to Service Bus
+        var sender = _serviceBusClient.CreateSender(UploadFinalizationQueueName);
+
+        var sbMessage = new ServiceBusMessage(JsonSerializer.Serialize(message))
+        {
+            MessageId = jobId.ToString(),
+            CorrelationId = correlationId,
+            ContentType = "application/json",
+            Subject = OfficeJobType.UploadFinalization.ToString(),
+            ApplicationProperties =
+            {
+                ["JobType"] = OfficeJobType.UploadFinalization.ToString(),
+                ["Attempt"] = 1,
+                ["UserId"] = userId,
+                ["ContentType"] = request.ContentType.ToString()
+            }
+        };
+
+        await sender.SendMessageAsync(sbMessage, cancellationToken);
+        await sender.DisposeAsync();
+
+        _logger.LogInformation(
+            "Upload finalization job {JobId} queued to Service Bus for {ContentType}",
+            jobId,
+            request.ContentType);
+    }
+
+    /// <summary>
+    /// Gets the MIME type for the save request content.
+    /// </summary>
+    private static string GetMimeType(SaveRequest request) => request.ContentType switch
+    {
+        SaveContentType.Email => "message/rfc822",
+        SaveContentType.Attachment => request.Attachment?.ContentType ?? "application/octet-stream",
+        SaveContentType.Document => request.Document?.ContentType ?? "application/octet-stream",
+        _ => "application/octet-stream"
+    };
+
+    /// <summary>
+    /// Updates ProcessingJob status in Dataverse.
+    /// </summary>
+    private async Task UpdateJobStatusInDataverseAsync(
+        Guid jobId,
+        JobStatus status,
+        string phase,
+        int progress,
+        string? errorMessage,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var dataverseStatus = status switch
+            {
+                JobStatus.Queued => 0,
+                JobStatus.Running => 1,
+                JobStatus.Completed => 2,
+                JobStatus.Failed => 3,
+                JobStatus.Cancelled => 4,
+                _ => 1
+            };
+
+            await _dataverseService.UpdateProcessingJobAsync(jobId, new
+            {
+                Status = dataverseStatus,
+                Progress = progress,
+                CurrentStage = phase,
+                ErrorMessage = errorMessage,
+                CompletedDate = status is JobStatus.Completed or JobStatus.Failed
+                    ? DateTime.UtcNow
+                    : (DateTime?)null
+            }, cancellationToken);
+
+            _logger.LogDebug(
+                "ProcessingJob {JobId} status updated: {Status}, {Phase}, {Progress}%",
+                jobId, status, phase, progress);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to update ProcessingJob {JobId} status in Dataverse", jobId);
+        }
+    }
+
+    /// <summary>
+    /// Creates a Document record in Dataverse with SPE pointers.
+    /// </summary>
+    private async Task<Guid> CreateDocumentWithSpePointersAsync(
+        SaveRequest request,
+        string driveId,
+        string itemId,
+        string fileName,
+        long fileSize,
+        string userId,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogDebug(
+            "Creating Document record with SPE pointers: DriveId={DriveId}, ItemId={ItemId}",
+            driveId, itemId);
+
+        // Create base document record
+        var createRequest = new Spaarke.Dataverse.CreateDocumentRequest
+        {
+            Name = fileName,
+            ContainerId = driveId,
+            Description = request.ContentType switch
+            {
+                SaveContentType.Email => request.Email?.Subject,
+                SaveContentType.Attachment => $"Attachment: {request.Attachment?.FileName}",
+                SaveContentType.Document => request.Document?.Title ?? request.Document?.FileName,
+                _ => null
+            }
+        };
+
+        var documentIdString = await _dataverseService.CreateDocumentAsync(createRequest, cancellationToken);
+        var documentId = Guid.Parse(documentIdString);
+
+        // Update with SPE pointers and additional metadata
+        var updateRequest = new Spaarke.Dataverse.UpdateDocumentRequest
+        {
+            GraphDriveId = driveId,
+            GraphItemId = itemId,
+            FileName = fileName,
+            FileSize = fileSize,
+            MimeType = GetMimeType(request),
+            HasFile = true
+        };
+
+        // Set entity association lookup based on target entity
+        if (request.TargetEntity != null)
+        {
+            switch (request.TargetEntity.EntityType?.ToLowerInvariant())
+            {
+                case "matter":
+                case "sprk_matter":
+                    updateRequest.MatterLookup = request.TargetEntity.EntityId;
+                    break;
+                case "project":
+                case "sprk_project":
+                    updateRequest.ProjectLookup = request.TargetEntity.EntityId;
+                    break;
+                case "invoice":
+                case "sprk_invoice":
+                    updateRequest.InvoiceLookup = request.TargetEntity.EntityId;
+                    break;
+                default:
+                    _logger.LogWarning(
+                        "Unknown target entity type {EntityType}, skipping association",
+                        request.TargetEntity.EntityType);
+                    break;
+            }
+        }
+
+        // Set email-specific fields
+        if (request.ContentType == SaveContentType.Email && request.Email != null)
+        {
+            updateRequest.EmailSubject = request.Email.Subject;
+            updateRequest.EmailFrom = request.Email.SenderEmail;
+            updateRequest.EmailTo = request.Email.Recipients != null
+                ? JsonSerializer.Serialize(request.Email.Recipients)
+                : null;
+            updateRequest.EmailDate = request.Email.SentDate?.DateTime;
+            updateRequest.EmailBody = request.Email.Body?[..Math.Min(request.Email.Body?.Length ?? 0, 2000)];
+            updateRequest.EmailMessageId = request.Email.InternetMessageId;
+            updateRequest.EmailConversationIndex = request.Email.ConversationId;
+            updateRequest.IsEmailArchive = true;
+        }
+
+        await _dataverseService.UpdateDocumentAsync(documentIdString, updateRequest, cancellationToken);
+
+        _logger.LogInformation(
+            "Document record created: DocumentId={DocumentId}, DriveId={DriveId}, ItemId={ItemId}",
+            documentId, driveId, itemId);
+
+        return documentId;
+    }
+
+    /// <summary>
+    /// Generates a Dataverse URL for a document record.
+    /// </summary>
+    private static string GenerateDataverseUrl(Guid documentId)
+    {
+        const string dataverseBaseUrl = "https://spaarkedev1.crm.dynamics.com";
+        const string appId = "729afe6d-ca73-f011-b4cb-6045bdd8b757";
+        return $"{dataverseBaseUrl}/main.aspx?appid={appId}&pagetype=entityrecord&etn=sprk_document&id={documentId}";
+    }
+
+    /// <summary>
     /// Checks for an existing ProcessingJob with the given idempotency key.
+    /// Uses IDataverseService to query for existing jobs.
     /// </summary>
     private async Task<JobStatusResponse?> CheckForExistingJobAsync(
         string idempotencyKey,
         CancellationToken cancellationToken)
     {
-        // TODO: Replace with actual Dataverse query
-        // FetchXML would be:
-        // <fetch top="1">
-        //   <entity name="sprk_processingjob">
-        //     <attribute name="sprk_processingjobid" />
-        //     <attribute name="sprk_status" />
-        //     <attribute name="sprk_jobtype" />
-        //     <filter>
-        //       <condition attribute="sprk_idempotencykey" operator="eq" value="{idempotencyKey}" />
-        //       <condition attribute="createdon" operator="last-x-hours" value="24" />
-        //     </filter>
-        //   </entity>
-        // </fetch>
-
-        await Task.CompletedTask;
-
-        // For now, always return null (no duplicate found)
         _logger.LogDebug("Checking for existing job with idempotency key");
-        return null;
+
+        try
+        {
+            var existingJob = await _dataverseService.GetProcessingJobByIdempotencyKeyAsync(
+                idempotencyKey,
+                cancellationToken);
+
+            if (existingJob == null)
+            {
+                return null;
+            }
+
+            // Map the dynamic result to JobStatusResponse
+            // The Dataverse service returns an anonymous type with: Id, Name, JobType, Status, Progress, IdempotencyKey, CorrelationId
+            dynamic job = existingJob;
+
+            var status = MapDataverseStatusToJobStatus((int?)job.Status);
+            var jobType = MapDataverseJobTypeToJobType((int?)job.JobType);
+
+            _logger.LogInformation(
+                "Found existing job {JobId} with idempotency key, status: {Status}",
+                (Guid)job.Id,
+                status);
+
+            return new JobStatusResponse
+            {
+                JobId = (Guid)job.Id,
+                Status = status,
+                JobType = jobType,
+                Progress = (int?)job.Progress ?? 0,
+                CurrentPhase = null, // Not stored in ProcessingJob
+                CompletedPhases = new List<CompletedPhase>(),
+                CreatedAt = DateTimeOffset.UtcNow, // Not returned by query
+                CreatedBy = null
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Error checking for existing job by idempotency key, treating as no duplicate");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Maps Dataverse ProcessingJob status option set value to JobStatus enum.
+    /// </summary>
+    private static JobStatus MapDataverseStatusToJobStatus(int? statusValue)
+    {
+        // ProcessingJob status option set values:
+        // 0 = Pending/Queued, 1 = InProgress/Running, 2 = Completed, 3 = Failed
+        return statusValue switch
+        {
+            0 => JobStatus.Queued,
+            1 => JobStatus.Running,
+            2 => JobStatus.Completed,
+            3 => JobStatus.Failed,
+            4 => JobStatus.Cancelled,
+            _ => JobStatus.Queued
+        };
+    }
+
+    /// <summary>
+    /// Maps Dataverse ProcessingJob job type option set value to JobType enum.
+    /// </summary>
+    private static JobType MapDataverseJobTypeToJobType(int? jobTypeValue)
+    {
+        // ProcessingJob job type option set values:
+        // 0 = DocumentSave, 1 = EmailSave, 2 = AttachmentSave, 3 = AiProcessing, 4 = Indexing
+        return jobTypeValue switch
+        {
+            0 => JobType.DocumentSave,
+            1 => JobType.EmailSave,
+            2 => JobType.AttachmentSave,
+            3 => JobType.AiProcessing,
+            4 => JobType.Indexing,
+            _ => JobType.DocumentSave
+        };
     }
 
     /// <inheritdoc />
@@ -201,20 +1112,35 @@ public class OfficeService : IOfficeService
             jobId,
             userId);
 
+        // Look up job in in-memory store
         // TODO: Replace with actual Dataverse query once ProcessingJob table exists
-        // The query should:
-        // 1. Look up job by sprk_processingjobid = jobId
-        // 2. Verify sprk_createdby (owner) matches userId
-        // 3. Map Dataverse entity to JobStatusResponse
+        if (_jobStore.TryGetValue(jobId, out var job))
+        {
+            _logger.LogDebug(
+                "Job {JobId} found in store: Status={Status}, Progress={Progress}",
+                jobId,
+                job.Status,
+                job.Progress);
 
-        // For now, return a stub response for testing with a known test job ID
-        // This allows end-to-end testing of the endpoint structure
+            // Optionally verify ownership (if userId is provided)
+            if (userId is not null && job.CreatedBy is not null && job.CreatedBy != userId)
+            {
+                _logger.LogWarning(
+                    "Job {JobId} ownership mismatch: Expected {ExpectedUser}, Got {ActualUser}",
+                    jobId,
+                    job.CreatedBy,
+                    userId);
+                return null; // Treat as not found for security
+            }
+
+            await Task.CompletedTask; // Keep method async for future Dataverse calls
+            return job;
+        }
+
+        // Also check for hardcoded test job ID for backwards compatibility
         var testJobId = Guid.Parse("00000000-0000-0000-0000-000000000001");
-
         if (jobId == testJobId)
         {
-            await Task.CompletedTask; // Simulate async operation
-
             return new JobStatusResponse
             {
                 JobId = jobId,
@@ -238,7 +1164,7 @@ public class OfficeService : IOfficeService
                     }
                 },
                 CreatedAt = DateTimeOffset.UtcNow.AddSeconds(-10),
-                CreatedBy = userId, // Set for ownership verification by filters
+                CreatedBy = userId,
                 StartedAt = DateTimeOffset.UtcNow.AddSeconds(-8)
             };
         }

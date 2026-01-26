@@ -1,3 +1,4 @@
+using System.IO;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Sprk.Bff.Api.Api.Filters;
@@ -103,6 +104,54 @@ public static class OfficeEndpoints
     /// </summary>
     private static void MapSaveEndpoints(RouteGroupBuilder group)
     {
+        // DEBUG: Raw body capture endpoint to diagnose 400 errors
+        // TODO: Remove after debugging is complete
+        group.MapPost("/save-debug", async (HttpContext context, ILogger<Program> logger) =>
+        {
+            context.Request.EnableBuffering();
+            context.Request.Body.Position = 0;
+            using var reader = new StreamReader(context.Request.Body);
+            var body = await reader.ReadToEndAsync();
+            logger.LogInformation("DEBUG /office/save-debug: Raw request body ({Length} bytes): {Body}",
+                body.Length, body);
+
+            try
+            {
+                var options = new System.Text.Json.JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                };
+                var request = System.Text.Json.JsonSerializer.Deserialize<SaveRequest>(body, options);
+                logger.LogInformation("DEBUG /office/save-debug: Deserialization succeeded. ContentType={ContentType}",
+                    request?.ContentType);
+                return Results.Ok(new
+                {
+                    success = true,
+                    contentType = request?.ContentType.ToString(),
+                    hasEmail = request?.Email != null,
+                    hasAttachment = request?.Attachment != null,
+                    hasDocument = request?.Document != null,
+                    hasTargetEntity = request?.TargetEntity != null
+                });
+            }
+            catch (System.Text.Json.JsonException ex)
+            {
+                logger.LogError(ex, "DEBUG /office/save-debug: JSON deserialization failed");
+                return Results.Ok(new
+                {
+                    success = false,
+                    error = ex.Message,
+                    innerError = ex.InnerException?.Message,
+                    path = ex.Path,
+                    lineNumber = ex.LineNumber,
+                    bodyPreview = body.Length > 500 ? body[..500] + "..." : body
+                });
+            }
+        })
+            .WithName("OfficeSaveDebug")
+            .WithDescription("DEBUG: Diagnostic endpoint to test request body parsing")
+            .AllowAnonymous(); // Allow anonymous for testing
+
         // POST /office/save - Submit email, attachment, or document for saving
         // Authorization: OfficeAuthFilter validates user authentication,
         //                EntityAccessFilter validates user has access to target entity
@@ -162,11 +211,17 @@ public static class OfficeEndpoints
         var idempotencyKey = context.Request.Headers["X-Idempotency-Key"].FirstOrDefault()
             ?? request.IdempotencyKey;
 
+        // Diagnostic logging for debugging 400 errors
         logger.LogInformation(
-            "Save request received for {ContentType} by user {UserId} with correlation {CorrelationId}",
+            "Save request received: ContentType={ContentType}, UserId={UserId}, CorrelationId={CorrelationId}, " +
+            "HasEmail={HasEmail}, HasAttachment={HasAttachment}, HasDocument={HasDocument}, HasTargetEntity={HasTargetEntity}",
             request.ContentType,
             userId,
-            traceId);
+            traceId,
+            request.Email != null,
+            request.Attachment != null,
+            request.Document != null,
+            request.TargetEntity != null);
 
         // Validate user identity
         if (string.IsNullOrEmpty(userId))

@@ -49,17 +49,62 @@ export interface StageStatus {
 }
 
 /**
+ * Completed phase from server response.
+ */
+export interface CompletedPhase {
+  name: string;
+  completedAt: string;
+  durationMs?: number;
+}
+
+/**
+ * Job result artifact from server response.
+ */
+export interface JobResultArtifact {
+  type: string;
+  id: string;
+  webUrl?: string;
+  speFileId?: string;
+  containerId?: string;
+}
+
+/**
+ * Job result from server response.
+ */
+export interface JobResult {
+  artifact?: JobResultArtifact;
+}
+
+/**
+ * Job error from server response.
+ */
+export interface JobErrorResponse {
+  code: string;
+  message: string;
+  retryable?: boolean;
+}
+
+/**
  * Job status response from API.
+ * Matches server's JobStatusResponse model.
  */
 export interface JobStatus {
   jobId: string;
-  status: 'Queued' | 'Running' | 'Completed' | 'Failed' | 'PartialSuccess';
-  stages: StageStatus[];
+  status: 'Queued' | 'Running' | 'Completed' | 'Failed' | 'PartialSuccess' | 'Cancelled';
+  jobType: string;
+  progress: number;
+  currentPhase?: string;
+  completedPhases?: CompletedPhase[];
+  createdAt: string;
+  createdBy?: string;
+  startedAt?: string;
+  completedAt?: string;
+  result?: JobResult;
+  error?: JobErrorResponse;
+  // Legacy fields for UI compatibility
+  stages?: StageStatus[];
   documentId?: string;
   documentUrl?: string;
-  associationUrl?: string;
-  errorCode?: string;
-  errorMessage?: string;
 }
 
 /**
@@ -322,6 +367,8 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const savedContextRef = useRef<SaveFlowContext | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const pollingRetryCountRef = useRef<number>(0);
+  const maxPollingRetries = 3;
 
   // Computed values
   const isSaving = flowState === 'uploading' || flowState === 'processing';
@@ -366,6 +413,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
+    pollingRetryCountRef.current = 0;
   }, []);
 
   // Reset state
@@ -385,42 +433,69 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
 
   // Handle SSE event
   const handleSseEvent = useCallback((event: SseEvent) => {
-    const data = event.data as Partial<JobStatus & { stage?: string; timestamp?: string }>;
+    // SSE events have different structures based on event type
+    // Server sends events like: progress, stage, complete, failed, heartbeat
+    const eventType = event.event || 'message';
+    const data = event.data as Record<string, unknown>;
 
-    // Update job status
-    if (data.stage && data.status) {
-      // Stage update
+    if (eventType === 'progress' || eventType === 'message') {
+      // Progress update: { progress: number, currentPhase: string }
       setJobStatus(prev => {
         if (!prev) return null;
-        const stages = prev.stages.map(s =>
-          s.name === data.stage
-            ? { ...s, status: data.status as StageStatus['status'], completedAt: data.timestamp }
+        const progress = typeof data.progress === 'number' ? data.progress : prev.progress;
+        const currentPhase = typeof data.currentPhase === 'string' ? data.currentPhase : prev.currentPhase;
+
+        // Update stages based on current phase
+        const stages = prev.stages?.map(s => {
+          if (s.name === currentPhase) {
+            return { ...s, status: 'Running' as const };
+          }
+          return s;
+        });
+
+        return { ...prev, progress, currentPhase, stages };
+      });
+    } else if (eventType === 'stage') {
+      // Stage update: { stage: string, status: string, timestamp: string }
+      const stageName = data.stage as string;
+      const stageStatus = data.status as string;
+      const timestamp = data.timestamp as string;
+
+      setJobStatus(prev => {
+        if (!prev) return null;
+        const stages = prev.stages?.map(s =>
+          s.name === stageName
+            ? { ...s, status: stageStatus as StageStatus['status'], completedAt: timestamp }
             : s
         );
         return { ...prev, stages };
       });
-    }
+    } else if (eventType === 'complete') {
+      // Completion: { jobId: string, documentId?: string, documentUrl?: string }
+      const documentId = data.documentId as string | undefined;
+      const documentUrl = data.documentUrl as string | undefined;
 
-    // Check for completion
-    if (data.status === 'Completed' || data.status === 'Failed') {
-      if (data.status === 'Completed' && data.documentId) {
-        setSavedDocumentId(data.documentId);
-        setSavedDocumentUrl(data.documentUrl || null);
+      if (documentId) {
+        setSavedDocumentId(documentId);
+        setSavedDocumentUrl(documentUrl || null);
         setFlowState('complete');
-        onComplete?.(data.documentId, data.documentUrl || '');
-      } else if (data.status === 'Failed') {
-        const errorMsg: ErrorMessage = {
-          title: 'Processing Failed',
-          message: data.errorMessage || 'An error occurred during processing.',
-          type: 'error',
-          recoverable: true,
-        };
-        setError(errorMsg);
-        setFlowState('error');
-        onError?.(errorMsg);
+        onComplete?.(documentId, documentUrl || '');
       }
       cleanup();
+    } else if (eventType === 'failed' || eventType === 'error') {
+      // Error: { code: string, message: string, retryable?: boolean }
+      const errorMsg: ErrorMessage = {
+        title: 'Processing Failed',
+        message: (data.message as string) || 'An error occurred during processing.',
+        type: 'error',
+        recoverable: (data.retryable as boolean) ?? true,
+      };
+      setError(errorMsg);
+      setFlowState('error');
+      onError?.(errorMsg);
+      cleanup();
     }
+    // Ignore heartbeat events
   }, [cleanup, onComplete, onError]);
 
   // Poll for job status
@@ -434,6 +509,28 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
       });
 
       if (!response.ok) {
+        // Increment retry counter on failure
+        pollingRetryCountRef.current++;
+        console.warn(
+          `Polling failed (attempt ${pollingRetryCountRef.current}/${maxPollingRetries}): ${response.status}`
+        );
+
+        // Stop polling after max retries
+        if (pollingRetryCountRef.current >= maxPollingRetries) {
+          console.error(`Max polling retries (${maxPollingRetries}) exceeded, stopping`);
+          const errorMsg: ErrorMessage = {
+            title: 'Job Status Unavailable',
+            message: `Unable to retrieve job status after ${maxPollingRetries} attempts. The save may still be processing in the background.`,
+            type: 'error',
+            recoverable: true,
+          };
+          setError(errorMsg);
+          setFlowState('error');
+          onError?.(errorMsg);
+          cleanup();
+          return;
+        }
+
         const errorData = await response.json().catch(() => null);
         if (isProblemDetails(errorData)) {
           throw errorData;
@@ -441,22 +538,66 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         throw new Error(`Failed to fetch job status: ${response.status}`);
       }
 
-      const status = (await response.json()) as JobStatus;
+      // Reset retry counter on success
+      pollingRetryCountRef.current = 0;
+
+      const rawStatus = (await response.json()) as JobStatus;
+
+      // Map server response to UI-compatible format
+      const mappedStages: StageStatus[] = [];
+
+      // Build stages from completedPhases and currentPhase
+      const phaseOrder = ['RecordsCreated', 'FileUploaded', 'ProfileSummary', 'Indexed', 'DeepAnalysis'];
+      const completedPhaseNames = new Set(rawStatus.completedPhases?.map(p => p.name) || []);
+
+      for (const phaseName of phaseOrder) {
+        if (completedPhaseNames.has(phaseName)) {
+          const phase = rawStatus.completedPhases?.find(p => p.name === phaseName);
+          mappedStages.push({
+            name: phaseName,
+            status: 'Completed',
+            completedAt: phase?.completedAt,
+          });
+        } else if (rawStatus.currentPhase === phaseName) {
+          mappedStages.push({
+            name: phaseName,
+            status: 'Running',
+          });
+        } else if (rawStatus.status !== 'Completed') {
+          // Only show pending stages if job is not complete
+          mappedStages.push({
+            name: phaseName,
+            status: 'Pending',
+          });
+        }
+      }
+
+      // Extract document info from result.artifact
+      const documentId = rawStatus.result?.artifact?.id;
+      const documentUrl = rawStatus.result?.artifact?.webUrl;
+
+      const status: JobStatus = {
+        ...rawStatus,
+        stages: mappedStages,
+        documentId,
+        documentUrl,
+      };
+
       setJobStatus(status);
 
       // Check for completion
       if (status.status === 'Completed' || status.status === 'Failed') {
-        if (status.status === 'Completed' && status.documentId) {
-          setSavedDocumentId(status.documentId);
-          setSavedDocumentUrl(status.documentUrl || null);
+        if (status.status === 'Completed' && documentId) {
+          setSavedDocumentId(documentId);
+          setSavedDocumentUrl(documentUrl || null);
           setFlowState('complete');
-          onComplete?.(status.documentId, status.documentUrl || '');
+          onComplete?.(documentId, documentUrl || '');
         } else if (status.status === 'Failed') {
           const errorMsg: ErrorMessage = {
             title: 'Processing Failed',
-            message: status.errorMessage || 'An error occurred during processing.',
+            message: status.error?.message || 'An error occurred during processing.',
             type: 'error',
-            recoverable: true,
+            recoverable: status.error?.retryable ?? true,
           };
           setError(errorMsg);
           setFlowState('error');
@@ -469,6 +610,22 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         return; // Cancelled
       }
       console.error('Polling error:', err);
+
+      // Increment retry counter on exception
+      pollingRetryCountRef.current++;
+      if (pollingRetryCountRef.current >= maxPollingRetries) {
+        console.error(`Max polling retries (${maxPollingRetries}) exceeded after exception, stopping`);
+        const errorMsg: ErrorMessage = {
+          title: 'Job Status Unavailable',
+          message: `Unable to retrieve job status after ${maxPollingRetries} attempts. Please try again later.`,
+          type: 'error',
+          recoverable: true,
+        };
+        setError(errorMsg);
+        setFlowState('error');
+        onError?.(errorMsg);
+        cleanup();
+      }
     }
   }, [apiBaseUrl, cleanup, onComplete, onError]);
 
@@ -479,6 +636,9 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
     accessToken: string
   ) => {
     setFlowState('processing');
+
+    // Reset retry counter at start of tracking
+    pollingRetryCountRef.current = 0;
 
     // Initialize job status with standard stages
     const initialStages: StageStatus[] = [
@@ -502,19 +662,23 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
       stages: initialStages,
     });
 
-    // Try SSE first
+    // Always start polling as the primary mechanism
+    // SSE is optional enhancement but may not receive events if Redis pub/sub isn't configured
+    console.log('[SaveFlow] Starting job polling for', jobId);
+    pollingIntervalRef.current = setInterval(() => {
+      pollJobStatus(jobId, accessToken);
+    }, pollingIntervalMs);
+
+    // Also do an immediate poll to get current status
+    pollJobStatus(jobId, accessToken);
+
+    // Try SSE as enhancement (provides faster updates when available)
     try {
       sseConnectionRef.current = createSseConnection(`${apiBaseUrl}${streamUrl}`, {
         accessToken,
         onEvent: handleSseEvent,
         onError: (err) => {
-          console.warn('SSE error, falling back to polling:', err.message);
-          // Fall back to polling
-          if (!pollingIntervalRef.current) {
-            pollingIntervalRef.current = setInterval(() => {
-              pollJobStatus(jobId, accessToken);
-            }, pollingIntervalMs);
-          }
+          console.warn('SSE error (polling continues):', err.message);
         },
         onClose: () => {
           sseConnectionRef.current = null;
@@ -522,11 +686,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         timeout: sseTimeoutMs,
       });
     } catch (err) {
-      console.warn('Failed to create SSE connection, using polling:', err);
-      // Start polling
-      pollingIntervalRef.current = setInterval(() => {
-        pollJobStatus(jobId, accessToken);
-      }, pollingIntervalMs);
+      console.warn('Failed to create SSE connection (polling continues):', err);
     }
   }, [apiBaseUrl, handleSseEvent, pollJobStatus, pollingIntervalMs, processingOptions, sseTimeoutMs]);
 
@@ -619,6 +779,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
       const idempotencyKey = await computeIdempotencyKey(request);
 
       // Submit save request
+      console.log('[SaveFlow] Sending request:', JSON.stringify(serverRequest, null, 2));
       const response = await fetch(`${apiBaseUrl}/office/save`, {
         method: 'POST',
         headers: {
@@ -630,7 +791,23 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         signal: abortControllerRef.current.signal,
       });
 
-      const responseData = await response.json();
+      // Get raw response text first for debugging
+      const responseText = await response.text();
+      console.log('[SaveFlow] Response status:', response.status);
+      console.log('[SaveFlow] Response text (raw):', responseText);
+
+      // Parse as JSON if possible
+      let responseData: unknown;
+      try {
+        responseData = JSON.parse(responseText);
+        console.log('[SaveFlow] Response data (parsed):', JSON.stringify(responseData, null, 2));
+      } catch (parseError) {
+        console.error('[SaveFlow] Failed to parse response as JSON:', parseError);
+        // If 400 with non-JSON response, show raw text as error
+        if (!response.ok) {
+          throw new Error(`Save failed (${response.status}): ${responseText.substring(0, 500)}`);
+        }
+      }
 
       // Handle different responses
       if (response.status === 200 && responseData.duplicate) {
