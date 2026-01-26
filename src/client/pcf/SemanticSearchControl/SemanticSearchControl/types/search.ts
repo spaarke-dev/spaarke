@@ -61,7 +61,7 @@ export interface SearchResult {
     documentType: string;
     matterName: string | null;
     matterId: string | null;
-    createdOn: string;
+    createdAt: string | null;
     combinedScore: number;
     highlights: string[];
     fileUrl: string;

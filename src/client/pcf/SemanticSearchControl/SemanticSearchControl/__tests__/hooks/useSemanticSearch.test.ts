@@ -23,7 +23,7 @@ const createMockResponse = (results: number, total: number): SearchResponse => (
         documentType: "contract",
         matterName: null,
         matterId: null,
-        createdOn: "2026-01-01",
+        createdAt: "2026-01-01",
         combinedScore: 0.95 - i * 0.01,
         highlights: ["test highlight"],
         fileUrl: `https://example.com/doc-${i}`,
