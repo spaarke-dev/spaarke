@@ -112,16 +112,22 @@ function getFileIcon(fileType: string): React.ReactElement {
 /**
  * Format date for display.
  */
-function formatDate(dateString: string): string {
+function formatDate(dateString: string | null): string {
+    if (!dateString) {
+        return "—";
+    }
     try {
         const date = new Date(dateString);
+        if (isNaN(date.getTime())) {
+            return "—";
+        }
         return date.toLocaleDateString(undefined, {
             year: "numeric",
             month: "short",
             day: "numeric",
         });
     } catch {
-        return dateString;
+        return "—";
     }
 }
 
@@ -205,14 +211,10 @@ export const ResultCard: React.FC<IResultCardProps> = ({
                                     </Text>
                                 </>
                             )}
-                            {result.createdAt && (
-                                <>
-                                    <Text className={styles.metaSeparator}>|</Text>
-                                    <Text className={styles.metaItem}>
-                                        {formatDate(result.createdAt)}
-                                    </Text>
-                                </>
-                            )}
+                            <Text className={styles.metaSeparator}>|</Text>
+                            <Text className={styles.metaItem}>
+                                {formatDate(result.createdAt)}
+                            </Text>
                         </div>
                     </div>
                 }

@@ -463,7 +463,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
             {/* Version Footer (always visible) */}
             <div className={styles.versionFooter}>
-                <Text size={100}>v1.0.16 • Built 2026-01-24</Text>
+                <Text size={100}>v1.0.22 • Built 2026-01-26</Text>
             </div>
         </div>
     );
