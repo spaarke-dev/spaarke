@@ -80,4 +80,9 @@
     <Content Update="builder-scopes\**\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!-- Exclude template config from publish - all config comes from Azure App Settings -->
+  <ItemGroup>
+    <Content Update="appsettings.template.json" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
 </Project>

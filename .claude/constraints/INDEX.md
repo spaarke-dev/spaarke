@@ -26,6 +26,7 @@ This directory contains actionable constraints (rules, requirements, limits) org
 | Jobs/Workers | [jobs.md](jobs.md) | ADR-001, 004, 017 | ~100 |
 | Configuration | [config.md](config.md) | ADR-018, 020 | ~115 |
 | Testing | [testing.md](testing.md) | ADR-022 | ~115 |
+| Azure Deployment | [azure-deployment.md](azure-deployment.md) | — | ~100 |
 
 ---
 
@@ -43,6 +44,7 @@ This directory contains actionable constraints (rules, requirements, limits) org
 | AI features | `ai.md` |
 | Configuration/flags | `config.md` |
 | Writing tests | `testing.md` |
+| Azure deployment | `azure-deployment.md` |
 
 This provides focused, actionable rules without loading full ADR context.
 
