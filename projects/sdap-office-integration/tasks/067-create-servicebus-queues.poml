@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="067" project="sdap-office-integration">
+  <metadata>
+    <title>Create Service Bus queues for Office workers</title>
+    <phase>5: Background Workers (Remediation)</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>068, 069</blocks>
+    <tags>azure, infrastructure, servicebus</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Infrastructure creation with verification</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create the missing Service Bus queues required for the Office worker pipeline.
+    The UploadFinalizationWorker, IndexingWorker, and ProfileSummaryWorker each
+    listen on dedicated queues that do not exist in Azure.
+  </prompt>
+
+  <role>
+    DevOps engineer with Azure Service Bus expertise. Familiar with queue
+    configuration for reliable message processing.
+  </role>
+
+  <goal>
+    All three Office worker queues exist in Azure Service Bus and are ready
+    to receive messages.
+  </goal>
+
+  <context>
+    <background>
+      The Office add-in save flow queues messages to Service Bus for async processing.
+      Currently the queues don't exist, causing a 400 error when saving emails.
+
+      Current state:
+      - office-upload-finalization: MISSING (critical - blocks basic save)
+      - office-profile: MISSING (for AI profiling stage)
+      - office-indexing: MISSING (for RAG indexing stage)
+      - office-jobs: EXISTS but UNUSED (cleanup candidate)
+    </background>
+    <relevant-files>
+      <file>projects/sdap-office-integration/notes/OFFICE-WORKERS-IMPLEMENTATION-PLAN.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Workers/Office/UploadFinalizationWorker.cs (queue name constants)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="azure-deploy">Use Azure CLI for queue creation</constraint>
+    <constraint source="spec">Queue names must match code constants exactly</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+      <file>projects/sdap-office-integration/notes/OFFICE-WORKERS-IMPLEMENTATION-PLAN.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify Azure CLI is logged in and correct subscription is set</step>
+    <step order="2">List existing queues in spaarke-servicebus-dev namespace</step>
+    <step order="3">Create queue: office-upload-finalization (max-size 1024MB, TTL 14 days)</step>
+    <step order="4">Create queue: office-profile (max-size 1024MB, TTL 14 days)</step>
+    <step order="5">Create queue: office-indexing (max-size 1024MB, TTL 14 days)</step>
+    <step order="6">Verify all three queues exist by listing again</step>
+    <step order="7">Test queue connectivity by sending a test message (optional)</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="az-cli">Azure CLI for Service Bus operations</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="infrastructure">Service Bus queue: office-upload-finalization</output>
+    <output type="infrastructure">Service Bus queue: office-profile</output>
+    <output type="infrastructure">Service Bus queue: office-indexing</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">az servicebus queue list shows all three queues</criterion>
+    <criterion testable="true">Queue names exactly match: office-upload-finalization, office-profile, office-indexing</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Azure Resource Details:
+    - Resource Group: spe-infrastructure-westus2
+    - Service Bus Namespace: spaarke-servicebus-dev
+
+    Queue Configuration:
+    - Max Size: 1024 MB (1 GB)
+    - Default Message TTL: 14 days (P14D)
+    - Lock Duration: 30 seconds (default)
+    - Max Delivery Count: 10 (default)
+
+    The office-jobs queue is unused and can be deleted in a later cleanup task.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load azure-deploy skill for Azure operations.
+      Verify queue names match constants in UploadFinalizationWorker.cs before creating.
+    </protocol>
+  </execution>
+</task>

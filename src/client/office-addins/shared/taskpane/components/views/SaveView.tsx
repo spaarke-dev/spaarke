@@ -99,8 +99,10 @@ export const SaveView: React.FC<SaveViewProps> = ({
   const [itemId, setItemId] = useState<string | undefined>();
   const [itemName, setItemName] = useState<string | undefined>();
   const [attachments, setAttachments] = useState<AttachmentInfo[]>([]);
-  const [emailSender, setEmailSender] = useState<string | undefined>();
-  const [emailReceivedDate, setEmailReceivedDate] = useState<Date | undefined>();
+  const [senderEmail, setSenderEmail] = useState<string | undefined>();
+  const [senderDisplayName, setSenderDisplayName] = useState<string | undefined>();
+  const [recipients, setRecipients] = useState<Array<{ email: string; displayName?: string; type: 'to' | 'cc' | 'bcc' }>>([]);
+  const [sentDate, setSentDate] = useState<Date | undefined>();
   const [documentUrl, setDocumentUrl] = useState<string | undefined>();
 
   // Load item context from host adapter
@@ -136,10 +138,32 @@ export const SaveView: React.FC<SaveViewProps> = ({
             setAttachments(atts);
           }
 
-          // Get sender
+          // Get sender email and display name
           if (hostAdapter.getCapabilities().canGetSender) {
             const sender = await hostAdapter.getSenderEmail();
-            setEmailSender(sender);
+            setSenderEmail(sender);
+
+            // Get sender display name if available (OutlookAdapter specific)
+            if ('getSenderDisplayName' in hostAdapter && typeof hostAdapter.getSenderDisplayName === 'function') {
+              const displayName = await hostAdapter.getSenderDisplayName();
+              setSenderDisplayName(displayName);
+            }
+          }
+
+          // Get recipients
+          if (hostAdapter.getCapabilities().canGetRecipients) {
+            const recipientList = await hostAdapter.getRecipients();
+            setRecipients(recipientList.map(r => ({
+              email: r.email,
+              displayName: r.displayName,
+              type: r.type,
+            })));
+          }
+
+          // Get sent date if available (OutlookAdapter specific)
+          if ('getSentDate' in hostAdapter && typeof hostAdapter.getSentDate === 'function') {
+            const date = hostAdapter.getSentDate();
+            setSentDate(date);
           }
         } else if (type === 'word') {
           // Word-specific context
@@ -202,8 +226,10 @@ export const SaveView: React.FC<SaveViewProps> = ({
         itemId={itemId}
         itemName={itemName}
         attachments={attachments}
-        emailSender={emailSender}
-        emailReceivedDate={emailReceivedDate}
+        senderEmail={senderEmail}
+        senderDisplayName={senderDisplayName}
+        recipients={recipients}
+        sentDate={sentDate}
         documentUrl={documentUrl}
         getAccessToken={getAccessToken || defaultGetAccessToken}
         apiBaseUrl={apiBaseUrl}

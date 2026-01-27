@@ -153,6 +153,15 @@ export interface SaveRequest {
 }
 
 /**
+ * Email recipient for save context.
+ */
+export interface EmailRecipient {
+  email: string;
+  displayName?: string;
+  type: 'to' | 'cc' | 'bcc';
+}
+
+/**
  * Save flow context data.
  */
 export interface SaveFlowContext {
@@ -166,6 +175,14 @@ export interface SaveFlowContext {
   attachments: AttachmentInfo[];
   /** Email body content (Outlook only) */
   emailBody?: string;
+  /** Sender email address (Outlook only) */
+  senderEmail?: string;
+  /** Sender display name (Outlook only) */
+  senderDisplayName?: string;
+  /** Email recipients (Outlook only) */
+  recipients?: EmailRecipient[];
+  /** Email sent date (Outlook only) */
+  sentDate?: Date;
   /** Document content URL (Word only) */
   documentUrl?: string;
 }
@@ -733,13 +750,23 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
 
       // Add content-type-specific metadata
       if (contentType === 'Email') {
+        // Build recipients array for server (matches EmailMetadata.Recipients model)
+        // Server expects: { type: 'To'|'Cc'|'Bcc', email: string, name?: string }
+        const recipients = context.recipients?.map(r => ({
+          type: r.type === 'to' ? 'To' : r.type === 'cc' ? 'Cc' : 'Bcc',
+          email: r.email,
+          name: r.displayName,
+        })) || [];
+
         serverRequest.email = {
           subject: context.itemName || 'Untitled Email',
-          senderEmail: 'unknown@placeholder.com', // Will be fetched by server from Graph
+          senderEmail: context.senderEmail || 'unknown@placeholder.com',
+          senderName: context.senderDisplayName,
+          recipients,
+          sentDate: context.sentDate?.toISOString(),
           body: includeBody ? context.emailBody : undefined,
           isBodyHtml: true,
-          // The server will use itemId to fetch full email details via Graph API
-          internetMessageId: context.itemId, // Pass email ID for server to fetch details
+          internetMessageId: context.itemId,
         };
       } else if (contentType === 'Attachment') {
         const attachmentId = Array.from(selectedAttachmentIds)[0];

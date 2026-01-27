@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="069b" project="sdap-office-integration">
+  <metadata>
+    <title>Test full Office worker pipeline end-to-end</title>
+    <phase>5: Background Workers (Remediation)</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>069a</dependencies>
+    <blocks>069c</blocks>
+    <tags>testing, e2e, integration</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Integration testing with comprehensive verification</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Test the complete Office worker pipeline with all stages enabled:
+    Upload Finalization → Profile Summary → RAG Indexing.
+    Verify each stage completes and updates job status correctly.
+  </prompt>
+
+  <role>
+    QA engineer testing complex async pipelines. Familiar with distributed
+    systems testing and multi-stage job processing.
+  </role>
+
+  <goal>
+    Confirm the complete Office worker pipeline processes documents through
+    all stages when all processing options are enabled.
+  </goal>
+
+  <context>
+    <background>
+      With all three workers registered and running, the full pipeline should work:
+
+      1. POST /office/save with ProfileSummary=true, RagIndex=true
+      2. UploadFinalizationWorker creates Document, queues to office-profile
+      3. ProfileSummaryWorker generates AI profile, queues to office-indexing
+      4. IndexingWorker indexes in Azure AI Search
+      5. Job status reaches "Completed" with all stages shown
+
+      Test both success and error scenarios.
+    </background>
+    <relevant-files>
+      <file>projects/sdap-office-integration/notes/OFFICE-WORKERS-IMPLEMENTATION-PLAN.md</file>
+      <file>projects/sdap-office-integration/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">All stages should update job status via SSE</constraint>
+    <constraint source="spec">Errors in optional stages should not fail the entire job</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-office-integration/spec.md</file>
+      <file>projects/sdap-office-integration/notes/OFFICE-WORKERS-IMPLEMENTATION-PLAN.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify all three workers are running (check Application Insights)</step>
+    <step order="2">Test: Save email with ProfileSummary=true, RagIndex=true</step>
+    <step order="3">Observe job status progression in taskpane (Upload → Profile → Index → Complete)</step>
+    <step order="4">Verify Document record in Dataverse has AI-generated summary</step>
+    <step order="5">Verify Document appears in Azure AI Search index</step>
+    <step order="6">Test: Save email with ProfileSummary=false, RagIndex=true (skip profile)</step>
+    <step order="7">Verify indexing still works when profile is skipped</step>
+    <step order="8">Test: Save email with both options false (basic save only)</step>
+    <step order="9">Verify job completes after upload finalization only</step>
+    <step order="10">Test error handling: trigger an AI error and verify job still succeeds</step>
+    <step order="11">Check Service Bus DLQ for any failed messages</step>
+    <step order="12">Document test results in notes/test-results-069b.md</step>
+    <step order="13">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="browser">Outlook Web App for testing</tool>
+    <tool name="dataverse">Power Apps for verifying records</tool>
+    <tool name="azure-portal">AI Search for verifying index</tool>
+    <tool name="az-cli">Check logs and DLQ</tool>
+  </tools>
+
+  <outputs>
+    <output type="verification">Full pipeline works end-to-end</output>
+    <output type="docs">projects/sdap-office-integration/notes/test-results-069b.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All three stages complete when both options enabled</criterion>
+    <criterion testable="true">Job status SSE shows stage progression</criterion>
+    <criterion testable="true">Document has AI-generated profile metadata</criterion>
+    <criterion testable="true">Document appears in Azure AI Search</criterion>
+    <criterion testable="true">Pipeline works correctly with various option combinations</criterion>
+    <criterion testable="true">No messages in Service Bus DLQ (all processed successfully)</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Test Matrix:
+
+    | ProfileSummary | RagIndex | Expected Stages |
+    |----------------|----------|-----------------|
+    | true | true | Upload → Profile → Index → Complete |
+    | true | false | Upload → Profile → Complete |
+    | false | true | Upload → Index → Complete |
+    | false | false | Upload → Complete |
+
+    Error Scenarios to Test:
+    - Large document that takes time to process (verify timeouts handled)
+    - Document type not supported by Document Intelligence (should fail gracefully)
+    - Network blip during processing (should retry)
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      This is a manual testing task. Create test-results-069b.md with findings.
+      If issues found, create follow-up tasks to address them.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="069" project="sdap-office-integration">
+  <metadata>
+    <title>Register IndexingWorker in DI and deploy</title>
+    <phase>5: Background Workers (Remediation)</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>068</dependencies>
+    <blocks>069a</blocks>
+    <tags>bff-api, worker, di</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code modification with deployment</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Register the existing IndexingWorker in dependency injection so it starts
+    listening on the office-indexing queue. The code exists but is not registered,
+    so documents are not being indexed even when RagIndex=true.
+  </prompt>
+
+  <role>
+    .NET developer with DI and BackgroundService expertise. Familiar with the
+    existing Office worker registration pattern.
+  </role>
+
+  <goal>
+    IndexingWorker is registered, starts on application boot, and successfully
+    indexes documents when jobs arrive on the office-indexing queue.
+  </goal>
+
+  <context>
+    <background>
+      IndexingWorker.cs exists and is fully implemented. It uses IFileIndexingService
+      (existing) for the actual RAG indexing. However, it's not registered in
+      OfficeWorkersModule.cs, so it never starts.
+
+      The worker must be registered following the same pattern as UploadFinalizationWorker.
+
+      CRITICAL: Do NOT create new indexing logic. IndexingWorker already uses
+      IFileIndexingService.IndexFileAppOnlyAsync which is the existing RAG pipeline.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Workers/Office/OfficeWorkersModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Workers/Office/IndexingWorker.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Workers/Office/UploadFinalizationWorker.cs (pattern reference)</file>
+      <file>projects/sdap-office-integration/notes/OFFICE-WORKERS-IMPLEMENTATION-PLAN.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="plan">MUST use existing IFileIndexingService - do NOT duplicate</constraint>
+    <constraint source="ADR-001">MUST use BackgroundService pattern</constraint>
+    <constraint source="ADR-010">Minimize DI registrations</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>projects/sdap-office-integration/notes/OFFICE-WORKERS-IMPLEMENTATION-PLAN.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read OfficeWorkersModule.cs to understand current registration pattern</step>
+    <step order="2">Read IndexingWorker.cs to verify it implements both IOfficeJobHandler and BackgroundService</step>
+    <step order="3">Add IndexingWorker registration to AddOfficeWorkers() following UploadFinalizationWorker pattern</step>
+    <step order="4">Verify IndexingWorker uses IFileIndexingService (existing) - do NOT add new services</step>
+    <step order="5">Build solution and verify no compilation errors</step>
+    <step order="6">Run unit tests for IndexingWorker</step>
+    <step order="7">Deploy to Azure using Deploy-BffApi.ps1 script</step>
+    <step order="8">Verify worker starts by checking Application Insights logs for "IndexingWorker starting"</step>
+    <step order="9">Test: Save email with RagIndex=true, verify document appears in AI Search index</step>
+    <step order="10">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="powershell">Deploy-BffApi.ps1</tool>
+    <tool name="az-cli">Check logs</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Workers/Office/OfficeWorkersModule.cs (modified)</output>
+    <output type="deployment">Updated BFF API deployed to Azure</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">dotnet build succeeds</criterion>
+    <criterion testable="true">IndexingWorker unit tests pass</criterion>
+    <criterion testable="true">Application logs show "IndexingWorker starting" on boot</criterion>
+    <criterion testable="true">Document with RagIndex=true appears in Azure AI Search</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Registration pattern from UploadFinalizationWorker:
+
+    ```csharp
+    // Register as IOfficeJobHandler
+    services.AddSingleton&lt;IOfficeJobHandler, IndexingWorker&gt;();
+
+    // Register as hosted service (resolves same instance)
+    services.AddHostedService&lt;IndexingWorker&gt;(sp =>
+    {
+        var handlers = sp.GetServices&lt;IOfficeJobHandler&gt;();
+        return handlers.OfType&lt;IndexingWorker&gt;().First();
+    });
+    ```
+
+    IndexingWorker already has all required dependencies injected:
+    - IFileIndexingService (for RAG pipeline)
+    - IIdempotencyService (for duplicate prevention)
+    - IOfficeJobStatusService (for status updates)
+    - RagTelemetry (for metrics)
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Follow FULL rigor protocol. This modifies code and requires deployment.
+      Use azure-deploy skill for deployment step.
+    </protocol>
+  </execution>
+</task>

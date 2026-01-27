@@ -210,10 +210,14 @@ export interface SaveFlowProps {
   itemName?: string;
   /** Available attachments (Outlook only) */
   attachments?: AttachmentInfo[];
-  /** Email sender (Outlook only) */
-  emailSender?: string;
-  /** Email received date (Outlook only) */
-  emailReceivedDate?: Date;
+  /** Email sender email address (Outlook only) */
+  senderEmail?: string;
+  /** Email sender display name (Outlook only) */
+  senderDisplayName?: string;
+  /** Email recipients (Outlook only) */
+  recipients?: Array<{ email: string; displayName?: string; type: 'to' | 'cc' | 'bcc' }>;
+  /** Email sent date (Outlook only) */
+  sentDate?: Date;
   /** Document URL (Word only) */
   documentUrl?: string;
   /** Access token getter */
@@ -271,8 +275,10 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     itemId,
     itemName,
     attachments = [],
-    emailSender,
-    emailReceivedDate,
+    senderEmail,
+    senderDisplayName,
+    recipients,
+    sentDate,
     documentUrl,
     getAccessToken,
     apiBaseUrl = '',
@@ -333,8 +339,12 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     itemId,
     itemName,
     attachments,
+    senderEmail,
+    senderDisplayName,
+    recipients,
+    sentDate,
     documentUrl,
-  }), [hostType, itemId, itemName, attachments, documentUrl]);
+  }), [hostType, itemId, itemName, attachments, senderEmail, senderDisplayName, recipients, sentDate, documentUrl]);
 
   // Handle save button click
   const handleSave = useCallback(() => {
@@ -603,15 +613,15 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
             <div className={styles.documentInfoRow}>
               <Text weight="semibold">{itemName}</Text>
             </div>
-            {hostType === 'outlook' && emailSender && (
+            {hostType === 'outlook' && (senderDisplayName || senderEmail) && (
               <div className={styles.documentInfoRow}>
-                <Text size={200}>From: {emailSender}</Text>
+                <Text size={200}>From: {senderDisplayName || senderEmail}</Text>
               </div>
             )}
-            {hostType === 'outlook' && emailReceivedDate && (
+            {hostType === 'outlook' && sentDate && (
               <div className={styles.documentInfoRow}>
                 <Text size={200}>
-                  Received: {emailReceivedDate.toLocaleDateString()}
+                  Sent: {sentDate.toLocaleDateString()}
                 </Text>
               </div>
             )}

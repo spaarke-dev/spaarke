@@ -190,10 +190,26 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                     50,
                     cancellationToken);
 
-                // Document record was already created - we need to look it up or create artifacts directly
-                // For now, create a new document ID to associate artifacts with
-                // In a fully integrated flow, we would pass the documentId in the payload
-                documentId = Guid.NewGuid(); // Placeholder - ideally passed from SaveAsync
+                // Document record was already created by SaveAsync - use the passed DocumentId
+                if (payload.DocumentId.HasValue && payload.DocumentId.Value != Guid.Empty)
+                {
+                    documentId = payload.DocumentId.Value;
+                    _logger.LogInformation(
+                        "Using Document ID from payload: {DocumentId}",
+                        documentId);
+                }
+                else
+                {
+                    // Fallback: should not happen in production, log warning
+                    _logger.LogWarning(
+                        "DocumentId not provided in payload for already-uploaded file, creating new Document record");
+                    documentId = await CreateDocumentRecordAsync(
+                        payload,
+                        driveId,
+                        itemId,
+                        message.UserId,
+                        cancellationToken);
+                }
             }
             else
             {
@@ -695,6 +711,15 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             documentId,
             metadata.Subject);
 
+        // Map importance (0=Low, 1=Normal, 2=High) to Dataverse priority option values
+        var priorityValue = metadata.Importance switch
+        {
+            0 => 192350003, // Low
+            1 => 192350002, // Medium (Normal)
+            2 => 192350001, // Important (High)
+            _ => 192350002  // Default to Medium
+        };
+
         var request = new
         {
             Name = $"{metadata.Subject} - {metadata.SentDate:yyyy-MM-dd}",
@@ -707,7 +732,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             ConversationId = metadata.ConversationId,
             BodyPreview = metadata.BodyPreview,
             HasAttachments = metadata.HasAttachments,
-            Importance = metadata.Importance,
+            Priority = priorityValue, // Changed from Importance to Priority per Dataverse schema
             DocumentId = documentId
         };
 

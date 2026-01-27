@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="069c" project="sdap-office-integration">
+  <metadata>
+    <title>Cleanup unused office-jobs queue and update task status</title>
+    <phase>5: Background Workers (Remediation)</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>069b</dependencies>
+    <blocks>none</blocks>
+    <tags>cleanup, azure, documentation</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Simple cleanup and documentation update</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Delete the unused office-jobs Service Bus queue and update project
+    documentation to reflect the true completion status of worker tasks.
+  </prompt>
+
+  <role>
+    DevOps engineer cleaning up unused resources and maintaining documentation.
+  </role>
+
+  <goal>
+    Remove unused infrastructure and ensure documentation accurately reflects
+    the current state of the Office worker implementation.
+  </goal>
+
+  <context>
+    <background>
+      The office-jobs queue was created previously but is not used by any code.
+      The Office workers use office-upload-finalization, office-profile, and
+      office-indexing queues instead.
+
+      Additionally, the TASK-INDEX.md shows tasks 061-066 as complete, but some
+      were not actually finished. Now that they are truly complete, we should
+      verify the status is accurate.
+    </background>
+    <relevant-files>
+      <file>projects/sdap-office-integration/tasks/TASK-INDEX.md</file>
+      <file>projects/sdap-office-integration/notes/OFFICE-WORKERS-IMPLEMENTATION-PLAN.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="best-practice">Verify queue is unused before deleting</constraint>
+    <constraint source="best-practice">Document cleanup actions</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+      <file>projects/sdap-office-integration/notes/OFFICE-WORKERS-IMPLEMENTATION-PLAN.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify office-jobs queue has no recent messages (check message count)</step>
+    <step order="2">Search codebase to confirm office-jobs is not referenced</step>
+    <step order="3">Delete office-jobs queue from Service Bus namespace</step>
+    <step order="4">Update TASK-INDEX.md to add tasks 067-069c to Phase 5 section</step>
+    <step order="5">Update notes/deployment-log.md with queue cleanup</step>
+    <step order="6">Update notes/OFFICE-WORKERS-IMPLEMENTATION-PLAN.md success criteria</step>
+    <step order="7">Run /repo-cleanup to validate structure</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="az-cli">Delete queue</tool>
+    <tool name="terminal">Run commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="infrastructure">Deleted Service Bus queue: office-jobs</output>
+    <output type="docs">Updated TASK-INDEX.md with remediation tasks</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">office-jobs queue no longer exists</criterion>
+    <criterion testable="true">TASK-INDEX.md includes tasks 067-069c</criterion>
+    <criterion testable="true">All remediation tasks marked complete</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Queue deletion command:
+    ```bash
+    az servicebus queue delete \
+      --resource-group spe-infrastructure-westus2 \
+      --namespace-name spaarke-servicebus-dev \
+      --name office-jobs
+    ```
+
+    After this task, Phase 5 is truly complete with the full worker pipeline
+    operational.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Follow MINIMAL rigor protocol. This is cleanup/documentation only.
+    </protocol>
+  </execution>
+</task>

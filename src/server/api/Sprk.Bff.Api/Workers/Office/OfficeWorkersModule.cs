@@ -20,22 +20,36 @@ public static class OfficeWorkersModule
     /// <para>
     /// Registered workers:
     /// - UploadFinalizationWorker: Processes file uploads, creates records
-    /// - (Future) ProfileWorker: AI summary generation
-    /// - (Future) IndexingWorker: Search indexing
+    /// - ProfileSummaryWorker: AI summary generation (stub)
+    /// - IndexingWorkerHostedService: Search indexing (stub)
     /// </para>
     /// </remarks>
     public static IServiceCollection AddOfficeWorkers(this IServiceCollection services)
     {
         // Register job handlers as singleton (stateless handlers)
         services.AddSingleton<IOfficeJobHandler, UploadFinalizationWorker>();
+        services.AddSingleton<IOfficeJobHandler, ProfileSummaryWorker>();
 
-        // Register the background service
+        // Register the background services
+        // UploadFinalizationWorker: Processes office-upload-finalization queue
         services.AddHostedService<UploadFinalizationWorker>(sp =>
         {
             // Resolve the same instance registered as IOfficeJobHandler
             var handlers = sp.GetServices<IOfficeJobHandler>();
             return handlers.OfType<UploadFinalizationWorker>().First();
         });
+
+        // ProfileSummaryWorker: Processes office-profile queue
+        services.AddHostedService<ProfileSummaryWorker>(sp =>
+        {
+            var handlers = sp.GetServices<IOfficeJobHandler>();
+            return handlers.OfType<ProfileSummaryWorker>().First();
+        });
+
+        // IndexingWorkerHostedService: Processes office-indexing queue
+        // Uses stub implementation for now - completes job without actual indexing
+        // TODO: Replace with full IndexingWorker when FileIndexingService is configured
+        services.AddHostedService<IndexingWorkerHostedService>();
 
         return services;
     }

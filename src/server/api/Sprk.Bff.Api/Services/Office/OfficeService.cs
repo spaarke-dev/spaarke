@@ -304,6 +304,7 @@ public class OfficeService : IOfficeService
                         itemId,
                         fileName,
                         fileSize,
+                        documentId,
                         cancellationToken);
                 }
                 else
@@ -756,6 +757,7 @@ public class OfficeService : IOfficeService
         string itemId,
         string fileName,
         long fileSize,
+        Guid documentId,
         CancellationToken cancellationToken)
     {
         _logger.LogDebug(
@@ -809,7 +811,8 @@ public class OfficeService : IOfficeService
                 ProfileSummary = request.TriggerAiProcessing,
                 RagIndex = request.TriggerAiProcessing,
                 DeepAnalysis = false
-            }
+            },
+            DocumentId = documentId
         };
 
         // Create the job message
@@ -1169,8 +1172,61 @@ public class OfficeService : IOfficeService
             };
         }
 
-        // Job not found
-        _logger.LogDebug("Job {JobId} not found in store", jobId);
+        // Job not found in memory - query Dataverse
+        _logger.LogDebug("Job {JobId} not found in memory store, querying Dataverse", jobId);
+
+        try
+        {
+            var processingJob = await _dataverseService.GetProcessingJobAsync(jobId, cancellationToken);
+            if (processingJob != null)
+            {
+                // Map Dataverse ProcessingJob to JobStatusResponse
+                // ProcessingJob fields: Id, Name, JobType, Status, Progress, IdempotencyKey, CorrelationId
+                dynamic dvJob = processingJob;
+
+                // Map Dataverse status values to JobStatus enum
+                // Dataverse: 1 = Running, 2 = Completed, 3 = Failed, 4 = Cancelled
+                var dvStatus = (int?)dvJob.Status ?? 1;
+                var status = dvStatus switch
+                {
+                    1 => JobStatus.Running,
+                    2 => JobStatus.Completed,
+                    3 => JobStatus.Failed,
+                    4 => JobStatus.Cancelled,
+                    _ => JobStatus.Running
+                };
+
+                var isCompleted = status == JobStatus.Completed;
+                var response = new JobStatusResponse
+                {
+                    JobId = jobId,
+                    Status = status,
+                    JobType = JobType.EmailSave, // Default to EmailSave for Office jobs
+                    Progress = isCompleted ? 100 : ((int?)dvJob.Progress ?? 0),
+                    CurrentPhase = isCompleted ? "Complete" : "Processing",
+                    CreatedAt = DateTimeOffset.UtcNow, // Not stored in Dataverse yet
+                    CompletedAt = isCompleted ? DateTimeOffset.UtcNow : null
+                };
+
+                _logger.LogInformation(
+                    "Job {JobId} found in Dataverse: Status={Status}, Progress={Progress}",
+                    jobId,
+                    response.Status,
+                    response.Progress);
+
+                return response;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to query Dataverse for job {JobId}, returning not found",
+                jobId);
+        }
+
+        // Job not found in Dataverse either
+        _logger.LogDebug("Job {JobId} not found in Dataverse", jobId);
         return null;
     }
 

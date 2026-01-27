@@ -13,6 +13,7 @@ using Sprk.Bff.Api.Api;
 using Sprk.Bff.Api.Api.Admin;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Api.Office;
+using Sprk.Bff.Api.Workers.Office;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Authorization;
 using Sprk.Bff.Api.Infrastructure.DI;
@@ -252,6 +253,9 @@ builder.Services.AddWorkersModule(builder.Configuration);
 
 // Office Add-in module (Office integration endpoints)
 builder.Services.AddOfficeModule();
+
+// Office Workers module (Office background workers - ADR-001)
+builder.Services.AddOfficeWorkers();
 
 // ============================================================================
 // DISTRIBUTED CACHE - Redis for production, in-memory for local dev (ADR-004, ADR-009)
@@ -1325,6 +1329,90 @@ app.MapGet("/status", () =>
     .AllowAnonymous()
     .WithTags("Health")
     .WithDescription("Service status with metadata (no sensitive info).");
+
+// DEBUG: Peek at office-upload-finalization DLQ (temporary - for debugging worker failures)
+app.MapGet("/debug/office-dlq", async (Azure.Messaging.ServiceBus.ServiceBusClient serviceBusClient, ILogger<Program> logger) =>
+{
+    try
+    {
+        await using var receiver = serviceBusClient.CreateReceiver(
+            "office-upload-finalization",
+            new Azure.Messaging.ServiceBus.ServiceBusReceiverOptions
+            {
+                SubQueue = Azure.Messaging.ServiceBus.SubQueue.DeadLetter,
+                ReceiveMode = Azure.Messaging.ServiceBus.ServiceBusReceiveMode.PeekLock
+            });
+
+        var messages = await receiver.PeekMessagesAsync(10);
+        var results = messages.Select(m => new
+        {
+            sequenceNumber = m.SequenceNumber,
+            deadLetterReason = m.DeadLetterReason,
+            deadLetterErrorDescription = m.DeadLetterErrorDescription,
+            enqueuedTime = m.EnqueuedTime,
+            messageId = m.MessageId,
+            correlationId = m.CorrelationId,
+            bodyPreview = m.Body.ToString().Length > 500 ? m.Body.ToString()[..500] + "..." : m.Body.ToString()
+        }).ToList();
+
+        return Results.Ok(new { count = results.Count, messages = results });
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "[DEBUG] Error peeking office DLQ");
+        return Results.Ok(new { error = ex.Message, innerError = ex.InnerException?.Message });
+    }
+}).AllowAnonymous();
+
+// DEBUG: Peek at office-indexing queue (to check if UploadFinalizationWorker forwarded messages)
+app.MapGet("/debug/office-indexing", async (Azure.Messaging.ServiceBus.ServiceBusClient serviceBusClient, ILogger<Program> logger) =>
+{
+    try
+    {
+        await using var receiver = serviceBusClient.CreateReceiver("office-indexing");
+        var messages = await receiver.PeekMessagesAsync(10);
+        var results = messages.Select(m => new
+        {
+            sequenceNumber = m.SequenceNumber,
+            enqueuedTime = m.EnqueuedTime,
+            messageId = m.MessageId,
+            correlationId = m.CorrelationId,
+            bodyPreview = m.Body.ToString().Length > 500 ? m.Body.ToString()[..500] + "..." : m.Body.ToString()
+        }).ToList();
+
+        return Results.Ok(new { queue = "office-indexing", count = results.Count, messages = results });
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "[DEBUG] Error peeking office-indexing queue");
+        return Results.Ok(new { error = ex.Message, innerError = ex.InnerException?.Message });
+    }
+}).AllowAnonymous();
+
+// DEBUG: Peek at office-profile queue
+app.MapGet("/debug/office-profile", async (Azure.Messaging.ServiceBus.ServiceBusClient serviceBusClient, ILogger<Program> logger) =>
+{
+    try
+    {
+        await using var receiver = serviceBusClient.CreateReceiver("office-profile");
+        var messages = await receiver.PeekMessagesAsync(10);
+        var results = messages.Select(m => new
+        {
+            sequenceNumber = m.SequenceNumber,
+            enqueuedTime = m.EnqueuedTime,
+            messageId = m.MessageId,
+            correlationId = m.CorrelationId,
+            bodyPreview = m.Body.ToString().Length > 500 ? m.Body.ToString()[..500] + "..." : m.Body.ToString()
+        }).ToList();
+
+        return Results.Ok(new { queue = "office-profile", count = results.Count, messages = results });
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "[DEBUG] Error peeking office-profile queue");
+        return Results.Ok(new { error = ex.Message, innerError = ex.InnerException?.Message });
+    }
+}).AllowAnonymous();
 
 // ---- Endpoint Groups ----
 

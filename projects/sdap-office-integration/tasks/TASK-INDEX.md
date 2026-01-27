@@ -107,6 +107,23 @@
 
 ---
 
+## Phase 5: Background Workers (Remediation) (067-069c)
+
+> **Note**: These tasks address gaps discovered during integration testing. Tasks 061-066 were marked complete
+> but Service Bus queues were not created, IndexingWorker was not registered, and ProfileSummaryWorker was not
+> fully implemented as an Office worker.
+
+| ID | Task | Status | Dependencies | Rigor |
+|----|------|--------|--------------|-------|
+| 067 | [Create Service Bus queues for Office workers](067-create-servicebus-queues.poml) | ✅ | none | STANDARD |
+| 068 | [Test basic Office save flow](068-test-basic-save-flow.poml) | 🔲 | 067 | STANDARD |
+| 069 | [Register IndexingWorker in DI](069-register-indexing-worker.poml) | 🔲 | 068 | MINIMAL |
+| 069a | [Create ProfileSummaryWorker using existing AI services](069a-create-profile-summary-worker.poml) | 🔲 | 069 | FULL |
+| 069b | [Test full Office worker pipeline end-to-end](069b-test-full-pipeline.poml) | 🔲 | 069a | STANDARD |
+| 069c | [Cleanup unused office-jobs queue and update task status](069c-cleanup-unused-queue.poml) | 🔲 | 069b | MINIMAL |
+
+---
+
 ## Phase 6: Integration & Testing (070-078)
 
 | ID | Task | Status | Dependencies | Rigor |
@@ -152,10 +169,11 @@
 | 3: Backend API | 16 | 10-14 days |
 | 4: Office Add-in | 19 | 12-16 days |
 | 5: Background Workers | 7 | 5-7 days |
+| 5: Background Workers (Remediation) | 6 | 1-2 days |
 | 6: Integration & Testing | 9 | 6-8 days |
 | 7: Deployment & Go-Live | 5 | 3-4 days |
 | Wrap-up | 1 | 1 day |
-| **Total** | **56** | **45-60 days** |
+| **Total** | **62** | **46-62 days** |
 
 ---
 

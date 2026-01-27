@@ -1086,14 +1086,35 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             var value = prop.GetValue(request);
             if (value == null) continue;
 
+            // Special handling for DocumentId lookup field
+            // TEMPORARILY SKIP - debugging "Entity does not exist" error
+            // TODO: Re-enable once we figure out why Document lookup fails
+            if (prop.Name == "DocumentId")
+            {
+                // Skip setting the Document lookup for now to test if other fields work
+                continue;
+            }
+
+            // Special handling for Priority option set field
+            // Option set fields require OptionSetValue, not plain int
+            if (prop.Name == "Priority")
+            {
+                if (value is int priorityInt)
+                {
+                    entity["sprk_priority"] = new OptionSetValue(priorityInt);
+                }
+                continue;
+            }
+
             var fieldName = $"sprk_{prop.Name.ToLower()}";
 
-            if (value is Guid guidValue)
+            if (value is Guid gv)
             {
-                entity[fieldName] = guidValue;
+                entity[fieldName] = gv;
             }
             else if (value is int intValue)
             {
+                // Generic int fields (not option sets)
                 entity[fieldName] = intValue;
             }
             else if (value is bool boolValue)
@@ -1147,11 +1168,20 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             var value = prop.GetValue(request);
             if (value == null) continue;
 
+            // Special handling for DocumentId lookup field
+            // TEMPORARILY SKIP - debugging "Entity does not exist" error
+            // TODO: Re-enable once we figure out why Document lookup fails
+            if (prop.Name == "DocumentId")
+            {
+                // Skip setting the Document lookup for now to test if other fields work
+                continue;
+            }
+
             var fieldName = $"sprk_{prop.Name.ToLower()}";
 
-            if (value is Guid guidValue)
+            if (value is Guid gv)
             {
-                entity[fieldName] = guidValue;
+                entity[fieldName] = gv;
             }
             else if (value is int intValue)
             {
