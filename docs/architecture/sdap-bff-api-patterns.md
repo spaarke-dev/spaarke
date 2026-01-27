@@ -776,6 +776,369 @@ public record FileHandleDto(
 
 ---
 
+## Background Workers Pattern (Office Add-ins)
+
+**Purpose**: Process Office Add-in file uploads asynchronously using Service Bus queues and BackgroundService workers.
+
+### IOfficeJobHandler Interface
+
+Office workers implement a common job handler interface for processing stages:
+
+```csharp
+// IOfficeJobHandler.cs
+public interface IOfficeJobHandler
+{
+    /// <summary>
+    /// Gets the job type this handler processes.
+    /// </summary>
+    OfficeJobType JobType { get; }
+
+    /// <summary>
+    /// Processes a job message.
+    /// </summary>
+    Task<JobOutcome> ProcessAsync(OfficeJobMessage message, CancellationToken cancellationToken);
+}
+
+public record JobOutcome(
+    bool IsSuccess,
+    string? ErrorCode = null,
+    string? ErrorMessage = null,
+    bool Retryable = false);
+
+public enum OfficeJobType
+{
+    UploadFinalization,  // Move files, create records
+    Profile,             // AI summary generation
+    Indexing,            // RAG search indexing
+    DeepAnalysis         // Optional detailed analysis
+}
+```
+
+### Service Bus Message Processing Pattern
+
+Workers use the Azure Service Bus SDK for queue processing:
+
+```csharp
+// UploadFinalizationWorker.cs (example)
+public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
+{
+    private readonly ServiceBusClient _serviceBusClient;
+    private readonly ServiceBusProcessor _processor;
+
+    public OfficeJobType JobType => OfficeJobType.UploadFinalization;
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        _processor = _serviceBusClient.CreateProcessor(
+            queueName: _options.UploadFinalizationQueue,
+            options: new ServiceBusProcessorOptions
+            {
+                MaxConcurrentCalls = 5,
+                AutoCompleteMessages = false,
+                MaxAutoLockRenewalDuration = TimeSpan.FromMinutes(10)
+            });
+
+        _processor.ProcessMessageAsync += ProcessMessageAsync;
+        _processor.ProcessErrorAsync += ProcessErrorAsync;
+
+        await _processor.StartProcessingAsync(stoppingToken);
+    }
+
+    private async Task ProcessMessageAsync(ProcessMessageEventArgs args)
+    {
+        try
+        {
+            // 1. Deserialize message
+            var message = JsonSerializer.Deserialize<OfficeJobMessage>(args.Message.Body);
+
+            // 2. Check idempotency
+            var cacheKey = $"{message.JobId}-upload";
+            if (await _cache.GetAsync(cacheKey) != null)
+            {
+                await args.CompleteMessageAsync(args.Message);
+                return; // Already processed
+            }
+
+            // 3. Process job stages
+            var outcome = await ProcessAsync(message, args.CancellationToken);
+
+            // 4. Complete or abandon message
+            if (outcome.IsSuccess)
+            {
+                await _cache.SetAsync(cacheKey, Array.Empty<byte>(),
+                    new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(7) });
+                await args.CompleteMessageAsync(args.Message);
+            }
+            else if (outcome.Retryable)
+            {
+                await args.AbandonMessageAsync(args.Message);
+            }
+            else
+            {
+                await args.DeadLetterMessageAsync(args.Message,
+                    deadLetterReason: outcome.ErrorCode,
+                    deadLetterErrorDescription: outcome.ErrorMessage);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unhandled error processing message");
+            await args.AbandonMessageAsync(args.Message);
+        }
+    }
+}
+```
+
+### Worker Registration Pattern
+
+Workers are registered in `OfficeWorkersModule.cs`:
+
+```csharp
+// OfficeWorkersModule.cs
+public static class OfficeWorkersModule
+{
+    public static IServiceCollection AddOfficeWorkers(this IServiceCollection services)
+    {
+        // Register job handlers as singleton (stateless)
+        services.AddSingleton<IOfficeJobHandler, UploadFinalizationWorker>();
+        services.AddSingleton<IOfficeJobHandler, ProfileSummaryWorker>();
+
+        // Register as BackgroundService (hosted services)
+        services.AddHostedService<UploadFinalizationWorker>(sp =>
+        {
+            var handlers = sp.GetServices<IOfficeJobHandler>();
+            return handlers.OfType<UploadFinalizationWorker>().First();
+        });
+
+        services.AddHostedService<ProfileSummaryWorker>(sp =>
+        {
+            var handlers = sp.GetServices<IOfficeJobHandler>();
+            return handlers.OfType<ProfileSummaryWorker>().First();
+        });
+
+        services.AddHostedService<IndexingWorkerHostedService>();
+
+        return services;
+    }
+
+    public static IServiceCollection AddOfficeServiceBus(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        services.Configure<ServiceBusOptions>(
+            configuration.GetSection("ServiceBus"));
+
+        services.AddSingleton<ServiceBusClient>(sp =>
+        {
+            var options = sp.GetRequiredService<IOptions<ServiceBusOptions>>();
+            return new ServiceBusClient(options.Value.ConnectionString);
+        });
+
+        return services;
+    }
+}
+```
+
+### Worker Implementations
+
+#### UploadFinalizationWorker
+
+**Purpose**: Processes file uploads, creates Dataverse records, queues downstream jobs.
+
+**Key Operations**:
+1. Move files from temp container to permanent SPE location
+2. Create EmailArtifact, AttachmentArtifact, Document records
+3. Link relationships between entities
+4. Queue messages to `office-profile` and `office-indexing` queues
+
+**Dependencies**: IDataverseServiceClient, ISpeFileStore, IDistributedCache, ServiceBusClient, IOptions<GraphOptions>
+
+#### ProfileSummaryWorker
+
+**Purpose**: Generates AI document profile using IAppOnlyAnalysisService.
+
+**Key Operations**:
+1. Call `AnalyzeDocumentAsync(documentId, "Document Profile", ct)`
+2. AI extracts summary, keywords, document type
+3. Update Document with AI-generated metadata
+4. Graceful degradation if AI service fails
+
+**Dependencies**: IAppOnlyAnalysisService, IDataverseServiceClient, IDistributedCache, ServiceBusClient
+
+#### IndexingWorkerHostedService
+
+**Purpose**: Indexes documents in Azure AI Search for RAG retrieval.
+
+**Key Operations**:
+1. Build FileIndexRequest with DriveId, ItemId, FileName, TenantId
+2. Call `IndexFileAppOnlyAsync(request, ct)`
+3. Service chunks content, generates embeddings, indexes in AI Search
+4. Log indexing results (chunks, duration)
+
+**Dependencies**: IFileIndexingService, IDistributedCache, ServiceBusClient
+
+### Configuration Pattern
+
+Workers use `IOptions<T>` for configuration:
+
+```csharp
+// ServiceBusOptions.cs
+public class ServiceBusOptions
+{
+    public string ConnectionString { get; set; } = string.Empty;
+    public string UploadFinalizationQueue { get; set; } = "office-upload-finalization";
+    public string ProfileQueue { get; set; } = "office-profile";
+    public string IndexingQueue { get; set; } = "office-indexing";
+}
+
+// appsettings.json
+{
+  "ServiceBus": {
+    "ConnectionString": "@Microsoft.KeyVault(SecretUri=...)",
+    "UploadFinalizationQueue": "office-upload-finalization",
+    "ProfileQueue": "office-profile",
+    "IndexingQueue": "office-indexing"
+  },
+  "Graph": {
+    "TenantId": "#{TENANT_ID}#",
+    "ClientId": "#{API_CLIENT_ID}#",
+    "ClientSecret": "@Microsoft.KeyVault(SecretUri=...)"
+  }
+}
+```
+
+### Idempotency Pattern
+
+Workers use Redis distributed cache for idempotency:
+
+```csharp
+// Check if job already processed
+var cacheKey = $"{jobId}-{stage}"; // e.g., "57e63bd6-...-upload"
+var cached = await _cache.GetAsync(cacheKey, ct);
+if (cached != null)
+{
+    _logger.LogInformation("Job {JobId} already processed (idempotency)", jobId);
+    return JobOutcome.Success();
+}
+
+// Mark as processed (7-day TTL)
+await _cache.SetAsync(cacheKey, Array.Empty<byte>(),
+    new DistributedCacheEntryOptions
+    {
+        AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(7)
+    }, ct);
+```
+
+**Pattern**: `{jobId}-{stage}` ensures each stage is idempotent independently.
+
+### Error Handling Pattern
+
+Workers distinguish between retryable and non-retryable errors:
+
+```csharp
+try
+{
+    // Processing logic
+    return JobOutcome.Success();
+}
+catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.TooManyRequests)
+{
+    // Retryable: throttling
+    return JobOutcome.Failure("OFFICE_THROTTLED", ex.Message, retryable: true);
+}
+catch (ArgumentException ex)
+{
+    // Non-retryable: validation error
+    return JobOutcome.Failure("OFFICE_INVALID_DATA", ex.Message, retryable: false);
+}
+catch (Exception ex)
+{
+    // Unknown error: retryable
+    _logger.LogError(ex, "Unexpected error processing job {JobId}", message.JobId);
+    return JobOutcome.Failure("OFFICE_UNEXPECTED", ex.Message, retryable: true);
+}
+```
+
+**Graceful Degradation**: AI and indexing failures are logged as warnings but don't fail the job:
+
+```csharp
+// AI profile generation (ProfileSummaryWorker)
+try
+{
+    var result = await _analysisService.AnalyzeDocumentAsync(documentId, "Document Profile", ct);
+    if (!result.IsSuccess)
+    {
+        _logger.LogWarning("AI profile generation failed (non-fatal): {Error}", result.ErrorMessage);
+    }
+}
+catch (Exception ex)
+{
+    _logger.LogWarning(ex, "Exception during AI profile generation (non-fatal)");
+}
+// Job continues regardless of AI outcome
+```
+
+### Queue Configuration
+
+Service Bus queues require creation and configuration:
+
+```bash
+# Create queues with 7-day TTL
+az servicebus queue create \
+  --resource-group spe-infrastructure-westus2 \
+  --namespace-name customer-servicebus \
+  --name office-upload-finalization \
+  --max-delivery-count 5 \
+  --default-message-time-to-live P7D \
+  --enable-dead-lettering-on-message-expiration true
+
+az servicebus queue create \
+  --resource-group spe-infrastructure-westus2 \
+  --namespace-name customer-servicebus \
+  --name office-profile \
+  --max-delivery-count 3 \
+  --default-message-time-to-live P7D
+
+az servicebus queue create \
+  --resource-group spe-infrastructure-westus2 \
+  --namespace-name customer-servicebus \
+  --name office-indexing \
+  --max-delivery-count 3 \
+  --default-message-time-to-live P7D
+```
+
+### Monitoring Pattern
+
+Application Insights queries for worker health:
+
+```kusto
+// Worker processing times
+traces
+| where customDimensions.Category == "OfficeWorker"
+| summarize avg(customDimensions.Duration), max(customDimensions.Duration)
+  by customDimensions.WorkerType, bin(timestamp, 1h)
+
+// Failed jobs by error code
+traces
+| where customDimensions.JobStatus == "Failed"
+| summarize count() by customDimensions.ErrorCode, bin(timestamp, 1h)
+
+// Stage completion rates
+traces
+| where customDimensions.Stage != ""
+| summarize completed = countif(customDimensions.StageStatus == "completed"),
+            failed = countif(customDimensions.StageStatus == "failed")
+            by customDimensions.Stage
+```
+
+### Related Documentation
+
+- **Full Architecture**: [office-outlook-teams-integration-architecture.md](office-outlook-teams-integration-architecture.md)
+- **Component Interactions**: [sdap-component-interactions.md](sdap-component-interactions.md) Pattern 5B
+- **Customer Deployment**: [CUSTOMER-DEPLOYMENT-GUIDE.md](../guides/CUSTOMER-DEPLOYMENT-GUIDE.md) Service Bus configuration
+
+---
+
 ## Common Mistakes
 
 | Mistake | Error | Fix |

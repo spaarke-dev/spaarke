@@ -490,6 +490,387 @@ All UI components use **Fluent UI v9** per ADR-021:
 
 ---
 
+## Background Workers Architecture
+
+The Office Add-ins integration uses a **multi-stage Service Bus pipeline** for asynchronous processing of saved emails and documents. This architecture enables parallel execution of time-intensive operations (file uploads, AI analysis, search indexing) without blocking the user experience.
+
+### Service Bus Queues
+
+| Queue Name | Consumer | Purpose | Next Stage |
+|------------|----------|---------|------------|
+| `office-upload-finalization` | `UploadFinalizationWorker` | Move temp files to SPE, create Dataverse records (EmailArtifact, AttachmentArtifact, Document), link relationships | Queues to `office-profile` and `office-indexing` |
+| `office-profile` | `ProfileSummaryWorker` | Generate AI document profile using IAppOnlyAnalysisService with "Document Profile" playbook (summary, keywords, document type) | None (terminal stage) |
+| `office-indexing` | `IndexingWorkerHostedService` | Index document content in Azure AI Search using IFileIndexingService for RAG retrieval | None (terminal stage) |
+
+**Queue Configuration**:
+- **MaxConcurrentCalls**: 5 (processes up to 5 messages in parallel per worker)
+- **AutoCompleteMessages**: false (manual completion after successful processing)
+- **MaxAutoLockRenewalDuration**: 10 minutes
+- **DeadLetterQueue**: Enabled for messages that fail after max retries
+
+### Worker Pipeline Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         User Saves Email/Document                            │
+└─────────────────────────────┬───────────────────────────────────────────────┘
+                              │
+                              ▼
+                    ┌─────────────────────┐
+                    │  BFF API Endpoint   │
+                    │  POST /api/office/* │
+                    └──────────┬──────────┘
+                              │
+                              │ 1. Upload temp file to SPE (temp container)
+                              │ 2. Create ProcessingJob (status=Pending)
+                              │ 3. Queue message to office-upload-finalization
+                              │ 4. Return job ID to client
+                              │
+                              ▼
+         ┌────────────────────────────────────────────────────┐
+         │         Service Bus Queue (office-upload-finalization)         │
+         └────────────────────┬───────────────────────────────┘
+                              │
+                              ▼
+         ┌────────────────────────────────────────────────────┐
+         │         UploadFinalizationWorker                   │
+         │  (IOfficeJobHandler - OfficeJobType.UploadFinalization)        │
+         └────────────────────┬───────────────────────────────┘
+                              │
+                              │ Stage 1: Validate job (idempotency check)
+                              │ Stage 2: Process email metadata
+                              │   - Create EmailArtifact record
+                              │   - Extract recipients, sender, dates
+                              │ Stage 3: Process attachments
+                              │   - Move files from temp → permanent SPE location
+                              │   - Create AttachmentArtifact records
+                              │   - Create Document records for each attachment
+                              │ Stage 4: Link relationships
+                              │   - Link EmailArtifact ↔ Document
+                              │   - Link AttachmentArtifact ↔ EmailArtifact
+                              │ Stage 5: Update ProcessingJob (status=InProgress)
+                              │ Stage 6: Queue next stages
+                              │
+              ┌───────────────┴───────────────┐
+              │                               │
+              ▼                               ▼
+┌─────────────────────────┐       ┌─────────────────────────┐
+│ Service Bus Queue       │       │ Service Bus Queue       │
+│ (office-profile)        │       │ (office-indexing)       │
+└───────────┬─────────────┘       └───────────┬─────────────┘
+            │                                 │
+            ▼                                 ▼
+┌─────────────────────────┐       ┌─────────────────────────┐
+│ ProfileSummaryWorker    │       │ IndexingWorkerHostedSvc │
+│ (IOfficeJobHandler)     │       │ (IOfficeJobHandler)     │
+└───────────┬─────────────┘       └───────────┬─────────────┘
+            │                                 │
+            │ 1. Check idempotency            │ 1. Check idempotency
+            │ 2. Call                         │ 2. Build FileIndexRequest
+            │    IAppOnlyAnalysisService      │ 3. Call IFileIndexingService
+            │    .AnalyzeDocumentAsync()      │    .IndexFileAppOnlyAsync()
+            │ 3. AI profile writes to         │ 4. Chunks indexed in AI Search
+            │    Document fields              │ 5. Complete message
+            │ 4. Complete message             │
+            │                                 │
+            └───────────────┬─────────────────┘
+                            │
+                            ▼
+                ┌───────────────────────┐
+                │  All stages complete  │
+                │  Job status=Completed │
+                │  SSE notifies client  │
+                └───────────────────────┘
+```
+
+### Worker Implementation Details
+
+#### UploadFinalizationWorker
+
+**Purpose**: Processes file uploads, creates Dataverse records, and queues downstream jobs.
+
+**Location**: `src/server/api/Sprk.Bff.Api/Workers/Office/UploadFinalizationWorker.cs`
+
+**Dependencies**:
+- `IDataverseServiceClient` - Create EmailArtifact, AttachmentArtifact, Document records
+- `ISpeFileStore` - Move files from temp container to permanent SPE location
+- `IDistributedCache` - Idempotency tracking (7-day TTL)
+- `ServiceBusClient` - Queue messages to office-profile and office-indexing
+- `IOptions<GraphOptions>` - Tenant ID resolution for app-only operations
+
+**Key Operations**:
+1. **Idempotency Check**: Uses `{jobId}-upload` cache key to prevent duplicate processing
+2. **Email Metadata Extraction**: Creates `sprk_emailartifact` with sender, recipients, dates, subject
+3. **Attachment Processing**:
+   - Moves each attachment from temp SPE container to permanent location
+   - Creates `sprk_attachmentartifact` record for each attachment
+   - Creates `sprk_document` record linked to each attachment
+4. **Relationship Linking**: Links EmailArtifact → Document, AttachmentArtifact → EmailArtifact
+5. **Job Payload Creation**: Builds payload with DriveId, ItemId, FileName, TenantId for downstream workers
+6. **Queue Next Stages**: Sends messages to `office-profile` and `office-indexing` queues
+
+**Configuration**:
+```json
+{
+  "ServiceBus": {
+    "ConnectionString": "@Microsoft.KeyVault(SecretUri=...)",
+    "UploadFinalizationQueue": "office-upload-finalization",
+    "ProfileQueue": "office-profile",
+    "IndexingQueue": "office-indexing"
+  },
+  "Graph": {
+    "TenantId": "#{TENANT_ID}#",
+    "ClientId": "#{API_CLIENT_ID}#",
+    "ClientSecret": "@Microsoft.KeyVault(SecretUri=...)"
+  }
+}
+```
+
+**Error Handling**:
+- **Retryable Errors**: Service Bus deadletter after 5 attempts (transient failures, timeouts)
+- **Non-Retryable Errors**: Immediate job failure (validation errors, missing data)
+- **Partial Success**: Graceful degradation - if downstream queuing fails, job still completes with warning
+
+#### ProfileSummaryWorker
+
+**Purpose**: Generates AI document profile using Azure OpenAI via IAppOnlyAnalysisService.
+
+**Location**: `src/server/api/Sprk.Bff.Api/Workers/Office/ProfileSummaryWorker.cs`
+
+**Dependencies**:
+- `IAppOnlyAnalysisService` - AI analysis service with "Document Profile" playbook
+- `IDataverseServiceClient` - Update Document with AI-generated fields (summary, keywords, document type)
+- `IDistributedCache` - Idempotency tracking
+- `ServiceBusClient` - Process messages from office-profile queue
+
+**Key Operations**:
+1. **Idempotency Check**: Uses `{jobId}-profile` cache key
+2. **AI Profile Generation**:
+   - Calls `AnalyzeDocumentAsync(documentId, "Document Profile", cancellationToken)`
+   - AI extracts: summary, keywords, document type, entities, topics
+3. **Document Update**: Writes AI-generated metadata to `sprk_document` fields
+4. **Graceful Degradation**: AI failures are logged as warnings but don't fail the job
+
+**Playbook**: "Document Profile" (configured in Azure OpenAI)
+- **Prompt**: Analyze document and extract structured metadata
+- **Output**: JSON with summary, keywords[], documentType, entities[], topics[]
+
+**Payload Structure**:
+```csharp
+public record ProfileJobPayload
+{
+    public Guid DocumentId { get; init; }
+    public string DriveId { get; init; }      // SPE drive ID
+    public string ItemId { get; init; }       // SPE item ID
+    public string FileName { get; init; }     // Original filename
+    public string TenantId { get; init; }     // Customer tenant ID
+    public bool ProfileSummary { get; init; } // Enable profile generation
+    public bool RagIndex { get; init; }       // Enable RAG indexing
+    public bool DeepAnalysis { get; init; }   // Enable deep analysis (future)
+}
+```
+
+**Error Handling**:
+- **AI Service Errors**: Logged as warnings, job continues (AI is optional enhancement)
+- **Document Not Found**: Non-retryable error, job fails
+- **Timeout**: Retryable error, message requeued
+
+#### IndexingWorkerHostedService
+
+**Purpose**: Indexes document content in Azure AI Search for RAG (Retrieval-Augmented Generation) queries.
+
+**Location**: `src/server/api/Sprk.Bff.Api/Workers/Office/IndexingWorkerHostedService.cs`
+
+**Dependencies**:
+- `IFileIndexingService` - RAG indexing service with chunking and embedding
+- `IDistributedCache` - Idempotency tracking
+- `ServiceBusClient` - Process messages from office-indexing queue
+
+**Key Operations**:
+1. **Idempotency Check**: Uses `{jobId}-indexing` cache key
+2. **Feature Flag Check**: Skips processing if `payload.RagIndex == false`
+3. **File Index Request**:
+   - Builds `FileIndexRequest` with DriveId, ItemId, FileName, TenantId, DocumentId
+   - Adds metadata: source=OfficeAddIn, jobId
+4. **RAG Indexing**:
+   - Calls `IndexFileAppOnlyAsync(request, cancellationToken)`
+   - Service downloads file from SPE, chunks content, generates embeddings, indexes in AI Search
+5. **Result Logging**: Logs chunks indexed, duration, index name
+
+**Payload Structure**:
+```csharp
+public record IndexingPayload
+{
+    public Guid DocumentId { get; init; }
+    public string DriveId { get; init; }      // SPE drive ID
+    public string ItemId { get; init; }       // SPE item ID
+    public string FileName { get; init; }     // Original filename
+    public string TenantId { get; init; }     // Customer tenant ID
+    public bool ProfileSummary { get; init; }
+    public bool RagIndex { get; init; }       // Must be true to index
+    public bool DeepAnalysis { get; init; }
+}
+```
+
+**Error Handling**:
+- **Indexing Failures**: Logged as warnings, job completes (indexing is optional enhancement)
+- **File Not Found**: Non-retryable error, job fails
+- **Embedding Service Timeout**: Retryable error, message requeued
+
+### Configuration Requirements
+
+**App Service Settings** (customer-specific):
+```bash
+# Service Bus Configuration
+ServiceBus__ConnectionString="Endpoint=sb://customer-servicebus.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=..."
+ServiceBus__UploadFinalizationQueue="office-upload-finalization"
+ServiceBus__ProfileQueue="office-profile"
+ServiceBus__IndexingQueue="office-indexing"
+
+# Graph API (for app-only operations)
+Graph__TenantId="<CUSTOMER_TENANT_ID>"
+Graph__ClientId="<API_APP_REGISTRATION_ID>"
+Graph__ClientSecret="@Microsoft.KeyVault(SecretUri=https://customer-kv.vault.azure.net/secrets/GraphClientSecret)"
+
+# Azure OpenAI (for AI profile generation)
+AzureOpenAi__Endpoint="https://customer-openai.openai.azure.com/"
+AzureOpenAi__DeploymentName="gpt-4"
+AzureOpenAi__ApiKey="@Microsoft.KeyVault(SecretUri=https://customer-kv.vault.azure.net/secrets/OpenAiApiKey)"
+
+# Azure AI Search (for RAG indexing)
+AzureSearch__ServiceName="customer-search"
+AzureSearch__IndexName="documents"
+AzureSearch__AdminKey="@Microsoft.KeyVault(SecretUri=https://customer-kv.vault.azure.net/secrets/SearchAdminKey)"
+```
+
+**Service Bus Queue Creation** (one-time setup):
+```bash
+# Create queues with 7-day TTL
+az servicebus queue create \
+  --resource-group spe-infrastructure-westus2 \
+  --namespace-name customer-servicebus \
+  --name office-upload-finalization \
+  --max-delivery-count 5 \
+  --default-message-time-to-live P7D \
+  --enable-dead-lettering-on-message-expiration true
+
+az servicebus queue create \
+  --resource-group spe-infrastructure-westus2 \
+  --namespace-name customer-servicebus \
+  --name office-profile \
+  --max-delivery-count 3 \
+  --default-message-time-to-live P7D
+
+az servicebus queue create \
+  --resource-group spe-infrastructure-westus2 \
+  --namespace-name customer-servicebus \
+  --name office-indexing \
+  --max-delivery-count 3 \
+  --default-message-time-to-live P7D
+```
+
+### Job Status Tracking
+
+The Office Add-in polls for job status using Server-Sent Events (SSE):
+
+```
+Client                          BFF API                        Redis Cache
+  |                                |                                |
+  | GET /api/office/process/{id}   |                                |
+  |─────────────────────────────>  |                                |
+  |                                |  Get job status from cache     |
+  |                                |─────────────────────────────>  |
+  |                                |  <─────────────────────────────|
+  | SSE: status update             |                                |
+  |<─────────────────────────────  |                                |
+  |                                |                                |
+  | (poll every 2 seconds)         |                                |
+  |                                |                                |
+  | SSE: status=Completed          |                                |
+  |<─────────────────────────────  |                                |
+```
+
+**ProcessingJob Status Values**:
+- `Pending` (0) - Job created, waiting for worker pickup
+- `InProgress` (1) - Worker processing stages
+- `Completed` (2) - All stages finished successfully
+- `Failed` (3) - Job encountered non-retryable error
+- `Cancelled` (4) - User cancelled the operation
+
+**Stage Tracking** (JSON in `sprk_stagestatus`):
+```json
+{
+  "upload": "completed",
+  "profile": "in_progress",
+  "indexing": "pending"
+}
+```
+
+### Error Handling & Retry Logic
+
+**Error Categories**:
+
+| Error Type | Retry? | Action |
+|------------|--------|--------|
+| **Transient** (timeout, throttling) | ✅ Yes | Exponential backoff, max 5 attempts |
+| **Validation** (missing data, invalid format) | ❌ No | Immediate failure, update job status |
+| **Authentication** (expired token, invalid credentials) | ✅ Yes | Retry with fresh token |
+| **AI Service** (OpenAI timeout, quota exceeded) | ⚠️ Optional | Log warning, job continues without AI fields |
+| **Indexing Service** (AI Search unavailable) | ⚠️ Optional | Log warning, job continues without indexing |
+
+**Graceful Degradation**:
+- **Core Operations** (file upload, record creation): Must succeed or job fails
+- **Enhancement Operations** (AI profile, RAG indexing): Failures logged as warnings, job completes
+
+**Idempotency Keys**:
+- Pattern: `{jobId}-{stage}` (e.g., `57e63bd6-3f95-4dd3-a9b3-b995dd144347-upload`)
+- TTL: 7 days (matches Service Bus message TTL)
+- Storage: Redis distributed cache
+
+### Monitoring & Troubleshooting
+
+**Application Insights Queries**:
+
+```kusto
+// Worker processing times
+traces
+| where customDimensions.Category == "OfficeWorker"
+| summarize avg(customDimensions.Duration), max(customDimensions.Duration) by customDimensions.WorkerType, bin(timestamp, 1h)
+
+// Failed jobs by error code
+traces
+| where customDimensions.JobStatus == "Failed"
+| summarize count() by customDimensions.ErrorCode, bin(timestamp, 1h)
+
+// Stage completion rates
+traces
+| where customDimensions.Stage != ""
+| summarize completed = countif(customDimensions.StageStatus == "completed"),
+            failed = countif(customDimensions.StageStatus == "failed")
+            by customDimensions.Stage
+
+// Service Bus deadletter queue inspection
+traces
+| where customDimensions.Queue endswith "-deadletter"
+| project timestamp, customDimensions.JobId, customDimensions.ErrorMessage
+```
+
+**Common Issues**:
+
+| Symptom | Possible Cause | Resolution |
+|---------|----------------|------------|
+| Job stuck at "Creating records" | ServiceBusClient not registered in DI | Verify `AddOfficeServiceBus()` called in Program.cs |
+| Workers not processing messages | Service Bus connection string missing | Check App Service Settings: `ServiceBus__ConnectionString` |
+| AI profile fields empty | IAppOnlyAnalysisService not called | Check ProfileSummaryWorker logs for AI service errors |
+| Documents not searchable | RAG indexing disabled or failed | Check `payload.RagIndex` flag, verify IFileIndexingService integration |
+| "Tenant not found" error | Hardcoded tenant ID or missing GraphOptions | Verify `Graph__TenantId` in App Service Settings |
+
+**Health Check Endpoints**:
+- `GET /healthz` - API health (database, Redis, Service Bus connectivity)
+- `GET /api/office/workers/health` - Worker health (last processed message timestamp)
+
+---
+
 ## Dataverse Schema
 
 > **Reference**: [DATAVERSE-TABLE-SCHEMAS.md](../../projects/sdap-office-integration/notes/DATAVERSE-TABLE-SCHEMAS.md)
