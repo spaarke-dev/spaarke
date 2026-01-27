@@ -40,6 +40,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     private readonly ServiceBusClient _serviceBusClient;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ServiceBusOptions _serviceBusOptions;
+    private readonly GraphOptions _graphOptions;
     private readonly IDataverseService _dataverseService;
     private readonly IEmailToEmlConverter _emlConverter;
     private readonly AttachmentFilterService _attachmentFilterService;
@@ -69,6 +70,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         ServiceBusClient serviceBusClient,
         IServiceScopeFactory scopeFactory,
         IOptions<ServiceBusOptions> serviceBusOptions,
+        IOptions<GraphOptions> graphOptions,
         IDataverseService dataverseService,
         IEmailToEmlConverter emlConverter,
         AttachmentFilterService attachmentFilterService)
@@ -79,6 +81,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         _serviceBusClient = serviceBusClient ?? throw new ArgumentNullException(nameof(serviceBusClient));
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _serviceBusOptions = serviceBusOptions?.Value ?? throw new ArgumentNullException(nameof(serviceBusOptions));
+        _graphOptions = graphOptions?.Value ?? throw new ArgumentNullException(nameof(graphOptions));
         _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
         _emlConverter = emlConverter ?? throw new ArgumentNullException(nameof(emlConverter));
         _attachmentFilterService = attachmentFilterService ?? throw new ArgumentNullException(nameof(attachmentFilterService));
@@ -853,9 +856,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             nextJobType,
             originalMessage.JobId);
 
-        // Get tenant ID from Dataverse environment (passed in message context)
-        // For now, use a placeholder - tenant resolution will be added later
-        var tenantId = "spaarke-dev"; // TODO: Get from configuration or context
+        // Get tenant ID from Graph configuration (customer-specific value from App Service settings)
+        var tenantId = _graphOptions.TenantId;
 
         var nextMessage = new OfficeJobMessage
         {
