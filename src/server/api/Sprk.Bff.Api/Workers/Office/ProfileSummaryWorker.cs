@@ -165,7 +165,7 @@ public class ProfileSummaryWorker : BackgroundService, IOfficeJobHandler
                     IAppOnlyAnalysisService.DefaultPlaybookName,
                     cancellationToken);
 
-                if (!analysisResult.Success)
+                if (!analysisResult.IsSuccess)
                 {
                     // Per spec, AI processing failures are not fatal
                     _logger.LogWarning(
