@@ -65,10 +65,13 @@ export interface SaveViewProps {
  * SaveView component - Container view for the save workflow.
  *
  * This view component:
- * - Initializes the host adapter and retrieves item context
- * - Fetches attachments for Outlook emails
+ * - Initializes the host adapter and retrieves item metadata (subject, sender, recipients, attachments list)
+ * - Fetches attachment metadata for Outlook emails (content retrieved server-side via Graph API)
  * - Renders the SaveFlow component with proper context
  * - Handles loading and error states
+ *
+ * Note: Email body and attachment content are retrieved server-side via Microsoft Graph API
+ * using OBO authentication. This provides more reliable retrieval than Office.js client-side APIs.
  *
  * @example
  * ```tsx
@@ -103,8 +106,8 @@ export const SaveView: React.FC<SaveViewProps> = ({
   const [senderDisplayName, setSenderDisplayName] = useState<string | undefined>();
   const [recipients, setRecipients] = useState<Array<{ email: string; displayName?: string; type: 'to' | 'cc' | 'bcc' }>>([]);
   const [sentDate, setSentDate] = useState<Date | undefined>();
-  const [emailBody, setEmailBody] = useState<string | undefined>();
   const [documentUrl, setDocumentUrl] = useState<string | undefined>();
+  // Note: emailBody removed - now retrieved server-side via Graph API
 
   // Load item context from host adapter
   useEffect(() => {
@@ -167,26 +170,8 @@ export const SaveView: React.FC<SaveViewProps> = ({
             setSentDate(date);
           }
 
-          // Get email body
-          if (hostAdapter.getCapabilities().canGetBody) {
-            try {
-              console.log('[SaveView] Attempting to retrieve email body...');
-              const bodyContent = await hostAdapter.getBody('html');
-              console.log('[SaveView] Email body retrieved:', {
-                length: bodyContent.content?.length || 0,
-                type: bodyContent.type,
-                hasContent: !!bodyContent.content,
-                preview: bodyContent.content?.substring(0, 100)
-              });
-              setEmailBody(bodyContent.content);
-            } catch (err) {
-              console.error('[SaveView] FAILED to get email body:', err);
-              console.error('[SaveView] Error details:', JSON.stringify(err, Object.getOwnPropertyNames(err)));
-              // Continue without body - not critical
-            }
-          } else {
-            console.warn('[SaveView] Host adapter reports canGetBody = false');
-          }
+          // Note: Email body and attachment content are now retrieved server-side via Graph API
+          // Client only sends internetMessageId and metadata for reliable, consistent retrieval
         } else if (type === 'word') {
           // Word-specific context
           // Document URL is typically the current file path
@@ -252,8 +237,8 @@ export const SaveView: React.FC<SaveViewProps> = ({
         senderDisplayName={senderDisplayName}
         recipients={recipients}
         sentDate={sentDate}
-        emailBody={emailBody}
         documentUrl={documentUrl}
+        {/* emailBody removed - retrieved server-side via Graph API */}
         getAccessToken={getAccessToken || defaultGetAccessToken}
         apiBaseUrl={apiBaseUrl}
         onComplete={onComplete}

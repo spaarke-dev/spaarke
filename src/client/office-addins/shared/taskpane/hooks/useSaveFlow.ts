@@ -758,24 +758,17 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           name: r.displayName,
         })) || [];
 
-        const emailBody = includeBody ? context.emailBody : undefined;
-        console.log('[SaveFlow] Email body info:', {
-          includeBody,
-          hasEmailBody: !!context.emailBody,
-          bodyLength: context.emailBody?.length || 0,
-          bodyPreview: context.emailBody?.substring(0, 100),
-          willSendBody: !!emailBody
-        });
-
+        // Note: Email body and attachment content are retrieved server-side via Graph API
+        // Client only sends internetMessageId - server will fetch body and attachments using OBO auth
         serverRequest.email = {
           subject: context.itemName || 'Untitled Email',
           senderEmail: context.senderEmail || 'unknown@placeholder.com',
           senderName: context.senderDisplayName,
           recipients,
           sentDate: context.sentDate?.toISOString(),
-          body: emailBody,
+          body: undefined, // Retrieved server-side via Graph API
           isBodyHtml: true,
-          internetMessageId: context.itemId,
+          internetMessageId: context.itemId, // Server uses this to fetch email via Graph
         };
       } else if (contentType === 'Attachment') {
         const attachmentId = Array.from(selectedAttachmentIds)[0];
