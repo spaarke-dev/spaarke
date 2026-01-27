@@ -254,6 +254,9 @@ builder.Services.AddWorkersModule(builder.Configuration);
 // Office Add-in module (Office integration endpoints)
 builder.Services.AddOfficeModule();
 
+// Office Service Bus client for workers
+builder.Services.AddOfficeServiceBus(builder.Configuration);
+
 // Office Workers module (Office background workers - ADR-001)
 builder.Services.AddOfficeWorkers();
 

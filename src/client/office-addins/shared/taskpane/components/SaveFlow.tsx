@@ -218,6 +218,8 @@ export interface SaveFlowProps {
   recipients?: Array<{ email: string; displayName?: string; type: 'to' | 'cc' | 'bcc' }>;
   /** Email sent date (Outlook only) */
   sentDate?: Date;
+  /** Email body content (Outlook only) */
+  emailBody?: string;
   /** Document URL (Word only) */
   documentUrl?: string;
   /** Access token getter */
@@ -279,6 +281,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     senderDisplayName,
     recipients,
     sentDate,
+    emailBody,
     documentUrl,
     getAccessToken,
     apiBaseUrl = '',
@@ -343,8 +346,9 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     senderDisplayName,
     recipients,
     sentDate,
+    emailBody,
     documentUrl,
-  }), [hostType, itemId, itemName, attachments, senderEmail, senderDisplayName, recipients, sentDate, documentUrl]);
+  }), [hostType, itemId, itemName, attachments, senderEmail, senderDisplayName, recipients, sentDate, emailBody, documentUrl]);
 
   // Handle save button click
   const handleSave = useCallback(() => {

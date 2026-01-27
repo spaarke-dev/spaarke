@@ -103,6 +103,7 @@ export const SaveView: React.FC<SaveViewProps> = ({
   const [senderDisplayName, setSenderDisplayName] = useState<string | undefined>();
   const [recipients, setRecipients] = useState<Array<{ email: string; displayName?: string; type: 'to' | 'cc' | 'bcc' }>>([]);
   const [sentDate, setSentDate] = useState<Date | undefined>();
+  const [emailBody, setEmailBody] = useState<string | undefined>();
   const [documentUrl, setDocumentUrl] = useState<string | undefined>();
 
   // Load item context from host adapter
@@ -164,6 +165,17 @@ export const SaveView: React.FC<SaveViewProps> = ({
           if ('getSentDate' in hostAdapter && typeof hostAdapter.getSentDate === 'function') {
             const date = hostAdapter.getSentDate();
             setSentDate(date);
+          }
+
+          // Get email body
+          if (hostAdapter.getCapabilities().canGetBody) {
+            try {
+              const bodyContent = await hostAdapter.getBody('html');
+              setEmailBody(bodyContent.content);
+            } catch (err) {
+              console.warn('Failed to get email body:', err);
+              // Continue without body - not critical
+            }
           }
         } else if (type === 'word') {
           // Word-specific context
@@ -230,6 +242,7 @@ export const SaveView: React.FC<SaveViewProps> = ({
         senderDisplayName={senderDisplayName}
         recipients={recipients}
         sentDate={sentDate}
+        emailBody={emailBody}
         documentUrl={documentUrl}
         getAccessToken={getAccessToken || defaultGetAccessToken}
         apiBaseUrl={apiBaseUrl}
