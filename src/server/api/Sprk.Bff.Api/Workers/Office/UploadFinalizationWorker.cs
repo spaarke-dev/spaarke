@@ -315,7 +315,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             // Step 10: Queue next stage (profile or indexing)
             if (payload.TriggerAiProcessing)
             {
-                await QueueNextStageAsync(message, documentId, payload, cancellationToken);
+                await QueueNextStageAsync(message, documentId, payload, driveId, itemId, cancellationToken);
             }
             else
             {
@@ -838,6 +838,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         OfficeJobMessage originalMessage,
         Guid documentId,
         UploadFinalizationPayload payload,
+        string driveId,
+        string itemId,
         CancellationToken cancellationToken)
     {
         var aiOptions = payload.AiOptions ?? new AiProcessingOptions();
@@ -850,6 +852,10 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             "Queueing next stage {NextJobType} for job {JobId}",
             nextJobType,
             originalMessage.JobId);
+
+        // Get tenant ID from Dataverse environment (passed in message context)
+        // For now, use a placeholder - tenant resolution will be added later
+        var tenantId = "spaarke-dev"; // TODO: Get from configuration or context
 
         var nextMessage = new OfficeJobMessage
         {
@@ -864,6 +870,10 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             Payload = JsonSerializer.SerializeToElement(new
             {
                 DocumentId = documentId,
+                DriveId = driveId,
+                ItemId = itemId,
+                FileName = payload.FileName ?? "unknown",
+                TenantId = tenantId,
                 ProfileSummary = aiOptions.ProfileSummary,
                 RagIndex = aiOptions.RagIndex,
                 DeepAnalysis = aiOptions.DeepAnalysis

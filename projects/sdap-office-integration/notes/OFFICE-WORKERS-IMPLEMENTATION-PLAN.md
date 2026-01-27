@@ -1,16 +1,25 @@
 # Office Workers Implementation Plan
 
 > **Created**: 2026-01-26
-> **Status**: Active Implementation
+> **Updated**: 2026-01-27
+> **Status**: Active Implementation - Workers Running but Stubs
 > **Purpose**: Complete the Office add-in email save → document processing pipeline
 
 ---
 
 ## Executive Summary
 
-The Office add-in save flow is partially implemented. The API endpoint and initial SPE upload work, but the background worker pipeline is incomplete. This document provides the roadmap to complete the full end-to-end flow using **existing components** wherever possible.
+The Office add-in save flow infrastructure is complete and deployed. All Service Bus queues exist, all workers are registered and listening. However, **ProfileSummaryWorker and IndexingWorkerHostedService are stub implementations** that skip actual AI processing.
 
-**Current Blocker**: Service Bus queue `office-upload-finalization` does not exist in Azure.
+**Current Status**:
+- ✅ Service Bus queues created in Azure
+- ✅ ServiceBusClient registered in DI (deployed 2026-01-27)
+- ✅ All workers listening to their queues
+- ✅ Email body fetching added to SaveView
+- ⚠️ ProfileSummaryWorker is a stub (skips AI profile generation)
+- ⚠️ IndexingWorkerHostedService is a stub (skips RAG indexing)
+
+**Current Blockers**: Need to integrate existing AI services into stub workers.
 
 ---
 
@@ -89,16 +98,36 @@ The Office add-in save flow is partially implemented. The API endpoint and initi
 
 ---
 
-## Current State Assessment
+## Current State Assessment (Updated 2026-01-27)
+
+### ✅ What's Working
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| Email Save Flow | ✅ Working | UI, validation, job creation |
+| Document Creation | ✅ Working | Dataverse record created |
+| SPE File Upload | ✅ Working | .eml file with body + attachments |
+| Service Bus Connectivity | ✅ Working | All workers connected to queues |
+| UploadFinalizationWorker | ✅ Working | Creates records, queues downstream jobs |
+| Job Status Updates | ✅ Working | Redis + SSE working |
+| Job Completion | ✅ Working | UI receives completion status |
+
+### ⚠️ What's NOT Working (Stub Implementations)
+
+| Component | Issue | Impact |
+|-----------|-------|--------|
+| **ProfileSummaryWorker** | Stub implementation (line 150-155) | No AI summary, keywords, or metadata |
+| **IndexingWorkerHostedService** | Stub implementation (line 129-133) | Documents not indexed in Azure AI Search |
 
 ### Code Status
 
 | Component | File Exists | Registered in DI | Functional | Notes |
 |-----------|-------------|------------------|------------|-------|
-| UploadFinalizationWorker | ✅ | ✅ | ❌ (queue missing) | Fully implemented |
-| IndexingWorker | ✅ | ❌ | ❌ | Code exists, not registered |
-| ProfileSummaryWorker | ❌ | ❌ | ❌ | Not created |
-| OfficeWorkersModule | ✅ | ✅ | ✅ | Only registers UploadFinalizationWorker |
+| UploadFinalizationWorker | ✅ | ✅ | ✅ | Fully implemented |
+| IndexingWorkerHostedService | ✅ | ✅ | ⚠️ Stub only | Needs FileIndexingService integration |
+| ProfileSummaryWorker | ✅ | ✅ | ⚠️ Stub only | Needs Playbook/Analysis integration |
+| OfficeWorkersModule | ✅ | ✅ | ✅ | All workers registered |
+| ServiceBusClient | ✅ | ✅ | ✅ | Added via AddOfficeServiceBus() |
 | IOfficeJobHandler | ✅ | ✅ | ✅ | Interface exists |
 | IOfficeJobStatusService | ✅ | ✅ | ✅ | Implementation exists |
 
@@ -159,102 +188,224 @@ public async Task<JobOutcome> ProcessAsync(OfficeJobMessage message, Cancellatio
 
 ---
 
-## Implementation Phases
+## Remaining Work Items
 
-### Phase 1: Basic Save Flow (Critical Path)
+### 1. Integrate RAG Indexing (IndexingWorkerHostedService)
 
-**Goal**: Email save → Document created in Dataverse
+**File**: `src/server/api/Sprk.Bff.Api/Workers/Office/IndexingWorkerHostedService.cs`
 
-**Steps**:
-1. Create Service Bus queue: `office-upload-finalization`
-2. Deploy BFF API with updated configuration
-3. Test end-to-end: Outlook → Save → SPE upload → Worker → Document created
-4. Verify job status updates reach SSE client
+**Current Code** (lines 129-133):
+```csharp
+// TODO: Integrate with actual IndexingWorker.ProcessAsync() when ready
+// For now, mark job as complete immediately (indexing is optional per spec)
+_logger.LogInformation(
+    "Indexing skipped for job {JobId} (stub implementation), marking complete",
+    message.JobId);
+```
 
-**Files Involved**:
-- No code changes required (UploadFinalizationWorker already complete)
-- Azure: Create queue via portal or CLI
+**Required Changes**:
+1. Inject `IFileIndexingService` into constructor
+2. Replace stub with call to `IndexFileAppOnlyAsync()`
+3. Handle indexing errors gracefully (indexing is optional per spec)
+4. Update job status to "Indexed" stage after success
 
-**Test Criteria**:
-- Email saves without error
-- Document record appears in Dataverse with correct association
-- EmailArtifact record created
-- Attachments extracted as child Documents (if present)
-- Job status shows "Completed"
+**Existing Service to Use**:
+- `IFileIndexingService.IndexFileAppOnlyAsync()` - Already exists and registered in DI
+- Used by existing `ScheduledRagIndexingService` - proven pattern
+
+### 2. Integrate AI Profile Generation (ProfileSummaryWorker)
+
+**File**: `src/server/api/Sprk.Bff.Api/Workers/Office/ProfileSummaryWorker.cs`
+
+**Current Code** (lines 150-155):
+```csharp
+// Step 4: TODO - Generate AI profile summary using existing AI services
+// For now, this is a stub that skips actual AI processing
+_logger.LogInformation(
+    "AI profile generation skipped (not yet implemented) for job {JobId}, document {DocumentId}",
+    message.JobId,
+    payload.DocumentId);
+```
+
+**Required Changes**:
+1. Determine correct AI service to use:
+   - Option A: `IPlaybookOrchestrationService` (if email profile playbook exists)
+   - Option B: `IAppOnlyAnalysisService.AnalyzeDocumentAsync()` (existing document analysis)
+2. Inject selected service into constructor
+3. Call AI service with document details
+4. Update Dataverse Document record with AI-generated metadata:
+   - `sprk_keywords`
+   - `sprk_summary`
+   - `sprk_documenttype` (if classified)
+   - Other AI-generated fields
+5. Handle errors gracefully (AI processing is optional)
+
+**Decision Required**: Which AI service should process email documents?
+- Email-specific playbook? (needs investigation)
+- General document analysis? (already exists)
+
+### 3. Test End-to-End Flow
+
+**For Outlook**:
+1. Save email from Outlook Web App
+2. Verify Document created with all metadata
+3. Verify AI summary populated (if enabled)
+4. Verify document indexed in Azure AI Search (if enabled)
+5. Verify attachments extracted and saved
+
+**For Word**:
+1. Test Word add-in save flow
+2. Verify Document + DOCX file saved correctly
+3. Verify same AI processing applies to Word documents
+
+### 4. Verify Word Add-in Integration
+
+**Status**: Unknown - needs testing
+
+**Files to Check**:
+- `src/client/office-addins/word/` - Word adapter implementation
+- `SaveView.tsx` - Should work for both Outlook and Word
+- `useSaveFlow.ts` - Content type detection for Word documents
 
 ---
 
-### Phase 2: RAG Indexing Stage
+## Implementation Phases
+
+### ✅ Phase 1: Basic Save Flow (COMPLETE)
+
+**Goal**: Email save → Document created in Dataverse
+
+**Status**: ✅ **COMPLETE** (2026-01-27)
+
+**Completed**:
+- ✅ Service Bus queues created (`office-upload-finalization`, `office-profile`, `office-indexing`)
+- ✅ ServiceBusClient registered in Program.cs via `AddOfficeServiceBus()`
+- ✅ All workers registered in OfficeWorkersModule
+- ✅ Email body fetching added to SaveView
+- ✅ BFF API deployed with workers running
+- ✅ End-to-end save flow working
+- ✅ Document record created in Dataverse
+- ✅ EmailArtifact record created
+- ✅ Job status updates working (Redis + SSE)
+
+**Test Results**:
+- ✅ Email saves without error
+- ✅ Document record appears in Dataverse with correct association
+- ✅ EmailArtifact record created
+- ✅ .eml file includes body and attachments
+- ✅ Job completes (though AI stages are stubs)
+
+---
+
+### 🚧 Phase 2: RAG Indexing Integration (IN PROGRESS)
 
 **Goal**: Documents indexed in Azure AI Search after save
 
-**Steps**:
-1. Create Service Bus queue: `office-indexing`
-2. Register IndexingWorker in OfficeWorkersModule.cs
-3. Deploy updated API
-4. Test: Save with RagIndex=true → Document indexed
+**Status**: ⚠️ Worker exists but is a stub
+
+**Completed**:
+- ✅ `office-indexing` queue exists
+- ✅ IndexingWorkerHostedService registered and running
+- ✅ IFileIndexingService exists and is registered
+
+**Remaining Work**:
+1. Replace stub in `IndexingWorkerHostedService.cs` (line 129-133)
+2. Inject `IFileIndexingService` into constructor
+3. Call `IndexFileAppOnlyAsync()` with document details
+4. Update Document record with indexing metadata
+5. Test: Save with RagIndex=true → Document indexed
+6. Verify duplicate handling (idempotency)
 
 **Files to Modify**:
-- `Workers/Office/OfficeWorkersModule.cs` - Add IndexingWorker registration
+- `Workers/Office/IndexingWorkerHostedService.cs` - Replace stub with real implementation
 
-**Code Change**:
-```csharp
-// OfficeWorkersModule.cs - ADD this registration
-services.AddSingleton<IOfficeJobHandler, IndexingWorker>();
-services.AddHostedService<IndexingWorker>(sp =>
-{
-    var handlers = sp.GetServices<IOfficeJobHandler>();
-    return handlers.OfType<IndexingWorker>().First();
-});
-```
-
-**Existing Components Used**:
-- `IFileIndexingService.IndexFileAppOnlyAsync` (already called by IndexingWorker)
-- `IIdempotencyService` (already used)
-- `RagTelemetry` (already used)
+**Existing Components to Use**:
+- `IFileIndexingService.IndexFileAppOnlyAsync()` - Already exists
+- Pattern reference: `ScheduledRagIndexingService.cs` (existing RAG indexing pattern)
 
 **Test Criteria**:
 - Document appears in Azure AI Search index
-- Job status shows "Indexed"
+- Vector embeddings generated
+- Job status shows "Indexed" stage
 - Duplicate saves don't re-index (idempotency)
 
 ---
 
-### Phase 3: AI Profile Stage
+### 🚧 Phase 3: AI Profile Integration (IN PROGRESS)
 
 **Goal**: Documents get AI-generated profile/summary after save
 
-**Steps**:
-1. Create Service Bus queue: `office-profile`
-2. Create ProfileSummaryWorker.cs (delegates to IAppOnlyAnalysisService)
-3. Register ProfileSummaryWorker in OfficeWorkersModule.cs
-4. Update UploadFinalizationWorker to queue to profile stage
-5. Deploy and test
+**Status**: ⚠️ Worker exists but is a stub
 
-**Files to Create**:
-- `Workers/Office/ProfileSummaryWorker.cs`
+**Completed**:
+- ✅ `office-profile` queue exists
+- ✅ ProfileSummaryWorker registered and running
+
+**Remaining Work**:
+1. **Decision**: Determine which AI service to use:
+   - Option A: Email-specific playbook (if exists)
+   - Option B: `IAppOnlyAnalysisService.AnalyzeDocumentAsync()` (general document analysis)
+2. Replace stub in `ProfileSummaryWorker.cs` (line 150-155)
+3. Inject selected AI service into constructor
+4. Call AI service with document details
+5. Update Document record with AI metadata:
+   - `sprk_keywords`
+   - `sprk_summary`
+   - `sprk_documenttype`
+   - Other AI-generated fields
+6. Test: Save with ProfileSummary=true → Document gets AI metadata
+7. Verify graceful error handling
 
 **Files to Modify**:
-- `Workers/Office/OfficeWorkersModule.cs` - Add ProfileSummaryWorker registration
+- `Workers/Office/ProfileSummaryWorker.cs` - Replace stub with real implementation
 
-**Existing Components Used**:
-- `IAppOnlyAnalysisService.AnalyzeDocumentAsync` (DO NOT DUPLICATE)
-- `IOfficeJobStatusService` (for status updates)
-- `IIdempotencyService` (for duplicate prevention)
+**Existing Components to Use**:
+- `IAppOnlyAnalysisService.AnalyzeDocumentAsync()` - Already exists
+- OR `IPlaybookOrchestrationService` - If email playbook exists
+- Pattern reference: `ProfileSummaryJobHandler.cs` (existing profile generation pattern)
 
 **Test Criteria**:
 - Document metadata updated with AI-generated summary
-- Job status shows "Profiled"
+- Keywords extracted and saved
+- Job status shows "ProfileSummary" stage
 - Errors in profile stage don't fail entire job
 
 ---
 
-### Phase 4: Cleanup
+### 🚧 Phase 4: Word Add-in Support (VERIFICATION NEEDED)
+
+**Goal**: Word documents save → Document created (same as Outlook)
+
+**Status**: ⚠️ Code exists, needs testing
+
+**Investigation Required**:
+1. Test Word add-in save flow
+2. Verify WordAdapter implementation
+3. Verify DOCX file upload works
+4. Verify AI processing applies to Word documents
+
+**Files to Check**:
+- `src/client/office-addins/word/` - Word adapter
+- `src/client/office-addins/shared/adapters/WordAdapter.ts` - Implementation
+- `useSaveFlow.ts` - Word document handling
+
+**Test Criteria**:
+- Word document saves from Word Online
+- Document record created in Dataverse
+- DOCX file uploaded to SPE
+- Same AI processing pipeline applies
+
+---
+
+### Phase 5: Cleanup and Documentation
+
+**Status**: ⏳ Pending completion of Phases 2-4
 
 **Steps**:
-1. Delete unused `office-jobs` queue
-2. Update TASK-INDEX.md to reflect true completion status
-3. Document deployment in notes/deployment-log.md
+1. Delete unused `office-jobs` queue (Task 069c)
+2. Update TASK-INDEX.md with final status
+3. Document deployment procedure for customer
+4. Create Azure resource deployment script/checklist
 
 ---
 

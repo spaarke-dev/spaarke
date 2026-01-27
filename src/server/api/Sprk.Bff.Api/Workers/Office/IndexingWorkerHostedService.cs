@@ -2,7 +2,9 @@ using System.Text.Json;
 using Azure.Messaging.ServiceBus;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Office;
+using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Office;
 using Sprk.Bff.Api.Workers.Office.Messages;
 using Spaarke.Dataverse;
@@ -35,6 +37,7 @@ public class IndexingWorkerHostedService : BackgroundService
     private readonly ServiceBusClient _serviceBusClient;
     private readonly IJobStatusService _jobStatusService;
     private readonly IDataverseService _dataverseService;
+    private readonly IFileIndexingService _fileIndexingService;
     private readonly ServiceBusOptions _serviceBusOptions;
 
     private const string QueueName = "office-indexing";
@@ -49,12 +52,14 @@ public class IndexingWorkerHostedService : BackgroundService
         ServiceBusClient serviceBusClient,
         IJobStatusService jobStatusService,
         IDataverseService dataverseService,
+        IFileIndexingService fileIndexingService,
         IOptions<ServiceBusOptions> serviceBusOptions)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _serviceBusClient = serviceBusClient ?? throw new ArgumentNullException(nameof(serviceBusClient));
         _jobStatusService = jobStatusService ?? throw new ArgumentNullException(nameof(jobStatusService));
         _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
+        _fileIndexingService = fileIndexingService ?? throw new ArgumentNullException(nameof(fileIndexingService));
         _serviceBusOptions = serviceBusOptions?.Value ?? throw new ArgumentNullException(nameof(serviceBusOptions));
     }
 
@@ -114,7 +119,7 @@ public class IndexingWorkerHostedService : BackgroundService
                 message.Attempt,
                 message.MaxAttempts);
 
-            // Parse payload to get DocumentId
+            // Parse payload to get DocumentId and file details
             var payload = ParsePayload(message.Payload);
             if (payload == null)
             {
@@ -126,19 +131,77 @@ public class IndexingWorkerHostedService : BackgroundService
                 return;
             }
 
-            // TODO: Integrate with actual IndexingWorker.ProcessAsync() when ready
-            // For now, mark job as complete immediately (indexing is optional per spec)
+            // Check if indexing is actually enabled
+            if (!payload.RagIndex)
+            {
+                _logger.LogInformation(
+                    "RAG indexing disabled for job {JobId}, skipping and completing",
+                    message.JobId);
+                await CompleteJobAsync(message.JobId, payload.DocumentId, args.CancellationToken);
+                await args.CompleteMessageAsync(args.Message, args.CancellationToken);
+                return;
+            }
+
             _logger.LogInformation(
-                "Indexing skipped for job {JobId} (stub implementation), marking complete",
-                message.JobId);
+                "Starting RAG indexing for job {JobId}, document {DocumentId}",
+                message.JobId,
+                payload.DocumentId);
 
-            await CompleteJobAsync(message.JobId, payload.DocumentId, args.CancellationToken);
+            try
+            {
+                // Build FileIndexRequest using the payload details
+                var indexRequest = new FileIndexRequest
+                {
+                    DriveId = payload.DriveId,
+                    ItemId = payload.ItemId,
+                    FileName = payload.FileName,
+                    TenantId = payload.TenantId,
+                    DocumentId = payload.DocumentId.ToString(),
+                    Metadata = new Dictionary<string, string>
+                    {
+                        ["source"] = "OfficeAddIn",
+                        ["jobId"] = message.JobId.ToString()
+                    }
+                };
 
-            await args.CompleteMessageAsync(args.Message, args.CancellationToken);
+                // Call FileIndexingService using app-only authentication
+                var result = await _fileIndexingService.IndexFileAppOnlyAsync(indexRequest, args.CancellationToken);
 
-            _logger.LogInformation(
-                "Indexing job {JobId} completed (stub - actual indexing not implemented)",
-                message.JobId);
+                if (!result.Success)
+                {
+                    // Per spec, indexing failures are not fatal - document remains accessible
+                    _logger.LogWarning(
+                        "RAG indexing failed for job {JobId} (non-fatal): {Error}",
+                        message.JobId,
+                        result.ErrorMessage);
+
+                    // Still complete the job - indexing failure doesn't fail the entire save
+                    await CompleteJobAsync(message.JobId, payload.DocumentId, args.CancellationToken);
+                    await args.CompleteMessageAsync(args.Message, args.CancellationToken);
+                    return;
+                }
+
+                _logger.LogInformation(
+                    "RAG indexing succeeded for job {JobId}: {ChunksIndexed} chunks indexed in {Duration}",
+                    message.JobId,
+                    result.ChunksIndexed,
+                    result.Duration);
+
+                await CompleteJobAsync(message.JobId, payload.DocumentId, args.CancellationToken);
+                await args.CompleteMessageAsync(args.Message, args.CancellationToken);
+            }
+            catch (Exception ex)
+            {
+                // Per spec, indexing is optional - log error but don't fail the job
+                _logger.LogError(
+                    ex,
+                    "Unhandled exception during indexing for job {JobId} (non-fatal)",
+                    message.JobId);
+
+                // Complete the job even though indexing failed
+                await CompleteJobAsync(message.JobId, payload.DocumentId, args.CancellationToken);
+                await args.CompleteMessageAsync(args.Message, args.CancellationToken);
+            }
         }
         catch (Exception ex)
         {
@@ -234,6 +297,10 @@ public class IndexingWorkerHostedService : BackgroundService
 public record IndexingPayload
 {
     public Guid DocumentId { get; init; }
+    public string DriveId { get; init; } = string.Empty;
+    public string ItemId { get; init; } = string.Empty;
+    public string FileName { get; init; } = string.Empty;
+    public string TenantId { get; init; } = string.Empty;
     public bool ProfileSummary { get; init; }
     public bool RagIndex { get; init; }
     public bool DeepAnalysis { get; init; }

@@ -4,6 +4,7 @@ using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Office;
+using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Office;
 using Sprk.Bff.Api.Workers.Office.Messages;
 using Spaarke.Dataverse;
@@ -39,6 +40,7 @@ public class ProfileSummaryWorker : BackgroundService, IOfficeJobHandler
     private readonly IDistributedCache _cache;
     private readonly IDataverseService _dataverseService;
     private readonly IJobStatusService _jobStatusService;
+    private readonly IAppOnlyAnalysisService _analysisService;
     private readonly ServiceBusOptions _serviceBusOptions;
 
     private const string QueueName = "office-profile";
@@ -59,6 +61,7 @@ public class ProfileSummaryWorker : BackgroundService, IOfficeJobHandler
         IDistributedCache cache,
         IDataverseService dataverseService,
         IJobStatusService jobStatusService,
+        IAppOnlyAnalysisService analysisService,
         IOptions<ServiceBusOptions> serviceBusOptions)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -66,6 +69,7 @@ public class ProfileSummaryWorker : BackgroundService, IOfficeJobHandler
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
         _jobStatusService = jobStatusService ?? throw new ArgumentNullException(nameof(jobStatusService));
+        _analysisService = analysisService ?? throw new ArgumentNullException(nameof(analysisService));
         _serviceBusOptions = serviceBusOptions?.Value ?? throw new ArgumentNullException(nameof(serviceBusOptions));
     }
 
@@ -147,12 +151,44 @@ public class ProfileSummaryWorker : BackgroundService, IOfficeJobHandler
                 75,
                 cancellationToken);
 
-            // Step 4: TODO - Generate AI profile summary using existing AI services
-            // For now, this is a stub that skips actual AI processing
-            _logger.LogInformation(
-                "AI profile generation skipped (not yet implemented) for job {JobId}, document {DocumentId}",
-                message.JobId,
-                payload.DocumentId);
+            // Step 4: Generate AI profile summary using IAppOnlyAnalysisService
+            try
+            {
+                _logger.LogInformation(
+                    "Starting AI profile generation for job {JobId}, document {DocumentId}",
+                    message.JobId,
+                    payload.DocumentId);
+
+                // Call the analysis service with the "Document Profile" playbook
+                var analysisResult = await _analysisService.AnalyzeDocumentAsync(
+                    payload.DocumentId,
+                    IAppOnlyAnalysisService.DefaultPlaybookName,
+                    cancellationToken);
+
+                if (!analysisResult.Success)
+                {
+                    // Per spec, AI processing failures are not fatal
+                    _logger.LogWarning(
+                        "AI profile generation failed for job {JobId} (non-fatal): {Error}",
+                        message.JobId,
+                        analysisResult.ErrorMessage);
+                }
+                else
+                {
+                    _logger.LogInformation(
+                        "AI profile generated successfully for job {JobId}, document {DocumentId}",
+                        message.JobId,
+                        payload.DocumentId);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Per spec, AI processing is optional - log error but don't fail the job
+                _logger.LogWarning(
+                    ex,
+                    "Exception during AI profile generation for job {JobId} (non-fatal)",
+                    message.JobId);
+            }
 
             // Step 5: Mark as processed (idempotency)
             await MarkAsProcessedAsync(message.IdempotencyKey, payload.DocumentId, cancellationToken);
@@ -493,6 +529,10 @@ public class ProfileSummaryWorker : BackgroundService, IOfficeJobHandler
             Payload = JsonSerializer.SerializeToElement(new
             {
                 DocumentId = payload.DocumentId,
+                payload.DriveId,
+                payload.ItemId,
+                payload.FileName,
+                payload.TenantId,
                 payload.ProfileSummary,
                 payload.RagIndex,
                 payload.DeepAnalysis
@@ -532,6 +572,10 @@ public class ProfileSummaryWorker : BackgroundService, IOfficeJobHandler
 public record ProfileJobPayload
 {
     public Guid DocumentId { get; init; }
+    public string DriveId { get; init; } = string.Empty;
+    public string ItemId { get; init; } = string.Empty;
+    public string FileName { get; init; } = string.Empty;
+    public string TenantId { get; init; } = string.Empty;
     public bool ProfileSummary { get; init; }
     public bool RagIndex { get; init; }
     public bool DeepAnalysis { get; init; }
