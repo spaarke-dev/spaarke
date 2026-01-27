@@ -1,0 +1,8 @@
+2026-01-25T00:07:52  PID[5708] Information 1/25/2026 12:07:52 AM [[4.9]] [DW1SDWK00083O] Starting cleanup for Completed Sessions MaxDiagnosticSessionsToKeep = [10] MaxNumberOfDaysForSessions= [20]
+2026-01-25T00:07:52  PID[5708] Information 1/25/2026 12:07:52 AM [[4.9]] [DW1SDWK00083O] Storage account is not configured
+2026-01-25T04:07:52  PID[5708] Information 1/25/2026 4:07:52 AM [[4.9]] [DW1SDWK00083O] Starting cleanup for Completed Sessions MaxDiagnosticSessionsToKeep = [10] MaxNumberOfDaysForSessions= [20]
+2026-01-25T04:07:52  PID[5708] Information 1/25/2026 4:07:52 AM [[4.9]] [DW1SDWK00083O] Storage account is not configured
+2026-01-25T08:07:52  PID[5708] Information 1/25/2026 8:07:52 AM [[4.9]] [DW1SDWK00083O] Starting cleanup for Completed Sessions MaxDiagnosticSessionsToKeep = [10] MaxNumberOfDaysForSessions= [20]
+2026-01-25T08:07:52  PID[5708] Information 1/25/2026 8:07:52 AM [[4.9]] [DW1SDWK00083O] Storage account is not configured
+2026-01-26T20:07:55  PID[5708] Information 1/26/2026 8:07:54 PM [[4.9]] [DW1SDWK00083O] Storage account is not configured
+2026-01-26T20:07:55  PID[5708] Information 1/26/2026 8:07:54 PM [[4.9]] [DW1SDWK00083O] Starting cleanup for Completed Sessions MaxDiagnosticSessionsToKeep = [10] MaxNumberOfDaysForSessions= [20]

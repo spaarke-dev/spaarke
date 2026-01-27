@@ -758,13 +758,22 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           name: r.displayName,
         })) || [];
 
+        const emailBody = includeBody ? context.emailBody : undefined;
+        console.log('[SaveFlow] Email body info:', {
+          includeBody,
+          hasEmailBody: !!context.emailBody,
+          bodyLength: context.emailBody?.length || 0,
+          bodyPreview: context.emailBody?.substring(0, 100),
+          willSendBody: !!emailBody
+        });
+
         serverRequest.email = {
           subject: context.itemName || 'Untitled Email',
           senderEmail: context.senderEmail || 'unknown@placeholder.com',
           senderName: context.senderDisplayName,
           recipients,
           sentDate: context.sentDate?.toISOString(),
-          body: includeBody ? context.emailBody : undefined,
+          body: emailBody,
           isBodyHtml: true,
           internetMessageId: context.itemId,
         };

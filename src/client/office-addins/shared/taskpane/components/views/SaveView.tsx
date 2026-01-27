@@ -170,12 +170,22 @@ export const SaveView: React.FC<SaveViewProps> = ({
           // Get email body
           if (hostAdapter.getCapabilities().canGetBody) {
             try {
+              console.log('[SaveView] Attempting to retrieve email body...');
               const bodyContent = await hostAdapter.getBody('html');
+              console.log('[SaveView] Email body retrieved:', {
+                length: bodyContent.content?.length || 0,
+                type: bodyContent.type,
+                hasContent: !!bodyContent.content,
+                preview: bodyContent.content?.substring(0, 100)
+              });
               setEmailBody(bodyContent.content);
             } catch (err) {
-              console.warn('Failed to get email body:', err);
+              console.error('[SaveView] FAILED to get email body:', err);
+              console.error('[SaveView] Error details:', JSON.stringify(err, Object.getOwnPropertyNames(err)));
               // Continue without body - not critical
             }
+          } else {
+            console.warn('[SaveView] Host adapter reports canGetBody = false');
           }
         } else if (type === 'word') {
           // Word-specific context

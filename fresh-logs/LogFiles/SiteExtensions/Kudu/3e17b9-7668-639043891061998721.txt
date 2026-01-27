@@ -1,0 +1,50 @@
+2026-01-19T03:11:17  PID[7668] Information Unpacking resources...
+2026-01-19T03:11:18  PID[7668] Information 01-19 03:11:18 Information: Executing Application Insights Profiler agent version 2.6.2201.2106 with arguments: 
+2026-01-19T03:11:18  PID[7668] Information 01-19 03:11:18 Information: Minimum version enabled on machine: 1.0.0
+2026-01-19T03:11:19  PID[7668] Information 01-19 03:11:18 Information: Applying logging level: Information
+2026-01-19T03:11:19  PID[7668] Information 01-19 03:11:18 Information: Instrumentation key: 09a9beed-0dcd-4aad-84bb-3696372ed5d1
+2026-01-19T03:11:20  PID[7668] Information 01-19 03:11:18 Information: Application Insights Profiler endpoint: https://profiler.monitor.azure.com/
+2026-01-19T03:11:20  PID[7668] Information 01-19 03:11:18 Information: Application Insights endpoint: https://westus2-2.in.applicationinsights.azure.com/v2/track/
+2026-01-19T03:11:20  PID[7668] Information 01-19 03:11:18 Information: Runtime Environment: Antares
+2026-01-19T03:11:21  PID[7668] Information 01-19 03:11:18 Information: Support files: C:\local\Temp\jobs\continuous\ApplicationInsightsProfiler3\1trrggzl.hs3\spsupport
+2026-01-19T03:11:22  PID[7668] Information 01-19 03:11:18 Information: Providing usage data (to opt out set the AppSettings ApplicationInsightsProvideUsageTelemetryData with the value "false"): True
+2026-01-19T03:11:22  PID[7668] Information 01-19 03:11:18 Information: Engine mode: Sampling
+2026-01-19T03:11:22  PID[7668] Information 01-19 03:11:19 Information: Application Insights AppId: 6a76b012-46d9-412f-b4ab-4905658a9559
+2026-01-19T03:11:23  PID[7668] Information 01-19 03:11:19 Information: Press 'Ctrl+C' to exit Application Insights Profiler.
+2026-01-19T03:11:24  PID[7668] Information 01-19 03:11:19 Information: Set up shutdown handler.
+2026-01-19T03:11:24  PID[7668] Information 01-19 03:11:19 Information: Shutdown handler set to watch C:\local\Temp\JobsShutdown\continuous\ApplicationInsightsProfiler3\ggzknw0q.m3h.
+2026-01-19T03:11:24  PID[7668] Information 01-19 03:11:19 Information: Starting main process
+2026-01-19T03:11:24  PID[7668] Information 01-19 03:11:22 Critical: Settings have been set from Engine
+2026-01-19T03:11:25  PID[7668] Information 01-19 03:11:23 Critical: Settings contract has been updated
+2026-01-19T03:11:25  PID[7668] Information 01-19 03:11:23 Critical: Enabled has been set to True
+2026-01-19T03:11:25  PID[7668] Information 01-19 03:11:23 Information: Triggering Based on Memory
+2026-01-19T03:11:25  PID[7668] Information 01-19 03:11:23 Critical: StartProfiler triggered.
+2026-01-19T03:11:25  PID[7668] Information 01-19 03:11:23 Information: Starting circular monitor
+2026-01-19T03:11:25  PID[7668] Information 01-19 03:11:24 Error: StartProfiler failed. Details: System.Runtime.InteropServices.COMException (0xE111005E): Exception from HRESULT: 0xE111005E
+2026-01-19T03:11:25  PID[7668] Information    at DiagnosticsHub.StandardCollector.Host.Interop.IStandardCollectorService.CreateSession(SessionConfiguration& sessionConfig, IStandardCollectorClientDelegate clientDelegate)
+2026-01-19T03:11:25  PID[7668] Information    at Microsoft.ServiceProfiler.Collectors.StandardCollectorService.CreateSecureSessionWithAgent(SessionConfiguration sessionConfiguration, String agentDll, Guid agentId, IStandardCollectorClientDelegate clientDelegate)
+2026-01-19T03:11:25  PID[7668] Information    at Microsoft.ServiceProfiler.Collectors.StandardCollectorBase.InitializeCore(Guid agentGuid, String scratchLocation, SessionConfigurationFlags flags)
+2026-01-19T03:11:25  PID[7668] Information    at Microsoft.ServiceProfiler.Collectors.DetailedTraceCollector.StartMonitor()
+2026-01-19T03:11:25  PID[7668] Information    at System.Threading.Tasks.Task`1.InnerInvoke()
+2026-01-19T03:11:26  PID[7668] Information    at System.Threading.Tasks.Task.Execute()
+2026-01-19T03:11:26  PID[7668] Information --- End of stack trace from previous location where exception was thrown ---
+2026-01-19T03:11:26  PID[7668] Information    at System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw()
+2026-01-19T03:11:26  PID[7668] Information    at System.Runtime.CompilerServices.TaskAwaiter.HandleNonSuccessAndDebuggerNotification(Task task)
+2026-01-19T03:11:26  PID[7668] Information    at Microsoft.ServiceProfiler.Agent.Orchestration.OrchestratorAgent.<TraceAsyncOperation>d__18.MoveNext()
+2026-01-19T03:11:54  PID[7668] Information 01-19 03:11:54 Critical: StopProfiler triggered.
+2026-01-19T03:11:54  PID[7668] Information 01-19 03:11:54 Error: StopProfiler failed. Details: System.InvalidOperationException: There is no active profiling session.
+2026-01-19T03:11:54  PID[7668] Information    at Microsoft.ServiceProfiler.Collectors.DetailedTraceCollector.<StopCollectingAndSaveTrace>d__41.MoveNext()
+2026-01-19T03:11:54  PID[7668] Information --- End of stack trace from previous location where exception was thrown ---
+2026-01-19T03:11:54  PID[7668] Information    at System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw()
+2026-01-19T03:11:55  PID[7668] Information    at System.Runtime.CompilerServices.TaskAwaiter.HandleNonSuccessAndDebuggerNotification(Task task)
+2026-01-19T03:11:55  PID[7668] Information    at Microsoft.ServiceProfiler.Collectors.DetailedTraceCollector.<StopCollectingAndUploadTraceAsync>d__39.MoveNext()
+2026-01-19T03:11:55  PID[7668] Information --- End of stack trace from previous location where exception was thrown ---
+2026-01-19T03:11:55  PID[7668] Information    at System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw()
+2026-01-19T03:11:55  PID[7668] Information    at System.Runtime.CompilerServices.TaskAwaiter.HandleNonSuccessAndDebuggerNotification(Task task)
+2026-01-19T03:11:55  PID[7668] Information    at Microsoft.ServiceProfiler.Engine.<>c__DisplayClass1_1.<<RunAsync>b__2>d.MoveNext()
+2026-01-19T03:11:55  PID[7668] Information --- End of stack trace from previous location where exception was thrown ---
+2026-01-19T03:11:55  PID[7668] Information    at System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw()
+2026-01-19T03:11:55  PID[7668] Information    at System.Runtime.CompilerServices.TaskAwaiter.HandleNonSuccessAndDebuggerNotification(Task task)
+2026-01-19T03:11:55  PID[7668] Information    at Microsoft.ServiceProfiler.Agent.Orchestration.OrchestratorAgent.<TraceAsyncOperation>d__18.MoveNext()
+2026-01-19T03:20:59  PID[7668] Information 01-19 03:20:59 Information: Received shutdown request.
+2026-01-19T03:21:06  PID[7668] Error       Thread was being aborted.

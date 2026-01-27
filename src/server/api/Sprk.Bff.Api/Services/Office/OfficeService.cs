@@ -2,6 +2,8 @@ using System.Text.Json;
 using Azure.Messaging.ServiceBus;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.Graph;
+using Microsoft.Graph.Models;
 using MimeKit;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
@@ -32,6 +34,7 @@ public class OfficeService : IOfficeService
     private readonly IJobStatusService _jobStatusService;
     private readonly IDataverseService _dataverseService;
     private readonly SpeFileStore _speFileStore;
+    private readonly IGraphClientFactory _graphClientFactory;
     private readonly ServiceBusClient _serviceBusClient;
     private readonly ServiceBusOptions _serviceBusOptions;
     private readonly EmailProcessingOptions _emailProcessingOptions;
@@ -47,6 +50,7 @@ public class OfficeService : IOfficeService
         IJobStatusService jobStatusService,
         IDataverseService dataverseService,
         SpeFileStore speFileStore,
+        IGraphClientFactory graphClientFactory,
         ServiceBusClient serviceBusClient,
         IOptions<ServiceBusOptions> serviceBusOptions,
         IOptions<EmailProcessingOptions> emailProcessingOptions,
@@ -55,6 +59,7 @@ public class OfficeService : IOfficeService
         _jobStatusService = jobStatusService;
         _dataverseService = dataverseService;
         _speFileStore = speFileStore;
+        _graphClientFactory = graphClientFactory;
         _serviceBusClient = serviceBusClient;
         _serviceBusOptions = serviceBusOptions.Value;
         _emailProcessingOptions = emailProcessingOptions.Value;
@@ -65,12 +70,30 @@ public class OfficeService : IOfficeService
     public async Task<SaveResponse> SaveAsync(
         SaveRequest request,
         string userId,
+        HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
         _logger.LogInformation(
             "Save requested for {ContentType} by user {UserId}",
             request.ContentType,
             userId);
+
+        // DEBUG: Log email body info
+        if (request.ContentType == SaveContentType.Email && request.Email != null)
+        {
+            _logger.LogInformation(
+                "[EMAIL BODY DEBUG] Subject={Subject}, HasBody={HasBody}, BodyLength={BodyLength}, BodyPreview={BodyPreview}",
+                request.Email.Subject,
+                !string.IsNullOrEmpty(request.Email.Body),
+                request.Email.Body?.Length ?? 0,
+                request.Email.Body?.Substring(0, Math.Min(50, request.Email.Body?.Length ?? 0)) ?? "(empty)");
+        }
+
+        // Fetch email body and attachments from Graph API if missing
+        if (request.ContentType == SaveContentType.Email && request.Email != null)
+        {
+            request = await EnrichEmailFromGraphAsync(request, httpContext, cancellationToken);
+        }
 
         try
         {
@@ -291,43 +314,20 @@ public class OfficeService : IOfficeService
                     CurrentPhase = "RecordsCreated"
                 };
 
-                // Queue finalization job for additional processing (AI, RAG, etc.)
-                if (request.TriggerAiProcessing)
-                {
-                    await QueueUploadFinalizationAsync(
-                        jobId,
-                        idempotencyKey,
-                        correlationId,
-                        userId,
-                        request,
-                        driveId,
-                        itemId,
-                        fileName,
-                        fileSize,
-                        documentId,
-                        cancellationToken);
-                }
-                else
-                {
-                    // No AI processing - mark job as complete
-                    await UpdateJobStatusInDataverseAsync(jobId, JobStatus.Completed, "Complete", 100, null, cancellationToken);
-                    _jobStore[jobId] = _jobStore[jobId] with
-                    {
-                        Status = JobStatus.Completed,
-                        Progress = 100,
-                        CurrentPhase = "Complete",
-                        CompletedAt = DateTimeOffset.UtcNow,
-                        Result = new JobResult
-                        {
-                            Artifact = new CreatedArtifact
-                            {
-                                Type = ArtifactType.Document,
-                                Id = documentId,
-                                WebUrl = webUrl ?? GenerateDataverseUrl(documentId)
-                            }
-                        }
-                    };
-                }
+                // ALWAYS queue finalization job - it creates EmailArtifact/AttachmentArtifact records
+                // and optionally triggers AI processing based on TriggerAiProcessing flag in payload
+                await QueueUploadFinalizationAsync(
+                    jobId,
+                    idempotencyKey,
+                    correlationId,
+                    userId,
+                    request,
+                    driveId,
+                    itemId,
+                    fileName,
+                    fileSize,
+                    documentId,
+                    cancellationToken);
 
                 _logger.LogInformation(
                     "ProcessingJob {JobId} created, file uploaded to SPE, document {DocumentId} created",
@@ -627,7 +627,7 @@ public class OfficeService : IOfficeService
                 try
                 {
                     var contentBytes = Convert.FromBase64String(attachment.ContentBase64);
-                    var contentType = ContentType.Parse(attachment.ContentType ?? "application/octet-stream");
+                    var contentType = MimeKit.ContentType.Parse(attachment.ContentType ?? "application/octet-stream");
 
                     if (attachment.IsInline && !string.IsNullOrEmpty(attachment.ContentId))
                     {
@@ -741,6 +741,136 @@ public class OfficeService : IOfficeService
         {
             _logger.LogError(ex, "SPE upload failed for {FileName}", fileName);
             return (false, null, null, null, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Enriches email metadata by fetching body and attachments from Graph API when missing.
+    /// Uses OBO authentication to access user's mailbox via Microsoft Graph.
+    /// </summary>
+    /// <param name="request">Save request to enrich with email content.</param>
+    /// <param name="httpContext">HTTP context for OBO authentication.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Updated save request with email body and attachments from Graph API.</returns>
+    private async Task<SaveRequest> EnrichEmailFromGraphAsync(
+        SaveRequest request,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        // Only fetch if body is missing and we have an internet message ID
+        if (!string.IsNullOrEmpty(request.Email?.Body) || string.IsNullOrEmpty(request.Email?.InternetMessageId))
+        {
+            return request; // Body already present or no message ID
+        }
+
+        try
+        {
+            _logger.LogInformation(
+                "Fetching email content from Graph API for message {MessageId}",
+                request.Email.InternetMessageId);
+
+            // Get Graph client with OBO auth
+            var graphClient = await _graphClientFactory.ForUserAsync(httpContext, cancellationToken);
+
+            // Fetch message with body and attachments
+            var message = await graphClient.Me.Messages[request.Email.InternetMessageId]
+                .GetAsync(requestConfig =>
+                {
+                    requestConfig.QueryParameters.Select = new[]
+                    {
+                        "body",
+                        "subject",
+                        "from",
+                        "toRecipients",
+                        "ccRecipients",
+                        "bccRecipients",
+                        "hasAttachments",
+                        "internetMessageId",
+                        "sentDateTime"
+                    };
+                    requestConfig.QueryParameters.Expand = new[] { "attachments" };
+                }, cancellationToken);
+
+            if (message == null)
+            {
+                _logger.LogWarning(
+                    "Graph API returned null message for {MessageId}",
+                    request.Email.InternetMessageId);
+                return request; // Graph API returned null, return original request
+            }
+
+            // Extract body content
+            string? bodyContent = null;
+            bool isBodyHtml = false;
+            if (message.Body != null && !string.IsNullOrEmpty(message.Body.Content))
+            {
+                bodyContent = message.Body.Content;
+                isBodyHtml = message.Body.ContentType == Microsoft.Graph.Models.BodyType.Html;
+
+                _logger.LogInformation(
+                    "Retrieved email body from Graph API: Length={BodyLength}, IsHtml={IsHtml}",
+                    bodyContent.Length,
+                    isBodyHtml);
+            }
+
+            // Extract attachments if present
+            List<Models.Office.AttachmentReference>? attachmentReferences = null;
+            if (message.HasAttachments == true && message.Attachments?.Any() == true)
+            {
+                attachmentReferences = new List<Models.Office.AttachmentReference>();
+
+                foreach (var attachment in message.Attachments)
+                {
+                    if (attachment is FileAttachment fileAttachment && fileAttachment.ContentBytes != null)
+                    {
+                        var contentBase64 = Convert.ToBase64String(fileAttachment.ContentBytes);
+
+                        attachmentReferences.Add(new Models.Office.AttachmentReference
+                        {
+                            AttachmentId = attachment.Id ?? Guid.NewGuid().ToString(),
+                            FileName = fileAttachment.Name ?? "attachment",
+                            Size = fileAttachment.Size,
+                            ContentType = fileAttachment.ContentType ?? "application/octet-stream",
+                            ContentBase64 = contentBase64,
+                            IsInline = fileAttachment.IsInline ?? false,
+                            ContentId = fileAttachment.ContentId
+                        });
+                    }
+                }
+
+                _logger.LogInformation(
+                    "Retrieved {AttachmentCount} attachments from Graph API for message {MessageId}",
+                    attachmentReferences.Count,
+                    request.Email.InternetMessageId);
+            }
+
+            // Create updated email metadata with Graph API content
+            // EmailMetadata is a record with init-only properties, so we need to create a new instance
+            if (bodyContent != null || attachmentReferences != null)
+            {
+                return request with
+                {
+                    Email = request.Email with
+                    {
+                        Body = bodyContent ?? request.Email.Body,
+                        IsBodyHtml = bodyContent != null ? isBodyHtml : request.Email.IsBodyHtml,
+                        Attachments = attachmentReferences ?? request.Email.Attachments
+                    }
+                };
+            }
+
+            return request; // No updates needed
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Failed to fetch email content from Graph API for message {MessageId}",
+                request.Email?.InternetMessageId);
+
+            // Don't throw - continue with whatever content we have from the client
+            // This allows fallback to client-provided data if Graph API fails
+            return request;
         }
     }
 
@@ -952,7 +1082,8 @@ public class OfficeService : IOfficeService
             FileName = fileName,
             FileSize = fileSize,
             MimeType = GetMimeType(request),
-            HasFile = true
+            HasFile = true,
+            FilePath = request.FolderPath  // Maps to sprk_filepath in Dataverse
         };
 
         // Set entity association lookup based on target entity

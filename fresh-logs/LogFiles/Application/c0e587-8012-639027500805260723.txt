@@ -1,0 +1,15 @@
+2025-12-31T03:54:37  PID[8012] Information 12/31/2025 3:54:36 AM [[4.8]] [dw1sdwk0008VV] DaasRunner.exe with version 4.8.40625.1 and ProcessId=8012 started
+2025-12-31T03:54:40  PID[8012] Information 12/31/2025 3:54:40 AM [[4.8]] [dw1sdwk0008VV] Checking DaaS bits and updating if required
+2025-12-31T03:54:41  PID[8012] Information 12/31/2025 3:54:41 AM [[4.8]] [dw1sdwk0008VV] [daasrunner.exe] Version in DaaS Installation path (4.8.40625.1) is lower or equal to the existing version 4.8.40625.1. Version Compare result = 0
+2025-12-31T03:54:41  PID[8012] Information 12/31/2025 3:54:41 AM [[4.8]] [dw1sdwk0008VV] Binary Comparing files C:\Program Files (x86)\SiteExtensions\DaaS\4.8.40625.1\bin\daasrunner.exe and C:\home\site\Jobs\Continuous\DaaS\DaasRunner.exe
+2025-12-31T03:54:41  PID[8012] Information 12/31/2025 3:54:41 AM [[4.8]] [dw1sdwk0008VV] Binary Comparison succeeded: C:\Program Files (x86)\SiteExtensions\DaaS\4.8.40625.1\bin\daasrunner.exe and C:\home\site\Jobs\Continuous\DaaS\DaasRunner.exe
+2025-12-31T03:54:42  PID[8012] Information 12/31/2025 3:54:42 AM [[4.8]] [dw1sdwk0008VV] [daasconsole.exe] Version in DaaS Installation path (4.8.40625.1) is lower or equal to the existing version 4.8.40625.1. Version Compare result = 0
+2025-12-31T03:54:42  PID[8012] Information 12/31/2025 3:54:42 AM [[4.8]] [dw1sdwk0008VV] Binary Comparing files C:\Program Files (x86)\SiteExtensions\DaaS\4.8.40625.1\bin\daasconsole.exe and C:\home\data\DaaS\bin\DaasConsole.exe
+2025-12-31T03:54:42  PID[8012] Information 12/31/2025 3:54:42 AM [[4.8]] [dw1sdwk0008VV] Binary Comparison succeeded: C:\Program Files (x86)\SiteExtensions\DaaS\4.8.40625.1\bin\daasconsole.exe and C:\home\data\DaaS\bin\DaasConsole.exe
+2025-12-31T03:54:42  PID[8012] Information 12/31/2025 3:54:42 AM [[4.8]] [dw1sdwk0008VV] Done checking DaaS bits for any new updates
+2025-12-31T03:56:02  PID[8012] Information 12/31/2025 3:56:02 AM [[4.8]] [dw1sdwk0008VV] Storage account is not configured
+2025-12-31T03:56:02  PID[8012] Information 12/31/2025 3:56:02 AM [[4.8]] [dw1sdwk0008VV] Starting cleanup for Completed Sessions MaxDiagnosticSessionsToKeep = [10] MaxNumberOfDaysForSessions= [20]
+2025-12-31T07:56:03  PID[8012] Information 12/31/2025 7:56:03 AM [[4.8]] [dw1sdwk0008VV] Starting cleanup for Completed Sessions MaxDiagnosticSessionsToKeep = [10] MaxNumberOfDaysForSessions= [20]
+2025-12-31T07:56:03  PID[8012] Information 12/31/2025 7:56:03 AM [[4.8]] [dw1sdwk0008VV] Storage account is not configured
+2025-12-31T11:56:03  PID[8012] Information 12/31/2025 11:56:03 AM [[4.8]] [dw1sdwk0008VV] Starting cleanup for Completed Sessions MaxDiagnosticSessionsToKeep = [10] MaxNumberOfDaysForSessions= [20]
+2025-12-31T11:56:03  PID[8012] Information 12/31/2025 11:56:03 AM [[4.8]] [dw1sdwk0008VV] Storage account is not configured

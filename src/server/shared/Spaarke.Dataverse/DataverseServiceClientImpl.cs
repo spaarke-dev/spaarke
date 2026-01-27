@@ -960,7 +960,15 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             }
             else if (value is int intValue)
             {
-                entity[fieldName] = intValue;
+                // Choice (OptionSet) fields require OptionSetValue wrapper
+                if (fieldName == "sprk_status" || fieldName == "sprk_jobtype")
+                {
+                    entity[fieldName] = new OptionSetValue(intValue);
+                }
+                else
+                {
+                    entity[fieldName] = intValue;
+                }
             }
             else if (value is bool boolValue)
             {
@@ -1001,7 +1009,15 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             }
             else if (value is int intValue)
             {
-                entity[fieldName] = intValue;
+                // Choice (OptionSet) fields require OptionSetValue wrapper
+                if (fieldName == "sprk_status" || fieldName == "sprk_jobtype")
+                {
+                    entity[fieldName] = new OptionSetValue(intValue);
+                }
+                else
+                {
+                    entity[fieldName] = intValue;
+                }
             }
             else if (value is bool boolValue)
             {
@@ -1185,7 +1201,15 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             }
             else if (value is int intValue)
             {
-                entity[fieldName] = intValue;
+                // Choice (OptionSet) fields require OptionSetValue wrapper
+                if (fieldName == "sprk_status" || fieldName == "sprk_jobtype")
+                {
+                    entity[fieldName] = new OptionSetValue(intValue);
+                }
+                else
+                {
+                    entity[fieldName] = intValue;
+                }
             }
             else if (value is bool boolValue)
             {

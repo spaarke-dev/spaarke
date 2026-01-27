@@ -1,0 +1,308 @@
+2026-01-19T17:52:29  PID[5240] Information 01-19 17:52:29 Critical: StartProfiler triggered.
+2026-01-19T17:52:29  PID[5240] Information 01-19 17:52:29 Information: Starting circular monitor
+2026-01-19T17:52:29  PID[5240] Information 01-19 17:52:29 Information: NativeImagePdbGeneration enabled.
+2026-01-19T17:52:40  PID[5240] Information 01-19 17:52:40 Information: Monitoring process 3908
+2026-01-19T17:52:47  PID[5240] Information 01-19 17:52:47 Information: Monitoring process 5240
+2026-01-19T17:52:58  PID[5240] Information 01-19 17:52:58 Information: Monitoring process 7012
+2026-01-19T17:53:03  PID[5240] Information 01-19 17:53:03 Information: Monitoring process 5832
+2026-01-19T17:53:12  PID[5240] Information 01-19 17:53:12 Information: Monitoring process 7344
+2026-01-19T17:53:20  PID[5240] Information 01-19 17:53:20 Information: Monitoring process 5548
+2026-01-19T17:53:24  PID[5240] Information 01-19 17:53:24 Information: Monitoring process 3740
+2026-01-19T17:53:24  PID[5240] Information 01-19 17:53:24 Critical: StartProfiler succeeded.
+2026-01-19T17:53:54  PID[5240] Information 01-19 17:53:54 Critical: StopProfiler triggered.
+2026-01-19T17:53:54  PID[5240] Information 01-19 17:53:54 Information: Stopping circular monitor and collecting etl snapshot.
+2026-01-19T17:56:44  PID[5240] Information 01-19 17:56:44 Information: Start to upload trace D:\DWASFiles\Sites\#1spe-api-dev-67e2xz\Temp\DA.Circular.2026-01-19T17-52-29-3250279Z.639044419493250279.639044420347147424.etl.zip
+2026-01-19T17:56:44  PID[5240] Information 01-19 17:56:44 Critical: Upload trace was canceled as no activity detected from target iKey.
+2026-01-19T17:56:44  PID[5240] Information 01-19 17:56:44 Information: Target iKey: 09a9beed-0dcd-4aad-84bb-3696372ed5d1. Detected iKeys: .
+2026-01-19T17:56:44  PID[5240] Information 01-19 17:56:44 Critical: StopProfiler succeeded.
+2026-01-19T17:58:54  PID[5240] Information 01-19 17:58:54 Critical: StartProfiler triggered.
+2026-01-19T17:58:54  PID[5240] Information 01-19 17:58:54 Information: Starting circular monitor
+2026-01-19T17:58:54  PID[5240] Information 01-19 17:58:54 Information: NativeImagePdbGeneration enabled.
+2026-01-19T17:59:05  PID[5240] Information 01-19 17:59:05 Information: Monitoring process 3908
+2026-01-19T17:59:08  PID[5240] Information 01-19 17:59:08 Information: Monitoring process 5240
+2026-01-19T17:59:10  PID[5240] Information 01-19 17:59:10 Information: Monitoring process 7012
+2026-01-19T17:59:11  PID[5240] Information 01-19 17:59:11 Information: Monitoring process 5832
+2026-01-19T17:59:13  PID[5240] Information 01-19 17:59:13 Information: Monitoring process 7344
+2026-01-19T17:59:15  PID[5240] Information 01-19 17:59:15 Information: Monitoring process 5548
+2026-01-19T17:59:16  PID[5240] Information 01-19 17:59:16 Information: Monitoring process 3740
+2026-01-19T17:59:16  PID[5240] Information 01-19 17:59:16 Critical: StartProfiler succeeded.
+2026-01-19T17:59:47  PID[5240] Information 01-19 17:59:47 Critical: StopProfiler triggered.
+2026-01-19T17:59:47  PID[5240] Information 01-19 17:59:47 Information: Stopping circular monitor and collecting etl snapshot.
+2026-01-19T18:02:47  PID[5240] Information 01-19 18:02:47 Information: Start to upload trace D:\DWASFiles\Sites\#1spe-api-dev-67e2xz\Temp\DA.Circular.2026-01-19T17-58-54-9854580Z.639044423349854580.639044423876823372.etl.zip
+2026-01-19T18:02:47  PID[5240] Information 01-19 18:02:47 Critical: Upload trace was canceled as no activity detected from target iKey.
+2026-01-19T18:02:47  PID[5240] Information 01-19 18:02:47 Information: Target iKey: 09a9beed-0dcd-4aad-84bb-3696372ed5d1. Detected iKeys: .
+2026-01-19T18:02:47  PID[5240] Information 01-19 18:02:47 Critical: StopProfiler succeeded.
+2026-01-19T18:08:57  PID[5240] Information 01-19 18:08:57 Critical: StartProfiler triggered.
+2026-01-19T18:08:57  PID[5240] Information 01-19 18:08:57 Information: Starting circular monitor
+2026-01-19T18:08:57  PID[5240] Information 01-19 18:08:57 Information: NativeImagePdbGeneration enabled.
+2026-01-19T18:09:11  PID[5240] Information 01-19 18:09:11 Information: Monitoring process 3908
+2026-01-19T18:09:19  PID[5240] Information 01-19 18:09:19 Information: Monitoring process 5240
+2026-01-19T18:09:29  PID[5240] Information 01-19 18:09:29 Information: Monitoring process 7012
+2026-01-19T18:09:30  PID[5240] Information 01-19 18:09:30 Information: Monitoring process 5832
+2026-01-19T18:09:33  PID[5240] Information 01-19 18:09:33 Information: Monitoring process 7344
+2026-01-19T18:09:43  PID[5240] Information 01-19 18:09:43 Information: Monitoring process 5548
+2026-01-19T18:09:50  PID[5240] Information 01-19 18:09:50 Information: Monitoring process 3740
+2026-01-19T18:09:50  PID[5240] Information 01-19 18:09:50 Critical: StartProfiler succeeded.
+2026-01-19T18:10:20  PID[5240] Information 01-19 18:10:20 Critical: StopProfiler triggered.
+2026-01-19T18:10:20  PID[5240] Information 01-19 18:10:20 Information: Stopping circular monitor and collecting etl snapshot.
+2026-01-19T18:13:16  PID[5240] Information 01-19 18:13:16 Information: Start to upload trace D:\DWASFiles\Sites\#1spe-api-dev-67e2xz\Temp\DA.Circular.2026-01-19T18-08-57-9030297Z.639044429379030297.639044430204561811.etl.zip
+2026-01-19T18:13:16  PID[5240] Information 01-19 18:13:16 Critical: Upload trace was canceled as no activity detected from target iKey.
+2026-01-19T18:13:16  PID[5240] Information 01-19 18:13:16 Information: Target iKey: 09a9beed-0dcd-4aad-84bb-3696372ed5d1. Detected iKeys: .
+2026-01-19T18:13:16  PID[5240] Information 01-19 18:13:16 Critical: StopProfiler succeeded.
+2026-01-19T18:31:27  PID[5240] Information 01-19 18:31:27 Critical: StartProfiler triggered.
+2026-01-19T18:31:27  PID[5240] Information 01-19 18:31:27 Information: Starting circular monitor
+2026-01-19T18:31:27  PID[5240] Information 01-19 18:31:27 Information: NativeImagePdbGeneration enabled.
+2026-01-19T18:31:40  PID[5240] Information 01-19 18:31:40 Information: Monitoring process 3908
+2026-01-19T18:31:44  PID[5240] Information 01-19 18:31:44 Information: Monitoring process 5240
+2026-01-19T18:31:49  PID[5240] Information 01-19 18:31:49 Information: Monitoring process 7012
+2026-01-19T18:31:52  PID[5240] Information 01-19 18:31:52 Information: Monitoring process 5832
+2026-01-19T18:31:56  PID[5240] Information 01-19 18:31:56 Information: Monitoring process 7344
+2026-01-19T18:31:58  PID[5240] Information 01-19 18:31:58 Information: Monitoring process 5548
+2026-01-19T18:32:05  PID[5240] Information 01-19 18:32:05 Information: Activity detected from iKey: 09a9beed-0dcd-4aad-84bb-3696372ed5d1.
+2026-01-19T18:32:06  PID[5240] Information 01-19 18:32:06 Information: RoleName discovered: spe-api-dev-67e2xz.
+2026-01-19T18:32:08  PID[5240] Information 01-19 18:32:08 Information: Monitoring process 3740
+2026-01-19T18:32:08  PID[5240] Information 01-19 18:32:08 Critical: StartProfiler succeeded.
+2026-01-19T18:32:38  PID[5240] Information 01-19 18:32:38 Critical: StopProfiler triggered.
+2026-01-19T18:32:38  PID[5240] Information 01-19 18:32:38 Information: Stopping circular monitor and collecting etl snapshot.
+2026-01-19T18:35:41  PID[5240] Information 01-19 18:35:41 Information: Start to upload trace D:\DWASFiles\Sites\#1spe-api-dev-67e2xz\Temp\DA.Circular.2026-01-19T18-31-27-7564238Z.639044442877564238.639044443586876325.etl.zip
+2026-01-19T18:35:47  PID[5240] Information 01-19 18:35:47 Critical: StopProfiler succeeded.
+2026-01-19T20:08:01  PID[5240] Information 01-19 20:08:01 Critical: StartProfiler triggered.
+2026-01-19T20:08:01  PID[5240] Information 01-19 20:08:01 Information: Starting circular monitor
+2026-01-19T20:08:02  PID[5240] Information 01-19 20:08:02 Information: NativeImagePdbGeneration enabled.
+2026-01-19T20:08:20  PID[5240] Information 01-19 20:08:20 Information: Monitoring process 3908
+2026-01-19T20:08:23  PID[5240] Information 01-19 20:08:23 Information: Monitoring process 5240
+2026-01-19T20:08:30  PID[5240] Information 01-19 20:08:30 Information: Monitoring process 7012
+2026-01-19T20:08:42  PID[5240] Information 01-19 20:08:42 Information: Monitoring process 5832
+2026-01-19T20:08:53  PID[5240] Information 01-19 20:08:53 Information: Monitoring process 7344
+2026-01-19T20:09:02  PID[5240] Information 01-19 20:09:02 Information: Monitoring process 5548
+2026-01-19T20:09:08  PID[5240] Information 01-19 20:09:05 Information: Monitoring process 3740
+2026-01-19T20:09:08  PID[5240] Information 01-19 20:09:05 Critical: StartProfiler succeeded.
+2026-01-19T20:09:35  PID[5240] Information 01-19 20:09:35 Critical: StopProfiler triggered.
+2026-01-19T20:09:35  PID[5240] Information 01-19 20:09:35 Information: Stopping circular monitor and collecting etl snapshot.
+2026-01-19T20:12:31  PID[5240] Information 01-19 20:12:30 Information: Start to upload trace D:\DWASFiles\Sites\#1spe-api-dev-67e2xz\Temp\DA.Circular.2026-01-19T20-08-02-0596456Z.639044500820596456.639044501758454980.etl.zip
+2026-01-19T20:12:31  PID[5240] Information 01-19 20:12:31 Critical: Upload trace was canceled as no activity detected from target iKey.
+2026-01-19T20:12:31  PID[5240] Information 01-19 20:12:31 Information: Target iKey: 09a9beed-0dcd-4aad-84bb-3696372ed5d1. Detected iKeys: .
+2026-01-19T20:12:31  PID[5240] Information 01-19 20:12:31 Critical: StopProfiler succeeded.
+2026-01-19T20:48:44  PID[5240] Information 01-19 20:48:44 Information: Triggering Based on Memory
+2026-01-19T20:48:44  PID[5240] Information 01-19 20:48:44 Critical: StartProfiler triggered.
+2026-01-19T20:48:44  PID[5240] Information 01-19 20:48:44 Information: Starting circular monitor
+2026-01-19T20:48:46  PID[5240] Information 01-19 20:48:46 Information: NativeImagePdbGeneration enabled.
+2026-01-19T20:49:28  PID[5240] Information 01-19 20:49:28 Information: Monitoring process 3908
+2026-01-19T20:49:43  PID[5240] Information 01-19 20:49:43 Information: Monitoring process 5240
+2026-01-19T20:49:48  PID[5240] Information 01-19 20:49:48 Information: Activity detected from iKey: 09a9beed-0dcd-4aad-84bb-3696372ed5d1.
+2026-01-19T20:49:48  PID[5240] Information 01-19 20:49:48 Information: RoleName discovered: spe-api-dev-67e2xz.
+2026-01-19T20:49:48  PID[5240] Information 01-19 20:49:48 Information: Monitoring process 7012
+2026-01-19T20:49:52  PID[5240] Information 01-19 20:49:52 Information: Monitoring process 5832
+2026-01-19T20:49:59  PID[5240] Information 01-19 20:49:59 Information: Monitoring process 7344
+2026-01-19T20:50:09  PID[5240] Information 01-19 20:50:09 Information: Monitoring process 5548
+2026-01-19T20:50:13  PID[5240] Information 01-19 20:50:13 Information: Monitoring process 3740
+2026-01-19T20:50:13  PID[5240] Information 01-19 20:50:13 Critical: StartProfiler succeeded.
+2026-01-19T20:50:43  PID[5240] Information 01-19 20:50:43 Critical: StopProfiler triggered.
+2026-01-19T20:50:43  PID[5240] Information 01-19 20:50:43 Information: Stopping circular monitor and collecting etl snapshot.
+2026-01-19T20:54:04  PID[5240] Information 01-19 20:54:04 Information: Start to upload trace D:\DWASFiles\Sites\#1spe-api-dev-67e2xz\Temp\DA.Circular.2026-01-19T20-48-46-2252743Z.639044525262252743.639044526443369190.etl.zip
+2026-01-19T20:54:15  PID[5240] Information 01-19 20:54:15 Critical: StopProfiler succeeded.
+2026-01-19T20:56:26  PID[5240] Information 01-19 20:56:26 Critical: StartProfiler triggered.
+2026-01-19T20:56:27  PID[5240] Information 01-19 20:56:27 Information: Starting circular monitor
+2026-01-19T20:56:27  PID[5240] Information 01-19 20:56:27 Information: NativeImagePdbGeneration enabled.
+2026-01-19T20:56:55  PID[5240] Information 01-19 20:56:55 Information: Monitoring process 3908
+2026-01-19T20:57:06  PID[5240] Information 01-19 20:57:06 Information: Monitoring process 5240
+2026-01-19T20:57:17  PID[5240] Information 01-19 20:57:17 Information: Monitoring process 7012
+2026-01-19T20:57:27  PID[5240] Information 01-19 20:57:27 Information: Monitoring process 5832
+2026-01-19T20:57:27  PID[5240] Information 01-19 20:57:27 Information: Activity detected from iKey: 09a9beed-0dcd-4aad-84bb-3696372ed5d1.
+2026-01-19T20:57:28  PID[5240] Information 01-19 20:57:28 Information: RoleName discovered: spe-api-dev-67e2xz.
+2026-01-19T20:57:42  PID[5240] Information 01-19 20:57:42 Information: Monitoring process 7344
+2026-01-19T20:57:51  PID[5240] Information 01-19 20:57:51 Information: Monitoring process 5548
+2026-01-19T20:57:55  PID[5240] Information 01-19 20:57:55 Information: Monitoring process 3740
+2026-01-19T20:57:55  PID[5240] Information 01-19 20:57:55 Critical: StartProfiler succeeded.
+2026-01-19T20:58:25  PID[5240] Information 01-19 20:58:25 Critical: StopProfiler triggered.
+2026-01-19T20:58:25  PID[5240] Information 01-19 20:58:25 Information: Stopping circular monitor and collecting etl snapshot.
+2026-01-19T21:01:20  PID[5240] Information 01-19 21:01:20 Information: Start to upload trace D:\DWASFiles\Sites\#1spe-api-dev-67e2xz\Temp\DA.Circular.2026-01-19T20-56-27-8960909Z.639044529878960909.639044531055819733.etl.zip
+2026-01-19T21:01:24  PID[5240] Information 01-19 21:01:24 Critical: StopProfiler succeeded.
+2026-01-19T22:33:39  PID[5240] Information 01-19 22:33:39 Critical: StartProfiler triggered.
+2026-01-19T22:33:39  PID[5240] Information 01-19 22:33:39 Information: Starting circular monitor
+2026-01-19T22:33:40  PID[5240] Information 01-19 22:33:40 Information: NativeImagePdbGeneration enabled.
+2026-01-19T22:33:57  PID[5240] Information 01-19 22:33:57 Information: Monitoring process 3908
+2026-01-19T22:34:01  PID[5240] Information 01-19 22:34:01 Information: Monitoring process 5240
+2026-01-19T22:34:03  PID[5240] Information 01-19 22:34:03 Information: Monitoring process 7012
+2026-01-19T22:34:07  PID[5240] Information 01-19 22:34:06 Information: Monitoring process 5832
+2026-01-19T22:34:09  PID[5240] Information 01-19 22:34:09 Information: Monitoring process 7344
+2026-01-19T22:34:14  PID[5240] Information 01-19 22:34:14 Information: Monitoring process 5548
+2026-01-19T22:34:17  PID[5240] Information 01-19 22:34:17 Information: Monitoring process 3740
+2026-01-19T22:34:17  PID[5240] Information 01-19 22:34:17 Critical: StartProfiler succeeded.
+2026-01-19T22:34:48  PID[5240] Information 01-19 22:34:48 Critical: StopProfiler triggered.
+2026-01-19T22:34:48  PID[5240] Information 01-19 22:34:48 Information: Stopping circular monitor and collecting etl snapshot.
+2026-01-19T22:38:03  PID[5240] Information 01-19 22:38:03 Information: Start to upload trace D:\DWASFiles\Sites\#1spe-api-dev-67e2xz\Temp\DA.Circular.2026-01-19T22-33-40-1488406Z.639044588201488406.639044588886549237.etl.zip
+2026-01-19T22:38:04  PID[5240] Information 01-19 22:38:03 Critical: Upload trace was canceled as no activity detected from target iKey.
+2026-01-19T22:38:04  PID[5240] Information 01-19 22:38:04 Information: Target iKey: 09a9beed-0dcd-4aad-84bb-3696372ed5d1. Detected iKeys: .
+2026-01-19T22:38:04  PID[5240] Information 01-19 22:38:04 Critical: StopProfiler succeeded.
+2026-01-19T22:48:14  PID[5240] Information 01-19 22:48:14 Critical: StartProfiler triggered.
+2026-01-19T22:48:14  PID[5240] Information 01-19 22:48:14 Information: Starting circular monitor
+2026-01-19T22:48:14  PID[5240] Information 01-19 22:48:14 Information: NativeImagePdbGeneration enabled.
+2026-01-19T22:48:35  PID[5240] Information 01-19 22:48:35 Information: Monitoring process 3908
+2026-01-19T22:48:45  PID[5240] Information 01-19 22:48:45 Information: Monitoring process 5240
+2026-01-19T22:48:53  PID[5240] Information 01-19 22:48:53 Information: Monitoring process 7012
+2026-01-19T22:48:55  PID[5240] Information 01-19 22:48:55 Information: Monitoring process 5832
+2026-01-19T22:48:59  PID[5240] Information 01-19 22:48:59 Information: Monitoring process 7344
+2026-01-19T22:49:02  PID[5240] Information 01-19 22:49:02 Information: Monitoring process 5548
+2026-01-19T22:49:10  PID[5240] Information 01-19 22:49:10 Information: Monitoring process 3740
+2026-01-19T22:49:10  PID[5240] Information 01-19 22:49:10 Critical: StartProfiler succeeded.
+2026-01-19T22:49:40  PID[5240] Information 01-19 22:49:40 Critical: StopProfiler triggered.
+2026-01-19T22:49:40  PID[5240] Information 01-19 22:49:40 Information: Stopping circular monitor and collecting etl snapshot.
+2026-01-19T22:52:57  PID[5240] Information 01-19 22:52:57 Information: Start to upload trace D:\DWASFiles\Sites\#1spe-api-dev-67e2xz\Temp\DA.Circular.2026-01-19T22-48-14-7269418Z.639044596947269418.639044597805139805.etl.zip
+2026-01-19T22:52:57  PID[5240] Information 01-19 22:52:57 Critical: Upload trace was canceled as no activity detected from target iKey.
+2026-01-19T22:52:57  PID[5240] Information 01-19 22:52:57 Information: Target iKey: 09a9beed-0dcd-4aad-84bb-3696372ed5d1. Detected iKeys: .
+2026-01-19T22:52:57  PID[5240] Information 01-19 22:52:57 Critical: StopProfiler succeeded.
+2026-01-19T22:57:08  PID[5240] Information 01-19 22:57:08 Critical: StartProfiler triggered.
+2026-01-19T22:57:08  PID[5240] Information 01-19 22:57:08 Information: Starting circular monitor
+2026-01-19T22:57:08  PID[5240] Information 01-19 22:57:08 Information: NativeImagePdbGeneration enabled.
+2026-01-19T22:57:23  PID[5240] Information 01-19 22:57:22 Information: Monitoring process 3908
+2026-01-19T22:57:27  PID[5240] Information 01-19 22:57:27 Information: Monitoring process 5240
+2026-01-19T22:57:29  PID[5240] Information 01-19 22:57:29 Information: Monitoring process 7012
+2026-01-19T22:57:34  PID[5240] Information 01-19 22:57:34 Information: Monitoring process 5832
+2026-01-19T22:57:42  PID[5240] Information 01-19 22:57:42 Information: Monitoring process 7344
+2026-01-19T22:57:52  PID[5240] Information 01-19 22:57:52 Information: Monitoring process 5548
+2026-01-19T22:57:59  PID[5240] Information 01-19 22:57:59 Information: Monitoring process 3740
+2026-01-19T22:57:59  PID[5240] Information 01-19 22:57:59 Critical: StartProfiler succeeded.
+2026-01-19T22:58:29  PID[5240] Information 01-19 22:58:29 Critical: StopProfiler triggered.
+2026-01-19T22:58:29  PID[5240] Information 01-19 22:58:29 Information: Stopping circular monitor and collecting etl snapshot.
+2026-01-19T23:01:45  PID[5240] Information 01-19 23:01:45 Information: Start to upload trace D:\DWASFiles\Sites\#1spe-api-dev-67e2xz\Temp\DA.Circular.2026-01-19T22-57-08-2992380Z.639044602282992380.639044603092451067.etl.zip
+2026-01-19T23:01:45  PID[5240] Information 01-19 23:01:45 Critical: Upload trace was canceled as no activity detected from target iKey.
+2026-01-19T23:01:45  PID[5240] Information 01-19 23:01:45 Information: Target iKey: 09a9beed-0dcd-4aad-84bb-3696372ed5d1. Detected iKeys: .
+2026-01-19T23:01:45  PID[5240] Information 01-19 23:01:45 Critical: StopProfiler succeeded.
+2026-01-19T23:07:55  PID[5240] Information 01-19 23:07:55 Critical: StartProfiler triggered.
+2026-01-19T23:07:55  PID[5240] Information 01-19 23:07:55 Information: Starting circular monitor
+2026-01-19T23:07:55  PID[5240] Information 01-19 23:07:55 Information: NativeImagePdbGeneration enabled.
+2026-01-19T23:08:03  PID[5240] Information 01-19 23:08:03 Information: Monitoring process 3908
+2026-01-19T23:08:07  PID[5240] Information 01-19 23:08:07 Information: Monitoring process 5240
+2026-01-19T23:08:11  PID[5240] Information 01-19 23:08:11 Information: Monitoring process 7012
+2026-01-19T23:08:12  PID[5240] Information 01-19 23:08:12 Information: Monitoring process 5832
+2026-01-19T23:08:14  PID[5240] Information 01-19 23:08:14 Information: Monitoring process 7344
+2026-01-19T23:08:20  PID[5240] Information 01-19 23:08:20 Information: Monitoring process 5548
+2026-01-19T23:08:24  PID[5240] Information 01-19 23:08:24 Information: Monitoring process 3740
+2026-01-19T23:08:24  PID[5240] Information 01-19 23:08:24 Critical: StartProfiler succeeded.
+2026-01-19T23:08:55  PID[5240] Information 01-19 23:08:55 Critical: StopProfiler triggered.
+2026-01-19T23:08:55  PID[5240] Information 01-19 23:08:55 Information: Stopping circular monitor and collecting etl snapshot.
+2026-01-19T23:12:13  PID[5240] Information 01-19 23:12:13 Information: Start to upload trace D:\DWASFiles\Sites\#1spe-api-dev-67e2xz\Temp\DA.Circular.2026-01-19T23-07-55-7947921Z.639044608757947921.639044609352953573.etl.zip
+2026-01-19T23:12:13  PID[5240] Information 01-19 23:12:13 Critical: Upload trace was canceled as no activity detected from target iKey.
+2026-01-19T23:12:13  PID[5240] Information 01-19 23:12:13 Information: Target iKey: 09a9beed-0dcd-4aad-84bb-3696372ed5d1. Detected iKeys: .
+2026-01-19T23:12:13  PID[5240] Information 01-19 23:12:13 Critical: StopProfiler succeeded.
+2026-01-19T23:18:24  PID[5240] Information 01-19 23:18:24 Critical: StartProfiler triggered.
+2026-01-19T23:18:24  PID[5240] Information 01-19 23:18:24 Information: Starting circular monitor
+2026-01-19T23:18:24  PID[5240] Information 01-19 23:18:24 Information: NativeImagePdbGeneration enabled.
+2026-01-19T23:18:34  PID[5240] Information 01-19 23:18:34 Information: Monitoring process 3908
+2026-01-19T23:18:42  PID[5240] Information 01-19 23:18:42 Information: Monitoring process 5240
+2026-01-19T23:18:49  PID[5240] Information 01-19 23:18:49 Information: Monitoring process 7012
+2026-01-19T23:18:54  PID[5240] Information 01-19 23:18:54 Information: Monitoring process 5832
+2026-01-19T23:19:00  PID[5240] Information 01-19 23:19:00 Information: Monitoring process 7344
+2026-01-19T23:19:07  PID[5240] Information 01-19 23:19:07 Information: Monitoring process 5548
+2026-01-19T23:19:14  PID[5240] Information 01-19 23:19:14 Information: Monitoring process 3740
+2026-01-19T23:19:14  PID[5240] Information 01-19 23:19:14 Critical: StartProfiler succeeded.
+2026-01-19T23:19:44  PID[5240] Information 01-19 23:19:44 Critical: StopProfiler triggered.
+2026-01-19T23:19:44  PID[5240] Information 01-19 23:19:44 Information: Stopping circular monitor and collecting etl snapshot.
+2026-01-19T23:23:06  PID[5240] Information 01-19 23:23:06 Information: Start to upload trace D:\DWASFiles\Sites\#1spe-api-dev-67e2xz\Temp\DA.Circular.2026-01-19T23-18-24-4588339Z.639044615044588339.639044615840949969.etl.zip
+2026-01-19T23:23:07  PID[5240] Information 01-19 23:23:07 Critical: Upload trace was canceled as no activity detected from target iKey.
+2026-01-19T23:23:08  PID[5240] Information 01-19 23:23:07 Information: Target iKey: 09a9beed-0dcd-4aad-84bb-3696372ed5d1. Detected iKeys: .
+2026-01-19T23:23:08  PID[5240] Information 01-19 23:23:07 Critical: StopProfiler succeeded.
+2026-01-20T00:05:19  PID[5240] Information 01-20 00:05:19 Critical: StartProfiler triggered.
+2026-01-20T00:05:19  PID[5240] Information 01-20 00:05:19 Information: Starting circular monitor
+2026-01-20T00:05:19  PID[5240] Information 01-20 00:05:19 Information: NativeImagePdbGeneration enabled.
+2026-01-20T00:05:37  PID[5240] Information 01-20 00:05:37 Information: Monitoring process 3908
+2026-01-20T00:05:43  PID[5240] Information 01-20 00:05:43 Information: Monitoring process 5240
+2026-01-20T00:05:48  PID[5240] Information 01-20 00:05:48 Information: Monitoring process 7012
+2026-01-20T00:05:53  PID[5240] Information 01-20 00:05:53 Information: Monitoring process 5832
+2026-01-20T00:06:01  PID[5240] Information 01-20 00:06:01 Information: Monitoring process 7344
+2026-01-20T00:06:09  PID[5240] Information 01-20 00:06:09 Information: Monitoring process 5548
+2026-01-20T00:06:18  PID[5240] Information 01-20 00:06:18 Information: Monitoring process 3740
+2026-01-20T00:06:18  PID[5240] Information 01-20 00:06:18 Critical: StartProfiler succeeded.
+2026-01-20T00:06:48  PID[5240] Information 01-20 00:06:48 Critical: StopProfiler triggered.
+2026-01-20T00:06:48  PID[5240] Information 01-20 00:06:48 Information: Stopping circular monitor and collecting etl snapshot.
+2026-01-20T00:10:01  PID[5240] Information 01-20 00:10:01 Information: Start to upload trace D:\DWASFiles\Sites\#1spe-api-dev-67e2xz\Temp\DA.Circular.2026-01-20T00-05-19-4530019Z.639044643194530019.639044644089339906.etl.zip
+2026-01-20T00:10:01  PID[5240] Information 01-20 00:10:01 Critical: Upload trace was canceled as no activity detected from target iKey.
+2026-01-20T00:10:01  PID[5240] Information 01-20 00:10:01 Information: Target iKey: 09a9beed-0dcd-4aad-84bb-3696372ed5d1. Detected iKeys: .
+2026-01-20T00:10:01  PID[5240] Information 01-20 00:10:01 Critical: StopProfiler succeeded.
+2026-01-20T00:28:12  PID[5240] Information 01-20 00:28:12 Critical: StartProfiler triggered.
+2026-01-20T00:28:12  PID[5240] Information 01-20 00:28:12 Information: Starting circular monitor
+2026-01-20T00:28:12  PID[5240] Information 01-20 00:28:12 Information: NativeImagePdbGeneration enabled.
+2026-01-20T00:28:31  PID[5240] Information 01-20 00:28:31 Information: Monitoring process 3908
+2026-01-20T00:28:38  PID[5240] Information 01-20 00:28:38 Information: Monitoring process 5240
+2026-01-20T00:28:46  PID[5240] Information 01-20 00:28:46 Information: Monitoring process 7012
+2026-01-20T00:28:53  PID[5240] Information 01-20 00:28:53 Information: Monitoring process 5832
+2026-01-20T00:29:03  PID[5240] Information 01-20 00:29:03 Information: Monitoring process 7344
+2026-01-20T00:29:11  PID[5240] Information 01-20 00:29:11 Information: Monitoring process 5548
+2026-01-20T00:29:19  PID[5240] Information 01-20 00:29:19 Information: Monitoring process 3740
+2026-01-20T00:29:19  PID[5240] Information 01-20 00:29:19 Critical: StartProfiler succeeded.
+2026-01-20T00:29:49  PID[5240] Information 01-20 00:29:49 Critical: StopProfiler triggered.
+2026-01-20T00:29:49  PID[5240] Information 01-20 00:29:49 Information: Stopping circular monitor and collecting etl snapshot.
+2026-01-20T00:33:08  PID[5240] Information 01-20 00:33:07 Information: Start to upload trace D:\DWASFiles\Sites\#1spe-api-dev-67e2xz\Temp\DA.Circular.2026-01-20T00-28-12-7629366Z.639044656927629366.639044657892453186.etl.zip
+2026-01-20T00:33:08  PID[5240] Information 01-20 00:33:08 Critical: Upload trace was canceled as no activity detected from target iKey.
+2026-01-20T00:33:08  PID[5240] Information 01-20 00:33:08 Information: Target iKey: 09a9beed-0dcd-4aad-84bb-3696372ed5d1. Detected iKeys: .
+2026-01-20T00:33:08  PID[5240] Information 01-20 00:33:08 Critical: StopProfiler succeeded.
+2026-01-20T00:55:19  PID[5240] Information 01-20 00:55:18 Critical: StartProfiler triggered.
+2026-01-20T00:55:19  PID[5240] Information 01-20 00:55:18 Information: Starting circular monitor
+2026-01-20T00:55:19  PID[5240] Information 01-20 00:55:19 Information: NativeImagePdbGeneration enabled.
+2026-01-20T00:55:35  PID[5240] Information 01-20 00:55:35 Information: Monitoring process 3908
+2026-01-20T00:55:39  PID[5240] Information 01-20 00:55:39 Information: Monitoring process 5240
+2026-01-20T00:55:43  PID[5240] Information 01-20 00:55:43 Information: Monitoring process 7012
+2026-01-20T00:55:46  PID[5240] Information 01-20 00:55:45 Information: Monitoring process 5832
+2026-01-20T00:55:48  PID[5240] Information 01-20 00:55:48 Information: Monitoring process 7344
+2026-01-20T00:55:52  PID[5240] Information 01-20 00:55:52 Information: Monitoring process 5548
+2026-01-20T00:55:55  PID[5240] Information 01-20 00:55:55 Information: Monitoring process 3740
+2026-01-20T00:55:55  PID[5240] Information 01-20 00:55:55 Critical: StartProfiler succeeded.
+2026-01-20T00:56:26  PID[5240] Information 01-20 00:56:26 Critical: StopProfiler triggered.
+2026-01-20T00:56:26  PID[5240] Information 01-20 00:56:26 Information: Stopping circular monitor and collecting etl snapshot.
+2026-01-20T00:59:45  PID[5240] Information 01-20 00:59:45 Information: Start to upload trace D:\DWASFiles\Sites\#1spe-api-dev-67e2xz\Temp\DA.Circular.2026-01-20T00-55-19-0606771Z.639044673190606771.639044673865039633.etl.zip
+2026-01-20T00:59:45  PID[5240] Information 01-20 00:59:45 Critical: Upload trace was canceled as no activity detected from target iKey.
+2026-01-20T00:59:45  PID[5240] Information 01-20 00:59:45 Information: Target iKey: 09a9beed-0dcd-4aad-84bb-3696372ed5d1. Detected iKeys: .
+2026-01-20T00:59:45  PID[5240] Information 01-20 00:59:45 Critical: StopProfiler succeeded.
+2026-01-20T01:31:57  PID[5240] Information 01-20 01:31:57 Critical: StartProfiler triggered.
+2026-01-20T01:31:57  PID[5240] Information 01-20 01:31:57 Information: Starting circular monitor
+2026-01-20T01:31:57  PID[5240] Information 01-20 01:31:57 Information: NativeImagePdbGeneration enabled.
+2026-01-20T01:32:13  PID[5240] Information 01-20 01:32:13 Information: Activity detected from iKey: 09a9beed-0dcd-4aad-84bb-3696372ed5d1.
+2026-01-20T01:32:14  PID[5240] Information 01-20 01:32:14 Information: RoleName discovered: spe-api-dev-67e2xz.
+2026-01-20T01:32:14  PID[5240] Information 01-20 01:32:14 Information: Monitoring process 3908
+2026-01-20T01:32:18  PID[5240] Information 01-20 01:32:18 Information: Monitoring process 5240
+2026-01-20T01:32:21  PID[5240] Information 01-20 01:32:21 Information: Monitoring process 7012
+2026-01-20T01:32:28  PID[5240] Information 01-20 01:32:28 Information: Monitoring process 5832
+2026-01-20T01:32:39  PID[5240] Information 01-20 01:32:39 Information: Monitoring process 7344
+2026-01-20T01:32:42  PID[5240] Information 01-20 01:32:42 Information: Monitoring process 5548
+2026-01-20T01:32:47  PID[5240] Information 01-20 01:32:47 Information: Monitoring process 3740
+2026-01-20T01:32:47  PID[5240] Information 01-20 01:32:47 Critical: StartProfiler succeeded.
+2026-01-20T01:33:17  PID[5240] Information 01-20 01:33:17 Critical: StopProfiler triggered.
+2026-01-20T01:33:17  PID[5240] Information 01-20 01:33:17 Information: Stopping circular monitor and collecting etl snapshot.
+2026-01-20T01:36:30  PID[5240] Information 01-20 01:36:30 Information: Start to upload trace D:\DWASFiles\Sites\#1spe-api-dev-67e2xz\Temp\DA.Circular.2026-01-20T01-31-57-6144820Z.639044695176144820.639044695972520171.etl.zip
+2026-01-20T01:36:35  PID[5240] Information 01-20 01:36:35 Critical: StopProfiler succeeded.
+2026-01-20T03:00:49  PID[5240] Information 01-20 03:00:49 Critical: StartProfiler triggered.
+2026-01-20T03:00:49  PID[5240] Information 01-20 03:00:49 Information: Starting circular monitor
+2026-01-20T03:00:49  PID[5240] Information 01-20 03:00:49 Information: NativeImagePdbGeneration enabled.
+2026-01-20T03:01:07  PID[5240] Information 01-20 03:01:07 Information: Monitoring process 3908
+2026-01-20T03:01:11  PID[5240] Information 01-20 03:01:11 Information: Monitoring process 5240
+2026-01-20T03:01:18  PID[5240] Information 01-20 03:01:18 Information: Monitoring process 7012
+2026-01-20T03:01:26  PID[5240] Information 01-20 03:01:26 Information: Monitoring process 5832
+2026-01-20T03:01:37  PID[5240] Information 01-20 03:01:37 Information: Monitoring process 7344
+2026-01-20T03:01:46  PID[5240] Information 01-20 03:01:46 Information: Monitoring process 5548
+2026-01-20T03:01:53  PID[5240] Information 01-20 03:01:53 Information: Monitoring process 3740
+2026-01-20T03:01:53  PID[5240] Information 01-20 03:01:53 Critical: StartProfiler succeeded.
+2026-01-20T03:02:18  PID[5240] Information 01-20 03:02:18 Information: Activity detected from iKey: 09a9beed-0dcd-4aad-84bb-3696372ed5d1.
+2026-01-20T03:02:18  PID[5240] Information 01-20 03:02:18 Information: RoleName discovered: spe-api-dev-67e2xz.
+2026-01-20T03:02:23  PID[5240] Information 01-20 03:02:23 Critical: StopProfiler triggered.
+2026-01-20T03:02:23  PID[5240] Information 01-20 03:02:23 Information: Stopping circular monitor and collecting etl snapshot.
+2026-01-20T03:05:39  PID[5240] Information 01-20 03:05:39 Information: Start to upload trace D:\DWASFiles\Sites\#1spe-api-dev-67e2xz\Temp\DA.Circular.2026-01-20T03-00-49-3656308Z.639044748493656308.639044749433451297.etl.zip
+2026-01-20T03:05:43  PID[5240] Information 01-20 03:05:43 Critical: StopProfiler succeeded.
+2026-01-20T04:27:57  PID[5240] Information 01-20 04:27:57 Critical: StartProfiler triggered.
+2026-01-20T04:27:57  PID[5240] Information 01-20 04:27:57 Information: Starting circular monitor
+2026-01-20T04:27:57  PID[5240] Information 01-20 04:27:57 Information: NativeImagePdbGeneration enabled.
+2026-01-20T04:28:16  PID[5240] Information 01-20 04:28:16 Information: Monitoring process 3908
+2026-01-20T04:28:20  PID[5240] Information 01-20 04:28:20 Information: Monitoring process 5240
+2026-01-20T04:28:23  PID[5240] Information 01-20 04:28:23 Information: Monitoring process 7012
+2026-01-20T04:28:26  PID[5240] Information 01-20 04:28:26 Information: Monitoring process 5832
+2026-01-20T04:28:32  PID[5240] Information 01-20 04:28:32 Information: Monitoring process 7344
+2026-01-20T04:28:36  PID[5240] Information 01-20 04:28:36 Information: Monitoring process 5548
+2026-01-20T04:28:40  PID[5240] Information 01-20 04:28:40 Information: Monitoring process 3740
+2026-01-20T04:28:40  PID[5240] Information 01-20 04:28:40 Critical: StartProfiler succeeded.
+2026-01-20T04:29:10  PID[5240] Information 01-20 04:29:10 Critical: StopProfiler triggered.
+2026-01-20T04:29:10  PID[5240] Information 01-20 04:29:10 Information: Stopping circular monitor and collecting etl snapshot.
+2026-01-20T04:32:29  PID[5240] Information 01-20 04:32:29 Information: Start to upload trace D:\DWASFiles\Sites\#1spe-api-dev-67e2xz\Temp\DA.Circular.2026-01-20T04-27-57-2257837Z.639044800772257837.639044801510481002.etl.zip
+2026-01-20T04:32:29  PID[5240] Information 01-20 04:32:29 Critical: Upload trace was canceled as no activity detected from target iKey.
+2026-01-20T04:32:29  PID[5240] Information 01-20 04:32:29 Information: Target iKey: 09a9beed-0dcd-4aad-84bb-3696372ed5d1. Detected iKeys: .
+2026-01-20T04:32:29  PID[5240] Information 01-20 04:32:29 Critical: StopProfiler succeeded.
+2026-01-20T06:20:44  PID[5240] Warning     The trace listener is disabled after running too long.
