@@ -20,8 +20,8 @@ public static class OfficeWorkersModule
     /// <para>
     /// Registered workers:
     /// - UploadFinalizationWorker: Processes file uploads, creates records
-    /// - ProfileSummaryWorker: AI summary generation (stub)
-    /// - IndexingWorkerHostedService: Search indexing (stub)
+    /// - ProfileSummaryWorker: AI summary generation via IAppOnlyAnalysisService
+    /// - IndexingWorkerHostedService: RAG indexing via IFileIndexingService
     /// </para>
     /// </remarks>
     public static IServiceCollection AddOfficeWorkers(this IServiceCollection services)
@@ -47,8 +47,7 @@ public static class OfficeWorkersModule
         });
 
         // IndexingWorkerHostedService: Processes office-indexing queue
-        // Uses stub implementation for now - completes job without actual indexing
-        // TODO: Replace with full IndexingWorker when FileIndexingService is configured
+        // Integrates with IFileIndexingService for RAG document indexing
         services.AddHostedService<IndexingWorkerHostedService>();
 
         return services;
