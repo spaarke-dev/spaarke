@@ -329,8 +329,19 @@ public class OfficeService : IOfficeService
                     documentId,
                     cancellationToken);
 
+                // Mark job as complete - background workers will process asynchronously
+                // User sees immediate success while AI processing continues in background
+                await UpdateJobStatusInDataverseAsync(jobId, JobStatus.Completed, "Complete", 100, null, cancellationToken);
+                _jobStore[jobId] = _jobStore[jobId] with
+                {
+                    Status = JobStatus.Completed,
+                    Progress = 100,
+                    CurrentPhase = "Complete",
+                    CompletedAt = DateTimeOffset.UtcNow
+                };
+
                 _logger.LogInformation(
-                    "ProcessingJob {JobId} created, file uploaded to SPE, document {DocumentId} created",
+                    "ProcessingJob {JobId} completed, file uploaded to SPE, document {DocumentId} created. Background workers queued for finalization.",
                     jobId,
                     documentId);
             }
@@ -923,7 +934,8 @@ public class OfficeService : IOfficeService
                     ReceivedDate = request.Email.ReceivedDate,
                     BodyPreview = request.Email.Body?[..Math.Min(request.Email.Body.Length, 500)],
                     HasAttachments = request.Email.Attachments?.Count > 0,
-                    Importance = 1 // Normal
+                    Importance = 1, // Normal
+                    SelectedAttachmentFileNames = request.Email.SelectedAttachmentFileNames
                 }
                 : null,
             AttachmentMetadata = request.ContentType == SaveContentType.Attachment && request.Attachment != null
@@ -936,12 +948,19 @@ public class OfficeService : IOfficeService
                     IsInline = false
                 }
                 : null,
-            AiOptions = new AiProcessingOptions
-            {
-                ProfileSummary = request.TriggerAiProcessing,
-                RagIndex = request.TriggerAiProcessing,
-                DeepAnalysis = false
-            },
+            AiOptions = request.AiOptions != null
+                ? new AiProcessingOptions
+                {
+                    ProfileSummary = request.AiOptions.ProfileSummary,
+                    RagIndex = request.AiOptions.RagIndex,
+                    DeepAnalysis = request.AiOptions.DeepAnalysis
+                }
+                : new AiProcessingOptions
+                {
+                    ProfileSummary = request.TriggerAiProcessing,
+                    RagIndex = request.TriggerAiProcessing,
+                    DeepAnalysis = false
+                },
             DocumentId = documentId
         };
 

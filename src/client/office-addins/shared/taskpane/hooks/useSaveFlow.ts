@@ -736,7 +736,12 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
       // Server requires: contentType, targetEntity, and type-specific metadata
       const serverRequest: Record<string, unknown> = {
         contentType,
-        triggerAiProcessing: processingOptions.deepAnalysis || processingOptions.ragIndex,
+        triggerAiProcessing: processingOptions.deepAnalysis || processingOptions.ragIndex || processingOptions.profileSummary,
+        aiOptions: {
+          profileSummary: processingOptions.profileSummary,
+          ragIndex: processingOptions.ragIndex,
+          deepAnalysis: processingOptions.deepAnalysis,
+        },
       };
 
       // Add target entity if an association was selected
@@ -760,6 +765,12 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
 
         // Note: Email body and attachment content are retrieved server-side via Graph API
         // Client only sends internetMessageId - server will fetch body and attachments using OBO auth
+
+        // Get selected attachment filenames (for creating as Documents)
+        const selectedAttachmentFileNames = Array.from(selectedAttachmentIds)
+          .map(id => context.attachments.find(a => a.id === id)?.name)
+          .filter((name): name is string => !!name);
+
         serverRequest.email = {
           subject: context.itemName || 'Untitled Email',
           senderEmail: context.senderEmail || 'unknown@placeholder.com',
@@ -769,6 +780,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           body: undefined, // Retrieved server-side via Graph API
           isBodyHtml: true,
           internetMessageId: context.itemId, // Server uses this to fetch email via Graph
+          selectedAttachmentFileNames: selectedAttachmentFileNames.length > 0 ? selectedAttachmentFileNames : undefined,
         };
       } else if (contentType === 'Attachment') {
         const attachmentId = Array.from(selectedAttachmentIds)[0];

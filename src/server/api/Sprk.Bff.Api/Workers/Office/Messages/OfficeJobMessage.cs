@@ -209,6 +209,12 @@ public record EmailArtifactPayload
     /// Email importance level.
     /// </summary>
     public int Importance { get; init; } = 1; // Normal
+
+    /// <summary>
+    /// Selected attachment filenames to create as Documents.
+    /// If null or empty, all attachments are created.
+    /// </summary>
+    public List<string>? SelectedAttachmentFileNames { get; init; }
 }
 
 /// <summary>

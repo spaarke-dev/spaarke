@@ -55,6 +55,12 @@ public record SaveRequest
     /// Whether to trigger AI processing after save.
     /// </summary>
     public bool TriggerAiProcessing { get; init; } = true;
+
+    /// <summary>
+    /// AI processing options (profile summary, RAG index, deep analysis).
+    /// If null, defaults based on TriggerAiProcessing flag.
+    /// </summary>
+    public AiProcessingOptionsRequest? AiOptions { get; init; }
 }
 
 /// <summary>
@@ -168,6 +174,13 @@ public record EmailMetadata
     /// List of attachments to include.
     /// </summary>
     public List<AttachmentReference>? Attachments { get; init; }
+
+    /// <summary>
+    /// Selected attachment filenames to create as Documents.
+    /// If null or empty, all attachments are created as Documents.
+    /// Used to respect user's attachment selection in the add-in UI.
+    /// </summary>
+    public List<string>? SelectedAttachmentFileNames { get; init; }
 }
 
 /// <summary>
@@ -338,4 +351,25 @@ public record DocumentMetadata
     /// </summary>
     [MaxLength(1000)]
     public string? VersionComment { get; init; }
+}
+
+/// <summary>
+/// AI processing options for document processing.
+/// </summary>
+public record AiProcessingOptionsRequest
+{
+    /// <summary>
+    /// Whether to generate profile summary.
+    /// </summary>
+    public bool ProfileSummary { get; init; } = true;
+
+    /// <summary>
+    /// Whether to index for RAG.
+    /// </summary>
+    public bool RagIndex { get; init; } = true;
+
+    /// <summary>
+    /// Whether to perform deep analysis.
+    /// </summary>
+    public bool DeepAnalysis { get; init; }
 }

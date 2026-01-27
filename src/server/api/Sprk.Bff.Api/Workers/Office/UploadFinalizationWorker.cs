@@ -982,6 +982,21 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             var filteredAttachments = _attachmentFilterService.FilterAttachments(attachments);
             var filteredCount = attachments.Count - filteredAttachments.Count;
 
+            // Respect user's attachment selection (if provided)
+            if (payload.EmailMetadata?.SelectedAttachmentFileNames?.Count > 0)
+            {
+                var selectedNames = new HashSet<string>(payload.EmailMetadata.SelectedAttachmentFileNames, StringComparer.OrdinalIgnoreCase);
+                filteredAttachments = filteredAttachments
+                    .Where(a => selectedNames.Contains(a.FileName))
+                    .ToList();
+
+                _logger.LogInformation(
+                    "User selected {SelectedCount} attachments for document {DocumentId}: {SelectedNames}",
+                    filteredAttachments.Count,
+                    parentDocumentId,
+                    string.Join(", ", filteredAttachments.Select(a => a.FileName)));
+            }
+
             _logger.LogInformation(
                 "Filtered attachments for document {DocumentId}: {RemainingCount} to process, {FilteredCount} filtered out",
                 parentDocumentId, filteredAttachments.Count, filteredCount);
