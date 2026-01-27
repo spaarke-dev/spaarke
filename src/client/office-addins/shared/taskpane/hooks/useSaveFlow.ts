@@ -767,9 +767,13 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         // Client only sends internetMessageId - server will fetch body and attachments using OBO auth
 
         // Get selected attachment filenames (for creating as Documents)
-        const selectedAttachmentFileNames = Array.from(selectedAttachmentIds)
-          .map(id => context.attachments.find(a => a.id === id)?.name)
-          .filter((name): name is string => !!name);
+        // Always send the list if email has attachments (even if empty array for "create no Documents")
+        // Send undefined only if email has no attachments at all
+        const selectedAttachmentFileNames = context.attachments.length > 0
+          ? Array.from(selectedAttachmentIds)
+              .map(id => context.attachments.find(a => a.id === id)?.name)
+              .filter((name): name is string => !!name)
+          : undefined;
 
         serverRequest.email = {
           subject: context.itemName || 'Untitled Email',
@@ -780,7 +784,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           body: undefined, // Retrieved server-side via Graph API
           isBodyHtml: true,
           internetMessageId: context.itemId, // Server uses this to fetch email via Graph
-          selectedAttachmentFileNames: selectedAttachmentFileNames.length > 0 ? selectedAttachmentFileNames : undefined,
+          selectedAttachmentFileNames: selectedAttachmentFileNames, // Can be undefined, empty array, or array with names
         };
       } else if (contentType === 'Attachment') {
         const attachmentId = Array.from(selectedAttachmentIds)[0];

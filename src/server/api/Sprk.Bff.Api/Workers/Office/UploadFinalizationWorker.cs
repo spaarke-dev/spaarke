@@ -983,8 +983,20 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             var filteredCount = attachments.Count - filteredAttachments.Count;
 
             // Respect user's attachment selection (if provided)
-            if (payload.EmailMetadata?.SelectedAttachmentFileNames?.Count > 0)
+            // - null: Process all attachments (backward compatible)
+            // - empty array: Process NO attachments (user deselected all)
+            // - array with names: Process only those attachments
+            if (payload.EmailMetadata?.SelectedAttachmentFileNames != null)
             {
+                if (payload.EmailMetadata.SelectedAttachmentFileNames.Count == 0)
+                {
+                    // User explicitly deselected all attachments
+                    _logger.LogInformation(
+                        "User deselected all attachments for document {DocumentId} - no attachment Documents will be created",
+                        parentDocumentId);
+                    return; // Skip all attachment processing
+                }
+
                 var selectedNames = new HashSet<string>(payload.EmailMetadata.SelectedAttachmentFileNames, StringComparer.OrdinalIgnoreCase);
                 filteredAttachments = filteredAttachments
                     .Where(a => selectedNames.Contains(a.FileName))
@@ -995,6 +1007,13 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                     filteredAttachments.Count,
                     parentDocumentId,
                     string.Join(", ", filteredAttachments.Select(a => a.FileName)));
+            }
+            else
+            {
+                _logger.LogDebug(
+                    "No attachment selection provided - processing all {Count} attachments for document {DocumentId}",
+                    filteredAttachments.Count,
+                    parentDocumentId);
             }
 
             _logger.LogInformation(

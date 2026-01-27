@@ -824,7 +824,8 @@ public class OfficeService : IOfficeService
                     isBodyHtml);
             }
 
-            // Extract attachments if present
+            // Extract ALL attachments (for embedding in .eml file)
+            // Note: Attachment selection only affects which ones become separate Documents, not what's in the .eml
             List<Models.Office.AttachmentReference>? attachmentReferences = null;
             if (message.HasAttachments == true && message.Attachments?.Any() == true)
             {
@@ -850,7 +851,7 @@ public class OfficeService : IOfficeService
                 }
 
                 _logger.LogInformation(
-                    "Retrieved {AttachmentCount} attachments from Graph API for message {MessageId}",
+                    "Retrieved {AttachmentCount} attachments from Graph API for message {MessageId} - all will be embedded in .eml",
                     attachmentReferences.Count,
                     request.Email.InternetMessageId);
             }
