@@ -75,8 +75,8 @@ public class ProfileSummaryWorker : BackgroundService, IOfficeJobHandler
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation(
-            "ProfileSummaryWorker starting, listening on queue {QueueName}",
+        _logger.LogWarning(
+            "🟢 ProfileSummaryWorker STARTING - listening on queue '{QueueName}'",
             QueueName);
 
         var processor = _serviceBusClient.CreateProcessor(QueueName, new ServiceBusProcessorOptions
@@ -116,7 +116,7 @@ public class ProfileSummaryWorker : BackgroundService, IOfficeJobHandler
         });
 
         _logger.LogInformation(
-            "Processing profile summary job {JobId}, attempt {Attempt}/{MaxAttempts}",
+            "🔵 ProfileSummaryWorker: Processing profile summary job {JobId}, attempt {Attempt}/{MaxAttempts}",
             message.JobId,
             message.Attempt,
             message.MaxAttempts);
@@ -154,8 +154,8 @@ public class ProfileSummaryWorker : BackgroundService, IOfficeJobHandler
             // Step 4: Generate AI profile summary using IAppOnlyAnalysisService
             try
             {
-                _logger.LogInformation(
-                    "Starting AI profile generation for job {JobId}, document {DocumentId}",
+                _logger.LogWarning(
+                    "🔵 Starting AI profile generation for job {JobId}, document {DocumentId}",
                     message.JobId,
                     payload.DocumentId);
 
@@ -168,15 +168,15 @@ public class ProfileSummaryWorker : BackgroundService, IOfficeJobHandler
                 if (!analysisResult.IsSuccess)
                 {
                     // Per spec, AI processing failures are not fatal
-                    _logger.LogWarning(
-                        "AI profile generation failed for job {JobId} (non-fatal): {Error}",
+                    _logger.LogError(
+                        "❌ AI profile generation FAILED for job {JobId} (non-fatal): {Error}",
                         message.JobId,
                         analysisResult.ErrorMessage);
                 }
                 else
                 {
-                    _logger.LogInformation(
-                        "AI profile generated successfully for job {JobId}, document {DocumentId}",
+                    _logger.LogWarning(
+                        "✅ AI profile generated successfully for job {JobId}, document {DocumentId}",
                         message.JobId,
                         payload.DocumentId);
                 }
@@ -184,9 +184,9 @@ public class ProfileSummaryWorker : BackgroundService, IOfficeJobHandler
             catch (Exception ex)
             {
                 // Per spec, AI processing is optional - log error but don't fail the job
-                _logger.LogWarning(
+                _logger.LogError(
                     ex,
-                    "Exception during AI profile generation for job {JobId} (non-fatal)",
+                    "❌ EXCEPTION during AI profile generation for job {JobId} (non-fatal)",
                     message.JobId);
             }
 

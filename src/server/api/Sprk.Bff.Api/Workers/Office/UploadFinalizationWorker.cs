@@ -89,33 +89,40 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation(
-            "UploadFinalizationWorker starting, listening on queue {QueueName}",
+        _logger.LogWarning(
+            "🚀🚀🚀 UploadFinalizationWorker STARTING - listening on queue '{QueueName}' 🚀🚀🚀",
             QueueName);
-
-        var processor = _serviceBusClient.CreateProcessor(QueueName, new ServiceBusProcessorOptions
-        {
-            MaxConcurrentCalls = MaxConcurrentCalls,
-            AutoCompleteMessages = false,
-            MaxAutoLockRenewalDuration = TimeSpan.FromMinutes(10)
-        });
-
-        processor.ProcessMessageAsync += ProcessMessageAsync;
-        processor.ProcessErrorAsync += ProcessErrorAsync;
 
         try
         {
+            var processor = _serviceBusClient.CreateProcessor(QueueName, new ServiceBusProcessorOptions
+            {
+                MaxConcurrentCalls = MaxConcurrentCalls,
+                AutoCompleteMessages = false,
+                MaxAutoLockRenewalDuration = TimeSpan.FromMinutes(10)
+            });
+
+            _logger.LogWarning("🔧 UploadFinalizationWorker: Service Bus processor created successfully");
+
+            processor.ProcessMessageAsync += ProcessMessageAsync;
+            processor.ProcessErrorAsync += ProcessErrorAsync;
+
+            _logger.LogWarning("🔧 UploadFinalizationWorker: Message handlers attached, starting processor...");
+
             await processor.StartProcessingAsync(stoppingToken);
+
+            _logger.LogWarning("✅✅✅ UploadFinalizationWorker STARTED SUCCESSFULLY and listening for messages ✅✅✅");
+
             await Task.Delay(Timeout.Infinite, stoppingToken);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
-            _logger.LogInformation("UploadFinalizationWorker stopping gracefully");
+            _logger.LogWarning("UploadFinalizationWorker stopping gracefully");
         }
-        finally
+        catch (Exception ex)
         {
-            await processor.StopProcessingAsync();
-            await processor.DisposeAsync();
+            _logger.LogCritical(ex, "❌❌❌ UploadFinalizationWorker FAILED TO START: {Error}", ex.Message);
+            throw;
         }
     }
 
@@ -319,13 +326,30 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                 documentId);
 
             // Step 10: Queue next stage (profile or indexing)
+            _logger.LogWarning(
+                "🔵 DIAGNOSTIC: About to check TriggerAiProcessing for job {JobId}. TriggerAiProcessing={TriggerAi}, AiOptions.ProfileSummary={ProfileSummary}, AiOptions.RagIndex={RagIndex}, AiOptions.DeepAnalysis={DeepAnalysis}",
+                message.JobId,
+                payload.TriggerAiProcessing,
+                payload.AiOptions?.ProfileSummary ?? false,
+                payload.AiOptions?.RagIndex ?? false,
+                payload.AiOptions?.DeepAnalysis ?? false);
+
             if (payload.TriggerAiProcessing)
             {
+                _logger.LogWarning(
+                    "🟢 DIAGNOSTIC: TriggerAiProcessing is TRUE - calling QueueNextStageAsync for job {JobId}",
+                    message.JobId);
                 await QueueNextStageAsync(message, documentId, payload, driveId, itemId, cancellationToken);
+                _logger.LogWarning(
+                    "🟢 DIAGNOSTIC: QueueNextStageAsync completed successfully for job {JobId}",
+                    message.JobId);
             }
             else
             {
                 // No AI processing - mark job as complete
+                _logger.LogWarning(
+                    "🔴 DIAGNOSTIC: TriggerAiProcessing is FALSE for job {JobId} - skipping AI processing",
+                    message.JobId);
                 await UpdateJobStatusAsync(
                     message.JobId,
                     JobStatus.Completed,
@@ -374,6 +398,11 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
 
     private async Task ProcessMessageAsync(ProcessMessageEventArgs args)
     {
+        _logger.LogWarning(
+            "📨 UploadFinalizationWorker: Received message {MessageId}, Delivery Count: {DeliveryCount}",
+            args.Message.MessageId,
+            args.Message.DeliveryCount);
+
         var messageBody = args.Message.Body.ToString();
         OfficeJobMessage? message = null;
 
@@ -389,6 +418,12 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                     deadLetterErrorDescription: "Failed to deserialize message payload");
                 return;
             }
+
+            _logger.LogWarning(
+                "📋 UploadFinalizationWorker: Processing job {JobId}, type {JobType}, attempt {Attempt}",
+                message.JobId,
+                message.JobType,
+                message.Attempt);
 
             // Verify this is the correct job type
             if (message.JobType != OfficeJobType.UploadFinalization)
@@ -731,7 +766,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         var request = new
         {
             Name = $"{metadata.Subject} - {metadata.SentDate:yyyy-MM-dd}",
-            Subject = metadata.Subject,
+            // Subject removed - field doesn't exist in sprk_emailartifact entity (subject is in Name field)
             Sender = metadata.SenderEmail,
             Recipients = metadata.RecipientsJson,
             SentDate = metadata.SentDate,
@@ -856,10 +891,14 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         var nextQueue = aiOptions.ProfileSummary ? ProfileQueueName : IndexingQueueName;
         var nextJobType = aiOptions.ProfileSummary ? OfficeJobType.Profile : OfficeJobType.Indexing;
 
-        _logger.LogDebug(
-            "Queueing next stage {NextJobType} for job {JobId}",
+        _logger.LogInformation(
+            "Queueing next stage {NextJobType} to queue '{QueueName}' for job {JobId}, document {DocumentId}. ProfileSummary={ProfileSummary}, RagIndex={RagIndex}",
             nextJobType,
-            originalMessage.JobId);
+            nextQueue,
+            originalMessage.JobId,
+            documentId,
+            aiOptions.ProfileSummary,
+            aiOptions.RagIndex);
 
         // Get tenant ID from Graph configuration (customer-specific value from App Service settings)
         var tenantId = _graphOptions.TenantId;
