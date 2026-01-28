@@ -25,6 +25,8 @@ alwaysApply: false
 
 **For Dataverse deployments (PCF, solutions, web resources)**: Use the `dataverse-deploy` skill instead.
 
+**Required Reading**: Load [azure-deployment.md](../../constraints/azure-deployment.md) for required App Settings before deploying.
+
 ---
 
 ## Prerequisites
@@ -252,16 +254,26 @@ az webapp config appsettings set `
 
 ### Required App Settings
 
+**CRITICAL - App will NOT start without these:**
+
+| Setting | Example Value | Notes |
+|---------|---------------|-------|
+| `ASPNETCORE_ENVIRONMENT` | `Development` or `Production` | Production requires CORS |
+| `Cors__AllowedOrigins__0` | `https://spaarkedev1.crm.dynamics.com` | **Required for Production** |
+| `Cors__AllowedOrigins__1` | `https://spaarkedev1.api.crm.dynamics.com` | **Required for Production** |
+| `ConnectionStrings__ServiceBus` | `@Microsoft.KeyVault(...)` | Required |
+
+**AI Features (optional):**
+
 | Setting | Example Value |
 |---------|---------------|
 | `Ai__Enabled` | `true` |
 | `Ai__OpenAiEndpoint` | `https://spaarke-openai-dev.openai.azure.com/` |
 | `Ai__OpenAiKey` | `@Microsoft.KeyVault(...)` |
-| `Ai__SummarizeModel` | `gpt-4o-mini` |
 | `DocumentIntelligence__Enabled` | `true` |
 | `DocumentIntelligence__AiSearchEndpoint` | `https://spaarke-search-dev.search.windows.net` |
 
-**Full settings reference**: See `docs/guides/AZURE-DEPLOYMENT-GUIDE.md` → BFF API App Settings
+**Full settings reference**: See [azure-deployment.md](../../constraints/azure-deployment.md) and `docs/guides/AZURE-DEPLOYMENT-GUIDE.md`
 
 ---
 

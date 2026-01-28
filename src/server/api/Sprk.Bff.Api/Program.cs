@@ -413,6 +413,9 @@ if (analysisEnabled && documentIntelligenceEnabled)
     builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.Builder.BuilderToolExecutor>();
     builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.Builder.IBuilderAgentService, Sprk.Bff.Api.Services.Ai.Builder.BuilderAgentService>();
 
+    // Builder Scope Importer - admin utility to import builder scopes from JSON files to Dataverse (ai-playbook-node-builder-r2 Phase 4)
+    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.Builder.BuilderScopeImporter>();
+
     // Model Selector - tiered AI model selection for cost optimization (ai-playbook-node-builder-r2 project)
     // Maps operation types to optimal models: mini for fast ops, o1-mini for reasoning, gpt-4o for generation
     builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.IModelSelector, Sprk.Bff.Api.Services.Ai.ModelSelector>();
@@ -1424,6 +1427,10 @@ if (app.Configuration.GetValue<bool>("DocumentIntelligence:RecordMatchingEnabled
     app.MapRecordMatchEndpoints();
     app.MapRecordMatchingAdminEndpoints();
 }
+
+// Builder Scope Admin endpoints (ai-playbook-node-builder-r2 Phase 4)
+// Allows importing builder scope JSON files into Dataverse
+app.MapBuilderScopeAdminEndpoints();
 
 app.Run();
 
