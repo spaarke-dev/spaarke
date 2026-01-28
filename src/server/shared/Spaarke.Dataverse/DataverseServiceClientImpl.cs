@@ -961,33 +961,65 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
             var fieldName = $"sprk_{prop.Name.ToLower()}";
 
-            if (value is Guid guidValue)
+            try
             {
-                entity[fieldName] = guidValue;
-            }
-            else if (value is int intValue)
-            {
-                // Choice (OptionSet) fields require OptionSetValue wrapper
-                if (fieldName == "sprk_status" || fieldName == "sprk_jobtype")
+                if (value is Guid guidValue)
                 {
-                    entity[fieldName] = new OptionSetValue(intValue);
+                    entity[fieldName] = guidValue;
+                }
+                else if (value is decimal decimalValue)
+                {
+                    entity[fieldName] = decimalValue;
+                }
+                else if (value is double doubleValue)
+                {
+                    entity[fieldName] = doubleValue;
+                }
+                else if (value is long longValue)
+                {
+                    entity[fieldName] = (int)longValue; // Cast long to int for Dataverse
+                }
+                else if (value is int intValue)
+                {
+                    // Choice (OptionSet) fields require OptionSetValue wrapper
+                    if (fieldName == "sprk_status")
+                    {
+                        entity[fieldName] = new OptionSetValue(intValue);
+                        _logger.LogDebug("Set {FieldName} = OptionSetValue({Value})", fieldName, intValue);
+                    }
+                    else if (fieldName == "sprk_jobtype")
+                    {
+                        // Log the JobType value being set for debugging
+                        _logger.LogInformation("Setting sprk_jobtype = {Value} (as OptionSetValue)", intValue);
+                        entity[fieldName] = new OptionSetValue(intValue);
+                    }
+                    else
+                    {
+                        entity[fieldName] = intValue;
+                    }
+                }
+                else if (value is bool boolValue)
+                {
+                    entity[fieldName] = boolValue;
+                }
+                else if (value is DateTime dateValue)
+                {
+                    entity[fieldName] = dateValue;
+                }
+                else if (value is string strValue)
+                {
+                    entity[fieldName] = strValue;
                 }
                 else
                 {
-                    entity[fieldName] = intValue;
+                    _logger.LogWarning("Unhandled property type for {PropName}: {Type}", prop.Name, value.GetType().FullName);
                 }
             }
-            else if (value is bool boolValue)
+            catch (Exception ex)
             {
-                entity[fieldName] = boolValue;
-            }
-            else if (value is DateTime dateValue)
-            {
-                entity[fieldName] = dateValue;
-            }
-            else if (value is string strValue)
-            {
-                entity[fieldName] = strValue;
+                _logger.LogError(ex, "Error setting field {FieldName} with value {Value} of type {Type}",
+                    fieldName, value, value?.GetType().FullName);
+                throw;
             }
         }
 
@@ -1010,33 +1042,63 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
             var fieldName = $"sprk_{prop.Name.ToLower()}";
 
-            if (value is Guid guidValue)
+            try
             {
-                entity[fieldName] = guidValue;
-            }
-            else if (value is int intValue)
-            {
-                // Choice (OptionSet) fields require OptionSetValue wrapper
-                if (fieldName == "sprk_status" || fieldName == "sprk_jobtype")
+                if (value is Guid guidValue)
                 {
-                    entity[fieldName] = new OptionSetValue(intValue);
+                    entity[fieldName] = guidValue;
+                }
+                else if (value is decimal decimalValue)
+                {
+                    entity[fieldName] = decimalValue;
+                }
+                else if (value is double doubleValue)
+                {
+                    entity[fieldName] = doubleValue;
+                }
+                else if (value is long longValue)
+                {
+                    entity[fieldName] = (int)longValue; // Cast long to int for Dataverse
+                }
+                else if (value is int intValue)
+                {
+                    // Choice (OptionSet) fields require OptionSetValue wrapper
+                    if (fieldName == "sprk_status")
+                    {
+                        entity[fieldName] = new OptionSetValue(intValue);
+                    }
+                    else if (fieldName == "sprk_jobtype")
+                    {
+                        _logger.LogDebug("Updating sprk_jobtype = {Value} (as OptionSetValue)", intValue);
+                        entity[fieldName] = new OptionSetValue(intValue);
+                    }
+                    else
+                    {
+                        entity[fieldName] = intValue;
+                    }
+                }
+                else if (value is bool boolValue)
+                {
+                    entity[fieldName] = boolValue;
+                }
+                else if (value is DateTime dateValue)
+                {
+                    entity[fieldName] = dateValue;
+                }
+                else if (value is string strValue)
+                {
+                    entity[fieldName] = strValue;
                 }
                 else
                 {
-                    entity[fieldName] = intValue;
+                    _logger.LogWarning("Unhandled property type for {PropName}: {Type}", prop.Name, value.GetType().FullName);
                 }
             }
-            else if (value is bool boolValue)
+            catch (Exception ex)
             {
-                entity[fieldName] = boolValue;
-            }
-            else if (value is DateTime dateValue)
-            {
-                entity[fieldName] = dateValue;
-            }
-            else if (value is string strValue)
-            {
-                entity[fieldName] = strValue;
+                _logger.LogError(ex, "Error updating field {FieldName} with value {Value} of type {Type}",
+                    fieldName, value, value?.GetType().FullName);
+                throw;
             }
         }
 
