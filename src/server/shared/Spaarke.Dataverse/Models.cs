@@ -137,6 +137,9 @@ public class UpdateDocumentRequest
     /// <summary>Parent Graph item ID (for attachments). Maps to sprk_ParentGraphItemId.</summary>
     public string? ParentGraphItemId { get; set; }
 
+    /// <summary>Parent email's internetMessageId (for attachments from emails). Maps to sprk_emailparentid.</summary>
+    public string? EmailParentId { get; set; }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // Record Association Lookups (Phase 2 - Record Matching)
     // ═══════════════════════════════════════════════════════════════════════════

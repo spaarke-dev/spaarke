@@ -727,7 +727,9 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
       // Determine content type for server API
       let contentType: 'Email' | 'Attachment' | 'Document';
       if (context.hostType === 'outlook') {
-        contentType = selectedAttachmentIds.size > 0 ? 'Attachment' : 'Email';
+        // Always save as Email when in Outlook
+        // The selectedAttachmentFileNames array controls which attachments become Documents
+        contentType = 'Email';
       } else {
         contentType = 'Document';
       }
@@ -794,6 +796,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           fileName: attachment?.name || 'attachment',
           contentType: attachment?.contentType,
           size: attachment?.size,
+          parentEmailId: context.itemId, // Parent email's internetMessageId - server uses this to fetch attachment via Graph API
         };
       } else if (contentType === 'Document') {
         serverRequest.document = {

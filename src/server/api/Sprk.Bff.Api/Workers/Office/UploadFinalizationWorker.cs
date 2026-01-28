@@ -210,6 +210,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                         payload,
                         driveId,
                         itemId,
+                        webUrl: null, // Not available in fallback path
                         message.UserId,
                         cancellationToken);
                 }
@@ -255,6 +256,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
 
                 driveId = uploadResult.DriveId!;
                 itemId = uploadResult.ItemId!;
+                var webUrl = uploadResult.WebUrl;
 
                 await UpdateJobStatusAsync(
                     message.JobId,
@@ -268,6 +270,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                     payload,
                     driveId,
                     itemId,
+                    webUrl,
                     message.UserId,
                     cancellationToken);
             }
@@ -602,6 +605,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         UploadFinalizationPayload payload,
         string driveId,
         string itemId,
+        string? webUrl,
         string userId,
         CancellationToken cancellationToken)
     {
@@ -638,6 +642,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             FileName = payload.FileName,
             FileSize = payload.FileSize,
             MimeType = payload.MimeType,
+            FilePath = webUrl,
             HasFile = true
         };
 
@@ -1045,6 +1050,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                         driveId,
                         containerId,
                         payload.EmailMetadata?.ConversationId,
+                        payload.EmailMetadata?.InternetMessageId,
                         cancellationToken);
 
                     uploadedCount++;
@@ -1093,6 +1099,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         string driveId,
         string containerId,
         string? conversationIndex,
+        string? internetMessageId,
         CancellationToken cancellationToken)
     {
         if (attachment.Content == null || attachment.Content.Length == 0)
@@ -1158,7 +1165,10 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             SourceType = SourceTypeEmailAttachment,
 
             // Copy ConversationIndex from parent email to enable same_thread queries
-            EmailConversationIndex = conversationIndex
+            EmailConversationIndex = conversationIndex,
+
+            // Copy parent email's internetMessageId for relationship tracking
+            EmailParentId = internetMessageId
         };
 
         await _dataverseService.UpdateDocumentAsync(childDocumentIdStr, updateRequest, cancellationToken);

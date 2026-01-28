@@ -300,6 +300,13 @@ public record AttachmentMetadata
     /// Parent email ID if saving from an email context.
     /// </summary>
     public Guid? ParentEmailArtifactId { get; init; }
+
+    /// <summary>
+    /// Parent email's internetMessageId (for fetching attachment content via Graph API).
+    /// When provided, server will fetch the email via Graph API and extract this attachment's content.
+    /// </summary>
+    [MaxLength(998)]
+    public string? ParentEmailId { get; init; }
 }
 
 /// <summary>

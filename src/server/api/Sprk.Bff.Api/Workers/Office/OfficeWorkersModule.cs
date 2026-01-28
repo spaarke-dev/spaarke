@@ -1,6 +1,7 @@
 using Azure.Messaging.ServiceBus;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Services.Email;
 
 namespace Sprk.Bff.Api.Workers.Office;
 
@@ -26,6 +27,10 @@ public static class OfficeWorkersModule
     /// </remarks>
     public static IServiceCollection AddOfficeWorkers(this IServiceCollection services)
     {
+        // Register worker dependencies
+        services.AddSingleton<IEmailToEmlConverter, EmailToEmlConverter>();
+        services.AddSingleton<AttachmentFilterService>();
+
         // Register job handlers as singleton (stateless handlers)
         services.AddSingleton<IOfficeJobHandler, UploadFinalizationWorker>();
         services.AddSingleton<IOfficeJobHandler, ProfileSummaryWorker>();

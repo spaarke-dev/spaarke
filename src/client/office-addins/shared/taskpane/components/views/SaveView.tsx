@@ -238,7 +238,6 @@ export const SaveView: React.FC<SaveViewProps> = ({
         recipients={recipients}
         sentDate={sentDate}
         documentUrl={documentUrl}
-        {/* emailBody removed - retrieved server-side via Graph API */}
         getAccessToken={getAccessToken || defaultGetAccessToken}
         apiBaseUrl={apiBaseUrl}
         onComplete={onComplete}

@@ -95,6 +95,12 @@ public class OfficeService : IOfficeService
             request = await EnrichEmailFromGraphAsync(request, httpContext, cancellationToken);
         }
 
+        // Fetch attachment content from Graph API if missing (single attachment save)
+        if (request.ContentType == SaveContentType.Attachment && request.Attachment != null)
+        {
+            request = await EnrichAttachmentFromGraphAsync(request, httpContext, cancellationToken);
+        }
+
         try
         {
             // Step 1: Generate or use provided idempotency key
@@ -301,6 +307,7 @@ public class OfficeService : IOfficeService
                     request,
                     driveId,
                     itemId,
+                    webUrl,
                     fileName,
                     fileSize,
                     userId,
@@ -887,6 +894,104 @@ public class OfficeService : IOfficeService
     }
 
     /// <summary>
+    /// Enriches attachment metadata by fetching content from Graph API.
+    /// Uses OBO authentication to access user's mailbox and extract the specific attachment.
+    /// </summary>
+    /// <param name="request">Save request to enrich with attachment content.</param>
+    /// <param name="httpContext">HTTP context for OBO authentication.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Updated save request with attachment content from Graph API.</returns>
+    private async Task<SaveRequest> EnrichAttachmentFromGraphAsync(
+        SaveRequest request,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        // Only fetch if content is missing and we have parent email ID
+        if (!string.IsNullOrEmpty(request.Attachment?.ContentBase64) || string.IsNullOrEmpty(request.Attachment?.ParentEmailId))
+        {
+            return request; // Content already present or no parent email ID
+        }
+
+        try
+        {
+            _logger.LogInformation(
+                "Fetching attachment content from Graph API for attachment {FileName} from message {MessageId}",
+                request.Attachment.FileName,
+                request.Attachment.ParentEmailId);
+
+            // Get Graph client with OBO auth
+            var graphClient = await _graphClientFactory.ForUserAsync(httpContext, cancellationToken);
+
+            // Fetch message with attachments
+            var message = await graphClient.Me.Messages[request.Attachment.ParentEmailId]
+                .GetAsync(requestConfig =>
+                {
+                    requestConfig.QueryParameters.Expand = new[] { "attachments" };
+                }, cancellationToken);
+
+            if (message == null || message.Attachments == null)
+            {
+                _logger.LogWarning(
+                    "Graph API returned null message or no attachments for {MessageId}",
+                    request.Attachment.ParentEmailId);
+                return request;
+            }
+
+            // Find the matching attachment by filename (case-insensitive)
+            FileAttachment? matchingAttachment = null;
+            foreach (var attachment in message.Attachments)
+            {
+                if (attachment is FileAttachment fileAttachment &&
+                    string.Equals(fileAttachment.Name, request.Attachment.FileName, StringComparison.OrdinalIgnoreCase))
+                {
+                    matchingAttachment = fileAttachment;
+                    break;
+                }
+            }
+
+            if (matchingAttachment?.ContentBytes == null)
+            {
+                _logger.LogWarning(
+                    "Attachment {FileName} not found in message {MessageId} or has no content",
+                    request.Attachment.FileName,
+                    request.Attachment.ParentEmailId);
+                return request;
+            }
+
+            // Convert to base64
+            var contentBase64 = Convert.ToBase64String(matchingAttachment.ContentBytes);
+
+            _logger.LogInformation(
+                "Retrieved attachment content from Graph API: {FileName}, Size={Size} bytes",
+                request.Attachment.FileName,
+                matchingAttachment.ContentBytes.Length);
+
+            // Return updated request with attachment content
+            return request with
+            {
+                Attachment = request.Attachment with
+                {
+                    ContentBase64 = contentBase64,
+                    Size = request.Attachment.Size ?? matchingAttachment.ContentBytes.Length
+                }
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Failed to fetch attachment content from Graph API for {FileName} from message {MessageId}",
+                request.Attachment?.FileName,
+                request.Attachment?.ParentEmailId);
+
+            // Don't throw - return error to user
+            throw new InvalidOperationException(
+                $"Failed to retrieve attachment content: {ex.Message}. Please try again.",
+                ex);
+        }
+    }
+
+    /// <summary>
     /// Queues a job to the Service Bus for background processing.
     /// </summary>
     private async Task QueueUploadFinalizationAsync(
@@ -1068,6 +1173,7 @@ public class OfficeService : IOfficeService
         SaveRequest request,
         string driveId,
         string itemId,
+        string? webUrl,
         string fileName,
         long fileSize,
         string userId,
@@ -1103,7 +1209,7 @@ public class OfficeService : IOfficeService
             FileSize = fileSize,
             MimeType = GetMimeType(request),
             HasFile = true,
-            FilePath = request.FolderPath  // Maps to sprk_filepath in Dataverse
+            FilePath = webUrl  // SharePoint Embedded web URL (maps to sprk_filepath in Dataverse)
         };
 
         // Set entity association lookup based on target entity

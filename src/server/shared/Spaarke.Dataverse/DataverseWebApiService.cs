@@ -404,6 +404,7 @@ public class DataverseWebApiService : IDataverseService
         // Note: sprk_parentdocumentid was removed from schema - use ParentDocumentLookup instead
         if (request.ParentFileName != null) payload["sprk_parentfilename"] = request.ParentFileName;
         if (request.ParentGraphItemId != null) payload["sprk_parentgraphitemid"] = request.ParentGraphItemId;
+        if (request.EmailParentId != null) payload["sprk_emailparentid"] = request.EmailParentId;
         // ParentDocumentLookup uses @odata.bind for lookup fields
         if (request.ParentDocumentLookup.HasValue)
             payload["sprk_ParentDocument@odata.bind"] = $"/sprk_documents({request.ParentDocumentLookup.Value})";
