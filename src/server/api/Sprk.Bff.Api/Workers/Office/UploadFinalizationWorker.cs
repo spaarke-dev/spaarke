@@ -887,69 +887,55 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     {
         var aiOptions = payload.AiOptions ?? new AiProcessingOptions();
 
-        // Determine which queue to use
-        var nextQueue = aiOptions.ProfileSummary ? ProfileQueueName : IndexingQueueName;
-        var nextJobType = aiOptions.ProfileSummary ? OfficeJobType.Profile : OfficeJobType.Indexing;
-
-        _logger.LogInformation(
-            "Queueing next stage {NextJobType} to queue '{QueueName}' for job {JobId}, document {DocumentId}. ProfileSummary={ProfileSummary}, RagIndex={RagIndex}",
-            nextJobType,
-            nextQueue,
+        _logger.LogWarning(
+            "🔵 Queueing AI analysis to sdap-jobs queue (AppOnlyDocumentAnalysis) for job {JobId}, document {DocumentId}. ProfileSummary={ProfileSummary}, RagIndex={RagIndex}",
             originalMessage.JobId,
             documentId,
             aiOptions.ProfileSummary,
             aiOptions.RagIndex);
 
-        // Get tenant ID from Graph configuration (customer-specific value from App Service settings)
-        var tenantId = _graphOptions.TenantId;
-
-        var nextMessage = new OfficeJobMessage
+        // Use the SAME proven AppOnlyDocumentAnalysisJobHandler that email-to-document uses
+        // Queue to sdap-jobs (not office-profile) to reuse existing working infrastructure
+        var analysisJob = new Services.Jobs.JobContract
         {
-            JobId = originalMessage.JobId,
-            JobType = nextJobType,
+            JobId = Guid.NewGuid(),
+            JobType = "AppOnlyDocumentAnalysis", // Same as EmailToDocumentJobHandler uses
             SubjectId = documentId.ToString(),
             CorrelationId = originalMessage.CorrelationId,
-            IdempotencyKey = $"{originalMessage.IdempotencyKey}-{nextJobType}",
+            IdempotencyKey = $"analysis-{documentId}-documentprofile",
             Attempt = 1,
             MaxAttempts = 3,
-            UserId = originalMessage.UserId,
-            Payload = JsonSerializer.SerializeToElement(new
+            CreatedAt = DateTimeOffset.UtcNow,
+            Payload = JsonDocument.Parse(JsonSerializer.Serialize(new
             {
                 DocumentId = documentId,
-                DriveId = driveId,
-                ItemId = itemId,
-                FileName = payload.FileName ?? "unknown",
-                TenantId = tenantId,
-                ProfileSummary = aiOptions.ProfileSummary,
-                RagIndex = aiOptions.RagIndex,
-                DeepAnalysis = aiOptions.DeepAnalysis
-            })
+                Source = "OfficeAddin",
+                EnqueuedAt = DateTimeOffset.UtcNow
+            }))
         };
 
-        var sender = _serviceBusClient.CreateSender(nextQueue);
+        var sender = _serviceBusClient.CreateSender(_serviceBusOptions.QueueName); // sdap-jobs queue
 
-        var sbMessage = new ServiceBusMessage(JsonSerializer.Serialize(nextMessage, JsonOptions))
+        var sbMessage = new ServiceBusMessage(JsonSerializer.Serialize(analysisJob))
         {
-            MessageId = $"{nextMessage.JobId}-{nextJobType}",
-            CorrelationId = nextMessage.CorrelationId,
+            MessageId = analysisJob.JobId.ToString(),
+            CorrelationId = analysisJob.CorrelationId,
             ContentType = "application/json",
-            Subject = nextJobType.ToString(),
+            Subject = analysisJob.JobType,
             ApplicationProperties =
             {
-                ["JobType"] = nextJobType.ToString(),
-                ["Attempt"] = 1,
-                ["UserId"] = nextMessage.UserId,
-                ["DocumentId"] = documentId.ToString()
+                ["JobId"] = analysisJob.JobId.ToString(),
+                ["JobType"] = analysisJob.JobType,
+                ["SubjectId"] = analysisJob.SubjectId
             }
         };
 
         await sender.SendMessageAsync(sbMessage, cancellationToken);
         await sender.DisposeAsync();
 
-        _logger.LogInformation(
-            "Queued {NextJobType} stage for job {JobId}, document {DocumentId}",
-            nextJobType,
-            originalMessage.JobId,
+        _logger.LogWarning(
+            "✅ Queued AI analysis job {AnalysisJobId} for document {DocumentId} to sdap-jobs (AppOnlyDocumentAnalysis)",
+            analysisJob.JobId,
             documentId);
     }
 
