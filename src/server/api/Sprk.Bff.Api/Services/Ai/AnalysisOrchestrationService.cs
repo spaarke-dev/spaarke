@@ -1066,6 +1066,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             var dataverseAnalysisId = await _dataverseService.CreateAnalysisAsync(
                 documentId,
                 $"Document Profile - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
+                playbookId: null,
                 cancellationToken);
 
             // Step 2: Store outputs in sprk_analysisoutput (critical path)

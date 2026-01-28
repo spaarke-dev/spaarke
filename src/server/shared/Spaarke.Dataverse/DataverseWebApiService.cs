@@ -251,7 +251,7 @@ public class DataverseWebApiService : IDataverseService
         }
     }
 
-    public async Task<Guid> CreateAnalysisAsync(Guid documentId, string? name = null, CancellationToken ct = default)
+    public async Task<Guid> CreateAnalysisAsync(Guid documentId, string? name = null, Guid? playbookId = null, CancellationToken ct = default)
     {
         await EnsureAuthenticatedAsync(ct);
 
@@ -261,6 +261,12 @@ public class DataverseWebApiService : IDataverseService
             ["sprk_documentid@odata.bind"] = $"/sprk_documents({documentId})",
             ["statuscode"] = 1 // Active
         };
+
+        // Set playbook lookup if provided
+        if (playbookId.HasValue)
+        {
+            payload["sprk_playbookid@odata.bind"] = $"/sprk_analysisplaybooks({playbookId.Value})";
+        }
 
         var response = await _httpClient.PostAsJsonAsync("sprk_analysises", payload, ct);
         response.EnsureSuccessStatusCode();

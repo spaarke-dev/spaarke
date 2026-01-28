@@ -150,18 +150,36 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
                 "Extracted {CharCount} characters from document {DocumentId}",
                 extractionResult.Text.Length, documentId);
 
-            // 5a. Create Analysis record in Dataverse (best effort - don't block on failure)
+            // 5a. Load playbook by name to get its ID for the Analysis record
+            Guid? playbookId = null;
+            try
+            {
+                var playbook = await _playbookService.GetByNameAsync(effectivePlaybookName, cancellationToken);
+                playbookId = playbook.Id;
+                _logger.LogInformation(
+                    "Loaded playbook '{PlaybookName}' with ID {PlaybookId}",
+                    effectivePlaybookName, playbookId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Failed to load playbook '{PlaybookName}'. Analysis record will be created without playbook reference.",
+                    effectivePlaybookName);
+            }
+
+            // 5b. Create Analysis record in Dataverse (best effort - don't block on failure)
             Guid? dataverseAnalysisId = null;
             try
             {
                 dataverseAnalysisId = await _dataverseService.CreateAnalysisAsync(
                     documentId,
                     $"Document Profile - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
+                    playbookId,
                     cancellationToken);
 
                 _logger.LogInformation(
-                    "Created Analysis record {AnalysisId} for document {DocumentId}",
-                    dataverseAnalysisId, documentId);
+                    "Created Analysis record {AnalysisId} for document {DocumentId} with playbook {PlaybookId}",
+                    dataverseAnalysisId, documentId, playbookId);
             }
             catch (Exception ex)
             {
@@ -781,6 +799,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
                 dataverseAnalysisId = await _dataverseService.CreateAnalysisAsync(
                     mainDocumentId,
                     $"Email Analysis - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
+                    playbookId: null,
                     cancellationToken);
 
                 _logger.LogInformation(

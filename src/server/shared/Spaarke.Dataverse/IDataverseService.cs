@@ -12,7 +12,7 @@ public interface IDataverseService
     // Analysis operations
     Task<AnalysisEntity?> GetAnalysisAsync(string id, CancellationToken ct = default);
     Task<AnalysisActionEntity?> GetAnalysisActionAsync(string id, CancellationToken ct = default);
-    Task<Guid> CreateAnalysisAsync(Guid documentId, string? name = null, CancellationToken ct = default);
+    Task<Guid> CreateAnalysisAsync(Guid documentId, string? name = null, Guid? playbookId = null, CancellationToken ct = default);
     Task<Guid> CreateAnalysisOutputAsync(AnalysisOutputEntity output, CancellationToken ct = default);
     Task UpdateDocumentFieldsAsync(string documentId, Dictionary<string, object?> fields, CancellationToken ct = default);
     Task UpdateDocumentAsync(string id, UpdateDocumentRequest request, CancellationToken ct = default);

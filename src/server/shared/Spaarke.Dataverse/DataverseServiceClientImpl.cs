@@ -177,7 +177,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         };
     }
 
-    public async Task<Guid> CreateAnalysisAsync(Guid documentId, string? name = null, CancellationToken ct = default)
+    public async Task<Guid> CreateAnalysisAsync(Guid documentId, string? name = null, Guid? playbookId = null, CancellationToken ct = default)
     {
         var analysis = new Entity("sprk_analysis")
         {
@@ -186,8 +186,15 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             ["statuscode"] = new OptionSetValue(1) // Active
         };
 
+        // Set playbook lookup if provided
+        if (playbookId.HasValue)
+        {
+            analysis["sprk_playbookid"] = new EntityReference("sprk_analysisplaybook", playbookId.Value);
+        }
+
         var analysisId = await _serviceClient.CreateAsync(analysis, ct);
-        _logger.LogInformation("[DATAVERSE] Created analysis {AnalysisId} for document {DocumentId}", analysisId, documentId);
+        _logger.LogInformation("[DATAVERSE] Created analysis {AnalysisId} for document {DocumentId} with playbook {PlaybookId}",
+            analysisId, documentId, playbookId);
         return analysisId;
     }
 
