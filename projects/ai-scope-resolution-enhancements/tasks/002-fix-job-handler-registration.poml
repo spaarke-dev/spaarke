@@ -7,6 +7,8 @@
     <estimate>2-3 hours</estimate>
     <dependencies>001</dependencies>
     <parallel-group>none</parallel-group>
+    <status>completed</status>
+    <completed>2026-01-29</completed>
   </metadata>
 
   <prompt>
@@ -87,4 +89,34 @@
     <criterion>JobType property = "AppOnlyDocumentAnalysis"</criterion>
     <criterion>Project builds without errors</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <note date="2026-01-29">
+      ## Fix Applied
+
+      **Root Cause (from Task 001)**: IToolHandlerRegistry was conditionally registered.
+      When ToolFramework:Enabled = false, AppOnlyAnalysisService couldn't be instantiated,
+      which caused AppOnlyDocumentAnalysisJobHandler to be excluded from the handler list.
+
+      **Changes Made to Program.cs**:
+
+      1. **Startup Diagnostics** (after `var app = builder.Build()`):
+         - Logs all registered IJobHandler types at startup
+         - Warns if expected handlers are missing
+         - Helps diagnose "NoHandler" errors quickly
+
+      2. **Fallback IToolHandlerRegistry Registration** (in else block for ToolFramework):
+         - Always registers IToolHandlerRegistry even when framework disabled
+         - Ensures AppOnlyAnalysisService can be instantiated
+         - Prevents silent DI failures
+
+      **Build Result**: ✅ Success (0 errors, 1 unrelated warning)
+
+      **Acceptance Criteria**:
+      - ✅ Handler exists at Services/Jobs/Handlers/AppOnlyDocumentAnalysisJobHandler.cs
+      - ✅ Handler registered at Program.cs:622 + fallback IToolHandlerRegistry ensures it works
+      - ✅ JobType = "AppOnlyDocumentAnalysis" (verified in Task 001)
+      - ✅ Build succeeds
+    </note>
+  </notes>
 </task>

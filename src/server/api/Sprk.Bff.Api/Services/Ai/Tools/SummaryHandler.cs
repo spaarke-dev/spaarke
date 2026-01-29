@@ -32,6 +32,51 @@ public sealed class SummaryHandler : IAnalysisToolHandler
     private readonly ITextChunkingService _textChunkingService;
     private readonly ILogger<SummaryHandler> _logger;
 
+    /// <summary>JSON Schema (Draft 07) for configuration validation.</summary>
+    private static readonly object ConfigSchema = new
+    {
+        schema = "https://json-schema.org/draft-07/schema#",
+        title = "Summary Generator Configuration",
+        type = "object",
+        properties = new
+        {
+            max_length = new
+            {
+                type = "integer",
+                description = "Maximum summary length in words",
+                minimum = 50,
+                maximum = 5000,
+                @default = 500
+            },
+            format = new
+            {
+                type = "string",
+                description = "Output format: paragraph, bullets, or structured",
+                @enum = new[] { "paragraph", "bullets", "structured" },
+                @default = "structured"
+            },
+            include_sections = new
+            {
+                type = "array",
+                description = "Sections to include in summary",
+                items = new { type = "string" },
+                @default = new[] { "executive_summary", "key_terms", "obligations", "notable_provisions" }
+            },
+            use_plain_language = new
+            {
+                type = "boolean",
+                description = "Use plain language accessible to non-lawyers",
+                @default = true
+            },
+            highlight_time_sensitive = new
+            {
+                type = "boolean",
+                description = "Highlight time-sensitive items",
+                @default = true
+            }
+        }
+    };
+
     public SummaryHandler(
         IOpenAiClient openAiClient,
         ITextChunkingService textChunkingService,
@@ -59,7 +104,8 @@ public sealed class SummaryHandler : IAnalysisToolHandler
                 DefaultValue: new[] { "executive_summary", "key_terms", "obligations", "notable_provisions" }),
             new ToolParameterDefinition("use_plain_language", "Use plain language accessible to non-lawyers", ToolParameterType.Boolean, Required: false, DefaultValue: true),
             new ToolParameterDefinition("highlight_time_sensitive", "Highlight time-sensitive items", ToolParameterType.Boolean, Required: false, DefaultValue: true)
-        });
+        },
+        ConfigurationSchema: ConfigSchema);
 
     /// <inheritdoc />
     public IReadOnlyList<ToolType> SupportedToolTypes { get; } = new[] { ToolType.Summary };

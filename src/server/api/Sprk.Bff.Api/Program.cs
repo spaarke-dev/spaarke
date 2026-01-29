@@ -510,6 +510,8 @@ if (analysisEnabled && documentIntelligenceEnabled)
     builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.ITextChunkingService, Sprk.Bff.Api.Services.Ai.TextChunkingService>();
 
     // Tool Framework - Dynamic tool loading for AI analysis tools
+    // NOTE: IToolHandlerRegistry MUST always be registered because AppOnlyAnalysisService
+    // depends on it. If the framework is disabled, we still register the registry (with no handlers).
     var toolFrameworkOptions = builder.Configuration.GetSection(Sprk.Bff.Api.Configuration.ToolFrameworkOptions.SectionName);
     if (toolFrameworkOptions.GetValue<bool>("Enabled", true))
     {
@@ -518,7 +520,10 @@ if (analysisEnabled && documentIntelligenceEnabled)
     }
     else
     {
-        Console.WriteLine("⚠ Tool framework disabled (ToolFramework:Enabled = false)");
+        // Register IToolHandlerRegistry even when framework disabled - required by AppOnlyAnalysisService
+        // Without this, job handlers that depend on AppOnlyAnalysisService will fail to instantiate
+        builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IToolHandlerRegistry, Sprk.Bff.Api.Services.Ai.ToolHandlerRegistry>();
+        Console.WriteLine("⚠ Tool framework disabled (ToolFramework:Enabled = false), but IToolHandlerRegistry registered for job handlers");
     }
 
     // Semantic Search - Hybrid search for AI knowledge base (ADR-013)
@@ -1095,6 +1100,87 @@ Console.WriteLine("✓ Circuit breaker registry enabled");
 
 var app = builder.Build();
 
+// ============================================================================
+// STARTUP DIAGNOSTICS - Log registered job handlers for troubleshooting
+// ============================================================================
+// This helps diagnose "NoHandler" dead-letter errors by showing which handlers
+// are actually available at runtime. If a handler's dependency chain fails,
+// it won't appear in this list.
+using (var startupScope = app.Services.CreateScope())
+{
+    var startupLogger = startupScope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+
+    // Test critical dependencies individually for better error diagnosis
+    startupLogger.LogInformation("🔍 Testing critical service dependencies...");
+
+    // Test IToolHandlerRegistry (required by AppOnlyAnalysisService)
+    try
+    {
+        var toolRegistry = startupScope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Ai.IToolHandlerRegistry>();
+        startupLogger.LogInformation("  ✅ IToolHandlerRegistry: {Status}", toolRegistry != null ? "Available" : "NULL");
+    }
+    catch (Exception ex)
+    {
+        startupLogger.LogError(ex, "  ❌ IToolHandlerRegistry resolution failed: {Error}", ex.Message);
+    }
+
+    // Test IAppOnlyAnalysisService (required by AppOnlyDocumentAnalysisJobHandler)
+    try
+    {
+        var analysisService = startupScope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Ai.IAppOnlyAnalysisService>();
+        startupLogger.LogInformation("  ✅ IAppOnlyAnalysisService: {Status}", analysisService != null ? "Available" : "NULL");
+    }
+    catch (Exception ex)
+    {
+        startupLogger.LogError(ex, "  ❌ IAppOnlyAnalysisService resolution failed: {Error}", ex.Message);
+    }
+
+    // Test AppOnlyDocumentAnalysisJobHandler directly
+    try
+    {
+        var handler = startupScope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Jobs.Handlers.AppOnlyDocumentAnalysisJobHandler>();
+        startupLogger.LogInformation("  ✅ AppOnlyDocumentAnalysisJobHandler: {Status}", handler != null ? "Available" : "NULL");
+    }
+    catch (Exception ex)
+    {
+        startupLogger.LogError(ex, "  ❌ AppOnlyDocumentAnalysisJobHandler resolution failed: {Error}", ex.Message);
+    }
+
+    // Now enumerate all handlers
+    try
+    {
+        var handlers = startupScope.ServiceProvider.GetServices<Sprk.Bff.Api.Services.Jobs.IJobHandler>().ToList();
+        var handlerTypes = string.Join(", ", handlers.Select(h => h.JobType));
+        startupLogger.LogInformation(
+            "📋 Job handlers registered: {Count} handlers available: [{HandlerTypes}]",
+            handlers.Count, handlerTypes);
+
+        // Validate expected handlers are present
+        var expectedHandlers = new[] { "AppOnlyDocumentAnalysis", "DocumentProcessing", "EmailToDocument", "ProfileSummary", "RagIndexing" };
+        var missingHandlers = expectedHandlers.Where(e => !handlers.Any(h => h.JobType == e)).ToList();
+        if (missingHandlers.Any())
+        {
+            startupLogger.LogWarning(
+                "⚠️ Missing expected job handlers: [{MissingHandlers}]. Check DI registration and dependency chain.",
+                string.Join(", ", missingHandlers));
+        }
+    }
+    catch (Exception ex)
+    {
+        startupLogger.LogError(ex,
+            "❌ Failed to enumerate job handlers at startup. This may cause 'NoHandler' dead-letter errors. Error: {Error}",
+            ex.Message);
+
+        // Log full exception chain for diagnosis
+        var inner = ex.InnerException;
+        while (inner != null)
+        {
+            startupLogger.LogError("  → Inner: {InnerError}", inner.Message);
+            inner = inner.InnerException;
+        }
+    }
+}
+
 // ---- Middleware Pipeline ----
 
 // Cross-cutting: CORS
@@ -1463,6 +1549,7 @@ if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
     app.MapNodeEndpoints();
     app.MapPlaybookRunEndpoints();
     app.MapModelEndpoints();
+    app.MapHandlerEndpoints(); // Handler Discovery API (ai-scope-resolution-enhancements project)
 }
 
 // RAG endpoints for knowledge base operations (R3)

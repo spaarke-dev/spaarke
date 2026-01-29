@@ -7,6 +7,8 @@
     <estimate>2-3 hours</estimate>
     <dependencies>none</dependencies>
     <parallel-group>none</parallel-group>
+    <status>completed</status>
+    <completed>2026-01-29</completed>
   </metadata>
 
   <prompt>
@@ -95,4 +97,25 @@
     <criterion>DI registration status confirmed</criterion>
     <criterion>Clear next steps documented for task 002</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <note date="2026-01-29">
+      ## Investigation Results
+
+      **Root Cause**: IToolHandlerRegistry is conditionally registered (ToolFramework:Enabled).
+      If disabled, AppOnlyAnalysisService fails to instantiate, causing handler to be excluded.
+
+      **Handler Status**:
+      - Handler EXISTS at Services/Jobs/Handlers/AppOnlyDocumentAnalysisJobHandler.cs
+      - Handler IS REGISTERED at Program.cs:622
+      - JobType MATCHES exactly: "AppOnlyDocumentAnalysis"
+
+      **Dependency Chain Issue**:
+      AppOnlyDocumentAnalysisJobHandler → IAppOnlyAnalysisService → IToolHandlerRegistry (conditional)
+
+      **Documentation**: See notes/001-investigation-findings.md for full analysis
+
+      **Recommended Fix**: Ensure IToolHandlerRegistry is always registered, or add startup diagnostics.
+    </note>
+  </notes>
 </task>

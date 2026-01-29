@@ -73,12 +73,14 @@ public interface IAnalysisToolHandler
 /// <param name="Version">Handler version for compatibility tracking.</param>
 /// <param name="SupportedInputTypes">Content types this handler can process (e.g., "text/plain", "application/pdf").</param>
 /// <param name="Parameters">Parameter definitions for configuration.</param>
+/// <param name="ConfigurationSchema">JSON Schema (Draft 07) for configuration validation. Null if no schema defined.</param>
 public record ToolHandlerMetadata(
     string Name,
     string Description,
     string Version,
     IReadOnlyList<string> SupportedInputTypes,
-    IReadOnlyList<ToolParameterDefinition> Parameters);
+    IReadOnlyList<ToolParameterDefinition> Parameters,
+    object? ConfigurationSchema = null);
 
 /// <summary>
 /// Defines a configuration parameter for a tool handler.

@@ -31,6 +31,44 @@ public sealed class FinancialCalculatorHandler : IAnalysisToolHandler
     private readonly ITextChunkingService _textChunkingService;
     private readonly ILogger<FinancialCalculatorHandler> _logger;
 
+    /// <summary>JSON Schema (Draft 07) for configuration validation.</summary>
+    private static readonly object ConfigSchema = new
+    {
+        schema = "https://json-schema.org/draft-07/schema#",
+        title = "Financial Calculator Configuration",
+        type = "object",
+        properties = new
+        {
+            currencies = new
+            {
+                type = "array",
+                description = "Currencies to detect",
+                items = new { type = "string" },
+                @default = new[] { "USD", "EUR", "GBP" }
+            },
+            include_payment_terms = new
+            {
+                type = "boolean",
+                description = "Extract payment terms",
+                @default = true
+            },
+            include_totals = new
+            {
+                type = "boolean",
+                description = "Calculate totals by category",
+                @default = true
+            },
+            max_items = new
+            {
+                type = "integer",
+                description = "Maximum financial items to return",
+                minimum = 1,
+                maximum = 500,
+                @default = 100
+            }
+        }
+    };
+
     public FinancialCalculatorHandler(
         IOpenAiClient openAiClient,
         ITextChunkingService textChunkingService,
@@ -57,7 +95,8 @@ public sealed class FinancialCalculatorHandler : IAnalysisToolHandler
             new ToolParameterDefinition("include_payment_terms", "Extract payment terms", ToolParameterType.Boolean, Required: false, DefaultValue: true),
             new ToolParameterDefinition("include_totals", "Calculate totals by category", ToolParameterType.Boolean, Required: false, DefaultValue: true),
             new ToolParameterDefinition("max_items", "Maximum financial items to return", ToolParameterType.Integer, Required: false, DefaultValue: 100)
-        });
+        },
+        ConfigurationSchema: ConfigSchema);
 
     /// <inheritdoc />
     public IReadOnlyList<ToolType> SupportedToolTypes { get; } = new[] { ToolType.FinancialCalculator };

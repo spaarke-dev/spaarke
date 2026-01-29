@@ -34,6 +34,52 @@ public sealed class DocumentClassifierHandler : IAnalysisToolHandler
     private readonly IRagService? _ragService;
     private readonly ILogger<DocumentClassifierHandler> _logger;
 
+    /// <summary>JSON Schema (Draft 07) for configuration validation.</summary>
+    private static readonly object ConfigSchema = new
+    {
+        schema = "https://json-schema.org/draft-07/schema#",
+        title = "Document Classifier Configuration",
+        type = "object",
+        properties = new
+        {
+            categories = new
+            {
+                type = "array",
+                description = "Document categories to classify into",
+                items = new { type = "string" },
+                @default = new[] { "NDA", "MSA", "SOW", "Amendment", "SLA", "License", "EmploymentContract", "LeaseAgreement", "PurchaseAgreement", "Invoice", "Proposal", "Report", "Memo", "Policy", "Specification" }
+            },
+            useRagExamples = new
+            {
+                type = "boolean",
+                description = "Use RAG to retrieve example documents for classification",
+                @default = false
+            },
+            ragExampleCount = new
+            {
+                type = "integer",
+                description = "Number of RAG examples to retrieve (1-5)",
+                minimum = 1,
+                maximum = 5,
+                @default = 3
+            },
+            minConfidence = new
+            {
+                type = "number",
+                description = "Minimum confidence threshold (0.0-1.0)",
+                minimum = 0.0,
+                maximum = 1.0,
+                @default = 0.5
+            },
+            includeSecondaryClassifications = new
+            {
+                type = "boolean",
+                description = "Include alternative classifications",
+                @default = true
+            }
+        }
+    };
+
     public DocumentClassifierHandler(
         IOpenAiClient openAiClient,
         ILogger<DocumentClassifierHandler> logger,
@@ -61,7 +107,8 @@ public sealed class DocumentClassifierHandler : IAnalysisToolHandler
             new ToolParameterDefinition("ragExampleCount", "Number of RAG examples to retrieve (1-5)", ToolParameterType.Integer, Required: false, DefaultValue: 3),
             new ToolParameterDefinition("minConfidence", "Minimum confidence threshold (0.0-1.0)", ToolParameterType.Decimal, Required: false, DefaultValue: 0.5),
             new ToolParameterDefinition("includeSecondaryClassifications", "Include alternative classifications", ToolParameterType.Boolean, Required: false, DefaultValue: true)
-        });
+        },
+        ConfigurationSchema: ConfigSchema);
 
     /// <inheritdoc />
     public IReadOnlyList<ToolType> SupportedToolTypes { get; } = new[] { ToolType.DocumentClassifier };

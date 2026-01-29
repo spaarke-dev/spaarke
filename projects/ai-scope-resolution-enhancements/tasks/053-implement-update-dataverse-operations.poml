@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="053" project="ai-scope-resolution-enhancements">
+  <metadata>
+    <title>Implement Update*Async Dataverse Operations</title>
+    <phase>5a</phase>
+    <tags>bff-api, scope-resolution, dataverse, crud</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>052</dependencies>
+    <parallel-group>none</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Replace stub dictionary updates in Update*Async methods with Dataverse Web API PATCH operations.
+    </goal>
+    <context>
+      Four Update methods need migration:
+      - UpdateActionAsync → PATCH sprk_systemprompts(id)
+      - UpdateSkillAsync → PATCH sprk_promptfragments(id)
+      - UpdateKnowledgeAsync → PATCH sprk_contents(id)
+      - UpdateToolAsync → PATCH sprk_analysistools(id)
+
+      Each must:
+      - Verify entity exists (call Get*Async first)
+      - Validate ownership (only customer-owned can be updated)
+      - Apply partial updates (only non-null fields)
+      - Return updated entity
+    </context>
+    <constraints>
+      - Preserve ownership validation (ValidateOwnership)
+      - Use PATCH for partial updates
+      - Only include changed fields in payload
+      - Handle 404 with KeyNotFoundException
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">
+      Create helper method BuildUpdatePayload:
+      - Only include non-null request fields
+      - Handle lookup field updates
+    </step>
+    <step order="2">Implement UpdateActionAsync with PATCH</step>
+    <step order="3">Implement UpdateSkillAsync with PATCH</step>
+    <step order="4">Implement UpdateKnowledgeAsync with PATCH</step>
+    <step order="5">Implement UpdateToolAsync with PATCH</step>
+    <step order="6">Build and verify all Update methods work</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>All 4 Update methods PATCH Dataverse</criterion>
+    <criterion>Ownership validation preserved</criterion>
+    <criterion>Partial updates work (only changed fields sent)</criterion>
+    <criterion>404 handled with KeyNotFoundException</criterion>
+  </acceptance-criteria>
+</task>
