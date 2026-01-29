@@ -397,15 +397,45 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
 
         foreach (var tool in scopes.Tools)
         {
-            _logger.LogDebug("Executing tool '{ToolName}' (Type={ToolType})", tool.Name, tool.Type);
+            _logger.LogDebug("Executing tool '{ToolName}' (Type={ToolType}, HandlerClass={HandlerClass})",
+                tool.Name, tool.Type, tool.HandlerClass ?? "null");
 
-            // Get handler for this tool type
-            var handlers = _toolHandlerRegistry.GetHandlersByType(tool.Type);
-            var handler = handlers.FirstOrDefault();
+            // Get handler for this tool
+            // Priority: 1) HandlerClass (if specified), 2) Type-based lookup, 3) GenericAnalysisHandler fallback
+            IAnalysisToolHandler? handler = null;
+
+            if (!string.IsNullOrWhiteSpace(tool.HandlerClass))
+            {
+                // Try to get specific handler by class name
+                handler = _toolHandlerRegistry.GetHandler(tool.HandlerClass);
+
+                if (handler == null)
+                {
+                    // Handler not found - log available handlers and fall back to generic
+                    var availableHandlers = _toolHandlerRegistry.GetRegisteredHandlerIds();
+                    _logger.LogWarning(
+                        "Custom handler '{HandlerClass}' not found for tool '{ToolName}'. " +
+                        "Available handlers: [{AvailableHandlers}]. Falling back to GenericAnalysisHandler.",
+                        tool.HandlerClass, tool.Name, string.Join(", ", availableHandlers));
+
+                    // Fall back to GenericAnalysisHandler
+                    handler = _toolHandlerRegistry.GetHandler("GenericAnalysisHandler");
+                }
+            }
+            else
+            {
+                // No HandlerClass specified - use type-based lookup
+                var handlers = _toolHandlerRegistry.GetHandlersByType(tool.Type);
+                handler = handlers.FirstOrDefault();
+            }
 
             if (handler == null)
             {
-                _logger.LogWarning("No handler found for tool type {ToolType}", tool.Type);
+                var availableHandlers = _toolHandlerRegistry.GetRegisteredHandlerIds();
+                _logger.LogWarning(
+                    "No handler found for tool '{ToolName}' (Type={ToolType}). " +
+                    "Available handlers: [{AvailableHandlers}]. Skipping tool.",
+                    tool.Name, tool.Type, string.Join(", ", availableHandlers));
                 continue;
             }
 

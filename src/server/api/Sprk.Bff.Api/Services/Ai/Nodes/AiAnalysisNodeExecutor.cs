@@ -60,7 +60,10 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
                 var handler = _toolHandlerRegistry.GetHandler(context.Tool.HandlerClass);
                 if (handler is null)
                 {
-                    errors.Add($"Tool handler '{context.Tool.HandlerClass}' is not registered");
+                    var availableHandlers = _toolHandlerRegistry.GetRegisteredHandlerIds();
+                    errors.Add(
+                        $"Tool handler '{context.Tool.HandlerClass}' is not registered. " +
+                        $"Available handlers: [{string.Join(", ", availableHandlers)}]");
                 }
             }
         }
@@ -112,10 +115,16 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
             var handler = _toolHandlerRegistry.GetHandler(tool.HandlerClass!);
             if (handler is null)
             {
+                var availableHandlers = _toolHandlerRegistry.GetRegisteredHandlerIds();
+                _logger.LogWarning(
+                    "Tool handler '{HandlerClass}' not found for tool '{ToolName}'. " +
+                    "Available handlers: [{AvailableHandlers}]",
+                    tool.HandlerClass, tool.Name, string.Join(", ", availableHandlers));
+
                 return NodeOutput.Error(
                     context.Node.Id,
                     context.Node.OutputVariable,
-                    $"Tool handler '{tool.HandlerClass}' not found",
+                    $"Tool handler '{tool.HandlerClass}' not found. Available handlers: [{string.Join(", ", availableHandlers)}]",
                     NodeErrorCodes.ToolHandlerNotFound,
                     NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
             }

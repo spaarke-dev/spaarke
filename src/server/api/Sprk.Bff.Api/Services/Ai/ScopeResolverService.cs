@@ -1,3 +1,8 @@
+using System.Net.Http.Headers;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using Azure.Core;
+using Azure.Identity;
 using Spaarke.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Ai;
@@ -6,14 +11,15 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// Resolves analysis scopes from Dataverse entities.
 /// Loads Skills, Knowledge, Tools by ID or from Playbook configuration.
 /// </summary>
-/// <remarks>
-/// Phase 1 Scaffolding: Returns stub data until Dataverse entity operations are implemented.
-/// IDataverseService will be extended with Analysis entity methods in Task 032.
-/// </remarks>
 public class ScopeResolverService : IScopeResolverService
 {
     private readonly IDataverseService _dataverseService;
+    private readonly IPlaybookService _playbookService;
     private readonly ILogger<ScopeResolverService> _logger;
+    private readonly HttpClient _httpClient;
+    private readonly string _apiUrl;
+    private readonly TokenCredential _credential;
+    private AccessToken? _currentToken;
 
     // In-memory stub data for Phase 1 (will be replaced with Dataverse in Task 032)
     private static readonly Dictionary<Guid, AnalysisAction> _stubActions = new()
@@ -124,10 +130,48 @@ public class ScopeResolverService : IScopeResolverService
 
     public ScopeResolverService(
         IDataverseService dataverseService,
+        IPlaybookService playbookService,
+        HttpClient httpClient,
+        IConfiguration configuration,
         ILogger<ScopeResolverService> logger)
     {
         _dataverseService = dataverseService;
+        _playbookService = playbookService;
+        _httpClient = httpClient;
         _logger = logger;
+
+        var dataverseUrl = configuration["Dataverse:ServiceUrl"]
+            ?? throw new InvalidOperationException("Dataverse:ServiceUrl configuration is required");
+        var tenantId = configuration["TENANT_ID"]
+            ?? throw new InvalidOperationException("TENANT_ID configuration is required");
+        var clientId = configuration["API_APP_ID"]
+            ?? throw new InvalidOperationException("API_APP_ID configuration is required");
+        var clientSecret = configuration["API_CLIENT_SECRET"]
+            ?? throw new InvalidOperationException("API_CLIENT_SECRET configuration is required");
+
+        _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2/";
+        _credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
+
+        _httpClient.BaseAddress = new Uri(_apiUrl);
+        _httpClient.DefaultRequestHeaders.Add("OData-MaxVersion", "4.0");
+        _httpClient.DefaultRequestHeaders.Add("OData-Version", "4.0");
+        _httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+    }
+
+    private async Task EnsureAuthenticatedAsync(CancellationToken cancellationToken = default)
+    {
+        if (_currentToken == null || _currentToken.Value.ExpiresOn <= DateTimeOffset.UtcNow.AddMinutes(5))
+        {
+            var scope = $"{_apiUrl.Replace("/api/data/v9.2", "")}/.default";
+            _currentToken = await _credential.GetTokenAsync(
+                new TokenRequestContext([scope]),
+                cancellationToken);
+
+            _httpClient.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", _currentToken.Value.Token);
+
+            _logger.LogDebug("Refreshed Dataverse access token for ScopeResolverService");
+        }
     }
 
     /// <inheritdoc />
@@ -147,16 +191,78 @@ public class ScopeResolverService : IScopeResolverService
     }
 
     /// <inheritdoc />
-    public Task<ResolvedScopes> ResolvePlaybookScopesAsync(
+    public async Task<ResolvedScopes> ResolvePlaybookScopesAsync(
         Guid playbookId,
         CancellationToken cancellationToken)
     {
         _logger.LogDebug("Resolving scopes from playbook {PlaybookId}", playbookId);
 
-        // Phase 1: Playbook resolution not yet implemented
-        _logger.LogWarning("Playbook resolution not yet implemented, returning empty scopes");
+        try
+        {
+            // Load playbook to get N:N relationship IDs
+            // PlaybookService queries sprk_playbook_tool N:N relationship
+            var playbook = await _playbookService.GetPlaybookAsync(playbookId, cancellationToken);
 
-        return Task.FromResult(new ResolvedScopes([], [], []));
+            if (playbook == null)
+            {
+                _logger.LogWarning("Playbook {PlaybookId} not found", playbookId);
+                return new ResolvedScopes([], [], []);
+            }
+
+            _logger.LogDebug(
+                "Playbook '{PlaybookName}' has {ToolCount} tools, {SkillCount} skills, {KnowledgeCount} knowledge",
+                playbook.Name, playbook.ToolIds.Length, playbook.SkillIds.Length, playbook.KnowledgeIds.Length);
+
+            if (playbook.ToolIds.Length == 0)
+            {
+                _logger.LogWarning(
+                    "Playbook '{PlaybookName}' (ID: {PlaybookId}) has no tools configured in N:N relationship",
+                    playbook.Name, playbookId);
+                return new ResolvedScopes([], [], []);
+            }
+
+            // Load full AnalysisTool entities for each tool ID
+            _logger.LogInformation(
+                "[RESOLVE SCOPES] Loading full tool entities for {Count} tool IDs: {ToolIds}",
+                playbook.ToolIds.Length,
+                string.Join(", ", playbook.ToolIds));
+
+            var toolTasks = playbook.ToolIds.Select(toolId => GetToolAsync(toolId, cancellationToken));
+            var toolResults = await Task.WhenAll(toolTasks);
+
+            _logger.LogInformation(
+                "[RESOLVE SCOPES] GetToolAsync returned {TotalCount} results, {NullCount} were null",
+                toolResults.Length,
+                toolResults.Count(t => t == null));
+
+            var tools = toolResults
+                .Where(t => t != null)
+                .Cast<AnalysisTool>()
+                .ToArray();
+
+            _logger.LogInformation(
+                "[RESOLVE SCOPES] After filtering nulls, {Count} valid tools remain",
+                tools.Length);
+
+            _logger.LogDebug(
+                "Resolved {ToolCount} tools from playbook '{PlaybookName}' (ID: {PlaybookId}): {ToolNames}",
+                tools.Length,
+                playbook.Name,
+                playbookId,
+                string.Join(", ", tools.Select(t => t.Name)));
+
+            // Return scopes with tools (Skills and Knowledge empty for now)
+            // TODO: Load skills and knowledge when needed (FR-14, FR-15)
+            return new ResolvedScopes([], [], tools);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Failed to resolve scopes from playbook {PlaybookId}",
+                playbookId);
+            throw;
+        }
     }
 
     /// <inheritdoc />
@@ -751,17 +857,85 @@ public class ScopeResolverService : IScopeResolverService
     #region Tool CRUD
 
     /// <inheritdoc />
-    public Task<AnalysisTool?> GetToolAsync(Guid toolId, CancellationToken cancellationToken)
+    public async Task<AnalysisTool?> GetToolAsync(Guid toolId, CancellationToken cancellationToken)
     {
-        _logger.LogDebug("Getting tool {ToolId}", toolId);
+        _logger.LogInformation("[GET TOOL] Loading tool {ToolId} from Dataverse", toolId);
 
-        // Check stub data for now
-        if (_stubTools.TryGetValue(toolId, out var tool))
+        await EnsureAuthenticatedAsync(cancellationToken);
+
+        var url = $"sprk_analysistools({toolId})?$expand=sprk_ToolTypeId($select=sprk_name)";
+        var response = await _httpClient.GetAsync(url, cancellationToken);
+
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
-            return Task.FromResult<AnalysisTool?>(tool);
+            _logger.LogWarning("[GET TOOL] Tool {ToolId} not found in Dataverse", toolId);
+            return null;
         }
 
-        return Task.FromResult<AnalysisTool?>(null);
+        response.EnsureSuccessStatusCode();
+
+        var entity = await response.Content.ReadFromJsonAsync<ToolEntity>(cancellationToken);
+        if (entity == null)
+        {
+            _logger.LogWarning("[GET TOOL] Failed to deserialize tool {ToolId}", toolId);
+            return null;
+        }
+
+        // Map from HandlerClass if available, otherwise fall back to type name from lookup
+        var toolType = !string.IsNullOrEmpty(entity.HandlerClass)
+            ? MapHandlerClassToToolType(entity.HandlerClass)
+            : MapToolTypeName(entity.ToolTypeId?.Name ?? "");
+
+        var tool = new AnalysisTool
+        {
+            Id = entity.Id,
+            Name = entity.Name ?? "Unnamed Tool",
+            Description = entity.Description,
+            Type = toolType,
+            HandlerClass = entity.HandlerClass,
+            Configuration = entity.Configuration,
+            OwnerType = ScopeOwnerType.System,
+            IsImmutable = false
+        };
+
+        var mappingSource = !string.IsNullOrEmpty(entity.HandlerClass) ? "HandlerClass" : "TypeName";
+        _logger.LogInformation("[GET TOOL] Loaded tool from Dataverse: {ToolName} (Type: {ToolType}, MappedFrom: {MappingSource}, HandlerClass: {HandlerClass})",
+            tool.Name, tool.Type, mappingSource, entity.HandlerClass ?? "null");
+
+        return tool;
+    }
+
+    private static ToolType MapHandlerClassToToolType(string handlerClass)
+    {
+        // Map from handler class name (e.g., "SummaryHandler", "EntityExtractorHandler") to ToolType enum
+        // This is the preferred mapping method as it's deterministic and matches implementation
+        return handlerClass switch
+        {
+            string s when s.Contains("EntityExtractor", StringComparison.OrdinalIgnoreCase) => ToolType.EntityExtractor,
+            string s when s.Contains("ClauseAnalyzer", StringComparison.OrdinalIgnoreCase) => ToolType.ClauseAnalyzer,
+            string s when s.Contains("DocumentClassifier", StringComparison.OrdinalIgnoreCase) => ToolType.DocumentClassifier,
+            string s when s.Contains("Summary", StringComparison.OrdinalIgnoreCase) => ToolType.Summary,
+            string s when s.Contains("RiskDetector", StringComparison.OrdinalIgnoreCase) => ToolType.RiskDetector,
+            string s when s.Contains("ClauseComparison", StringComparison.OrdinalIgnoreCase) => ToolType.ClauseComparison,
+            string s when s.Contains("DateExtractor", StringComparison.OrdinalIgnoreCase) => ToolType.DateExtractor,
+            string s when s.Contains("FinancialCalculator", StringComparison.OrdinalIgnoreCase) => ToolType.FinancialCalculator,
+            _ => ToolType.Custom // Default to Custom for unknown handler classes
+        };
+    }
+
+    private static ToolType MapToolTypeName(string typeName)
+    {
+        // Fallback: Map from sprk_aitooltype.sprk_name to ToolType enum
+        // Type names are like "01 - Entity Extraction", "02 - Classification", etc.
+        // This is a fallback if HandlerClass is not populated
+        return typeName switch
+        {
+            string s when s.Contains("Entity Extraction", StringComparison.OrdinalIgnoreCase) => ToolType.EntityExtractor,
+            string s when s.Contains("Classification", StringComparison.OrdinalIgnoreCase) => ToolType.DocumentClassifier,
+            string s when s.Contains("Analysis", StringComparison.OrdinalIgnoreCase) => ToolType.Summary,
+            string s when s.Contains("Calculation", StringComparison.OrdinalIgnoreCase) => ToolType.FinancialCalculator,
+            _ => ToolType.Custom // Default to Custom for unknown types
+        };
     }
 
     /// <inheritdoc />
@@ -1337,6 +1511,40 @@ public class ScopeResolverService : IScopeResolverService
     }
 
     #endregion
+
+    #endregion
+
+    #region Private DTOs
+
+    /// <summary>
+    /// DTO for deserializing sprk_analysistool entity from Dataverse Web API
+    /// </summary>
+    private class ToolEntity
+    {
+        [JsonPropertyName("sprk_analysistoolid")]
+        public Guid Id { get; set; }
+
+        [JsonPropertyName("sprk_name")]
+        public string? Name { get; set; }
+
+        [JsonPropertyName("sprk_description")]
+        public string? Description { get; set; }
+
+        [JsonPropertyName("sprk_ToolTypeId")]
+        public ToolTypeReference? ToolTypeId { get; set; }
+
+        [JsonPropertyName("sprk_handlerclass")]
+        public string? HandlerClass { get; set; }
+
+        [JsonPropertyName("sprk_configuration")]
+        public string? Configuration { get; set; }
+    }
+
+    private class ToolTypeReference
+    {
+        [JsonPropertyName("sprk_name")]
+        public string? Name { get; set; }
+    }
 
     #endregion
 }
