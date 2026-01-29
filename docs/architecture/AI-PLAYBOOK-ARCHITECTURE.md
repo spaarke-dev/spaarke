@@ -216,6 +216,92 @@ public record ToolResult
 - `Data`: Structured JSON for extraction/storage (e.g., `{"fullText":"...", "sections":{...}}`)
 - `Summary`: Human-readable text for display (e.g., "Found 5 entities: Organization (3), Person (2)...")
 
+#### Tool Handler Resolution (Three-Tier Architecture)
+
+**Updated**: January 29, 2026 - Configuration-driven extensibility pattern
+
+The system uses a **three-tier architecture** for resolving and executing tool handlers, enabling configuration-driven AI features without code deployment:
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│  Tier 1: Configuration (Dataverse - Source of Truth)           │
+│  ─────────────────────────────────────────────────────────────  │
+│  sprk_analysistool                                             │
+│  ├── sprk_handlerclass = "EntityExtractorHandler" (optional)  │
+│  └── sprk_configuration = {JSON config for handler}           │
+│                                                                │
+│  If sprk_handlerclass is NULL → Uses GenericAnalysisHandler   │
+└────────────────────────────────────────────────────────────────┘
+                              ↓
+┌────────────────────────────────────────────────────────────────┐
+│  Tier 2: Generic Execution (Handles 95% of Cases)             │
+│  ─────────────────────────────────────────────────────────────  │
+│  GenericAnalysisHandler                                        │
+│  - Reads JSON configuration from sprk_configuration           │
+│  - Supports operations: extract, classify, validate,          │
+│    generate, transform, analyze                               │
+│  - Executes via AI prompts (no arbitrary code)                │
+│  - Enables new tools without code deployment                  │
+│                                                                │
+│  Configuration Example:                                        │
+│  {                                                             │
+│    "operation": "extract",                                     │
+│    "prompt_template": "Extract technical requirements...",    │
+│    "output_schema": {...},                                     │
+│    "temperature": 0.2                                          │
+│  }                                                             │
+└────────────────────────────────────────────────────────────────┘
+                              ↓
+┌────────────────────────────────────────────────────────────────┐
+│  Tier 3: Custom Handlers (Complex Scenarios Only)             │
+│  ─────────────────────────────────────────────────────────────  │
+│  Specialized handlers for complex processing:                 │
+│  - EntityExtractorHandler                                     │
+│  - SummaryHandler                                             │
+│  - ClauseAnalyzerHandler                                      │
+│  - DocumentClassifierHandler                                  │
+│  - RiskDetectorHandler                                        │
+│  - ... (more can be added)                                    │
+│                                                                │
+│  Registered in DI at startup (ToolFrameworkExtensions)        │
+│  Discoverable via IToolHandlerRegistry                        │
+└────────────────────────────────────────────────────────────────┘
+```
+
+**Handler Resolution Priority**:
+
+1. **Check `sprk_handlerclass` field first** (if populated)
+   ```csharp
+   if (!string.IsNullOrWhiteSpace(tool.HandlerClass))
+   {
+       handler = registry.GetHandler(tool.HandlerClass);
+   }
+   ```
+
+2. **Fall back to GenericAnalysisHandler** (if custom handler not found)
+   ```csharp
+   if (handler == null)
+   {
+       logger.LogWarning("Handler '{HandlerClass}' not found. Available: [{Available}]. " +
+                        "Falling back to GenericAnalysisHandler.",
+                        tool.HandlerClass, string.Join(", ", registry.GetRegisteredHandlerIds()));
+       handler = registry.GetHandler("GenericAnalysisHandler");
+   }
+   ```
+
+3. **Type-based lookup** (if no HandlerClass specified)
+   ```csharp
+   else
+   {
+       var handlers = registry.GetHandlersByType(tool.Type);
+       handler = handlers.FirstOrDefault();
+   }
+   ```
+
+**User Benefit**: Admins can create new analysis tools in Dataverse with custom configurations, and they work immediately without backend code deployment. Only complex scenarios requiring specialized processing logic need custom handlers.
+
+**Handler Discovery API**: `GET /api/ai/handlers` returns metadata for all registered handlers, enabling frontend validation and dropdown selection in PCF controls.
+
 ---
 
 ### 5. Outputs (Field Mappings)
