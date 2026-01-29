@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="ai-scope-resolution-enhancements">
+  <metadata>
+    <title>Fix Job Handler Registration</title>
+    <phase>0</phase>
+    <tags>bff-api, jobs, critical, implementation</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>001</dependencies>
+    <parallel-group>none</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Fix the job handler registration so AppOnlyDocumentAnalysis jobs are processed correctly.
+    </goal>
+    <context>
+      Based on investigation in task 001, implement the fix for job handler registration.
+      The fix may involve:
+      - Creating a new job handler if missing
+      - Registering existing handler in DI
+      - Fixing JobType property mismatch
+    </context>
+    <constraints>
+      - Follow ADR-001: BackgroundService pattern
+      - Follow ADR-004: IJobHandler interface with idempotent processing
+      - Follow ADR-010: ≤15 non-framework DI lines, use feature modules
+      - Handler must be idempotent (safe under at-least-once delivery)
+      - Propagate CorrelationId from job contract
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>projects/ai-scope-resolution-enhancements/notes/research/001-investigation-findings.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">
+      If handler is missing, create AppOnlyDocumentAnalysisJobHandler:
+      - Implement IJobHandler interface
+      - Set JobType = "AppOnlyDocumentAnalysis"
+      - Implement ProcessAsync with idempotency check
+      - Delegate to AppOnlyAnalysisService for actual processing
+    </step>
+    <step order="2">
+      If handler exists but not registered, add DI registration:
+      - Find appropriate feature module (WorkersModule or similar)
+      - Add: services.AddScoped&lt;IJobHandler, AppOnlyDocumentAnalysisJobHandler&gt;()
+      - Ensure it's part of IEnumerable&lt;IJobHandler&gt; injection
+    </step>
+    <step order="3">
+      If JobType mismatch, fix the property:
+      - Update JobType property to match "AppOnlyDocumentAnalysis"
+      - Verify case-sensitivity matches what's sent to Service Bus
+    </step>
+    <step order="4">
+      Verify handler is discoverable:
+      - Check ServiceBusJobProcessor can find the handler
+      - Add logging if needed for troubleshooting
+    </step>
+    <step order="5">
+      Build and verify no compilation errors:
+      - Run: dotnet build src/server/api/Sprk.Bff.Api/
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Edit - Modify existing files</tool>
+    <tool>Write - Create new handler if needed</tool>
+    <tool>Bash - Run build commands</tool>
+  </tools>
+
+  <outputs>
+    <output>Job handler implementation (new or fixed)</output>
+    <output>DI registration added/fixed</output>
+    <output>Successful build</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>AppOnlyDocumentAnalysisJobHandler exists and implements IJobHandler</criterion>
+    <criterion>Handler registered in DI container</criterion>
+    <criterion>JobType property = "AppOnlyDocumentAnalysis"</criterion>
+    <criterion>Project builds without errors</criterion>
+  </acceptance-criteria>
+</task>

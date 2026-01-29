@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="ai-scope-resolution-enhancements">
+  <metadata>
+    <title>Create Handler Discovery API Endpoint</title>
+    <phase>6</phase>
+    <tags>bff-api, api, endpoints</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>050</dependencies>
+    <parallel-group>none</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Create GET /api/ai/handlers endpoint that returns metadata for all registered tool handlers.
+    </goal>
+    <context>
+      This endpoint enables frontend validation of handler configuration.
+
+      Response format:
+      {
+        "handlers": [
+          {
+            "handlerId": "EntityExtractorHandler",
+            "name": "Entity Extractor",
+            "description": "Extracts structured entities...",
+            "version": "1.0.0",
+            "supportedToolTypes": ["EntityExtractor"],
+            "supportedInputTypes": ["text/plain", "application/pdf"],
+            "parameters": [...],
+            "configurationSchema": {...},
+            "isEnabled": true
+          }
+        ]
+      }
+    </context>
+    <constraints>
+      - Follow ADR-001: Minimal API pattern
+      - Follow ADR-008: Require authentication
+      - Follow ADR-014: Cache response for 5 minutes
+      - Use IMemoryCache (not Redis) for handler metadata
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create endpoint in AiEndpoints.cs</step>
+    <step order="2">Inject IToolHandlerRegistry and IMemoryCache</step>
+    <step order="3">Implement cache-aside pattern with 5-minute TTL</step>
+    <step order="4">Map handler info to response DTO</step>
+    <step order="5">Add RequireAuthorization()</step>
+    <step order="6">Add Swagger documentation</step>
+    <step order="7">Build and verify</step>
+  </steps>
+
+  <tools>
+    <tool>Edit - Add endpoint to AiEndpoints.cs</tool>
+    <tool>Bash - Build verification</tool>
+  </tools>
+
+  <outputs>
+    <output>GET /api/ai/handlers endpoint</output>
+    <output>Caching implementation</output>
+    <output>Swagger documentation</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Endpoint returns 200 OK with handler metadata</criterion>
+    <criterion>Response cached for 5 minutes</criterion>
+    <criterion>Returns 401 if unauthenticated</criterion>
+    <criterion>Swagger documentation generated</criterion>
+  </acceptance-criteria>
+</task>

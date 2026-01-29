@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="ai-scope-resolution-enhancements">
+  <metadata>
+    <title>Implement Knowledge Resolution DTOs</title>
+    <phase>3</phase>
+    <tags>bff-api, scope-resolution, dataverse</tags>
+    <estimate>1-2 hours</estimate>
+    <dependencies>011</dependencies>
+    <parallel-group>A</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Create KnowledgeEntity and KnowledgeTypeReference DTO classes for deserializing Dataverse Web API responses.
+    </goal>
+    <context>
+      Knowledge sources are stored in sprk_contents entity with a lookup to sprk_aiknowledgetype.
+
+      Entity schema:
+      - sprk_contentid (Guid)
+      - sprk_name (String)
+      - sprk_description (Memo)
+      - sprk_content (Memo) - The actual knowledge content
+      - sprk_deploymentid (Guid, nullable) - For RAG type
+      - sprk_KnowledgeTypeId (Lookup) → sprk_aiknowledgetype
+    </context>
+    <constraints>
+      - Follow existing ToolEntity/SkillEntity pattern
+      - Include DeploymentId for RAG knowledge type
+      - Use System.Text.Json attributes
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>docs/architecture/AI-ANALYSIS-PLAYBOOK-SCOPE-DESIGN.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">
+      Create KnowledgeEntity DTO class with all required properties
+    </step>
+    <step order="2">
+      Create KnowledgeTypeReference DTO class
+    </step>
+    <step order="3">
+      Verify DTOs compile correctly
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Edit - Add DTO classes</tool>
+    <tool>Bash - Build verification</tool>
+  </tools>
+
+  <outputs>
+    <output>KnowledgeEntity DTO class</output>
+    <output>KnowledgeTypeReference DTO class</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>KnowledgeEntity has all required properties</criterion>
+    <criterion>DeploymentId is nullable Guid</criterion>
+    <criterion>Project builds without errors</criterion>
+  </acceptance-criteria>
+</task>
