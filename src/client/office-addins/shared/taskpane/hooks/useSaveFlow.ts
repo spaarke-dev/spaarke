@@ -825,9 +825,6 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         };
       }
 
-      // Use custom documentName if provided, otherwise fall back to itemName
-      const effectiveDocumentName = context.documentName || context.itemName;
-
       // Build legacy request for idempotency key computation (keep format stable)
       const request: SaveRequest = {
         sourceType: context.hostType === 'outlook'
