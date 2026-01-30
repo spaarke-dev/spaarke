@@ -1,13 +1,20 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Azure.Messaging.ServiceBus;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Email;
+using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Jobs.Handlers;
 using Sprk.Bff.Api.Workers.Office.Messages;
 using Spaarke.Dataverse;
+
+// Alias to resolve ambiguity between Services.Jobs.JobStatus and Models.Office.JobStatus
+using JobStatus = Sprk.Bff.Api.Models.Office.JobStatus;
 
 namespace Sprk.Bff.Api.Workers.Office;
 
@@ -44,6 +51,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     private readonly IDataverseService _dataverseService;
     private readonly IEmailToEmlConverter _emlConverter;
     private readonly AttachmentFilterService _attachmentFilterService;
+    private readonly JobSubmissionService _jobSubmissionService;
+    private readonly IConfiguration _configuration;
 
     private const string QueueName = "office-upload-finalization";
     private const string ProfileQueueName = "office-profile";
@@ -73,7 +82,9 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         IOptions<GraphOptions> graphOptions,
         IDataverseService dataverseService,
         IEmailToEmlConverter emlConverter,
-        AttachmentFilterService attachmentFilterService)
+        AttachmentFilterService attachmentFilterService,
+        JobSubmissionService jobSubmissionService,
+        IConfiguration configuration)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _speFileStore = speFileStore ?? throw new ArgumentNullException(nameof(speFileStore));
@@ -85,6 +96,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
         _emlConverter = emlConverter ?? throw new ArgumentNullException(nameof(emlConverter));
         _attachmentFilterService = attachmentFilterService ?? throw new ArgumentNullException(nameof(attachmentFilterService));
+        _jobSubmissionService = jobSubmissionService ?? throw new ArgumentNullException(nameof(jobSubmissionService));
+        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -894,14 +907,14 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             aiOptions.ProfileSummary,
             aiOptions.RagIndex);
 
-        // Use the SAME proven AppOnlyDocumentAnalysisJobHandler that email-to-document uses
-        // Queue to sdap-jobs (not office-profile) to reuse existing working infrastructure
-        var analysisJob = new Services.Jobs.JobContract
+        // Use the EXACT SAME pattern as EmailToDocumentJobHandler.EnqueueAiAnalysisJobAsync()
+        // This ensures correct camelCase serialization via JobSubmissionService
+        var analysisJob = new JobContract
         {
             JobId = Guid.NewGuid(),
-            JobType = "AppOnlyDocumentAnalysis", // Same as EmailToDocumentJobHandler uses
+            JobType = AppOnlyDocumentAnalysisJobHandler.JobTypeName, // Use constant, same as EmailToDocumentJobHandler
             SubjectId = documentId.ToString(),
-            CorrelationId = originalMessage.CorrelationId,
+            CorrelationId = Activity.Current?.Id ?? originalMessage.CorrelationId ?? Guid.NewGuid().ToString(),
             IdempotencyKey = $"analysis-{documentId}-documentprofile",
             Attempt = 1,
             MaxAttempts = 3,
@@ -914,29 +927,20 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             }))
         };
 
-        var sender = _serviceBusClient.CreateSender(_serviceBusOptions.QueueName); // sdap-jobs queue
-
-        var sbMessage = new ServiceBusMessage(JsonSerializer.Serialize(analysisJob))
-        {
-            MessageId = analysisJob.JobId.ToString(),
-            CorrelationId = analysisJob.CorrelationId,
-            ContentType = "application/json",
-            Subject = analysisJob.JobType,
-            ApplicationProperties =
-            {
-                ["JobId"] = analysisJob.JobId.ToString(),
-                ["JobType"] = analysisJob.JobType,
-                ["SubjectId"] = analysisJob.SubjectId
-            }
-        };
-
-        await sender.SendMessageAsync(sbMessage, cancellationToken);
-        await sender.DisposeAsync();
+        // Use JobSubmissionService - the SAME proven service that EmailToDocumentJobHandler uses
+        // This handles camelCase serialization, Service Bus message formatting, and all edge cases
+        await _jobSubmissionService.SubmitJobAsync(analysisJob, cancellationToken);
 
         _logger.LogWarning(
-            "✅ Queued AI analysis job {AnalysisJobId} for document {DocumentId} to sdap-jobs (AppOnlyDocumentAnalysis)",
+            "✅ Queued AI analysis job {AnalysisJobId} for document {DocumentId} to sdap-jobs (AppOnlyDocumentAnalysis) via JobSubmissionService",
             analysisJob.JobId,
             documentId);
+
+        // Also queue RAG indexing if requested (same pattern as EmailToDocumentJobHandler)
+        if (aiOptions.RagIndex)
+        {
+            await EnqueueRagIndexingAsync(driveId, itemId, documentId, payload.FileName, cancellationToken);
+        }
     }
 
     private async Task CleanupTempFileAsync(string location, CancellationToken cancellationToken)
@@ -1201,6 +1205,108 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         _logger.LogInformation(
             "Created child document {ChildDocumentId} for attachment '{AttachmentName}' (parent: {ParentDocumentId})",
             childDocumentId, attachment.FileName, parentDocumentId);
+
+        // Enqueue AI analysis for attachment document (same pattern as EmailToDocumentJobHandler)
+        await EnqueueAiAnalysisForAttachmentAsync(childDocumentId, cancellationToken);
+
+        // Enqueue RAG indexing for attachment document (same pattern as EmailToDocumentJobHandler)
+        await EnqueueRagIndexingAsync(driveId, fileHandle.Id, childDocumentId, attachment.FileName, cancellationToken);
+    }
+
+    /// <summary>
+    /// Enqueues an AI analysis job for an attachment document.
+    /// Uses try/catch to ensure enqueueing failures don't fail the main processing.
+    /// Follows the same pattern as EmailToDocumentJobHandler.EnqueueAiAnalysisJobAsync.
+    /// </summary>
+    private async Task EnqueueAiAnalysisForAttachmentAsync(Guid documentId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var analysisJob = new JobContract
+            {
+                JobId = Guid.NewGuid(),
+                JobType = AppOnlyDocumentAnalysisJobHandler.JobTypeName,
+                SubjectId = documentId.ToString(),
+                CorrelationId = Activity.Current?.Id ?? Guid.NewGuid().ToString(),
+                IdempotencyKey = $"analysis-{documentId}-documentprofile",
+                Attempt = 1,
+                MaxAttempts = 3,
+                CreatedAt = DateTimeOffset.UtcNow,
+                Payload = JsonDocument.Parse(JsonSerializer.Serialize(new
+                {
+                    DocumentId = documentId,
+                    Source = "EmailAttachment",
+                    EnqueuedAt = DateTimeOffset.UtcNow
+                }))
+            };
+
+            await _jobSubmissionService.SubmitJobAsync(analysisJob, cancellationToken);
+
+            _logger.LogInformation(
+                "Enqueued AI analysis job {JobId} for attachment document {DocumentId}",
+                analysisJob.JobId, documentId);
+        }
+        catch (Exception ex)
+        {
+            // Log but don't fail - AI analysis is non-critical
+            _logger.LogWarning(ex,
+                "Failed to enqueue AI analysis job for attachment document {DocumentId}: {Error}. Attachment processing will continue.",
+                documentId, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Enqueues a RAG indexing job for a document.
+    /// Uses try/catch to ensure enqueueing failures don't fail the main processing.
+    /// Follows the same pattern as EmailToDocumentJobHandler.EnqueueRagIndexingJobAsync.
+    /// </summary>
+    private async Task EnqueueRagIndexingAsync(
+        string driveId,
+        string itemId,
+        Guid documentId,
+        string fileName,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Get tenant ID from configuration (same pattern as EmailToDocumentJobHandler)
+            var tenantId = _configuration["TENANT_ID"] ?? _configuration["AzureAd:TenantId"] ?? "";
+
+            var indexingJob = new JobContract
+            {
+                JobId = Guid.NewGuid(),
+                JobType = RagIndexingJobHandler.JobTypeName,
+                SubjectId = documentId.ToString(),
+                CorrelationId = Activity.Current?.Id ?? Guid.NewGuid().ToString(),
+                IdempotencyKey = $"rag-index-{driveId}-{itemId}",
+                Attempt = 1,
+                MaxAttempts = 3,
+                CreatedAt = DateTimeOffset.UtcNow,
+                Payload = JsonDocument.Parse(JsonSerializer.Serialize(new RagIndexingJobPayload
+                {
+                    TenantId = tenantId,
+                    DriveId = driveId,
+                    ItemId = itemId,
+                    FileName = fileName,
+                    DocumentId = documentId.ToString(),
+                    Source = "OfficeAddin",
+                    EnqueuedAt = DateTimeOffset.UtcNow
+                }))
+            };
+
+            await _jobSubmissionService.SubmitJobAsync(indexingJob, cancellationToken);
+
+            _logger.LogInformation(
+                "Enqueued RAG indexing job {JobId} for document {DocumentId} (file: {FileName})",
+                indexingJob.JobId, documentId, fileName);
+        }
+        catch (Exception ex)
+        {
+            // Log but don't fail - RAG indexing is non-critical
+            _logger.LogWarning(ex,
+                "Failed to enqueue RAG indexing job for document {DocumentId}: {Error}. Processing will continue.",
+                documentId, ex.Message);
+        }
     }
 
     /// <summary>
