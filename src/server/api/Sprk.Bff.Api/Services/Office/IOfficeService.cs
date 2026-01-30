@@ -26,11 +26,13 @@ public interface IOfficeService
     /// </summary>
     /// <param name="request">Save request with content metadata.</param>
     /// <param name="userId">Authenticated user ID.</param>
+    /// <param name="httpContext">HTTP context for OBO authentication (used to fetch email body via Graph API).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Save response with job tracking information.</returns>
     Task<SaveResponse> SaveAsync(
         SaveRequest request,
         string userId,
+        HttpContext httpContext,
         CancellationToken cancellationToken = default);
 
     /// <summary>

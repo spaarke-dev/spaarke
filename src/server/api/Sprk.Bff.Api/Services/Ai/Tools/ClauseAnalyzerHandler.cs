@@ -33,6 +33,50 @@ public sealed class ClauseAnalyzerHandler : IAnalysisToolHandler
     private readonly ITextChunkingService _textChunkingService;
     private readonly ILogger<ClauseAnalyzerHandler> _logger;
 
+    /// <summary>JSON Schema (Draft 07) for configuration validation.</summary>
+    private static readonly object ConfigSchema = new
+    {
+        schema = "https://json-schema.org/draft-07/schema#",
+        title = "Clause Analyzer Configuration",
+        type = "object",
+        properties = new
+        {
+            clauseTypes = new
+            {
+                type = "array",
+                description = "Clause types to detect",
+                items = new { type = "string" },
+                @default = new[] { "Indemnification", "LimitationOfLiability", "Termination", "Confidentiality", "DisputeResolution", "GoverningLaw", "ForceMajeure", "IntellectualProperty", "Warranty", "PaymentTerms" }
+            },
+            includeRiskAssessment = new
+            {
+                type = "boolean",
+                description = "Whether to assess risk per clause",
+                @default = true
+            },
+            includeStandardComparison = new
+            {
+                type = "boolean",
+                description = "Compare against standard language",
+                @default = true
+            },
+            detectMissingClauses = new
+            {
+                type = "boolean",
+                description = "Flag expected but missing clauses",
+                @default = true
+            },
+            chunkSize = new
+            {
+                type = "integer",
+                description = "Characters per chunk for large documents",
+                minimum = 500,
+                maximum = 32000,
+                @default = 8000
+            }
+        }
+    };
+
     public ClauseAnalyzerHandler(
         IOpenAiClient openAiClient,
         ITextChunkingService textChunkingService,
@@ -60,7 +104,8 @@ public sealed class ClauseAnalyzerHandler : IAnalysisToolHandler
             new ToolParameterDefinition("includeStandardComparison", "Compare against standard language", ToolParameterType.Boolean, Required: false, DefaultValue: true),
             new ToolParameterDefinition("detectMissingClauses", "Flag expected but missing clauses", ToolParameterType.Boolean, Required: false, DefaultValue: true),
             new ToolParameterDefinition("chunkSize", "Characters per chunk for large documents", ToolParameterType.Integer, Required: false, DefaultValue: 8000)
-        });
+        },
+        ConfigurationSchema: ConfigSchema);
 
     /// <inheritdoc />
     public IReadOnlyList<ToolType> SupportedToolTypes { get; } = new[] { ToolType.ClauseAnalyzer };

@@ -177,7 +177,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         };
     }
 
-    public async Task<Guid> CreateAnalysisAsync(Guid documentId, string? name = null, CancellationToken ct = default)
+    public async Task<Guid> CreateAnalysisAsync(Guid documentId, string? name = null, Guid? playbookId = null, CancellationToken ct = default)
     {
         var analysis = new Entity("sprk_analysis")
         {
@@ -186,8 +186,15 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             ["statuscode"] = new OptionSetValue(1) // Active
         };
 
+        // Set playbook lookup if provided
+        if (playbookId.HasValue)
+        {
+            analysis["sprk_playbookid"] = new EntityReference("sprk_analysisplaybook", playbookId.Value);
+        }
+
         var analysisId = await _serviceClient.CreateAsync(analysis, ct);
-        _logger.LogInformation("[DATAVERSE] Created analysis {AnalysisId} for document {DocumentId}", analysisId, documentId);
+        _logger.LogInformation("[DATAVERSE] Created analysis {AnalysisId} for document {DocumentId} with playbook {PlaybookId}",
+            analysisId, documentId, playbookId);
         return analysisId;
     }
 
@@ -954,25 +961,65 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
             var fieldName = $"sprk_{prop.Name.ToLower()}";
 
-            if (value is Guid guidValue)
+            try
             {
-                entity[fieldName] = guidValue;
+                if (value is Guid guidValue)
+                {
+                    entity[fieldName] = guidValue;
+                }
+                else if (value is decimal decimalValue)
+                {
+                    entity[fieldName] = decimalValue;
+                }
+                else if (value is double doubleValue)
+                {
+                    entity[fieldName] = doubleValue;
+                }
+                else if (value is long longValue)
+                {
+                    entity[fieldName] = (int)longValue; // Cast long to int for Dataverse
+                }
+                else if (value is int intValue)
+                {
+                    // Choice (OptionSet) fields require OptionSetValue wrapper
+                    if (fieldName == "sprk_status")
+                    {
+                        entity[fieldName] = new OptionSetValue(intValue);
+                        _logger.LogDebug("Set {FieldName} = OptionSetValue({Value})", fieldName, intValue);
+                    }
+                    else if (fieldName == "sprk_jobtype")
+                    {
+                        // Log the JobType value being set for debugging
+                        _logger.LogInformation("Setting sprk_jobtype = {Value} (as OptionSetValue)", intValue);
+                        entity[fieldName] = new OptionSetValue(intValue);
+                    }
+                    else
+                    {
+                        entity[fieldName] = intValue;
+                    }
+                }
+                else if (value is bool boolValue)
+                {
+                    entity[fieldName] = boolValue;
+                }
+                else if (value is DateTime dateValue)
+                {
+                    entity[fieldName] = dateValue;
+                }
+                else if (value is string strValue)
+                {
+                    entity[fieldName] = strValue;
+                }
+                else
+                {
+                    _logger.LogWarning("Unhandled property type for {PropName}: {Type}", prop.Name, value.GetType().FullName);
+                }
             }
-            else if (value is int intValue)
+            catch (Exception ex)
             {
-                entity[fieldName] = intValue;
-            }
-            else if (value is bool boolValue)
-            {
-                entity[fieldName] = boolValue;
-            }
-            else if (value is DateTime dateValue)
-            {
-                entity[fieldName] = dateValue;
-            }
-            else if (value is string strValue)
-            {
-                entity[fieldName] = strValue;
+                _logger.LogError(ex, "Error setting field {FieldName} with value {Value} of type {Type}",
+                    fieldName, value, value?.GetType().FullName);
+                throw;
             }
         }
 
@@ -995,25 +1042,63 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
             var fieldName = $"sprk_{prop.Name.ToLower()}";
 
-            if (value is Guid guidValue)
+            try
             {
-                entity[fieldName] = guidValue;
+                if (value is Guid guidValue)
+                {
+                    entity[fieldName] = guidValue;
+                }
+                else if (value is decimal decimalValue)
+                {
+                    entity[fieldName] = decimalValue;
+                }
+                else if (value is double doubleValue)
+                {
+                    entity[fieldName] = doubleValue;
+                }
+                else if (value is long longValue)
+                {
+                    entity[fieldName] = (int)longValue; // Cast long to int for Dataverse
+                }
+                else if (value is int intValue)
+                {
+                    // Choice (OptionSet) fields require OptionSetValue wrapper
+                    if (fieldName == "sprk_status")
+                    {
+                        entity[fieldName] = new OptionSetValue(intValue);
+                    }
+                    else if (fieldName == "sprk_jobtype")
+                    {
+                        _logger.LogDebug("Updating sprk_jobtype = {Value} (as OptionSetValue)", intValue);
+                        entity[fieldName] = new OptionSetValue(intValue);
+                    }
+                    else
+                    {
+                        entity[fieldName] = intValue;
+                    }
+                }
+                else if (value is bool boolValue)
+                {
+                    entity[fieldName] = boolValue;
+                }
+                else if (value is DateTime dateValue)
+                {
+                    entity[fieldName] = dateValue;
+                }
+                else if (value is string strValue)
+                {
+                    entity[fieldName] = strValue;
+                }
+                else
+                {
+                    _logger.LogWarning("Unhandled property type for {PropName}: {Type}", prop.Name, value.GetType().FullName);
+                }
             }
-            else if (value is int intValue)
+            catch (Exception ex)
             {
-                entity[fieldName] = intValue;
-            }
-            else if (value is bool boolValue)
-            {
-                entity[fieldName] = boolValue;
-            }
-            else if (value is DateTime dateValue)
-            {
-                entity[fieldName] = dateValue;
-            }
-            else if (value is string strValue)
-            {
-                entity[fieldName] = strValue;
+                _logger.LogError(ex, "Error updating field {FieldName} with value {Value} of type {Type}",
+                    fieldName, value, value?.GetType().FullName);
+                throw;
             }
         }
 
@@ -1086,14 +1171,35 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             var value = prop.GetValue(request);
             if (value == null) continue;
 
+            // Special handling for DocumentId lookup field
+            // TEMPORARILY SKIP - debugging "Entity does not exist" error
+            // TODO: Re-enable once we figure out why Document lookup fails
+            if (prop.Name == "DocumentId")
+            {
+                // Skip setting the Document lookup for now to test if other fields work
+                continue;
+            }
+
+            // Special handling for Priority option set field
+            // Option set fields require OptionSetValue, not plain int
+            if (prop.Name == "Priority")
+            {
+                if (value is int priorityInt)
+                {
+                    entity["sprk_priority"] = new OptionSetValue(priorityInt);
+                }
+                continue;
+            }
+
             var fieldName = $"sprk_{prop.Name.ToLower()}";
 
-            if (value is Guid guidValue)
+            if (value is Guid gv)
             {
-                entity[fieldName] = guidValue;
+                entity[fieldName] = gv;
             }
             else if (value is int intValue)
             {
+                // Generic int fields (not option sets)
                 entity[fieldName] = intValue;
             }
             else if (value is bool boolValue)
@@ -1147,15 +1253,32 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             var value = prop.GetValue(request);
             if (value == null) continue;
 
+            // Special handling for DocumentId lookup field
+            // TEMPORARILY SKIP - debugging "Entity does not exist" error
+            // TODO: Re-enable once we figure out why Document lookup fails
+            if (prop.Name == "DocumentId")
+            {
+                // Skip setting the Document lookup for now to test if other fields work
+                continue;
+            }
+
             var fieldName = $"sprk_{prop.Name.ToLower()}";
 
-            if (value is Guid guidValue)
+            if (value is Guid gv)
             {
-                entity[fieldName] = guidValue;
+                entity[fieldName] = gv;
             }
             else if (value is int intValue)
             {
-                entity[fieldName] = intValue;
+                // Choice (OptionSet) fields require OptionSetValue wrapper
+                if (fieldName == "sprk_status" || fieldName == "sprk_jobtype")
+                {
+                    entity[fieldName] = new OptionSetValue(intValue);
+                }
+                else
+                {
+                    entity[fieldName] = intValue;
+                }
             }
             else if (value is bool boolValue)
             {

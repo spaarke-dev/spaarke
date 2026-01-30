@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="ai-scope-resolution-enhancements">
+  <metadata>
+    <title>Test GenericAnalysisHandler Fallback</title>
+    <phase>1</phase>
+    <tags>bff-api, handlers, testing</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>010</dependencies>
+    <parallel-group>none</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Verify GenericAnalysisHandler is registered and works as fallback when custom handlers aren't found.
+    </goal>
+    <context>
+      The three-tier handler resolution should:
+      1. Check HandlerClass field first
+      2. If handler not found, fall back to GenericAnalysisHandler
+      3. Log available handlers when fallback occurs
+
+      This ensures tools work even if HandlerClass specifies a non-existent handler.
+    </context>
+    <constraints>
+      - Follow ADR-013: AI Architecture patterns
+      - Verify logging includes available handlers list
+      - Test both success and fallback paths
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/architecture/AI-PLAYBOOK-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">
+      Verify GenericAnalysisHandler is registered:
+      - Check DI registration in Program.cs or feature module
+      - Confirm it implements IAnalysisToolHandler
+      - Verify it's discoverable via IToolHandlerRegistry
+    </step>
+    <step order="2">
+      Check handler resolution code in AppOnlyAnalysisService:
+      - Verify HandlerClass is checked first
+      - Verify fallback logic exists
+      - Confirm available handlers are logged
+    </step>
+    <step order="3">
+      Test fallback scenario:
+      - Find or create a tool with invalid HandlerClass
+      - Execute analysis
+      - Verify GenericAnalysisHandler is used
+      - Check logs show fallback occurred
+    </step>
+    <step order="4">
+      Document handler registration list:
+      - List all registered handlers
+      - Note which are custom vs generic
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review handler implementations</tool>
+    <tool>Grep - Search for handler registrations</tool>
+  </tools>
+
+  <outputs>
+    <output>Confirmation GenericAnalysisHandler registered</output>
+    <output>List of all registered handlers</output>
+    <output>Verification fallback works correctly</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>GenericAnalysisHandler registered in DI</criterion>
+    <criterion>Fallback occurs when HandlerClass not found</criterion>
+    <criterion>Logs show "Available handlers: [...]" on fallback</criterion>
+    <criterion>Analysis completes successfully via fallback</criterion>
+  </acceptance-criteria>
+</task>

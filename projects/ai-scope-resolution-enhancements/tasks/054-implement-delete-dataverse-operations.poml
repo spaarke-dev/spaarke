@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="054" project="ai-scope-resolution-enhancements">
+  <metadata>
+    <title>Implement Delete*Async Dataverse Operations</title>
+    <phase>5a</phase>
+    <tags>bff-api, scope-resolution, dataverse, crud</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>053</dependencies>
+    <parallel-group>none</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Replace stub dictionary deletes in Delete*Async methods with Dataverse Web API DELETE operations.
+    </goal>
+    <context>
+      Four Delete methods need migration:
+      - DeleteActionAsync → DELETE sprk_systemprompts(id)
+      - DeleteSkillAsync → DELETE sprk_promptfragments(id)
+      - DeleteKnowledgeAsync → DELETE sprk_contents(id)
+      - DeleteToolAsync → DELETE sprk_analysistools(id)
+
+      Each must:
+      - Verify entity exists
+      - Validate ownership (only customer-owned can be deleted)
+      - Return true on success, false if not found
+    </context>
+    <constraints>
+      - Preserve ownership validation
+      - Handle 404 gracefully (return false)
+      - Log delete operations at Information level
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Implement DeleteActionAsync with DELETE</step>
+    <step order="2">Implement DeleteSkillAsync with DELETE</step>
+    <step order="3">Implement DeleteKnowledgeAsync with DELETE</step>
+    <step order="4">Implement DeleteToolAsync with DELETE</step>
+    <step order="5">Build and verify all Delete methods work</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>All 4 Delete methods DELETE from Dataverse</criterion>
+    <criterion>Ownership validation preserved</criterion>
+    <criterion>404 returns false (not exception)</criterion>
+    <criterion>Successful delete returns true</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="ai-scope-resolution-enhancements">
+  <metadata>
+    <title>Integration Test: End-to-End Playbook Execution</title>
+    <phase>7</phase>
+    <tags>testing, integration-tests</tags>
+    <estimate>3-4 hours</estimate>
+    <dependencies>064</dependencies>
+    <parallel-group>none</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Create integration tests that verify complete playbook execution with all scope types loaded from Dataverse.
+    </goal>
+    <context>
+      Test scenarios:
+      1. Document Profile playbook - basic analysis
+      2. Custom tool playbook - GenericAnalysisHandler execution
+      3. Mixed scopes playbook - Action + Skills + Tools + Knowledge
+    </context>
+    <constraints>
+      - Use real Dataverse data (dev environment)
+      - Tests should be idempotent
+      - Clean up test records after execution
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create integration test class for playbook execution</step>
+    <step order="2">Test Document Profile playbook execution</step>
+    <step order="3">Test custom tool with GenericAnalysisHandler</step>
+    <step order="4">Test playbook with all scope types</step>
+    <step order="5">Verify sprk_analysis records created</step>
+    <step order="6">Run tests and document results</step>
+  </steps>
+
+  <tools>
+    <tool>Write - Create integration test file</tool>
+    <tool>Bash - Run integration tests</tool>
+  </tools>
+
+  <outputs>
+    <output>Playbook execution integration tests</output>
+    <output>Test results documentation</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All playbook scenarios tested</criterion>
+    <criterion>Tests pass against dev environment</criterion>
+    <criterion>Analysis records created successfully</criterion>
+  </acceptance-criteria>
+</task>

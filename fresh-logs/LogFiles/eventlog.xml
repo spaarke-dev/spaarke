@@ -1,0 +1,209 @@
+<Events><Event><System><Provider Name=".NET Runtime"/><EventID>1000</EventID><Level>2</Level><Task>0</Task><Keywords>Keywords</Keywords><TimeCreated SystemTime="2026-01-27T17:48:38Z"/><EventRecordID>1594372687</EventRecordID><Channel>Application</Channel><Computer>DW1SDWK00083O</Computer><Security/></System><EventData><Data>Category: Sprk.Bff.Api.Workers.Office.UploadFinalizationWorker
+EventId: 0
+SpanId: 8d329e06eea8bcc6
+TraceId: ad508b4b6a0b12950e4c74d44658aa68
+ParentId: 59ac8c62af246ee1
+JobId: a534fefb-9da1-4b72-9bda-e93039d5288d
+CorrelationId: 2cfd1c60-4a85-4ea4-89ae-f962542eb4f0
+UserId: d12L59FRq5S6dJP4qZ-wuS3RS5TYJnXdFpPUZH-rkjg
+
+Failed to update ProcessingJob a534fefb-9da1-4b72-9bda-e93039d5288d in Dataverse, continuing
+
+Exception: 
+System.ServiceModel.FaultException`1[Microsoft.Xrm.Sdk.OrganizationServiceFault]: Incorrect attribute value type System.Int32 (Fault Detail is equal to Exception details: 
+ErrorCode: 0x80040203
+Message: Incorrect attribute value type System.Int32
+TimeStamp: 2026-01-27T17:48:37.8174251Z
+--
+Exception details: 
+ErrorCode: 0x80040203
+Message: Incorrect attribute value type System.Int32
+TimeStamp: 2026-01-27T17:48:37.8174251Z
+--
+Exception details: 
+ErrorCode: 0x80040216
+Message: System.ArgumentException: Incorrect attribute value type System.Int32
+Parameter name: sprk_status
+TimeStamp: 2026-01-27T17:48:37.8174251Z
+--
+).
+</Data></EventData></Event><Event><System><Provider Name=".NET Runtime"/><EventID>1000</EventID><Level>2</Level><Task>0</Task><Keywords>Keywords</Keywords><TimeCreated SystemTime="2026-01-27T17:48:39Z"/><EventRecordID>1594373437</EventRecordID><Channel>Application</Channel><Computer>DW1SDWK00083O</Computer><Security/></System><EventData><Data>Category: Sprk.Bff.Api.Workers.Office.ProfileSummaryWorker
+EventId: 0
+SpanId: dcad6c80d5c32e91
+TraceId: ad508b4b6a0b12950e4c74d44658aa68
+ParentId: fa2f88d34f03f6b1
+JobId: a534fefb-9da1-4b72-9bda-e93039d5288d
+CorrelationId: 2cfd1c60-4a85-4ea4-89ae-f962542eb4f0
+UserId: d12L59FRq5S6dJP4qZ-wuS3RS5TYJnXdFpPUZH-rkjg
+
+Failed to update job status for job a534fefb-9da1-4b72-9bda-e93039d5288d, continuing
+
+Exception: 
+System.ServiceModel.FaultException`1[Microsoft.Xrm.Sdk.OrganizationServiceFault]: Incorrect attribute value type System.Int32 (Fault Detail is equal to Exception details: 
+ErrorCode: 0x80040203
+Message: Incorrect attribute value type System.Int32
+TimeStamp: 2026-01-27T17:48:39.1605998Z
+--
+Exception details: 
+ErrorCode: 0x80040203
+Message: Incorrect attribute value type System.Int32
+TimeStamp: 2026-01-27T17:48:39.1605998Z
+--
+Exception details: 
+ErrorCode: 0x80040216
+Message: System.ArgumentException: Incorrect attribute value type System.Int32
+Parameter name: sprk_status
+TimeStamp: 2026-01-27T17:48:39.1605998Z
+--
+).
+</Data></EventData></Event><Event><System><Provider Name=".NET Runtime"/><EventID>1000</EventID><Level>2</Level><Task>0</Task><Keywords>Keywords</Keywords><TimeCreated SystemTime="2026-01-27T17:48:42Z"/><EventRecordID>1594377000</EventRecordID><Channel>Application</Channel><Computer>DW1SDWK00083O</Computer><Security/></System><EventData><Data>Category: Sprk.Bff.Api.Services.Ai.ScopeResolverService
+EventId: 0
+SpanId: dcad6c80d5c32e91
+TraceId: ad508b4b6a0b12950e4c74d44658aa68
+ParentId: fa2f88d34f03f6b1
+JobId: a534fefb-9da1-4b72-9bda-e93039d5288d
+CorrelationId: 2cfd1c60-4a85-4ea4-89ae-f962542eb4f0
+UserId: d12L59FRq5S6dJP4qZ-wuS3RS5TYJnXdFpPUZH-rkjg
+
+Playbook resolution not yet implemented, returning empty scopes
+</Data></EventData></Event><Event><System><Provider Name=".NET Runtime"/><EventID>1000</EventID><Level>2</Level><Task>0</Task><Keywords>Keywords</Keywords><TimeCreated SystemTime="2026-01-27T17:48:43Z"/><EventRecordID>1594377671</EventRecordID><Channel>Application</Channel><Computer>DW1SDWK00083O</Computer><Security/></System><EventData><Data>Category: Sprk.Bff.Api.Services.Ai.AppOnlyAnalysisService
+EventId: 0
+SpanId: dcad6c80d5c32e91
+TraceId: ad508b4b6a0b12950e4c74d44658aa68
+ParentId: fa2f88d34f03f6b1
+JobId: a534fefb-9da1-4b72-9bda-e93039d5288d
+CorrelationId: 2cfd1c60-4a85-4ea4-89ae-f962542eb4f0
+UserId: d12L59FRq5S6dJP4qZ-wuS3RS5TYJnXdFpPUZH-rkjg
+
+Playbook 'Document Profile' has no tools configured
+</Data></EventData></Event><Event><System><Provider Name=".NET Runtime"/><EventID>1000</EventID><Level>2</Level><Task>0</Task><Keywords>Keywords</Keywords><TimeCreated SystemTime="2026-01-27T17:48:44Z"/><EventRecordID>1594378687</EventRecordID><Channel>Application</Channel><Computer>DW1SDWK00083O</Computer><Security/></System><EventData><Data>Category: Sprk.Bff.Api.Workers.Office.ProfileSummaryWorker
+EventId: 0
+SpanId: dcad6c80d5c32e91
+TraceId: ad508b4b6a0b12950e4c74d44658aa68
+ParentId: fa2f88d34f03f6b1
+JobId: a534fefb-9da1-4b72-9bda-e93039d5288d
+CorrelationId: 2cfd1c60-4a85-4ea4-89ae-f962542eb4f0
+UserId: d12L59FRq5S6dJP4qZ-wuS3RS5TYJnXdFpPUZH-rkjg
+
+AI profile generation failed for job a534fefb-9da1-4b72-9bda-e93039d5288d (non-fatal): Playbook 'Document Profile' has no tools configured
+</Data></EventData></Event><Event><System><Provider Name=".NET Runtime"/><EventID>1000</EventID><Level>2</Level><Task>0</Task><Keywords>Keywords</Keywords><TimeCreated SystemTime="2026-01-27T17:48:45Z"/><EventRecordID>1594379781</EventRecordID><Channel>Application</Channel><Computer>DW1SDWK00083O</Computer><Security/></System><EventData><Data>Category: Sprk.Bff.Api.Workers.Office.ProfileSummaryWorker
+EventId: 0
+SpanId: dcad6c80d5c32e91
+TraceId: ad508b4b6a0b12950e4c74d44658aa68
+ParentId: fa2f88d34f03f6b1
+JobId: a534fefb-9da1-4b72-9bda-e93039d5288d
+CorrelationId: 2cfd1c60-4a85-4ea4-89ae-f962542eb4f0
+UserId: d12L59FRq5S6dJP4qZ-wuS3RS5TYJnXdFpPUZH-rkjg
+
+Failed to update job status for job a534fefb-9da1-4b72-9bda-e93039d5288d, continuing
+
+Exception: 
+System.ServiceModel.FaultException`1[Microsoft.Xrm.Sdk.OrganizationServiceFault]: Incorrect attribute value type System.Int32 (Fault Detail is equal to Exception details: 
+ErrorCode: 0x80040203
+Message: Incorrect attribute value type System.Int32
+TimeStamp: 2026-01-27T17:48:45.5535379Z
+--
+Exception details: 
+ErrorCode: 0x80040203
+Message: Incorrect attribute value type System.Int32
+TimeStamp: 2026-01-27T17:48:45.5535379Z
+--
+Exception details: 
+ErrorCode: 0x80040216
+Message: System.ArgumentException: Incorrect attribute value type System.Int32
+Parameter name: sprk_status
+TimeStamp: 2026-01-27T17:48:45.5535379Z
+--
+).
+</Data></EventData></Event><Event><System><Provider Name=".NET Runtime"/><EventID>1000</EventID><Level>2</Level><Task>0</Task><Keywords>Keywords</Keywords><TimeCreated SystemTime="2026-01-27T17:48:49Z"/><EventRecordID>1594383234</EventRecordID><Channel>Application</Channel><Computer>DW1SDWK00083O</Computer><Security/></System><EventData><Data>Category: Sprk.Bff.Api.Workers.Office.IndexingWorkerHostedService
+EventId: 0
+SpanId: 110723e78a7b7971
+TraceId: ad508b4b6a0b12950e4c74d44658aa68
+ParentId: cf19230380cbb821
+
+Failed to update ProcessingJob a534fefb-9da1-4b72-9bda-e93039d5288d in Dataverse, continuing
+
+Exception: 
+System.ServiceModel.FaultException`1[Microsoft.Xrm.Sdk.OrganizationServiceFault]: Incorrect attribute value type System.Int32 (Fault Detail is equal to Exception details: 
+ErrorCode: 0x80040203
+Message: Incorrect attribute value type System.Int32
+TimeStamp: 2026-01-27T17:48:48.6630039Z
+--
+Exception details: 
+ErrorCode: 0x80040203
+Message: Incorrect attribute value type System.Int32
+TimeStamp: 2026-01-27T17:48:48.6630039Z
+--
+Exception details: 
+ErrorCode: 0x80040216
+Message: System.ArgumentException: Incorrect attribute value type System.Int32
+Parameter name: sprk_status
+TimeStamp: 2026-01-27T17:48:48.6630039Z
+--
+).
+</Data></EventData></Event><Event><System><Provider Name=".NET Runtime"/><EventID>1000</EventID><Level>2</Level><Task>0</Task><Keywords>Keywords</Keywords><TimeCreated SystemTime="2026-01-27T17:49:23Z"/><EventRecordID>1594417687</EventRecordID><Channel>Application</Channel><Computer>DW1SDWK00083O</Computer><Security/></System><EventData><Data>Category: Sprk.Bff.Api.Services.Office.OfficeService
+EventId: 0
+SpanId: dabe1450527c0c4c
+TraceId: 279f04997793385d4fc83650e75663b8
+ParentId: 0000000000000000
+RequestId: 400037de-0000-ce00-b63f-84710c7967bb
+RequestPath: /office/jobs/a534fefb-9da1-4b72-9bda-e93039d5288d/stream
+
+SSE stream falling back to polling for job a534fefb-9da1-4b72-9bda-e93039d5288d (Redis unavailable)
+</Data></EventData></Event><Event><System><Provider Name="IIS AspNetCore Module V2"/><EventID>1012</EventID><Level>4</Level><Task>0</Task><Keywords>Keywords</Keywords><TimeCreated SystemTime="2026-01-27T17:53:09Z"/><EventRecordID>1594643781</EventRecordID><Channel>Application</Channel><Computer>DW1SDWK00083O</Computer><Security/></System><EventData><Data>Application 'C:\home\site\wwwroot\' was recycled after detecting app_offline.htm.</Data><Data>Process Id: 5732.</Data><Data>File Version: 18.0.25301.22. Description: IIS ASP.NET Core Module V2 Request Handler. Commit: </Data></EventData></Event><Event><System><Provider Name="IIS AspNetCore Module V2"/><EventID>1005</EventID><Level>2</Level><Task>0</Task><Keywords>Keywords</Keywords><TimeCreated SystemTime="2026-01-27T17:53:20Z"/><EventRecordID>1594655125</EventRecordID><Channel>Application</Channel><Computer>DW1SDWK00083O</Computer><Security/></System><EventData><Data>Failed to gracefully shutdown application 'MACHINE/WEBROOT/APPHOST/SPE-API-DEV-67E2XZ'.</Data><Data>Process Id: 5732.</Data><Data>File Version: 18.0.25301.22. Description: IIS ASP.NET Core Module V2 Request Handler. Commit: </Data></EventData></Event><Event><System><Provider Name=".NET Runtime"/><EventID>1000</EventID><Level>1</Level><Task>0</Task><Keywords>Keywords</Keywords><TimeCreated SystemTime="2026-01-27T17:53:21Z"/><EventRecordID>1594655796</EventRecordID><Channel>Application</Channel><Computer>DW1SDWK00083O</Computer><Security/></System><EventData><Data>Category: Microsoft.Extensions.Hosting.Internal.Host
+EventId: 9
+
+BackgroundService failed
+
+Exception: 
+System.ObjectDisposedException: Cannot access a disposed object.
+Object name: 'System.Threading.SemaphoreSlim'.
+   at System.Threading.SemaphoreSlim.WaitAsync(Int32 millisecondsTimeout, CancellationToken cancellationToken)
+   at Azure.Messaging.ServiceBus.ServiceBusProcessor.StopProcessingAsync(CancellationToken cancellationToken)
+   at Sprk.Bff.Api.Services.Jobs.ServiceBusJobProcessor.ExecuteAsync(CancellationToken stoppingToken) in C:\code_files\spaarke-wt-SDAP-outlook-office-add-in\src\server\api\Sprk.Bff.Api\Services\Jobs\ServiceBusJobProcessor.cs:line 72
+   at Microsoft.Extensions.Hosting.Internal.Host.TryExecuteBackgroundServiceAsync(BackgroundService backgroundService)
+</Data></EventData></Event><Event><System><Provider Name=".NET Runtime"/><EventID>1000</EventID><Level>1</Level><Task>0</Task><Keywords>Keywords</Keywords><TimeCreated SystemTime="2026-01-27T17:53:21Z"/><EventRecordID>1594655828</EventRecordID><Channel>Application</Channel><Computer>DW1SDWK00083O</Computer><Security/></System><EventData><Data>Category: Microsoft.Extensions.Hosting.Internal.Host
+EventId: 10
+
+The HostOptions.BackgroundServiceExceptionBehavior is configured to StopHost. A BackgroundService has thrown an unhandled exception, and the IHost instance is stopping. To avoid this behavior, configure this to Ignore; however the BackgroundService will not be restarted.
+
+Exception: 
+System.ObjectDisposedException: Cannot access a disposed object.
+Object name: 'System.Threading.SemaphoreSlim'.
+   at System.Threading.SemaphoreSlim.WaitAsync(Int32 millisecondsTimeout, CancellationToken cancellationToken)
+   at Azure.Messaging.ServiceBus.ServiceBusProcessor.StopProcessingAsync(CancellationToken cancellationToken)
+   at Sprk.Bff.Api.Services.Jobs.ServiceBusJobProcessor.ExecuteAsync(CancellationToken stoppingToken) in C:\code_files\spaarke-wt-SDAP-outlook-office-add-in\src\server\api\Sprk.Bff.Api\Services\Jobs\ServiceBusJobProcessor.cs:line 72
+   at Microsoft.Extensions.Hosting.Internal.Host.TryExecuteBackgroundServiceAsync(BackgroundService backgroundService)
+</Data></EventData></Event><Event><System><Provider Name=".NET Runtime"/><EventID>1000</EventID><Level>2</Level><Task>0</Task><Keywords>Keywords</Keywords><TimeCreated SystemTime="2026-01-27T17:54:07Z"/><EventRecordID>1594701750</EventRecordID><Channel>Application</Channel><Computer>DW1SDWK00083O</Computer><Security/></System><EventData><Data>Category: Sprk.Bff.Api.Services.Office.JobStatusService
+EventId: 0
+
+JobStatusService initialized without Redis - pub/sub will be disabled, SSE will fall back to polling
+</Data></EventData></Event><Event><System><Provider Name="IIS AspNetCore Module V2"/><EventID>1032</EventID><Level>4</Level><Task>0</Task><Keywords>Keywords</Keywords><TimeCreated SystemTime="2026-01-27T17:54:12Z"/><EventRecordID>1594706812</EventRecordID><Channel>Application</Channel><Computer>DW1SDWK00083O</Computer><Security/></System><EventData><Data>Application 'C:\home\site\wwwroot\' started successfully.</Data><Data>Process Id: 4624.</Data><Data>File Version: 18.0.25301.22. Description: IIS ASP.NET Core Module V2 Request Handler. Commit: </Data></EventData></Event><Event><System><Provider Name="IIS AspNetCore Module V2"/><EventID>1033</EventID><Level>4</Level><Task>0</Task><Keywords>Keywords</Keywords><TimeCreated SystemTime="2026-01-27T18:50:37Z"/><EventRecordID>1598092093</EventRecordID><Channel>Application</Channel><Computer>DW1SDWK00083O</Computer><Security/></System><EventData><Data>Application 'MACHINE/WEBROOT/APPHOST/~1SPE-API-DEV-67E2XZ/APPLICATIONINSIGHTS' has shutdown.</Data><Data>Process Id: 5900.</Data><Data>File Version: 13.1.22321.32. Description: IIS ASP.NET Core Module V2 Request Handler. Commit: 3eeb12e106b9e913c3a4dec1a7d16da7b74149eb</Data></EventData></Event><Event><System><Provider Name=".NET Runtime"/><EventID>1000</EventID><Level>1</Level><Task>0</Task><Keywords>Keywords</Keywords><TimeCreated SystemTime="2026-01-27T18:50:38Z"/><EventRecordID>1598092609</EventRecordID><Channel>Application</Channel><Computer>DW1SDWK00083O</Computer><Security/></System><EventData><Data>Category: Microsoft.Extensions.Hosting.Internal.Host
+EventId: 9
+
+BackgroundService failed
+
+Exception: 
+System.ObjectDisposedException: Cannot access a disposed object.
+Object name: 'System.Threading.SemaphoreSlim'.
+   at System.Threading.SemaphoreSlim.WaitAsync(Int32 millisecondsTimeout, CancellationToken cancellationToken)
+   at Azure.Messaging.ServiceBus.ServiceBusProcessor.StopProcessingAsync(CancellationToken cancellationToken)
+   at Sprk.Bff.Api.Services.Jobs.ServiceBusJobProcessor.ExecuteAsync(CancellationToken stoppingToken) in C:\code_files\spaarke-wt-SDAP-outlook-office-add-in\src\server\api\Sprk.Bff.Api\Services\Jobs\ServiceBusJobProcessor.cs:line 72
+   at Microsoft.Extensions.Hosting.Internal.Host.TryExecuteBackgroundServiceAsync(BackgroundService backgroundService)
+</Data></EventData></Event><Event><System><Provider Name=".NET Runtime"/><EventID>1000</EventID><Level>1</Level><Task>0</Task><Keywords>Keywords</Keywords><TimeCreated SystemTime="2026-01-27T18:50:38Z"/><EventRecordID>1598092703</EventRecordID><Channel>Application</Channel><Computer>DW1SDWK00083O</Computer><Security/></System><EventData><Data>Category: Microsoft.Extensions.Hosting.Internal.Host
+EventId: 10
+
+The HostOptions.BackgroundServiceExceptionBehavior is configured to StopHost. A BackgroundService has thrown an unhandled exception, and the IHost instance is stopping. To avoid this behavior, configure this to Ignore; however the BackgroundService will not be restarted.
+
+Exception: 
+System.ObjectDisposedException: Cannot access a disposed object.
+Object name: 'System.Threading.SemaphoreSlim'.
+   at System.Threading.SemaphoreSlim.WaitAsync(Int32 millisecondsTimeout, CancellationToken cancellationToken)
+   at Azure.Messaging.ServiceBus.ServiceBusProcessor.StopProcessingAsync(CancellationToken cancellationToken)
+   at Sprk.Bff.Api.Services.Jobs.ServiceBusJobProcessor.ExecuteAsync(CancellationToken stoppingToken) in C:\code_files\spaarke-wt-SDAP-outlook-office-add-in\src\server\api\Sprk.Bff.Api\Services\Jobs\ServiceBusJobProcessor.cs:line 72
+   at Microsoft.Extensions.Hosting.Internal.Host.TryExecuteBackgroundServiceAsync(BackgroundService backgroundService)
+</Data></EventData></Event><Event><System><Provider Name="IIS AspNetCore Module V2"/><EventID>1033</EventID><Level>4</Level><Task>0</Task><Keywords>Keywords</Keywords><TimeCreated SystemTime="2026-01-27T18:50:40Z"/><EventRecordID>1598094734</EventRecordID><Channel>Application</Channel><Computer>DW1SDWK00083O</Computer><Security/></System><EventData><Data>Application 'MACHINE/WEBROOT/APPHOST/SPE-API-DEV-67E2XZ' has shutdown.</Data><Data>Process Id: 4624.</Data><Data>File Version: 18.0.25301.22. Description: IIS ASP.NET Core Module V2 Request Handler. Commit: </Data></EventData></Event><Event><System><Provider Name="IIS AspNetCore Module V2"/><EventID>1032</EventID><Level>4</Level><Task>0</Task><Keywords>Keywords</Keywords><TimeCreated SystemTime="2026-01-27T18:51:14Z"/><EventRecordID>1598128515</EventRecordID><Channel>Application</Channel><Computer>DW1SDWK00083O</Computer><Security/></System><EventData><Data>Application 'C:\Program Files (x86)\SiteExtensions\ApplicationInsightsAgent\2.8.47\ExtensionManager\' started successfully.</Data><Data>Process Id: 4652.</Data><Data>File Version: 13.1.22321.32. Description: IIS ASP.NET Core Module V2 Request Handler. Commit: 3eeb12e106b9e913c3a4dec1a7d16da7b74149eb</Data></EventData></Event><Event><System><Provider Name=".NET Runtime"/><EventID>1000</EventID><Level>2</Level><Task>0</Task><Keywords>Keywords</Keywords><TimeCreated SystemTime="2026-01-27T18:51:42Z"/><EventRecordID>1598156281</EventRecordID><Channel>Application</Channel><Computer>DW1SDWK00083O</Computer><Security/></System><EventData><Data>Category: Sprk.Bff.Api.Services.Office.JobStatusService
+EventId: 0
+
+JobStatusService initialized without Redis - pub/sub will be disabled, SSE will fall back to polling
+</Data></EventData></Event><Event><System><Provider Name="IIS AspNetCore Module V2"/><EventID>1032</EventID><Level>4</Level><Task>0</Task><Keywords>Keywords</Keywords><TimeCreated SystemTime="2026-01-27T18:51:47Z"/><EventRecordID>1598161640</EventRecordID><Channel>Application</Channel><Computer>DW1SDWK00083O</Computer><Security/></System><EventData><Data>Application 'C:\home\site\wwwroot\' started successfully.</Data><Data>Process Id: 3116.</Data><Data>File Version: 18.0.25301.22. Description: IIS ASP.NET Core Module V2 Request Handler. Commit: </Data></EventData></Event></Events>

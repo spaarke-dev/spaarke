@@ -278,10 +278,142 @@ When a user creates a Playbook:
 | `sprk_analysistoolid` | GUID | Primary key |
 | `sprk_name` | String | Tool name |
 | `sprk_description` | Memo | Description |
-| `sprk_tooltypeid` | Lookup | Reference to `sprk_aitooltype` |
-| `sprk_type` | OptionSet | EntityExtractor (0), ClauseAnalyzer (1), etc. |
-| `sprk_handlerclass` | String | C# handler class name |
-| `sprk_configuration` | Memo | JSON configuration |
+| `sprk_tooltypeid` | Lookup | Reference to `sprk_aitooltype` (category only) |
+| `sprk_type` | OptionSet | **DEPRECATED** - Use handlerclass instead |
+| `sprk_handlerclass` | String(200) | C# handler class name (e.g., "EntityExtractorHandler") - **OPTIONAL** |
+| `sprk_configuration` | Memo(100K) | JSON configuration for handler |
+
+**Handler Resolution** (Updated January 29, 2026):
+
+The `sprk_handlerclass` field determines which C# handler executes the tool:
+
+1. **NULL or empty** → Uses `GenericAnalysisHandler` (default, configuration-driven)
+2. **Specific handler** (e.g., "EntityExtractorHandler") → Uses that handler if registered
+3. **Handler not found** → Falls back to `GenericAnalysisHandler` with warning
+
+**Example - Configuration-Driven Tool (No Code Deployment Required)**:
+```json
+// sprk_analysistool record
+{
+  "sprk_name": "Technical Requirements Extractor",
+  "sprk_tooltypeid": "01 - Entity Extraction",
+  "sprk_handlerclass": null,  // Uses GenericAnalysisHandler
+  "sprk_configuration": {
+    "operation": "extract",
+    "prompt_template": "Extract all technical requirements from the document. List each requirement with its priority level (Must/Should/Could/Won't).",
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "requirements": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "description": { "type": "string" },
+              "priority": { "type": "string", "enum": ["Must", "Should", "Could", "Won't"] }
+            }
+          }
+        }
+      }
+    },
+    "temperature": 0.2
+  }
+}
+```
+
+**Example - Custom Handler (For Complex Processing)**:
+```json
+{
+  "sprk_name": "Entity Extractor",
+  "sprk_tooltypeid": "01 - Entity Extraction",
+  "sprk_handlerclass": "EntityExtractorHandler",  // Uses specialized handler
+  "sprk_configuration": {
+    "entityTypes": ["Person", "Organization", "Date", "MonetaryValue"],
+    "confidenceThreshold": 0.7
+  }
+}
+```
+
+#### sprk_systemprompt (Action)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `sprk_systempromptid` | GUID | Primary key |
+| `sprk_name` | String(200) | Action name |
+| `sprk_description` | Memo(2000) | Description |
+| `sprk_actiontypeid` | Lookup | Reference to `sprk_analysisactiontype` |
+| `sprk_systemprompt` | Memo(100K) | System prompt template |
+
+#### sprk_promptfragment (Skill)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `sprk_promptfragmentid` | GUID | Primary key |
+| `sprk_name` | String(200) | Skill name |
+| `sprk_description` | Memo(2000) | Description |
+| `sprk_skilltypeid` | Lookup | Reference to `sprk_aiskilltype` |
+| `sprk_promptfragment` | Memo(100K) | Prompt fragment content |
+
+#### sprk_content (Knowledge)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `sprk_contentid` | GUID | Primary key |
+| `sprk_name` | String(200) | Knowledge source name |
+| `sprk_description` | Memo(2000) | Description |
+| `sprk_knowledgetypeid` | Lookup | Reference to `sprk_aiknowledgetype` |
+| `sprk_content` | Memo(100K) | Inline content or RAG configuration JSON |
+| `sprk_deploymentid` | Guid (nullable) | Reference to RAG deployment (if KnowledgeType is RAG) |
+
+---
+
+### Scope Resolution from Dataverse
+
+**Updated**: January 29, 2026 - All scopes loaded dynamically from Dataverse
+
+**Key Pattern**: Scopes are loaded from Dataverse at playbook execution time via `IScopeResolverService`:
+
+```csharp
+// Example: Loading a Tool
+public async Task<AnalysisTool?> GetToolAsync(Guid toolId, CancellationToken cancellationToken)
+{
+    // Query Dataverse Web API
+    var url = $"sprk_analysistools({toolId})?$expand=sprk_ToolTypeId($select=sprk_name)";
+    var response = await _httpClient.GetAsync(url, cancellationToken);
+
+    if (response.StatusCode == NotFound) return null;
+
+    var entity = await response.Content.ReadFromJsonAsync<ToolEntity>(cancellationToken);
+
+    // Map to domain model
+    var tool = new AnalysisTool
+    {
+        Id = entity.Id,
+        Name = entity.Name,
+        Description = entity.Description,
+        HandlerClass = entity.HandlerClass,  // Used for handler resolution
+        Configuration = entity.Configuration,
+        Type = MapHandlerClassToToolType(entity.HandlerClass)
+    };
+
+    return tool;
+}
+```
+
+**Same Pattern for All Scopes**:
+
+| Scope Type | Entity Set | Query Pattern |
+|------------|-----------|---------------|
+| Tools | `sprk_analysistools` | `sprk_analysistools({id})?$expand=sprk_ToolTypeId($select=sprk_name)` |
+| Skills | `sprk_promptfragments` | `sprk_promptfragments({id})?$expand=sprk_SkillTypeId($select=sprk_name)` |
+| Knowledge | `sprk_contents` | `sprk_contents({id})?$expand=sprk_KnowledgeTypeId($select=sprk_name)` |
+| Actions | `sprk_systemprompts` | `sprk_systemprompts({id})?$expand=sprk_ActionTypeId($select=sprk_name)` |
+
+**Benefits**:
+- ✅ New scopes work immediately after creation in Dataverse
+- ✅ No code deployment required for new tools/skills/knowledge/actions
+- ✅ Configuration changes reflected immediately
+- ✅ No stub data or hardcoded GUIDs
 
 ---
 

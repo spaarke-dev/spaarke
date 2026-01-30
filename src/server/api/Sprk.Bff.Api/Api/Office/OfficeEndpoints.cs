@@ -240,7 +240,7 @@ public static class OfficeEndpoints
         try
         {
             // Call service to process save request
-            var response = await officeService.SaveAsync(request, userId, cancellationToken);
+            var response = await officeService.SaveAsync(request, userId, context, cancellationToken);
 
             if (response.Success)
             {

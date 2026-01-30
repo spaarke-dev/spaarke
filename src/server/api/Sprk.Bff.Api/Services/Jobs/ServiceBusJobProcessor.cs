@@ -69,8 +69,32 @@ public class ServiceBusJobProcessor : BackgroundService
         {
             if (_processor != null)
             {
-                await _processor.StopProcessingAsync();
-                await _processor.DisposeAsync();
+                try
+                {
+                    await _processor.StopProcessingAsync();
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Processor already disposed - this is fine during shutdown
+                    _logger.LogDebug("Processor was already disposed during shutdown");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error stopping processor during shutdown");
+                }
+
+                try
+                {
+                    await _processor.DisposeAsync();
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Already disposed - this is fine
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error disposing processor during shutdown");
+                }
             }
             _logger.LogInformation("Service Bus Job Processor stopped");
         }

@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="068" project="sdap-office-integration">
+  <metadata>
+    <title>Test basic email save flow end-to-end</title>
+    <phase>5: Background Workers (Remediation)</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>067</dependencies>
+    <blocks>069</blocks>
+    <tags>testing, e2e, outlook</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Integration testing with verification steps</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Test the complete email save flow from Outlook add-in through to Document
+    creation in Dataverse. Verify UploadFinalizationWorker processes the job
+    correctly now that the Service Bus queue exists.
+  </prompt>
+
+  <role>
+    QA engineer testing end-to-end integration. Familiar with Outlook add-ins,
+    Azure Service Bus, and Dataverse.
+  </role>
+
+  <goal>
+    Confirm that saving an email from Outlook successfully creates a Document
+    record in Dataverse with proper metadata and associations.
+  </goal>
+
+  <context>
+    <background>
+      After creating the Service Bus queues in task 067, the basic save flow
+      should work. This task validates the complete pipeline:
+
+      1. User saves email in Outlook add-in
+      2. POST /office/save uploads .eml to SPE, queues job
+      3. UploadFinalizationWorker creates Document + EmailArtifact records
+      4. Job status reaches "Completed"
+
+      AI processing stages (profile, indexing) are tested separately.
+    </background>
+    <relevant-files>
+      <file>projects/sdap-office-integration/notes/OFFICE-WORKERS-IMPLEMENTATION-PLAN.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Workers/Office/UploadFinalizationWorker.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Document must be associated to an entity (Matter/Project/Account/Contact)</constraint>
+    <constraint source="spec">EmailArtifact must contain email metadata</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-office-integration/spec.md</file>
+      <file>projects/sdap-office-integration/notes/OFFICE-WORKERS-IMPLEMENTATION-PLAN.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify BFF API is deployed with latest code (check /healthz)</step>
+    <step order="2">Verify Service Bus queues exist (from task 067)</step>
+    <step order="3">Open Outlook for Web and load the Spaarke add-in</step>
+    <step order="4">Select a test email with at least one attachment</step>
+    <step order="5">Click "Save to Spaarke" and select an association target (Matter or Account)</step>
+    <step order="6">Observe job status in taskpane - should progress through stages</step>
+    <step order="7">Verify Document record created in Dataverse with correct association</step>
+    <step order="8">Verify EmailArtifact record created with email metadata</step>
+    <step order="9">Verify .eml file exists in SPE container</step>
+    <step order="10">Verify attachments extracted as child Documents (if email had attachments)</step>
+    <step order="11">Check Application Insights for any errors during processing</step>
+    <step order="12">Document any issues found in notes/test-results-068.md</step>
+    <step order="13">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="browser">Outlook Web App for testing</tool>
+    <tool name="dataverse">Power Apps for verifying records</tool>
+    <tool name="az-cli">Check logs if needed</tool>
+  </tools>
+
+  <outputs>
+    <output type="verification">Email save flow works end-to-end</output>
+    <output type="docs">projects/sdap-office-integration/notes/test-results-068.md (if issues found)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Email saves without HTTP errors</criterion>
+    <criterion testable="true">Document record exists in Dataverse</criterion>
+    <criterion testable="true">Document is associated to selected entity</criterion>
+    <criterion testable="true">EmailArtifact record contains subject, sender, recipients</criterion>
+    <criterion testable="true">.eml file accessible in SPE</criterion>
+    <criterion testable="true">Job status reaches "Completed"</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Test Environment:
+    - BFF API: https://spe-api-dev-67e2xz.azurewebsites.net
+    - Dataverse: https://spaarkedev1.crm.dynamics.com
+    - Add-in: https://icy-desert-0bfdbb61e.6.azurestaticapps.net
+
+    If errors occur:
+    - Check browser console for client-side errors
+    - Check Application Insights for server-side errors
+    - Check Service Bus DLQ for failed messages
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      This is a manual testing task. Document findings as you go.
+      If blocking issues found, create follow-up tasks to fix them.
+    </protocol>
+  </execution>
+</task>

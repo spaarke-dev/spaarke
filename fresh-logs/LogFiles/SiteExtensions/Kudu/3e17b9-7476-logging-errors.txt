@@ -1,0 +1,15 @@
+2026-01-16T22:59:57
+System.Threading.ThreadAbortException: Thread was being aborted.
+   at Microsoft.WindowsAzure.WebSites.Diagnostics.AzureDriveTraceListener.InitializeOutput(Int32 bytesToWrite)
+   at Microsoft.WindowsAzure.WebSites.Diagnostics.AzureDriveTraceListener.ConsumeBuffer()
+
+2026-01-16T22:59:57
+System.Threading.ThreadAbortException: Thread was being aborted.
+   at Microsoft.WindowsAzure.WebSites.Diagnostics.AzureDriveTraceListener.ConsumeBuffer()
+   at Microsoft.WindowsAzure.WebSites.Diagnostics.BaseTraceListener.FlushBuffer(Boolean waitForCompletion)
+
+2026-01-16T22:59:57
+System.Threading.ThreadAbortException: Thread was being aborted.
+   at Microsoft.WindowsAzure.WebSites.Diagnostics.BaseTraceListener.FlushBuffer(Boolean waitForCompletion)
+   at Microsoft.WindowsAzure.WebSites.Diagnostics.BaseTraceListener.OnFlushBuffer(Object state)
+

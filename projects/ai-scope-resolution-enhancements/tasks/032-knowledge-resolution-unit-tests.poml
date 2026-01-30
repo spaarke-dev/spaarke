@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="ai-scope-resolution-enhancements">
+  <metadata>
+    <title>Create Unit Tests for Knowledge Resolution</title>
+    <phase>3</phase>
+    <tags>testing, unit-tests</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>031</dependencies>
+    <parallel-group>A</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Create unit tests for GetKnowledgeAsync method.
+    </goal>
+    <context>
+      Tests should cover:
+      - Successful knowledge load
+      - Knowledge not found returns null
+      - KnowledgeType mapping (Inline, RagIndex)
+      - DeploymentId populated for RAG type
+    </context>
+    <constraints>
+      - Follow AAA pattern
+      - Use FluentAssertions
+      - Test both Inline and RagIndex types
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">
+      Create test: GetKnowledgeAsync_ReturnsKnowledge_WhenKnowledgeExists
+    </step>
+    <step order="2">
+      Create test: GetKnowledgeAsync_ReturnsNull_WhenKnowledgeNotFound
+    </step>
+    <step order="3">
+      Create test: GetKnowledgeAsync_MapsInlineType_WhenTypeNameContainsStandards
+    </step>
+    <step order="4">
+      Create test: GetKnowledgeAsync_MapsRagIndexType_WhenTypeNameContainsRegulations
+    </step>
+    <step order="5">
+      Run tests and verify
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Edit - Add tests to test class</tool>
+    <tool>Bash - Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output>Knowledge resolution unit tests</output>
+    <output>All tests passing</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All knowledge resolution scenarios covered</criterion>
+    <criterion>Type mapping tests included</criterion>
+    <criterion>All tests pass</criterion>
+  </acceptance-criteria>
+</task>

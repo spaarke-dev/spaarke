@@ -251,7 +251,7 @@ public class DataverseWebApiService : IDataverseService
         }
     }
 
-    public async Task<Guid> CreateAnalysisAsync(Guid documentId, string? name = null, CancellationToken ct = default)
+    public async Task<Guid> CreateAnalysisAsync(Guid documentId, string? name = null, Guid? playbookId = null, CancellationToken ct = default)
     {
         await EnsureAuthenticatedAsync(ct);
 
@@ -261,6 +261,12 @@ public class DataverseWebApiService : IDataverseService
             ["sprk_documentid@odata.bind"] = $"/sprk_documents({documentId})",
             ["statuscode"] = 1 // Active
         };
+
+        // Set playbook lookup if provided
+        if (playbookId.HasValue)
+        {
+            payload["sprk_playbookid@odata.bind"] = $"/sprk_analysisplaybooks({playbookId.Value})";
+        }
 
         var response = await _httpClient.PostAsJsonAsync("sprk_analysises", payload, ct);
         response.EnsureSuccessStatusCode();
@@ -404,6 +410,7 @@ public class DataverseWebApiService : IDataverseService
         // Note: sprk_parentdocumentid was removed from schema - use ParentDocumentLookup instead
         if (request.ParentFileName != null) payload["sprk_parentfilename"] = request.ParentFileName;
         if (request.ParentGraphItemId != null) payload["sprk_parentgraphitemid"] = request.ParentGraphItemId;
+        if (request.EmailParentId != null) payload["sprk_emailparentid"] = request.EmailParentId;
         // ParentDocumentLookup uses @odata.bind for lookup fields
         if (request.ParentDocumentLookup.HasValue)
             payload["sprk_ParentDocument@odata.bind"] = $"/sprk_documents({request.ParentDocumentLookup.Value})";

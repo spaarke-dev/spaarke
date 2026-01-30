@@ -1,0 +1,19 @@
+2026-01-18T18:42:26
+System.Threading.ThreadAbortException: Thread was being aborted.
+   at Microsoft.Win32.Win32Native.CreateFile(String lpFileName, Int32 dwDesiredAccess, FileShare dwShareMode, SECURITY_ATTRIBUTES securityAttrs, FileMode dwCreationDisposition, Int32 dwFlagsAndAttributes, IntPtr hTemplateFile)
+   at Microsoft.Win32.Win32Native.SafeCreateFile(String lpFileName, Int32 dwDesiredAccess, FileShare dwShareMode, SECURITY_ATTRIBUTES securityAttrs, FileMode dwCreationDisposition, Int32 dwFlagsAndAttributes, IntPtr hTemplateFile)
+   at System.IO.FileStream.Init(String path, FileMode mode, FileAccess access, Int32 rights, Boolean useRights, FileShare share, Int32 bufferSize, FileOptions options, SECURITY_ATTRIBUTES secAttrs, String msgPath, Boolean bFromProxy, Boolean useLongPath, Boolean checkHost)
+   at System.IO.FileStream..ctor(String path, FileMode mode, FileAccess access, FileShare share)
+   at Microsoft.WindowsAzure.WebSites.Diagnostics.AzureDriveTraceListener.InitializeOutput(Int32 bytesToWrite)
+   at Microsoft.WindowsAzure.WebSites.Diagnostics.AzureDriveTraceListener.ConsumeBuffer()
+
+2026-01-18T18:42:26
+System.Threading.ThreadAbortException: Thread was being aborted.
+   at Microsoft.WindowsAzure.WebSites.Diagnostics.AzureDriveTraceListener.ConsumeBuffer()
+   at Microsoft.WindowsAzure.WebSites.Diagnostics.BaseTraceListener.FlushBuffer(Boolean waitForCompletion)
+
+2026-01-18T18:42:26
+System.Threading.ThreadAbortException: Thread was being aborted.
+   at Microsoft.WindowsAzure.WebSites.Diagnostics.BaseTraceListener.FlushBuffer(Boolean waitForCompletion)
+   at Microsoft.WindowsAzure.WebSites.Diagnostics.BaseTraceListener.OnFlushBuffer(Object state)
+

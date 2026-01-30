@@ -135,6 +135,14 @@ public record UploadFinalizationPayload
     /// AI processing options.
     /// </summary>
     public AiProcessingOptions? AiOptions { get; init; }
+
+    /// <summary>
+    /// Document ID from Dataverse (sprk_document).
+    /// When the file is uploaded directly to SPE by SaveAsync, this contains
+    /// the Document record ID that was created. The worker should use this
+    /// instead of creating a new Document record.
+    /// </summary>
+    public Guid? DocumentId { get; init; }
 }
 
 /// <summary>
@@ -201,6 +209,12 @@ public record EmailArtifactPayload
     /// Email importance level.
     /// </summary>
     public int Importance { get; init; } = 1; // Normal
+
+    /// <summary>
+    /// Selected attachment filenames to create as Documents.
+    /// If null or empty, all attachments are created.
+    /// </summary>
+    public List<string>? SelectedAttachmentFileNames { get; init; }
 }
 
 /// <summary>

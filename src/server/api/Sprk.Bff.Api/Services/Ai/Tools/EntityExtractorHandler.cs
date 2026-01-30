@@ -31,6 +31,40 @@ public sealed class EntityExtractorHandler : IAnalysisToolHandler
     private readonly ITextChunkingService _textChunkingService;
     private readonly ILogger<EntityExtractorHandler> _logger;
 
+    /// <summary>JSON Schema (Draft 07) for configuration validation.</summary>
+    private static readonly object ConfigSchema = new
+    {
+        schema = "https://json-schema.org/draft-07/schema#",
+        title = "Entity Extractor Configuration",
+        type = "object",
+        properties = new
+        {
+            entityTypes = new
+            {
+                type = "array",
+                description = "Entity types to extract",
+                items = new { type = "string" },
+                @default = new[] { "Person", "Organization", "Date", "MonetaryValue", "LegalReference" }
+            },
+            minConfidence = new
+            {
+                type = "number",
+                description = "Minimum confidence threshold (0.0-1.0)",
+                minimum = 0.0,
+                maximum = 1.0,
+                @default = 0.5
+            },
+            chunkSize = new
+            {
+                type = "integer",
+                description = "Characters per chunk for large documents",
+                minimum = 1000,
+                maximum = 32000,
+                @default = 8000
+            }
+        }
+    };
+
     public EntityExtractorHandler(
         IOpenAiClient openAiClient,
         ITextChunkingService textChunkingService,
@@ -56,7 +90,8 @@ public sealed class EntityExtractorHandler : IAnalysisToolHandler
                 DefaultValue: new[] { "Person", "Organization", "Date", "MonetaryValue", "LegalReference" }),
             new ToolParameterDefinition("minConfidence", "Minimum confidence threshold (0.0-1.0)", ToolParameterType.Decimal, Required: false, DefaultValue: 0.5),
             new ToolParameterDefinition("chunkSize", "Characters per chunk for large documents", ToolParameterType.Integer, Required: false, DefaultValue: 8000)
-        });
+        },
+        ConfigurationSchema: ConfigSchema);
 
     /// <inheritdoc />
     public IReadOnlyList<ToolType> SupportedToolTypes { get; } = new[] { ToolType.EntityExtractor };

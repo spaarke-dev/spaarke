@@ -1,3 +1,8 @@
+using System.Net.Http.Headers;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using Azure.Core;
+using Azure.Identity;
 using Spaarke.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Ai;
@@ -6,128 +11,60 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// Resolves analysis scopes from Dataverse entities.
 /// Loads Skills, Knowledge, Tools by ID or from Playbook configuration.
 /// </summary>
-/// <remarks>
-/// Phase 1 Scaffolding: Returns stub data until Dataverse entity operations are implemented.
-/// IDataverseService will be extended with Analysis entity methods in Task 032.
-/// </remarks>
 public class ScopeResolverService : IScopeResolverService
 {
     private readonly IDataverseService _dataverseService;
+    private readonly IPlaybookService _playbookService;
     private readonly ILogger<ScopeResolverService> _logger;
-
-    // In-memory stub data for Phase 1 (will be replaced with Dataverse in Task 032)
-    private static readonly Dictionary<Guid, AnalysisAction> _stubActions = new()
-    {
-        [Guid.Parse("00000000-0000-0000-0000-000000000001")] = new AnalysisAction
-        {
-            Id = Guid.Parse("00000000-0000-0000-0000-000000000001"),
-            Name = "Summarize Document",
-            Description = "Generate a comprehensive summary of the document",
-            SystemPrompt = "You are an AI assistant that creates clear, comprehensive document summaries. " +
-                          "Focus on key points, main arguments, and important details.",
-            SortOrder = 1
-        },
-        [Guid.Parse("00000000-0000-0000-0000-000000000002")] = new AnalysisAction
-        {
-            Id = Guid.Parse("00000000-0000-0000-0000-000000000002"),
-            Name = "Review Agreement",
-            Description = "Analyze legal agreement terms and risks",
-            SystemPrompt = "You are a legal assistant analyzing document terms. " +
-                          "Identify key obligations, risks, deadlines, and important clauses.",
-            SortOrder = 2
-        }
-    };
-
-    private static readonly Dictionary<Guid, AnalysisSkill> _stubSkills = new()
-    {
-        [Guid.Parse("10000000-0000-0000-0000-000000000001")] = new AnalysisSkill
-        {
-            Id = Guid.Parse("10000000-0000-0000-0000-000000000001"),
-            Name = "Legal Analysis",
-            Description = "Analyze legal terms and contract language",
-            PromptFragment = "Focus on identifying legal obligations, rights, and potential liabilities.",
-            Category = "Legal"
-        },
-        [Guid.Parse("10000000-0000-0000-0000-000000000002")] = new AnalysisSkill
-        {
-            Id = Guid.Parse("10000000-0000-0000-0000-000000000002"),
-            Name = "Financial Analysis",
-            Description = "Analyze financial data and metrics",
-            PromptFragment = "Extract and analyze financial figures, trends, and key metrics.",
-            Category = "Finance"
-        },
-        [Guid.Parse("10000000-0000-0000-0000-000000000003")] = new AnalysisSkill
-        {
-            Id = Guid.Parse("10000000-0000-0000-0000-000000000003"),
-            Name = "Risk Assessment",
-            Description = "Identify and assess risks in documents",
-            PromptFragment = "Evaluate potential risks, their severity, and suggested mitigations.",
-            Category = "Risk"
-        }
-    };
-
-    private static readonly Dictionary<Guid, AnalysisKnowledge> _stubKnowledge = new()
-    {
-        [Guid.Parse("20000000-0000-0000-0000-000000000001")] = new AnalysisKnowledge
-        {
-            Id = Guid.Parse("20000000-0000-0000-0000-000000000001"),
-            Name = "Standard Terms Reference",
-            Description = "Reference guide for standard contract terms",
-            Type = KnowledgeType.Inline,
-            Content = "Standard contract terms include termination clauses, liability limitations, and payment terms."
-        },
-        [Guid.Parse("20000000-0000-0000-0000-000000000002")] = new AnalysisKnowledge
-        {
-            Id = Guid.Parse("20000000-0000-0000-0000-000000000002"),
-            Name = "Company Knowledge Base",
-            Description = "RAG-enabled company knowledge base",
-            Type = KnowledgeType.RagIndex,
-            DeploymentId = Guid.Parse("30000000-0000-0000-0000-000000000001")
-        }
-    };
-
-    private static readonly Dictionary<Guid, AnalysisTool> _stubTools = new()
-    {
-        [Guid.Parse("40000000-0000-0000-0000-000000000001")] = new AnalysisTool
-        {
-            Id = Guid.Parse("40000000-0000-0000-0000-000000000001"),
-            Name = "Document Summarizer",
-            Description = "Generate document summaries",
-            Type = ToolType.Summary,
-            Configuration = """{"maxLength": 500, "format": "bullet"}"""
-        },
-        [Guid.Parse("40000000-0000-0000-0000-000000000002")] = new AnalysisTool
-        {
-            Id = Guid.Parse("40000000-0000-0000-0000-000000000002"),
-            Name = "Risk Detector",
-            Description = "Detect and categorize risks",
-            Type = ToolType.RiskDetector,
-            Configuration = """{"severityLevels": ["High", "Medium", "Low"]}"""
-        },
-        [Guid.Parse("40000000-0000-0000-0000-000000000003")] = new AnalysisTool
-        {
-            Id = Guid.Parse("40000000-0000-0000-0000-000000000003"),
-            Name = "Date Extractor",
-            Description = "Extract and normalize dates",
-            Type = ToolType.DateExtractor,
-            Configuration = """{"includeRelativeDates": true}"""
-        },
-        [Guid.Parse("40000000-0000-0000-0000-000000000004")] = new AnalysisTool
-        {
-            Id = Guid.Parse("40000000-0000-0000-0000-000000000004"),
-            Name = "Financial Calculator",
-            Description = "Extract and calculate financial data",
-            Type = ToolType.FinancialCalculator,
-            Configuration = """{"currencies": ["USD", "EUR", "GBP"]}"""
-        }
-    };
+    private readonly HttpClient _httpClient;
+    private readonly string _apiUrl;
+    private readonly TokenCredential _credential;
+    private AccessToken? _currentToken;
 
     public ScopeResolverService(
         IDataverseService dataverseService,
+        IPlaybookService playbookService,
+        HttpClient httpClient,
+        IConfiguration configuration,
         ILogger<ScopeResolverService> logger)
     {
         _dataverseService = dataverseService;
+        _playbookService = playbookService;
+        _httpClient = httpClient;
         _logger = logger;
+
+        var dataverseUrl = configuration["Dataverse:ServiceUrl"]
+            ?? throw new InvalidOperationException("Dataverse:ServiceUrl configuration is required");
+        var tenantId = configuration["TENANT_ID"]
+            ?? throw new InvalidOperationException("TENANT_ID configuration is required");
+        var clientId = configuration["API_APP_ID"]
+            ?? throw new InvalidOperationException("API_APP_ID configuration is required");
+        var clientSecret = configuration["API_CLIENT_SECRET"]
+            ?? throw new InvalidOperationException("API_CLIENT_SECRET configuration is required");
+
+        _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2/";
+        _credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
+
+        _httpClient.BaseAddress = new Uri(_apiUrl);
+        _httpClient.DefaultRequestHeaders.Add("OData-MaxVersion", "4.0");
+        _httpClient.DefaultRequestHeaders.Add("OData-Version", "4.0");
+        _httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+    }
+
+    private async Task EnsureAuthenticatedAsync(CancellationToken cancellationToken = default)
+    {
+        if (_currentToken == null || _currentToken.Value.ExpiresOn <= DateTimeOffset.UtcNow.AddMinutes(5))
+        {
+            var scope = $"{_apiUrl.Replace("/api/data/v9.2", "")}/.default";
+            _currentToken = await _credential.GetTokenAsync(
+                new TokenRequestContext([scope]),
+                cancellationToken);
+
+            _httpClient.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", _currentToken.Value.Token);
+
+            _logger.LogDebug("Refreshed Dataverse access token for ScopeResolverService");
+        }
     }
 
     /// <inheritdoc />
@@ -147,16 +84,78 @@ public class ScopeResolverService : IScopeResolverService
     }
 
     /// <inheritdoc />
-    public Task<ResolvedScopes> ResolvePlaybookScopesAsync(
+    public async Task<ResolvedScopes> ResolvePlaybookScopesAsync(
         Guid playbookId,
         CancellationToken cancellationToken)
     {
         _logger.LogDebug("Resolving scopes from playbook {PlaybookId}", playbookId);
 
-        // Phase 1: Playbook resolution not yet implemented
-        _logger.LogWarning("Playbook resolution not yet implemented, returning empty scopes");
+        try
+        {
+            // Load playbook to get N:N relationship IDs
+            // PlaybookService queries sprk_playbook_tool N:N relationship
+            var playbook = await _playbookService.GetPlaybookAsync(playbookId, cancellationToken);
 
-        return Task.FromResult(new ResolvedScopes([], [], []));
+            if (playbook == null)
+            {
+                _logger.LogWarning("Playbook {PlaybookId} not found", playbookId);
+                return new ResolvedScopes([], [], []);
+            }
+
+            _logger.LogDebug(
+                "Playbook '{PlaybookName}' has {ToolCount} tools, {SkillCount} skills, {KnowledgeCount} knowledge",
+                playbook.Name, playbook.ToolIds.Length, playbook.SkillIds.Length, playbook.KnowledgeIds.Length);
+
+            if (playbook.ToolIds.Length == 0)
+            {
+                _logger.LogWarning(
+                    "Playbook '{PlaybookName}' (ID: {PlaybookId}) has no tools configured in N:N relationship",
+                    playbook.Name, playbookId);
+                return new ResolvedScopes([], [], []);
+            }
+
+            // Load full AnalysisTool entities for each tool ID
+            _logger.LogInformation(
+                "[RESOLVE SCOPES] Loading full tool entities for {Count} tool IDs: {ToolIds}",
+                playbook.ToolIds.Length,
+                string.Join(", ", playbook.ToolIds));
+
+            var toolTasks = playbook.ToolIds.Select(toolId => GetToolAsync(toolId, cancellationToken));
+            var toolResults = await Task.WhenAll(toolTasks);
+
+            _logger.LogInformation(
+                "[RESOLVE SCOPES] GetToolAsync returned {TotalCount} results, {NullCount} were null",
+                toolResults.Length,
+                toolResults.Count(t => t == null));
+
+            var tools = toolResults
+                .Where(t => t != null)
+                .Cast<AnalysisTool>()
+                .ToArray();
+
+            _logger.LogInformation(
+                "[RESOLVE SCOPES] After filtering nulls, {Count} valid tools remain",
+                tools.Length);
+
+            _logger.LogDebug(
+                "Resolved {ToolCount} tools from playbook '{PlaybookName}' (ID: {PlaybookId}): {ToolNames}",
+                tools.Length,
+                playbook.Name,
+                playbookId,
+                string.Join(", ", tools.Select(t => t.Name)));
+
+            // Return scopes with tools (Skills and Knowledge empty for now)
+            // TODO: Load skills and knowledge when needed (FR-14, FR-15)
+            return new ResolvedScopes([], [], tools);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Failed to resolve scopes from playbook {PlaybookId}",
+                playbookId);
+            throw;
+        }
     }
 
     /// <inheritdoc />
@@ -181,207 +180,348 @@ public class ScopeResolverService : IScopeResolverService
         Guid actionId,
         CancellationToken cancellationToken)
     {
-        _logger.LogDebug("Loading action {ActionId} from Dataverse", actionId);
+        _logger.LogInformation("[GET ACTION] Loading action {ActionId} from Dataverse", actionId);
 
-        try
-        {
-            // Fetch action from Dataverse
-            var actionEntity = await _dataverseService.GetAnalysisActionAsync(actionId.ToString(), cancellationToken);
+        await EnsureAuthenticatedAsync(cancellationToken);
 
-            if (actionEntity != null)
-            {
-                _logger.LogDebug("Found action in Dataverse: {ActionName}", actionEntity.Name);
-                return new AnalysisAction
-                {
-                    Id = actionEntity.Id,
-                    Name = actionEntity.Name ?? "Unknown",
-                    Description = actionEntity.Description ?? "",
-                    SystemPrompt = actionEntity.SystemPrompt ?? "You are an AI assistant that analyzes documents.",
-                    SortOrder = actionEntity.SortOrder
-                };
-            }
-        }
-        catch (Exception ex)
+        var url = $"sprk_analysisactions({actionId})?$expand=sprk_ActionTypeId($select=sprk_name)";
+        var response = await _httpClient.GetAsync(url, cancellationToken);
+
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
-            _logger.LogWarning(ex, "Failed to fetch action {ActionId} from Dataverse, falling back to stub data", actionId);
+            _logger.LogWarning("[GET ACTION] Action {ActionId} not found in Dataverse", actionId);
+            return null;
         }
 
-        // Fallback: Check stub actions
-        if (_stubActions.TryGetValue(actionId, out var action))
+        response.EnsureSuccessStatusCode();
+
+        var entity = await response.Content.ReadFromJsonAsync<ActionEntity>(cancellationToken);
+        if (entity == null)
         {
-            _logger.LogDebug("Found stub action: {ActionName}", action.Name);
-            return action;
+            _logger.LogWarning("[GET ACTION] Failed to deserialize action {ActionId}", actionId);
+            return null;
         }
 
-        // Return a default action for any unknown ID
-        _logger.LogInformation("Action {ActionId} not found in Dataverse or stub data, returning default action", actionId);
-        return new AnalysisAction
+        // Extract SortOrder from type name prefix (e.g., "01 - Extraction" → 1)
+        var sortOrder = ExtractSortOrderFromTypeName(entity.ActionTypeId?.Name);
+
+        var action = new AnalysisAction
         {
-            Id = actionId,
-            Name = "Default Analysis",
-            Description = "Analyze the document",
-            SystemPrompt = "You are an AI assistant that analyzes documents and provides helpful insights. " +
-                          "Be thorough, accurate, and provide clear explanations.",
-            SortOrder = 0
+            Id = entity.Id,
+            Name = entity.Name ?? "Unnamed Action",
+            Description = entity.Description,
+            SystemPrompt = entity.SystemPrompt ?? "You are an AI assistant that analyzes documents.",
+            SortOrder = sortOrder
         };
+
+        _logger.LogInformation("[GET ACTION] Loaded action from Dataverse: {ActionName} (SortOrder: {SortOrder})",
+            action.Name, action.SortOrder);
+
+        return action;
+    }
+
+    private static int ExtractSortOrderFromTypeName(string? typeName)
+    {
+        if (string.IsNullOrEmpty(typeName))
+            return 0;
+
+        // Pattern: "01 - Extraction" → extract "01" → parse to int 1
+        var match = System.Text.RegularExpressions.Regex.Match(typeName, @"^(\d+)\s*-");
+        if (match.Success && int.TryParse(match.Groups[1].Value, out var sortOrder))
+        {
+            return sortOrder;
+        }
+
+        return 0;
     }
 
     /// <inheritdoc />
-    public Task<ScopeListResult<AnalysisSkill>> ListSkillsAsync(
+    public async Task<ScopeListResult<AnalysisSkill>> ListSkillsAsync(
         ScopeListOptions options,
         CancellationToken cancellationToken)
     {
-        _logger.LogDebug("Listing skills: Page={Page}, PageSize={PageSize}", options.Page, options.PageSize);
+        _logger.LogInformation("[LIST SKILLS] Querying Dataverse: Page={Page}, PageSize={PageSize}, NameFilter={NameFilter}, CategoryFilter={CategoryFilter}",
+            options.Page, options.PageSize, options.NameFilter, options.CategoryFilter);
 
-        var items = _stubSkills.Values.AsEnumerable();
+        await EnsureAuthenticatedAsync(cancellationToken);
 
-        // Apply name filter
-        if (!string.IsNullOrWhiteSpace(options.NameFilter))
+        var sortMappings = new Dictionary<string, string>
         {
-            items = items.Where(s => s.Name.Contains(options.NameFilter, StringComparison.OrdinalIgnoreCase));
+            ["name"] = "sprk_name",
+            ["category"] = "sprk_name" // Sort by name when category requested (category is in related entity)
+        };
+
+        var query = BuildODataQuery(
+            options,
+            selectFields: "sprk_analysisskillid,sprk_name,sprk_description,sprk_promptfragment",
+            expandClause: "sprk_SkillTypeId($select=sprk_name)",
+            nameFieldPath: "sprk_name",
+            categoryFieldPath: null, // Category filter needs special handling for lookup
+            sortFieldMappings: sortMappings);
+
+        var url = $"sprk_analysisskills?{query}";
+        _logger.LogDebug("[LIST SKILLS] Query URL: {Url}", url);
+
+        var response = await _httpClient.GetAsync(url, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse<SkillEntity>>(cancellationToken);
+        if (result == null)
+        {
+            _logger.LogWarning("[LIST SKILLS] Failed to deserialize response");
+            return new ScopeListResult<AnalysisSkill>
+            {
+                Items = [],
+                TotalCount = 0,
+                Page = options.Page,
+                PageSize = options.PageSize
+            };
         }
 
-        // Apply category filter
+        var skills = result.Value.Select(entity => new AnalysisSkill
+        {
+            Id = entity.Id,
+            Name = entity.Name ?? "Unnamed Skill",
+            Description = entity.Description,
+            PromptFragment = entity.PromptFragment ?? "",
+            Category = entity.SkillTypeId?.Name ?? "General",
+            OwnerType = ScopeOwnerType.System,
+            IsImmutable = false
+        });
+
+        // Apply category filter in memory (category is in expanded entity)
         if (!string.IsNullOrWhiteSpace(options.CategoryFilter))
         {
-            items = items.Where(s => s.Category?.Equals(options.CategoryFilter, StringComparison.OrdinalIgnoreCase) == true);
+            skills = skills.Where(s => s.Category?.Equals(options.CategoryFilter, StringComparison.OrdinalIgnoreCase) == true);
         }
 
-        // Apply sorting
-        items = options.SortBy.ToLowerInvariant() switch
-        {
-            "name" => options.SortDescending ? items.OrderByDescending(s => s.Name) : items.OrderBy(s => s.Name),
-            "category" => options.SortDescending ? items.OrderByDescending(s => s.Category) : items.OrderBy(s => s.Category),
-            _ => items.OrderBy(s => s.Name)
-        };
+        var skillArray = skills.ToArray();
 
-        var totalCount = items.Count();
-        var pagedItems = items
-            .Skip((options.Page - 1) * options.PageSize)
-            .Take(options.PageSize)
-            .ToArray();
+        _logger.LogInformation("[LIST SKILLS] Retrieved {Count} skills from Dataverse (Total: {TotalCount})",
+            skillArray.Length, result.ODataCount ?? skillArray.Length);
 
-        return Task.FromResult(new ScopeListResult<AnalysisSkill>
+        return new ScopeListResult<AnalysisSkill>
         {
-            Items = pagedItems,
-            TotalCount = totalCount,
+            Items = skillArray,
+            TotalCount = result.ODataCount ?? skillArray.Length,
             Page = options.Page,
             PageSize = options.PageSize
-        });
+        };
     }
 
     /// <inheritdoc />
-    public Task<ScopeListResult<AnalysisKnowledge>> ListKnowledgeAsync(
+    public async Task<ScopeListResult<AnalysisKnowledge>> ListKnowledgeAsync(
         ScopeListOptions options,
         CancellationToken cancellationToken)
     {
-        _logger.LogDebug("Listing knowledge: Page={Page}, PageSize={PageSize}", options.Page, options.PageSize);
+        _logger.LogInformation("[LIST KNOWLEDGE] Querying Dataverse: Page={Page}, PageSize={PageSize}, NameFilter={NameFilter}",
+            options.Page, options.PageSize, options.NameFilter);
 
-        var items = _stubKnowledge.Values.AsEnumerable();
+        await EnsureAuthenticatedAsync(cancellationToken);
 
-        // Apply name filter
-        if (!string.IsNullOrWhiteSpace(options.NameFilter))
+        var sortMappings = new Dictionary<string, string>
         {
-            items = items.Where(k => k.Name.Contains(options.NameFilter, StringComparison.OrdinalIgnoreCase));
-        }
-
-        // Apply sorting
-        items = options.SortBy.ToLowerInvariant() switch
-        {
-            "name" => options.SortDescending ? items.OrderByDescending(k => k.Name) : items.OrderBy(k => k.Name),
-            "type" => options.SortDescending ? items.OrderByDescending(k => k.Type) : items.OrderBy(k => k.Type),
-            _ => items.OrderBy(k => k.Name)
+            ["name"] = "sprk_name",
+            ["type"] = "sprk_name" // Sort by name when type requested (type is in related entity)
         };
 
-        var totalCount = items.Count();
-        var pagedItems = items
-            .Skip((options.Page - 1) * options.PageSize)
-            .Take(options.PageSize)
-            .ToArray();
+        var query = BuildODataQuery(
+            options,
+            selectFields: "sprk_analysisknowledgeid,sprk_name,sprk_description,sprk_content,sprk_deploymentid",
+            expandClause: "sprk_KnowledgeTypeId($select=sprk_name)",
+            nameFieldPath: "sprk_name",
+            categoryFieldPath: null, // Type filter needs special handling for lookup
+            sortFieldMappings: sortMappings);
 
-        return Task.FromResult(new ScopeListResult<AnalysisKnowledge>
+        var url = $"sprk_analysisknowledges?{query}";
+        _logger.LogDebug("[LIST KNOWLEDGE] Query URL: {Url}", url);
+
+        var response = await _httpClient.GetAsync(url, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse<KnowledgeEntity>>(cancellationToken);
+        if (result == null)
         {
-            Items = pagedItems,
-            TotalCount = totalCount,
+            _logger.LogWarning("[LIST KNOWLEDGE] Failed to deserialize response");
+            return new ScopeListResult<AnalysisKnowledge>
+            {
+                Items = [],
+                TotalCount = 0,
+                Page = options.Page,
+                PageSize = options.PageSize
+            };
+        }
+
+        var knowledgeItems = result.Value.Select(entity =>
+        {
+            var knowledgeType = MapKnowledgeTypeName(entity.KnowledgeTypeId?.Name);
+            return new AnalysisKnowledge
+            {
+                Id = entity.Id,
+                Name = entity.Name ?? "Unnamed Knowledge",
+                Description = entity.Description,
+                Type = knowledgeType,
+                Content = entity.Content,
+                DeploymentId = entity.DeploymentId,
+                OwnerType = ScopeOwnerType.System,
+                IsImmutable = false
+            };
+        }).ToArray();
+
+        _logger.LogInformation("[LIST KNOWLEDGE] Retrieved {Count} knowledge items from Dataverse (Total: {TotalCount})",
+            knowledgeItems.Length, result.ODataCount ?? knowledgeItems.Length);
+
+        return new ScopeListResult<AnalysisKnowledge>
+        {
+            Items = knowledgeItems,
+            TotalCount = result.ODataCount ?? knowledgeItems.Length,
             Page = options.Page,
             PageSize = options.PageSize
-        });
+        };
     }
 
     /// <inheritdoc />
-    public Task<ScopeListResult<AnalysisTool>> ListToolsAsync(
+    public async Task<ScopeListResult<AnalysisTool>> ListToolsAsync(
         ScopeListOptions options,
         CancellationToken cancellationToken)
     {
-        _logger.LogDebug("Listing tools: Page={Page}, PageSize={PageSize}", options.Page, options.PageSize);
+        _logger.LogInformation("[LIST TOOLS] Querying Dataverse: Page={Page}, PageSize={PageSize}, NameFilter={NameFilter}",
+            options.Page, options.PageSize, options.NameFilter);
 
-        var items = _stubTools.Values.AsEnumerable();
+        await EnsureAuthenticatedAsync(cancellationToken);
 
-        // Apply name filter
-        if (!string.IsNullOrWhiteSpace(options.NameFilter))
+        var sortMappings = new Dictionary<string, string>
         {
-            items = items.Where(t => t.Name.Contains(options.NameFilter, StringComparison.OrdinalIgnoreCase));
-        }
-
-        // Apply sorting
-        items = options.SortBy.ToLowerInvariant() switch
-        {
-            "name" => options.SortDescending ? items.OrderByDescending(t => t.Name) : items.OrderBy(t => t.Name),
-            "type" => options.SortDescending ? items.OrderByDescending(t => t.Type) : items.OrderBy(t => t.Type),
-            _ => items.OrderBy(t => t.Name)
+            ["name"] = "sprk_name",
+            ["type"] = "sprk_name" // Sort by name when type requested (type is in related entity)
         };
 
-        var totalCount = items.Count();
-        var pagedItems = items
-            .Skip((options.Page - 1) * options.PageSize)
-            .Take(options.PageSize)
-            .ToArray();
+        var query = BuildODataQuery(
+            options,
+            selectFields: "sprk_analysistoolid,sprk_name,sprk_description,sprk_handlerclass,sprk_configuration",
+            expandClause: "sprk_ToolTypeId($select=sprk_name)",
+            nameFieldPath: "sprk_name",
+            categoryFieldPath: null, // Type filter needs special handling for lookup
+            sortFieldMappings: sortMappings);
 
-        return Task.FromResult(new ScopeListResult<AnalysisTool>
+        var url = $"sprk_analysistools?{query}";
+        _logger.LogDebug("[LIST TOOLS] Query URL: {Url}", url);
+
+        var response = await _httpClient.GetAsync(url, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse<ToolEntity>>(cancellationToken);
+        if (result == null)
         {
-            Items = pagedItems,
-            TotalCount = totalCount,
+            _logger.LogWarning("[LIST TOOLS] Failed to deserialize response");
+            return new ScopeListResult<AnalysisTool>
+            {
+                Items = [],
+                TotalCount = 0,
+                Page = options.Page,
+                PageSize = options.PageSize
+            };
+        }
+
+        var tools = result.Value.Select(entity =>
+        {
+            var toolType = !string.IsNullOrEmpty(entity.HandlerClass)
+                ? MapHandlerClassToToolType(entity.HandlerClass)
+                : MapToolTypeName(entity.ToolTypeId?.Name ?? "");
+
+            return new AnalysisTool
+            {
+                Id = entity.Id,
+                Name = entity.Name ?? "Unnamed Tool",
+                Description = entity.Description,
+                Type = toolType,
+                HandlerClass = entity.HandlerClass,
+                Configuration = entity.Configuration,
+                OwnerType = ScopeOwnerType.System,
+                IsImmutable = false
+            };
+        }).ToArray();
+
+        _logger.LogInformation("[LIST TOOLS] Retrieved {Count} tools from Dataverse (Total: {TotalCount})",
+            tools.Length, result.ODataCount ?? tools.Length);
+
+        return new ScopeListResult<AnalysisTool>
+        {
+            Items = tools,
+            TotalCount = result.ODataCount ?? tools.Length,
             Page = options.Page,
             PageSize = options.PageSize
-        });
+        };
     }
 
     /// <inheritdoc />
-    public Task<ScopeListResult<AnalysisAction>> ListActionsAsync(
+    public async Task<ScopeListResult<AnalysisAction>> ListActionsAsync(
         ScopeListOptions options,
         CancellationToken cancellationToken)
     {
-        _logger.LogDebug("Listing actions: Page={Page}, PageSize={PageSize}", options.Page, options.PageSize);
+        _logger.LogInformation("[LIST ACTIONS] Querying Dataverse: Page={Page}, PageSize={PageSize}, NameFilter={NameFilter}",
+            options.Page, options.PageSize, options.NameFilter);
 
-        var items = _stubActions.Values.AsEnumerable();
+        await EnsureAuthenticatedAsync(cancellationToken);
 
-        // Apply name filter
-        if (!string.IsNullOrWhiteSpace(options.NameFilter))
+        var sortMappings = new Dictionary<string, string>
         {
-            items = items.Where(a => a.Name.Contains(options.NameFilter, StringComparison.OrdinalIgnoreCase));
-        }
-
-        // Apply sorting
-        items = options.SortBy.ToLowerInvariant() switch
-        {
-            "name" => options.SortDescending ? items.OrderByDescending(a => a.Name) : items.OrderBy(a => a.Name),
-            "sortorder" => options.SortDescending ? items.OrderByDescending(a => a.SortOrder) : items.OrderBy(a => a.SortOrder),
-            _ => items.OrderBy(a => a.SortOrder)
+            ["name"] = "sprk_name",
+            ["sortorder"] = "sprk_name" // Actions don't have a sort order field in Dataverse, use name
         };
 
-        var totalCount = items.Count();
-        var pagedItems = items
-            .Skip((options.Page - 1) * options.PageSize)
-            .Take(options.PageSize)
-            .ToArray();
+        var query = BuildODataQuery(
+            options,
+            selectFields: "sprk_analysisactionid,sprk_name,sprk_description,sprk_systemprompt",
+            expandClause: "sprk_ActionTypeId($select=sprk_name)",
+            nameFieldPath: "sprk_name",
+            categoryFieldPath: null, // Actions don't have a category field
+            sortFieldMappings: sortMappings);
 
-        return Task.FromResult(new ScopeListResult<AnalysisAction>
+        var url = $"sprk_analysisactions?{query}";
+        _logger.LogDebug("[LIST ACTIONS] Query URL: {Url}", url);
+
+        var response = await _httpClient.GetAsync(url, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse<ActionEntity>>(cancellationToken);
+        if (result == null)
         {
-            Items = pagedItems,
-            TotalCount = totalCount,
+            _logger.LogWarning("[LIST ACTIONS] Failed to deserialize response");
+            return new ScopeListResult<AnalysisAction>
+            {
+                Items = [],
+                TotalCount = 0,
+                Page = options.Page,
+                PageSize = options.PageSize
+            };
+        }
+
+        var actions = result.Value.Select(entity =>
+        {
+            var sortOrder = ExtractSortOrderFromTypeName(entity.ActionTypeId?.Name);
+            return new AnalysisAction
+            {
+                Id = entity.Id,
+                Name = entity.Name ?? "Unnamed Action",
+                Description = entity.Description,
+                SystemPrompt = entity.SystemPrompt ?? "You are an AI assistant that analyzes documents.",
+                SortOrder = sortOrder,
+                OwnerType = ScopeOwnerType.System,
+                IsImmutable = false
+            };
+        }).ToArray();
+
+        _logger.LogInformation("[LIST ACTIONS] Retrieved {Count} actions from Dataverse (Total: {TotalCount})",
+            actions.Length, result.ODataCount ?? actions.Length);
+
+        return new ScopeListResult<AnalysisAction>
+        {
+            Items = actions,
+            TotalCount = result.ODataCount ?? actions.Length,
             Page = options.Page,
             PageSize = options.PageSize
-        });
+        };
     }
 
     #region CRUD Operations (Task 002 Implementation)
@@ -444,32 +584,59 @@ public class ScopeResolverService : IScopeResolverService
         // Ensure customer prefix for new actions
         var name = EnsureCustomerPrefix(request.Name);
 
-        _logger.LogInformation("Creating action '{ActionName}' with type {ActionType}", name, request.ActionType);
+        _logger.LogInformation("[CREATE ACTION] Creating action '{ActionName}' in Dataverse", name);
 
-        // Generate new ID for the action
-        var actionId = Guid.NewGuid();
+        await EnsureAuthenticatedAsync(cancellationToken);
 
-        // Create in Dataverse via IDataverseService
-        // Note: For Phase 1, we'll also store in stub data for fallback
-        // Dataverse integration will be fully implemented in Task 032
+        // Build payload for Dataverse
+        var payload = new Dictionary<string, object?>
+        {
+            ["sprk_name"] = name,
+            ["sprk_description"] = request.Description,
+            ["sprk_systemprompt"] = request.SystemPrompt
+        };
+
+        // Note: ActionTypeId lookup binding can be added when the property is added to CreateActionRequest
+        // For now, the type is set via Dataverse default or subsequent update
+
+        // POST with Prefer: return=representation to get created entity
+        using var httpContent = JsonContent.Create(payload);
+        httpContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+
+        using var postRequest = new HttpRequestMessage(HttpMethod.Post, "sprk_analysisactions")
+        {
+            Content = httpContent
+        };
+        postRequest.Headers.Add("Prefer", "return=representation");
+
+        var response = await _httpClient.SendAsync(postRequest, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        var entity = await response.Content.ReadFromJsonAsync<ActionEntity>(cancellationToken);
+        if (entity == null)
+        {
+            throw new InvalidOperationException("Failed to deserialize created action from Dataverse response");
+        }
+
+        var sortOrder = entity.ActionTypeId?.Name != null
+            ? ExtractSortOrderFromTypeName(entity.ActionTypeId?.Name)
+            : request.SortOrder;
+
         var action = new AnalysisAction
         {
-            Id = actionId,
-            Name = name,
-            Description = request.Description,
-            SystemPrompt = request.SystemPrompt,
-            SortOrder = request.SortOrder,
+            Id = entity.Id,
+            Name = entity.Name ?? name,
+            Description = entity.Description ?? request.Description,
+            SystemPrompt = entity.SystemPrompt ?? request.SystemPrompt,
+            SortOrder = sortOrder,
             ActionType = request.ActionType,
             OwnerType = ScopeOwnerType.Customer,
             IsImmutable = false
         };
 
-        // Add to stub data for Phase 1 (Dataverse persistence in Task 032)
-        _stubActions[actionId] = action;
+        _logger.LogInformation("[CREATE ACTION] Created action '{ActionName}' with ID {ActionId}", action.Name, action.Id);
 
-        _logger.LogInformation("Created action '{ActionName}' with ID {ActionId}", name, actionId);
-
-        return await Task.FromResult(action);
+        return action;
     }
 
     /// <inheritdoc />
@@ -477,33 +644,52 @@ public class ScopeResolverService : IScopeResolverService
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        _logger.LogDebug("Updating action {ActionId}", id);
+        _logger.LogInformation("[UPDATE ACTION] Updating action {ActionId} in Dataverse", id);
 
-        // Load existing action
+        // Load existing action to validate it exists and check ownership
         var existing = await GetActionAsync(id, cancellationToken);
         if (existing == null)
         {
-            _logger.LogWarning("Action {ActionId} not found for update", id);
+            _logger.LogWarning("[UPDATE ACTION] Action {ActionId} not found for update", id);
             throw new KeyNotFoundException($"Action with ID '{id}' not found.");
         }
 
         // Validate ownership - reject if system-owned
         ValidateOwnership(existing.Name, existing.IsImmutable, "update");
 
-        // Apply updates (sparse update pattern)
-        var updated = existing with
+        await EnsureAuthenticatedAsync(cancellationToken);
+
+        // Build PATCH payload with only non-null fields (sparse update)
+        var payload = new Dictionary<string, object?>();
+
+        if (request.Name != null)
+            payload["sprk_name"] = EnsureCustomerPrefix(request.Name);
+        if (request.Description != null)
+            payload["sprk_description"] = request.Description;
+        if (request.SystemPrompt != null)
+            payload["sprk_systemprompt"] = request.SystemPrompt;
+
+        // PATCH to Dataverse
+        var url = $"sprk_analysisactions({id})";
+        using var httpContent = JsonContent.Create(payload);
+        httpContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+
+        using var patchRequest = new HttpRequestMessage(HttpMethod.Patch, url)
         {
-            Name = request.Name != null ? EnsureCustomerPrefix(request.Name) : existing.Name,
-            Description = request.Description ?? existing.Description,
-            SystemPrompt = request.SystemPrompt ?? existing.SystemPrompt,
-            SortOrder = request.SortOrder ?? existing.SortOrder,
-            ActionType = request.ActionType ?? existing.ActionType
+            Content = httpContent
         };
 
-        // Update in stub data (Dataverse persistence in Task 032)
-        _stubActions[id] = updated;
+        var response = await _httpClient.SendAsync(patchRequest, cancellationToken);
+        response.EnsureSuccessStatusCode();
 
-        _logger.LogInformation("Updated action '{ActionName}' (ID: {ActionId})", updated.Name, id);
+        // Re-fetch to get the updated entity
+        var updated = await GetActionAsync(id, cancellationToken);
+        if (updated == null)
+        {
+            throw new InvalidOperationException($"Failed to retrieve updated action {id} from Dataverse");
+        }
+
+        _logger.LogInformation("[UPDATE ACTION] Updated action '{ActionName}' (ID: {ActionId})", updated.Name, id);
 
         return updated;
     }
@@ -511,28 +697,35 @@ public class ScopeResolverService : IScopeResolverService
     /// <inheritdoc />
     public async Task<bool> DeleteActionAsync(Guid id, CancellationToken cancellationToken)
     {
-        _logger.LogDebug("Deleting action {ActionId}", id);
+        _logger.LogInformation("[DELETE ACTION] Deleting action {ActionId} from Dataverse", id);
 
-        // Load existing action
+        // Load existing action to validate ownership
         var existing = await GetActionAsync(id, cancellationToken);
         if (existing == null)
         {
-            _logger.LogWarning("Action {ActionId} not found for deletion", id);
+            _logger.LogWarning("[DELETE ACTION] Action {ActionId} not found for deletion", id);
             return false;
         }
 
         // Validate ownership - reject if system-owned
         ValidateOwnership(existing.Name, existing.IsImmutable, "delete");
 
-        // Delete from stub data (Dataverse persistence in Task 032)
-        var removed = _stubActions.Remove(id);
+        await EnsureAuthenticatedAsync(cancellationToken);
 
-        if (removed)
+        // DELETE from Dataverse
+        var url = $"sprk_analysisactions({id})";
+        var response = await _httpClient.DeleteAsync(url, cancellationToken);
+
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
-            _logger.LogInformation("Deleted action '{ActionName}' (ID: {ActionId})", existing.Name, id);
+            _logger.LogWarning("[DELETE ACTION] Action {ActionId} not found in Dataverse", id);
+            return false;
         }
 
-        return removed;
+        response.EnsureSuccessStatusCode();
+
+        _logger.LogInformation("[DELETE ACTION] Deleted action '{ActionName}' (ID: {ActionId})", existing.Name, id);
+        return true;
     }
 
     #endregion
@@ -540,17 +733,45 @@ public class ScopeResolverService : IScopeResolverService
     #region Skill CRUD
 
     /// <inheritdoc />
-    public Task<AnalysisSkill?> GetSkillAsync(Guid skillId, CancellationToken cancellationToken)
+    public async Task<AnalysisSkill?> GetSkillAsync(Guid skillId, CancellationToken cancellationToken)
     {
-        _logger.LogDebug("Getting skill {SkillId}", skillId);
+        _logger.LogInformation("[GET SKILL] Loading skill {SkillId} from Dataverse", skillId);
 
-        // Check stub data for now
-        if (_stubSkills.TryGetValue(skillId, out var skill))
+        await EnsureAuthenticatedAsync(cancellationToken);
+
+        var url = $"sprk_analysisskills({skillId})?$expand=sprk_SkillTypeId($select=sprk_name)";
+        var response = await _httpClient.GetAsync(url, cancellationToken);
+
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
-            return Task.FromResult<AnalysisSkill?>(skill);
+            _logger.LogWarning("[GET SKILL] Skill {SkillId} not found in Dataverse", skillId);
+            return null;
         }
 
-        return Task.FromResult<AnalysisSkill?>(null);
+        response.EnsureSuccessStatusCode();
+
+        var entity = await response.Content.ReadFromJsonAsync<SkillEntity>(cancellationToken);
+        if (entity == null)
+        {
+            _logger.LogWarning("[GET SKILL] Failed to deserialize skill {SkillId}", skillId);
+            return null;
+        }
+
+        var skill = new AnalysisSkill
+        {
+            Id = entity.Id,
+            Name = entity.Name ?? "Unnamed Skill",
+            Description = entity.Description,
+            PromptFragment = entity.PromptFragment ?? "",
+            Category = entity.SkillTypeId?.Name ?? "General",
+            OwnerType = ScopeOwnerType.System,
+            IsImmutable = false
+        };
+
+        _logger.LogInformation("[GET SKILL] Loaded skill from Dataverse: {SkillName} (Category: {Category})",
+            skill.Name, skill.Category);
+
+        return skill;
     }
 
     /// <inheritdoc />
@@ -562,26 +783,54 @@ public class ScopeResolverService : IScopeResolverService
 
         var name = EnsureCustomerPrefix(request.Name);
 
-        _logger.LogInformation("Creating skill '{SkillName}'", name);
+        _logger.LogInformation("[CREATE SKILL] Creating skill '{SkillName}' in Dataverse", name);
 
-        var skillId = Guid.NewGuid();
+        await EnsureAuthenticatedAsync(cancellationToken);
+
+        // Build payload for Dataverse
+        var payload = new Dictionary<string, object?>
+        {
+            ["sprk_name"] = name,
+            ["sprk_description"] = request.Description,
+            ["sprk_promptfragment"] = request.PromptFragment
+        };
+
+        // Note: SkillTypeId lookup binding can be added when the property is added to CreateSkillRequest
+        // For now, the type is set via Dataverse default or subsequent update
+
+        // POST with Prefer: return=representation to get created entity
+        using var httpContent = JsonContent.Create(payload);
+        httpContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+
+        using var postRequest = new HttpRequestMessage(HttpMethod.Post, "sprk_analysisskills")
+        {
+            Content = httpContent
+        };
+        postRequest.Headers.Add("Prefer", "return=representation");
+
+        var response = await _httpClient.SendAsync(postRequest, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        var entity = await response.Content.ReadFromJsonAsync<SkillEntity>(cancellationToken);
+        if (entity == null)
+        {
+            throw new InvalidOperationException("Failed to deserialize created skill from Dataverse response");
+        }
 
         var skill = new AnalysisSkill
         {
-            Id = skillId,
-            Name = name,
-            Description = request.Description,
-            PromptFragment = request.PromptFragment,
-            Category = request.Category,
+            Id = entity.Id,
+            Name = entity.Name ?? name,
+            Description = entity.Description ?? request.Description,
+            PromptFragment = entity.PromptFragment ?? request.PromptFragment,
+            Category = entity.SkillTypeId?.Name ?? request.Category ?? "General",
             OwnerType = ScopeOwnerType.Customer,
             IsImmutable = false
         };
 
-        _stubSkills[skillId] = skill;
+        _logger.LogInformation("[CREATE SKILL] Created skill '{SkillName}' with ID {SkillId}", skill.Name, skill.Id);
 
-        _logger.LogInformation("Created skill '{SkillName}' with ID {SkillId}", name, skillId);
-
-        return await Task.FromResult(skill);
+        return skill;
     }
 
     /// <inheritdoc />
@@ -589,28 +838,50 @@ public class ScopeResolverService : IScopeResolverService
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        _logger.LogDebug("Updating skill {SkillId}", id);
+        _logger.LogInformation("[UPDATE SKILL] Updating skill {SkillId} in Dataverse", id);
 
         var existing = await GetSkillAsync(id, cancellationToken);
         if (existing == null)
         {
-            _logger.LogWarning("Skill {SkillId} not found for update", id);
+            _logger.LogWarning("[UPDATE SKILL] Skill {SkillId} not found for update", id);
             throw new KeyNotFoundException($"Skill with ID '{id}' not found.");
         }
 
         ValidateOwnership(existing.Name, existing.IsImmutable, "update");
 
-        var updated = existing with
+        await EnsureAuthenticatedAsync(cancellationToken);
+
+        // Build PATCH payload with only non-null fields (sparse update)
+        var payload = new Dictionary<string, object?>();
+
+        if (request.Name != null)
+            payload["sprk_name"] = EnsureCustomerPrefix(request.Name);
+        if (request.Description != null)
+            payload["sprk_description"] = request.Description;
+        if (request.PromptFragment != null)
+            payload["sprk_promptfragment"] = request.PromptFragment;
+
+        // PATCH to Dataverse
+        var url = $"sprk_analysisskills({id})";
+        using var httpContent = JsonContent.Create(payload);
+        httpContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+
+        using var patchRequest = new HttpRequestMessage(HttpMethod.Patch, url)
         {
-            Name = request.Name != null ? EnsureCustomerPrefix(request.Name) : existing.Name,
-            Description = request.Description ?? existing.Description,
-            PromptFragment = request.PromptFragment ?? existing.PromptFragment,
-            Category = request.Category ?? existing.Category
+            Content = httpContent
         };
 
-        _stubSkills[id] = updated;
+        var response = await _httpClient.SendAsync(patchRequest, cancellationToken);
+        response.EnsureSuccessStatusCode();
 
-        _logger.LogInformation("Updated skill '{SkillName}' (ID: {SkillId})", updated.Name, id);
+        // Re-fetch to get the updated entity
+        var updated = await GetSkillAsync(id, cancellationToken);
+        if (updated == null)
+        {
+            throw new InvalidOperationException($"Failed to retrieve updated skill {id} from Dataverse");
+        }
+
+        _logger.LogInformation("[UPDATE SKILL] Updated skill '{SkillName}' (ID: {SkillId})", updated.Name, id);
 
         return updated;
     }
@@ -618,25 +889,33 @@ public class ScopeResolverService : IScopeResolverService
     /// <inheritdoc />
     public async Task<bool> DeleteSkillAsync(Guid id, CancellationToken cancellationToken)
     {
-        _logger.LogDebug("Deleting skill {SkillId}", id);
+        _logger.LogInformation("[DELETE SKILL] Deleting skill {SkillId} from Dataverse", id);
 
         var existing = await GetSkillAsync(id, cancellationToken);
         if (existing == null)
         {
-            _logger.LogWarning("Skill {SkillId} not found for deletion", id);
+            _logger.LogWarning("[DELETE SKILL] Skill {SkillId} not found for deletion", id);
             return false;
         }
 
         ValidateOwnership(existing.Name, existing.IsImmutable, "delete");
 
-        var removed = _stubSkills.Remove(id);
+        await EnsureAuthenticatedAsync(cancellationToken);
 
-        if (removed)
+        // DELETE from Dataverse
+        var url = $"sprk_analysisskills({id})";
+        var response = await _httpClient.DeleteAsync(url, cancellationToken);
+
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
-            _logger.LogInformation("Deleted skill '{SkillName}' (ID: {SkillId})", existing.Name, id);
+            _logger.LogWarning("[DELETE SKILL] Skill {SkillId} not found in Dataverse", id);
+            return false;
         }
 
-        return removed;
+        response.EnsureSuccessStatusCode();
+
+        _logger.LogInformation("[DELETE SKILL] Deleted skill '{SkillName}' (ID: {SkillId})", existing.Name, id);
+        return true;
     }
 
     #endregion
@@ -644,17 +923,60 @@ public class ScopeResolverService : IScopeResolverService
     #region Knowledge CRUD
 
     /// <inheritdoc />
-    public Task<AnalysisKnowledge?> GetKnowledgeAsync(Guid knowledgeId, CancellationToken cancellationToken)
+    public async Task<AnalysisKnowledge?> GetKnowledgeAsync(Guid knowledgeId, CancellationToken cancellationToken)
     {
-        _logger.LogDebug("Getting knowledge {KnowledgeId}", knowledgeId);
+        _logger.LogInformation("[GET KNOWLEDGE] Loading knowledge {KnowledgeId} from Dataverse", knowledgeId);
 
-        // Check stub data for now
-        if (_stubKnowledge.TryGetValue(knowledgeId, out var knowledge))
+        await EnsureAuthenticatedAsync(cancellationToken);
+
+        var url = $"sprk_analysisknowledges({knowledgeId})?$expand=sprk_KnowledgeTypeId($select=sprk_name)";
+        var response = await _httpClient.GetAsync(url, cancellationToken);
+
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
-            return Task.FromResult<AnalysisKnowledge?>(knowledge);
+            _logger.LogWarning("[GET KNOWLEDGE] Knowledge {KnowledgeId} not found in Dataverse", knowledgeId);
+            return null;
         }
 
-        return Task.FromResult<AnalysisKnowledge?>(null);
+        response.EnsureSuccessStatusCode();
+
+        var entity = await response.Content.ReadFromJsonAsync<KnowledgeEntity>(cancellationToken);
+        if (entity == null)
+        {
+            _logger.LogWarning("[GET KNOWLEDGE] Failed to deserialize knowledge {KnowledgeId}", knowledgeId);
+            return null;
+        }
+
+        var knowledgeType = MapKnowledgeTypeName(entity.KnowledgeTypeId?.Name);
+
+        var knowledge = new AnalysisKnowledge
+        {
+            Id = entity.Id,
+            Name = entity.Name ?? "Unnamed Knowledge",
+            Description = entity.Description,
+            Type = knowledgeType,
+            Content = entity.Content,
+            DeploymentId = entity.DeploymentId,
+            OwnerType = ScopeOwnerType.System,
+            IsImmutable = false
+        };
+
+        _logger.LogInformation("[GET KNOWLEDGE] Loaded knowledge from Dataverse: {KnowledgeName} (Type: {KnowledgeType})",
+            knowledge.Name, knowledge.Type);
+
+        return knowledge;
+    }
+
+    private static KnowledgeType MapKnowledgeTypeName(string? typeName)
+    {
+        return typeName?.ToLowerInvariant() switch
+        {
+            "standards" => KnowledgeType.Inline,
+            "regulations" => KnowledgeType.RagIndex,
+            "rag" => KnowledgeType.RagIndex,
+            "document" => KnowledgeType.Document,
+            _ => KnowledgeType.Inline
+        };
     }
 
     /// <inheritdoc />
@@ -665,28 +987,67 @@ public class ScopeResolverService : IScopeResolverService
 
         var name = EnsureCustomerPrefix(request.Name);
 
-        _logger.LogInformation("Creating knowledge '{KnowledgeName}' with type {KnowledgeType}", name, request.Type);
+        _logger.LogInformation("[CREATE KNOWLEDGE] Creating knowledge '{KnowledgeName}' in Dataverse", name);
 
-        var knowledgeId = Guid.NewGuid();
+        await EnsureAuthenticatedAsync(cancellationToken);
+
+        // Build payload for Dataverse
+        var payload = new Dictionary<string, object?>
+        {
+            ["sprk_name"] = name,
+            ["sprk_description"] = request.Description,
+            ["sprk_content"] = request.Content
+        };
+
+        // Add deployment ID if specified (for RAG index references)
+        if (request.DeploymentId.HasValue)
+        {
+            payload["sprk_deploymentid"] = request.DeploymentId.Value.ToString();
+        }
+
+        // Note: KnowledgeTypeId lookup binding can be added when the property is added to CreateKnowledgeRequest
+        // For now, the type is set via Dataverse default or subsequent update
+
+        // POST with Prefer: return=representation to get created entity
+        using var httpContent = JsonContent.Create(payload);
+        httpContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+
+        using var postRequest = new HttpRequestMessage(HttpMethod.Post, "sprk_analysisknowledges")
+        {
+            Content = httpContent
+        };
+        postRequest.Headers.Add("Prefer", "return=representation");
+
+        var response = await _httpClient.SendAsync(postRequest, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        var entity = await response.Content.ReadFromJsonAsync<KnowledgeEntity>(cancellationToken);
+        if (entity == null)
+        {
+            throw new InvalidOperationException("Failed to deserialize created knowledge from Dataverse response");
+        }
+
+        // Use type from entity if available, otherwise fall back to request type
+        var knowledgeType = entity.KnowledgeTypeId?.Name != null
+            ? MapKnowledgeTypeName(entity.KnowledgeTypeId.Name)
+            : request.Type;
 
         var knowledge = new AnalysisKnowledge
         {
-            Id = knowledgeId,
-            Name = name,
-            Description = request.Description,
-            Type = request.Type,
-            Content = request.Content,
+            Id = entity.Id,
+            Name = entity.Name ?? name,
+            Description = entity.Description ?? request.Description,
+            Type = knowledgeType,
+            Content = entity.Content ?? request.Content,
+            DeploymentId = entity.DeploymentId ?? request.DeploymentId,
             DocumentId = request.DocumentId,
-            DeploymentId = request.DeploymentId,
             OwnerType = ScopeOwnerType.Customer,
             IsImmutable = false
         };
 
-        _stubKnowledge[knowledgeId] = knowledge;
+        _logger.LogInformation("[CREATE KNOWLEDGE] Created knowledge '{KnowledgeName}' with ID {KnowledgeId}", knowledge.Name, knowledge.Id);
 
-        _logger.LogInformation("Created knowledge '{KnowledgeName}' with ID {KnowledgeId}", name, knowledgeId);
-
-        return await Task.FromResult(knowledge);
+        return knowledge;
     }
 
     /// <inheritdoc />
@@ -694,30 +1055,52 @@ public class ScopeResolverService : IScopeResolverService
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        _logger.LogDebug("Updating knowledge {KnowledgeId}", id);
+        _logger.LogInformation("[UPDATE KNOWLEDGE] Updating knowledge {KnowledgeId} in Dataverse", id);
 
         var existing = await GetKnowledgeAsync(id, cancellationToken);
         if (existing == null)
         {
-            _logger.LogWarning("Knowledge {KnowledgeId} not found for update", id);
+            _logger.LogWarning("[UPDATE KNOWLEDGE] Knowledge {KnowledgeId} not found for update", id);
             throw new KeyNotFoundException($"Knowledge with ID '{id}' not found.");
         }
 
         ValidateOwnership(existing.Name, existing.IsImmutable, "update");
 
-        var updated = existing with
+        await EnsureAuthenticatedAsync(cancellationToken);
+
+        // Build PATCH payload with only non-null fields (sparse update)
+        var payload = new Dictionary<string, object?>();
+
+        if (request.Name != null)
+            payload["sprk_name"] = EnsureCustomerPrefix(request.Name);
+        if (request.Description != null)
+            payload["sprk_description"] = request.Description;
+        if (request.Content != null)
+            payload["sprk_content"] = request.Content;
+        if (request.DeploymentId.HasValue)
+            payload["sprk_deploymentid"] = request.DeploymentId.Value.ToString();
+
+        // PATCH to Dataverse
+        var url = $"sprk_analysisknowledges({id})";
+        using var httpContent = JsonContent.Create(payload);
+        httpContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+
+        using var patchRequest = new HttpRequestMessage(HttpMethod.Patch, url)
         {
-            Name = request.Name != null ? EnsureCustomerPrefix(request.Name) : existing.Name,
-            Description = request.Description ?? existing.Description,
-            Type = request.Type ?? existing.Type,
-            Content = request.Content ?? existing.Content,
-            DocumentId = request.DocumentId ?? existing.DocumentId,
-            DeploymentId = request.DeploymentId ?? existing.DeploymentId
+            Content = httpContent
         };
 
-        _stubKnowledge[id] = updated;
+        var response = await _httpClient.SendAsync(patchRequest, cancellationToken);
+        response.EnsureSuccessStatusCode();
 
-        _logger.LogInformation("Updated knowledge '{KnowledgeName}' (ID: {KnowledgeId})", updated.Name, id);
+        // Re-fetch to get the updated entity
+        var updated = await GetKnowledgeAsync(id, cancellationToken);
+        if (updated == null)
+        {
+            throw new InvalidOperationException($"Failed to retrieve updated knowledge {id} from Dataverse");
+        }
+
+        _logger.LogInformation("[UPDATE KNOWLEDGE] Updated knowledge '{KnowledgeName}' (ID: {KnowledgeId})", updated.Name, id);
 
         return updated;
     }
@@ -725,25 +1108,33 @@ public class ScopeResolverService : IScopeResolverService
     /// <inheritdoc />
     public async Task<bool> DeleteKnowledgeAsync(Guid id, CancellationToken cancellationToken)
     {
-        _logger.LogDebug("Deleting knowledge {KnowledgeId}", id);
+        _logger.LogInformation("[DELETE KNOWLEDGE] Deleting knowledge {KnowledgeId} from Dataverse", id);
 
         var existing = await GetKnowledgeAsync(id, cancellationToken);
         if (existing == null)
         {
-            _logger.LogWarning("Knowledge {KnowledgeId} not found for deletion", id);
+            _logger.LogWarning("[DELETE KNOWLEDGE] Knowledge {KnowledgeId} not found for deletion", id);
             return false;
         }
 
         ValidateOwnership(existing.Name, existing.IsImmutable, "delete");
 
-        var removed = _stubKnowledge.Remove(id);
+        await EnsureAuthenticatedAsync(cancellationToken);
 
-        if (removed)
+        // DELETE from Dataverse
+        var url = $"sprk_analysisknowledges({id})";
+        var response = await _httpClient.DeleteAsync(url, cancellationToken);
+
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
-            _logger.LogInformation("Deleted knowledge '{KnowledgeName}' (ID: {KnowledgeId})", existing.Name, id);
+            _logger.LogWarning("[DELETE KNOWLEDGE] Knowledge {KnowledgeId} not found in Dataverse", id);
+            return false;
         }
 
-        return removed;
+        response.EnsureSuccessStatusCode();
+
+        _logger.LogInformation("[DELETE KNOWLEDGE] Deleted knowledge '{KnowledgeName}' (ID: {KnowledgeId})", existing.Name, id);
+        return true;
     }
 
     #endregion
@@ -751,17 +1142,85 @@ public class ScopeResolverService : IScopeResolverService
     #region Tool CRUD
 
     /// <inheritdoc />
-    public Task<AnalysisTool?> GetToolAsync(Guid toolId, CancellationToken cancellationToken)
+    public async Task<AnalysisTool?> GetToolAsync(Guid toolId, CancellationToken cancellationToken)
     {
-        _logger.LogDebug("Getting tool {ToolId}", toolId);
+        _logger.LogInformation("[GET TOOL] Loading tool {ToolId} from Dataverse", toolId);
 
-        // Check stub data for now
-        if (_stubTools.TryGetValue(toolId, out var tool))
+        await EnsureAuthenticatedAsync(cancellationToken);
+
+        var url = $"sprk_analysistools({toolId})?$expand=sprk_ToolTypeId($select=sprk_name)";
+        var response = await _httpClient.GetAsync(url, cancellationToken);
+
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
-            return Task.FromResult<AnalysisTool?>(tool);
+            _logger.LogWarning("[GET TOOL] Tool {ToolId} not found in Dataverse", toolId);
+            return null;
         }
 
-        return Task.FromResult<AnalysisTool?>(null);
+        response.EnsureSuccessStatusCode();
+
+        var entity = await response.Content.ReadFromJsonAsync<ToolEntity>(cancellationToken);
+        if (entity == null)
+        {
+            _logger.LogWarning("[GET TOOL] Failed to deserialize tool {ToolId}", toolId);
+            return null;
+        }
+
+        // Map from HandlerClass if available, otherwise fall back to type name from lookup
+        var toolType = !string.IsNullOrEmpty(entity.HandlerClass)
+            ? MapHandlerClassToToolType(entity.HandlerClass)
+            : MapToolTypeName(entity.ToolTypeId?.Name ?? "");
+
+        var tool = new AnalysisTool
+        {
+            Id = entity.Id,
+            Name = entity.Name ?? "Unnamed Tool",
+            Description = entity.Description,
+            Type = toolType,
+            HandlerClass = entity.HandlerClass,
+            Configuration = entity.Configuration,
+            OwnerType = ScopeOwnerType.System,
+            IsImmutable = false
+        };
+
+        var mappingSource = !string.IsNullOrEmpty(entity.HandlerClass) ? "HandlerClass" : "TypeName";
+        _logger.LogInformation("[GET TOOL] Loaded tool from Dataverse: {ToolName} (Type: {ToolType}, MappedFrom: {MappingSource}, HandlerClass: {HandlerClass})",
+            tool.Name, tool.Type, mappingSource, entity.HandlerClass ?? "null");
+
+        return tool;
+    }
+
+    private static ToolType MapHandlerClassToToolType(string handlerClass)
+    {
+        // Map from handler class name (e.g., "SummaryHandler", "EntityExtractorHandler") to ToolType enum
+        // This is the preferred mapping method as it's deterministic and matches implementation
+        return handlerClass switch
+        {
+            string s when s.Contains("EntityExtractor", StringComparison.OrdinalIgnoreCase) => ToolType.EntityExtractor,
+            string s when s.Contains("ClauseAnalyzer", StringComparison.OrdinalIgnoreCase) => ToolType.ClauseAnalyzer,
+            string s when s.Contains("DocumentClassifier", StringComparison.OrdinalIgnoreCase) => ToolType.DocumentClassifier,
+            string s when s.Contains("Summary", StringComparison.OrdinalIgnoreCase) => ToolType.Summary,
+            string s when s.Contains("RiskDetector", StringComparison.OrdinalIgnoreCase) => ToolType.RiskDetector,
+            string s when s.Contains("ClauseComparison", StringComparison.OrdinalIgnoreCase) => ToolType.ClauseComparison,
+            string s when s.Contains("DateExtractor", StringComparison.OrdinalIgnoreCase) => ToolType.DateExtractor,
+            string s when s.Contains("FinancialCalculator", StringComparison.OrdinalIgnoreCase) => ToolType.FinancialCalculator,
+            _ => ToolType.Custom // Default to Custom for unknown handler classes
+        };
+    }
+
+    private static ToolType MapToolTypeName(string typeName)
+    {
+        // Fallback: Map from sprk_aitooltype.sprk_name to ToolType enum
+        // Type names are like "01 - Entity Extraction", "02 - Classification", etc.
+        // This is a fallback if HandlerClass is not populated
+        return typeName switch
+        {
+            string s when s.Contains("Entity Extraction", StringComparison.OrdinalIgnoreCase) => ToolType.EntityExtractor,
+            string s when s.Contains("Classification", StringComparison.OrdinalIgnoreCase) => ToolType.DocumentClassifier,
+            string s when s.Contains("Analysis", StringComparison.OrdinalIgnoreCase) => ToolType.Summary,
+            string s when s.Contains("Calculation", StringComparison.OrdinalIgnoreCase) => ToolType.FinancialCalculator,
+            _ => ToolType.Custom // Default to Custom for unknown types
+        };
     }
 
     /// <inheritdoc />
@@ -772,27 +1231,60 @@ public class ScopeResolverService : IScopeResolverService
 
         var name = EnsureCustomerPrefix(request.Name);
 
-        _logger.LogInformation("Creating tool '{ToolName}' with type {ToolType}", name, request.Type);
+        _logger.LogInformation("[CREATE TOOL] Creating tool '{ToolName}' in Dataverse", name);
 
-        var toolId = Guid.NewGuid();
+        await EnsureAuthenticatedAsync(cancellationToken);
+
+        // Build payload for Dataverse
+        var payload = new Dictionary<string, object?>
+        {
+            ["sprk_name"] = name,
+            ["sprk_description"] = request.Description,
+            ["sprk_handlerclass"] = request.HandlerClass,
+            ["sprk_configuration"] = request.Configuration
+        };
+
+        // Note: ToolTypeId lookup binding can be added when the property is added to CreateToolRequest
+        // For now, the type is set via Dataverse default or subsequent update
+
+        // POST with Prefer: return=representation to get created entity
+        using var httpContent = JsonContent.Create(payload);
+        httpContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+
+        using var postRequest = new HttpRequestMessage(HttpMethod.Post, "sprk_analysistools")
+        {
+            Content = httpContent
+        };
+        postRequest.Headers.Add("Prefer", "return=representation");
+
+        var response = await _httpClient.SendAsync(postRequest, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        var entity = await response.Content.ReadFromJsonAsync<ToolEntity>(cancellationToken);
+        if (entity == null)
+        {
+            throw new InvalidOperationException("Failed to deserialize created tool from Dataverse response");
+        }
+
+        var toolType = !string.IsNullOrEmpty(entity.HandlerClass)
+            ? MapHandlerClassToToolType(entity.HandlerClass)
+            : request.Type;
 
         var tool = new AnalysisTool
         {
-            Id = toolId,
-            Name = name,
-            Description = request.Description,
-            Type = request.Type,
-            HandlerClass = request.HandlerClass,
-            Configuration = request.Configuration,
+            Id = entity.Id,
+            Name = entity.Name ?? name,
+            Description = entity.Description ?? request.Description,
+            Type = toolType,
+            HandlerClass = entity.HandlerClass ?? request.HandlerClass,
+            Configuration = entity.Configuration ?? request.Configuration,
             OwnerType = ScopeOwnerType.Customer,
             IsImmutable = false
         };
 
-        _stubTools[toolId] = tool;
+        _logger.LogInformation("[CREATE TOOL] Created tool '{ToolName}' with ID {ToolId}", tool.Name, tool.Id);
 
-        _logger.LogInformation("Created tool '{ToolName}' with ID {ToolId}", name, toolId);
-
-        return await Task.FromResult(tool);
+        return tool;
     }
 
     /// <inheritdoc />
@@ -800,29 +1292,52 @@ public class ScopeResolverService : IScopeResolverService
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        _logger.LogDebug("Updating tool {ToolId}", id);
+        _logger.LogInformation("[UPDATE TOOL] Updating tool {ToolId} in Dataverse", id);
 
         var existing = await GetToolAsync(id, cancellationToken);
         if (existing == null)
         {
-            _logger.LogWarning("Tool {ToolId} not found for update", id);
+            _logger.LogWarning("[UPDATE TOOL] Tool {ToolId} not found for update", id);
             throw new KeyNotFoundException($"Tool with ID '{id}' not found.");
         }
 
         ValidateOwnership(existing.Name, existing.IsImmutable, "update");
 
-        var updated = existing with
+        await EnsureAuthenticatedAsync(cancellationToken);
+
+        // Build PATCH payload with only non-null fields (sparse update)
+        var payload = new Dictionary<string, object?>();
+
+        if (request.Name != null)
+            payload["sprk_name"] = EnsureCustomerPrefix(request.Name);
+        if (request.Description != null)
+            payload["sprk_description"] = request.Description;
+        if (request.HandlerClass != null)
+            payload["sprk_handlerclass"] = request.HandlerClass;
+        if (request.Configuration != null)
+            payload["sprk_configuration"] = request.Configuration;
+
+        // PATCH to Dataverse
+        var url = $"sprk_analysistools({id})";
+        using var httpContent = JsonContent.Create(payload);
+        httpContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+
+        using var patchRequest = new HttpRequestMessage(HttpMethod.Patch, url)
         {
-            Name = request.Name != null ? EnsureCustomerPrefix(request.Name) : existing.Name,
-            Description = request.Description ?? existing.Description,
-            Type = request.Type ?? existing.Type,
-            HandlerClass = request.HandlerClass ?? existing.HandlerClass,
-            Configuration = request.Configuration ?? existing.Configuration
+            Content = httpContent
         };
 
-        _stubTools[id] = updated;
+        var response = await _httpClient.SendAsync(patchRequest, cancellationToken);
+        response.EnsureSuccessStatusCode();
 
-        _logger.LogInformation("Updated tool '{ToolName}' (ID: {ToolId})", updated.Name, id);
+        // Re-fetch to get the updated entity
+        var updated = await GetToolAsync(id, cancellationToken);
+        if (updated == null)
+        {
+            throw new InvalidOperationException($"Failed to retrieve updated tool {id} from Dataverse");
+        }
+
+        _logger.LogInformation("[UPDATE TOOL] Updated tool '{ToolName}' (ID: {ToolId})", updated.Name, id);
 
         return updated;
     }
@@ -830,25 +1345,33 @@ public class ScopeResolverService : IScopeResolverService
     /// <inheritdoc />
     public async Task<bool> DeleteToolAsync(Guid id, CancellationToken cancellationToken)
     {
-        _logger.LogDebug("Deleting tool {ToolId}", id);
+        _logger.LogInformation("[DELETE TOOL] Deleting tool {ToolId} from Dataverse", id);
 
         var existing = await GetToolAsync(id, cancellationToken);
         if (existing == null)
         {
-            _logger.LogWarning("Tool {ToolId} not found for deletion", id);
+            _logger.LogWarning("[DELETE TOOL] Tool {ToolId} not found for deletion", id);
             return false;
         }
 
         ValidateOwnership(existing.Name, existing.IsImmutable, "delete");
 
-        var removed = _stubTools.Remove(id);
+        await EnsureAuthenticatedAsync(cancellationToken);
 
-        if (removed)
+        // DELETE from Dataverse
+        var url = $"sprk_analysistools({id})";
+        var response = await _httpClient.DeleteAsync(url, cancellationToken);
+
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
-            _logger.LogInformation("Deleted tool '{ToolName}' (ID: {ToolId})", existing.Name, id);
+            _logger.LogWarning("[DELETE TOOL] Tool {ToolId} not found in Dataverse", id);
+            return false;
         }
 
-        return removed;
+        response.EnsureSuccessStatusCode();
+
+        _logger.LogInformation("[DELETE TOOL] Deleted tool '{ToolName}' (ID: {ToolId})", existing.Name, id);
+        return true;
     }
 
     #endregion
@@ -856,11 +1379,11 @@ public class ScopeResolverService : IScopeResolverService
     #region Search Operations
 
     /// <inheritdoc />
-    public Task<ScopeSearchResult> SearchScopesAsync(ScopeSearchQuery query, CancellationToken cancellationToken)
+    public async Task<ScopeSearchResult> SearchScopesAsync(ScopeSearchQuery query, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(query);
 
-        _logger.LogDebug("Searching scopes with text '{SearchText}', types: {ScopeTypes}, ownerType: {OwnerType}",
+        _logger.LogInformation("[SEARCH SCOPES] Searching Dataverse with text '{SearchText}', types: {ScopeTypes}, ownerType: {OwnerType}",
             query.SearchText, query.ScopeTypes, query.OwnerType);
 
         // Determine which scope types to search
@@ -875,39 +1398,52 @@ public class ScopeResolverService : IScopeResolverService
 
         var countsByType = new Dictionary<ScopeType, int>();
 
-        // Search Actions
+        // Build list options from search query
+        var listOptions = new ScopeListOptions
+        {
+            NameFilter = query.SearchText,
+            CategoryFilter = query.Category,
+            Page = query.Page,
+            PageSize = query.PageSize
+        };
+
+        // Search Actions via List method
         if (typesToSearch.Contains(ScopeType.Action))
         {
-            actions = SearchActions(query).ToArray();
+            var result = await ListActionsAsync(listOptions, cancellationToken);
+            actions = ApplySearchFilters(result.Items, query).ToArray();
             countsByType[ScopeType.Action] = actions.Length;
         }
 
-        // Search Skills
+        // Search Skills via List method
         if (typesToSearch.Contains(ScopeType.Skill))
         {
-            skills = SearchSkills(query).ToArray();
+            var result = await ListSkillsAsync(listOptions, cancellationToken);
+            skills = ApplySearchFilters(result.Items, query).ToArray();
             countsByType[ScopeType.Skill] = skills.Length;
         }
 
-        // Search Knowledge
+        // Search Knowledge via List method
         if (typesToSearch.Contains(ScopeType.Knowledge))
         {
-            knowledge = SearchKnowledge(query).ToArray();
+            var result = await ListKnowledgeAsync(listOptions, cancellationToken);
+            knowledge = ApplySearchFilters(result.Items, query).ToArray();
             countsByType[ScopeType.Knowledge] = knowledge.Length;
         }
 
-        // Search Tools
+        // Search Tools via List method
         if (typesToSearch.Contains(ScopeType.Tool))
         {
-            tools = SearchTools(query).ToArray();
+            var result = await ListToolsAsync(listOptions, cancellationToken);
+            tools = ApplySearchFilters(result.Items, query).ToArray();
             countsByType[ScopeType.Tool] = tools.Length;
         }
 
         var totalCount = countsByType.Values.Sum();
 
-        _logger.LogDebug("Search found {TotalCount} results across {TypeCount} types", totalCount, countsByType.Count);
+        _logger.LogInformation("[SEARCH SCOPES] Search found {TotalCount} results across {TypeCount} types", totalCount, countsByType.Count);
 
-        return Task.FromResult(new ScopeSearchResult
+        return new ScopeSearchResult
         {
             Actions = actions,
             Skills = skills,
@@ -915,141 +1451,51 @@ public class ScopeResolverService : IScopeResolverService
             Tools = tools,
             TotalCount = totalCount,
             CountsByType = countsByType
-        });
+        };
     }
 
-    private IEnumerable<AnalysisAction> SearchActions(ScopeSearchQuery query)
+    /// <summary>
+    /// Applies additional search filters that can't be done in OData query.
+    /// </summary>
+    private static T[] ApplySearchFilters<T>(T[] items, ScopeSearchQuery query) where T : class
     {
-        var items = _stubActions.Values.AsEnumerable();
-
-        // Apply text filter
-        if (!string.IsNullOrWhiteSpace(query.SearchText))
-        {
-            items = items.Where(a =>
-                a.Name.Contains(query.SearchText, StringComparison.OrdinalIgnoreCase) ||
-                (a.Description?.Contains(query.SearchText, StringComparison.OrdinalIgnoreCase) ?? false));
-        }
+        IEnumerable<T> filtered = items;
 
         // Apply owner type filter
         if (query.OwnerType.HasValue)
         {
-            items = items.Where(a => a.OwnerType == query.OwnerType.Value);
+            filtered = filtered.Where(item =>
+            {
+                var ownerType = item switch
+                {
+                    AnalysisAction a => a.OwnerType,
+                    AnalysisSkill s => s.OwnerType,
+                    AnalysisKnowledge k => k.OwnerType,
+                    AnalysisTool t => t.OwnerType,
+                    _ => ScopeOwnerType.System
+                };
+                return ownerType == query.OwnerType.Value;
+            });
         }
 
         // Apply editable-only filter
         if (query.EditableOnly)
         {
-            items = items.Where(a => !a.IsImmutable && !IsSystemScope(a.Name));
+            filtered = filtered.Where(item =>
+            {
+                var (isImmutable, name) = item switch
+                {
+                    AnalysisAction a => (a.IsImmutable, a.Name),
+                    AnalysisSkill s => (s.IsImmutable, s.Name),
+                    AnalysisKnowledge k => (k.IsImmutable, k.Name),
+                    AnalysisTool t => (t.IsImmutable, t.Name),
+                    _ => (true, "")
+                };
+                return !isImmutable && !IsSystemScope(name);
+            });
         }
 
-        // Apply pagination
-        items = items
-            .Skip((query.Page - 1) * query.PageSize)
-            .Take(query.PageSize);
-
-        return items;
-    }
-
-    private IEnumerable<AnalysisSkill> SearchSkills(ScopeSearchQuery query)
-    {
-        var items = _stubSkills.Values.AsEnumerable();
-
-        // Apply text filter
-        if (!string.IsNullOrWhiteSpace(query.SearchText))
-        {
-            items = items.Where(s =>
-                s.Name.Contains(query.SearchText, StringComparison.OrdinalIgnoreCase) ||
-                (s.Description?.Contains(query.SearchText, StringComparison.OrdinalIgnoreCase) ?? false));
-        }
-
-        // Apply owner type filter
-        if (query.OwnerType.HasValue)
-        {
-            items = items.Where(s => s.OwnerType == query.OwnerType.Value);
-        }
-
-        // Apply category filter
-        if (!string.IsNullOrWhiteSpace(query.Category))
-        {
-            items = items.Where(s => s.Category?.Equals(query.Category, StringComparison.OrdinalIgnoreCase) ?? false);
-        }
-
-        // Apply editable-only filter
-        if (query.EditableOnly)
-        {
-            items = items.Where(s => !s.IsImmutable && !IsSystemScope(s.Name));
-        }
-
-        // Apply pagination
-        items = items
-            .Skip((query.Page - 1) * query.PageSize)
-            .Take(query.PageSize);
-
-        return items;
-    }
-
-    private IEnumerable<AnalysisKnowledge> SearchKnowledge(ScopeSearchQuery query)
-    {
-        var items = _stubKnowledge.Values.AsEnumerable();
-
-        // Apply text filter
-        if (!string.IsNullOrWhiteSpace(query.SearchText))
-        {
-            items = items.Where(k =>
-                k.Name.Contains(query.SearchText, StringComparison.OrdinalIgnoreCase) ||
-                (k.Description?.Contains(query.SearchText, StringComparison.OrdinalIgnoreCase) ?? false));
-        }
-
-        // Apply owner type filter
-        if (query.OwnerType.HasValue)
-        {
-            items = items.Where(k => k.OwnerType == query.OwnerType.Value);
-        }
-
-        // Apply editable-only filter
-        if (query.EditableOnly)
-        {
-            items = items.Where(k => !k.IsImmutable && !IsSystemScope(k.Name));
-        }
-
-        // Apply pagination
-        items = items
-            .Skip((query.Page - 1) * query.PageSize)
-            .Take(query.PageSize);
-
-        return items;
-    }
-
-    private IEnumerable<AnalysisTool> SearchTools(ScopeSearchQuery query)
-    {
-        var items = _stubTools.Values.AsEnumerable();
-
-        // Apply text filter
-        if (!string.IsNullOrWhiteSpace(query.SearchText))
-        {
-            items = items.Where(t =>
-                t.Name.Contains(query.SearchText, StringComparison.OrdinalIgnoreCase) ||
-                (t.Description?.Contains(query.SearchText, StringComparison.OrdinalIgnoreCase) ?? false));
-        }
-
-        // Apply owner type filter
-        if (query.OwnerType.HasValue)
-        {
-            items = items.Where(t => t.OwnerType == query.OwnerType.Value);
-        }
-
-        // Apply editable-only filter
-        if (query.EditableOnly)
-        {
-            items = items.Where(t => !t.IsImmutable && !IsSystemScope(t.Name));
-        }
-
-        // Apply pagination
-        items = items
-            .Skip((query.Page - 1) * query.PageSize)
-            .Take(query.PageSize);
-
-        return items;
+        return filtered.ToArray();
     }
 
     #endregion
@@ -1071,25 +1517,23 @@ public class ScopeResolverService : IScopeResolverService
             throw new KeyNotFoundException($"Source action with ID '{sourceId}' not found.");
         }
 
-        // Create copy with new name and BasedOnId
-        var name = EnsureCustomerPrefix(newName);
-        var copyId = Guid.NewGuid();
-
-        var copy = source with
+        // Create copy via Create method with BasedOnId tracking
+        var createRequest = new CreateActionRequest
         {
-            Id = copyId,
-            Name = name,
-            OwnerType = ScopeOwnerType.Customer,
-            IsImmutable = false,
-            BasedOnId = sourceId,
-            ParentScopeId = null // Save As is a copy, not an extension
+            Name = newName,
+            Description = source.Description,
+            SystemPrompt = source.SystemPrompt,
+            SortOrder = source.SortOrder,
+            ActionType = source.ActionType
         };
 
-        _stubActions[copyId] = copy;
+        var copy = await CreateActionAsync(createRequest, cancellationToken);
 
-        _logger.LogInformation("Created action copy '{Name}' (ID: {CopyId}) based on {SourceId}", name, copyId, sourceId);
+        // Update with BasedOnId reference (created entity tracks lineage)
+        _logger.LogInformation("[SAVE AS ACTION] Created action copy '{Name}' (ID: {CopyId}) based on {SourceId}",
+            copy.Name, copy.Id, sourceId);
 
-        return copy;
+        return copy with { BasedOnId = sourceId };
     }
 
     /// <inheritdoc />
@@ -1106,24 +1550,21 @@ public class ScopeResolverService : IScopeResolverService
             throw new KeyNotFoundException($"Source skill with ID '{sourceId}' not found.");
         }
 
-        var name = EnsureCustomerPrefix(newName);
-        var copyId = Guid.NewGuid();
-
-        var copy = source with
+        // Create copy via Create method with BasedOnId tracking
+        var createRequest = new CreateSkillRequest
         {
-            Id = copyId,
-            Name = name,
-            OwnerType = ScopeOwnerType.Customer,
-            IsImmutable = false,
-            BasedOnId = sourceId,
-            ParentScopeId = null
+            Name = newName,
+            Description = source.Description,
+            PromptFragment = source.PromptFragment,
+            Category = source.Category
         };
 
-        _stubSkills[copyId] = copy;
+        var copy = await CreateSkillAsync(createRequest, cancellationToken);
 
-        _logger.LogInformation("Created skill copy '{Name}' (ID: {CopyId}) based on {SourceId}", name, copyId, sourceId);
+        _logger.LogInformation("[SAVE AS SKILL] Created skill copy '{Name}' (ID: {CopyId}) based on {SourceId}",
+            copy.Name, copy.Id, sourceId);
 
-        return copy;
+        return copy with { BasedOnId = sourceId };
     }
 
     /// <inheritdoc />
@@ -1140,24 +1581,23 @@ public class ScopeResolverService : IScopeResolverService
             throw new KeyNotFoundException($"Source knowledge with ID '{sourceId}' not found.");
         }
 
-        var name = EnsureCustomerPrefix(newName);
-        var copyId = Guid.NewGuid();
-
-        var copy = source with
+        // Create copy via Create method with BasedOnId tracking
+        var createRequest = new CreateKnowledgeRequest
         {
-            Id = copyId,
-            Name = name,
-            OwnerType = ScopeOwnerType.Customer,
-            IsImmutable = false,
-            BasedOnId = sourceId,
-            ParentScopeId = null
+            Name = newName,
+            Description = source.Description,
+            Type = source.Type,
+            Content = source.Content,
+            DeploymentId = source.DeploymentId,
+            DocumentId = source.DocumentId
         };
 
-        _stubKnowledge[copyId] = copy;
+        var copy = await CreateKnowledgeAsync(createRequest, cancellationToken);
 
-        _logger.LogInformation("Created knowledge copy '{Name}' (ID: {CopyId}) based on {SourceId}", name, copyId, sourceId);
+        _logger.LogInformation("[SAVE AS KNOWLEDGE] Created knowledge copy '{Name}' (ID: {CopyId}) based on {SourceId}",
+            copy.Name, copy.Id, sourceId);
 
-        return copy;
+        return copy with { BasedOnId = sourceId };
     }
 
     /// <inheritdoc />
@@ -1174,24 +1614,22 @@ public class ScopeResolverService : IScopeResolverService
             throw new KeyNotFoundException($"Source tool with ID '{sourceId}' not found.");
         }
 
-        var name = EnsureCustomerPrefix(newName);
-        var copyId = Guid.NewGuid();
-
-        var copy = source with
+        // Create copy via Create method with BasedOnId tracking
+        var createRequest = new CreateToolRequest
         {
-            Id = copyId,
-            Name = name,
-            OwnerType = ScopeOwnerType.Customer,
-            IsImmutable = false,
-            BasedOnId = sourceId,
-            ParentScopeId = null
+            Name = newName,
+            Description = source.Description,
+            Type = source.Type,
+            HandlerClass = source.HandlerClass,
+            Configuration = source.Configuration
         };
 
-        _stubTools[copyId] = copy;
+        var copy = await CreateToolAsync(createRequest, cancellationToken);
 
-        _logger.LogInformation("Created tool copy '{Name}' (ID: {CopyId}) based on {SourceId}", name, copyId, sourceId);
+        _logger.LogInformation("[SAVE AS TOOL] Created tool copy '{Name}' (ID: {CopyId}) based on {SourceId}",
+            copy.Name, copy.Id, sourceId);
 
-        return copy;
+        return copy with { BasedOnId = sourceId };
     }
 
     #endregion
@@ -1203,35 +1641,32 @@ public class ScopeResolverService : IScopeResolverService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(childName, nameof(childName));
 
-        _logger.LogInformation("Extending action {ParentId} with child '{ChildName}'", parentId, childName);
+        _logger.LogInformation("[EXTEND ACTION] Extending action {ParentId} with child '{ChildName}'", parentId, childName);
 
         // Load parent action
         var parent = await GetActionAsync(parentId, cancellationToken);
         if (parent == null)
         {
-            _logger.LogWarning("Parent action {ParentId} not found for Extend", parentId);
+            _logger.LogWarning("[EXTEND ACTION] Parent action {ParentId} not found for Extend", parentId);
             throw new KeyNotFoundException($"Parent action with ID '{parentId}' not found.");
         }
 
-        // Create child with parent reference
-        var name = EnsureCustomerPrefix(childName);
-        var childId = Guid.NewGuid();
-
-        var child = parent with
+        // Create child via Create method with ParentScopeId tracking
+        var createRequest = new CreateActionRequest
         {
-            Id = childId,
-            Name = name,
-            OwnerType = ScopeOwnerType.Customer,
-            IsImmutable = false,
-            ParentScopeId = parentId,
-            BasedOnId = null // Extend is not a copy
+            Name = childName,
+            Description = parent.Description,
+            SystemPrompt = parent.SystemPrompt,
+            SortOrder = parent.SortOrder,
+            ActionType = parent.ActionType
         };
 
-        _stubActions[childId] = child;
+        var child = await CreateActionAsync(createRequest, cancellationToken);
 
-        _logger.LogInformation("Created child action '{Name}' (ID: {ChildId}) extending {ParentId}", name, childId, parentId);
+        _logger.LogInformation("[EXTEND ACTION] Created child action '{Name}' (ID: {ChildId}) extending {ParentId}",
+            child.Name, child.Id, parentId);
 
-        return child;
+        return child with { ParentScopeId = parentId };
     }
 
     /// <inheritdoc />
@@ -1239,33 +1674,30 @@ public class ScopeResolverService : IScopeResolverService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(childName, nameof(childName));
 
-        _logger.LogInformation("Extending skill {ParentId} with child '{ChildName}'", parentId, childName);
+        _logger.LogInformation("[EXTEND SKILL] Extending skill {ParentId} with child '{ChildName}'", parentId, childName);
 
         var parent = await GetSkillAsync(parentId, cancellationToken);
         if (parent == null)
         {
-            _logger.LogWarning("Parent skill {ParentId} not found for Extend", parentId);
+            _logger.LogWarning("[EXTEND SKILL] Parent skill {ParentId} not found for Extend", parentId);
             throw new KeyNotFoundException($"Parent skill with ID '{parentId}' not found.");
         }
 
-        var name = EnsureCustomerPrefix(childName);
-        var childId = Guid.NewGuid();
-
-        var child = parent with
+        // Create child via Create method with ParentScopeId tracking
+        var createRequest = new CreateSkillRequest
         {
-            Id = childId,
-            Name = name,
-            OwnerType = ScopeOwnerType.Customer,
-            IsImmutable = false,
-            ParentScopeId = parentId,
-            BasedOnId = null
+            Name = childName,
+            Description = parent.Description,
+            PromptFragment = parent.PromptFragment,
+            Category = parent.Category
         };
 
-        _stubSkills[childId] = child;
+        var child = await CreateSkillAsync(createRequest, cancellationToken);
 
-        _logger.LogInformation("Created child skill '{Name}' (ID: {ChildId}) extending {ParentId}", name, childId, parentId);
+        _logger.LogInformation("[EXTEND SKILL] Created child skill '{Name}' (ID: {ChildId}) extending {ParentId}",
+            child.Name, child.Id, parentId);
 
-        return child;
+        return child with { ParentScopeId = parentId };
     }
 
     /// <inheritdoc />
@@ -1273,33 +1705,32 @@ public class ScopeResolverService : IScopeResolverService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(childName, nameof(childName));
 
-        _logger.LogInformation("Extending knowledge {ParentId} with child '{ChildName}'", parentId, childName);
+        _logger.LogInformation("[EXTEND KNOWLEDGE] Extending knowledge {ParentId} with child '{ChildName}'", parentId, childName);
 
         var parent = await GetKnowledgeAsync(parentId, cancellationToken);
         if (parent == null)
         {
-            _logger.LogWarning("Parent knowledge {ParentId} not found for Extend", parentId);
+            _logger.LogWarning("[EXTEND KNOWLEDGE] Parent knowledge {ParentId} not found for Extend", parentId);
             throw new KeyNotFoundException($"Parent knowledge with ID '{parentId}' not found.");
         }
 
-        var name = EnsureCustomerPrefix(childName);
-        var childId = Guid.NewGuid();
-
-        var child = parent with
+        // Create child via Create method with ParentScopeId tracking
+        var createRequest = new CreateKnowledgeRequest
         {
-            Id = childId,
-            Name = name,
-            OwnerType = ScopeOwnerType.Customer,
-            IsImmutable = false,
-            ParentScopeId = parentId,
-            BasedOnId = null
+            Name = childName,
+            Description = parent.Description,
+            Type = parent.Type,
+            Content = parent.Content,
+            DeploymentId = parent.DeploymentId,
+            DocumentId = parent.DocumentId
         };
 
-        _stubKnowledge[childId] = child;
+        var child = await CreateKnowledgeAsync(createRequest, cancellationToken);
 
-        _logger.LogInformation("Created child knowledge '{Name}' (ID: {ChildId}) extending {ParentId}", name, childId, parentId);
+        _logger.LogInformation("[EXTEND KNOWLEDGE] Created child knowledge '{Name}' (ID: {ChildId}) extending {ParentId}",
+            child.Name, child.Id, parentId);
 
-        return child;
+        return child with { ParentScopeId = parentId };
     }
 
     /// <inheritdoc />
@@ -1307,36 +1738,243 @@ public class ScopeResolverService : IScopeResolverService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(childName, nameof(childName));
 
-        _logger.LogInformation("Extending tool {ParentId} with child '{ChildName}'", parentId, childName);
+        _logger.LogInformation("[EXTEND TOOL] Extending tool {ParentId} with child '{ChildName}'", parentId, childName);
 
         var parent = await GetToolAsync(parentId, cancellationToken);
         if (parent == null)
         {
-            _logger.LogWarning("Parent tool {ParentId} not found for Extend", parentId);
+            _logger.LogWarning("[EXTEND TOOL] Parent tool {ParentId} not found for Extend", parentId);
             throw new KeyNotFoundException($"Parent tool with ID '{parentId}' not found.");
         }
 
-        var name = EnsureCustomerPrefix(childName);
-        var childId = Guid.NewGuid();
-
-        var child = parent with
+        // Create child via Create method with ParentScopeId tracking
+        var createRequest = new CreateToolRequest
         {
-            Id = childId,
-            Name = name,
-            OwnerType = ScopeOwnerType.Customer,
-            IsImmutable = false,
-            ParentScopeId = parentId,
-            BasedOnId = null
+            Name = childName,
+            Description = parent.Description,
+            Type = parent.Type,
+            HandlerClass = parent.HandlerClass,
+            Configuration = parent.Configuration
         };
 
-        _stubTools[childId] = child;
+        var child = await CreateToolAsync(createRequest, cancellationToken);
 
-        _logger.LogInformation("Created child tool '{Name}' (ID: {ChildId}) extending {ParentId}", name, childId, parentId);
+        _logger.LogInformation("[EXTEND TOOL] Created child tool '{Name}' (ID: {ChildId}) extending {ParentId}",
+            child.Name, child.Id, parentId);
 
-        return child;
+        return child with { ParentScopeId = parentId };
     }
 
     #endregion
+
+    #endregion
+
+    #region Private DTOs
+
+    /// <summary>
+    /// DTO for deserializing sprk_analysistool entity from Dataverse Web API
+    /// </summary>
+    private class ToolEntity
+    {
+        [JsonPropertyName("sprk_analysistoolid")]
+        public Guid Id { get; set; }
+
+        [JsonPropertyName("sprk_name")]
+        public string? Name { get; set; }
+
+        [JsonPropertyName("sprk_description")]
+        public string? Description { get; set; }
+
+        [JsonPropertyName("sprk_ToolTypeId")]
+        public ToolTypeReference? ToolTypeId { get; set; }
+
+        [JsonPropertyName("sprk_handlerclass")]
+        public string? HandlerClass { get; set; }
+
+        [JsonPropertyName("sprk_configuration")]
+        public string? Configuration { get; set; }
+    }
+
+    private class ToolTypeReference
+    {
+        [JsonPropertyName("sprk_name")]
+        public string? Name { get; set; }
+    }
+
+    /// <summary>
+    /// DTO for deserializing sprk_analysisskill entity from Dataverse Web API (Skills)
+    /// </summary>
+    private class SkillEntity
+    {
+        [JsonPropertyName("sprk_analysisskillid")]
+        public Guid Id { get; set; }
+
+        [JsonPropertyName("sprk_name")]
+        public string? Name { get; set; }
+
+        [JsonPropertyName("sprk_description")]
+        public string? Description { get; set; }
+
+        [JsonPropertyName("sprk_promptfragment")]
+        public string? PromptFragment { get; set; }
+
+        [JsonPropertyName("sprk_SkillTypeId")]
+        public SkillTypeReference? SkillTypeId { get; set; }
+    }
+
+    private class SkillTypeReference
+    {
+        [JsonPropertyName("sprk_name")]
+        public string? Name { get; set; }
+    }
+
+    /// <summary>
+    /// DTO for deserializing sprk_analysisknowledge entity from Dataverse Web API (Knowledge)
+    /// </summary>
+    private class KnowledgeEntity
+    {
+        [JsonPropertyName("sprk_analysisknowledgeid")]
+        public Guid Id { get; set; }
+
+        [JsonPropertyName("sprk_name")]
+        public string? Name { get; set; }
+
+        [JsonPropertyName("sprk_description")]
+        public string? Description { get; set; }
+
+        [JsonPropertyName("sprk_content")]
+        public string? Content { get; set; }
+
+        [JsonPropertyName("sprk_deploymentid")]
+        public Guid? DeploymentId { get; set; }
+
+        [JsonPropertyName("sprk_KnowledgeTypeId")]
+        public KnowledgeTypeReference? KnowledgeTypeId { get; set; }
+    }
+
+    private class KnowledgeTypeReference
+    {
+        [JsonPropertyName("sprk_name")]
+        public string? Name { get; set; }
+    }
+
+    /// <summary>
+    /// DTO for deserializing sprk_analysisaction entity from Dataverse Web API (Actions)
+    /// </summary>
+    private class ActionEntity
+    {
+        [JsonPropertyName("sprk_analysisactionid")]
+        public Guid Id { get; set; }
+
+        [JsonPropertyName("sprk_name")]
+        public string? Name { get; set; }
+
+        [JsonPropertyName("sprk_description")]
+        public string? Description { get; set; }
+
+        [JsonPropertyName("sprk_systemprompt")]
+        public string? SystemPrompt { get; set; }
+
+        [JsonPropertyName("sprk_ActionTypeId")]
+        public ActionTypeReference? ActionTypeId { get; set; }
+    }
+
+    private class ActionTypeReference
+    {
+        [JsonPropertyName("sprk_name")]
+        public string? Name { get; set; }
+    }
+
+    /// <summary>
+    /// Generic OData collection response with count support for pagination
+    /// </summary>
+    private class ODataCollectionResponse<T>
+    {
+        [JsonPropertyName("value")]
+        public List<T> Value { get; set; } = new();
+
+        [JsonPropertyName("@odata.count")]
+        public int? ODataCount { get; set; }
+
+        [JsonPropertyName("@odata.nextLink")]
+        public string? NextLink { get; set; }
+    }
+
+    #endregion
+
+    #region OData Query Helpers
+
+    /// <summary>
+    /// Builds an OData query string from ScopeListOptions
+    /// </summary>
+    /// <param name="options">List options including pagination, filtering, sorting</param>
+    /// <param name="selectFields">Fields to select</param>
+    /// <param name="expandClause">Expand clause for related entities</param>
+    /// <param name="nameFieldPath">Path to the name field for filtering (e.g., "sprk_name")</param>
+    /// <param name="categoryFieldPath">Optional path to category/type field for filtering</param>
+    /// <param name="sortFieldMappings">Dictionary mapping sort keys to field paths</param>
+    /// <returns>OData query string (without leading ?)</returns>
+    private static string BuildODataQuery(
+        ScopeListOptions options,
+        string selectFields,
+        string expandClause,
+        string nameFieldPath,
+        string? categoryFieldPath,
+        Dictionary<string, string> sortFieldMappings)
+    {
+        var queryParts = new List<string>();
+
+        // Select
+        if (!string.IsNullOrEmpty(selectFields))
+        {
+            queryParts.Add($"$select={selectFields}");
+        }
+
+        // Expand for related entities
+        if (!string.IsNullOrEmpty(expandClause))
+        {
+            queryParts.Add($"$expand={expandClause}");
+        }
+
+        // Build filter clauses
+        var filterClauses = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(options.NameFilter))
+        {
+            // OData contains function for text search
+            var escapedName = options.NameFilter.Replace("'", "''");
+            filterClauses.Add($"contains({nameFieldPath}, '{escapedName}')");
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.CategoryFilter) && !string.IsNullOrEmpty(categoryFieldPath))
+        {
+            var escapedCategory = options.CategoryFilter.Replace("'", "''");
+            filterClauses.Add($"{categoryFieldPath} eq '{escapedCategory}'");
+        }
+
+        if (filterClauses.Count > 0)
+        {
+            queryParts.Add($"$filter={string.Join(" and ", filterClauses)}");
+        }
+
+        // Sorting
+        var sortField = sortFieldMappings.GetValueOrDefault(options.SortBy.ToLowerInvariant(), sortFieldMappings.Values.First());
+        var sortDirection = options.SortDescending ? "desc" : "asc";
+        queryParts.Add($"$orderby={sortField} {sortDirection}");
+
+        // Pagination
+        var skip = (options.Page - 1) * options.PageSize;
+        if (skip > 0)
+        {
+            queryParts.Add($"$skip={skip}");
+        }
+        queryParts.Add($"$top={options.PageSize}");
+
+        // Request count for pagination
+        queryParts.Add("$count=true");
+
+        return string.Join("&", queryParts);
+    }
 
     #endregion
 }

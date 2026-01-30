@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="063" project="ai-scope-resolution-enhancements">
+  <metadata>
+    <title>Add ConfigurationSchema to All Remaining Handlers</title>
+    <phase>6</phase>
+    <tags>bff-api, handlers</tags>
+    <estimate>3-4 hours</estimate>
+    <dependencies>061</dependencies>
+    <parallel-group>B</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Add JSON Schema to all remaining tool handlers (8 handlers total).
+    </goal>
+    <context>
+      Handlers to update:
+      1. EntityExtractorHandler - entityTypes, confidenceThreshold
+      2. SummaryHandler - maxLength, format
+      3. ClauseAnalyzerHandler - clauseTypes, comparisonMode
+      4. DocumentClassifierHandler - categories, threshold
+      5. RiskDetectorHandler - riskCategories, severity
+      6. ClauseComparisonHandler - baselineDocumentId
+      7. DateExtractorHandler - dateFormats, timezone
+      8. FinancialCalculatorHandler - calculationType, precision
+    </context>
+    <constraints>
+      - Each handler must have schema specific to its parameters
+      - Follow JSON Schema Draft 07
+      - Include type, properties, required fields
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/HOW-TO-CREATE-AI-PLAYBOOK-SCOPES.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Update EntityExtractorHandler schema</step>
+    <step order="2">Update SummaryHandler schema</step>
+    <step order="3">Update ClauseAnalyzerHandler schema</step>
+    <step order="4">Update DocumentClassifierHandler schema</step>
+    <step order="5">Update RiskDetectorHandler schema</step>
+    <step order="6">Update ClauseComparisonHandler schema</step>
+    <step order="7">Update DateExtractorHandler schema</step>
+    <step order="8">Update FinancialCalculatorHandler schema</step>
+    <step order="9">Build and verify all handlers compile</step>
+  </steps>
+
+  <tools>
+    <tool>Glob - Find all handler files</tool>
+    <tool>Edit - Update each handler</tool>
+    <tool>Bash - Build verification</tool>
+  </tools>
+
+  <outputs>
+    <output>All 8 handlers with ConfigurationSchema</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All 8 handlers have ConfigurationSchema</criterion>
+    <criterion>Each schema reflects handler's actual parameters</criterion>
+    <criterion>Project builds without errors</criterion>
+  </acceptance-criteria>
+</task>

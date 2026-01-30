@@ -806,25 +806,71 @@ public class PlaybookService : IPlaybookService
     {
         var url = $"{EntitySetName}({playbookId})/{relationshipName}?$select={targetIdField}";
 
+        _logger.LogInformation(
+            "[N:N QUERY] Querying relationship '{Relationship}' for playbook {PlaybookId}",
+            relationshipName, playbookId);
+        _logger.LogInformation("[N:N QUERY] Full URL: {Url}", url);
+        _logger.LogInformation("[N:N QUERY] Target field: {Field}", targetIdField);
+
         try
         {
             var response = await _httpClient.GetAsync(url, cancellationToken);
+
+            _logger.LogInformation(
+                "[N:N QUERY] Response status: {StatusCode} - {ReasonPhrase}",
+                response.StatusCode, response.ReasonPhrase);
+
             if (!response.IsSuccessStatusCode)
             {
+                var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogError(
+                    "[N:N QUERY] Failed with status {StatusCode}. Response body: {Body}",
+                    response.StatusCode, errorBody);
                 return [];
             }
 
-            var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(JsonOptions, cancellationToken);
-            if (result?.Value == null) return [];
+            var rawJson = await response.Content.ReadAsStringAsync(cancellationToken);
+            _logger.LogInformation("[N:N QUERY] Raw JSON response: {Json}", rawJson);
 
-            return result.Value
-                .Select(v => v.TryGetProperty(targetIdField, out var idElement) ? idElement.GetGuid() : Guid.Empty)
-                .Where(id => id != Guid.Empty)
-                .ToArray();
+            var result = System.Text.Json.JsonSerializer.Deserialize<ODataCollectionResponse>(rawJson, JsonOptions);
+            if (result?.Value == null)
+            {
+                _logger.LogWarning("[N:N QUERY] Deserialized result is null or has no value array");
+                return [];
+            }
+
+            _logger.LogInformation("[N:N QUERY] Found {Count} items in response", result.Value.Length);
+
+            var ids = new List<Guid>();
+            for (int i = 0; i < result.Value.Length; i++)
+            {
+                var item = result.Value[i];
+                _logger.LogInformation("[N:N QUERY] Item {Index} raw JSON: {ItemJson}", i, item.GetRawText());
+
+                if (item.TryGetProperty(targetIdField, out var idElement))
+                {
+                    var guid = idElement.GetGuid();
+                    _logger.LogInformation("[N:N QUERY] Item {Index} - extracted {Field} = {Guid}", i, targetIdField, guid);
+                    ids.Add(guid);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "[N:N QUERY] Item {Index} - property '{Field}' not found. Available properties: {Properties}",
+                        i, targetIdField, string.Join(", ", item.EnumerateObject().Select(p => p.Name)));
+                }
+            }
+
+            var validIds = ids.Where(id => id != Guid.Empty).ToArray();
+            _logger.LogInformation(
+                "[N:N QUERY] Returning {Count} valid GUIDs for relationship '{Relationship}'",
+                validIds.Length, relationshipName);
+
+            return validIds;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to get related IDs for {Relationship}", relationshipName);
+            _logger.LogError(ex, "[N:N QUERY] Exception querying relationship '{Relationship}': {Message}", relationshipName, ex.Message);
             return [];
         }
     }

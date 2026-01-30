@@ -1,13 +1,20 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Azure.Messaging.ServiceBus;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Email;
+using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Jobs.Handlers;
 using Sprk.Bff.Api.Workers.Office.Messages;
 using Spaarke.Dataverse;
+
+// Alias to resolve ambiguity between Services.Jobs.JobStatus and Models.Office.JobStatus
+using JobStatus = Sprk.Bff.Api.Models.Office.JobStatus;
 
 namespace Sprk.Bff.Api.Workers.Office;
 
@@ -40,9 +47,12 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     private readonly ServiceBusClient _serviceBusClient;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ServiceBusOptions _serviceBusOptions;
+    private readonly GraphOptions _graphOptions;
     private readonly IDataverseService _dataverseService;
     private readonly IEmailToEmlConverter _emlConverter;
     private readonly AttachmentFilterService _attachmentFilterService;
+    private readonly JobSubmissionService _jobSubmissionService;
+    private readonly IConfiguration _configuration;
 
     private const string QueueName = "office-upload-finalization";
     private const string ProfileQueueName = "office-profile";
@@ -69,9 +79,12 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         ServiceBusClient serviceBusClient,
         IServiceScopeFactory scopeFactory,
         IOptions<ServiceBusOptions> serviceBusOptions,
+        IOptions<GraphOptions> graphOptions,
         IDataverseService dataverseService,
         IEmailToEmlConverter emlConverter,
-        AttachmentFilterService attachmentFilterService)
+        AttachmentFilterService attachmentFilterService,
+        JobSubmissionService jobSubmissionService,
+        IConfiguration configuration)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _speFileStore = speFileStore ?? throw new ArgumentNullException(nameof(speFileStore));
@@ -79,40 +92,50 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         _serviceBusClient = serviceBusClient ?? throw new ArgumentNullException(nameof(serviceBusClient));
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _serviceBusOptions = serviceBusOptions?.Value ?? throw new ArgumentNullException(nameof(serviceBusOptions));
+        _graphOptions = graphOptions?.Value ?? throw new ArgumentNullException(nameof(graphOptions));
         _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
         _emlConverter = emlConverter ?? throw new ArgumentNullException(nameof(emlConverter));
         _attachmentFilterService = attachmentFilterService ?? throw new ArgumentNullException(nameof(attachmentFilterService));
+        _jobSubmissionService = jobSubmissionService ?? throw new ArgumentNullException(nameof(jobSubmissionService));
+        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation(
-            "UploadFinalizationWorker starting, listening on queue {QueueName}",
+        _logger.LogWarning(
+            "🚀🚀🚀 UploadFinalizationWorker STARTING - listening on queue '{QueueName}' 🚀🚀🚀",
             QueueName);
-
-        var processor = _serviceBusClient.CreateProcessor(QueueName, new ServiceBusProcessorOptions
-        {
-            MaxConcurrentCalls = MaxConcurrentCalls,
-            AutoCompleteMessages = false,
-            MaxAutoLockRenewalDuration = TimeSpan.FromMinutes(10)
-        });
-
-        processor.ProcessMessageAsync += ProcessMessageAsync;
-        processor.ProcessErrorAsync += ProcessErrorAsync;
 
         try
         {
+            var processor = _serviceBusClient.CreateProcessor(QueueName, new ServiceBusProcessorOptions
+            {
+                MaxConcurrentCalls = MaxConcurrentCalls,
+                AutoCompleteMessages = false,
+                MaxAutoLockRenewalDuration = TimeSpan.FromMinutes(10)
+            });
+
+            _logger.LogWarning("🔧 UploadFinalizationWorker: Service Bus processor created successfully");
+
+            processor.ProcessMessageAsync += ProcessMessageAsync;
+            processor.ProcessErrorAsync += ProcessErrorAsync;
+
+            _logger.LogWarning("🔧 UploadFinalizationWorker: Message handlers attached, starting processor...");
+
             await processor.StartProcessingAsync(stoppingToken);
+
+            _logger.LogWarning("✅✅✅ UploadFinalizationWorker STARTED SUCCESSFULLY and listening for messages ✅✅✅");
+
             await Task.Delay(Timeout.Infinite, stoppingToken);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
-            _logger.LogInformation("UploadFinalizationWorker stopping gracefully");
+            _logger.LogWarning("UploadFinalizationWorker stopping gracefully");
         }
-        finally
+        catch (Exception ex)
         {
-            await processor.StopProcessingAsync();
-            await processor.DisposeAsync();
+            _logger.LogCritical(ex, "❌❌❌ UploadFinalizationWorker FAILED TO START: {Error}", ex.Message);
+            throw;
         }
     }
 
@@ -190,10 +213,27 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                     50,
                     cancellationToken);
 
-                // Document record was already created - we need to look it up or create artifacts directly
-                // For now, create a new document ID to associate artifacts with
-                // In a fully integrated flow, we would pass the documentId in the payload
-                documentId = Guid.NewGuid(); // Placeholder - ideally passed from SaveAsync
+                // Document record was already created by SaveAsync - use the passed DocumentId
+                if (payload.DocumentId.HasValue && payload.DocumentId.Value != Guid.Empty)
+                {
+                    documentId = payload.DocumentId.Value;
+                    _logger.LogInformation(
+                        "Using Document ID from payload: {DocumentId}",
+                        documentId);
+                }
+                else
+                {
+                    // Fallback: should not happen in production, log warning
+                    _logger.LogWarning(
+                        "DocumentId not provided in payload for already-uploaded file, creating new Document record");
+                    documentId = await CreateDocumentRecordAsync(
+                        payload,
+                        driveId,
+                        itemId,
+                        webUrl: null, // Not available in fallback path
+                        message.UserId,
+                        cancellationToken);
+                }
             }
             else
             {
@@ -236,6 +276,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
 
                 driveId = uploadResult.DriveId!;
                 itemId = uploadResult.ItemId!;
+                var webUrl = uploadResult.WebUrl;
 
                 await UpdateJobStatusAsync(
                     message.JobId,
@@ -249,6 +290,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                     payload,
                     driveId,
                     itemId,
+                    webUrl,
                     message.UserId,
                     cancellationToken);
             }
@@ -297,13 +339,30 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                 documentId);
 
             // Step 10: Queue next stage (profile or indexing)
+            _logger.LogWarning(
+                "🔵 DIAGNOSTIC: About to check TriggerAiProcessing for job {JobId}. TriggerAiProcessing={TriggerAi}, AiOptions.ProfileSummary={ProfileSummary}, AiOptions.RagIndex={RagIndex}, AiOptions.DeepAnalysis={DeepAnalysis}",
+                message.JobId,
+                payload.TriggerAiProcessing,
+                payload.AiOptions?.ProfileSummary ?? false,
+                payload.AiOptions?.RagIndex ?? false,
+                payload.AiOptions?.DeepAnalysis ?? false);
+
             if (payload.TriggerAiProcessing)
             {
-                await QueueNextStageAsync(message, documentId, payload, cancellationToken);
+                _logger.LogWarning(
+                    "🟢 DIAGNOSTIC: TriggerAiProcessing is TRUE - calling QueueNextStageAsync for job {JobId}",
+                    message.JobId);
+                await QueueNextStageAsync(message, documentId, payload, driveId, itemId, cancellationToken);
+                _logger.LogWarning(
+                    "🟢 DIAGNOSTIC: QueueNextStageAsync completed successfully for job {JobId}",
+                    message.JobId);
             }
             else
             {
                 // No AI processing - mark job as complete
+                _logger.LogWarning(
+                    "🔴 DIAGNOSTIC: TriggerAiProcessing is FALSE for job {JobId} - skipping AI processing",
+                    message.JobId);
                 await UpdateJobStatusAsync(
                     message.JobId,
                     JobStatus.Completed,
@@ -352,6 +411,11 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
 
     private async Task ProcessMessageAsync(ProcessMessageEventArgs args)
     {
+        _logger.LogWarning(
+            "📨 UploadFinalizationWorker: Received message {MessageId}, Delivery Count: {DeliveryCount}",
+            args.Message.MessageId,
+            args.Message.DeliveryCount);
+
         var messageBody = args.Message.Body.ToString();
         OfficeJobMessage? message = null;
 
@@ -367,6 +431,12 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                     deadLetterErrorDescription: "Failed to deserialize message payload");
                 return;
             }
+
+            _logger.LogWarning(
+                "📋 UploadFinalizationWorker: Processing job {JobId}, type {JobType}, attempt {Attempt}",
+                message.JobId,
+                message.JobType,
+                message.Attempt);
 
             // Verify this is the correct job type
             if (message.JobType != OfficeJobType.UploadFinalization)
@@ -583,6 +653,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         UploadFinalizationPayload payload,
         string driveId,
         string itemId,
+        string? webUrl,
         string userId,
         CancellationToken cancellationToken)
     {
@@ -619,6 +690,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             FileName = payload.FileName,
             FileSize = payload.FileSize,
             MimeType = payload.MimeType,
+            FilePath = webUrl,
             HasFile = true
         };
 
@@ -695,10 +767,19 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             documentId,
             metadata.Subject);
 
+        // Map importance (0=Low, 1=Normal, 2=High) to Dataverse priority option values
+        var priorityValue = metadata.Importance switch
+        {
+            0 => 192350003, // Low
+            1 => 192350002, // Medium (Normal)
+            2 => 192350001, // Important (High)
+            _ => 192350002  // Default to Medium
+        };
+
         var request = new
         {
             Name = $"{metadata.Subject} - {metadata.SentDate:yyyy-MM-dd}",
-            Subject = metadata.Subject,
+            // Subject removed - field doesn't exist in sprk_emailartifact entity (subject is in Name field)
             Sender = metadata.SenderEmail,
             Recipients = metadata.RecipientsJson,
             SentDate = metadata.SentDate,
@@ -707,7 +788,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             ConversationId = metadata.ConversationId,
             BodyPreview = metadata.BodyPreview,
             HasAttachments = metadata.HasAttachments,
-            Importance = metadata.Importance,
+            Priority = priorityValue, // Changed from Importance to Priority per Dataverse schema
             DocumentId = documentId
         };
 
@@ -813,63 +894,53 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         OfficeJobMessage originalMessage,
         Guid documentId,
         UploadFinalizationPayload payload,
+        string driveId,
+        string itemId,
         CancellationToken cancellationToken)
     {
         var aiOptions = payload.AiOptions ?? new AiProcessingOptions();
 
-        // Determine which queue to use
-        var nextQueue = aiOptions.ProfileSummary ? ProfileQueueName : IndexingQueueName;
-        var nextJobType = aiOptions.ProfileSummary ? OfficeJobType.Profile : OfficeJobType.Indexing;
+        _logger.LogWarning(
+            "🔵 Queueing AI analysis to sdap-jobs queue (AppOnlyDocumentAnalysis) for job {JobId}, document {DocumentId}. ProfileSummary={ProfileSummary}, RagIndex={RagIndex}",
+            originalMessage.JobId,
+            documentId,
+            aiOptions.ProfileSummary,
+            aiOptions.RagIndex);
 
-        _logger.LogDebug(
-            "Queueing next stage {NextJobType} for job {JobId}",
-            nextJobType,
-            originalMessage.JobId);
-
-        var nextMessage = new OfficeJobMessage
+        // Use the EXACT SAME pattern as EmailToDocumentJobHandler.EnqueueAiAnalysisJobAsync()
+        // This ensures correct camelCase serialization via JobSubmissionService
+        var analysisJob = new JobContract
         {
-            JobId = originalMessage.JobId,
-            JobType = nextJobType,
+            JobId = Guid.NewGuid(),
+            JobType = AppOnlyDocumentAnalysisJobHandler.JobTypeName, // Use constant, same as EmailToDocumentJobHandler
             SubjectId = documentId.ToString(),
-            CorrelationId = originalMessage.CorrelationId,
-            IdempotencyKey = $"{originalMessage.IdempotencyKey}-{nextJobType}",
+            CorrelationId = Activity.Current?.Id ?? originalMessage.CorrelationId ?? Guid.NewGuid().ToString(),
+            IdempotencyKey = $"analysis-{documentId}-documentprofile",
             Attempt = 1,
             MaxAttempts = 3,
-            UserId = originalMessage.UserId,
-            Payload = JsonSerializer.SerializeToElement(new
+            CreatedAt = DateTimeOffset.UtcNow,
+            Payload = JsonDocument.Parse(JsonSerializer.Serialize(new
             {
                 DocumentId = documentId,
-                ProfileSummary = aiOptions.ProfileSummary,
-                RagIndex = aiOptions.RagIndex,
-                DeepAnalysis = aiOptions.DeepAnalysis
-            })
+                Source = "OfficeAddin",
+                EnqueuedAt = DateTimeOffset.UtcNow
+            }))
         };
 
-        var sender = _serviceBusClient.CreateSender(nextQueue);
+        // Use JobSubmissionService - the SAME proven service that EmailToDocumentJobHandler uses
+        // This handles camelCase serialization, Service Bus message formatting, and all edge cases
+        await _jobSubmissionService.SubmitJobAsync(analysisJob, cancellationToken);
 
-        var sbMessage = new ServiceBusMessage(JsonSerializer.Serialize(nextMessage, JsonOptions))
-        {
-            MessageId = $"{nextMessage.JobId}-{nextJobType}",
-            CorrelationId = nextMessage.CorrelationId,
-            ContentType = "application/json",
-            Subject = nextJobType.ToString(),
-            ApplicationProperties =
-            {
-                ["JobType"] = nextJobType.ToString(),
-                ["Attempt"] = 1,
-                ["UserId"] = nextMessage.UserId,
-                ["DocumentId"] = documentId.ToString()
-            }
-        };
-
-        await sender.SendMessageAsync(sbMessage, cancellationToken);
-        await sender.DisposeAsync();
-
-        _logger.LogInformation(
-            "Queued {NextJobType} stage for job {JobId}, document {DocumentId}",
-            nextJobType,
-            originalMessage.JobId,
+        _logger.LogWarning(
+            "✅ Queued AI analysis job {AnalysisJobId} for document {DocumentId} to sdap-jobs (AppOnlyDocumentAnalysis) via JobSubmissionService",
+            analysisJob.JobId,
             documentId);
+
+        // Also queue RAG indexing if requested (same pattern as EmailToDocumentJobHandler)
+        if (aiOptions.RagIndex)
+        {
+            await EnqueueRagIndexingAsync(driveId, itemId, documentId, payload.FileName, cancellationToken);
+        }
     }
 
     private async Task CleanupTempFileAsync(string location, CancellationToken cancellationToken)
@@ -945,6 +1016,40 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             var filteredAttachments = _attachmentFilterService.FilterAttachments(attachments);
             var filteredCount = attachments.Count - filteredAttachments.Count;
 
+            // Respect user's attachment selection (if provided)
+            // - null: Process all attachments (backward compatible)
+            // - empty array: Process NO attachments (user deselected all)
+            // - array with names: Process only those attachments
+            if (payload.EmailMetadata?.SelectedAttachmentFileNames != null)
+            {
+                if (payload.EmailMetadata.SelectedAttachmentFileNames.Count == 0)
+                {
+                    // User explicitly deselected all attachments
+                    _logger.LogInformation(
+                        "User deselected all attachments for document {DocumentId} - no attachment Documents will be created",
+                        parentDocumentId);
+                    return; // Skip all attachment processing
+                }
+
+                var selectedNames = new HashSet<string>(payload.EmailMetadata.SelectedAttachmentFileNames, StringComparer.OrdinalIgnoreCase);
+                filteredAttachments = filteredAttachments
+                    .Where(a => selectedNames.Contains(a.FileName))
+                    .ToList();
+
+                _logger.LogInformation(
+                    "User selected {SelectedCount} attachments for document {DocumentId}: {SelectedNames}",
+                    filteredAttachments.Count,
+                    parentDocumentId,
+                    string.Join(", ", filteredAttachments.Select(a => a.FileName)));
+            }
+            else
+            {
+                _logger.LogDebug(
+                    "No attachment selection provided - processing all {Count} attachments for document {DocumentId}",
+                    filteredAttachments.Count,
+                    parentDocumentId);
+            }
+
             _logger.LogInformation(
                 "Filtered attachments for document {DocumentId}: {RemainingCount} to process, {FilteredCount} filtered out",
                 parentDocumentId, filteredAttachments.Count, filteredCount);
@@ -974,6 +1079,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                         driveId,
                         containerId,
                         payload.EmailMetadata?.ConversationId,
+                        payload.EmailMetadata?.InternetMessageId,
                         cancellationToken);
 
                     uploadedCount++;
@@ -1022,6 +1128,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         string driveId,
         string containerId,
         string? conversationIndex,
+        string? internetMessageId,
         CancellationToken cancellationToken)
     {
         if (attachment.Content == null || attachment.Content.Length == 0)
@@ -1087,7 +1194,10 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             SourceType = SourceTypeEmailAttachment,
 
             // Copy ConversationIndex from parent email to enable same_thread queries
-            EmailConversationIndex = conversationIndex
+            EmailConversationIndex = conversationIndex,
+
+            // Copy parent email's internetMessageId for relationship tracking
+            EmailParentId = internetMessageId
         };
 
         await _dataverseService.UpdateDocumentAsync(childDocumentIdStr, updateRequest, cancellationToken);
@@ -1095,6 +1205,108 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         _logger.LogInformation(
             "Created child document {ChildDocumentId} for attachment '{AttachmentName}' (parent: {ParentDocumentId})",
             childDocumentId, attachment.FileName, parentDocumentId);
+
+        // Enqueue AI analysis for attachment document (same pattern as EmailToDocumentJobHandler)
+        await EnqueueAiAnalysisForAttachmentAsync(childDocumentId, cancellationToken);
+
+        // Enqueue RAG indexing for attachment document (same pattern as EmailToDocumentJobHandler)
+        await EnqueueRagIndexingAsync(driveId, fileHandle.Id, childDocumentId, attachment.FileName, cancellationToken);
+    }
+
+    /// <summary>
+    /// Enqueues an AI analysis job for an attachment document.
+    /// Uses try/catch to ensure enqueueing failures don't fail the main processing.
+    /// Follows the same pattern as EmailToDocumentJobHandler.EnqueueAiAnalysisJobAsync.
+    /// </summary>
+    private async Task EnqueueAiAnalysisForAttachmentAsync(Guid documentId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var analysisJob = new JobContract
+            {
+                JobId = Guid.NewGuid(),
+                JobType = AppOnlyDocumentAnalysisJobHandler.JobTypeName,
+                SubjectId = documentId.ToString(),
+                CorrelationId = Activity.Current?.Id ?? Guid.NewGuid().ToString(),
+                IdempotencyKey = $"analysis-{documentId}-documentprofile",
+                Attempt = 1,
+                MaxAttempts = 3,
+                CreatedAt = DateTimeOffset.UtcNow,
+                Payload = JsonDocument.Parse(JsonSerializer.Serialize(new
+                {
+                    DocumentId = documentId,
+                    Source = "EmailAttachment",
+                    EnqueuedAt = DateTimeOffset.UtcNow
+                }))
+            };
+
+            await _jobSubmissionService.SubmitJobAsync(analysisJob, cancellationToken);
+
+            _logger.LogInformation(
+                "Enqueued AI analysis job {JobId} for attachment document {DocumentId}",
+                analysisJob.JobId, documentId);
+        }
+        catch (Exception ex)
+        {
+            // Log but don't fail - AI analysis is non-critical
+            _logger.LogWarning(ex,
+                "Failed to enqueue AI analysis job for attachment document {DocumentId}: {Error}. Attachment processing will continue.",
+                documentId, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Enqueues a RAG indexing job for a document.
+    /// Uses try/catch to ensure enqueueing failures don't fail the main processing.
+    /// Follows the same pattern as EmailToDocumentJobHandler.EnqueueRagIndexingJobAsync.
+    /// </summary>
+    private async Task EnqueueRagIndexingAsync(
+        string driveId,
+        string itemId,
+        Guid documentId,
+        string fileName,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Get tenant ID from configuration (same pattern as EmailToDocumentJobHandler)
+            var tenantId = _configuration["TENANT_ID"] ?? _configuration["AzureAd:TenantId"] ?? "";
+
+            var indexingJob = new JobContract
+            {
+                JobId = Guid.NewGuid(),
+                JobType = RagIndexingJobHandler.JobTypeName,
+                SubjectId = documentId.ToString(),
+                CorrelationId = Activity.Current?.Id ?? Guid.NewGuid().ToString(),
+                IdempotencyKey = $"rag-index-{driveId}-{itemId}",
+                Attempt = 1,
+                MaxAttempts = 3,
+                CreatedAt = DateTimeOffset.UtcNow,
+                Payload = JsonDocument.Parse(JsonSerializer.Serialize(new RagIndexingJobPayload
+                {
+                    TenantId = tenantId,
+                    DriveId = driveId,
+                    ItemId = itemId,
+                    FileName = fileName,
+                    DocumentId = documentId.ToString(),
+                    Source = "OfficeAddin",
+                    EnqueuedAt = DateTimeOffset.UtcNow
+                }))
+            };
+
+            await _jobSubmissionService.SubmitJobAsync(indexingJob, cancellationToken);
+
+            _logger.LogInformation(
+                "Enqueued RAG indexing job {JobId} for document {DocumentId} (file: {FileName})",
+                indexingJob.JobId, documentId, fileName);
+        }
+        catch (Exception ex)
+        {
+            // Log but don't fail - RAG indexing is non-critical
+            _logger.LogWarning(ex,
+                "Failed to enqueue RAG indexing job for document {DocumentId}: {Error}. Processing will continue.",
+                documentId, ex.Message);
+        }
     }
 
     /// <summary>

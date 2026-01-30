@@ -150,18 +150,36 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
                 "Extracted {CharCount} characters from document {DocumentId}",
                 extractionResult.Text.Length, documentId);
 
-            // 5a. Create Analysis record in Dataverse (best effort - don't block on failure)
+            // 5a. Load playbook by name to get its ID for the Analysis record
+            Guid? playbookId = null;
+            try
+            {
+                var playbook = await _playbookService.GetByNameAsync(effectivePlaybookName, cancellationToken);
+                playbookId = playbook.Id;
+                _logger.LogInformation(
+                    "Loaded playbook '{PlaybookName}' with ID {PlaybookId}",
+                    effectivePlaybookName, playbookId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Failed to load playbook '{PlaybookName}'. Analysis record will be created without playbook reference.",
+                    effectivePlaybookName);
+            }
+
+            // 5b. Create Analysis record in Dataverse (best effort - don't block on failure)
             Guid? dataverseAnalysisId = null;
             try
             {
                 dataverseAnalysisId = await _dataverseService.CreateAnalysisAsync(
                     documentId,
                     $"Document Profile - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
+                    playbookId,
                     cancellationToken);
 
                 _logger.LogInformation(
-                    "Created Analysis record {AnalysisId} for document {DocumentId}",
-                    dataverseAnalysisId, documentId);
+                    "Created Analysis record {AnalysisId} for document {DocumentId} with playbook {PlaybookId}",
+                    dataverseAnalysisId, documentId, playbookId);
             }
             catch (Exception ex)
             {
@@ -379,15 +397,45 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
 
         foreach (var tool in scopes.Tools)
         {
-            _logger.LogDebug("Executing tool '{ToolName}' (Type={ToolType})", tool.Name, tool.Type);
+            _logger.LogDebug("Executing tool '{ToolName}' (Type={ToolType}, HandlerClass={HandlerClass})",
+                tool.Name, tool.Type, tool.HandlerClass ?? "null");
 
-            // Get handler for this tool type
-            var handlers = _toolHandlerRegistry.GetHandlersByType(tool.Type);
-            var handler = handlers.FirstOrDefault();
+            // Get handler for this tool
+            // Priority: 1) HandlerClass (if specified), 2) Type-based lookup, 3) GenericAnalysisHandler fallback
+            IAnalysisToolHandler? handler = null;
+
+            if (!string.IsNullOrWhiteSpace(tool.HandlerClass))
+            {
+                // Try to get specific handler by class name
+                handler = _toolHandlerRegistry.GetHandler(tool.HandlerClass);
+
+                if (handler == null)
+                {
+                    // Handler not found - log available handlers and fall back to generic
+                    var availableHandlers = _toolHandlerRegistry.GetRegisteredHandlerIds();
+                    _logger.LogWarning(
+                        "Custom handler '{HandlerClass}' not found for tool '{ToolName}'. " +
+                        "Available handlers: [{AvailableHandlers}]. Falling back to GenericAnalysisHandler.",
+                        tool.HandlerClass, tool.Name, string.Join(", ", availableHandlers));
+
+                    // Fall back to GenericAnalysisHandler
+                    handler = _toolHandlerRegistry.GetHandler("GenericAnalysisHandler");
+                }
+            }
+            else
+            {
+                // No HandlerClass specified - use type-based lookup
+                var handlers = _toolHandlerRegistry.GetHandlersByType(tool.Type);
+                handler = handlers.FirstOrDefault();
+            }
 
             if (handler == null)
             {
-                _logger.LogWarning("No handler found for tool type {ToolType}", tool.Type);
+                var availableHandlers = _toolHandlerRegistry.GetRegisteredHandlerIds();
+                _logger.LogWarning(
+                    "No handler found for tool '{ToolName}' (Type={ToolType}). " +
+                    "Available handlers: [{AvailableHandlers}]. Skipping tool.",
+                    tool.Name, tool.Type, string.Join(", ", availableHandlers));
                 continue;
             }
 
@@ -781,6 +829,7 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
                 dataverseAnalysisId = await _dataverseService.CreateAnalysisAsync(
                     mainDocumentId,
                     $"Email Analysis - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
+                    playbookId: null,
                     cancellationToken);
 
                 _logger.LogInformation(

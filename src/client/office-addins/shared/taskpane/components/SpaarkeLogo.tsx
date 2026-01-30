@@ -1,0 +1,59 @@
+import React from 'react';
+
+/**
+ * Props for the SpaarkeLogo component.
+ */
+export interface SpaarkeLogoProps {
+  /** Size of the logo in pixels */
+  size?: number;
+  /** Additional class name */
+  className?: string;
+  /** Aria label for accessibility */
+  'aria-label'?: string;
+}
+
+/**
+ * Spaarke star logo component.
+ *
+ * Renders the Spaarke three-star sparkle logo as an inline SVG.
+ * Features:
+ * - Blue (primary) large star
+ * - Yellow (accent) medium star
+ * - Red (accent) small star
+ */
+export const SpaarkeLogo: React.FC<SpaarkeLogoProps> = ({
+  size = 48,
+  className,
+  'aria-label': ariaLabel = 'Spaarke logo',
+}) => {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 1898 1592"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      aria-label={ariaLabel}
+      role="img"
+    >
+      {/* Blue star (largest) */}
+      <path
+        d="M775.745 0.000414431C778.516 731.755 782.682 735.724 1551.49 738.364C782.682 741.003 778.516 744.962 775.745 1476.72C772.974 744.962 768.808 741.003 0 738.364C768.808 735.724 772.974 731.755 775.745 0.000414431Z"
+        fill="#00A4EF"
+      />
+      {/* Yellow star (medium) */}
+      <path
+        d="M1449.56 738.363C1451.17 1161.36 1453.58 1163.65 1898 1165.18C1453.58 1166.7 1451.17 1168.99 1449.56 1592C1447.96 1168.99 1445.55 1166.7 1001.14 1165.18C1445.55 1163.65 1447.96 1161.36 1449.56 738.363Z"
+        fill="#FFB900"
+      />
+      {/* Red star (smallest) */}
+      <path
+        d="M1302.87 132.141C1303.77 369.593 1305.12 370.872 1554.58 371.731C1305.12 372.591 1303.77 373.87 1302.87 611.322C1301.97 373.87 1300.62 372.591 1051.15 371.731C1300.62 370.872 1301.97 369.593 1302.87 132.141Z"
+        fill="#F25022"
+      />
+    </svg>
+  );
+};
+
+export default SpaarkeLogo;

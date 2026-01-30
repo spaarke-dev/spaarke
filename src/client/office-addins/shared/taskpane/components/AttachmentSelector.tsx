@@ -459,27 +459,6 @@ export const AttachmentSelector = forwardRef<HTMLDivElement, AttachmentSelectorP
           />
         )}
 
-        {/* Select All / Total Size */}
-        <div className={styles.selectAllContainer}>
-          <Checkbox
-            checked={allSelected ? true : someSelected ? 'mixed' : false}
-            onChange={handleSelectAll}
-            disabled={disabled || selectableAttachments.length === 0}
-            label={allSelected ? 'Deselect all' : 'Select all'}
-            aria-label={allSelected ? 'Deselect all attachments' : 'Select all attachments'}
-          />
-          <span
-            className={mergeClasses(
-              styles.totalSize,
-              isTotalSizeExceeded && styles.totalSizeError,
-              isTotalSizeWarning && !isTotalSizeExceeded && styles.totalSizeWarning
-            )}
-          >
-            {formatFileSize(totalSelectedSize)} selected
-            {isTotalSizeExceeded && ' (exceeds limit)'}
-          </span>
-        </div>
-
         {/* Attachment List */}
         <div
           className={styles.attachmentList}

@@ -1,0 +1,18 @@
+<step title="Incoming Request" date="2026-01-26T04:05:23.087" instance="3e17b9" url="/api/zipdeploy?isAsync=true&amp;deployer=GITHUB_ZIP_DEPLOY&amp;message=%7B%22type%22%3A%22deployment%22%2C%22sha%22%3A%22410375652cd81d4620b32979951a949c9cf37768%22%2C%22repoName%22%3A%22spaarke-dev%2Fspaarke%22%2C%22actor%22%3A%22spaarke-dev%22%2C%22slotName%22%3A%22production%22%2C%22commitMessage%22%3A%22%22%7D" method="POST" type="request" pid="7348,3,61" Transfer-Encoding="chunked" Content-Type="application/octet-stream" Authorization="Bea..." Cookie="ARRAffinity=3e17b9e38d526e9dbee8844de2b7a78882b6ad83579d402318e659c6ba0cc0d7;Path=/;HttpOnly;Secure;Domain=spe-api-dev-67e2xz.scm.azurewebsites.net; ARRAffinitySameSite=3e17b9e38d526e9dbee8844de2b7a78882b6ad83579d402318e659c6ba0cc0d7;Path=/;HttpOnly;SameSite=None;Secure;Domain=spe-api-dev-67e2xz.scm.azurewebsites.net" Host="spe-api-dev-67e2xz.scm.azurewebsites.net" User-Agent="GITHUBACTIONS_DeployWebAppToAzure_bc83129da18e3902ed8f245b9bfe8c76e4b21e661bb96532f8b3695b7910faf3" X-ARR-LOG-ID="76245b9b-d215-4c32-978d-515a80799789" CLIENT-IP="20.161.30.48:9216" X-SITE-DEPLOYMENT-ID="spe-api-dev-67e2xz" WAS-DEFAULT-HOSTNAME="spe-api-dev-67e2xz.scm.azurewebsites.net" X-Forwarded-Proto="https" X-AppService-Proto="https" X-Forwarded-TlsVersion="1.3" X-WAWS-Unencoded-URL="/api/zipdeploy?isAsync=true&amp;deployer=GITHUB_ZIP_DEPLOY&amp;message=%7B%22type%22%3A%22deployment%22%2C%22sha%22%3A%22410375652cd81d4620b32979951a949c9cf37768%22%2C%22repoName%22%3A%22spaarke-dev%2Fspaarke%22%2C%22actor%22%3A%22spaarke-dev%22%2C%22slotName%22%3A%22production%22%2C%22commitMessage%22%3A%22%22%7D" >
+  <step title="ZipPushDeploy" date="2026-01-26T04:05:23.228" >
+    <step title="ZipDeploy. Extract zip. " date="2026-01-26T04:05:23.244" /><!-- duration: 0ms -->
+    <step title="Starting PushDeployAsync" date="2026-01-26T04:05:23.244" /><!-- duration: 16ms -->
+    <step title="Updating shutdown sentinel last write time" date="2026-01-26T04:05:23.353" SemaphoreCount="7" /><!-- duration: 0ms -->
+    <step title="LockFile &apos;C:\home\site\locks\deployments.lock&apos; acquired" date="2026-01-26T04:05:23.369" /><!-- duration: 16ms -->
+    <step title="Saving request content to C:\local\Temp\zipdeploy\4mvjqben.zip" date="2026-01-26T04:05:23.384" >
+      <step title="Total 70,445,091 bytes written to C:\local\Temp\zipdeploy\4mvjqben.zip" date="2026-01-26T04:05:25.917" /><!-- duration: 0ms -->
+    </step><!-- duration: 2548ms -->
+    <step title="LockFile &apos;C:\home\site\locks\deployments.lock&apos; released" date="2026-01-26T04:05:25.932" /><!-- duration: 16ms -->
+    <step title="Deleting shutdown sentinel file" date="2026-01-26T04:05:25.948" SemaphoreCount="8" /><!-- duration: 0ms -->
+    <step title="Starting FetchDeploy" date="2026-01-26T04:05:26.042" /><!-- duration: 31ms -->
+    <step title="Start deployment in the background" date="2026-01-26T04:05:26.104" >
+      <step title="Starting LocalZipFetch" date="2026-01-26T04:05:26.403" /><!-- duration: 13ms -->
+    </step><!-- duration: 993ms -->
+  </step><!-- duration: 3880ms -->
+  <step title="Outgoing response" date="2026-01-26T04:05:36.594" type="response" statusCode="202" statusText="Accepted" Server="Microsoft-IIS/10.0" x-ms-request-id="76245b9b-d215-4c32-978d-515a80799789" Retry-After="30" Cache-Control="private" X-AspNet-Version="4.0.30319" Location="https://spe-api-dev-67e2xz.scm.azurewebsites.net/api/deployments/latest?deployer=GITHUB_ZIP_DEPLOY&amp;time=2026-01-26_04-05-27Z" /><!-- duration: 0ms -->
+</step><!-- duration: 13524ms -->

@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="069a" project="sdap-office-integration">
+  <metadata>
+    <title>Create ProfileSummaryWorker using existing AI services</title>
+    <phase>5: Background Workers (Remediation)</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>069</dependencies>
+    <blocks>069b</blocks>
+    <tags>bff-api, worker, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New worker implementation with AI integration</rigor-reason>
+  </metadata>
+
+  <prompt>
+    Create ProfileSummaryWorker that listens on the office-profile queue and
+    generates AI-powered document profiles. CRITICAL: This worker must DELEGATE
+    to the existing IAppOnlyAnalysisService - do NOT duplicate analysis logic.
+  </prompt>
+
+  <role>
+    .NET developer with AI service integration experience. Familiar with the
+    existing Spaarke AI architecture and Office worker patterns.
+  </role>
+
+  <goal>
+    ProfileSummaryWorker exists, is registered, and successfully generates
+    AI profiles for documents using the existing analysis pipeline.
+  </goal>
+
+  <context>
+    <background>
+      The Office save flow can optionally trigger AI processing (ProfileSummary=true).
+      UploadFinalizationWorker queues jobs to office-profile for this stage.
+
+      EXISTING COMPONENTS TO REUSE:
+      - IAppOnlyAnalysisService.AnalyzeDocumentAsync - the actual AI analysis
+      - ProfileSummaryJobHandler - reference implementation (uses same service)
+      - IOfficeJobStatusService - for status updates
+      - IIdempotencyService - for duplicate prevention
+
+      The ProfileSummaryWorker is a thin wrapper that:
+      1. Receives OfficeJobMessage from office-profile queue
+      2. Extracts document ID and options from payload
+      3. Calls IAppOnlyAnalysisService.AnalyzeDocumentAsync (EXISTING)
+      4. Updates job status via IOfficeJobStatusService (EXISTING)
+      5. Queues to office-indexing if RagIndex is also enabled
+
+      DO NOT create new analysis logic - delegate to existing services.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Workers/Office/UploadFinalizationWorker.cs (pattern)</file>
+      <file>src/server/api/Sprk.Bff.Api/Workers/Office/IndexingWorker.cs (pattern)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/ProfileSummaryJobHandler.cs (logic reference)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IAppOnlyAnalysisService.cs (REUSE THIS)</file>
+      <file>projects/sdap-office-integration/notes/OFFICE-WORKERS-IMPLEMENTATION-PLAN.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="plan">MUST use IAppOnlyAnalysisService - do NOT duplicate analysis logic</constraint>
+    <constraint source="plan">MUST use IOfficeJobStatusService for status updates</constraint>
+    <constraint source="plan">MUST use IIdempotencyService for duplicate prevention</constraint>
+    <constraint source="ADR-001">MUST implement BackgroundService pattern</constraint>
+    <constraint source="ADR-004">MUST follow job contract and idempotency patterns</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>.claude/adr/ADR-004-async-job-contract.md</file>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>projects/sdap-office-integration/notes/OFFICE-WORKERS-IMPLEMENTATION-PLAN.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read ProfileSummaryJobHandler.cs to understand existing analysis flow</step>
+    <step order="2">Read IAppOnlyAnalysisService.cs interface to understand available methods</step>
+    <step order="3">Read UploadFinalizationWorker.cs and IndexingWorker.cs for Office worker patterns</step>
+    <step order="4">Create ProfileSummaryWorker.cs implementing IOfficeJobHandler and BackgroundService</step>
+    <step order="5">Inject IAppOnlyAnalysisService, IOfficeJobStatusService, IIdempotencyService</step>
+    <step order="6">Implement ProcessAsync to call IAppOnlyAnalysisService.AnalyzeDocumentAsync</step>
+    <step order="7">Add logic to queue to office-indexing if RagIndex option is enabled</step>
+    <step order="8">Register ProfileSummaryWorker in OfficeWorkersModule.cs</step>
+    <step order="9">Build and run unit tests</step>
+    <step order="10">Deploy to Azure</step>
+    <step order="11">Test: Save email with ProfileSummary=true, verify document gets AI metadata</step>
+    <step order="12">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="powershell">Deploy-BffApi.ps1</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Workers/Office/ProfileSummaryWorker.cs (new)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Workers/Office/OfficeWorkersModule.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ProfileSummaryWorker.cs exists and compiles</criterion>
+    <criterion testable="true">Worker delegates to IAppOnlyAnalysisService (no duplicate logic)</criterion>
+    <criterion testable="true">Worker is registered in OfficeWorkersModule</criterion>
+    <criterion testable="true">Application logs show "ProfileSummaryWorker starting" on boot</criterion>
+    <criterion testable="true">Document with ProfileSummary=true gets AI-generated metadata</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Worker Structure (following IndexingWorker pattern):
+
+    ```csharp
+    public class ProfileSummaryWorker : BackgroundService, IOfficeJobHandler
+    {
+        private readonly IAppOnlyAnalysisService _analysisService; // EXISTING
+        private readonly IOfficeJobStatusService _statusService;   // EXISTING
+        private readonly IIdempotencyService _idempotencyService;  // EXISTING
+
+        private const string QueueName = "office-profile";
+        private const string IndexingQueueName = "office-indexing";
+
+        public OfficeJobType JobType => OfficeJobType.Profile;
+
+        public async Task&lt;JobOutcome&gt; ProcessAsync(OfficeJobMessage message, CancellationToken ct)
+        {
+            // 1. Check idempotency
+            // 2. Check if ProfileSummary enabled in options
+            // 3. Call _analysisService.AnalyzeDocumentAsync(documentId, playbookName, ct)
+            // 4. Update status via _statusService
+            // 5. Queue to office-indexing if RagIndex also enabled
+        }
+    }
+    ```
+
+    The IAppOnlyAnalysisService handles:
+    - Retrieving document from SPE
+    - Running Document Intelligence for text extraction
+    - Running OpenAI for summary/entity extraction
+    - Updating Dataverse Document record with profile data
+
+    We just need to call it - no new logic required.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Follow FULL rigor protocol. Review ProfileSummaryJobHandler.cs carefully
+      to understand how it uses IAppOnlyAnalysisService before writing new code.
+    </protocol>
+  </execution>
+</task>
