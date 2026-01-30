@@ -171,6 +171,10 @@ export interface SaveFlowContext {
   itemId?: string;
   /** Display name of the current item */
   itemName?: string;
+  /** Custom document name (overrides itemName if provided) */
+  documentName?: string;
+  /** Document description for Dataverse sprk_documentdescription field */
+  documentDescription?: string;
   /** Available attachments (Outlook only) */
   attachments: AttachmentInfo[];
   /** Email body content (Outlook only) */
@@ -185,6 +189,8 @@ export interface SaveFlowContext {
   sentDate?: Date;
   /** Document content URL (Word only) */
   documentUrl?: string;
+  /** Document content as base64 string (Word only) */
+  documentContentBase64?: string;
 }
 
 /**
@@ -734,6 +740,9 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         contentType = 'Document';
       }
 
+      // Use custom documentName if provided, otherwise fall back to itemName
+      const effectiveDocumentName = context.documentName || context.itemName;
+
       // Build request in server-expected format
       // Server requires: contentType, targetEntity, and type-specific metadata
       const serverRequest: Record<string, unknown> = {
@@ -743,6 +752,11 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           profileSummary: processingOptions.profileSummary,
           ragIndex: processingOptions.ragIndex,
           deepAnalysis: processingOptions.deepAnalysis,
+        },
+        // Include custom document name and description for Dataverse fields
+        documentMetadata: {
+          name: effectiveDocumentName,
+          description: context.documentDescription || undefined,
         },
       };
 
@@ -778,7 +792,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           : undefined;
 
         serverRequest.email = {
-          subject: context.itemName || 'Untitled Email',
+          subject: effectiveDocumentName || 'Untitled Email',
           senderEmail: context.senderEmail || 'unknown@placeholder.com',
           senderName: context.senderDisplayName,
           recipients,
@@ -799,12 +813,20 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           parentEmailId: context.itemId, // Parent email's internetMessageId - server uses this to fetch attachment via Graph API
         };
       } else if (contentType === 'Document') {
+        // Document content is required for Word documents
+        if (!context.documentContentBase64) {
+          throw new Error('Document content is required. Please ensure the document is captured before saving.');
+        }
         serverRequest.document = {
-          fileName: context.itemName || 'document.docx',
-          title: context.itemName,
+          fileName: effectiveDocumentName || 'document.docx',
+          title: effectiveDocumentName,
           contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          contentBase64: context.documentContentBase64,
         };
       }
+
+      // Use custom documentName if provided, otherwise fall back to itemName
+      const effectiveDocumentName = context.documentName || context.itemName;
 
       // Build legacy request for idempotency key computation (keep format stable)
       const request: SaveRequest = {
@@ -818,9 +840,12 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           includeBody: includeBody && context.hostType === 'outlook',
           attachmentIds: Array.from(selectedAttachmentIds),
           documentUrl: context.documentUrl,
-          documentName: context.itemName,
+          documentName: effectiveDocumentName,
         },
         processing: processingOptions,
+        metadata: context.documentDescription ? {
+          description: context.documentDescription,
+        } : undefined,
       };
 
       // Compute idempotency key from legacy format for consistency

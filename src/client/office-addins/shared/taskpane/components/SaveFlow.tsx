@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useEffect } from 'react';
+import React, { useCallback, useMemo, useEffect, useState } from 'react';
 import {
   makeStyles,
   tokens,
@@ -18,6 +18,9 @@ import {
   Divider,
   Link,
   mergeClasses,
+  Input,
+  Textarea,
+  Label,
 } from '@fluentui/react-components';
 import {
   SaveRegular,
@@ -28,10 +31,10 @@ import {
   InfoRegular,
   SparkleRegular,
   SearchRegular,
-  BrainCircuitRegular,
   OpenRegular,
   CopyRegular,
   PersonSearchRegular,
+  EditRegular,
 } from '@fluentui/react-icons';
 import { EntityPicker } from './EntityPicker';
 import { AttachmentSelector } from './AttachmentSelector';
@@ -55,7 +58,7 @@ const useStyles = makeStyles({
   container: {
     display: 'flex',
     flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
+    gap: tokens.spacingVerticalL,
     width: '100%',
   },
   section: {
@@ -99,10 +102,15 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
-  processingDescription: {
+  fieldContainer: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
+  },
+  fieldLabel: {
     fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-    marginLeft: tokens.spacingHorizontalXL,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground2,
   },
   actions: {
     display: 'flex',
@@ -222,6 +230,8 @@ export interface SaveFlowProps {
   emailBody?: string;
   /** Document URL (Word only) */
   documentUrl?: string;
+  /** Document content as base64 (Word only) */
+  documentContentBase64?: string;
   /** Access token getter */
   getAccessToken: () => Promise<string>;
   /** API base URL */
@@ -283,6 +293,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     sentDate,
     emailBody,
     documentUrl,
+    documentContentBase64,
     getAccessToken,
     apiBaseUrl = '',
     onComplete,
@@ -336,11 +347,24 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     savedDocumentUrl,
   } = useSaveFlow(saveFlowOptions);
 
+  // Local state for document metadata fields
+  const [documentName, setDocumentName] = useState<string>('');
+  const [documentDescription, setDocumentDescription] = useState<string>('');
+
+  // Initialize document name from item name when it changes
+  useEffect(() => {
+    if (itemName && !documentName) {
+      setDocumentName(itemName);
+    }
+  }, [itemName, documentName]);
+
   // Build save context
   const buildSaveContext = useCallback((): SaveFlowContext => ({
     hostType,
     itemId,
     itemName,
+    documentName: documentName || undefined,
+    documentDescription: documentDescription || undefined,
     attachments,
     senderEmail,
     senderDisplayName,
@@ -348,7 +372,8 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     sentDate,
     emailBody,
     documentUrl,
-  }), [hostType, itemId, itemName, attachments, senderEmail, senderDisplayName, recipients, sentDate, emailBody, documentUrl]);
+    documentContentBase64,
+  }), [hostType, itemId, itemName, documentName, documentDescription, attachments, senderEmail, senderDisplayName, recipients, sentDate, emailBody, documentUrl, documentContentBase64]);
 
   // Handle save button click
   const handleSave = useCallback(() => {
@@ -557,9 +582,6 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
               aria-label="Enable profile summary generation"
             />
           </div>
-          <Text className={styles.processingDescription}>
-            Generate AI summary with key details and entities
-          </Text>
 
           <Divider />
 
@@ -572,30 +594,9 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
               checked={processingOptions.ragIndex}
               onChange={() => toggleProcessingOption('ragIndex')}
               disabled={isSaving}
-              aria-label="Enable RAG indexing"
+              aria-label="Enable search indexing"
             />
           </div>
-          <Text className={styles.processingDescription}>
-            Index content for AI-powered search
-          </Text>
-
-          <Divider />
-
-          <div className={styles.processingOption}>
-            <div className={styles.processingLabel}>
-              <BrainCircuitRegular />
-              <Text>Deep Analysis</Text>
-            </div>
-            <Switch
-              checked={processingOptions.deepAnalysis}
-              onChange={() => toggleProcessingOption('deepAnalysis')}
-              disabled={isSaving}
-              aria-label="Enable deep AI analysis"
-            />
-          </div>
-          <Text className={styles.processingDescription}>
-            Run comprehensive AI analysis (slower)
-          </Text>
         </div>
       </Card>
     </div>
@@ -632,6 +633,43 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           </div>
         </div>
       )}
+
+      {/* Document Metadata Fields */}
+      <div className={styles.section}>
+        <div className={styles.sectionTitle}>
+          <EditRegular />
+          <Text weight="semibold">Document Details</Text>
+        </div>
+        <Card>
+          <div className={styles.fieldContainer}>
+            <Label htmlFor="document-name" className={styles.fieldLabel}>
+              Document Name
+            </Label>
+            <Input
+              id="document-name"
+              value={documentName}
+              onChange={(e, data) => setDocumentName(data.value)}
+              placeholder="Enter document name"
+              disabled={isSaving}
+              aria-label="Document name"
+            />
+          </div>
+          <div className={styles.fieldContainer} style={{ marginTop: tokens.spacingVerticalM }}>
+            <Label htmlFor="document-description" className={styles.fieldLabel}>
+              Description
+            </Label>
+            <Textarea
+              id="document-description"
+              value={documentDescription}
+              onChange={(e, data) => setDocumentDescription(data.value)}
+              placeholder="Enter document description (optional)"
+              disabled={isSaving}
+              aria-label="Document description"
+              rows={3}
+            />
+          </div>
+        </Card>
+      </div>
 
       {/* Entity Picker */}
       <div className={styles.section}>

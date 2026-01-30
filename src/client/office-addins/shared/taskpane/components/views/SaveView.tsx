@@ -107,6 +107,7 @@ export const SaveView: React.FC<SaveViewProps> = ({
   const [recipients, setRecipients] = useState<Array<{ email: string; displayName?: string; type: 'to' | 'cc' | 'bcc' }>>([]);
   const [sentDate, setSentDate] = useState<Date | undefined>();
   const [documentUrl, setDocumentUrl] = useState<string | undefined>();
+  const [documentContentBase64, setDocumentContentBase64] = useState<string | undefined>();
   // Note: emailBody removed - now retrieved server-side via Graph API
 
   // Load item context from host adapter
@@ -176,6 +177,24 @@ export const SaveView: React.FC<SaveViewProps> = ({
           // Word-specific context
           // Document URL is typically the current file path
           setDocumentUrl(id);
+
+          // Capture document content as base64 for upload
+          if (hostAdapter.getCapabilities().canGetDocumentContent) {
+            try {
+              const content = await hostAdapter.getDocumentContent({ format: 'ooxml' });
+              // Convert ArrayBuffer to base64
+              const uint8Array = new Uint8Array(content);
+              let binary = '';
+              for (let i = 0; i < uint8Array.length; i++) {
+                binary += String.fromCharCode(uint8Array[i]);
+              }
+              const base64 = btoa(binary);
+              setDocumentContentBase64(base64);
+            } catch (err) {
+              console.error('Failed to get document content:', err);
+              // Don't fail completely - user can still attempt save
+            }
+          }
         }
 
         setIsLoading(false);
@@ -238,6 +257,7 @@ export const SaveView: React.FC<SaveViewProps> = ({
         recipients={recipients}
         sentDate={sentDate}
         documentUrl={documentUrl}
+        documentContentBase64={documentContentBase64}
         getAccessToken={getAccessToken || defaultGetAccessToken}
         apiBaseUrl={apiBaseUrl}
         onComplete={onComplete}

@@ -10,10 +10,8 @@ import {
   MessageBar,
   MessageBarBody,
 } from '@fluentui/react-components';
-import {
-  PersonRegular,
-  LockClosedRegular,
-} from '@fluentui/react-icons';
+import { PersonRegular } from '@fluentui/react-icons';
+import { SpaarkeLogo } from '../SpaarkeLogo';
 
 const useStyles = makeStyles({
   container: {
@@ -89,10 +87,8 @@ export const SignInView: React.FC<SignInViewProps> = ({
 
   return (
     <div className={styles.container}>
-      {/* Logo/Icon */}
-      <div className={styles.logo}>
-        <LockClosedRegular />
-      </div>
+      {/* Logo */}
+      <SpaarkeLogo size={64} />
 
       {/* Welcome Text */}
       <Text size={500} weight="semibold" className={styles.title}>
