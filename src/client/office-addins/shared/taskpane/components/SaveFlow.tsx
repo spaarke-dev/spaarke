@@ -18,7 +18,6 @@ import {
   Divider,
   Link,
   mergeClasses,
-  Input,
   Textarea,
   Label,
 } from '@fluentui/react-components';
@@ -351,13 +350,6 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   const [documentName, setDocumentName] = useState<string>('');
   const [documentDescription, setDocumentDescription] = useState<string>('');
 
-  // Initialize document name from item name when it changes
-  useEffect(() => {
-    if (itemName && !documentName) {
-      setDocumentName(itemName);
-    }
-  }, [itemName, documentName]);
-
   // Build save context
   const buildSaveContext = useCallback((): SaveFlowContext => ({
     hostType,
@@ -645,13 +637,14 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
             <Label htmlFor="document-name" className={styles.fieldLabel}>
               Document Name
             </Label>
-            <Input
+            <Textarea
               id="document-name"
               value={documentName}
               onChange={(e, data) => setDocumentName(data.value)}
               placeholder="Enter document name"
               disabled={isSaving}
               aria-label="Document name"
+              rows={2}
             />
           </div>
           <div className={styles.fieldContainer} style={{ marginTop: tokens.spacingVerticalM }}>
@@ -665,31 +658,10 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
               placeholder="Enter document description (optional)"
               disabled={isSaving}
               aria-label="Document description"
-              rows={3}
+              rows={6}
             />
           </div>
         </Card>
-      </div>
-
-      {/* Entity Picker */}
-      <div className={styles.section}>
-        <EntityPicker
-          value={selectedEntity}
-          onChange={handleEntitySelect}
-          onQuickCreate={onQuickCreate}
-          placeholder="Search for Matter, Project, Account... (optional)"
-          allowedTypes={allowedEntityTypes}
-          showTypeFilter
-          showRecent
-          showQuickCreate={!!onQuickCreate}
-          disabled={isSaving}
-          required={false}
-          label="Associate With (optional)"
-          searchOptions={{
-            apiBaseUrl,
-            getAccessToken,
-          }}
-        />
       </div>
 
       {/* Attachment Selector (Outlook only) */}
