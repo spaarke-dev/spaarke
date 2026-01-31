@@ -180,7 +180,7 @@ export const App: React.FC<AppProps> = ({
 
   // Determine title and host type
   const hostType: HostType = hostAdapter.getHostType() === 'outlook' ? 'outlook' : 'word';
-  const displayTitle = title || (hostType === 'outlook' ? 'Spaarke for Outlook' : 'Spaarke for Word');
+  const displayTitle = title || 'Spaarke Add-in';
 
   // Get user info
   const account = authService.getAccount();
