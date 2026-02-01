@@ -11,9 +11,9 @@
 
 | Status | Count | Meaning |
 |--------|-------|---------|
-| 🔲 | 10 | Not started |
+| 🔲 | 5 | Not started |
 | 🔄 | 0 | In progress |
-| ✅ | 36 | Completed |
+| ✅ | 41 | Completed |
 | ⏸️ | 0 | Blocked |
 
 ---
@@ -104,11 +104,11 @@
 
 | ID | Title | Status | Dependencies | Parallel Group | Est. Hours |
 |----|-------|--------|--------------|----------------|------------|
-| 070 | Deploy solution to dev environment | 🔲 | 065 | — | 3 |
-| 071 | User acceptance testing scenarios | 🔲 | 070 | — | 4 |
-| 072 | Create user documentation | 🔲 | 071 | G | 4 |
-| 073 | Create admin documentation | 🔲 | 071 | G | 3 |
-| 074 | Update README status to Complete | 🔲 | 072, 073 | — | 1 |
+| 070 | Deploy solution to dev environment | ✅ | 065 | — | 3 |
+| 071 | User acceptance testing scenarios | ✅ | 070 | — | 4 |
+| 072 | Create user documentation | ✅ | 071 | G | 4 |
+| 073 | Create admin documentation | ✅ | 071 | G | 3 |
+| 074 | Update README status to Complete | ✅ | 072, 073 | — | 1 |
 | 090 | Project Wrap-up | 🔲 | 074 | — | 2 |
 
 ---

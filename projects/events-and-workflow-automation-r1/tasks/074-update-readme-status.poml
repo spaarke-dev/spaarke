@@ -3,7 +3,7 @@
   <metadata>
     <title>Update README status to Complete</title>
     <phase>7: Deployment &amp; Wrap-up</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1</estimated-hours>
     <dependencies>072, 073</dependencies>
     <blocks>090</blocks>
