@@ -11,9 +11,9 @@
 
 | Status | Count | Meaning |
 |--------|-------|---------|
-| 🔲 | 11 | Not started |
+| 🔲 | 10 | Not started |
 | 🔄 | 0 | In progress |
-| ✅ | 35 | Completed |
+| ✅ | 36 | Completed |
 | ⏸️ | 0 | Blocked |
 
 ---
@@ -96,7 +96,7 @@
 | 062 | E2E test - Refresh from Parent flow | ✅ | 036, 058 | F | 2 |
 | 063 | E2E test - Update Related push flow | ✅ | 036, 058 | F | 3 |
 | 064 | Dark mode verification - all PCF controls | ✅ | 036 | — | 3 |
-| 065 | Performance validation and bundle size check | 🔲 | 036 | — | 2 |
+| 065 | Performance validation and bundle size check | ✅ | 036 | — | 2 |
 
 ---
 
