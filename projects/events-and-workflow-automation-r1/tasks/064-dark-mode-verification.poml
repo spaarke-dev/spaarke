@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="064" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>Dark mode verification - all PCF controls</title>
+    <phase>6: Integration &amp; Testing</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>036</dependencies>
+    <blocks>none</blocks>
+    <tags>e2e-test, testing, pcf, fluent-ui</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>UI verification task with ADR-021 compliance check</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Verify all 5 PCF controls comply with ADR-021 dark mode requirements. Test each control
+    in both light and dark modes, verifying no hard-coded colors and proper use of Fluent UI v9
+    semantic tokens.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in Fluent UI v9 and accessibility testing.
+  </role>
+
+  <goal>
+    All 5 PCF controls verified for ADR-021 dark mode compliance. Any issues documented and
+    fixed. Success criteria SC-14 validated.
+  </goal>
+
+  <context>
+    <background>
+      ADR-021 requires all UI to support dark mode using Fluent UI v9 design tokens. Hard-coded
+      colors will break in dark mode. This task verifies compliance across all controls.
+    </background>
+    <relevant-files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md - Success criteria SC-14</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">No hard-coded colors (hex, rgb, named colors)</constraint>
+    <constraint source="ADR-021">Must use Fluent UI v9 semantic tokens</constraint>
+    <constraint source="spec">SC-14: All PCF controls support dark mode</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Enable dark mode in Dataverse user settings</step>
+    <step order="2">Test AssociationResolver: dropdown, search, results - verify colors adapt</step>
+    <step order="3">Test EventFormController: verify any visible elements adapt</step>
+    <step order="4">Test RegardingLink: verify link color adapts</step>
+    <step order="5">Test FieldMappingAdmin: forms, tables, buttons - verify colors adapt</step>
+    <step order="6">Test UpdateRelatedButton: button, dialog, toast - verify colors adapt</step>
+    <step order="7">For each control, check: background, text, borders, icons</step>
+    <step order="8">Document any issues with screenshots</step>
+    <step order="9">Fix any hard-coded colors found</step>
+    <step order="10">Re-test after fixes</step>
+    <step order="11">Document final verification results</step>
+    <step order="12">Update TASK-INDEX.md: change task 064 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="browser">Test controls in Dataverse</tool>
+    <tool name="terminal">Run shell commands for fixes if needed</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/events-and-workflow-automation-r1/notes/dark-mode-verification-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given dark mode is enabled, when each PCF control is rendered, then no white backgrounds
+      or black text appear (unless semantically correct).
+    </criterion>
+    <criterion testable="true">
+      Given the code is inspected, when CSS is reviewed, then no hard-coded color values exist.
+    </criterion>
+    <criterion testable="true">
+      Given light mode is enabled, when controls are rendered, then colors are appropriate for
+      light mode.
+    </criterion>
+    <criterion testable="true">Success criteria SC-14 is validated.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Dark Mode - AssociationResolver">
+      <steps>
+        <step>Enable dark mode in D365</step>
+        <step>Open Event form</step>
+        <step>Verify AssociationResolver adapts (no white bg in dark mode)</step>
+        <step>Click dropdown - verify colors</step>
+        <step>Type in search - verify input colors</step>
+      </steps>
+      <expected>All colors use semantic tokens per ADR-021</expected>
+    </test>
+    <test name="Dark Mode - FieldMappingAdmin">
+      <steps>
+        <step>Enable dark mode in D365</step>
+        <step>Open Field Mapping Profile form</step>
+        <step>Verify FieldMappingAdmin adapts</step>
+        <step>Check rule editor colors</step>
+      </steps>
+      <expected>All colors use semantic tokens per ADR-021</expected>
+    </test>
+    <test name="Dark Mode - UpdateRelatedButton">
+      <steps>
+        <step>Enable dark mode in D365</step>
+        <step>Open parent entity form (Matter)</step>
+        <step>Verify button color adapts</step>
+        <step>Click button - verify dialog colors</step>
+      </steps>
+      <expected>Button and dialog use semantic tokens</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Common dark mode issues:
+    - White backgrounds: Use colorNeutralBackground1 instead of #ffffff
+    - Black text: Use colorNeutralForeground1 instead of #000000
+    - Borders: Use colorNeutralStroke1 instead of hard-coded
+
+    Fluent UI v9 token examples:
+    - colorNeutralBackground1 (adapts to light/dark)
+    - colorNeutralForeground1 (adapts to light/dark)
+    - colorBrandForegroundLink (link color, adapts)
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

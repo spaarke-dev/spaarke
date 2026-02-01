@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>Seed Event Type records</title>
+    <phase>1: Foundation &amp; Data Model</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>030</blocks>
+    <tags>dataverse, configuration</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation/configuration task with no code implementation</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create seed data for the Event Type table (sprk_eventtype) in Dataverse. Define the initial
+    set of event types that will be available when creating Events, including their required
+    fields and display order.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in Dataverse data seeding and configuration.
+    Understand business requirements for event management in legal practice management.
+  </role>
+
+  <goal>
+    Event Type table populated with initial seed records that support the Events feature.
+    Each event type should have appropriate required field configurations.
+  </goal>
+
+  <context>
+    <background>
+      Event Types define categories of events (meetings, deadlines, reminders, etc.) and control
+      which fields are required or hidden on the Event form. The EventFormController PCF will
+      read these configurations to dynamically show/hide fields.
+    </background>
+    <relevant-files>
+      <file>projects/events-and-workflow-automation-r1/spec.md - Event Type section</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Event Type table already exists (sprk_eventtype)</constraint>
+    <constraint source="spec">Event Types should include at minimum: Meeting, Deadline, Reminder, Task, Court Date</constraint>
+    <constraint source="project">Required fields configuration stored as JSON or related table</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/events-and-workflow-automation-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Dataverse Seeding" location="scripts/">
+        Standard approach for seeding reference data in Dataverse
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review spec.md for Event Type requirements and field configurations</step>
+    <step order="2">Document the Event Types to create with their configurations</step>
+    <step order="3">Create "Meeting" event type with required fields: Subject, Start Date, End Date, Location</step>
+    <step order="4">Create "Deadline" event type with required fields: Subject, Due Date</step>
+    <step order="5">Create "Reminder" event type with required fields: Subject, Reminder Date</step>
+    <step order="6">Create "Task" event type with required fields: Subject, Due Date, Assigned To</step>
+    <step order="7">Create "Court Date" event type with required fields: Subject, Date, Location, Judge</step>
+    <step order="8">Set display order for each event type</step>
+    <step order="9">Verify all records created correctly in Dataverse</step>
+    <step order="10">Update TASK-INDEX.md: change task 003 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI for Dataverse operations</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse">5+ Event Type records in sprk_eventtype table</output>
+    <output type="docs">Event Type configuration documentation</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given the Dataverse environment, when I query sprk_eventtype, then at least 5 event types
+      exist (Meeting, Deadline, Reminder, Task, Court Date).
+    </criterion>
+    <criterion testable="true">
+      Given an Event Type record, when I view it, then required field configuration is specified.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Event Types may need a related table or JSON field to store required field configurations.
+    Coordinate with EventFormController PCF (task 030) on the expected data format.
+
+    This task can run in parallel with tasks 004 and 005 (Parallel Group A).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

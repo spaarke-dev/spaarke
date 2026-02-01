@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>Build FieldMappingAdmin PCF control</title>
+    <phase>2: Field Mapping Framework</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>016</blocks>
+    <tags>pcf, react, typescript, frontend, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task tags include 'pcf', 'react' (code implementation)</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build the FieldMappingAdmin PCF control for administrators to configure field mapping profiles
+    and rules. The control should provide UI for creating profiles, adding rules with source/target
+    field selection, type validation, and sync mode configuration.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in PCF control development, React, and Fluent UI v9.
+    Follow ADR-021 for dark mode. Follow ADR-022 for React 16 APIs. Expert in form UX patterns.
+  </role>
+
+  <goal>
+    FieldMappingAdmin PCF control implemented with full admin configuration UI. Admins should be
+    able to create/edit/delete profiles and rules, see type compatibility validation in real-time,
+    and configure sync modes.
+  </goal>
+
+  <context>
+    <background>
+      The FieldMappingAdmin control is placed on the Field Mapping Profile form or a dedicated
+      admin page. It provides a rich UI for configuring mappings that replaces manual table editing.
+      It uses FieldMappingService for validation and persistence.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/FieldMappingAdmin/ - Control scaffold from task 005</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.ts</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md - FieldMappingAdmin requirements</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Must use Fluent UI v9 with dark mode support</constraint>
+    <constraint source="ADR-022">Must use React 16 APIs (ReactDOM.render)</constraint>
+    <constraint source="ADR-012">Must use @spaarke/ui-components for shared components</constraint>
+    <constraint source="spec">Must validate type compatibility in real-time</constraint>
+    <constraint source="spec">Must support all 3 sync modes</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-V9-PACKAGING.md</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="PCF Initialization" location=".claude/patterns/pcf/control-initialization.md">
+        React 16 pattern with FluentProvider wrapper
+      </pattern>
+      <pattern name="Theme Management" location=".claude/patterns/pcf/theme-management.md">
+        Dark mode detection and token usage
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review spec.md FieldMappingAdmin requirements</step>
+    <step order="2">Open FieldMappingAdmin scaffold from task 005</step>
+    <step order="3">Design component structure: ProfileEditor, RulesList, RuleEditor</step>
+    <step order="4">Implement ProfileEditor with entity dropdowns and sync mode selector</step>
+    <step order="5">Implement RulesList showing all rules for the profile</step>
+    <step order="6">Implement RuleEditor with field dropdowns and type displays</step>
+    <step order="7">Integrate FieldMappingService for data operations</step>
+    <step order="8">Add real-time type compatibility validation with visual feedback</step>
+    <step order="9">Implement CRUD operations (create, update, delete rules)</step>
+    <step order="10">Add dark mode support using Fluent UI v9 tokens</step>
+    <step order="11">Follow PCF-V9-PACKAGING.md to update version (4 locations)</step>
+    <step order="12">Build and verify control compiles without errors</step>
+    <step order="13">Update TASK-INDEX.md: change task 012 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF control</tool>
+    <tool name="pac">Power Platform CLI for testing</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/FieldMappingAdmin/FieldMappingAdmin/index.ts</output>
+    <output type="code">src/client/pcf/FieldMappingAdmin/FieldMappingAdmin/components/ProfileEditor.tsx</output>
+    <output type="code">src/client/pcf/FieldMappingAdmin/FieldMappingAdmin/components/RulesList.tsx</output>
+    <output type="code">src/client/pcf/FieldMappingAdmin/FieldMappingAdmin/components/RuleEditor.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given the FieldMappingAdmin control, when an admin selects source and target entities,
+      then the profile is saved to Dataverse.
+    </criterion>
+    <criterion testable="true">
+      Given a rule with incompatible types, when the admin tries to save, then a validation
+      error is shown and save is blocked.
+    </criterion>
+    <criterion testable="true">
+      Given the control in dark mode, when rendered, then all colors use Fluent UI v9 semantic
+      tokens (no hard-coded colors).
+    </criterion>
+    <criterion testable="true">Control builds without TypeScript errors.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="FieldMappingAdmin Renders">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_fieldmappingprofile</url>
+      <steps>
+        <step>Navigate to Field Mapping Profile form</step>
+        <step>Verify FieldMappingAdmin control is visible</step>
+        <step>Check console for JavaScript errors</step>
+      </steps>
+      <expected>Control renders without console errors</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in D365 settings</step>
+        <step>Verify background colors adapt (no white in dark mode)</step>
+        <step>Verify text colors adapt (no black in dark mode)</step>
+        <step>Verify form elements use semantic tokens</step>
+      </steps>
+      <expected>All colors use Fluent UI v9 semantic tokens per ADR-021</expected>
+    </test>
+    <test name="Type Compatibility Validation">
+      <steps>
+        <step>Create new rule with source type Lookup</step>
+        <step>Try to set target type to DateTime</step>
+        <step>Verify validation error appears</step>
+      </steps>
+      <expected>Incompatible type mapping shows validation error</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    The control should query entity metadata to populate field dropdowns. Use Dataverse WebAPI
+    to get EntityDefinitions and AttributeDefinitions.
+
+    Consider lazy loading field lists for performance with large entities.
+
+    This task can run in parallel with task 013 (Parallel Group B).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

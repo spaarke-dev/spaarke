@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="036" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>Deploy Phase 4 - Event Form Controls</title>
+    <phase>4: Event Form Controls</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>035</dependencies>
+    <blocks>060, 061, 062, 063, 064, 065</blocks>
+    <tags>deploy, dataverse, pcf</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task with explicit constraints</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Deploy all Phase 4 Event Form Controls (EventFormController, RegardingLink) to Dataverse
+    dev environment. Verify the complete Event form works end-to-end with all controls.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in Dataverse deployment. Follow dataverse-deploy skill.
+  </role>
+
+  <goal>
+    All Phase 4 PCF controls deployed and configured. Event form provides complete experience
+    with dynamic fields, regarding selection, and field mapping.
+  </goal>
+
+  <context>
+    <background>
+      Phase 4 completes the Event form controls. This deployment makes the full event creation
+      and editing experience available for E2E testing.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/EventFormController/ - Control to deploy</file>
+      <file>src/client/pcf/RegardingLink/ - Control to deploy</file>
+      <file>docs/guides/PCF-V9-PACKAGING.md - Version bumping</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-022">PCF must be deployed as unmanaged solution</constraint>
+    <constraint source="PCF-V9-PACKAGING">Version must be updated in 4 locations</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/guides/PCF-V9-PACKAGING.md</file>
+      <file>scripts/Deploy-PCFWebResources.ps1</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Bump version for EventFormController (4 locations)</step>
+    <step order="2">Bump version for RegardingLink (4 locations)</step>
+    <step order="3">Build both controls: npm run build</step>
+    <step order="4">Deploy EventFormController using pac pcf push</step>
+    <step order="5">Deploy RegardingLink using pac pcf push</step>
+    <step order="6">Publish all customizations</step>
+    <step order="7">Test: Create new Event</step>
+    <step order="8">Test: Select Event Type - verify field visibility changes</step>
+    <step order="9">Test: Select regarding record - verify field mapping</step>
+    <step order="10">Test: View All Events - verify RegardingLink displays</step>
+    <step order="11">Test: Click RegardingLink - verify navigation</step>
+    <step order="12">Document deployment status in notes/</step>
+    <step order="13">Update TASK-INDEX.md: change task 036 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI for PCF deployment</tool>
+    <tool name="npm">Build PCF controls</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment">EventFormController PCF in Dataverse dev</output>
+    <output type="deployment">RegardingLink PCF in Dataverse dev</output>
+    <output type="docs">Deployment verification notes</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given the dev environment, when I create a new Event and select Event Type, then fields
+      show/hide based on type configuration.
+    </criterion>
+    <criterion testable="true">
+      Given the All Events view, when I view the list, then RegardingLink shows record names
+      as clickable links.
+    </criterion>
+    <criterion testable="true">
+      Given I click a RegardingLink, when navigation completes, then the correct parent record
+      form opens.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This deployment enables E2E testing in Phase 6. Ensure all form configurations from task 035
+    are published along with the control deployments.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

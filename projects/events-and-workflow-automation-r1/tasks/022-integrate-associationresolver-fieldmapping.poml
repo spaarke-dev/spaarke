@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>Integrate AssociationResolver with FieldMappingService</title>
+    <phase>3: Association Resolver</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>021</dependencies>
+    <blocks>023, 024</blocks>
+    <tags>pcf, react, typescript, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task integrates multiple components, modifies code files</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Integrate the AssociationResolver PCF control with FieldMappingService. When a regarding
+    record is selected, the control should automatically apply any configured field mappings
+    from the parent (regarding) record to the Event record.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in PCF controls and service integration.
+    Understand the Field Mapping Framework and sync modes.
+  </role>
+
+  <goal>
+    When a record is selected in AssociationResolver, field mappings are automatically applied
+    if a profile exists for the entity pair. User sees mapping results and can override if needed.
+  </goal>
+
+  <context>
+    <background>
+      The AssociationResolver is the trigger point for one-time field mapping. When the user
+      selects a regarding record (parent), the Event (child) should inherit configured field
+      values automatically. This provides a streamlined UX for event creation.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/AssociationResolver/ - Control from tasks 020-021</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.ts</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md - Field mapping integration</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Apply mappings automatically after record selection</constraint>
+    <constraint source="spec">Respect sync mode (only apply for one-time and manual refresh)</constraint>
+    <constraint source="spec">Do not overwrite fields that user has already modified</constraint>
+    <constraint source="ADR-012">Import FieldMappingService from @spaarke/ui-components</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review spec.md field mapping integration requirements</step>
+    <step order="2">Import FieldMappingService into AssociationResolver</step>
+    <step order="3">After record selection, call getProfileForEntityPair(source, "sprk_event")</step>
+    <step order="4">If profile exists, fetch the source record's full data</step>
+    <step order="5">Call applyMappings to get field values to set</step>
+    <step order="6">Apply mapped values to Event form fields (skip user-modified)</step>
+    <step order="7">Track which fields were mapped (for toast notification)</step>
+    <step order="8">Handle errors gracefully (mapping service unavailable, etc.)</step>
+    <step order="9">Add option to disable auto-mapping (user preference)</step>
+    <step order="10">Build and verify integration works</step>
+    <step order="11">Update TASK-INDEX.md: change task 022 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF control</tool>
+    <tool name="pac">Power Platform CLI for testing</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/AssociationResolver/AssociationResolver/handlers/FieldMappingHandler.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given a Matter→Event field mapping profile exists, when user selects Matter ABC,
+      then configured fields from ABC are copied to the Event form.
+    </criterion>
+    <criterion testable="true">
+      Given no field mapping profile exists for Account→Event, when user selects Account XYZ,
+      then no fields are auto-populated (graceful no-op).
+    </criterion>
+    <criterion testable="true">
+      Given user has already typed in the Subject field, when mappings are applied, then Subject
+      is not overwritten (user-modified fields preserved).
+    </criterion>
+    <criterion testable="true">Control builds without TypeScript errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Key flow:
+    1. User selects entity type (Matter)
+    2. User picks specific record (Matter ABC)
+    3. AssociationResolver sets regarding fields (task 021)
+    4. AssociationResolver calls FieldMappingService (this task)
+    5. If mappings exist, values are applied to Event
+    6. Toast shows "3 fields populated from Matter" (task 024)
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

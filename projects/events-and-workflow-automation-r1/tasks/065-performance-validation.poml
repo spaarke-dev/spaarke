@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="065" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>Performance validation and bundle size check</title>
+    <phase>6: Integration &amp; Testing</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>036</dependencies>
+    <blocks>070</blocks>
+    <tags>testing, pcf</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Performance validation task</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Validate performance of all PCF controls against NFR requirements. Check bundle sizes
+    are under 1MB, render times under 200ms, and API response times under 500ms.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in performance testing and bundle optimization.
+  </role>
+
+  <goal>
+    Performance metrics collected and validated against NFRs. Bundle sizes verified under 1MB.
+    Success criteria SC-15 validated.
+  </goal>
+
+  <context>
+    <background>
+      Performance is critical for user experience. PCF controls must render quickly and not
+      bloat bundle sizes. API endpoints must respond within acceptable timeframes.
+    </background>
+    <relevant-files>
+      <file>projects/events-and-workflow-automation-r1/spec.md - NFR requirements</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">NFR: PCF render time &lt;200ms</constraint>
+    <constraint source="spec">NFR: API response time &lt;500ms</constraint>
+    <constraint source="spec">SC-15: PCF bundles use platform libraries (&lt;1MB each)</constraint>
+    <constraint source="ADR-022">Platform libraries should not be bundled</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>docs/guides/PCF-V9-PACKAGING.md</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review NFR requirements from spec.md</step>
+    <step order="2">Check bundle sizes for all 5 PCF controls</step>
+    <step order="3">Verify each bundle is under 1MB (should be ~100-300KB with platform libs)</step>
+    <step order="4">If bundle too large, check for accidentally bundled React/Fluent UI</step>
+    <step order="5">Measure render times for each control using browser devtools</step>
+    <step order="6">Verify render times under 200ms</step>
+    <step order="7">Measure API response times for key endpoints</step>
+    <step order="8">Verify API times under 500ms</step>
+    <step order="9">Test push API with 100 records - verify performance acceptable</step>
+    <step order="10">Document all performance metrics</step>
+    <step order="11">Identify and fix any performance issues</step>
+    <step order="12">Update TASK-INDEX.md: change task 065 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Check bundle sizes</tool>
+    <tool name="browser">Performance devtools</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/events-and-workflow-automation-r1/notes/performance-validation-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given each PCF control, when bundle is measured, then size is under 1MB.
+    </criterion>
+    <criterion testable="true">
+      Given each PCF control, when render time is measured, then it is under 200ms.
+    </criterion>
+    <criterion testable="true">
+      Given Event API endpoints, when response time is measured, then it is under 500ms.
+    </criterion>
+    <criterion testable="true">
+      Given push API with 100 children, when executed, then completes in reasonable time
+      (under 10 seconds for 100 records).
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Bundle size check:
+    ```bash
+    cd src/client/pcf/{ControlName}
+    npm run build
+    ls -la out/controls/{ControlName}/bundle.js
+    # Should be < 1MB (1,000,000 bytes)
+    ```
+
+    If bundle is large (>500KB), likely causes:
+    - React bundled instead of platform-library
+    - Fluent UI bundled instead of platform-library
+    - Unused imports not tree-shaken
+
+    Render time measurement:
+    - Chrome DevTools > Performance > Record
+    - Look for "Scripting" time during control initialization
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

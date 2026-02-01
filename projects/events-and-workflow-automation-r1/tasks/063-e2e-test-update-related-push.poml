@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="063" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>E2E test - Update Related push flow</title>
+    <phase>6: Integration &amp; Testing</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>036, 058</dependencies>
+    <blocks>none</blocks>
+    <tags>e2e-test, testing</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task tags include 'testing', 'e2e-test'</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create and execute end-to-end test for "Update Related" push functionality. Verify that
+    clicking the button on a parent record pushes field values to all related child records.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in E2E testing.
+  </role>
+
+  <goal>
+    E2E test documented and executed that validates the Update Related push button correctly
+    updates all child records.
+  </goal>
+
+  <context>
+    <background>
+      "Update Related" allows pushing values from parent to all children at once. This tests
+      the Update Related sync mode and the push API endpoint.
+    </background>
+    <relevant-files>
+      <file>projects/events-and-workflow-automation-r1/spec.md - Success criteria SC-10, SC-13</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">SC-10: "Update Related" button pushes mappings to all children</constraint>
+    <constraint source="spec">SC-13: Push API returns accurate counts</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Set up: Create Matter with 5 related Events</step>
+    <step order="2">Set up: Events have different values in mapped fields</step>
+    <step order="3">Set up: Update Matter field values</step>
+    <step order="4">Test: Open the Matter form</step>
+    <step order="5">Test: Verify "Update Related" button is visible</step>
+    <step order="6">Test: Click "Update Related"</step>
+    <step order="7">Test: Verify confirmation dialog shows count (5 Events)</step>
+    <step order="8">Test: Confirm the push</step>
+    <step order="9">Test: Verify spinner/progress indicator shows</step>
+    <step order="10">Test: Verify success toast shows "5 Events updated"</step>
+    <step order="11">Test: Open each Event and verify values match Matter</step>
+    <step order="12">Document test results</step>
+    <step order="13">Update TASK-INDEX.md: change task 063 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="browser">Execute E2E tests in Dataverse</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/events-and-workflow-automation-r1/notes/e2e-update-related-push-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given a Matter with 5 related Events, when Update Related is clicked, then all 5 Events
+      are updated and toast shows "5 Events updated".
+    </criterion>
+    <criterion testable="true">
+      Given Update Related is in progress, when API executes, then spinner/progress indicator
+      is visible.
+    </criterion>
+    <criterion testable="true">
+      Given some Events fail to update, when push completes, then toast shows "X updated,
+      Y failed" with error details accessible.
+    </criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Update Related Push">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_matter&amp;id={test-matter-id}</url>
+      <steps>
+        <step>Open Matter with multiple related Events</step>
+        <step>Click Update Related button</step>
+        <step>Verify confirmation shows child count</step>
+        <step>Click Confirm</step>
+        <step>Verify progress indicator</step>
+        <step>Verify success toast with count</step>
+        <step>Spot-check 1-2 Events for updated values</step>
+      </steps>
+      <expected>All child Events updated with parent values</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    This tests success criteria SC-10 and SC-13.
+
+    Test scenarios:
+    - All success: 5 Events updated, 0 failed
+    - Partial failure: 4 updated, 1 failed (e.g., locked record)
+    - No children: 0 updated, appropriate message
+
+    This task can run in parallel with tasks 060, 061, 062 (Parallel Group F).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

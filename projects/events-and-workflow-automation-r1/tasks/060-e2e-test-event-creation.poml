@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>E2E test - Event creation with regarding record</title>
+    <phase>6: Integration &amp; Testing</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>036, 058</dependencies>
+    <blocks>none</blocks>
+    <tags>e2e-test, testing, pcf</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task tags include 'testing', 'e2e-test'</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create and execute end-to-end test for the Event creation flow: select entity type,
+    search and select regarding record, verify field mapping, fill remaining fields, and save.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in E2E testing for Dataverse model-driven apps.
+  </role>
+
+  <goal>
+    E2E test documented and executed that validates the complete Event creation workflow
+    including regarding record selection and field mapping.
+  </goal>
+
+  <context>
+    <background>
+      The Event creation flow involves multiple PCF controls working together:
+      AssociationResolver for regarding selection, FieldMappingService for field inheritance,
+      EventFormController for field visibility.
+    </background>
+    <relevant-files>
+      <file>Deployed components from tasks 036, 058</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md - Success criteria SC-01 through SC-04</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">SC-01: AssociationResolver allows selection from all 8 entity types</constraint>
+    <constraint source="spec">SC-08: Field mappings apply on child record creation</constraint>
+    <constraint source="ADR-021">UI must work in both light and dark modes</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Document E2E test scenario for Event creation</step>
+    <step order="2">Create test: Navigate to Event form (new record)</step>
+    <step order="3">Test: Verify AssociationResolver shows 8 entity types</step>
+    <step order="4">Test: Select "Matter" entity type</step>
+    <step order="5">Test: Search for and select a specific Matter</step>
+    <step order="6">Test: Verify regarding fields are populated correctly</step>
+    <step order="7">Test: Verify field mappings are applied (if configured)</step>
+    <step order="8">Test: Select Event Type and verify fields show/hide</step>
+    <step order="9">Test: Fill required fields and save</step>
+    <step order="10">Test: Verify Event is created with correct data</step>
+    <step order="11">Test: Verify Event Log entry exists</step>
+    <step order="12">Repeat test for 2-3 other entity types</step>
+    <step order="13">Document test results and any issues found</step>
+    <step order="14">Update TASK-INDEX.md: change task 060 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="browser">Execute E2E tests in Dataverse</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/events-and-workflow-automation-r1/notes/e2e-event-creation-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given the Event form, when user selects entity type, then all 8 types are available.
+    </criterion>
+    <criterion testable="true">
+      Given a Matter is selected, when form is viewed, then regarding fields are populated
+      with Matter ID and name.
+    </criterion>
+    <criterion testable="true">
+      Given a mapping profile exists, when Matter is selected, then mapped fields are auto-populated.
+    </criterion>
+    <criterion testable="true">
+      Given all required fields are filled, when Save is clicked, then Event is created
+      successfully.
+    </criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Event Creation Flow">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_event</url>
+      <steps>
+        <step>Navigate to new Event form</step>
+        <step>Click entity type dropdown in AssociationResolver</step>
+        <step>Verify 8 entity types are listed</step>
+        <step>Select "Matter"</step>
+        <step>Search for a test Matter</step>
+        <step>Select the Matter</step>
+        <step>Verify regarding fields show Matter info</step>
+        <step>Verify mapped fields are populated (if mapping exists)</step>
+        <step>Select Event Type</step>
+        <step>Fill remaining fields</step>
+        <step>Click Save</step>
+        <step>Verify Event saved successfully</step>
+      </steps>
+      <expected>Event created with correct regarding record and mapped fields</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    This E2E test validates success criteria SC-01, SC-04, SC-08.
+
+    Test with multiple entity types to ensure AssociationResolver works for all 8.
+
+    This task can run in parallel with tasks 061, 062, 063 (Parallel Group F).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

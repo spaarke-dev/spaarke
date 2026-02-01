@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>Create Field Mapping API - POST validate</title>
+    <phase>2: Field Mapping Framework</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>011</dependencies>
+    <blocks>054</blocks>
+    <tags>bff-api, api, minimal-api, endpoints</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task extends existing API pattern with validation logic</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create the POST /api/v1/field-mappings/validate endpoint in the BFF API. This endpoint
+    validates a proposed field mapping rule for type compatibility without persisting it.
+    Used by the admin UI for real-time validation feedback.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in .NET 8 Minimal API development and validation.
+    Follow ADR-001 for API patterns, ADR-019 for error responses.
+  </role>
+
+  <goal>
+    POST /api/v1/field-mappings/validate endpoint implemented that validates type compatibility
+    and returns detailed validation results. Should be used for admin UI validation.
+  </goal>
+
+  <context>
+    <background>
+      Administrators need instant feedback when creating field mapping rules. This endpoint
+      validates the proposed mapping without saving it, returning either success or detailed
+      validation errors.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/FieldMappings/FieldMappingEndpoints.cs</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/TypeCompatibility.ts - TypeScript equivalent</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Must use Minimal API pattern</constraint>
+    <constraint source="ADR-019">Return ProblemDetails for validation failures</constraint>
+    <constraint source="spec">Must implement same type compatibility rules as TypeScript service</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/error-handling.md</file>
+      <file>projects/events-and-workflow-automation-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review TypeCompatibility.ts for validation rules to replicate</step>
+    <step order="2">Create ValidateFieldMappingRequest DTO</step>
+    <step order="3">Create ValidateFieldMappingResponse DTO</step>
+    <step order="4">Implement type compatibility validation in C# (mirror TypeScript)</step>
+    <step order="5">Add POST /api/v1/field-mappings/validate endpoint</step>
+    <step order="6">Return validation result with isValid flag and errors array</step>
+    <step order="7">Add endpoint filter for authorization</step>
+    <step order="8">Write unit tests for validation logic</step>
+    <step order="9">Write integration tests for endpoint</step>
+    <step order="10">Update TASK-INDEX.md: change task 015 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and run .NET API</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/FieldMappings/Dtos/ValidateFieldMappingRequest.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/FieldMappings/Dtos/ValidateFieldMappingResponse.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/TypeCompatibilityValidator.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/FieldMappings/ValidateFieldMappingTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given a compatible type mapping, when POST validate is called, then isValid=true is returned.
+    </criterion>
+    <criterion testable="true">
+      Given an incompatible type mapping, when POST validate is called, then isValid=false with
+      error details is returned.
+    </criterion>
+    <criterion testable="true">
+      Given the same type combination, when validated in C# and TypeScript, then both return
+      the same result (consistent validation).
+    </criterion>
+    <criterion testable="true">All unit and integration tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Request DTO:
+    - sourceType: string (enum)
+    - targetType: string (enum)
+    - sourceField: string (optional, for detailed messages)
+    - targetField: string (optional, for detailed messages)
+
+    Response DTO:
+    - isValid: boolean
+    - errors: string[] (detailed error messages)
+    - compatibleTargetTypes: string[] (suggestions if invalid)
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

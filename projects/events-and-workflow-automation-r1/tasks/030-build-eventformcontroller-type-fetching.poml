@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>Build EventFormController PCF - Event Type fetching</title>
+    <phase>4: Event Form Controls</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>005</dependencies>
+    <blocks>031</blocks>
+    <tags>pcf, react, typescript, frontend, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task tags include 'pcf', 'react' (code implementation)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build the EventFormController PCF control's Event Type fetching functionality. The control
+    fetches the selected Event Type's configuration (required fields, hidden fields) and makes
+    it available for form field visibility management.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in PCF control development and Dataverse form integration.
+    Follow ADR-022 for React 16 APIs. Follow ADR-021 for Fluent UI v9.
+  </role>
+
+  <goal>
+    EventFormController fetches Event Type configuration when bound to Event Type field. The
+    configuration data is parsed and ready for field visibility logic in subsequent task.
+  </goal>
+
+  <context>
+    <background>
+      Different Event Types require different fields. The EventFormController reads the Event Type
+      configuration to determine which fields should be visible, required, or hidden on the Event form.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/EventFormController/ - Control scaffold from task 005</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md - EventFormController requirements</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-022">Must use React 16 APIs</constraint>
+    <constraint source="spec">Control bound to Event Type lookup field</constraint>
+    <constraint source="spec">Must fetch Event Type configuration on change</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/dataverse-queries.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-V9-PACKAGING.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review spec.md EventFormController requirements</step>
+    <step order="2">Open EventFormController scaffold from task 005</step>
+    <step order="3">Configure control to bind to Event Type lookup field</step>
+    <step order="4">Implement updateView to detect Event Type changes</step>
+    <step order="5">Query Event Type record to get configuration data</step>
+    <step order="6">Define TypeScript interface for Event Type configuration</step>
+    <step order="7">Parse configuration (required fields, hidden fields lists)</step>
+    <step order="8">Store configuration in component state</step>
+    <step order="9">Handle loading state while fetching</step>
+    <step order="10">Handle errors (Event Type not found, etc.)</step>
+    <step order="11">Build and verify control compiles</step>
+    <step order="12">Update TASK-INDEX.md: change task 030 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF control</tool>
+    <tool name="pac">Power Platform CLI for testing</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/EventFormController/EventFormController/index.ts</output>
+    <output type="code">src/client/pcf/EventFormController/EventFormController/types/EventTypeConfig.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given Event Type "Meeting" is selected, when control updates, then Meeting's configuration
+      (required fields, hidden fields) is fetched from Dataverse.
+    </criterion>
+    <criterion testable="true">
+      Given Event Type is changed from "Meeting" to "Deadline", when control updates, then
+      Deadline's configuration is fetched and replaces Meeting's.
+    </criterion>
+    <criterion testable="true">
+      Given no Event Type is selected, when form loads, then control shows no configuration
+      (waiting for selection).
+    </criterion>
+    <criterion testable="true">Control builds without TypeScript errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Event Type configuration format (expected from task 003):
+    - Required fields: comma-separated field names
+    - Hidden fields: comma-separated field names
+
+    Example configuration for "Meeting":
+    - Required: subject, scheduledstart, scheduledend, location
+    - Hidden: reminderdate
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

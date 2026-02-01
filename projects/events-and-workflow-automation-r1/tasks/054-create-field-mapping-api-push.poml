@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="054" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>Create Field Mapping API - POST push</title>
+    <phase>5: API &amp; Event Log</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>015</dependencies>
+    <blocks>034, 057</blocks>
+    <tags>bff-api, api, minimal-api, endpoints</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task tags include 'bff-api', complex multi-record operation</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create the Field Mapping API push endpoint: POST /api/v1/field-mappings/push. This endpoint
+    pushes field values from a parent record to all related child records based on mapping profiles.
+    Used by the UpdateRelatedButton PCF control.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in .NET 8 Minimal API and batch operations.
+    Follow ADR-001, ADR-019.
+  </role>
+
+  <goal>
+    Push endpoint implemented that updates multiple child records from parent, returns accurate
+    counts, handles partial failures gracefully.
+  </goal>
+
+  <context>
+    <background>
+      The "Update Related" sync mode allows pushing values from parent to all children at once.
+      This is a batch operation that may affect hundreds of records. The endpoint must handle
+      partial failures and provide accurate reporting.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/FieldMappings/FieldMappingEndpoints.cs</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md - Push API requirements</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Must use Minimal API pattern</constraint>
+    <constraint source="ADR-019">Must use ProblemDetails for errors</constraint>
+    <constraint source="spec">Limit to 500 child records per push operation</constraint>
+    <constraint source="spec">Return accurate counts: updated, failed, skipped</constraint>
+    <constraint source="spec">Continue on partial failure (don't roll back all)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/error-handling.md</file>
+      <file>src/server/api/CLAUDE.md</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review spec.md Push API requirements</step>
+    <step order="2">Define PushFieldMappingsRequest DTO</step>
+    <step order="3">Define PushFieldMappingsResponse DTO</step>
+    <step order="4">Implement POST /api/v1/field-mappings/push endpoint</step>
+    <step order="5">Query Field Mapping Profile for source/target pair</step>
+    <step order="6">Query all child records related to source (limit 500)</step>
+    <step order="7">Get source record field values</step>
+    <step order="8">For each child, apply mapping rules</step>
+    <step order="9">Update child record in Dataverse</step>
+    <step order="10">Track: updatedCount, failedCount, errors[]</step>
+    <step order="11">Return response with counts even on partial failure</step>
+    <step order="12">Add endpoint filter for authorization</step>
+    <step order="13">Write integration tests</step>
+    <step order="14">Update TASK-INDEX.md: change task 054 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and run .NET API</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/FieldMappings/Dtos/PushFieldMappingsRequest.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/FieldMappings/Dtos/PushFieldMappingsResponse.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/FieldMappingPushService.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/FieldMappings/PushFieldMappingsTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given a Matter with 10 related Events and a mapping profile, when POST push is called,
+      then all 10 Events are updated and response shows updatedCount=10.
+    </criterion>
+    <criterion testable="true">
+      Given one Event update fails, when push executes, then remaining Events are still updated
+      and response shows failedCount=1 with error details.
+    </criterion>
+    <criterion testable="true">
+      Given more than 500 children, when push is called, then 400 is returned indicating limit
+      exceeded (or pagination guidance).
+    </criterion>
+    <criterion testable="true">
+      Given no mapping profile exists, when push is called, then 404 is returned.
+    </criterion>
+    <criterion testable="true">Integration tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Request DTO:
+    ```json
+    {
+      "sourceEntityType": "sprk_matter",
+      "sourceRecordId": "guid-here",
+      "targetEntityType": "sprk_event"
+    }
+    ```
+
+    Response DTO:
+    ```json
+    {
+      "updatedCount": 15,
+      "failedCount": 1,
+      "skippedCount": 0,
+      "errors": [{ "recordId": "guid", "error": "message" }]
+    }
+    ```
+
+    This endpoint blocks the UpdateRelatedButton PCF (task 034).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

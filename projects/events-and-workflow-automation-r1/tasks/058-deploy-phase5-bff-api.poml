@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="058" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>Deploy Phase 5 - BFF API</title>
+    <phase>5: API &amp; Event Log</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>057</dependencies>
+    <blocks>060, 061, 062, 063</blocks>
+    <tags>deploy, azure, bff-api</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task with explicit constraints</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Deploy the BFF API with all Event and Field Mapping endpoints to Azure App Service dev
+    environment. Verify all endpoints are accessible and functional.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in Azure App Service deployment. Follow azure-deploy skill.
+  </role>
+
+  <goal>
+    BFF API deployed to Azure dev with all Phase 5 endpoints. All endpoints return expected
+    responses when tested.
+  </goal>
+
+  <context>
+    <background>
+      Phase 5 completes the API layer. This deployment makes the full API available for
+      E2E testing and PCF control integration.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/ - API to deploy</file>
+      <file>scripts/Deploy-BffApi.ps1 - Deployment script</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="azure-deploy">Use Deploy-BffApi.ps1 or az webapp deploy</constraint>
+    <constraint source="azure-deploy">Target: spe-api-dev-67e2xz.azurewebsites.net</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+      <file>scripts/Deploy-BffApi.ps1</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Build BFF API: dotnet publish -c Release</step>
+    <step order="2">Run all integration tests to ensure they pass</step>
+    <step order="3">Deploy using Deploy-BffApi.ps1 or az webapp deploy</step>
+    <step order="4">Wait for deployment to complete</step>
+    <step order="5">Test: GET /api/v1/events returns events</step>
+    <step order="6">Test: POST /api/v1/events creates event</step>
+    <step order="7">Test: GET /api/v1/field-mappings/profiles returns profiles</step>
+    <step order="8">Test: POST /api/v1/field-mappings/push works</step>
+    <step order="9">Verify Event Log entries are created</step>
+    <step order="10">Document deployment status in notes/</step>
+    <step order="11">Update TASK-INDEX.md: change task 058 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET API</tool>
+    <tool name="az">Azure CLI for deployment</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment">BFF API endpoints in Azure dev App Service</output>
+    <output type="docs">Deployment verification notes</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given the dev API URL, when I call GET /api/v1/events, then events are returned.
+    </criterion>
+    <criterion testable="true">
+      Given the dev API URL, when I create an Event via POST, then the event is persisted
+      and visible in Dataverse.
+    </criterion>
+    <criterion testable="true">
+      Given the dev API URL, when I call POST /api/v1/field-mappings/push, then child records
+      are updated correctly.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Deployment URLs:
+    - BFF API: https://spe-api-dev-67e2xz.azurewebsites.net
+
+    Use curl or Postman to test endpoints after deployment.
+
+    Example test:
+    ```bash
+    curl -H "Authorization: Bearer {token}" \
+         https://spe-api-dev-67e2xz.azurewebsites.net/api/v1/events
+    ```
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

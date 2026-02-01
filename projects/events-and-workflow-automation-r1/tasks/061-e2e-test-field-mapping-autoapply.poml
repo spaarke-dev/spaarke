@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>E2E test - Field mapping auto-application</title>
+    <phase>6: Integration &amp; Testing</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>036, 058</dependencies>
+    <blocks>none</blocks>
+    <tags>e2e-test, testing</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task tags include 'testing', 'e2e-test'</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create and execute end-to-end test for field mapping auto-application. Verify that when
+    a regarding record is selected, configured field mappings are automatically applied to
+    the Event form.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in E2E testing for Dataverse model-driven apps.
+  </role>
+
+  <goal>
+    E2E test documented and executed that validates field mappings are applied automatically
+    when a regarding record is selected.
+  </goal>
+
+  <context>
+    <background>
+      Field mapping auto-application is a key feature that reduces data entry. When a user
+      selects a regarding record, configured field values should flow automatically from
+      the parent to the Event.
+    </background>
+    <relevant-files>
+      <file>projects/events-and-workflow-automation-r1/spec.md - Success criteria SC-08</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">SC-08: Field mappings apply on child record creation</constraint>
+    <constraint source="spec">SC-11: Type compatibility validation blocks incompatible rules</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Set up test data: Create Matter→Event mapping profile with rules</step>
+    <step order="2">Ensure test Matter has values in mapped fields</step>
+    <step order="3">Test: Create new Event</step>
+    <step order="4">Test: Select Matter entity type</step>
+    <step order="5">Test: Select the test Matter</step>
+    <step order="6">Test: Verify toast notification shows "X fields populated"</step>
+    <step order="7">Test: Verify mapped field values match Matter values</step>
+    <step order="8">Test: Verify user can override mapped values</step>
+    <step order="9">Test: Clear regarding and select different record</step>
+    <step order="10">Test: Verify new values are applied</step>
+    <step order="11">Document test results</step>
+    <step order="12">Update TASK-INDEX.md: change task 061 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="browser">Execute E2E tests in Dataverse</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/events-and-workflow-automation-r1/notes/e2e-field-mapping-autoapply-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given a mapping profile exists with 3 rules, when Matter is selected, then 3 fields
+      are populated and toast shows "3 fields populated from Matter".
+    </criterion>
+    <criterion testable="true">
+      Given a mapped field is auto-populated, when user edits it, then new value is retained.
+    </criterion>
+    <criterion testable="true">
+      Given a new regarding record is selected, when mappings apply, then previous values
+      are replaced with new values.
+    </criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Field Mapping Auto-Apply">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_event</url>
+      <steps>
+        <step>Navigate to new Event form</step>
+        <step>Select Matter entity type</step>
+        <step>Select a Matter with known field values</step>
+        <step>Verify toast shows field count</step>
+        <step>Verify field values match source Matter</step>
+      </steps>
+      <expected>Field values auto-populated from Matter</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Prerequisite: Mapping profile must exist. Create in FieldMappingAdmin if needed:
+    - Source: sprk_matter
+    - Target: sprk_event
+    - Rules: Map 2-3 fields (e.g., client name, description)
+
+    This task can run in parallel with tasks 060, 062, 063 (Parallel Group F).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

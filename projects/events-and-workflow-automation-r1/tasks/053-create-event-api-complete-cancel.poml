@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="053" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>Create Event API - complete/cancel actions</title>
+    <phase>5: API &amp; Event Log</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>051</dependencies>
+    <blocks>055</blocks>
+    <tags>bff-api, api, minimal-api, endpoints</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Action endpoints extending existing pattern</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create the Event API action endpoints: POST /api/v1/events/{id}/complete and
+    POST /api/v1/events/{id}/cancel. These state transition endpoints update Event status
+    and create Event Log entries.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in .NET 8 Minimal API. Follow ADR-001, ADR-019.
+  </role>
+
+  <goal>
+    Event API complete and cancel action endpoints implemented with state validation and
+    Event Log tracking.
+  </goal>
+
+  <context>
+    <background>
+      Events have lifecycle states: active → completed OR active → cancelled. These action
+      endpoints provide explicit state transitions rather than generic updates.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Events/EventEndpoints.cs - From tasks 050-052</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Must use Minimal API pattern</constraint>
+    <constraint source="ADR-019">Must use ProblemDetails for invalid transitions</constraint>
+    <constraint source="spec">Create Event Log on complete (active → completed)</constraint>
+    <constraint source="spec">Create Event Log on cancel (active → cancelled)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>src/server/api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Implement POST /api/v1/events/{id}/complete endpoint</step>
+    <step order="2">Validate Event is in active state (400 if already completed/cancelled)</step>
+    <step order="3">Update Event status to "completed" in Dataverse</step>
+    <step order="4">Create Event Log entry: active → completed</step>
+    <step order="5">Return updated EventDto</step>
+    <step order="6">Implement POST /api/v1/events/{id}/cancel endpoint</step>
+    <step order="7">Validate Event is in active state</step>
+    <step order="8">Update Event status to "cancelled" in Dataverse</step>
+    <step order="9">Create Event Log entry: active → cancelled</step>
+    <step order="10">Return updated EventDto</step>
+    <step order="11">Add endpoint filters for authorization</step>
+    <step order="12">Write integration tests</step>
+    <step order="13">Update TASK-INDEX.md: change task 053 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and run .NET API</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Events/EventEndpoints.cs (updated)</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Events/CompleteCancel EventTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given an active Event, when POST complete is called, then Event status changes to completed
+      and Event Log entry is created.
+    </criterion>
+    <criterion testable="true">
+      Given an active Event, when POST cancel is called, then Event status changes to cancelled
+      and Event Log entry is created.
+    </criterion>
+    <criterion testable="true">
+      Given an already completed Event, when POST complete is called again, then 400 ProblemDetails
+      is returned (invalid transition).
+    </criterion>
+    <criterion testable="true">Integration tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Event states:
+    - active (statecode=0)
+    - completed (statecode=1, statuscode specific value)
+    - cancelled (statecode=1, statuscode specific value)
+
+    Invalid transitions should return clear error messages explaining valid transitions.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

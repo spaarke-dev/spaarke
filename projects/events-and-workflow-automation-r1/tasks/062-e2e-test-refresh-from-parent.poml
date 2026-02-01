@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="062" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>E2E test - Refresh from Parent flow</title>
+    <phase>6: Integration &amp; Testing</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>036, 058</dependencies>
+    <blocks>none</blocks>
+    <tags>e2e-test, testing</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task tags include 'testing', 'e2e-test'</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create and execute end-to-end test for "Refresh from Parent" functionality. Verify that
+    clicking the button re-applies field mappings from the parent record.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in E2E testing.
+  </role>
+
+  <goal>
+    E2E test documented and executed that validates the Refresh from Parent button correctly
+    re-applies field mappings.
+  </goal>
+
+  <context>
+    <background>
+      "Refresh from Parent" allows users to manually sync values from the parent record
+      after parent data changes. This tests the Manual Refresh sync mode.
+    </background>
+    <relevant-files>
+      <file>projects/events-and-workflow-automation-r1/spec.md - Success criteria SC-09</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">SC-09: "Refresh from Parent" button re-applies mappings</constraint>
+    <constraint source="spec">Button should show confirmation before overwriting</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Set up: Create Event linked to Matter</step>
+    <step order="2">Set up: Modify Event's mapped fields (different from Matter)</step>
+    <step order="3">Set up: Update Matter's field values</step>
+    <step order="4">Test: Open the Event form</step>
+    <step order="5">Test: Verify "Refresh from Parent" button is visible</step>
+    <step order="6">Test: Click "Refresh from Parent"</step>
+    <step order="7">Test: Verify confirmation dialog appears</step>
+    <step order="8">Test: Confirm the refresh</step>
+    <step order="9">Test: Verify Event fields now match Matter values</step>
+    <step order="10">Test: Verify toast shows refresh result</step>
+    <step order="11">Document test results</step>
+    <step order="12">Update TASK-INDEX.md: change task 062 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="browser">Execute E2E tests in Dataverse</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/events-and-workflow-automation-r1/notes/e2e-refresh-from-parent-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given an Event with stale values, when Refresh from Parent is clicked and confirmed,
+      then Event fields are updated to match current parent values.
+    </criterion>
+    <criterion testable="true">
+      Given Refresh from Parent is clicked, when user clicks Cancel on confirmation, then
+      no changes are made.
+    </criterion>
+    <criterion testable="true">
+      Given an Event with no regarding record, when form is viewed, then Refresh from Parent
+      button is hidden.
+    </criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Refresh from Parent">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_event&amp;id={existing-event-id}</url>
+      <steps>
+        <step>Open existing Event linked to Matter</step>
+        <step>Note current field values</step>
+        <step>Click Refresh from Parent button</step>
+        <step>Verify confirmation dialog</step>
+        <step>Click Confirm</step>
+        <step>Verify field values updated to match Matter</step>
+      </steps>
+      <expected>Field values refreshed from parent Matter</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    This tests success criteria SC-09.
+
+    Test scenario:
+    1. Matter has Description = "Original description"
+    2. Event was created with mapped Description = "Original description"
+    3. Event Description manually changed to "Modified description"
+    4. Matter Description updated to "Updated description"
+    5. Refresh from Parent should set Event Description = "Updated description"
+
+    This task can run in parallel with tasks 060, 061, 063 (Parallel Group F).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

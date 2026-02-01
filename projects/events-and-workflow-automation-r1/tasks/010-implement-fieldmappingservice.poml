@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>Implement FieldMappingService shared component</title>
+    <phase>2: Field Mapping Framework</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>011, 012, 013, 020, 022</blocks>
+    <tags>pcf, typescript, react, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task tags include 'pcf' (code implementation), critical shared component</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement the FieldMappingService as a shared TypeScript component in @spaarke/ui-components.
+    This service queries Dataverse for field mapping profiles and rules, then applies mappings
+    from source records to target records. It is the core engine for the Field Mapping Framework.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in TypeScript service design and Dataverse WebAPI.
+    Follow ADR-012 for shared component patterns. Expert in async operations and error handling.
+  </role>
+
+  <goal>
+    FieldMappingService implemented with methods to: query profiles, get mappings for entity pair,
+    apply mappings from source to target record, and support all three sync modes. Service should
+    be reusable across multiple PCF controls.
+  </goal>
+
+  <context>
+    <background>
+      The FieldMappingService is the core of the Field Mapping Framework. It abstracts the
+      complexity of querying mapping configurations and applying them to records. Multiple PCF
+      controls (AssociationResolver, FieldMappingAdmin, UpdateRelatedButton) will use this service.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/ - Shared component library</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md - Field Mapping Framework section</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Must be placed in @spaarke/ui-components shared library</constraint>
+    <constraint source="spec">Must support all 3 sync modes: One-time, Manual Refresh, Update Related</constraint>
+    <constraint source="spec">Must handle cascading mappings with two-pass limit</constraint>
+    <constraint source="spec">Must validate type compatibility before applying</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/dataverse-queries.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Dataverse WebAPI" location=".claude/patterns/pcf/dataverse-queries.md">
+        Pattern for querying Dataverse from PCF controls using WebAPI
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review spec.md Field Mapping Framework section for requirements</step>
+    <step order="2">Review existing shared components in src/client/shared/Spaarke.UI.Components/</step>
+    <step order="3">Design FieldMappingService interface with TypeScript types</step>
+    <step order="4">Implement getProfiles() method to query all active profiles</step>
+    <step order="5">Implement getProfileForEntityPair(sourceEntity, targetEntity) method</step>
+    <step order="6">Implement getRulesForProfile(profileId) method</step>
+    <step order="7">Implement applyMappings(sourceRecord, targetRecord, profile) method</step>
+    <step order="8">Implement cascading logic with two-pass limit to prevent loops</step>
+    <step order="9">Add error handling for missing fields, type mismatches</step>
+    <step order="10">Export service from @spaarke/ui-components package</step>
+    <step order="11">Write unit tests for mapping logic</step>
+    <step order="12">Verify build succeeds with new service</step>
+    <step order="13">Update TASK-INDEX.md: change task 010 status to ✅ completed</step>
+    <step order="14">Document service API in notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript library</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.types.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given a source entity and target entity, when getProfileForEntityPair is called, then the
+      matching active profile is returned (or null if none exists).
+    </criterion>
+    <criterion testable="true">
+      Given a profile with rules, when applyMappings is called, then all field values are copied
+      from source to target according to the rules.
+    </criterion>
+    <criterion testable="true">
+      Given cascading mappings, when applyMappings triggers a secondary mapping, then execution
+      stops after two passes (no infinite loops).
+    </criterion>
+    <criterion testable="true">All unit tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Key interfaces to define:
+    - IFieldMappingProfile: { id, name, sourceEntity, targetEntity, syncMode, isActive }
+    - IFieldMappingRule: { id, profileId, sourceField, targetField, sourceType, targetType, isReversible }
+    - IMappingResult: { success, fieldsMapped, errors }
+
+    The service should be stateless - each method call queries Dataverse fresh.
+    Consider caching profiles/rules for performance if needed.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>Create Field Mapping API - GET profile by source/target</title>
+    <phase>2: Field Mapping Framework</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>013</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, api, minimal-api, endpoints</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Extends existing endpoint pattern from task 013</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create the GET /api/v1/field-mappings/profiles/{sourceEntity}/{targetEntity} endpoint in the
+    BFF API. This endpoint returns a single profile with all its rules for a specific entity pair.
+    Used by PCF controls to get mappings when a record is selected.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in .NET 8 Minimal API development. Follow ADR-001
+    for API patterns, ADR-008 for endpoint filters, ADR-019 for ProblemDetails error responses.
+  </role>
+
+  <goal>
+    GET /api/v1/field-mappings/profiles/{sourceEntity}/{targetEntity} endpoint implemented that
+    returns a profile with all its rules. Returns 404 if no profile exists for the entity pair.
+  </goal>
+
+  <context>
+    <background>
+      PCF controls need to quickly look up if a mapping exists for a given entity pair. This
+      endpoint provides that lookup with full rule details so the control can apply mappings
+      without additional API calls.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/FieldMappings/FieldMappingEndpoints.cs - From task 013</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md - API Requirements section</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Must use Minimal API pattern</constraint>
+    <constraint source="ADR-019">Return ProblemDetails 404 if not found</constraint>
+    <constraint source="spec">Include all rules in response (eager load)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/error-handling.md</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Open FieldMappingEndpoints.cs from task 013</step>
+    <step order="2">Define FieldMappingRuleDto response type</step>
+    <step order="3">Define FieldMappingProfileWithRulesDto (profile + rules array)</step>
+    <step order="4">Add GET /api/v1/field-mappings/profiles/{sourceEntity}/{targetEntity} endpoint</step>
+    <step order="5">Implement Dataverse query with $expand to include rules</step>
+    <step order="6">Return 404 ProblemDetails if no profile found</step>
+    <step order="7">Add endpoint filter for authorization</step>
+    <step order="8">Write integration tests</step>
+    <step order="9">Verify endpoint works via Swagger/curl</step>
+    <step order="10">Update TASK-INDEX.md: change task 014 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and run .NET API</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/FieldMappings/Dtos/FieldMappingRuleDto.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/FieldMappings/Dtos/FieldMappingProfileWithRulesDto.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/FieldMappings/GetProfileByPairTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given a valid entity pair, when GET profiles/{source}/{target} is called, then the profile
+      with all rules is returned with HTTP 200.
+    </criterion>
+    <criterion testable="true">
+      Given an invalid entity pair, when GET profiles/{source}/{target} is called, then HTTP 404
+      with ProblemDetails is returned.
+    </criterion>
+    <criterion testable="true">Integration tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Response should include rules array:
+    - rules: [{ id, sourceField, targetField, sourceType, targetType, isReversible }]
+
+    This endpoint is performance-critical as it's called during record selection in PCF.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

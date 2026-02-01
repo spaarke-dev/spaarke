@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="071" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>User acceptance testing scenarios</title>
+    <phase>7: Deployment &amp; Wrap-up</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>070</dependencies>
+    <blocks>072, 073</blocks>
+    <tags>testing</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>UAT coordination task</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create and execute user acceptance testing scenarios. Cover all graduation criteria
+    with real-world use cases. Document results and get sign-off.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer coordinating with business stakeholders for UAT.
+  </role>
+
+  <goal>
+    UAT scenarios executed, all graduation criteria verified, and sign-off obtained from
+    stakeholders.
+  </goal>
+
+  <context>
+    <background>
+      UAT validates the solution meets business requirements. This goes beyond technical
+      testing to ensure the solution is usable and valuable for end users.
+    </background>
+    <relevant-files>
+      <file>projects/events-and-workflow-automation-r1/README.md - Graduation criteria</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md - Success criteria</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">All 15 graduation criteria must be validated</constraint>
+    <constraint source="project">Document results for each criterion</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/events-and-workflow-automation-r1/README.md</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create UAT test case document with all graduation criteria</step>
+    <step order="2">Schedule UAT session with stakeholder(s)</step>
+    <step order="3">UAT: SC-01 - Select from all 8 entity types</step>
+    <step order="4">UAT: SC-02 - RegardingLink displays and navigates</step>
+    <step order="5">UAT: SC-03 - EventFormController shows/hides fields</step>
+    <step order="6">UAT: SC-04 - Entity subgrids filter correctly</step>
+    <step order="7">UAT: SC-05 - Event Log captures state transitions</step>
+    <step order="8">UAT: SC-06 - Event API endpoints functional</step>
+    <step order="9">UAT: SC-07 - Admin can create mapping profiles</step>
+    <step order="10">UAT: SC-08 - Field mappings apply on creation</step>
+    <step order="11">UAT: SC-09 - Refresh from Parent works</step>
+    <step order="12">UAT: SC-10 - Update Related pushes to children</step>
+    <step order="13">UAT: SC-11 - Type compatibility blocks incompatible</step>
+    <step order="14">UAT: SC-12 - Cascading mappings execute</step>
+    <step order="15">UAT: SC-13 - Push API returns accurate counts</step>
+    <step order="16">UAT: SC-14 - All controls support dark mode</step>
+    <step order="17">UAT: SC-15 - Bundle sizes under 1MB</step>
+    <step order="18">Document all results and any issues found</step>
+    <step order="19">Obtain sign-off from stakeholders</step>
+    <step order="20">Update TASK-INDEX.md: change task 071 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="browser">Execute UAT in Dataverse</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/events-and-workflow-automation-r1/notes/uat-results.md</output>
+    <output type="docs">UAT sign-off documentation</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given the UAT checklist, when all criteria are tested, then each has Pass/Fail status
+      documented.
+    </criterion>
+    <criterion testable="true">
+      Given any failed criteria, when issues are reviewed, then remediation plan exists or
+      issue is deferred to future release with acceptance.
+    </criterion>
+    <criterion testable="true">
+      Given UAT completion, when sign-off is requested, then stakeholder approves the solution.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    UAT document format:
+    | Criterion | Test Case | Expected | Actual | Status | Notes |
+    |-----------|-----------|----------|--------|--------|-------|
+    | SC-01 | Select entity types | 8 types shown | ... | Pass/Fail | ... |
+
+    Key stakeholders for sign-off:
+    - Product Owner
+    - Lead User / Admin Representative
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

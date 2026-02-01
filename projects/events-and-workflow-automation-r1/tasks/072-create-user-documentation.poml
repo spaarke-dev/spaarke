@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="072" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>Create user documentation</title>
+    <phase>7: Deployment &amp; Wrap-up</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>071</dependencies>
+    <blocks>074</blocks>
+    <tags>documentation</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation task (no code implementation)</rigor-reason>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create end-user documentation for the Events and Field Mapping features. Cover how to
+    create events, use the regarding selector, understand field mappings, and refresh values.
+  </prompt>
+
+  <role>
+    Technical writer with expertise in Dataverse model-driven app user guides.
+  </role>
+
+  <goal>
+    User documentation created that enables end users to effectively use the Events feature
+    and understand field mapping behavior.
+  </goal>
+
+  <context>
+    <background>
+      End users need documentation to understand the new Events feature, how to select
+      regarding records, and how field inheritance works.
+    </background>
+    <relevant-files>
+      <file>projects/events-and-workflow-automation-r1/spec.md - Feature descriptions</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Documentation should be accessible to non-technical users</constraint>
+    <constraint source="project">Include screenshots where helpful</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/events-and-workflow-automation-r1/spec.md</file>
+      <file>docs/product-documentation/ - Existing user doc patterns</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review spec.md for feature descriptions and terminology</step>
+    <step order="2">Outline user documentation structure</step>
+    <step order="3">Write: Introduction to Events</step>
+    <step order="4">Write: Creating an Event (step-by-step)</step>
+    <step order="5">Write: Selecting a Regarding Record</step>
+    <step order="6">Write: Understanding Field Inheritance</step>
+    <step order="7">Write: Refreshing Values from Parent</step>
+    <step order="8">Write: Completing and Cancelling Events</step>
+    <step order="9">Write: Viewing Events (All Events view, entity subgrids)</step>
+    <step order="10">Add screenshots for key workflows</step>
+    <step order="11">Review documentation for clarity</step>
+    <step order="12">Update TASK-INDEX.md: change task 072 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="browser">Capture screenshots</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/product-documentation/events-user-guide.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given a new user, when they read the documentation, then they can successfully create
+      an Event with a regarding record.
+    </criterion>
+    <criterion testable="true">
+      Given the documentation, when reviewed, then all major workflows are covered with
+      step-by-step instructions.
+    </criterion>
+    <criterion testable="true">
+      Given non-technical terminology, when documentation uses field names, then user-friendly
+      display names are used (not logical names).
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Documentation outline:
+    1. What are Events?
+    2. Event Types and their purposes
+    3. Creating a new Event
+       - Selecting the related record
+       - Automatic field population
+       - Filling required fields
+    4. Managing Events
+       - Completing events
+       - Cancelling events
+       - Refreshing values from parent
+    5. Viewing Events
+       - All Events view
+       - Events related to a specific record
+    6. FAQ / Troubleshooting
+
+    This task can run in parallel with task 073 (Parallel Group G).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>
