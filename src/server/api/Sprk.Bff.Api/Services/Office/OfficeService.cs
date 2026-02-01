@@ -5,12 +5,12 @@ using Microsoft.Extensions.Options;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
 using MimeKit;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Workers.Office;
 using Sprk.Bff.Api.Workers.Office.Messages;
-using Spaarke.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Office;
 
