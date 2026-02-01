@@ -246,6 +246,14 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                     cancellationToken);
 
                 // Step 4: Retrieve temporary file
+                if (string.IsNullOrEmpty(payload.TempFileLocation))
+                {
+                    return JobOutcome.Failure(
+                        "OFFICE_INTERNAL",
+                        "TempFileLocation is required for traditional upload flow",
+                        retryable: false);
+                }
+
                 using var fileStream = await RetrieveTempFileAsync(
                     payload.TempFileLocation,
                     cancellationToken);
