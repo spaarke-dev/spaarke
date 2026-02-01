@@ -1,13 +1,13 @@
 using System.Text.Json;
 using Azure.Messaging.ServiceBus;
 using Microsoft.Extensions.Options;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Office;
 using Sprk.Bff.Api.Workers.Office.Messages;
-using Spaarke.Dataverse;
 
 namespace Sprk.Bff.Api.Workers.Office;
 

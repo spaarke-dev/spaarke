@@ -1,11 +1,11 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Telemetry;
-using Spaarke.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Jobs.Handlers;
 

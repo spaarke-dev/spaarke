@@ -1,5 +1,7 @@
 using System.Text.Json;
 using Azure.Messaging.ServiceBus;
+using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Configuration;
 
 namespace Sprk.Bff.Api.Services.Jobs;
 
@@ -14,13 +16,15 @@ public class JobSubmissionService
     private readonly string _queueName;
 
     public JobSubmissionService(
-        IConfiguration configuration,
+        IOptions<ServiceBusOptions> serviceBusOptions,
         ILogger<JobSubmissionService> logger,
         ServiceBusClient serviceBusClient)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _serviceBusClient = serviceBusClient ?? throw new ArgumentNullException(nameof(serviceBusClient));
-        _queueName = configuration["Jobs:ServiceBus:QueueName"] ?? "sdap-jobs";
+
+        var options = serviceBusOptions?.Value ?? throw new ArgumentNullException(nameof(serviceBusOptions));
+        _queueName = options.QueueName;
 
         _logger.LogInformation("Job submission configured with Service Bus (Queue: {Queue})", _queueName);
     }

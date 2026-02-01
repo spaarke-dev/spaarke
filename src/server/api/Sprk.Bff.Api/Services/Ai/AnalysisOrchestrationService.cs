@@ -90,10 +90,37 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         HttpContext httpContext,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
+        // CRITICAL FIX: If PlaybookId is provided, delegate to ExecutePlaybookAsync
+        // which executes each tool in the playbook (SummaryHandler, EntityExtractorHandler, etc.)
+        // and stores structured outputs in Dataverse Document fields.
+        // Without this delegation, the method just does a raw OpenAI call that doesn't use tools.
+        if (request.PlaybookId.HasValue)
+        {
+            _logger.LogInformation(
+                "ExecuteAnalysisAsync: Delegating to ExecutePlaybookAsync for playbook {PlaybookId}",
+                request.PlaybookId.Value);
+
+            var playbookRequest = new PlaybookExecuteRequest
+            {
+                PlaybookId = request.PlaybookId.Value,
+                DocumentIds = request.DocumentIds,
+                ActionId = request.ActionId,
+                AdditionalContext = null
+            };
+
+            await foreach (var chunk in ExecutePlaybookAsync(playbookRequest, httpContext, cancellationToken))
+            {
+                yield return chunk;
+            }
+
+            yield break; // Exit after playbook execution
+        }
+
+        // No playbook specified - continue with action-based analysis (raw OpenAI call)
         // Phase 1: Process only the first document
         var documentId = request.DocumentIds[0];
 
-        _logger.LogInformation("Starting analysis for document {DocumentId}, action {ActionId}",
+        _logger.LogInformation("Starting action-based analysis for document {DocumentId}, action {ActionId}",
             documentId, request.ActionId);
 
         // 1. Get document details from Dataverse
@@ -129,40 +156,19 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         yield return AnalysisStreamChunk.Metadata(analysisId, document.Name ?? "Unknown");
 
         // 3. Resolve scopes (Skills, Knowledge, Tools) and action
-        Guid actionId;
-        ResolvedScopes scopes;
-
-        if (request.PlaybookId.HasValue)
+        // Note: Playbook-based analysis is handled via early delegation to ExecutePlaybookAsync above.
+        // This code path is for action-based analysis only (no playbook).
+        if (!request.ActionId.HasValue)
         {
-            // Using playbook: get playbook details to retrieve actions and scopes
-            var playbook = await _playbookService.GetPlaybookAsync(request.PlaybookId.Value, cancellationToken)
-                ?? throw new KeyNotFoundException($"Playbook {request.PlaybookId.Value} not found");
-
-            scopes = await _scopeResolver.ResolvePlaybookScopesAsync(request.PlaybookId.Value, cancellationToken);
-
-            // Use provided ActionId or fall back to playbook's first action
-            actionId = request.ActionId ?? playbook.ActionIds.FirstOrDefault();
-
-            if (actionId == Guid.Empty)
-            {
-                throw new InvalidOperationException($"Playbook {request.PlaybookId} has no actions configured");
-            }
+            throw new ArgumentException("ActionId is required when not using a playbook");
         }
-        else
-        {
-            // Not using playbook: require explicit ActionId
-            if (!request.ActionId.HasValue)
-            {
-                throw new ArgumentException("ActionId is required when not using a playbook");
-            }
 
-            actionId = request.ActionId.Value;
-            scopes = await _scopeResolver.ResolveScopesAsync(
-                request.SkillIds ?? [],
-                request.KnowledgeIds ?? [],
-                request.ToolIds ?? [],
-                cancellationToken);
-        }
+        var actionId = request.ActionId.Value;
+        var scopes = await _scopeResolver.ResolveScopesAsync(
+            request.SkillIds ?? [],
+            request.KnowledgeIds ?? [],
+            request.ToolIds ?? [],
+            cancellationToken);
 
         // Update analysis record with resolved action ID
         analysis.ActionId = actionId;
