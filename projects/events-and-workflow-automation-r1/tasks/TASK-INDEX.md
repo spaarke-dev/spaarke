@@ -2,7 +2,7 @@
 
 > **Last Updated**: 2026-02-01
 > **Project**: events-and-workflow-automation-r1
-> **Total Tasks**: 33
+> **Total Tasks**: 46
 > **Status**: Ready for Execution
 
 ---
@@ -11,9 +11,9 @@
 
 | Status | Count | Meaning |
 |--------|-------|---------|
-| 🔲 | 32 | Not started |
+| 🔲 | 11 | Not started |
 | 🔄 | 0 | In progress |
-| ✅ | 0 | Completed |
+| ✅ | 35 | Completed |
 | ⏸️ | 0 | Blocked |
 
 ---
@@ -22,11 +22,11 @@
 
 | ID | Title | Status | Dependencies | Parallel Group | Est. Hours |
 |----|-------|--------|--------------|----------------|------------|
-| 001 | Create Field Mapping Profile table | 🔲 | none | — | 2 |
-| 002 | Create Field Mapping Rule table | 🔲 | 001 | — | 2 |
-| 003 | Seed Event Type records | 🔲 | none | A | 2 |
-| 004 | Configure Event form with control placeholders | 🔲 | none | A | 3 |
-| 005 | Scaffold PCF project structure | 🔲 | none | A | 4 |
+| 001 | Create Field Mapping Profile table | ✅ | none | — | 2 |
+| 002 | Create Field Mapping Rule table | ✅ | 001 | — | 2 |
+| 003 | Seed Event Type records | ✅ | none | A | 2 |
+| 004 | Configure Event form with control placeholders | ✅ | none | A | 3 |
+| 005 | Scaffold PCF project structure | ✅ | none | A | 4 |
 
 ---
 
@@ -34,13 +34,13 @@
 
 | ID | Title | Status | Dependencies | Parallel Group | Est. Hours |
 |----|-------|--------|--------------|----------------|------------|
-| 010 | Implement FieldMappingService shared component | 🔲 | 002 | — | 4 |
-| 011 | Implement type compatibility validation | 🔲 | 010 | — | 3 |
-| 012 | Build FieldMappingAdmin PCF control | 🔲 | 010 | B | 4 |
-| 013 | Create Field Mapping API - GET profiles | 🔲 | 010 | B | 3 |
-| 014 | Create Field Mapping API - GET profile by source/target | 🔲 | 013 | — | 2 |
-| 015 | Create Field Mapping API - POST validate | 🔲 | 011 | — | 2 |
-| 016 | Deploy Phase 2 - Field Mapping Framework | 🔲 | 012, 015 | — | 2 |
+| 010 | Implement FieldMappingService shared component | ✅ | 002 | — | 4 |
+| 011 | Implement type compatibility validation | ✅ | 010 | — | 3 |
+| 012 | Build FieldMappingAdmin PCF control | ✅ | 010 | B | 4 |
+| 013 | Create Field Mapping API - GET profiles | ✅ | 010 | B | 3 |
+| 014 | Create Field Mapping API - GET profile by source/target | ✅ | 013 | — | 2 |
+| 015 | Create Field Mapping API - POST validate | ✅ | 011 | — | 2 |
+| 016 | Deploy Phase 2 - Field Mapping Framework | ✅ | 012, 015 | — | 2 |
 
 ---
 
@@ -48,12 +48,12 @@
 
 | ID | Title | Status | Dependencies | Parallel Group | Est. Hours |
 |----|-------|--------|--------------|----------------|------------|
-| 020 | Build AssociationResolver PCF - entity type dropdown | 🔲 | 005, 010 | — | 4 |
-| 021 | Implement AssociationResolver - regarding field population | 🔲 | 020 | — | 3 |
-| 022 | Integrate AssociationResolver with FieldMappingService | 🔲 | 021 | — | 3 |
-| 023 | Add Refresh from Parent functionality | 🔲 | 022 | — | 2 |
-| 024 | Add toast notifications for mapping results | 🔲 | 022 | — | 2 |
-| 025 | Deploy Phase 3 - AssociationResolver PCF | 🔲 | 024 | — | 2 |
+| 020 | Build AssociationResolver PCF - entity type dropdown | ✅ | 005, 010 | — | 4 |
+| 021 | Implement AssociationResolver - regarding field population | ✅ | 020 | — | 3 |
+| 022 | Integrate AssociationResolver with FieldMappingService | ✅ | 021 | — | 3 |
+| 023 | Add Refresh from Parent functionality | ✅ | 022 | — | 2 |
+| 024 | Add toast notifications for mapping results | ✅ | 022 | — | 2 |
+| 025 | Deploy Phase 3 - AssociationResolver PCF | ✅ | 024 | — | 2 |
 
 ---
 
@@ -61,13 +61,13 @@
 
 | ID | Title | Status | Dependencies | Parallel Group | Est. Hours |
 |----|-------|--------|--------------|----------------|------------|
-| 030 | Build EventFormController PCF - Event Type fetching | 🔲 | 005 | — | 3 |
-| 031 | Implement EventFormController - field show/hide logic | 🔲 | 030 | — | 3 |
-| 032 | Implement EventFormController - save validation | 🔲 | 031 | — | 2 |
-| 033 | Build RegardingLink PCF control | 🔲 | 005 | C | 3 |
-| 034 | Build UpdateRelatedButton PCF control | 🔲 | 005, 054 | — | 4 |
-| 035 | Configure Event form with all controls | 🔲 | 025, 032, 033 | — | 3 |
-| 036 | Deploy Phase 4 - Event Form Controls | 🔲 | 035 | — | 2 |
+| 030 | Build EventFormController PCF - Event Type fetching | ✅ | 005 | — | 3 |
+| 031 | Implement EventFormController - field show/hide logic | ✅ | 030 | — | 3 |
+| 032 | Implement EventFormController - save validation | ✅ | 031 | — | 2 |
+| 033 | Build RegardingLink PCF control | ✅ | 005 | C | 3 |
+| 034 | Build UpdateRelatedButton PCF control | ✅ | 005, 054 | — | 4 |
+| 035 | Configure Event form with all controls | ✅ | 025, 032, 033 | — | 3 |
+| 036 | Deploy Phase 4 - Event Form Controls | ✅ | 035 | — | 2 |
 
 ---
 
@@ -75,15 +75,15 @@
 
 | ID | Title | Status | Dependencies | Parallel Group | Est. Hours |
 |----|-------|--------|--------------|----------------|------------|
-| 050 | Create Event API - GET endpoints | 🔲 | 002 | D | 3 |
-| 051 | Create Event API - POST/PUT endpoints | 🔲 | 050 | — | 3 |
-| 052 | Create Event API - DELETE endpoint | 🔲 | 050 | D | 2 |
-| 053 | Create Event API - complete/cancel actions | 🔲 | 051 | — | 2 |
-| 054 | Create Field Mapping API - POST push | 🔲 | 015 | — | 4 |
-| 055 | Implement Event Log creation on state changes | 🔲 | 053 | — | 3 |
-| 056 | Write integration tests for Event API | 🔲 | 055 | E | 4 |
-| 057 | Write integration tests for Field Mapping API | 🔲 | 054 | E | 3 |
-| 058 | Deploy Phase 5 - BFF API | 🔲 | 057 | — | 2 |
+| 050 | Create Event API - GET endpoints | ✅ | 002 | D | 3 |
+| 051 | Create Event API - POST/PUT endpoints | ✅ | 050 | — | 3 |
+| 052 | Create Event API - DELETE endpoint | ✅ | 050 | D | 2 |
+| 053 | Create Event API - complete/cancel actions | ✅ | 051 | — | 2 |
+| 054 | Create Field Mapping API - POST push | ✅ | 015 | — | 4 |
+| 055 | Implement Event Log creation on state changes | ✅ | 053 | — | 3 |
+| 056 | Write integration tests for Event API | ✅ | 055 | E | 4 |
+| 057 | Write integration tests for Field Mapping API | ✅ | 054 | E | 3 |
+| 058 | Deploy Phase 5 - BFF API | ✅ | 057 | — | 2 |
 
 ---
 
@@ -91,11 +91,11 @@
 
 | ID | Title | Status | Dependencies | Parallel Group | Est. Hours |
 |----|-------|--------|--------------|----------------|------------|
-| 060 | E2E test - Event creation with regarding record | 🔲 | 036, 058 | F | 4 |
-| 061 | E2E test - Field mapping auto-application | 🔲 | 036, 058 | F | 3 |
-| 062 | E2E test - Refresh from Parent flow | 🔲 | 036, 058 | F | 2 |
-| 063 | E2E test - Update Related push flow | 🔲 | 036, 058 | F | 3 |
-| 064 | Dark mode verification - all PCF controls | 🔲 | 036 | — | 3 |
+| 060 | E2E test - Event creation with regarding record | ✅ | 036, 058 | F | 4 |
+| 061 | E2E test - Field mapping auto-application | ✅ | 036, 058 | F | 3 |
+| 062 | E2E test - Refresh from Parent flow | ✅ | 036, 058 | F | 2 |
+| 063 | E2E test - Update Related push flow | ✅ | 036, 058 | F | 3 |
+| 064 | Dark mode verification - all PCF controls | ✅ | 036 | — | 3 |
 | 065 | Performance validation and bundle size check | 🔲 | 036 | — | 2 |
 
 ---
