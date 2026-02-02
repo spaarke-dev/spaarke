@@ -3,7 +3,7 @@
   <metadata>
     <title>Create Field Mapping API - POST validate</title>
     <phase>2: Field Mapping Framework</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>011</dependencies>
     <blocks>054</blocks>
@@ -117,4 +117,28 @@
       Follow the task-execute skill for mandatory pre-execution checklist.
     </protocol>
   </execution>
+
+  <completion-notes>
+    <completed-date>2026-02-01</completed-date>
+    <summary>
+      Implemented POST /api/v1/field-mappings/validate endpoint that validates type compatibility
+      for field mapping rules. Created TypeCompatibilityValidator with STRICT_TYPE_COMPATIBILITY
+      matrix matching the TypeScript implementation in FieldMappingTypes.ts.
+    </summary>
+    <files-created>
+      <file>src/server/api/Sprk.Bff.Api/Api/FieldMappings/Dtos/ValidateMappingRequest.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/FieldMappings/Dtos/ValidateMappingResponse.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/FieldMappings/TypeCompatibilityValidator.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Api/FieldMappings/TypeCompatibilityValidatorTests.cs</file>
+    </files-created>
+    <files-modified>
+      <file>src/server/api/Sprk.Bff.Api/Api/FieldMappings/FieldMappingEndpoints.cs</file>
+    </files-modified>
+    <notes>
+      - Type compatibility matrix mirrors TypeScript STRICT_TYPE_COMPATIBILITY
+      - Response includes CompatibleTargetTypes for UI suggestions when validation fails
+      - Unit tests verify C#/TypeScript parity
+      - Pre-existing test build errors in OfficeServiceTests/UploadFinalizationWorkerTests (unrelated)
+    </notes>
+  </completion-notes>
 </task>

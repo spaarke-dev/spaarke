@@ -3,7 +3,7 @@
   <metadata>
     <title>Build EventFormController PCF - Event Type fetching</title>
     <phase>4: Event Form Controls</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>005</dependencies>
     <blocks>031</blocks>

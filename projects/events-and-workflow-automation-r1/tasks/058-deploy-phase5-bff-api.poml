@@ -3,7 +3,7 @@
   <metadata>
     <title>Deploy Phase 5 - BFF API</title>
     <phase>5: API &amp; Event Log</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>057</dependencies>
     <blocks>060, 061, 062, 063</blocks>

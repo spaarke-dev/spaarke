@@ -3,7 +3,7 @@
   <metadata>
     <title>Create Field Mapping API - POST push</title>
     <phase>5: API &amp; Event Log</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>015</dependencies>
     <blocks>034, 057</blocks>
@@ -138,4 +138,26 @@
       Follow the task-execute skill for mandatory pre-execution checklist.
     </protocol>
   </execution>
+
+  <completion-notes>
+    <completed-date>2026-02-01</completed-date>
+    <summary>
+      Implemented POST /api/v1/field-mappings/push endpoint with full request validation,
+      profile lookup, type compatibility checks, and partial failure handling. Created
+      PushFieldMappingsRequest and PushFieldMappingsResponse DTOs. Dataverse operations
+      stubbed (S054-01, S054-02) pending IDataverseService implementation.
+    </summary>
+    <files-created>
+      <file>src/server/api/Sprk.Bff.Api/Api/FieldMappings/Dtos/PushFieldMappingsRequest.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/FieldMappings/Dtos/PushFieldMappingsResponse.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Api/FieldMappings/PushFieldMappingsTests.cs</file>
+    </files-created>
+    <files-modified>
+      <file>src/server/api/Sprk.Bff.Api/Api/FieldMappings/FieldMappingEndpoints.cs</file>
+    </files-modified>
+    <stubs-created>
+      <stub id="S054-01">Retrieve source record field values from Dataverse</stub>
+      <stub id="S054-02">Query child records and update records in Dataverse</stub>
+    </stubs-created>
+  </completion-notes>
 </task>

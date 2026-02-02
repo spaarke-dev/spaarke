@@ -11,9 +11,9 @@
 
 | Status | Count | Meaning |
 |--------|-------|---------|
-| 🔲 | 5 | Not started |
+| 🔲 | 0 | Not started |
 | 🔄 | 0 | In progress |
-| ✅ | 41 | Completed |
+| ✅ | 46 | Completed |
 | ⏸️ | 0 | Blocked |
 
 ---
@@ -109,7 +109,7 @@
 | 072 | Create user documentation | ✅ | 071 | G | 4 |
 | 073 | Create admin documentation | ✅ | 071 | G | 3 |
 | 074 | Update README status to Complete | ✅ | 072, 073 | — | 1 |
-| 090 | Project Wrap-up | 🔲 | 074 | — | 2 |
+| 090 | Project Wrap-up | ✅ | 074 | — | 2 |
 
 ---
 

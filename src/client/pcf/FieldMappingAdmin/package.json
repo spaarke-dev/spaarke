@@ -1,0 +1,34 @@
+{
+  "name": "spaarke-field-mapping-admin",
+  "version": "1.0.0",
+  "description": "PCF control for admin management of field mapping profiles and rules",
+  "scripts": {
+    "build": "pcf-scripts build",
+    "build:prod": "pcf-scripts build -- --mode production",
+    "clean": "pcf-scripts clean",
+    "lint": "pcf-scripts lint",
+    "lint:fix": "pcf-scripts lint fix",
+    "rebuild": "pcf-scripts rebuild",
+    "start": "pcf-scripts start",
+    "start:watch": "pcf-scripts start watch",
+    "refreshTypes": "pcf-scripts refreshTypes"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@fluentui/react-components": "^9.46.0",
+    "@fluentui/react-icons": "^2.0.0",
+    "@microsoft/eslint-plugin-power-apps": "^0.2.51",
+    "@types/node": "^18.19.0",
+    "@types/powerapps-component-framework": "^1.3.15",
+    "@types/react": "^16.14.0",
+    "@types/react-dom": "^16.9.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^9.0.0",
+    "pcf-scripts": "^1",
+    "pcf-start": "^1",
+    "react": "^16.14.0",
+    "react-dom": "^16.14.0",
+    "typescript": "^5.0.0"
+  }
+}

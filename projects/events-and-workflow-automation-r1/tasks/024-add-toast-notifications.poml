@@ -3,7 +3,7 @@
   <metadata>
     <title>Add toast notifications for mapping results</title>
     <phase>3: Association Resolver</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>022</dependencies>
     <blocks>025</blocks>

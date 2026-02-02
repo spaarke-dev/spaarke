@@ -3,7 +3,7 @@
   <metadata>
     <title>Create Event API - DELETE endpoint</title>
     <phase>5: API &amp; Event Log</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>050</dependencies>
     <blocks>none</blocks>

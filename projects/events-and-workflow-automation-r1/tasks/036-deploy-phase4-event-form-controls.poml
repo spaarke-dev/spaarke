@@ -3,7 +3,7 @@
   <metadata>
     <title>Deploy Phase 4 - Event Form Controls</title>
     <phase>4: Event Form Controls</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>035</dependencies>
     <blocks>060, 061, 062, 063, 064, 065</blocks>

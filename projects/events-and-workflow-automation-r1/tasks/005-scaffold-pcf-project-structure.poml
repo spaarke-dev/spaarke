@@ -3,7 +3,7 @@
   <metadata>
     <title>Scaffold PCF project structure</title>
     <phase>1: Foundation &amp; Data Model</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>020, 030, 033, 034</blocks>

@@ -3,7 +3,7 @@
   <metadata>
     <title>Create Event API - POST/PUT endpoints</title>
     <phase>5: API &amp; Event Log</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>050</dependencies>
     <blocks>053</blocks>

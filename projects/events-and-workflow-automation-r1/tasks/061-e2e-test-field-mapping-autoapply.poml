@@ -3,7 +3,7 @@
   <metadata>
     <title>E2E test - Field mapping auto-application</title>
     <phase>6: Integration &amp; Testing</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>036, 058</dependencies>
     <blocks>none</blocks>
@@ -111,6 +111,14 @@
     - Rules: Map 2-3 fields (e.g., client name, description)
 
     This task can run in parallel with tasks 060, 062, 063 (Parallel Group F).
+
+    COMPLETED 2026-02-01:
+    - Created comprehensive E2E test scenario document: tests/e2e/scenarios/field-mapping-auto-application.md
+    - Document includes 8 test scenarios covering SC-08, SC-11, and SC-12
+    - Scenarios: Auto-apply, user-modified protection, type validation, multiple changes, cascading, toast accuracy, performance, error handling
+    - Each scenario includes prerequisites, test steps, acceptance criteria, and error cases
+    - Test data requirements documented (Matter records, Field Mapping Profile, 3+ mapping rules)
+    - Ready for tester execution against dev environment
   </notes>
 
   <execution>

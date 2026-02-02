@@ -3,7 +3,7 @@
   <metadata>
     <title>Configure Event form with all controls</title>
     <phase>4: Event Form Controls</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>025, 032, 033</dependencies>
     <blocks>036</blocks>
@@ -117,6 +117,14 @@
       - Description
       - Notes
     ```
+
+    Completion Notes (2026-02-01):
+    - Created comprehensive form configuration documentation: notes/event-form-configuration.md
+    - Documents all 5 PCF controls: AssociationResolver, EventFormController, RegardingLink, UpdateRelatedButton, FieldMappingAdmin
+    - Includes control manifest bindings, behavior descriptions, form designer steps, and testing checklist
+    - Entity configuration table for all 8 supported regarding record types
+    - Field visibility rules by Event Type
+    - Placement guidance for UpdateRelatedButton on parent entity forms
   </notes>
 
   <execution>

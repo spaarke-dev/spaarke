@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement EventFormController - field show/hide logic</title>
     <phase>4: Event Form Controls</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>030</dependencies>
     <blocks>032</blocks>

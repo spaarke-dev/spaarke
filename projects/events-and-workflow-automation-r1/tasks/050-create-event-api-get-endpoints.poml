@@ -3,7 +3,7 @@
   <metadata>
     <title>Create Event API - GET endpoints</title>
     <phase>5: API &amp; Event Log</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>002</dependencies>
     <blocks>051, 052</blocks>
@@ -110,6 +110,26 @@
 
     This task can run in parallel with task 052 (Parallel Group D).
   </notes>
+
+  <completion-notes>
+    <completed-on>2026-02-01</completed-on>
+    <summary>
+      Implemented Event API GET endpoints following Minimal API pattern (ADR-001):
+      - GET /api/v1/events: List events with filtering (regardingRecordType, regardingRecordId, eventTypeId, statusCode, priority, dueDateFrom, dueDateTo) and pagination (pageNumber, pageSize with max 100)
+      - GET /api/v1/events/{id}: Get single event by ID with 404 ProblemDetails for not found
+
+      Files created:
+      - src/server/api/Sprk.Bff.Api/Api/Events/EventEndpoints.cs (endpoints)
+      - src/server/api/Sprk.Bff.Api/Api/Events/Dtos/EventDto.cs (DTOs with status/priority helpers)
+      - src/server/api/Sprk.Bff.Api/Api/Events/Dtos/EventListResponse.cs (paginated response)
+
+      Stub created:
+      - S050-01: Query sprk_event entity from Dataverse (returns empty data until entity deployed)
+
+      Build verified: dotnet build passes with 0 errors
+    </summary>
+    <stub-id>S050-01</stub-id>
+  </completion-notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

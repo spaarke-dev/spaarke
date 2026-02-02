@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<manifest>
+  <control namespace="Spaarke.Controls" constructor="FieldMappingAdmin" version="1.1.0" display-name-key="Field Mapping Admin" description-key="Admin UI for configuring field mapping profiles and rules with ProfileEditor, RulesList, and RuleEditor components" control-type="standard">
+    <external-service-usage enabled="false">
+    </external-service-usage>
+    <!-- Profile ID (when editing existing profile) -->
+    <property name="profileId" display-name-key="Profile ID" description-key="GUID of the Field Mapping Profile being edited" of-type="SingleLine.Text" usage="bound" required="false" />
+    <!-- BFF API Base URL -->
+    <property name="apiBaseUrl" display-name-key="API Base URL" description-key="Base URL for BFF API field mapping endpoints" of-type="SingleLine.Text" usage="input" required="false" default-value="https://spe-api-dev-67e2xz.azurewebsites.net/api" />
+    <resources>
+      <code path="index.ts" order="1" />
+      <css path="styles.css" order="1" />
+      <!-- Platform-provided libraries: DO NOT bundle -->
+      <platform-library name="React" version="16.14.0" />
+      <platform-library name="Fluent" version="9.46.2" />
+    </resources>
+    <feature-usage>
+      <uses-feature name="WebAPI" required="true" />
+      <uses-feature name="Utility" required="true" />
+    </feature-usage>
+  </control>
+</manifest>

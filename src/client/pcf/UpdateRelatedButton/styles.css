@@ -1,0 +1,13 @@
+/**
+ * UpdateRelatedButton Styles
+ *
+ * Minimal CSS - most styling handled by Fluent UI v9 tokens
+ * per ADR-021 design system requirements.
+ */
+
+.update-related-button-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+}

@@ -3,7 +3,7 @@
   <metadata>
     <title>Integrate AssociationResolver with FieldMappingService</title>
     <phase>3: Association Resolver</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>021</dependencies>
     <blocks>023, 024</blocks>

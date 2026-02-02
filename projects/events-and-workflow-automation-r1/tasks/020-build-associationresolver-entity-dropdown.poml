@@ -3,7 +3,7 @@
   <metadata>
     <title>Build AssociationResolver PCF - entity type dropdown</title>
     <phase>3: Association Resolver</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>005, 010</dependencies>
     <blocks>021</blocks>
@@ -144,6 +144,16 @@
     ```
 
     Use this configuration to populate the dropdown and determine which lookup field to set.
+
+    COMPLETION NOTES (2026-02-01):
+    - Task 005 already implemented the entity dropdown with all 8 entity types
+    - All ENTITY_CONFIGS verified with correct logicalName, displayName, regardingField, regardingRecordTypeValue
+    - Fluent UI v9 Dropdown component properly implemented
+    - Dark mode support via resolveTheme() and Fluent tokens
+    - Search functionality uses Xrm.Utility.lookupObjects (standard Dataverse lookup dialog)
+    - Build succeeds without TypeScript errors
+    - Bundle size: 2.8MB (within 5MB limit per NFR-04)
+    - Existing stubs S001, S002 documented in STUBS.md
   </notes>
 
   <execution>

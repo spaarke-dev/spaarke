@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement Event Log creation on state changes</title>
     <phase>5: API &amp; Event Log</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>053</dependencies>
     <blocks>056</blocks>

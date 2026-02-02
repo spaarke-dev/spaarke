@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<manifest>
+  <control namespace="Spaarke.Controls" constructor="EventFormController" version="1.0.0" display-name-key="Event Form Controller" description-key="Controls Event form field visibility based on Event Type configuration" control-type="standard">
+    <external-service-usage enabled="false">
+    </external-service-usage>
+    <!-- Event Type (lookup to sprk_eventtype) -->
+    <property name="eventTypeId" display-name-key="Event Type ID" description-key="GUID of the selected Event Type" of-type="SingleLine.Text" usage="bound" required="false" />
+    <!-- Event Type Name (for display) -->
+    <property name="eventTypeName" display-name-key="Event Type Name" description-key="Name of the selected Event Type" of-type="SingleLine.Text" usage="bound" required="false" />
+    <!-- Form Control Status (output for debugging) -->
+    <property name="controlStatus" display-name-key="Control Status" description-key="Current status of the form controller" of-type="SingleLine.Text" usage="output" required="false" />
+    <resources>
+      <code path="index.ts" order="1" />
+      <css path="styles.css" order="1" />
+      <!-- Platform-provided libraries: DO NOT bundle -->
+      <platform-library name="React" version="16.14.0" />
+      <platform-library name="Fluent" version="9.46.2" />
+    </resources>
+    <feature-usage>
+      <uses-feature name="WebAPI" required="true" />
+      <uses-feature name="Utility" required="true" />
+    </feature-usage>
+  </control>
+</manifest>

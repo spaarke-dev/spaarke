@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<manifest>
+  <control namespace="Spaarke.Controls" constructor="AssociationResolver" version="1.0.0" display-name-key="Association Resolver" description-key="Allows users to select a parent entity type and record, then auto-populates fields via field mapping" control-type="standard">
+    <external-service-usage enabled="false">
+    </external-service-usage>
+    <!-- Entity Type Selection (Choice/OptionSet bound property) -->
+    <property name="regardingRecordType" display-name-key="Regarding Record Type" description-key="The selected entity type (0=Project, 1=Matter, etc.)" of-type="OptionSet" usage="bound" required="true" />
+    <!-- Regarding Record ID (output after selection) -->
+    <property name="regardingRecordId" display-name-key="Regarding Record ID" description-key="GUID of the selected regarding record" of-type="SingleLine.Text" usage="bound" required="false" />
+    <!-- Regarding Record Name (output for display) -->
+    <property name="regardingRecordName" display-name-key="Regarding Record Name" description-key="Display name of the selected regarding record" of-type="SingleLine.Text" usage="bound" required="false" />
+    <!-- BFF API Base URL for field mapping service -->
+    <property name="apiBaseUrl" display-name-key="API Base URL" description-key="Base URL for BFF API field mapping endpoints" of-type="SingleLine.Text" usage="input" required="false" default-value="https://spe-api-dev-67e2xz.azurewebsites.net/api" />
+    <resources>
+      <code path="index.ts" order="1" />
+      <css path="styles.css" order="1" />
+      <!-- Platform-provided libraries: DO NOT bundle -->
+      <platform-library name="React" version="16.14.0" />
+      <platform-library name="Fluent" version="9.46.2" />
+    </resources>
+    <feature-usage>
+      <uses-feature name="WebAPI" required="true" />
+      <uses-feature name="Utility" required="true" />
+    </feature-usage>
+  </control>
+</manifest>

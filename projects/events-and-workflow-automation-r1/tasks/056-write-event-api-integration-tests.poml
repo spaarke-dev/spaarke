@@ -3,7 +3,7 @@
   <metadata>
     <title>Write integration tests for Event API</title>
     <phase>5: API &amp; Event Log</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>055</dependencies>
     <blocks>058</blocks>

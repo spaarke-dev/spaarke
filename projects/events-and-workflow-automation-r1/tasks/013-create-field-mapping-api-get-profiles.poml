@@ -3,7 +3,7 @@
   <metadata>
     <title>Create Field Mapping API - GET profiles</title>
     <phase>2: Field Mapping Framework</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>010</dependencies>
     <blocks>014</blocks>

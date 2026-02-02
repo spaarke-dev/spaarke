@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<manifest>
+  <control namespace="Spaarke.Controls" constructor="RegardingLink" version="1.0.0" display-name-key="Regarding Link" description-key="Displays a clickable navigation link to the regarding (parent) record" control-type="standard">
+    <external-service-usage enabled="false">
+    </external-service-usage>
+    <!-- Regarding Record Type (to determine which entity lookup field to read) -->
+    <property name="regardingRecordType" display-name-key="Regarding Record Type" description-key="The entity type value (0=Project, 1=Matter, etc.)" of-type="OptionSet" usage="bound" required="false" />
+    <!-- Regarding Record ID (lookup value from one of the entity-specific fields) -->
+    <property name="regardingRecordId" display-name-key="Regarding Record ID" description-key="GUID of the regarding record" of-type="SingleLine.Text" usage="bound" required="false" />
+    <!-- Regarding Record Name (for display) -->
+    <property name="regardingRecordName" display-name-key="Regarding Record Name" description-key="Display name of the regarding record" of-type="SingleLine.Text" usage="bound" required="false" />
+    <resources>
+      <code path="index.ts" order="1" />
+      <css path="styles.css" order="1" />
+      <!-- Platform-provided libraries: DO NOT bundle -->
+      <platform-library name="React" version="16.14.0" />
+      <platform-library name="Fluent" version="9.46.2" />
+    </resources>
+    <feature-usage>
+      <uses-feature name="Utility" required="true" />
+    </feature-usage>
+  </control>
+</manifest>

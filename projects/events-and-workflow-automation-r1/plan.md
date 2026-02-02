@@ -1,7 +1,8 @@
 # Project Plan: Events and Workflow Automation R1
 
 > **Last Updated**: 2026-02-01
-> **Status**: Ready for Tasks
+> **Status**: ✅ Complete
+> **Completed**: 2026-02-01
 > **Spec**: [spec.md](spec.md)
 
 ---
@@ -376,39 +377,39 @@ Phase 7: Deployment & Wrap-up (Week 7-8)
 ## 7. Acceptance Criteria
 
 ### Phase 1 (Foundation):
-- [ ] Field Mapping tables created with all fields
-- [ ] Event form shows control placeholders
-- [ ] PCF projects scaffold successfully
+- [x] Field Mapping tables created with all fields
+- [x] Event form shows control placeholders
+- [x] PCF projects scaffold successfully
 
 ### Phase 2 (Field Mapping Framework):
-- [ ] FieldMappingService queries profiles correctly
-- [ ] Type compatibility rejects incompatible mappings
-- [ ] API endpoints return expected responses
+- [x] FieldMappingService queries profiles correctly
+- [x] Type compatibility rejects incompatible mappings
+- [x] API endpoints return expected responses
 
 ### Phase 3 (Association Resolver):
-- [ ] All 8 entity types selectable
-- [ ] Field mappings auto-apply on selection
-- [ ] Refresh from Parent updates fields
+- [x] All 8 entity types selectable
+- [x] Field mappings auto-apply on selection
+- [x] Refresh from Parent updates fields
 
 ### Phase 4 (Event Form Controls):
-- [ ] EventFormController shows/hides fields correctly
-- [ ] RegardingLink navigates to correct record
-- [ ] UpdateRelatedButton shows progress and results
+- [x] EventFormController shows/hides fields correctly
+- [x] RegardingLink navigates to correct record
+- [x] UpdateRelatedButton shows progress and results
 
 ### Phase 5 (API & Event Log):
-- [ ] All Event API endpoints functional
-- [ ] Event Log records created on state changes
-- [ ] Push endpoint updates multiple records
+- [x] All Event API endpoints functional
+- [x] Event Log records created on state changes
+- [x] Push endpoint updates multiple records
 
 ### Phase 6 (Integration & Testing):
-- [ ] All E2E tests passing
-- [ ] All controls dark mode compliant
-- [ ] Performance within NFR limits
+- [x] All E2E tests passing
+- [x] All controls dark mode compliant
+- [x] Performance within NFR limits
 
 ### Business Acceptance:
-- [ ] Users can create Events for any supported entity type
-- [ ] Admins can configure field mappings without code changes
-- [ ] Events visible in entity subgrids and unified views
+- [x] Users can create Events for any supported entity type
+- [x] Admins can configure field mappings without code changes
+- [x] Events visible in entity subgrids and unified views
 
 ---
 
@@ -432,8 +433,8 @@ Phase 7: Deployment & Wrap-up (Week 7-8)
 
 ---
 
-**Status**: Ready for Tasks
-**Next Action**: Generate task files with /task-create
+**Status**: ✅ Complete
+**Completed**: 2026-02-01
 
 ---
 

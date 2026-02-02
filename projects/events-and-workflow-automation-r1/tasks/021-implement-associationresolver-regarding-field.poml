@@ -3,7 +3,7 @@
   <metadata>
     <title>Implement AssociationResolver - regarding field population</title>
     <phase>3: Association Resolver</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>020</dependencies>
     <blocks>022</blocks>
