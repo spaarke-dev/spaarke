@@ -719,7 +719,7 @@ public static class EventEndpoints
 
     /// <summary>
     /// Creates an updated EventDto by merging existing data with update request.
-    /// Used for stub responses when actual Dataverse update is not yet implemented.
+    /// Used to build the response DTO after Dataverse update completes.
     /// </summary>
     private static EventDto CreateUpdatedEventDto(EventDto existing, ApiUpdateEventRequest request)
     {
