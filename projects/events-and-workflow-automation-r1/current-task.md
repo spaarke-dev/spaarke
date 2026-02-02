@@ -1,6 +1,6 @@
 # Current Task: Deployment Complete - Form Configuration Pending
 
-> **Last Updated**: 2026-02-02
+> **Last Updated**: 2026-02-02 (working FieldMappingService deployed)
 > **Status**: Deployment Complete, Form Configuration Pending
 
 ---
@@ -62,9 +62,14 @@ Controls are deployed but need to be added to forms:
 
 | Issue | Impact | Priority |
 |-------|--------|----------|
-| **FieldMappingService is stub** | Auto-apply mappings on record selection doesn't work | High |
-| **@spaarke/ui-components React conflict** | Had to inline types in AssociationResolver | Medium |
+| **@spaarke/ui-components React conflict** | Had to inline types in AssociationResolver; will reconcile in React migration project | Medium |
 | **pcfconfig.json template issue** | Manual fix required for each control | Low |
+
+### ✅ Resolved Issues
+
+| Issue | Resolution | Date |
+|-------|------------|------|
+| **FieldMappingService was stub** | Implemented working service querying Dataverse directly via WebAPI | 2026-02-02 |
 
 **Full details:** [notes/DEPLOYMENT-ISSUES.md](notes/DEPLOYMENT-ISSUES.md)
 
@@ -104,7 +109,7 @@ If resuming this work:
 
 ### Code Fixes
 - `src/client/pcf/AssociationResolver/package.json` - Removed @spaarke/ui-components dependency
-- `src/client/pcf/AssociationResolver/handlers/FieldMappingHandler.ts` - Inlined types + stub service
+- `src/client/pcf/AssociationResolver/handlers/FieldMappingHandler.ts` - Inlined types + **working** FieldMappingService (queries Dataverse directly)
 - `src/client/pcf/FieldMappingAdmin/components/RulesList.tsx` - Fixed Badge icon type
 
 ### Documentation
