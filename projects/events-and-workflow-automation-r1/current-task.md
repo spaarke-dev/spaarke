@@ -1,7 +1,88 @@
-# Current Task: Project Complete
+# Current Task: Deployment Complete - Form Configuration Pending
 
-> **Last Updated**: 2026-02-01
-> **Status**: Complete
+> **Last Updated**: 2026-02-02
+> **Status**: Deployment Complete, Form Configuration Pending
+
+---
+
+## Session Summary (2026-02-02)
+
+This session completed deployment of all components:
+
+### Completed This Session
+
+1. **BFF API Deployment** ✅
+   - Built and published to `publish/bff-api-deployment.zip`
+   - Deployed to Azure App Service via Kudu
+   - All stubs replaced with actual IDataverseService implementations
+
+2. **PCF Control Deployment** ✅
+   - All 5 controls deployed to Dataverse
+   - Workarounds applied for build/dependency issues (see [DEPLOYMENT-ISSUES.md](notes/DEPLOYMENT-ISSUES.md))
+
+3. **Git Push** ✅
+   - Branch: `work/events-and-workflow-automation-r1`
+   - All changes committed and pushed
+
+---
+
+## Deployment Status
+
+| Component | Status | Environment |
+|-----------|--------|-------------|
+| **BFF API** | ✅ Deployed | `https://spe-api-dev-67e2xz.azurewebsites.net` |
+| **Dataverse Tables** | ✅ Deployed | `https://spaarkedev1.crm.dynamics.com` |
+| **AssociationResolver** | ✅ Deployed | PowerAppsToolsTemp_sprk solution |
+| **EventFormController** | ✅ Deployed | PowerAppsToolsTemp_sprk solution |
+| **RegardingLink** | ✅ Deployed | PowerAppsToolsTemp_sprk solution |
+| **UpdateRelatedButton** | ✅ Deployed | PowerAppsToolsTemp_sprk solution |
+| **FieldMappingAdmin** | ✅ Deployed | PowerAppsToolsTemp_sprk solution |
+| **Form Configuration** | 🔲 Pending | Manual steps required |
+
+---
+
+## Outstanding Work
+
+### 🔲 Form Configuration (Manual in Dataverse)
+
+Controls are deployed but need to be added to forms:
+
+1. **Event Main Form** (`sprk_event`):
+   - Add AssociationResolver to Regarding Record Type field
+   - Add EventFormController for dynamic field visibility
+   - Add UpdateRelatedButton for push mappings
+
+2. **Field Mapping Rule Form** (`sprk_fieldmappingrule`):
+   - Add FieldMappingAdmin control
+
+3. **Event View**:
+   - Add RegardingLink to Regarding column
+
+### ⚠️ Known Issues / Technical Debt
+
+| Issue | Impact | Priority |
+|-------|--------|----------|
+| **FieldMappingService is stub** | Auto-apply mappings on record selection doesn't work | High |
+| **@spaarke/ui-components React conflict** | Had to inline types in AssociationResolver | Medium |
+| **pcfconfig.json template issue** | Manual fix required for each control | Low |
+
+**Full details:** [notes/DEPLOYMENT-ISSUES.md](notes/DEPLOYMENT-ISSUES.md)
+
+---
+
+## Quick Recovery
+
+If resuming this work:
+
+1. **Check deployment status:**
+   ```bash
+   pac auth list  # Verify Dataverse connection
+   pac solution list | grep -i "PowerAppsToolsTemp"  # Verify controls deployed
+   ```
+
+2. **Form configuration:** Open Dataverse admin center and configure forms manually
+
+3. **Test functionality:** Create an Event record and verify controls work
 
 ---
 
@@ -10,74 +91,25 @@
 | Field | Value |
 |-------|-------|
 | **Project** | Events and Workflow Automation R1 |
-| **Status** | Complete |
-| **Total Tasks** | 46 |
-| **Completed Tasks** | 46 |
-| **Completion Date** | 2026-02-01 |
+| **Code Status** | Complete (46/46 tasks) |
+| **Deployment Status** | Controls deployed, forms pending |
+| **Branch** | `work/events-and-workflow-automation-r1` |
 
 ---
 
-## Final Status
+## Files Modified This Session
 
-All 46 tasks have been completed. The project delivered:
+### Build Configuration
+- `src/client/pcf/*/pcfconfig.json` - Updated outDir for all 5 controls
 
-1. **Event Management System**:
-   - Event, Event Type, and Event Log entities in Dataverse
-   - BFF API endpoints for CRUD operations
-   - Event state transition tracking
+### Code Fixes
+- `src/client/pcf/AssociationResolver/package.json` - Removed @spaarke/ui-components dependency
+- `src/client/pcf/AssociationResolver/handlers/FieldMappingHandler.ts` - Inlined types + stub service
+- `src/client/pcf/FieldMappingAdmin/components/RulesList.tsx` - Fixed Badge icon type
 
-2. **Association Resolver Framework**:
-   - AssociationResolver PCF control for selecting regarding records
-   - RegardingLink PCF control for displaying clickable links
-   - Dual-field strategy for cross-entity filtering
-
-3. **Field Mapping Framework**:
-   - Field Mapping Profile and Rule entities
-   - FieldMappingService for type compatibility validation
-   - Three sync modes: One-time, Manual Refresh, Update Related
-   - FieldMappingAdmin PCF for configuration
-   - UpdateRelatedButton PCF for push operations
-
-4. **EventFormController PCF**:
-   - Dynamic field visibility based on Event Type
-   - Integration with Association Resolver
-
-5. **Documentation**:
-   - User documentation
-   - Administrator documentation
+### Documentation
+- `projects/events-and-workflow-automation-r1/notes/DEPLOYMENT-ISSUES.md` - NEW: Tracking deployment issues
 
 ---
 
-## Graduation Criteria Met
-
-All 15 graduation criteria have been satisfied:
-
-- [x] SC-01: AssociationResolver PCF allows selection from all 8 entity types
-- [x] SC-02: RegardingLink PCF displays clickable links in All Events view
-- [x] SC-03: EventFormController shows/hides fields based on Event Type
-- [x] SC-04: Entity subgrids show only relevant Events
-- [x] SC-05: Event Log captures state transitions
-- [x] SC-06: Event API endpoints pass integration tests
-- [x] SC-07: Admin can create Field Mapping Profile and Rules
-- [x] SC-08: Field mappings apply on child record creation
-- [x] SC-09: "Refresh from Parent" button re-applies mappings
-- [x] SC-10: "Update Related" button pushes mappings to all children
-- [x] SC-11: Type compatibility validation blocks incompatible rules
-- [x] SC-12: Cascading mappings execute correctly (two-pass)
-- [x] SC-13: Push API returns accurate counts
-- [x] SC-14: All PCF controls support dark mode
-- [x] SC-15: PCF bundles use platform libraries (< 1MB each)
-
----
-
-## Next Steps
-
-The project is complete. Consider:
-
-1. Running `/repo-cleanup projects/events-and-workflow-automation-r1` to clean ephemeral files
-2. Creating a PR if not already done
-3. Moving to the next project
-
----
-
-*Project completed: 2026-02-01*
+*Last updated: 2026-02-02*
