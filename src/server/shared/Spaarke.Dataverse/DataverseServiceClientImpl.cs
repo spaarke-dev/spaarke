@@ -1199,6 +1199,141 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         };
     }
 
+    // ========================================
+    // Event Management Operations (Events and Workflow Automation R1)
+    // Note: These use ServiceClient SDK. For Web API implementation, see DataverseWebApiService.
+    // ========================================
+
+    public Task<(EventEntity[] Items, int TotalCount)> QueryEventsAsync(
+        int? regardingRecordType = null,
+        string? regardingRecordId = null,
+        Guid? eventTypeId = null,
+        int? statusCode = null,
+        int? priority = null,
+        DateTime? dueDateFrom = null,
+        DateTime? dueDateTo = null,
+        int skip = 0,
+        int top = 50,
+        CancellationToken ct = default)
+    {
+        // Stub: Return empty results until sprk_event entity is deployed
+        _logger.LogWarning("QueryEventsAsync called on ServiceClient implementation - use DataverseWebApiService for full implementation");
+        return Task.FromResult((Array.Empty<EventEntity>(), 0));
+    }
+
+    public Task<EventEntity?> GetEventAsync(Guid id, CancellationToken ct = default)
+    {
+        // Stub: Return null until sprk_event entity is deployed
+        _logger.LogWarning("GetEventAsync called on ServiceClient implementation - use DataverseWebApiService for full implementation");
+        return Task.FromResult<EventEntity?>(null);
+    }
+
+    public Task<(Guid Id, DateTime CreatedOn)> CreateEventAsync(CreateEventRequest request, CancellationToken ct = default)
+    {
+        // Stub: Not implemented in ServiceClient version - use DataverseWebApiService
+        throw new NotImplementedException("CreateEventAsync is implemented in DataverseWebApiService. Configure DI to use Web API implementation.");
+    }
+
+    public Task UpdateEventAsync(Guid id, UpdateEventRequest request, CancellationToken ct = default)
+    {
+        // Stub: Not implemented in ServiceClient version - use DataverseWebApiService
+        throw new NotImplementedException("UpdateEventAsync is implemented in DataverseWebApiService. Configure DI to use Web API implementation.");
+    }
+
+    public Task UpdateEventStatusAsync(Guid id, int statusCode, DateTime? completedDate = null, CancellationToken ct = default)
+    {
+        // Stub: Not implemented in ServiceClient version - use DataverseWebApiService
+        throw new NotImplementedException("UpdateEventStatusAsync is implemented in DataverseWebApiService. Configure DI to use Web API implementation.");
+    }
+
+    public Task<EventLogEntity[]> QueryEventLogsAsync(Guid eventId, CancellationToken ct = default)
+    {
+        // Stub: Return empty results until sprk_eventlog entity is deployed
+        _logger.LogWarning("QueryEventLogsAsync called on ServiceClient implementation - use DataverseWebApiService for full implementation");
+        return Task.FromResult(Array.Empty<EventLogEntity>());
+    }
+
+    public Task<Guid> CreateEventLogAsync(Guid eventId, int action, string? description, CancellationToken ct = default)
+    {
+        // Stub: Not implemented in ServiceClient version - use DataverseWebApiService
+        throw new NotImplementedException("CreateEventLogAsync is implemented in DataverseWebApiService. Configure DI to use Web API implementation.");
+    }
+
+    public Task<EventTypeEntity[]> GetEventTypesAsync(bool activeOnly = true, CancellationToken ct = default)
+    {
+        // Stub: Return empty results until sprk_eventtype entity is deployed
+        _logger.LogWarning("GetEventTypesAsync called on ServiceClient implementation - use DataverseWebApiService for full implementation");
+        return Task.FromResult(Array.Empty<EventTypeEntity>());
+    }
+
+    public Task<EventTypeEntity?> GetEventTypeAsync(Guid id, CancellationToken ct = default)
+    {
+        // Stub: Return null until sprk_eventtype entity is deployed
+        _logger.LogWarning("GetEventTypeAsync called on ServiceClient implementation - use DataverseWebApiService for full implementation");
+        return Task.FromResult<EventTypeEntity?>(null);
+    }
+
+    // ========================================
+    // Field Mapping Operations (Events and Workflow Automation R1)
+    // ========================================
+
+    public Task<FieldMappingProfileEntity[]> QueryFieldMappingProfilesAsync(CancellationToken ct = default)
+    {
+        // Stub: Return empty results until sprk_fieldmappingprofile entity is deployed
+        _logger.LogWarning("QueryFieldMappingProfilesAsync called on ServiceClient implementation - use DataverseWebApiService for full implementation");
+        return Task.FromResult(Array.Empty<FieldMappingProfileEntity>());
+    }
+
+    public Task<FieldMappingProfileEntity?> GetFieldMappingProfileAsync(
+        string sourceEntity,
+        string targetEntity,
+        CancellationToken ct = default)
+    {
+        // Stub: Return null until sprk_fieldmappingprofile entity is deployed
+        _logger.LogWarning("GetFieldMappingProfileAsync called on ServiceClient implementation - use DataverseWebApiService for full implementation");
+        return Task.FromResult<FieldMappingProfileEntity?>(null);
+    }
+
+    public Task<FieldMappingRuleEntity[]> GetFieldMappingRulesAsync(
+        Guid profileId,
+        bool activeOnly = true,
+        CancellationToken ct = default)
+    {
+        // Stub: Return empty results until sprk_fieldmappingrule entity is deployed
+        _logger.LogWarning("GetFieldMappingRulesAsync called on ServiceClient implementation - use DataverseWebApiService for full implementation");
+        return Task.FromResult(Array.Empty<FieldMappingRuleEntity>());
+    }
+
+    public Task<Dictionary<string, object?>> RetrieveRecordFieldsAsync(
+        string entityLogicalName,
+        Guid recordId,
+        string[] fields,
+        CancellationToken ct = default)
+    {
+        // Stub: Not implemented in ServiceClient version - use DataverseWebApiService
+        throw new NotImplementedException("RetrieveRecordFieldsAsync is implemented in DataverseWebApiService. Configure DI to use Web API implementation.");
+    }
+
+    public Task<Guid[]> QueryChildRecordIdsAsync(
+        string childEntityLogicalName,
+        string parentLookupField,
+        Guid parentRecordId,
+        CancellationToken ct = default)
+    {
+        // Stub: Not implemented in ServiceClient version - use DataverseWebApiService
+        throw new NotImplementedException("QueryChildRecordIdsAsync is implemented in DataverseWebApiService. Configure DI to use Web API implementation.");
+    }
+
+    public Task UpdateRecordFieldsAsync(
+        string entityLogicalName,
+        Guid recordId,
+        Dictionary<string, object?> fields,
+        CancellationToken ct = default)
+    {
+        // Stub: Not implemented in ServiceClient version - use DataverseWebApiService
+        throw new NotImplementedException("UpdateRecordFieldsAsync is implemented in DataverseWebApiService. Configure DI to use Web API implementation.");
+    }
+
     public void Dispose()
     {
         if (!_disposed)

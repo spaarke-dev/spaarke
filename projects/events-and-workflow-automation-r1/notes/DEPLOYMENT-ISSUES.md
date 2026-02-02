@@ -62,28 +62,28 @@ npm error Conflicting peer dependency: react@18.3.1
 - PCF controls must use React 16 (per ADR-022 - Dataverse platform constraint)
 - These peer dependencies are incompatible
 
-**Workaround Applied (AssociationResolver only):**
+**Solution Applied (AssociationResolver):**
 1. Removed `@spaarke/ui-components` dependency from `package.json`
 2. Inlined required types directly in `FieldMappingHandler.ts`:
    - `SyncMode` enum
    - `IFieldMappingProfile` interface
    - `IFieldMappingRule` interface
    - `IMappingResult` interface
-3. Created stub `FieldMappingService` class that returns null/empty results
+3. Implemented **working** `FieldMappingService` that queries Dataverse directly via WebAPI
 
 **Files Changed:**
 - `src/client/pcf/AssociationResolver/package.json` (removed dependency)
-- `src/client/pcf/AssociationResolver/handlers/FieldMappingHandler.ts` (inlined types + stub)
+- `src/client/pcf/AssociationResolver/handlers/FieldMappingHandler.ts` (inlined types + working service)
 
-**Permanent Fix Needed:**
-- Build a React 16-compatible version of `@spaarke/ui-components` for PCF controls
-- OR maintain separate PCF-specific service implementations
-- Update `@spaarke/ui-components` to support React 16 as a peer dependency
+**Current State:**
+- ✅ FieldMappingService queries `sprk_fieldmappingprofile` and `sprk_fieldmappingrule` directly
+- ✅ Field mapping auto-application on record selection is FUNCTIONAL
+- ✅ "Refresh from Parent" button is FUNCTIONAL
 
-**Impact of Workaround:**
-- FieldMappingService in AssociationResolver is a **STUB** - it always returns `null` for profiles
-- Field mapping auto-application on record selection is NOT FUNCTIONAL
-- Users must manually use "Refresh from Parent" button (which calls BFF API directly)
+**Future Reconciliation (React Migration Project):**
+- When `@spaarke/ui-components` is fixed for React 16, this local implementation can be replaced
+- The local implementation uses the same interfaces, so replacement will be straightforward
+- Both libraries can coexist until migration completes
 
 ---
 
@@ -168,14 +168,14 @@ pac solution import --path "obj/PowerAppsToolsTemp_sprk/bin/Debug/PowerAppsTools
 
 | Item | Description | Impact |
 |------|-------------|--------|
-| **FieldMappingService stub** | AssociationResolver's FieldMappingService is a stub returning null | Field mapping auto-application on record selection does not work |
 | **Form configuration** | PCF controls need to be added to Dataverse forms manually | Controls are deployed but not visible to users |
+| **Redeploy AssociationResolver** | Need to redeploy with working FieldMappingService | Current deployed version has stub |
 
 ### Medium Priority
 
 | Item | Description | Impact |
 |------|-------------|--------|
-| **React 16 shared library** | Build React 16-compatible version of @spaarke/ui-components | Currently using inlined types and stub |
+| **React 16 shared library** | Build React 16-compatible version of @spaarke/ui-components | Currently using local implementation |
 | **PCF template updates** | Update templates with correct pcfconfig.json and @types/xrm | Prevents issues in future PCF projects |
 
 ### Low Priority
@@ -183,6 +183,12 @@ pac solution import --path "obj/PowerAppsToolsTemp_sprk/bin/Debug/PowerAppsTools
 | Item | Description | Impact |
 |------|-------------|--------|
 | **Shared library build** | Fix @spaarke/ui-components build (missing Fluent UI deps) | Library cannot be built locally |
+
+### Resolved Items
+
+| Item | Resolution | Date |
+|------|------------|------|
+| **FieldMappingService stub** | Implemented working service that queries Dataverse directly | 2026-02-02 |
 
 ---
 

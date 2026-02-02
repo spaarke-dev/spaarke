@@ -12,6 +12,8 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api;
 using Sprk.Bff.Api.Api.Admin;
 using Sprk.Bff.Api.Api.Ai;
+using Sprk.Bff.Api.Api.Events;
+using Sprk.Bff.Api.Api.FieldMappings;
 using Sprk.Bff.Api.Api.Office;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Authorization;
@@ -1360,6 +1362,12 @@ app.MapEmailEndpoints();
 
 // Office Add-in endpoints (Outlook and Word integration)
 app.MapOfficeEndpoints();
+
+// Field Mapping endpoints (Events and Workflow Automation R1 project)
+app.MapFieldMappingEndpoints();
+
+// Event endpoints (Events and Workflow Automation R1 project)
+app.MapEventEndpoints();
 
 // Analysis endpoints (if enabled)
 if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&

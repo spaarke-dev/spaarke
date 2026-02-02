@@ -173,4 +173,177 @@ public interface IDataverseService
     /// Get an AttachmentArtifact by ID.
     /// </summary>
     Task<object?> GetAttachmentArtifactAsync(Guid id, CancellationToken ct = default);
+
+    // ========================================
+    // Event Management Operations (Events and Workflow Automation R1)
+    // ========================================
+
+    /// <summary>
+    /// Query events with optional filtering and pagination.
+    /// </summary>
+    /// <param name="regardingRecordType">Filter by regarding record type (0-7)</param>
+    /// <param name="regardingRecordId">Filter by specific regarding record ID</param>
+    /// <param name="eventTypeId">Filter by event type ID</param>
+    /// <param name="statusCode">Filter by status code</param>
+    /// <param name="priority">Filter by priority (0-3)</param>
+    /// <param name="dueDateFrom">Filter events with due date on or after this date</param>
+    /// <param name="dueDateTo">Filter events with due date on or before this date</param>
+    /// <param name="skip">Number of records to skip (for pagination)</param>
+    /// <param name="top">Number of records to return (max 100)</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Tuple of events array and total count</returns>
+    Task<(EventEntity[] Items, int TotalCount)> QueryEventsAsync(
+        int? regardingRecordType = null,
+        string? regardingRecordId = null,
+        Guid? eventTypeId = null,
+        int? statusCode = null,
+        int? priority = null,
+        DateTime? dueDateFrom = null,
+        DateTime? dueDateTo = null,
+        int skip = 0,
+        int top = 50,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Get a single event by ID.
+    /// </summary>
+    /// <param name="id">Event ID</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Event entity or null if not found</returns>
+    Task<EventEntity?> GetEventAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>
+    /// Create a new event.
+    /// </summary>
+    /// <param name="request">Create event request</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Created event ID and timestamp</returns>
+    Task<(Guid Id, DateTime CreatedOn)> CreateEventAsync(CreateEventRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// Update an existing event.
+    /// </summary>
+    /// <param name="id">Event ID</param>
+    /// <param name="request">Update event request</param>
+    /// <param name="ct">Cancellation token</param>
+    Task UpdateEventAsync(Guid id, UpdateEventRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// Update event status (for complete/cancel/delete operations).
+    /// </summary>
+    /// <param name="id">Event ID</param>
+    /// <param name="statusCode">New status code</param>
+    /// <param name="completedDate">Completed date (for completion only)</param>
+    /// <param name="ct">Cancellation token</param>
+    Task UpdateEventStatusAsync(Guid id, int statusCode, DateTime? completedDate = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Query event logs for a specific event.
+    /// </summary>
+    /// <param name="eventId">Event ID</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Array of event log entries ordered by created date descending</returns>
+    Task<EventLogEntity[]> QueryEventLogsAsync(Guid eventId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Create an event log entry.
+    /// </summary>
+    /// <param name="eventId">Event ID</param>
+    /// <param name="action">Action type (Created, Updated, Completed, Cancelled, Deleted)</param>
+    /// <param name="description">Description of the action</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Created event log ID</returns>
+    Task<Guid> CreateEventLogAsync(Guid eventId, int action, string? description, CancellationToken ct = default);
+
+    /// <summary>
+    /// Get all event types.
+    /// </summary>
+    /// <param name="activeOnly">Return only active event types</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Array of event type entities</returns>
+    Task<EventTypeEntity[]> GetEventTypesAsync(bool activeOnly = true, CancellationToken ct = default);
+
+    /// <summary>
+    /// Get a single event type by ID.
+    /// </summary>
+    /// <param name="id">Event type ID</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Event type entity or null if not found</returns>
+    Task<EventTypeEntity?> GetEventTypeAsync(Guid id, CancellationToken ct = default);
+
+    // ========================================
+    // Field Mapping Operations (Events and Workflow Automation R1)
+    // ========================================
+
+    /// <summary>
+    /// Query all active field mapping profiles.
+    /// </summary>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Array of field mapping profiles</returns>
+    Task<FieldMappingProfileEntity[]> QueryFieldMappingProfilesAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Get a field mapping profile by source and target entity pair.
+    /// </summary>
+    /// <param name="sourceEntity">Source entity logical name</param>
+    /// <param name="targetEntity">Target entity logical name</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Profile with rules or null if not found</returns>
+    Task<FieldMappingProfileEntity?> GetFieldMappingProfileAsync(
+        string sourceEntity,
+        string targetEntity,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Get field mapping rules for a profile.
+    /// </summary>
+    /// <param name="profileId">Profile ID</param>
+    /// <param name="activeOnly">Return only active rules</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Array of mapping rules ordered by execution order</returns>
+    Task<FieldMappingRuleEntity[]> GetFieldMappingRulesAsync(
+        Guid profileId,
+        bool activeOnly = true,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Retrieve field values from a source record.
+    /// </summary>
+    /// <param name="entityLogicalName">Entity logical name</param>
+    /// <param name="recordId">Record ID</param>
+    /// <param name="fields">Field names to retrieve</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Dictionary of field name to value</returns>
+    Task<Dictionary<string, object?>> RetrieveRecordFieldsAsync(
+        string entityLogicalName,
+        Guid recordId,
+        string[] fields,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Query child records for push mapping operation.
+    /// </summary>
+    /// <param name="childEntityLogicalName">Child entity logical name</param>
+    /// <param name="parentLookupField">Parent lookup field name</param>
+    /// <param name="parentRecordId">Parent record ID</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Array of child record IDs</returns>
+    Task<Guid[]> QueryChildRecordIdsAsync(
+        string childEntityLogicalName,
+        string parentLookupField,
+        Guid parentRecordId,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Update multiple fields on a record.
+    /// </summary>
+    /// <param name="entityLogicalName">Entity logical name</param>
+    /// <param name="recordId">Record ID</param>
+    /// <param name="fields">Dictionary of field name to value</param>
+    /// <param name="ct">Cancellation token</param>
+    Task UpdateRecordFieldsAsync(
+        string entityLogicalName,
+        Guid recordId,
+        Dictionary<string, object?> fields,
+        CancellationToken ct = default);
 }

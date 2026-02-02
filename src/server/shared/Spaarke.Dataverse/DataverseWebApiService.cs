@@ -955,9 +955,754 @@ public class DataverseWebApiService : IDataverseService
         throw new NotImplementedException("Office add-in operations require DataverseServiceClientImpl");
     }
 
+    // ========================================
+    // Event Management Operations (Events and Workflow Automation R1)
+    // ========================================
+
+    public async Task<(EventEntity[] Items, int TotalCount)> QueryEventsAsync(
+        int? regardingRecordType = null,
+        string? regardingRecordId = null,
+        Guid? eventTypeId = null,
+        int? statusCode = null,
+        int? priority = null,
+        DateTime? dueDateFrom = null,
+        DateTime? dueDateTo = null,
+        int skip = 0,
+        int top = 50,
+        CancellationToken ct = default)
+    {
+        await EnsureAuthenticatedAsync(ct);
+
+        // Build OData query
+        var filters = new List<string>();
+
+        if (regardingRecordType.HasValue)
+            filters.Add($"sprk_regardingrecordtype eq {regardingRecordType.Value}");
+
+        if (!string.IsNullOrEmpty(regardingRecordId))
+            filters.Add($"sprk_regardingrecordid eq '{regardingRecordId}'");
+
+        if (eventTypeId.HasValue)
+            filters.Add($"_sprk_eventtype_ref_value eq {eventTypeId.Value}");
+
+        if (statusCode.HasValue)
+            filters.Add($"statuscode eq {statusCode.Value}");
+
+        if (priority.HasValue)
+            filters.Add($"sprk_priority eq {priority.Value}");
+
+        if (dueDateFrom.HasValue)
+            filters.Add($"sprk_duedate ge {dueDateFrom.Value:yyyy-MM-dd}");
+
+        if (dueDateTo.HasValue)
+            filters.Add($"sprk_duedate le {dueDateTo.Value:yyyy-MM-dd}");
+
+        var filterQuery = filters.Count > 0 ? $"$filter={string.Join(" and ", filters)}&" : "";
+        var url = $"sprk_events?{filterQuery}$select=sprk_eventid,sprk_eventname,sprk_description,_sprk_eventtype_ref_value,sprk_regardingrecordid,sprk_regardingrecordname,sprk_regardingrecordtype,sprk_basedate,sprk_duedate,sprk_completeddate,statecode,statuscode,sprk_priority,sprk_source,createdon,modifiedon&$expand=sprk_eventtype_ref($select=sprk_name)&$orderby=sprk_duedate asc,createdon desc&$skip={skip}&$top={top}&$count=true";
+
+        _logger.LogDebug("Querying events: {Url}", url);
+
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Add("Prefer", "odata.include-annotations=\"OData.Community.Display.V1.FormattedValue\"");
+
+            var response = await _httpClient.SendAsync(request, ct);
+            response.EnsureSuccessStatusCode();
+
+            var data = await response.Content.ReadFromJsonAsync<ODataCountResponse>(cancellationToken: ct);
+            if (data == null)
+                return (Array.Empty<EventEntity>(), 0);
+
+            var events = data.Value.Select(MapToEventEntity).ToArray();
+            return (events, data.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error querying events");
+            throw;
+        }
+    }
+
+    public async Task<EventEntity?> GetEventAsync(Guid id, CancellationToken ct = default)
+    {
+        await EnsureAuthenticatedAsync(ct);
+
+        var url = $"sprk_events({id})?$select=sprk_eventid,sprk_eventname,sprk_description,_sprk_eventtype_ref_value,sprk_regardingrecordid,sprk_regardingrecordname,sprk_regardingrecordtype,_sprk_regardingaccount_value,_sprk_regardinganalysis_value,_sprk_regardingcontact_value,_sprk_regardinginvoice_value,_sprk_regardingmatter_value,_sprk_regardingproject_value,_sprk_regardingbudget_value,_sprk_regardingworkassignment_value,sprk_basedate,sprk_duedate,sprk_completeddate,statecode,statuscode,sprk_priority,sprk_source,sprk_remindat,_sprk_relatedevent_value,sprk_relatedeventtype,sprk_relatedeventoffsettype,createdon,modifiedon&$expand=sprk_eventtype_ref($select=sprk_name)";
+
+        _logger.LogDebug("Getting event: {Id}", id);
+
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Add("Prefer", "odata.include-annotations=\"OData.Community.Display.V1.FormattedValue\"");
+
+            var response = await _httpClient.SendAsync(request, ct);
+
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                _logger.LogDebug("Event not found: {Id}", id);
+                return null;
+            }
+
+            response.EnsureSuccessStatusCode();
+
+            var data = await response.Content.ReadFromJsonAsync<Dictionary<string, JsonElement>>(cancellationToken: ct);
+            if (data == null) return null;
+
+            return MapToEventEntity(data);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting event {Id}", id);
+            throw;
+        }
+    }
+
+    public async Task<(Guid Id, DateTime CreatedOn)> CreateEventAsync(CreateEventRequest request, CancellationToken ct = default)
+    {
+        await EnsureAuthenticatedAsync(ct);
+
+        var payload = new Dictionary<string, object?>
+        {
+            ["sprk_eventname"] = request.Name,
+            ["sprk_description"] = request.Description,
+            ["statuscode"] = 3, // Open
+            ["statecode"] = 0,  // Active
+            ["sprk_source"] = 0 // User
+        };
+
+        if (request.EventTypeId.HasValue)
+            payload["sprk_eventtype_ref@odata.bind"] = $"/sprk_eventtypes({request.EventTypeId.Value})";
+
+        if (request.BaseDate.HasValue)
+            payload["sprk_basedate"] = request.BaseDate.Value.ToString("yyyy-MM-dd");
+
+        if (request.DueDate.HasValue)
+            payload["sprk_duedate"] = request.DueDate.Value.ToString("yyyy-MM-dd");
+
+        if (request.Priority.HasValue)
+            payload["sprk_priority"] = request.Priority.Value;
+
+        if (request.RegardingRecordType.HasValue)
+        {
+            payload["sprk_regardingrecordtype"] = request.RegardingRecordType.Value;
+            payload["sprk_regardingrecordid"] = request.RegardingRecordId;
+            payload["sprk_regardingrecordname"] = request.RegardingRecordName;
+
+            // Set entity-specific lookup based on record type
+            var lookupField = RegardingRecordType.GetLookupFieldName(request.RegardingRecordType.Value);
+            var entityName = RegardingRecordType.GetEntityLogicalName(request.RegardingRecordType.Value);
+            if (lookupField != null && entityName != null && !string.IsNullOrEmpty(request.RegardingRecordId))
+            {
+                payload[$"{lookupField}@odata.bind"] = $"/{entityName}s({request.RegardingRecordId})";
+            }
+        }
+
+        _logger.LogInformation("Creating event: {Name}", request.Name);
+
+        var response = await _httpClient.PostAsJsonAsync("sprk_events", payload, ct);
+        response.EnsureSuccessStatusCode();
+
+        var entityIdHeader = response.Headers.GetValues("OData-EntityId").FirstOrDefault();
+        if (entityIdHeader != null)
+        {
+            var idString = entityIdHeader.Split('(', ')')[1];
+            var id = Guid.Parse(idString);
+            var createdOn = DateTime.UtcNow;
+
+            _logger.LogInformation("Event created: {Id}", id);
+            return (id, createdOn);
+        }
+
+        throw new InvalidOperationException("Failed to extract entity ID from create response");
+    }
+
+    public async Task UpdateEventAsync(Guid id, UpdateEventRequest request, CancellationToken ct = default)
+    {
+        await EnsureAuthenticatedAsync(ct);
+
+        var payload = new Dictionary<string, object?>();
+
+        if (request.Name != null)
+            payload["sprk_eventname"] = request.Name;
+
+        if (request.Description != null)
+            payload["sprk_description"] = request.Description;
+
+        if (request.EventTypeId.HasValue)
+            payload["sprk_eventtype_ref@odata.bind"] = $"/sprk_eventtypes({request.EventTypeId.Value})";
+
+        if (request.BaseDate.HasValue)
+            payload["sprk_basedate"] = request.BaseDate.Value.ToString("yyyy-MM-dd");
+
+        if (request.DueDate.HasValue)
+            payload["sprk_duedate"] = request.DueDate.Value.ToString("yyyy-MM-dd");
+
+        if (request.Priority.HasValue)
+            payload["sprk_priority"] = request.Priority.Value;
+
+        if (request.StatusCode.HasValue)
+            payload["statuscode"] = request.StatusCode.Value;
+
+        if (request.RegardingRecordType.HasValue)
+        {
+            payload["sprk_regardingrecordtype"] = request.RegardingRecordType.Value;
+            payload["sprk_regardingrecordid"] = request.RegardingRecordId;
+            payload["sprk_regardingrecordname"] = request.RegardingRecordName;
+        }
+
+        if (payload.Count == 0)
+        {
+            _logger.LogDebug("No fields to update for event {Id}", id);
+            return;
+        }
+
+        _logger.LogInformation("Updating event: {Id}", id);
+
+        var response = await _httpClient.PatchAsJsonAsync($"sprk_events({id})", payload, ct);
+        response.EnsureSuccessStatusCode();
+
+        _logger.LogDebug("Event updated: {Id}", id);
+    }
+
+    public async Task UpdateEventStatusAsync(Guid id, int statusCode, DateTime? completedDate = null, CancellationToken ct = default)
+    {
+        await EnsureAuthenticatedAsync(ct);
+
+        var payload = new Dictionary<string, object?>
+        {
+            ["statuscode"] = statusCode
+        };
+
+        // Set statecode based on statuscode
+        // Draft(1), Planned(2), Open(3), OnHold(4) = Active(0)
+        // Completed(5), Cancelled(6), Deleted(7) = Inactive(1)
+        payload["statecode"] = statusCode >= 5 ? 1 : 0;
+
+        if (completedDate.HasValue)
+            payload["sprk_completeddate"] = completedDate.Value.ToString("yyyy-MM-dd");
+
+        _logger.LogInformation("Updating event status: {Id} -> {StatusCode}", id, statusCode);
+
+        var response = await _httpClient.PatchAsJsonAsync($"sprk_events({id})", payload, ct);
+        response.EnsureSuccessStatusCode();
+
+        _logger.LogDebug("Event status updated: {Id}", id);
+    }
+
+    public async Task<EventLogEntity[]> QueryEventLogsAsync(Guid eventId, CancellationToken ct = default)
+    {
+        await EnsureAuthenticatedAsync(ct);
+
+        var url = $"sprk_eventlogs?$filter=_sprk_event_value eq {eventId}&$select=sprk_eventlogid,sprk_eventlogname,_sprk_event_value,sprk_action,sprk_description,createdon,_createdby_value&$orderby=createdon desc";
+
+        _logger.LogDebug("Querying event logs for event: {EventId}", eventId);
+
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Add("Prefer", "odata.include-annotations=\"OData.Community.Display.V1.FormattedValue\"");
+
+            var response = await _httpClient.SendAsync(request, ct);
+            response.EnsureSuccessStatusCode();
+
+            var data = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
+            if (data == null)
+                return Array.Empty<EventLogEntity>();
+
+            return data.Value.Select(MapToEventLogEntity).ToArray();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error querying event logs for event {EventId}", eventId);
+            throw;
+        }
+    }
+
+    public async Task<Guid> CreateEventLogAsync(Guid eventId, int action, string? description, CancellationToken ct = default)
+    {
+        await EnsureAuthenticatedAsync(ct);
+
+        var logName = $"Event Log - {EventLogAction.GetDisplayName(action)} - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}";
+
+        var payload = new Dictionary<string, object?>
+        {
+            ["sprk_eventlogname"] = logName,
+            ["sprk_event@odata.bind"] = $"/sprk_events({eventId})",
+            ["sprk_action"] = action,
+            ["sprk_description"] = description
+        };
+
+        _logger.LogInformation("Creating event log for event {EventId}: {Action}", eventId, EventLogAction.GetDisplayName(action));
+
+        var response = await _httpClient.PostAsJsonAsync("sprk_eventlogs", payload, ct);
+        response.EnsureSuccessStatusCode();
+
+        var entityIdHeader = response.Headers.GetValues("OData-EntityId").FirstOrDefault();
+        if (entityIdHeader != null)
+        {
+            var idString = entityIdHeader.Split('(', ')')[1];
+            var id = Guid.Parse(idString);
+
+            _logger.LogDebug("Event log created: {Id}", id);
+            return id;
+        }
+
+        throw new InvalidOperationException("Failed to extract entity ID from create response");
+    }
+
+    public async Task<EventTypeEntity[]> GetEventTypesAsync(bool activeOnly = true, CancellationToken ct = default)
+    {
+        await EnsureAuthenticatedAsync(ct);
+
+        var filterQuery = activeOnly ? "$filter=statecode eq 0&" : "";
+        var url = $"sprk_eventtypes?{filterQuery}$select=sprk_eventtypeid,sprk_name,sprk_eventcode,sprk_description,statecode,sprk_requiresduedate,sprk_requiresbasedate&$orderby=sprk_name asc";
+
+        _logger.LogDebug("Getting event types (activeOnly={ActiveOnly})", activeOnly);
+
+        try
+        {
+            var response = await _httpClient.GetAsync(url, ct);
+            response.EnsureSuccessStatusCode();
+
+            var data = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
+            if (data == null)
+                return Array.Empty<EventTypeEntity>();
+
+            return data.Value.Select(MapToEventTypeEntity).ToArray();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting event types");
+            throw;
+        }
+    }
+
+    public async Task<EventTypeEntity?> GetEventTypeAsync(Guid id, CancellationToken ct = default)
+    {
+        await EnsureAuthenticatedAsync(ct);
+
+        var url = $"sprk_eventtypes({id})?$select=sprk_eventtypeid,sprk_name,sprk_eventcode,sprk_description,statecode,sprk_requiresduedate,sprk_requiresbasedate";
+
+        _logger.LogDebug("Getting event type: {Id}", id);
+
+        try
+        {
+            var response = await _httpClient.GetAsync(url, ct);
+
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                _logger.LogDebug("Event type not found: {Id}", id);
+                return null;
+            }
+
+            response.EnsureSuccessStatusCode();
+
+            var data = await response.Content.ReadFromJsonAsync<Dictionary<string, JsonElement>>(cancellationToken: ct);
+            if (data == null) return null;
+
+            return MapToEventTypeEntity(data);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting event type {Id}", id);
+            throw;
+        }
+    }
+
+    // ========================================
+    // Field Mapping Operations (Events and Workflow Automation R1)
+    // ========================================
+
+    public async Task<FieldMappingProfileEntity[]> QueryFieldMappingProfilesAsync(CancellationToken ct = default)
+    {
+        await EnsureAuthenticatedAsync(ct);
+
+        var url = "sprk_fieldmappingprofiles?$filter=sprk_isactive eq true&$select=sprk_fieldmappingprofileid,sprk_name,sprk_sourceentity,sprk_targetentity,sprk_mappingdirection,sprk_syncmode,sprk_isactive,sprk_description&$orderby=sprk_name asc";
+
+        _logger.LogDebug("Querying field mapping profiles");
+
+        try
+        {
+            var response = await _httpClient.GetAsync(url, ct);
+            response.EnsureSuccessStatusCode();
+
+            var data = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
+            if (data == null)
+                return Array.Empty<FieldMappingProfileEntity>();
+
+            return data.Value.Select(MapToFieldMappingProfileEntity).ToArray();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error querying field mapping profiles");
+            throw;
+        }
+    }
+
+    public async Task<FieldMappingProfileEntity?> GetFieldMappingProfileAsync(
+        string sourceEntity,
+        string targetEntity,
+        CancellationToken ct = default)
+    {
+        await EnsureAuthenticatedAsync(ct);
+
+        var url = $"sprk_fieldmappingprofiles?$filter=sprk_sourceentity eq '{sourceEntity}' and sprk_targetentity eq '{targetEntity}' and sprk_isactive eq true&$select=sprk_fieldmappingprofileid,sprk_name,sprk_sourceentity,sprk_targetentity,sprk_mappingdirection,sprk_syncmode,sprk_isactive,sprk_description";
+
+        _logger.LogDebug("Getting field mapping profile: {Source} -> {Target}", sourceEntity, targetEntity);
+
+        try
+        {
+            var response = await _httpClient.GetAsync(url, ct);
+            response.EnsureSuccessStatusCode();
+
+            var data = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
+            if (data == null || data.Value.Count == 0)
+                return null;
+
+            var profile = MapToFieldMappingProfileEntity(data.Value[0]);
+
+            // Load rules for this profile
+            profile.Rules = (await GetFieldMappingRulesAsync(profile.Id, true, ct)).ToList();
+
+            return profile;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting field mapping profile for {Source} -> {Target}", sourceEntity, targetEntity);
+            throw;
+        }
+    }
+
+    public async Task<FieldMappingRuleEntity[]> GetFieldMappingRulesAsync(
+        Guid profileId,
+        bool activeOnly = true,
+        CancellationToken ct = default)
+    {
+        await EnsureAuthenticatedAsync(ct);
+
+        var filterQuery = activeOnly
+            ? $"$filter=_sprk_fieldmappingprofile_value eq {profileId} and sprk_isactive eq true&"
+            : $"$filter=_sprk_fieldmappingprofile_value eq {profileId}&";
+
+        var url = $"sprk_fieldmappingrules?{filterQuery}$select=sprk_fieldmappingruleid,sprk_name,_sprk_fieldmappingprofile_value,sprk_sourcefield,sprk_sourcefieldtype,sprk_targetfield,sprk_targetfieldtype,sprk_compatibilitymode,sprk_isrequired,sprk_defaultvalue,sprk_iscascadingsource,sprk_executionorder,sprk_isactive&$orderby=sprk_executionorder asc";
+
+        _logger.LogDebug("Getting field mapping rules for profile: {ProfileId}", profileId);
+
+        try
+        {
+            var response = await _httpClient.GetAsync(url, ct);
+            response.EnsureSuccessStatusCode();
+
+            var data = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
+            if (data == null)
+                return Array.Empty<FieldMappingRuleEntity>();
+
+            return data.Value.Select(MapToFieldMappingRuleEntity).ToArray();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting field mapping rules for profile {ProfileId}", profileId);
+            throw;
+        }
+    }
+
+    public async Task<Dictionary<string, object?>> RetrieveRecordFieldsAsync(
+        string entityLogicalName,
+        Guid recordId,
+        string[] fields,
+        CancellationToken ct = default)
+    {
+        await EnsureAuthenticatedAsync(ct);
+
+        var entitySetName = await GetEntitySetNameAsync(entityLogicalName, ct);
+        var selectFields = string.Join(",", fields);
+        var url = $"{entitySetName}({recordId})?$select={selectFields}";
+
+        _logger.LogDebug("Retrieving record fields: {Entity}({Id})", entityLogicalName, recordId);
+
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Add("Prefer", "odata.include-annotations=\"OData.Community.Display.V1.FormattedValue\"");
+
+            var response = await _httpClient.SendAsync(request, ct);
+
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                _logger.LogWarning("Record not found: {Entity}({Id})", entityLogicalName, recordId);
+                return new Dictionary<string, object?>();
+            }
+
+            response.EnsureSuccessStatusCode();
+
+            var data = await response.Content.ReadFromJsonAsync<Dictionary<string, JsonElement>>(cancellationToken: ct);
+            if (data == null)
+                return new Dictionary<string, object?>();
+
+            var result = new Dictionary<string, object?>();
+            foreach (var field in fields)
+            {
+                if (data.TryGetValue(field, out var value))
+                {
+                    result[field] = ConvertJsonElementToObject(value);
+                }
+                else
+                {
+                    result[field] = null;
+                }
+            }
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving record fields: {Entity}({Id})", entityLogicalName, recordId);
+            throw;
+        }
+    }
+
+    public async Task<Guid[]> QueryChildRecordIdsAsync(
+        string childEntityLogicalName,
+        string parentLookupField,
+        Guid parentRecordId,
+        CancellationToken ct = default)
+    {
+        await EnsureAuthenticatedAsync(ct);
+
+        var entitySetName = await GetEntitySetNameAsync(childEntityLogicalName, ct);
+        var primaryKey = $"{childEntityLogicalName}id";
+        var url = $"{entitySetName}?$filter=_{parentLookupField}_value eq {parentRecordId}&$select={primaryKey}";
+
+        _logger.LogDebug("Querying child records: {Entity} by {LookupField} = {ParentId}", childEntityLogicalName, parentLookupField, parentRecordId);
+
+        try
+        {
+            var response = await _httpClient.GetAsync(url, ct);
+            response.EnsureSuccessStatusCode();
+
+            var data = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
+            if (data == null)
+                return Array.Empty<Guid>();
+
+            return data.Value
+                .Where(d => d.TryGetValue(primaryKey, out _))
+                .Select(d => Guid.Parse(d[primaryKey].GetString()!))
+                .ToArray();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error querying child records: {Entity} by {LookupField}", childEntityLogicalName, parentLookupField);
+            throw;
+        }
+    }
+
+    public async Task UpdateRecordFieldsAsync(
+        string entityLogicalName,
+        Guid recordId,
+        Dictionary<string, object?> fields,
+        CancellationToken ct = default)
+    {
+        await EnsureAuthenticatedAsync(ct);
+
+        if (fields.Count == 0)
+        {
+            _logger.LogDebug("No fields to update for {Entity}({Id})", entityLogicalName, recordId);
+            return;
+        }
+
+        var entitySetName = await GetEntitySetNameAsync(entityLogicalName, ct);
+
+        _logger.LogInformation("Updating record fields: {Entity}({Id}), {FieldCount} fields", entityLogicalName, recordId, fields.Count);
+
+        var response = await _httpClient.PatchAsJsonAsync($"{entitySetName}({recordId})", fields, ct);
+        response.EnsureSuccessStatusCode();
+
+        _logger.LogDebug("Record updated: {Entity}({Id})", entityLogicalName, recordId);
+    }
+
+    // ========================================
+    // Entity Mapping Helpers
+    // ========================================
+
+    private EventEntity MapToEventEntity(Dictionary<string, JsonElement> data)
+    {
+        return new EventEntity
+        {
+            Id = data.TryGetValue("sprk_eventid", out var id) && id.ValueKind != JsonValueKind.Null
+                ? Guid.Parse(id.GetString()!) : Guid.Empty,
+            Name = data.TryGetValue("sprk_eventname", out var name) && name.ValueKind != JsonValueKind.Null
+                ? name.GetString()! : string.Empty,
+            Description = data.TryGetValue("sprk_description", out var desc) && desc.ValueKind != JsonValueKind.Null
+                ? desc.GetString() : null,
+            EventTypeId = data.TryGetValue("_sprk_eventtype_ref_value", out var etId) && etId.ValueKind != JsonValueKind.Null
+                ? Guid.Parse(etId.GetString()!) : null,
+            EventTypeName = data.TryGetValue("sprk_eventtype_ref", out var et) && et.ValueKind == JsonValueKind.Object
+                ? et.GetProperty("sprk_name").GetString() : null,
+            StateCode = data.TryGetValue("statecode", out var state) ? state.GetInt32() : 0,
+            StatusCode = data.TryGetValue("statuscode", out var status) ? status.GetInt32() : 1,
+            BaseDate = data.TryGetValue("sprk_basedate", out var bd) && bd.ValueKind != JsonValueKind.Null
+                ? DateTime.Parse(bd.GetString()!) : null,
+            DueDate = data.TryGetValue("sprk_duedate", out var dd) && dd.ValueKind != JsonValueKind.Null
+                ? DateTime.Parse(dd.GetString()!) : null,
+            CompletedDate = data.TryGetValue("sprk_completeddate", out var cd) && cd.ValueKind != JsonValueKind.Null
+                ? DateTime.Parse(cd.GetString()!) : null,
+            Priority = data.TryGetValue("sprk_priority", out var pri) && pri.ValueKind != JsonValueKind.Null
+                ? pri.GetInt32() : null,
+            Source = data.TryGetValue("sprk_source", out var src) && src.ValueKind != JsonValueKind.Null
+                ? src.GetInt32() : null,
+            RemindAt = data.TryGetValue("sprk_remindat", out var ra) && ra.ValueKind != JsonValueKind.Null
+                ? DateTime.Parse(ra.GetString()!) : null,
+            RelatedEventId = data.TryGetValue("_sprk_relatedevent_value", out var reId) && reId.ValueKind != JsonValueKind.Null
+                ? Guid.Parse(reId.GetString()!) : null,
+            RelatedEventType = data.TryGetValue("sprk_relatedeventtype", out var ret) && ret.ValueKind != JsonValueKind.Null
+                ? ret.GetInt32() : null,
+            RelatedEventOffsetType = data.TryGetValue("sprk_relatedeventoffsettype", out var reot) && reot.ValueKind != JsonValueKind.Null
+                ? reot.GetInt32() : null,
+            RegardingRecordId = data.TryGetValue("sprk_regardingrecordid", out var rrid) && rrid.ValueKind != JsonValueKind.Null
+                ? rrid.GetString() : null,
+            RegardingRecordName = data.TryGetValue("sprk_regardingrecordname", out var rrn) && rrn.ValueKind != JsonValueKind.Null
+                ? rrn.GetString() : null,
+            RegardingRecordType = data.TryGetValue("sprk_regardingrecordtype", out var rrt) && rrt.ValueKind != JsonValueKind.Null
+                ? rrt.GetInt32() : null,
+            RegardingAccountId = data.TryGetValue("_sprk_regardingaccount_value", out var racc) && racc.ValueKind != JsonValueKind.Null
+                ? Guid.Parse(racc.GetString()!) : null,
+            RegardingAnalysisId = data.TryGetValue("_sprk_regardinganalysis_value", out var rana) && rana.ValueKind != JsonValueKind.Null
+                ? Guid.Parse(rana.GetString()!) : null,
+            RegardingContactId = data.TryGetValue("_sprk_regardingcontact_value", out var rcon) && rcon.ValueKind != JsonValueKind.Null
+                ? Guid.Parse(rcon.GetString()!) : null,
+            RegardingInvoiceId = data.TryGetValue("_sprk_regardinginvoice_value", out var rinv) && rinv.ValueKind != JsonValueKind.Null
+                ? Guid.Parse(rinv.GetString()!) : null,
+            RegardingMatterId = data.TryGetValue("_sprk_regardingmatter_value", out var rmat) && rmat.ValueKind != JsonValueKind.Null
+                ? Guid.Parse(rmat.GetString()!) : null,
+            RegardingProjectId = data.TryGetValue("_sprk_regardingproject_value", out var rproj) && rproj.ValueKind != JsonValueKind.Null
+                ? Guid.Parse(rproj.GetString()!) : null,
+            RegardingBudgetId = data.TryGetValue("_sprk_regardingbudget_value", out var rbud) && rbud.ValueKind != JsonValueKind.Null
+                ? Guid.Parse(rbud.GetString()!) : null,
+            RegardingWorkAssignmentId = data.TryGetValue("_sprk_regardingworkassignment_value", out var rwa) && rwa.ValueKind != JsonValueKind.Null
+                ? Guid.Parse(rwa.GetString()!) : null,
+            CreatedOn = data.TryGetValue("createdon", out var created) && created.ValueKind != JsonValueKind.Null
+                ? created.GetDateTime() : DateTime.MinValue,
+            ModifiedOn = data.TryGetValue("modifiedon", out var modified) && modified.ValueKind != JsonValueKind.Null
+                ? modified.GetDateTime() : DateTime.MinValue
+        };
+    }
+
+    private EventLogEntity MapToEventLogEntity(Dictionary<string, JsonElement> data)
+    {
+        return new EventLogEntity
+        {
+            Id = data.TryGetValue("sprk_eventlogid", out var id) && id.ValueKind != JsonValueKind.Null
+                ? Guid.Parse(id.GetString()!) : Guid.Empty,
+            Name = data.TryGetValue("sprk_eventlogname", out var name) && name.ValueKind != JsonValueKind.Null
+                ? name.GetString() : null,
+            EventId = data.TryGetValue("_sprk_event_value", out var evId) && evId.ValueKind != JsonValueKind.Null
+                ? Guid.Parse(evId.GetString()!) : Guid.Empty,
+            Action = data.TryGetValue("sprk_action", out var action) ? action.GetInt32() : 0,
+            Description = data.TryGetValue("sprk_description", out var desc) && desc.ValueKind != JsonValueKind.Null
+                ? desc.GetString() : null,
+            CreatedOn = data.TryGetValue("createdon", out var created) && created.ValueKind != JsonValueKind.Null
+                ? created.GetDateTime() : DateTime.MinValue,
+            CreatedById = data.TryGetValue("_createdby_value", out var cbId) && cbId.ValueKind != JsonValueKind.Null
+                ? Guid.Parse(cbId.GetString()!) : null,
+            CreatedByName = data.TryGetValue("_createdby_value@OData.Community.Display.V1.FormattedValue", out var cbName) && cbName.ValueKind != JsonValueKind.Null
+                ? cbName.GetString() : null
+        };
+    }
+
+    private EventTypeEntity MapToEventTypeEntity(Dictionary<string, JsonElement> data)
+    {
+        return new EventTypeEntity
+        {
+            Id = data.TryGetValue("sprk_eventtypeid", out var id) && id.ValueKind != JsonValueKind.Null
+                ? Guid.Parse(id.GetString()!) : Guid.Empty,
+            Name = data.TryGetValue("sprk_name", out var name) && name.ValueKind != JsonValueKind.Null
+                ? name.GetString()! : string.Empty,
+            EventCode = data.TryGetValue("sprk_eventcode", out var code) && code.ValueKind != JsonValueKind.Null
+                ? code.GetString() : null,
+            Description = data.TryGetValue("sprk_description", out var desc) && desc.ValueKind != JsonValueKind.Null
+                ? desc.GetString() : null,
+            StateCode = data.TryGetValue("statecode", out var state) ? state.GetInt32() : 0,
+            RequiresDueDate = data.TryGetValue("sprk_requiresduedate", out var rdd) && rdd.ValueKind != JsonValueKind.Null
+                ? rdd.GetInt32() : null,
+            RequiresBaseDate = data.TryGetValue("sprk_requiresbasedate", out var rbd) && rbd.ValueKind != JsonValueKind.Null
+                ? rbd.GetInt32() : null
+        };
+    }
+
+    private FieldMappingProfileEntity MapToFieldMappingProfileEntity(Dictionary<string, JsonElement> data)
+    {
+        return new FieldMappingProfileEntity
+        {
+            Id = data.TryGetValue("sprk_fieldmappingprofileid", out var id) && id.ValueKind != JsonValueKind.Null
+                ? Guid.Parse(id.GetString()!) : Guid.Empty,
+            Name = data.TryGetValue("sprk_name", out var name) && name.ValueKind != JsonValueKind.Null
+                ? name.GetString()! : string.Empty,
+            SourceEntity = data.TryGetValue("sprk_sourceentity", out var src) && src.ValueKind != JsonValueKind.Null
+                ? src.GetString()! : string.Empty,
+            TargetEntity = data.TryGetValue("sprk_targetentity", out var tgt) && tgt.ValueKind != JsonValueKind.Null
+                ? tgt.GetString()! : string.Empty,
+            MappingDirection = data.TryGetValue("sprk_mappingdirection", out var dir) ? dir.GetInt32() : 0,
+            SyncMode = data.TryGetValue("sprk_syncmode", out var mode) ? mode.GetInt32() : 0,
+            IsActive = data.TryGetValue("sprk_isactive", out var active) && active.GetBoolean(),
+            Description = data.TryGetValue("sprk_description", out var desc) && desc.ValueKind != JsonValueKind.Null
+                ? desc.GetString() : null
+        };
+    }
+
+    private FieldMappingRuleEntity MapToFieldMappingRuleEntity(Dictionary<string, JsonElement> data)
+    {
+        return new FieldMappingRuleEntity
+        {
+            Id = data.TryGetValue("sprk_fieldmappingruleid", out var id) && id.ValueKind != JsonValueKind.Null
+                ? Guid.Parse(id.GetString()!) : Guid.Empty,
+            Name = data.TryGetValue("sprk_name", out var name) && name.ValueKind != JsonValueKind.Null
+                ? name.GetString()! : string.Empty,
+            ProfileId = data.TryGetValue("_sprk_fieldmappingprofile_value", out var pid) && pid.ValueKind != JsonValueKind.Null
+                ? Guid.Parse(pid.GetString()!) : Guid.Empty,
+            SourceField = data.TryGetValue("sprk_sourcefield", out var sf) && sf.ValueKind != JsonValueKind.Null
+                ? sf.GetString()! : string.Empty,
+            SourceFieldType = data.TryGetValue("sprk_sourcefieldtype", out var sft) ? sft.GetInt32() : 0,
+            TargetField = data.TryGetValue("sprk_targetfield", out var tf) && tf.ValueKind != JsonValueKind.Null
+                ? tf.GetString()! : string.Empty,
+            TargetFieldType = data.TryGetValue("sprk_targetfieldtype", out var tft) ? tft.GetInt32() : 0,
+            CompatibilityMode = data.TryGetValue("sprk_compatibilitymode", out var cm) ? cm.GetInt32() : 0,
+            IsRequired = data.TryGetValue("sprk_isrequired", out var req) && req.GetBoolean(),
+            DefaultValue = data.TryGetValue("sprk_defaultvalue", out var dv) && dv.ValueKind != JsonValueKind.Null
+                ? dv.GetString() : null,
+            IsCascadingSource = data.TryGetValue("sprk_iscascadingsource", out var cs) && cs.GetBoolean(),
+            ExecutionOrder = data.TryGetValue("sprk_executionorder", out var eo) ? eo.GetInt32() : 0,
+            IsActive = data.TryGetValue("sprk_isactive", out var active) && active.GetBoolean()
+        };
+    }
+
+    private static object? ConvertJsonElementToObject(JsonElement element)
+    {
+        return element.ValueKind switch
+        {
+            JsonValueKind.String => element.GetString(),
+            JsonValueKind.Number => element.TryGetInt64(out var l) ? l : element.GetDouble(),
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Null => null,
+            JsonValueKind.Undefined => null,
+            _ => element.GetRawText()
+        };
+    }
+
     private class ODataCollectionResponse
     {
         [JsonPropertyName("value")]
         public List<Dictionary<string, JsonElement>> Value { get; set; } = new();
+    }
+
+    private class ODataCountResponse
+    {
+        [JsonPropertyName("value")]
+        public List<Dictionary<string, JsonElement>> Value { get; set; } = new();
+
+        [JsonPropertyName("@odata.count")]
+        public int Count { get; set; }
     }
 }

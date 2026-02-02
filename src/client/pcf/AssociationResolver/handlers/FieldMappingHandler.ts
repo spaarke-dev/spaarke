@@ -53,40 +53,172 @@ export interface IFieldMappingServiceConfig {
 }
 
 /**
- * Stub FieldMappingService - queries BFF API for mapping profiles
- * Full implementation in @spaarke/ui-components
+ * FieldMappingService - Queries Dataverse for mapping profiles and applies mappings
+ *
+ * This is a local implementation that queries sprk_fieldmappingprofile directly
+ * via Dataverse WebAPI, avoiding the React 18 dependency in @spaarke/ui-components.
+ *
+ * When the React migration project fixes @spaarke/ui-components for React 16,
+ * this can be replaced with an import from the shared library.
+ *
+ * @see DEPLOYMENT-ISSUES.md for context on why this local implementation exists
  */
 class FieldMappingService {
     private webApi: ComponentFramework.WebApi;
     private enableCache: boolean;
+    private profileCache: Map<string, { profile: IFieldMappingProfile | null; timestamp: number }> = new Map();
+    private readonly CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
     constructor(config: IFieldMappingServiceConfig) {
         this.webApi = config.webApi;
         this.enableCache = config.enableCache ?? false;
     }
 
+    /**
+     * Get field mapping profile for an entity pair
+     * Queries sprk_fieldmappingprofile from Dataverse
+     */
     async getProfileForEntityPair(sourceEntity: string, targetEntity: string): Promise<IFieldMappingProfile | null> {
+        const cacheKey = `${sourceEntity}:${targetEntity}`;
         console.log(`[FieldMappingService] Querying profile for ${sourceEntity} -> ${targetEntity}`);
-        // Stub: Return null - no profiles configured yet
-        // Full implementation queries sprk_fieldmappingprofile via WebAPI
-        return null;
+
+        // Check cache if enabled
+        if (this.enableCache) {
+            const cached = this.profileCache.get(cacheKey);
+            if (cached && (Date.now() - cached.timestamp) < this.CACHE_TTL_MS) {
+                console.log(`[FieldMappingService] Returning cached profile`);
+                return cached.profile;
+            }
+        }
+
+        try {
+            // Query for active profile matching source and target entities
+            const query = `?$filter=sprk_sourceentity eq '${sourceEntity}' and sprk_targetentity eq '${targetEntity}' and statecode eq 0&$select=sprk_fieldmappingprofileid,sprk_name,sprk_sourceentity,sprk_targetentity,sprk_syncmode,statecode`;
+
+            const result = await this.webApi.retrieveMultipleRecords("sprk_fieldmappingprofile", query);
+
+            if (!result.entities || result.entities.length === 0) {
+                console.log(`[FieldMappingService] No profile found for ${sourceEntity} -> ${targetEntity}`);
+                if (this.enableCache) {
+                    this.profileCache.set(cacheKey, { profile: null, timestamp: Date.now() });
+                }
+                return null;
+            }
+
+            const profileEntity = result.entities[0];
+            const profileId = profileEntity.sprk_fieldmappingprofileid;
+
+            // Fetch rules for this profile
+            const rulesQuery = `?$filter=_sprk_fieldmappingprofileid_value eq '${profileId}' and statecode eq 0&$select=sprk_fieldmappingruleid,sprk_sourcefield,sprk_targetfield,sprk_sourcefieldtype,sprk_targetfieldtype,sprk_executionorder&$orderby=sprk_executionorder asc`;
+
+            const rulesResult = await this.webApi.retrieveMultipleRecords("sprk_fieldmappingrule", rulesQuery);
+
+            const rules: IFieldMappingRule[] = (rulesResult.entities || []).map((rule: Record<string, unknown>) => ({
+                id: rule.sprk_fieldmappingruleid as string,
+                sourceField: rule.sprk_sourcefield as string,
+                targetField: rule.sprk_targetfield as string,
+                sourceFieldType: rule.sprk_sourcefieldtype as number,
+                targetFieldType: rule.sprk_targetfieldtype as number,
+                executionOrder: rule.sprk_executionorder as number || 0
+            }));
+
+            const profile: IFieldMappingProfile = {
+                id: profileId,
+                name: profileEntity.sprk_name as string,
+                sourceEntity: profileEntity.sprk_sourceentity as string,
+                targetEntity: profileEntity.sprk_targetentity as string,
+                syncMode: profileEntity.sprk_syncmode as SyncMode || SyncMode.OneTime,
+                isActive: profileEntity.statecode === 0,
+                rules
+            };
+
+            console.log(`[FieldMappingService] Found profile: ${profile.name} with ${rules.length} rules`);
+
+            if (this.enableCache) {
+                this.profileCache.set(cacheKey, { profile, timestamp: Date.now() });
+            }
+
+            return profile;
+
+        } catch (error) {
+            console.error(`[FieldMappingService] Error querying profile:`, error);
+            return null;
+        }
     }
 
+    /**
+     * Apply field mappings from source record to target record
+     * Fetches source record values and maps them according to profile rules
+     */
     async applyMappings(
         sourceRecordId: string,
         targetRecord: Record<string, unknown>,
         profile: IFieldMappingProfile
     ): Promise<IMappingResult> {
         console.log(`[FieldMappingService] Applying mappings from profile ${profile.name}`);
-        // Stub: Return empty result
-        // Full implementation queries source record and applies rules
-        return {
+
+        const result: IMappingResult = {
             success: true,
             appliedRules: 0,
             skippedRules: 0,
             errors: [],
             mappedValues: {}
         };
+
+        if (!profile.rules || profile.rules.length === 0) {
+            console.log(`[FieldMappingService] No rules in profile`);
+            return result;
+        }
+
+        try {
+            // Build select string from source fields in rules
+            const sourceFields = profile.rules.map(r => r.sourceField).join(',');
+
+            // Fetch source record with required fields
+            const sourceRecord = await this.webApi.retrieveRecord(
+                profile.sourceEntity,
+                sourceRecordId,
+                `?$select=${sourceFields}`
+            );
+
+            // Apply each rule
+            for (const rule of profile.rules) {
+                try {
+                    const sourceValue = sourceRecord[rule.sourceField];
+
+                    if (sourceValue === undefined) {
+                        console.log(`[FieldMappingService] Source field ${rule.sourceField} not found, skipping`);
+                        result.skippedRules++;
+                        continue;
+                    }
+
+                    // Map the value (type conversion could be added here for complex cases)
+                    targetRecord[rule.targetField] = sourceValue;
+                    result.mappedValues[rule.targetField] = sourceValue;
+                    result.appliedRules++;
+
+                    console.log(`[FieldMappingService] Mapped ${rule.sourceField} -> ${rule.targetField}`);
+
+                } catch (ruleError) {
+                    console.error(`[FieldMappingService] Error applying rule ${rule.sourceField} -> ${rule.targetField}:`, ruleError);
+                    result.errors.push({
+                        message: `Failed to apply mapping: ${rule.sourceField} -> ${rule.targetField}`
+                    });
+                    result.skippedRules++;
+                }
+            }
+
+            console.log(`[FieldMappingService] Applied ${result.appliedRules} rules, skipped ${result.skippedRules}`);
+            return result;
+
+        } catch (error) {
+            console.error(`[FieldMappingService] Error fetching source record:`, error);
+            result.success = false;
+            result.errors.push({
+                message: error instanceof Error ? error.message : "Failed to fetch source record"
+            });
+            return result;
+        }
     }
 }
 
