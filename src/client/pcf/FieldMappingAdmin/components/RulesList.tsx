@@ -131,7 +131,7 @@ const useStyles = makeStyles({
 const getCompatibilityDisplay = (
     level: CompatibilityLevel | undefined,
     styles: ReturnType<typeof useStyles>
-): { icon: React.ReactNode; className: string; label: string } => {
+): { icon: JSX.Element | undefined; className: string; label: string } => {
     switch (level) {
         case CompatibilityLevel.Exact:
         case CompatibilityLevel.SafeConversion:
@@ -154,7 +154,7 @@ const getCompatibilityDisplay = (
             };
         default:
             return {
-                icon: null,
+                icon: undefined,
                 className: "",
                 label: "Unknown",
             };
