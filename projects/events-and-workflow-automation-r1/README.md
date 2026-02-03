@@ -77,9 +77,11 @@ The project is considered **complete** when:
 - Model-driven app forms, views, subgrids
 
 **Field Mapping Framework:**
-- Field Mapping Profile (`sprk_fieldmappingprofile`), Field Mapping Rule (`sprk_fieldmappingrule`) tables
+- Field Mapping Profile (`sprk_fieldmappingprofile`) table with Record Type lookups
+- Field Mapping Rule (`sprk_fieldmappingrule`) table as child records
+- Native Dataverse forms for admin configuration (no PCF required)
 - FieldMappingService shared component
-- 2 PCF controls: FieldMappingAdmin, UpdateRelatedButton
+- UpdateRelatedButton PCF for push operations
 - BFF API endpoints: `/api/v1/field-mappings`
 - Sync modes: One-time, Manual Refresh (pull), Update Related (push)
 - Type compatibility validation (Strict mode)

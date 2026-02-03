@@ -25,7 +25,16 @@ import { FluentProvider, webLightTheme, webDarkTheme, Theme } from "@fluentui/re
 import { AssociationResolverApp } from "./AssociationResolverApp";
 
 // Control version for footer display
-const CONTROL_VERSION = "1.0.0";
+const CONTROL_VERSION = "1.0.2";
+
+/**
+ * Record Type lookup reference extracted from bound property
+ */
+interface RecordTypeReference {
+    id: string;
+    name: string;
+    entityLogicalName?: string;
+}
 
 /**
  * Resolve theme based on PCF context and user preference
@@ -130,13 +139,38 @@ export class AssociationResolver implements ComponentFramework.StandardControl<I
     };
 
     /**
+     * Extract Record Type reference from bound lookup property
+     * For Lookup.Simple, raw value is an EntityReference with id, name, entityType
+     */
+    private getRecordTypeReference(): RecordTypeReference | null {
+        const rawValue = this.context.parameters.regardingRecordType?.raw;
+
+        // Lookup.Simple raw value is an EntityReference array or single reference
+        if (!rawValue) {
+            return null;
+        }
+
+        // Handle both array (multiple) and single reference formats
+        const ref = Array.isArray(rawValue) ? rawValue[0] : rawValue;
+        if (!ref || !ref.id) {
+            return null;
+        }
+
+        return {
+            id: ref.id,
+            name: ref.name || "",
+            entityLogicalName: ref.entityType || "sprk_recordtype"
+        };
+    }
+
+    /**
      * Render the React component
      */
     private renderComponent(): void {
         if (!this.container) return;
 
         const theme = resolveTheme(this.context);
-        const regardingRecordType = this.context.parameters.regardingRecordType?.raw;
+        const regardingRecordType = this.getRecordTypeReference();
         const apiBaseUrl = this.context.parameters.apiBaseUrl?.raw || "https://spe-api-dev-67e2xz.azurewebsites.net/api";
 
         // React 16: ReactDOM.render (NOT createRoot().render())

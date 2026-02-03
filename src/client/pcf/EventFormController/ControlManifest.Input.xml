@@ -1,12 +1,13 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="EventFormController" version="1.0.0" display-name-key="Event Form Controller" description-key="Controls Event form field visibility based on Event Type configuration" control-type="standard">
+  <control namespace="Spaarke.Controls" constructor="EventFormController" version="1.0.5" display-name-key="Event Form Controller" description-key="Controls Event form field visibility based on Event Type configuration" control-type="standard">
     <external-service-usage enabled="false">
     </external-service-usage>
-    <!-- Event Type (lookup to sprk_eventtype) -->
-    <property name="eventTypeId" display-name-key="Event Type ID" description-key="GUID of the selected Event Type" of-type="SingleLine.Text" usage="bound" required="false" />
-    <!-- Event Type Name (for display) -->
-    <property name="eventTypeName" display-name-key="Event Type Name" description-key="Name of the selected Event Type" of-type="SingleLine.Text" usage="bound" required="false" />
+    <!-- Bound field - attach control to any text field on the form (e.g., Event Name) -->
+    <!-- The control reads Event Type lookup internally, this just provides an attachment point -->
+    <property name="boundField" display-name-key="Bound Field" description-key="Text field to attach this control to (control reads Event Type internally)" of-type="SingleLine.Text" usage="bound" required="true" />
+    <!-- Event Type Field Name - configure which lookup field contains the Event Type -->
+    <property name="eventTypeFieldName" display-name-key="Event Type Field Name" description-key="Logical name of the Event Type lookup field (default: sprk_eventtype)" of-type="SingleLine.Text" usage="input" required="false" default-value="sprk_eventtype" />
     <!-- Form Control Status (output for debugging) -->
     <property name="controlStatus" display-name-key="Control Status" description-key="Current status of the form controller" of-type="SingleLine.Text" usage="output" required="false" />
     <resources>

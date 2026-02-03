@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="RegardingLink" version="1.1.0" display-name-key="Regarding Link Grid Customizer" description-key="Grid customizer that renders Regarding Record Name as a clickable navigation link" control-type="virtual">
+  <control namespace="Spaarke.Controls" constructor="SpaarkeGridCustomizer" version="1.0.0" display-name-key="Spaarke Grid Customizer" description-key="General-purpose Power Apps Grid Control customizer for custom cell rendering" control-type="virtual">
     <external-service-usage enabled="false">
     </external-service-usage>
-    <!-- Data set for grid customizer -->
-    <data-set name="records" display-name-key="Records" />
+    <!-- Grid customizers need a data-set element to work with Power Apps Grid Control -->
+    <data-set name="dataSet" display-name-key="Data Set" cds-data-set-options="displayCommandBar:false;displayViewSelector:false;displayQuickFind:false">
+    </data-set>
     <resources>
       <code path="index.ts" order="1" />
       <css path="styles.css" order="1" />

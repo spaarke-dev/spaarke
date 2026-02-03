@@ -31,7 +31,7 @@ This project implements an event management system for Spaarke's legal practice 
 - **PCF Control: AssociationResolver**: Regarding record selection with multi-entity search + field mapping application
 - **PCF Control: RegardingLink**: Clickable link rendering in grid views
 - **PCF Control: EventFormController**: Event Type validation and field show/hide logic
-- **PCF Control: FieldMappingAdmin**: Validation control for mapping rule configuration
+- **Native Dataverse Forms**: Field Mapping Profile form with Rules subgrid (no PCF needed)
 - **PCF Control: UpdateRelatedButton**: Parent form button to push mappings to child records
 - **BFF API Endpoints**: CRUD operations for Events via `/api/v1/events`
 - **BFF API Endpoints**: Field mapping operations via `/api/v1/field-mappings`
@@ -54,7 +54,7 @@ This project implements an event management system for Spaarke's legal practice 
 - `src/client/pcf/AssociationResolver/` - New PCF control for regarding selection + field mapping
 - `src/client/pcf/RegardingLink/` - New PCF control for grid display
 - `src/client/pcf/EventFormController/` - New PCF control for form validation
-- `src/client/pcf/FieldMappingAdmin/` - New PCF control for mapping rule validation
+- ~~`src/client/pcf/FieldMappingAdmin/`~~ - **Removed**: Native Dataverse forms used instead
 - `src/client/pcf/UpdateRelatedButton/` - New PCF control for push mappings from parent
 - `src/client/shared/Spaarke.UI.Components/services/FieldMappingService.ts` - Shared mapping service
 - `src/server/api/Sprk.Bff.Api/Features/Events/` - Event API endpoints
@@ -233,32 +233,35 @@ The Field Mapping Framework provides admin-configurable field-to-field mappings 
 
 ### Field Mapping Profile Table (`sprk_fieldmappingprofile`)
 
+**Updated Feb 2026**: Source/Target Entity changed to Record Type lookups for admin usability.
+
 | Field | Schema Name | Type | Notes |
 |-------|-------------|------|-------|
 | Profile Name | `sprk_name` | Single line text | Primary field |
-| Source Entity | `sprk_sourceentity` | Single line text | Logical name (e.g., `sprk_matter`) |
-| Target Entity | `sprk_targetentity` | Single line text | Logical name (e.g., `sprk_event`) |
+| Source Record Type | `sprk_sourcerecordtype` | Lookup | N:1 to `sprk_recordtype` |
+| Target Record Type | `sprk_targetrecordtype` | Lookup | N:1 to `sprk_recordtype` |
 | Mapping Direction | `sprk_mappingdirection` | Choice | Parent to Child (0), Child to Parent (1), Bidirectional (2) |
 | Sync Mode | `sprk_syncmode` | Choice | One-time (0), Manual Refresh (1) |
-| Is Active | `sprk_isactive` | Yes/No | Enable/disable profile |
+| Is Active | (statecode) | State | Active/Inactive via standard state |
 | Description | `sprk_description` | Multiline text | Admin notes |
+
+**Note**: The `sprk_recordtype` entity contains `sprk_entitylogicalname` field used by FieldMappingService to resolve entity names.
 
 ### Field Mapping Rule Table (`sprk_fieldmappingrule`)
 
 | Field | Schema Name | Type | Notes |
 |-------|-------------|------|-------|
 | Rule Name | `sprk_name` | Single line text | Primary field |
-| Mapping Profile | `sprk_fieldmappingprofile` | Lookup | N:1 to profile |
-| Source Field | `sprk_sourcefield` | Single line text | Schema name (e.g., `sprk_client`) |
-| Source Field Type | `sprk_sourcefieldtype` | Choice | Text (0), Lookup (1), OptionSet (2), Number (3), DateTime (4), Boolean (5), Memo (6) |
-| Target Field | `sprk_targetfield` | Single line text | Schema name (e.g., `sprk_regardingaccount`) |
-| Target Field Type | `sprk_targetfieldtype` | Choice | Must be compatible with source |
-| Compatibility Mode | `sprk_compatibilitymode` | Choice | Strict (0), Resolve (1 - future) |
+| Mapping Profile | `sprk_fieldmappingprofile` | Lookup | N:1 to profile (required) |
+| Source Field | `sprk_sourcefield` | Single line text | Schema name (e.g., `sprk_matterid`) |
+| Target Field | `sprk_targetfield` | Single line text | Schema name (e.g., `sprk_regardingrecordid`) |
+| Mapping Type | `sprk_mappingtype` | Choice | Direct Copy (0), Constant (1), Transform (2 - future) |
+| Default Value | `sprk_defaultvalue` | Single line text | Used for Constant mapping type |
 | Is Required | `sprk_isrequired` | Yes/No | Fail if source is empty |
-| Default Value | `sprk_defaultvalue` | Single line text | Used when source is empty |
-| Is Cascading Source | `sprk_iscascadingsource` | Yes/No | This field can trigger secondary mappings |
 | Execution Order | `sprk_executionorder` | Whole number | Sequence for dependent mappings |
-| Is Active | `sprk_isactive` | Yes/No | Enable/disable rule |
+| Is Active | (statecode) | State | Active/Inactive via standard state |
+
+**Note**: FieldMappingAdmin PCF was removed in favor of native Dataverse forms with subgrids. Profile form shows related Rules in a subgrid.
 
 ### Type Compatibility Matrix (Strict Mode)
 
@@ -462,43 +465,14 @@ const ENTITY_CONFIGS: EntityConfig[] = [
 3. Validate required fields before save (block save if missing)
 4. No Dataverse Business Rules - all logic in TypeScript
 
-### 4. FieldMappingAdmin PCF
+### 4. ~~FieldMappingAdmin PCF~~ (REMOVED)
 
-**Purpose**: Validates field mapping rule configuration at save time
-
-**Manifest Properties**:
-- `sourceFieldType` (Bound, OptionSet) - `sprk_sourcefieldtype`
-- `targetFieldType` (Bound, OptionSet) - `sprk_targetfieldtype`
-- `compatibilityMode` (Bound, OptionSet) - `sprk_compatibilitymode`
-
-**Behavior**:
-1. On form load: validate current source/target type compatibility
-2. On field type change: re-validate compatibility
-3. If incompatible in Strict mode:
-   - Display warning message with explanation
-   - Block form save via `context.mode.setControlState({ disabled: true })`
-4. Show compatibility indicator: ✅ Compatible | ⚠️ Requires Resolve Mode | ❌ Incompatible
-
-**Compatibility Validation Logic**:
-```typescript
-function isCompatible(source: FieldType, target: FieldType, mode: CompatibilityMode): boolean {
-  const strictCompatible: Record<FieldType, FieldType[]> = {
-    [FieldType.Lookup]: [FieldType.Lookup, FieldType.Text],
-    [FieldType.Text]: [FieldType.Text, FieldType.Memo],
-    [FieldType.Memo]: [FieldType.Text, FieldType.Memo],
-    [FieldType.OptionSet]: [FieldType.OptionSet, FieldType.Text],
-    [FieldType.Number]: [FieldType.Number, FieldType.Text],
-    [FieldType.DateTime]: [FieldType.DateTime, FieldType.Text],
-    [FieldType.Boolean]: [FieldType.Boolean, FieldType.Text],
-  };
-
-  if (mode === CompatibilityMode.Strict) {
-    return strictCompatible[source]?.includes(target) ?? false;
-  }
-  // Resolve mode - future implementation
-  return true;
-}
-```
+> **Note (Feb 2026)**: This PCF was removed in favor of native Dataverse forms. Admin configuration is done via:
+> - Field Mapping Profile form with standard fields
+> - Field Mapping Rule subgrid on the Profile form
+> - Standard Dataverse validation via Business Rules (if needed)
+>
+> The complexity of a custom PCF was not justified when native forms work well for admin configuration.
 
 ### 5. UpdateRelatedButton PCF
 
@@ -511,7 +485,7 @@ function isCompatible(source: FieldType, target: FieldType, mode: CompatibilityM
 - `targetEntity` (Input, SingleLine.Text) - Optional: specific target entity, or blank for all
 
 **Behavior**:
-1. On load: check if active FieldMappingProfiles exist where `sprk_sourceentity` = current entity
+1. On load: check if active FieldMappingProfiles exist for the current entity's Record Type
 2. If no profiles: hide button or show disabled with tooltip "No field mappings configured"
 3. On click:
    - Show confirmation dialog: "Update all related [Target Entity] records with current values?"

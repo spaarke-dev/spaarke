@@ -7,12 +7,15 @@
  * 3. Clears the other 7 entity-specific lookup fields
  *
  * Uses Xrm.Page.getAttribute() for form field access.
+ * Uses WebAPI for Record Type lookup queries.
  *
  * ADR Compliance:
  * - ADR-006: Logic in PCF control code, not Business Rules
  * - ADR-021: No UI changes here (Fluent UI v9 in components)
  *
  * STUB: [CONFIG] - S021-01: Lookup field names should come from configuration, not hardcoded
+ *
+ * @version 1.1.0 - Updated to use Record Type lookup instead of OptionSet
  */
 
 /**
@@ -31,28 +34,31 @@ interface EntityLookupConfig {
     logicalName: string;
     displayName: string;
     regardingField: string;
-    regardingRecordTypeValue: number;
+    // Note: regardingRecordTypeValue removed - now using Record Type lookup
 }
 
 // STUB: [CONFIG] - S021-01: Lookup field names should come from configuration, not hardcoded
 // These must match ENTITY_CONFIGS in AssociationResolverApp.tsx and spec.md
 const ENTITY_LOOKUP_CONFIGS: EntityLookupConfig[] = [
-    { logicalName: "sprk_matter", displayName: "Matter", regardingField: "sprk_regardingmatter", regardingRecordTypeValue: 1 },
-    { logicalName: "sprk_project", displayName: "Project", regardingField: "sprk_regardingproject", regardingRecordTypeValue: 0 },
-    { logicalName: "sprk_invoice", displayName: "Invoice", regardingField: "sprk_regardinginvoice", regardingRecordTypeValue: 2 },
-    { logicalName: "sprk_analysis", displayName: "Analysis", regardingField: "sprk_regardinganalysis", regardingRecordTypeValue: 3 },
-    { logicalName: "account", displayName: "Account", regardingField: "sprk_regardingaccount", regardingRecordTypeValue: 4 },
-    { logicalName: "contact", displayName: "Contact", regardingField: "sprk_regardingcontact", regardingRecordTypeValue: 5 },
-    { logicalName: "sprk_workassignment", displayName: "Work Assignment", regardingField: "sprk_regardingworkassignment", regardingRecordTypeValue: 6 },
-    { logicalName: "sprk_budget", displayName: "Budget", regardingField: "sprk_regardingbudget", regardingRecordTypeValue: 7 }
+    { logicalName: "sprk_matter", displayName: "Matter", regardingField: "sprk_regardingmatter" },
+    { logicalName: "sprk_project", displayName: "Project", regardingField: "sprk_regardingproject" },
+    { logicalName: "sprk_invoice", displayName: "Invoice", regardingField: "sprk_regardinginvoice" },
+    { logicalName: "sprk_analysis", displayName: "Analysis", regardingField: "sprk_regardinganalysis" },
+    { logicalName: "account", displayName: "Account", regardingField: "sprk_regardingaccount" },
+    { logicalName: "contact", displayName: "Contact", regardingField: "sprk_regardingcontact" },
+    { logicalName: "sprk_workassignment", displayName: "Work Assignment", regardingField: "sprk_regardingworkassignment" },
+    { logicalName: "sprk_budget", displayName: "Budget", regardingField: "sprk_regardingbudget" }
 ];
 
 // Denormalized field names for unified views
 const DENORMALIZED_FIELDS = {
     recordName: "sprk_regardingrecordname",
     recordId: "sprk_regardingrecordid",
-    recordType: "sprk_regardingrecordtype"
+    recordType: "sprk_regardingrecordtype"  // Now a Lookup to sprk_recordtype
 };
+
+// Cache for Record Type lookups to avoid repeated queries
+const recordTypeCache: Map<string, { id: string; name: string }> = new Map();
 
 /**
  * Get Xrm.Page from parent window (PCF runs in iframe)
@@ -160,29 +166,42 @@ function setTextValue(fieldName: string, value: string | null): boolean {
 }
 
 /**
- * Set an optionset field value
- * Handles gracefully if field doesn't exist on form
+ * Query Record Type entity by entity logical name
+ * Returns the Record Type record ID and name for the given entity
  */
-function setOptionSetValue(fieldName: string, value: number | null): boolean {
-    const xrmPage = getXrmPage();
-    if (!xrmPage) {
-        console.warn("[RecordSelectionHandler] Xrm.Page not available");
-        return false;
+async function getRecordTypeByEntityLogicalName(
+    webApi: ComponentFramework.WebApi,
+    entityLogicalName: string
+): Promise<{ id: string; name: string } | null> {
+    // Check cache first
+    const cached = recordTypeCache.get(entityLogicalName);
+    if (cached) {
+        console.log(`[RecordSelectionHandler] Record Type cache hit for ${entityLogicalName}: ${cached.id}`);
+        return cached;
     }
 
     try {
-        const attr = xrmPage.getAttribute(fieldName);
-        if (attr) {
-            attr.setValue(value);
-            console.log(`[RecordSelectionHandler] Set ${fieldName} to ${value}`);
-            return true;
+        // Query sprk_recordtype by sprk_entitylogicalname
+        const query = `?$filter=sprk_entitylogicalname eq '${entityLogicalName}' and statecode eq 0&$select=sprk_recordtypeid,sprk_name`;
+        const result = await webApi.retrieveMultipleRecords("sprk_recordtype", query);
+
+        if (result.entities && result.entities.length > 0) {
+            const recordType = result.entities[0];
+            const id = recordType.sprk_recordtypeid as string;
+            const name = recordType.sprk_name as string;
+
+            // Cache the result
+            recordTypeCache.set(entityLogicalName, { id, name });
+
+            console.log(`[RecordSelectionHandler] Found Record Type for ${entityLogicalName}: ${name} (${id})`);
+            return { id, name };
         } else {
-            console.warn(`[RecordSelectionHandler] Field ${fieldName} not found on form`);
-            return false;
+            console.warn(`[RecordSelectionHandler] No Record Type found for entity: ${entityLogicalName}`);
+            return null;
         }
     } catch (error) {
-        console.error(`[RecordSelectionHandler] Error setting ${fieldName}:`, error);
-        return false;
+        console.error(`[RecordSelectionHandler] Error querying Record Type for ${entityLogicalName}:`, error);
+        return null;
     }
 }
 
@@ -198,14 +217,21 @@ export interface IRecordSelectionResult {
 }
 
 /**
- * Handle record selection - main entry point
+ * Handle record selection - main entry point (async)
  *
  * When a record is selected:
  * 1. Clear all 8 entity-specific lookup fields
  * 2. Set the selected entity's lookup field
  * 3. Set denormalized fields (name, id, type)
+ * 4. Query Record Type and set as lookup
+ *
+ * @param selection - The selected record details
+ * @param webApi - WebAPI for Record Type queries
  */
-export function handleRecordSelection(selection: IRecordSelection): IRecordSelectionResult {
+export async function handleRecordSelection(
+    selection: IRecordSelection,
+    webApi: ComponentFramework.WebApi
+): Promise<IRecordSelectionResult> {
     const result: IRecordSelectionResult = {
         success: false,
         lookupFieldSet: false,
@@ -262,10 +288,17 @@ export function handleRecordSelection(selection: IRecordSelection): IRecordSelec
         result.errors.push(`Failed to set ${DENORMALIZED_FIELDS.recordId}`);
     }
 
-    // Set record type (optionset value)
-    if (!setOptionSetValue(DENORMALIZED_FIELDS.recordType, selectedConfig.regardingRecordTypeValue)) {
+    // Step 4: Query Record Type and set as lookup (async operation)
+    const recordType = await getRecordTypeByEntityLogicalName(webApi, selection.entityType);
+    if (recordType) {
+        // Set record type as a lookup value to sprk_recordtype entity
+        if (!setLookupValue(DENORMALIZED_FIELDS.recordType, "sprk_recordtype", recordType.id, recordType.name)) {
+            denormalizedSuccess = false;
+            result.errors.push(`Failed to set ${DENORMALIZED_FIELDS.recordType}`);
+        }
+    } else {
         denormalizedSuccess = false;
-        result.errors.push(`Failed to set ${DENORMALIZED_FIELDS.recordType}`);
+        result.errors.push(`Record Type not found for entity: ${selection.entityType}`);
     }
 
     result.denormalizedFieldsSet = denormalizedSuccess;
@@ -292,7 +325,7 @@ export function clearAllRegardingFields(): void {
     // Clear denormalized fields
     setTextValue(DENORMALIZED_FIELDS.recordName, null);
     setTextValue(DENORMALIZED_FIELDS.recordId, null);
-    setOptionSetValue(DENORMALIZED_FIELDS.recordType, null);
+    clearLookupValue(DENORMALIZED_FIELDS.recordType);  // Now a lookup, use clearLookupValue
 }
 
 /**
@@ -307,4 +340,132 @@ export function getEntityConfig(logicalName: string): EntityLookupConfig | undef
  */
 export function getAllEntityConfigs(): EntityLookupConfig[] {
     return [...ENTITY_LOOKUP_CONFIGS];
+}
+
+/**
+ * Clear the Record Type cache (useful for testing or when data changes)
+ */
+export function clearRecordTypeCache(): void {
+    recordTypeCache.clear();
+    console.log("[RecordSelectionHandler] Record Type cache cleared");
+}
+
+/**
+ * Result of auto-detecting a pre-populated regarding field
+ */
+export interface IDetectedParentContext {
+    entityType: string;      // Logical name (e.g., "sprk_matter")
+    entityDisplayName: string; // Display name (e.g., "Matter")
+    recordId: string;        // GUID of the parent record
+    recordName: string;      // Display name of the parent record
+    regardingField: string;  // The field that was populated (e.g., "sprk_regardingmatter")
+}
+
+/**
+ * Detect if any regarding lookup field is pre-populated (from subgrid context)
+ *
+ * When creating an Event from a parent's subgrid, Dataverse can auto-populate
+ * the lookup field via relationship mapping. This function checks all 8
+ * entity-specific lookup fields to find which one (if any) is populated.
+ *
+ * @returns The detected parent context, or null if no parent is detected
+ */
+export function detectPrePopulatedParent(): IDetectedParentContext | null {
+    const xrmPage = getXrmPage();
+    if (!xrmPage) {
+        console.log("[RecordSelectionHandler] Xrm.Page not available for parent detection");
+        return null;
+    }
+
+    console.log("[RecordSelectionHandler] Checking for pre-populated regarding fields...");
+
+    // Check each entity-specific lookup field
+    for (const config of ENTITY_LOOKUP_CONFIGS) {
+        try {
+            const attr = xrmPage.getAttribute(config.regardingField);
+            if (attr) {
+                const value = attr.getValue() as Xrm.LookupValue[] | null;
+                // Lookup values are arrays with entity references
+                if (value && Array.isArray(value) && value.length > 0) {
+                    const lookupValue = value[0] as Xrm.LookupValue;
+                    if (lookupValue && lookupValue.id) {
+                        const detected: IDetectedParentContext = {
+                            entityType: config.logicalName,
+                            entityDisplayName: config.displayName,
+                            recordId: lookupValue.id.replace(/[{}]/g, ''),
+                            recordName: lookupValue.name || "",
+                            regardingField: config.regardingField
+                        };
+                        console.log(`[RecordSelectionHandler] Detected pre-populated parent: ${config.displayName} - ${detected.recordName} (${detected.recordId})`);
+                        return detected;
+                    }
+                }
+            }
+        } catch (error) {
+            console.warn(`[RecordSelectionHandler] Error checking ${config.regardingField}:`, error);
+        }
+    }
+
+    console.log("[RecordSelectionHandler] No pre-populated regarding field detected");
+    return null;
+}
+
+/**
+ * Complete the association for a detected parent context
+ *
+ * When a parent is auto-detected from a subgrid, this function:
+ * 1. Sets the denormalized fields (sprk_regardingrecordtype, sprk_regardingrecordid, sprk_regardingrecordname)
+ * 2. Does NOT clear other lookups (only one should be populated from subgrid)
+ *
+ * @param detectedParent - The detected parent context from detectPrePopulatedParent()
+ * @param webApi - WebAPI for Record Type queries
+ * @returns Result of the operation
+ */
+export async function completeAutoDetectedAssociation(
+    detectedParent: IDetectedParentContext,
+    webApi: ComponentFramework.WebApi
+): Promise<IRecordSelectionResult> {
+    const result: IRecordSelectionResult = {
+        success: false,
+        lookupFieldSet: true, // Already set by Dataverse
+        denormalizedFieldsSet: false,
+        otherLookupsCleared: 0,
+        errors: []
+    };
+
+    console.log(`[RecordSelectionHandler] Completing auto-detected association: ${detectedParent.entityDisplayName} - ${detectedParent.recordName}`);
+
+    // Set denormalized fields
+    let denormalizedSuccess = true;
+
+    // Set record name
+    if (!setTextValue(DENORMALIZED_FIELDS.recordName, detectedParent.recordName)) {
+        denormalizedSuccess = false;
+        result.errors.push(`Failed to set ${DENORMALIZED_FIELDS.recordName}`);
+    }
+
+    // Set record ID (GUID without braces)
+    if (!setTextValue(DENORMALIZED_FIELDS.recordId, detectedParent.recordId)) {
+        denormalizedSuccess = false;
+        result.errors.push(`Failed to set ${DENORMALIZED_FIELDS.recordId}`);
+    }
+
+    // Query Record Type and set as lookup
+    const recordType = await getRecordTypeByEntityLogicalName(webApi, detectedParent.entityType);
+    if (recordType) {
+        if (!setLookupValue(DENORMALIZED_FIELDS.recordType, "sprk_recordtype", recordType.id, recordType.name)) {
+            denormalizedSuccess = false;
+            result.errors.push(`Failed to set ${DENORMALIZED_FIELDS.recordType}`);
+        }
+    } else {
+        denormalizedSuccess = false;
+        result.errors.push(`Record Type not found for entity: ${detectedParent.entityType}`);
+    }
+
+    result.denormalizedFieldsSet = denormalizedSuccess;
+    result.success = denormalizedSuccess;
+
+    console.log(`[RecordSelectionHandler] Auto-detection completion result: success=${result.success}, denormalized=${result.denormalizedFieldsSet}`);
+
+    return result;
 }

@@ -33,8 +33,11 @@ import { IInputs } from "./generated/ManifestTypes";
 import {
     handleRecordSelection,
     clearAllRegardingFields,
+    detectPrePopulatedParent,
+    completeAutoDetectedAssociation,
     IRecordSelection,
-    IRecordSelectionResult
+    IRecordSelectionResult,
+    IDetectedParentContext
 } from "./handlers/RecordSelectionHandler";
 import {
     FieldMappingHandler,
@@ -48,25 +51,34 @@ interface EntityConfig {
     logicalName: string;
     displayName: string;
     regardingField: string;
-    regardingRecordTypeValue: number;
+    // Note: regardingRecordTypeValue removed - now using Record Type lookup
 }
 
 // STUB: [CONFIG] - S002: Hardcoded entity configs - should be loaded from Dataverse or config service (Task 020)
-// These values must match the optionset values in sprk_event.sprk_regardingrecordtype
+// Record Type values are now queried dynamically from sprk_recordtype entity
 const ENTITY_CONFIGS: EntityConfig[] = [
-    { logicalName: "sprk_matter", displayName: "Matter", regardingField: "sprk_regardingmatter", regardingRecordTypeValue: 1 },
-    { logicalName: "sprk_project", displayName: "Project", regardingField: "sprk_regardingproject", regardingRecordTypeValue: 0 },
-    { logicalName: "sprk_invoice", displayName: "Invoice", regardingField: "sprk_regardinginvoice", regardingRecordTypeValue: 2 },
-    { logicalName: "sprk_analysis", displayName: "Analysis", regardingField: "sprk_regardinganalysis", regardingRecordTypeValue: 3 },
-    { logicalName: "account", displayName: "Account", regardingField: "sprk_regardingaccount", regardingRecordTypeValue: 4 },
-    { logicalName: "contact", displayName: "Contact", regardingField: "sprk_regardingcontact", regardingRecordTypeValue: 5 },
-    { logicalName: "sprk_workassignment", displayName: "Work Assignment", regardingField: "sprk_regardingworkassignment", regardingRecordTypeValue: 6 },
-    { logicalName: "sprk_budget", displayName: "Budget", regardingField: "sprk_regardingbudget", regardingRecordTypeValue: 7 }
+    { logicalName: "sprk_matter", displayName: "Matter", regardingField: "sprk_regardingmatter" },
+    { logicalName: "sprk_project", displayName: "Project", regardingField: "sprk_regardingproject" },
+    { logicalName: "sprk_invoice", displayName: "Invoice", regardingField: "sprk_regardinginvoice" },
+    { logicalName: "sprk_analysis", displayName: "Analysis", regardingField: "sprk_regardinganalysis" },
+    { logicalName: "account", displayName: "Account", regardingField: "sprk_regardingaccount" },
+    { logicalName: "contact", displayName: "Contact", regardingField: "sprk_regardingcontact" },
+    { logicalName: "sprk_workassignment", displayName: "Work Assignment", regardingField: "sprk_regardingworkassignment" },
+    { logicalName: "sprk_budget", displayName: "Budget", regardingField: "sprk_regardingbudget" }
 ];
+
+/**
+ * Record Type lookup reference from bound property
+ */
+interface RecordTypeReference {
+    id: string;
+    name: string;
+    entityLogicalName?: string;  // The entity this record type represents (e.g., "sprk_matter")
+}
 
 interface AssociationResolverAppProps {
     context: ComponentFramework.Context<IInputs>;
-    regardingRecordType: number | null;
+    regardingRecordType: RecordTypeReference | null;  // Now a lookup to sprk_recordtype
     apiBaseUrl: string;
     onRecordSelected: (recordId: string, recordName: string) => void;
     version: string;
@@ -133,6 +145,11 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
     const [showRefreshConfirm, setShowRefreshConfirm] = React.useState(false);
     const [hasProfileForEntity, setHasProfileForEntity] = React.useState(false);
 
+    // Auto-detection state
+    const [isAutoDetected, setIsAutoDetected] = React.useState(false);
+    const [autoDetectionComplete, setAutoDetectionComplete] = React.useState(false);
+    const [detectedParent, setDetectedParent] = React.useState<IDetectedParentContext | null>(null);
+
     // Task 024: Toast notifications for mapping results
     const { toasterId, showMappingResult, showError: showErrorToast } = useMappingToast();
 
@@ -144,15 +161,100 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
         return null;
     }, [context?.webAPI]);
 
-    // Initialize from bound optionset value
+    // Auto-detect parent context on mount
+    // Checks if any regarding lookup field is pre-populated (from subgrid creation)
+    // If detected, auto-completes the association and applies field mappings
     React.useEffect(() => {
-        if (regardingRecordType !== null && regardingRecordType !== undefined) {
-            const config = ENTITY_CONFIGS.find(c => c.regardingRecordTypeValue === regardingRecordType);
-            if (config) {
-                setSelectedEntityType(config.logicalName);
+        const autoDetectAndInitialize = async () => {
+            if (autoDetectionComplete || !context?.webAPI) {
+                return;
             }
-        }
-    }, [regardingRecordType]);
+
+            console.log("[AssociationResolver] Running auto-detection...");
+            setIsLoading(true);
+
+            try {
+                // Step 1: Check for pre-populated regarding field (from subgrid context)
+                const detected = detectPrePopulatedParent();
+
+                if (detected) {
+                    console.log(`[AssociationResolver] Auto-detected parent: ${detected.entityDisplayName} - ${detected.recordName}`);
+                    setIsAutoDetected(true);
+                    setDetectedParent(detected);
+                    setSelectedEntityType(detected.entityType);
+                    setSelectedRecord({ id: detected.recordId, name: detected.recordName });
+
+                    // Complete the association (set denormalized fields)
+                    const result = await completeAutoDetectedAssociation(detected, context.webAPI);
+
+                    if (result.success) {
+                        // Notify parent component
+                        onRecordSelected(detected.recordId, detected.recordName);
+
+                        // Apply field mappings automatically
+                        if (fieldMappingHandler) {
+                            setIsApplyingMappings(true);
+                            try {
+                                const targetRecord: Record<string, unknown> = {};
+                                const mappingResult = await fieldMappingHandler.applyMappingsForSelection(
+                                    detected.entityType,
+                                    detected.recordId,
+                                    targetRecord
+                                );
+
+                                if (mappingResult.profileFound && mappingResult.fieldsMapped > 0) {
+                                    fieldMappingHandler.applyToForm(targetRecord, true);
+                                    setMappingStatus(
+                                        `Auto-populated from ${detected.entityDisplayName}: ${mappingResult.fieldsMapped} fields mapped`
+                                    );
+                                    showMappingResult(mappingResult, detected.entityDisplayName);
+                                } else {
+                                    setMappingStatus(`Associated with ${detected.entityDisplayName}: ${detected.recordName}`);
+                                }
+                            } catch (mappingErr) {
+                                console.error("[AssociationResolver] Auto field mapping error:", mappingErr);
+                            } finally {
+                                setIsApplyingMappings(false);
+                            }
+                        } else {
+                            setMappingStatus(`Associated with ${detected.entityDisplayName}: ${detected.recordName}`);
+                        }
+                    } else {
+                        console.warn("[AssociationResolver] Auto-detection completion had errors:", result.errors);
+                        setMappingStatus(`Associated with ${detected.entityDisplayName}: ${detected.recordName}`);
+                    }
+                } else {
+                    // No auto-detection - check if bound Record Type is set (fallback)
+                    if (regardingRecordType?.id) {
+                        try {
+                            const recordTypeId = regardingRecordType.id.replace(/[{}]/g, '');
+                            const result = await context.webAPI.retrieveRecord(
+                                "sprk_recordtype",
+                                recordTypeId,
+                                "?$select=sprk_entitylogicalname,sprk_name"
+                            );
+
+                            const entityLogicalName = result.sprk_entitylogicalname as string;
+                            if (entityLogicalName) {
+                                const config = ENTITY_CONFIGS.find(c => c.logicalName === entityLogicalName);
+                                if (config) {
+                                    console.log(`[AssociationResolver] Initialized entity type from Record Type: ${entityLogicalName}`);
+                                    setSelectedEntityType(config.logicalName);
+                                }
+                            }
+                        } catch (err) {
+                            console.error("[AssociationResolver] Error initializing from Record Type:", err);
+                        }
+                    }
+                }
+            } finally {
+                setIsLoading(false);
+                setAutoDetectionComplete(true);
+            }
+        };
+
+        autoDetectAndInitialize();
+    }, [context?.webAPI, fieldMappingHandler, autoDetectionComplete, regardingRecordType, onRecordSelected, showMappingResult]);
 
     // Check if a field mapping profile exists for the current entity type
     // Used to enable/disable the "Refresh from Parent" button
@@ -296,8 +398,8 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
                     recordName: recordName
                 };
 
-                // Call handler to populate regarding fields and clear others
-                const result: IRecordSelectionResult = handleRecordSelection(selection);
+                // Call handler to populate regarding fields and clear others (async - queries Record Type)
+                const result: IRecordSelectionResult = await handleRecordSelection(selection, context.webAPI);
 
                 if (result.success) {
                     setSelectedRecord({
@@ -471,13 +573,101 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
 
     const selectedEntityConfig = ENTITY_CONFIGS.find(c => c.logicalName === selectedEntityType);
 
+    // If still loading/detecting, show minimal loading state
+    if (isLoading && !autoDetectionComplete) {
+        return (
+            <div className={styles.container}>
+                <Toaster toasterId={toasterId} position="top-end" />
+                <div className={styles.header}>
+                    <Spinner size="tiny" style={{ marginRight: '8px' }} />
+                    <Text>Detecting parent context...</Text>
+                </div>
+            </div>
+        );
+    }
+
+    // Auto-detected mode: Show read-only association display
+    if (isAutoDetected && detectedParent) {
+        return (
+            <div className={styles.container}>
+                <Toaster toasterId={toasterId} position="top-end" />
+
+                {error && (
+                    <MessageBar intent="error">
+                        <MessageBarBody>{error}</MessageBarBody>
+                    </MessageBar>
+                )}
+
+                {isApplyingMappings && (
+                    <MessageBar intent="info">
+                        <MessageBarBody>
+                            <Spinner size="tiny" style={{ marginRight: '8px' }} />
+                            Applying field mappings...
+                        </MessageBarBody>
+                    </MessageBar>
+                )}
+
+                {mappingStatus && !isApplyingMappings && (
+                    <MessageBar intent="success">
+                        <MessageBarBody>{mappingStatus}</MessageBarBody>
+                    </MessageBar>
+                )}
+
+                {/* Read-only association display */}
+                <div className={styles.selectedRecord}>
+                    <Text weight="semibold">{detectedParent.entityDisplayName}:</Text>
+                    <Text>{detectedParent.recordName}</Text>
+                    <Button
+                        appearance="subtle"
+                        icon={<ArrowSync20Regular />}
+                        onClick={handleRefreshClick}
+                        disabled={!hasProfileForEntity || isLoading || isApplyingMappings}
+                        title={hasProfileForEntity
+                            ? "Refresh fields from parent record"
+                            : "No field mapping profile available"}
+                    >
+                        {isApplyingMappings ? <Spinner size="tiny" /> : "Refresh"}
+                    </Button>
+                </div>
+
+                {/* Refresh Confirmation Dialog */}
+                <Dialog
+                    open={showRefreshConfirm}
+                    onOpenChange={(_, data) => setShowRefreshConfirm(data.open)}
+                >
+                    <DialogSurface>
+                        <DialogBody>
+                            <DialogTitle>Refresh from Parent?</DialogTitle>
+                            <DialogContent>
+                                This will overwrite current field values with values from the parent record.
+                            </DialogContent>
+                            <DialogActions>
+                                <Button appearance="secondary" onClick={() => setShowRefreshConfirm(false)}>
+                                    Cancel
+                                </Button>
+                                <Button appearance="primary" onClick={confirmRefresh}>
+                                    Refresh
+                                </Button>
+                            </DialogActions>
+                        </DialogBody>
+                    </DialogSurface>
+                </Dialog>
+
+                <div className={styles.footer}>
+                    <Text className={styles.versionText}>v{version} • Auto</Text>
+                </div>
+            </div>
+        );
+    }
+
+    // Manual selection mode: Show full selection UI
     return (
         <div className={styles.container}>
             {/* Task 024: Toaster for mapping result notifications */}
             <Toaster toasterId={toasterId} position="top-end" />
 
             <div className={styles.header}>
-                <Text weight="semibold" size={400}>Association Resolver</Text>
+                <Text weight="semibold" size={400}>Select Parent Record</Text>
             </div>
 
             {error && (

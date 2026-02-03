@@ -2,10 +2,15 @@
  * FieldMappingHandler - Integrates AssociationResolver with FieldMappingService
  *
  * After a regarding record is selected, this handler:
- * 1. Queries for an active field mapping profile (source entity -> sprk_event)
+ * 1. Queries for an active field mapping profile (source record type -> target record type)
  * 2. If profile exists, fetches source record values
  * 3. Applies mappings to the Event form fields
  * 4. Returns mapping results for UI feedback
+ *
+ * SCHEMA UPDATE (Feb 2026):
+ * - Profile.Source Entity -> Profile.Source Record Type (lookup to sprk_recordtype)
+ * - Profile.Target Entity -> Profile.Target Record Type (lookup to sprk_recordtype)
+ * - sprk_recordtype has sprk_entitylogicalname field for entity lookup
  *
  * ADR Compliance:
  * - ADR-012: Uses FieldMappingService from @spaarke/ui-components
@@ -23,8 +28,10 @@ export enum SyncMode {
 export interface IFieldMappingProfile {
     id: string;
     name: string;
-    sourceEntity: string;
-    targetEntity: string;
+    sourceRecordTypeId: string;
+    sourceEntityLogicalName: string;
+    targetRecordTypeId: string;
+    targetEntityLogicalName: string;
     syncMode: SyncMode;
     isActive: boolean;
     rules: IFieldMappingRule[];
@@ -34,8 +41,8 @@ export interface IFieldMappingRule {
     id: string;
     sourceField: string;
     targetField: string;
-    sourceFieldType: number;
-    targetFieldType: number;
+    mappingType: number;
+    defaultValue?: string;
     executionOrder: number;
 }
 
@@ -55,18 +62,14 @@ export interface IFieldMappingServiceConfig {
 /**
  * FieldMappingService - Queries Dataverse for mapping profiles and applies mappings
  *
- * This is a local implementation that queries sprk_fieldmappingprofile directly
- * via Dataverse WebAPI, avoiding the React 18 dependency in @spaarke/ui-components.
- *
- * When the React migration project fixes @spaarke/ui-components for React 16,
- * this can be replaced with an import from the shared library.
- *
- * @see DEPLOYMENT-ISSUES.md for context on why this local implementation exists
+ * Updated to use Record Type lookups instead of text entity fields.
+ * Queries sprk_fieldmappingprofile with expanded sprk_recordtype lookups.
  */
 class FieldMappingService {
     private webApi: ComponentFramework.WebApi;
     private enableCache: boolean;
     private profileCache: Map<string, { profile: IFieldMappingProfile | null; timestamp: number }> = new Map();
+    private recordTypeCache: Map<string, string> = new Map(); // entityLogicalName -> recordTypeId
     private readonly CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
     constructor(config: IFieldMappingServiceConfig) {
@@ -75,8 +78,38 @@ class FieldMappingService {
     }
 
     /**
+     * Get Record Type ID for an entity logical name
+     * Queries sprk_recordtype where sprk_entitylogicalname matches
+     */
+    private async getRecordTypeId(entityLogicalName: string): Promise<string | null> {
+        // Check cache
+        if (this.recordTypeCache.has(entityLogicalName)) {
+            return this.recordTypeCache.get(entityLogicalName) || null;
+        }
+
+        try {
+            const query = `?$filter=sprk_entitylogicalname eq '${entityLogicalName}' and statecode eq 0&$select=sprk_recordtypeid,sprk_name`;
+            const result = await this.webApi.retrieveMultipleRecords("sprk_recordtype", query);
+
+            if (!result.entities || result.entities.length === 0) {
+                console.log(`[FieldMappingService] No Record Type found for entity: ${entityLogicalName}`);
+                return null;
+            }
+
+            const recordTypeId = result.entities[0].sprk_recordtypeid as string;
+            this.recordTypeCache.set(entityLogicalName, recordTypeId);
+            console.log(`[FieldMappingService] Found Record Type ${recordTypeId} for ${entityLogicalName}`);
+            return recordTypeId;
+
+        } catch (error) {
+            console.error(`[FieldMappingService] Error querying Record Type:`, error);
+            return null;
+        }
+    }
+
+    /**
      * Get field mapping profile for an entity pair
-     * Queries sprk_fieldmappingprofile from Dataverse
+     * Queries sprk_fieldmappingprofile using Record Type lookups
      */
     async getProfileForEntityPair(sourceEntity: string, targetEntity: string): Promise<IFieldMappingProfile | null> {
         const cacheKey = `${sourceEntity}:${targetEntity}`;
@@ -92,8 +125,22 @@ class FieldMappingService {
         }
 
         try {
-            // Query for active profile matching source and target entities
-            const query = `?$filter=sprk_sourceentity eq '${sourceEntity}' and sprk_targetentity eq '${targetEntity}' and statecode eq 0&$select=sprk_fieldmappingprofileid,sprk_name,sprk_sourceentity,sprk_targetentity,sprk_syncmode,statecode`;
+            // Step 1: Get Record Type IDs for source and target entities
+            const sourceRecordTypeId = await this.getRecordTypeId(sourceEntity);
+            const targetRecordTypeId = await this.getRecordTypeId(targetEntity);
+
+            if (!sourceRecordTypeId) {
+                console.log(`[FieldMappingService] No Record Type for source entity: ${sourceEntity}`);
+                return null;
+            }
+
+            if (!targetRecordTypeId) {
+                console.log(`[FieldMappingService] No Record Type for target entity: ${targetEntity}`);
+                return null;
+            }
+
+            // Step 2: Query for active profile matching source and target record types
+            const query = `?$filter=_sprk_sourcerecordtype_value eq '${sourceRecordTypeId}' and _sprk_targetrecordtype_value eq '${targetRecordTypeId}' and statecode eq 0&$select=sprk_fieldmappingprofileid,sprk_name,_sprk_sourcerecordtype_value,_sprk_targetrecordtype_value,sprk_syncmode,statecode`;
 
             const result = await this.webApi.retrieveMultipleRecords("sprk_fieldmappingprofile", query);
 
@@ -108,8 +155,8 @@ class FieldMappingService {
             const profileEntity = result.entities[0];
             const profileId = profileEntity.sprk_fieldmappingprofileid;
 
-            // Fetch rules for this profile
-            const rulesQuery = `?$filter=_sprk_fieldmappingprofileid_value eq '${profileId}' and statecode eq 0&$select=sprk_fieldmappingruleid,sprk_sourcefield,sprk_targetfield,sprk_sourcefieldtype,sprk_targetfieldtype,sprk_executionorder&$orderby=sprk_executionorder asc`;
+            // Step 3: Fetch rules for this profile
+            const rulesQuery = `?$filter=_sprk_fieldmappingprofile_value eq '${profileId}' and statecode eq 0&$select=sprk_fieldmappingruleid,sprk_sourcefield,sprk_targetfield,sprk_mappingtype,sprk_defaultvalue,sprk_executionorder&$orderby=sprk_executionorder asc`;
 
             const rulesResult = await this.webApi.retrieveMultipleRecords("sprk_fieldmappingrule", rulesQuery);
 
@@ -117,16 +164,18 @@ class FieldMappingService {
                 id: rule.sprk_fieldmappingruleid as string,
                 sourceField: rule.sprk_sourcefield as string,
                 targetField: rule.sprk_targetfield as string,
-                sourceFieldType: rule.sprk_sourcefieldtype as number,
-                targetFieldType: rule.sprk_targetfieldtype as number,
+                mappingType: rule.sprk_mappingtype as number || 0,
+                defaultValue: rule.sprk_defaultvalue as string,
                 executionOrder: rule.sprk_executionorder as number || 0
             }));
 
             const profile: IFieldMappingProfile = {
                 id: profileId,
                 name: profileEntity.sprk_name as string,
-                sourceEntity: profileEntity.sprk_sourceentity as string,
-                targetEntity: profileEntity.sprk_targetentity as string,
+                sourceRecordTypeId: sourceRecordTypeId,
+                sourceEntityLogicalName: sourceEntity,
+                targetRecordTypeId: targetRecordTypeId,
+                targetEntityLogicalName: targetEntity,
                 syncMode: profileEntity.sprk_syncmode as SyncMode || SyncMode.OneTime,
                 isActive: profileEntity.statecode === 0,
                 rules
@@ -171,33 +220,50 @@ class FieldMappingService {
         }
 
         try {
-            // Build select string from source fields in rules
-            const sourceFields = profile.rules.map(r => r.sourceField).join(',');
+            // Build select string from source fields in rules (exclude constant mappings)
+            const sourceFields = profile.rules
+                .filter(r => r.mappingType !== 1) // 1 = Constant
+                .map(r => r.sourceField)
+                .filter(f => f) // Filter out empty
+                .join(',');
 
-            // Fetch source record with required fields
-            const sourceRecord = await this.webApi.retrieveRecord(
-                profile.sourceEntity,
-                sourceRecordId,
-                `?$select=${sourceFields}`
-            );
+            let sourceRecord: Record<string, unknown> = {};
+
+            // Only fetch source record if we have source fields to get
+            if (sourceFields) {
+                sourceRecord = await this.webApi.retrieveRecord(
+                    profile.sourceEntityLogicalName,
+                    sourceRecordId,
+                    `?$select=${sourceFields}`
+                );
+            }
 
             // Apply each rule
             for (const rule of profile.rules) {
                 try {
-                    const sourceValue = sourceRecord[rule.sourceField];
+                    let valueToSet: unknown;
 
-                    if (sourceValue === undefined) {
-                        console.log(`[FieldMappingService] Source field ${rule.sourceField} not found, skipping`);
-                        result.skippedRules++;
-                        continue;
+                    // Handle mapping types
+                    if (rule.mappingType === 1) {
+                        // Constant value mapping
+                        valueToSet = rule.defaultValue;
+                    } else {
+                        // Direct copy from source
+                        valueToSet = sourceRecord[rule.sourceField];
+
+                        if (valueToSet === undefined) {
+                            console.log(`[FieldMappingService] Source field ${rule.sourceField} not found, skipping`);
+                            result.skippedRules++;
+                            continue;
+                        }
                     }
 
-                    // Map the value (type conversion could be added here for complex cases)
-                    targetRecord[rule.targetField] = sourceValue;
-                    result.mappedValues[rule.targetField] = sourceValue;
+                    // Map the value
+                    targetRecord[rule.targetField] = valueToSet;
+                    result.mappedValues[rule.targetField] = valueToSet;
                     result.appliedRules++;
 
-                    console.log(`[FieldMappingService] Mapped ${rule.sourceField} -> ${rule.targetField}`);
+                    console.log(`[FieldMappingService] Mapped ${rule.sourceField || '(constant)'} -> ${rule.targetField}: ${valueToSet}`);
 
                 } catch (ruleError) {
                     console.error(`[FieldMappingService] Error applying rule ${rule.sourceField} -> ${rule.targetField}:`, ruleError);
@@ -466,6 +532,7 @@ export class FieldMappingHandler {
      */
     private getXrmPage(): Xrm.Page | null {
         try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const xrm = (window as any).Xrm || (window.parent as any)?.Xrm;
             return xrm?.Page || null;
         } catch (error) {
