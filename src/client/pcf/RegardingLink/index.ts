@@ -20,7 +20,7 @@ import * as ReactDOM from "react-dom"; // React 16 - NOT react-dom/client
 import { FluentProvider, webLightTheme, webDarkTheme, Link, Theme } from "@fluentui/react-components";
 import { Open16Regular } from "@fluentui/react-icons";
 
-const CONTROL_VERSION = "1.1.0";
+const CONTROL_VERSION = "1.1.5";
 
 // Entity type mapping - values correspond to sprk_recordtype.sprk_entitylogicalname
 // STUB: [CONFIG] - S007: Should query Record Type entity for dynamic mapping
@@ -102,22 +102,46 @@ const LinkCell: React.FC<LinkCellProps> = ({ recordName, recordId, entityLogical
  * Note: Using 'any' type because PAGridCustomizer and CellRendererOverridesProps
  * are not yet exported in @types/powerapps-component-framework but exist at runtime
  */
+// Log when gridCustomizer is created
+console.log(`[RegardingLink] Creating gridCustomizer with Text column override`);
+
 const gridCustomizer: any = {
     /**
      * Called to get the cell customizer for specific columns
+     * Key is the column DATA TYPE (e.g., "Text"), not the column name
+     * We check the column name inside the renderer function
      */
     cellRendererOverrides: {
         /**
-         * Override cell renderer for the Regarding Record Name column
-         * This renders the cell as a clickable link that navigates to the parent record
+         * Override cell renderer for Text columns
+         * Checks if this is the Regarding Record Name column and renders as clickable link
          */
-        [REGARDING_RECORD_NAME_COLUMN]: (
+        ["Text"]: (
             props: any,
             renderedValue: React.ReactNode
         ): React.ReactNode => {
+            // Get column info from props
+            const columnName = props?.columnInfo?.name || props?.colDefs?.[props?.columnIndex]?.name;
+
+            // DEBUG: Log every Text cell render call
+            console.log(`[RegardingLink] Text cellRenderer called`, {
+                columnName: columnName,
+                targetColumn: REGARDING_RECORD_NAME_COLUMN,
+                isMatch: columnName === REGARDING_RECORD_NAME_COLUMN,
+                propsKeys: Object.keys(props || {})
+            });
+
+            // Only process the Regarding Record Name column
+            if (columnName !== REGARDING_RECORD_NAME_COLUMN) {
+                return renderedValue; // Return default for other text columns
+            }
+
+            console.log(`[RegardingLink] Processing ${REGARDING_RECORD_NAME_COLUMN} column`);
+
             // Get the row data
-            const rowData = props.rowData;
+            const rowData = props?.rowData;
             if (!rowData) {
+                console.log("[RegardingLink] No rowData in props");
                 return renderedValue;
             }
 
@@ -174,45 +198,50 @@ const gridCustomizer: any = {
  * The getGridCustomizer static method is called by Power Apps Grid
  * to get the cell renderer overrides
  */
-export class RegardingLink implements ComponentFramework.StandardControl<IInputs, IOutputs> {
+export class RegardingLink implements ComponentFramework.ReactControl<IInputs, IOutputs> {
     /**
      * Static method to get the grid customizer
      * Called by Power Apps Grid to get cell renderer overrides
-     * Note: Using 'any' return type because PAGridCustomizer is not in @types
      */
     public static getGridCustomizer(): any {
+        console.log("[RegardingLink] getGridCustomizer() called by Power Apps Grid");
+        console.log("[RegardingLink] Returning customizer with cellRendererOverrides for:", Object.keys(gridCustomizer.cellRendererOverrides));
         return gridCustomizer;
     }
 
-    private container: HTMLDivElement | null = null;
     private context: ComponentFramework.Context<IInputs>;
     private notifyOutputChanged: () => void;
 
     constructor() {}
 
     /**
-     * Initialize the control
+     * Initialize the control - ReactControl version
      */
     public init(
         context: ComponentFramework.Context<IInputs>,
         notifyOutputChanged: () => void,
-        state: ComponentFramework.Dictionary,
-        container: HTMLDivElement
+        state: ComponentFramework.Dictionary
     ): void {
         this.context = context;
         this.notifyOutputChanged = notifyOutputChanged;
-        this.container = container;
 
         console.log(`[RegardingLink] Grid Customizer initialized v${CONTROL_VERSION}`);
+
+        // DEBUG: Expose class globally to verify getGridCustomizer is accessible
+        (window as any).RegardingLinkClass = RegardingLink;
+        console.log("[RegardingLink] Class exposed globally. Test with: window.RegardingLinkClass.getGridCustomizer()");
+        console.log("[RegardingLink] getGridCustomizer exists:", typeof RegardingLink.getGridCustomizer);
     }
 
     /**
-     * Update view - for grid customizer, minimal rendering
+     * Update view - for ReactControl, return React element
+     * Grid customizer doesn't render anything - just provides cell overrides
      */
-    public updateView(context: ComponentFramework.Context<IInputs>): void {
+    public updateView(context: ComponentFramework.Context<IInputs>): React.ReactElement {
         this.context = context;
         // Grid customizer handles cell rendering via getGridCustomizer()
-        // This control renders nothing visually
+        // Return empty fragment - this control renders nothing visually
+        return React.createElement(React.Fragment, null);
     }
 
     /**
@@ -229,3 +258,10 @@ export class RegardingLink implements ComponentFramework.StandardControl<IInputs
         console.log("[RegardingLink] Grid Customizer destroyed");
     }
 }
+
+// Also expose getGridCustomizer at module level for Power Apps Grid discovery
+// This is in addition to the static method on the class
+(RegardingLink as any).getGridCustomizer = RegardingLink.getGridCustomizer;
+
+// Log to verify module-level exposure
+console.log("[RegardingLink] Module loaded, getGridCustomizer exposed on class:", typeof (RegardingLink as any).getGridCustomizer);

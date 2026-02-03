@@ -1,10 +1,8 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="RegardingLink" version="1.0.0" display-name-key="Regarding Link" description-key="Displays a clickable navigation link to the regarding (parent) record" control-type="standard" api-version="1.3.18">
+  <control namespace="Spaarke.Controls" constructor="RegardingLink" version="1.1.5" display-name-key="Regarding Link Grid Customizer" description-key="Grid customizer that renders Regarding Record Name as a clickable navigation link" control-type="virtual" api-version="1.3.18">
     <external-service-usage enabled="false"/>
-    <property name="regardingRecordType" display-name-key="Regarding Record Type" description-key="The entity type value (0=Project, 1=Matter, etc.)" of-type="OptionSet" usage="bound" required="false"/>
-    <property name="regardingRecordId" display-name-key="Regarding Record ID" description-key="GUID of the regarding record" of-type="SingleLine.Text" usage="bound" required="false"/>
-    <property name="regardingRecordName" display-name-key="Regarding Record Name" description-key="Display name of the regarding record" of-type="SingleLine.Text" usage="bound" required="false"/>
+    <data-set name="records" display-name-key="Records"/>
     <resources>
       <code path="bundle.js" order="1"/>
       <css path="styles.css" order="1"/>
