@@ -45,6 +45,52 @@ public sealed class GenericAnalysisHandler : IAnalysisToolHandler
         "analyze"     // General analysis
     };
 
+    /// <summary>
+    /// JSON Schema (Draft 07) for configuration validation.
+    /// </summary>
+    private static readonly object ConfigSchema = new
+    {
+        schema = "https://json-schema.org/draft-07/schema#",
+        title = "Generic Analysis Handler Configuration",
+        type = "object",
+        properties = new
+        {
+            operation = new
+            {
+                type = "string",
+                description = "The operation type to perform",
+                @enum = new[] { "extract", "classify", "validate", "generate", "transform", "analyze" }
+            },
+            prompt_template = new
+            {
+                type = "string",
+                description = "Custom prompt template. Use {document} and {parameters} placeholders."
+            },
+            output_schema = new
+            {
+                type = "object",
+                description = "JSON schema defining the expected output structure"
+            },
+            max_tokens = new
+            {
+                type = "integer",
+                description = "Maximum tokens for AI response",
+                minimum = 100,
+                maximum = 16000,
+                @default = 2000
+            },
+            temperature = new
+            {
+                type = "number",
+                description = "AI temperature (0.0-1.0)",
+                minimum = 0.0,
+                maximum = 1.0,
+                @default = 0.3
+            }
+        },
+        required = new[] { "operation" }
+    };
+
     public GenericAnalysisHandler(
         IOpenAiClient openAiClient,
         IScopeResolverService scopeResolver,
@@ -71,7 +117,8 @@ public sealed class GenericAnalysisHandler : IAnalysisToolHandler
             new ToolParameterDefinition("output_schema", "JSON schema for expected output structure", ToolParameterType.Object, Required: false),
             new ToolParameterDefinition("max_tokens", "Maximum tokens for AI response", ToolParameterType.Integer, Required: false, DefaultValue: 2000),
             new ToolParameterDefinition("temperature", "AI temperature (0.0-1.0)", ToolParameterType.Decimal, Required: false, DefaultValue: 0.3)
-        });
+        },
+        ConfigurationSchema: ConfigSchema);
 
     /// <inheritdoc />
     public IReadOnlyList<ToolType> SupportedToolTypes { get; } = new[] { ToolType.Custom };

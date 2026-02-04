@@ -1,0 +1,165 @@
+<!--
+  Event Entity Ribbon Customizations
+
+  Adds "Update Related" button to:
+  - Homepage Grid (main view when records selected)
+  - Main Form (command bar)
+  - SubGrid (when Event records appear on parent forms)
+
+  Prerequisites:
+  1. Deploy sprk_updaterelated_commands.js web resource
+  2. Deploy sprk_UpdateRelated.svg icon web resource
+  3. Add this RibbonDiffXml to the Event entity in a solution
+
+  @see ribbon-edit skill for deployment instructions
+-->
+
+<RibbonDiffXml>
+  <CustomActions>
+    <!-- Homepage Grid Button - shows when records are selected in Event grid view -->
+    <CustomAction Id="sprk.UpdateRelated.HomepageGrid.CustomAction"
+                  Location="Mscrm.HomepageGrid.sprk_event.MainTab.Actions.Controls._children"
+                  Sequence="60">
+      <CommandUIDefinition>
+        <Button Id="sprk.UpdateRelated.HomepageGrid.Button"
+                Command="sprk.UpdateRelated.HomepageGrid.Command"
+                LabelText="$LocLabels:sprk.UpdateRelated.Label"
+                Alt="$LocLabels:sprk.UpdateRelated.Alt"
+                ToolTipTitle="$LocLabels:sprk.UpdateRelated.ToolTipTitle"
+                ToolTipDescription="$LocLabels:sprk.UpdateRelated.ToolTipDescription"
+                TemplateAlias="o1"
+                Image16by16="$webresource:sprk_UpdateRelated.svg"
+                Image32by32="$webresource:sprk_UpdateRelated.svg"
+                ModernImage="$webresource:sprk_UpdateRelated.svg" />
+      </CommandUIDefinition>
+    </CustomAction>
+
+    <!-- Form Button - shows on Event main form command bar -->
+    <CustomAction Id="sprk.UpdateRelated.Form.CustomAction"
+                  Location="Mscrm.Form.sprk_event.MainTab.Save.Controls._children"
+                  Sequence="100">
+      <CommandUIDefinition>
+        <Button Id="sprk.UpdateRelated.Form.Button"
+                Command="sprk.UpdateRelated.Form.Command"
+                LabelText="$LocLabels:sprk.UpdateRelated.Label"
+                Alt="$LocLabels:sprk.UpdateRelated.Alt"
+                ToolTipTitle="$LocLabels:sprk.UpdateRelated.ToolTipTitle"
+                ToolTipDescription="$LocLabels:sprk.UpdateRelated.ToolTipDescription"
+                TemplateAlias="o1"
+                Image16by16="$webresource:sprk_UpdateRelated.svg"
+                Image32by32="$webresource:sprk_UpdateRelated.svg"
+                ModernImage="$webresource:sprk_UpdateRelated.svg" />
+      </CommandUIDefinition>
+    </CustomAction>
+
+    <!-- SubGrid Button - shows when Event records appear in subgrids on other forms -->
+    <CustomAction Id="sprk.UpdateRelated.SubGrid.CustomAction"
+                  Location="Mscrm.SubGrid.sprk_event.MainTab.Actions.Controls._children"
+                  Sequence="60">
+      <CommandUIDefinition>
+        <Button Id="sprk.UpdateRelated.SubGrid.Button"
+                Command="sprk.UpdateRelated.SubGrid.Command"
+                LabelText="$LocLabels:sprk.UpdateRelated.Label"
+                Alt="$LocLabels:sprk.UpdateRelated.Alt"
+                ToolTipTitle="$LocLabels:sprk.UpdateRelated.ToolTipTitle"
+                ToolTipDescription="$LocLabels:sprk.UpdateRelated.ToolTipDescription"
+                TemplateAlias="o1"
+                Image16by16="$webresource:sprk_UpdateRelated.svg"
+                Image32by32="$webresource:sprk_UpdateRelated.svg"
+                ModernImage="$webresource:sprk_UpdateRelated.svg" />
+      </CommandUIDefinition>
+    </CustomAction>
+  </CustomActions>
+
+  <Templates>
+    <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>
+  </Templates>
+
+  <CommandDefinitions>
+    <!-- Homepage Grid Command -->
+    <CommandDefinition Id="sprk.UpdateRelated.HomepageGrid.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.UpdateRelated.HomepageGrid.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_updaterelated_commands.js"
+                           FunctionName="Spaarke_UpdateRelated_Grid">
+          <CrmParameter Value="SelectedControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+
+    <!-- Form Command -->
+    <CommandDefinition Id="sprk.UpdateRelated.Form.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.UpdateRelated.Form.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_updaterelated_commands.js"
+                           FunctionName="Spaarke_UpdateRelated_Form">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+
+    <!-- SubGrid Command -->
+    <CommandDefinition Id="sprk.UpdateRelated.SubGrid.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.UpdateRelated.SubGrid.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_updaterelated_commands.js"
+                           FunctionName="Spaarke_UpdateRelated_SubGrid">
+          <CrmParameter Value="SelectedControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+  </CommandDefinitions>
+
+  <RuleDefinitions>
+    <TabDisplayRules />
+    <DisplayRules />
+    <EnableRules>
+      <!-- Homepage Grid Enable Rule - enabled when records are selected -->
+      <EnableRule Id="sprk.UpdateRelated.HomepageGrid.EnableRule">
+        <SelectionCountRule AppliesTo="SelectedEntity" Minimum="1" Default="false" />
+      </EnableRule>
+
+      <!-- Form Enable Rule - always enabled on form (record exists) -->
+      <EnableRule Id="sprk.UpdateRelated.Form.EnableRule">
+        <FormStateRule State="Existing" Default="true" />
+      </EnableRule>
+
+      <!-- SubGrid Enable Rule - enabled when records are selected in subgrid -->
+      <EnableRule Id="sprk.UpdateRelated.SubGrid.EnableRule">
+        <SelectionCountRule AppliesTo="SelectedEntity" Minimum="1" Default="false" />
+      </EnableRule>
+    </EnableRules>
+  </RuleDefinitions>
+
+  <LocLabels>
+    <LocLabel Id="sprk.UpdateRelated.Label">
+      <Titles>
+        <Title languagecode="1033" description="Update Related" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.UpdateRelated.Alt">
+      <Titles>
+        <Title languagecode="1033" description="Update Related Records" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.UpdateRelated.ToolTipTitle">
+      <Titles>
+        <Title languagecode="1033" description="Update Related Records" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.UpdateRelated.ToolTipDescription">
+      <Titles>
+        <Title languagecode="1033" description="Push field mapping values from this Event to all related records" />
+      </Titles>
+    </LocLabel>
+  </LocLabels>
+</RibbonDiffXml>

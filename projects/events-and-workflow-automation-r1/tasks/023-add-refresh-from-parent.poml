@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>Add Refresh from Parent functionality</title>
+    <phase>3: Association Resolver</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>022</dependencies>
+    <blocks>none</blocks>
+    <tags>pcf, react, typescript, frontend</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Extends existing component with new feature</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add a "Refresh from Parent" button to AssociationResolver that allows users to manually
+    re-apply field mappings from the regarding record. This supports the Manual Refresh sync mode.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in PCF control development and UX design.
+  </role>
+
+  <goal>
+    "Refresh from Parent" button implemented that re-applies field mappings on demand. Button
+    shows confirmation dialog before overwriting existing values.
+  </goal>
+
+  <context>
+    <background>
+      Manual Refresh (pull) sync mode allows users to re-sync field values from the parent
+      record at any time. This is useful when parent data changes after child creation.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/AssociationResolver/ - Control from tasks 020-022</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md - Manual Refresh requirements</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Button only visible when regarding record is set</constraint>
+    <constraint source="spec">Show confirmation before overwriting values</constraint>
+    <constraint source="ADR-021">Use Fluent UI v9 Button and Dialog components</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review spec.md Manual Refresh sync mode requirements</step>
+    <step order="2">Add "Refresh from Parent" Button component using Fluent UI v9</step>
+    <step order="3">Implement visibility logic (only show when regarding record exists)</step>
+    <step order="4">Add confirmation Dialog before applying mappings</step>
+    <step order="5">Reuse FieldMappingHandler from task 022 for refresh logic</step>
+    <step order="6">This time, overwrite existing values (not skip user-modified)</step>
+    <step order="7">Show loading indicator during refresh</step>
+    <step order="8">Show success/failure result to user</step>
+    <step order="9">Build and verify feature works</step>
+    <step order="10">Update TASK-INDEX.md: change task 023 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF control</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/AssociationResolver/AssociationResolver/components/RefreshFromParentButton.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given an Event with a regarding Matter, when the form loads, then "Refresh from Parent"
+      button is visible.
+    </criterion>
+    <criterion testable="true">
+      Given the user clicks "Refresh from Parent", when confirmation is accepted, then mapped
+      fields are updated from the parent Matter's current values.
+    </criterion>
+    <criterion testable="true">
+      Given an Event with no regarding record, when the form loads, then the button is hidden.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The key difference from initial mapping (task 022):
+    - Initial: Skip fields user has modified
+    - Refresh: Overwrite all mapped fields (user explicitly requested refresh)
+
+    Use Fluent UI v9 Dialog for confirmation modal.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

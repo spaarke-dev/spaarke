@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<manifest>
+  <control namespace="Spaarke.Controls" constructor="UpdateRelatedButton" version="1.0.0" display-name-key="Update Related Button" description-key="Triggers update of related records based on configured field mappings" control-type="standard">
+    <external-service-usage enabled="false">
+    </external-service-usage>
+
+    <property name="buttonLabel" display-name-key="Button Label" description-key="Text displayed on the update button" of-type="SingleLine.Text" usage="bound" required="true" />
+    <property name="sourceEntityId" display-name-key="Source Entity ID" description-key="GUID of the source record" of-type="SingleLine.Text" usage="bound" required="true" />
+    <property name="sourceEntityType" display-name-key="Source Entity Type" description-key="Logical name of source entity" of-type="SingleLine.Text" usage="bound" required="true" />
+    <property name="mappingProfileId" display-name-key="Mapping Profile ID" description-key="GUID of the field mapping profile to use" of-type="SingleLine.Text" usage="bound" required="false" />
+    <property name="apiBaseUrl" display-name-key="API Base URL" description-key="Base URL for the BFF API" of-type="SingleLine.Text" usage="bound" required="true" />
+
+    <resources>
+      <code path="index.ts" order="1" />
+      <css path="styles.css" order="1" />
+      <!-- Platform-provided libraries: DO NOT bundle -->
+      <platform-library name="React" version="16.14.0" />
+      <platform-library name="Fluent" version="9.46.2" />
+    </resources>
+    <feature-usage>
+      <uses-feature name="WebAPI" required="true" />
+      <uses-feature name="Utility" required="true" />
+    </feature-usage>
+  </control>
+</manifest>

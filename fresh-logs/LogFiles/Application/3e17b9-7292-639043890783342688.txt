@@ -1,0 +1,11 @@
+2026-01-19T03:11:15  PID[7292] Information 1/19/2026 3:11:15 AM [[4.8]] [DW1SDWK00083O] DaasRunner.exe with version 4.8.40625.1 and ProcessId=7292 started
+2026-01-19T03:11:17  PID[7292] Information 1/19/2026 3:11:17 AM [[4.8]] [DW1SDWK00083O] Checking DaaS bits and updating if required
+2026-01-19T03:11:18  PID[7292] Information 1/19/2026 3:11:18 AM [[4.8]] [DW1SDWK00083O] [daasrunner.exe] Version in DaaS Installation path (4.8.40625.1) is lower or equal to the existing version 4.8.40625.1. Version Compare result = 0
+2026-01-19T03:11:18  PID[7292] Information 1/19/2026 3:11:18 AM [[4.8]] [DW1SDWK00083O] Binary Comparing files C:\Program Files (x86)\SiteExtensions\DaaS\4.8.40625.1\bin\daasrunner.exe and C:\home\site\Jobs\Continuous\DaaS\DaasRunner.exe
+2026-01-19T03:11:18  PID[7292] Information 1/19/2026 3:11:18 AM [[4.8]] [DW1SDWK00083O] Binary Comparison succeeded: C:\Program Files (x86)\SiteExtensions\DaaS\4.8.40625.1\bin\daasrunner.exe and C:\home\site\Jobs\Continuous\DaaS\DaasRunner.exe
+2026-01-19T03:11:19  PID[7292] Information 1/19/2026 3:11:19 AM [[4.8]] [DW1SDWK00083O] [daasconsole.exe] Version in DaaS Installation path (4.8.40625.1) is lower or equal to the existing version 4.8.40625.1. Version Compare result = 0
+2026-01-19T03:11:19  PID[7292] Information 1/19/2026 3:11:19 AM [[4.8]] [DW1SDWK00083O] Binary Comparing files C:\Program Files (x86)\SiteExtensions\DaaS\4.8.40625.1\bin\daasconsole.exe and C:\home\data\DaaS\bin\DaasConsole.exe
+2026-01-19T03:11:19  PID[7292] Information 1/19/2026 3:11:19 AM [[4.8]] [DW1SDWK00083O] Binary Comparison succeeded: C:\Program Files (x86)\SiteExtensions\DaaS\4.8.40625.1\bin\daasconsole.exe and C:\home\data\DaaS\bin\DaasConsole.exe
+2026-01-19T03:11:19  PID[7292] Information 1/19/2026 3:11:19 AM [[4.8]] [DW1SDWK00083O] Done checking DaaS bits for any new updates
+2026-01-19T03:12:40  PID[7292] Information 1/19/2026 3:12:40 AM [[4.8]] [DW1SDWK00083O] Starting cleanup for Completed Sessions MaxDiagnosticSessionsToKeep = [10] MaxNumberOfDaysForSessions= [20]
+2026-01-19T03:12:40  PID[7292] Information 1/19/2026 3:12:40 AM [[4.8]] [DW1SDWK00083O] Storage account is not configured

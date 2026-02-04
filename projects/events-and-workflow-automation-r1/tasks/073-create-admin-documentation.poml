@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="073" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>Create admin documentation</title>
+    <phase>7: Deployment &amp; Wrap-up</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>071</dependencies>
+    <blocks>074</blocks>
+    <tags>documentation</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation task (no code implementation)</rigor-reason>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create administrator documentation for configuring Field Mapping profiles and rules.
+    Cover how to set up mappings between entities, understand type compatibility, and use
+    the Update Related feature.
+  </prompt>
+
+  <role>
+    Technical writer with expertise in Dataverse administration guides.
+  </role>
+
+  <goal>
+    Admin documentation created that enables administrators to configure field mappings
+    without developer assistance.
+  </goal>
+
+  <context>
+    <background>
+      Administrators need documentation to configure field mapping profiles. This is a
+      powerful feature that requires understanding of entity relationships and field types.
+    </background>
+    <relevant-files>
+      <file>projects/events-and-workflow-automation-r1/spec.md - Field Mapping Framework</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Documentation should enable self-service configuration</constraint>
+    <constraint source="project">Include type compatibility reference</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/events-and-workflow-automation-r1/spec.md</file>
+      <file>projects/events-and-workflow-automation-r1/CLAUDE.md - Type compatibility matrix</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review spec.md Field Mapping Framework section</step>
+    <step order="2">Outline admin documentation structure</step>
+    <step order="3">Write: Introduction to Field Mapping</step>
+    <step order="4">Write: Creating a Field Mapping Profile</step>
+    <step order="5">Write: Adding Field Mapping Rules</step>
+    <step order="6">Write: Understanding Type Compatibility</step>
+    <step order="7">Write: Sync Modes explained (one-time, manual refresh, update related)</step>
+    <step order="8">Write: Using Update Related from parent record</step>
+    <step order="9">Write: Troubleshooting common issues</step>
+    <step order="10">Add type compatibility reference table</step>
+    <step order="11">Review documentation for accuracy</step>
+    <step order="12">Update TASK-INDEX.md: change task 073 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="browser">Capture screenshots</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/product-documentation/field-mapping-admin-guide.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given an administrator, when they read the documentation, then they can create a field
+      mapping profile with rules without developer help.
+    </criterion>
+    <criterion testable="true">
+      Given the type compatibility table, when reviewed, then all type combinations are
+      documented with allowed/blocked status.
+    </criterion>
+    <criterion testable="true">
+      Given the sync mode explanations, when reviewed, then each mode's behavior and use case
+      is clearly described.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Documentation outline:
+    1. Overview of Field Mapping Framework
+    2. Creating a Field Mapping Profile
+       - Selecting source and target entities
+       - Choosing sync mode
+    3. Adding Field Mapping Rules
+       - Selecting fields
+       - Type compatibility (reference table)
+       - Reversible mappings
+    4. Sync Modes Deep Dive
+       - One-time: Initial population only
+       - Manual Refresh: User-triggered pull
+       - Update Related: Admin-triggered push
+    5. Using Update Related
+       - From parent record
+       - Understanding the push operation
+       - Viewing results
+    6. Type Compatibility Reference
+       - Full matrix table
+    7. Troubleshooting
+       - Mapping not applied?
+       - Type validation errors
+
+    Type compatibility table:
+    | Source Type | Can Map To |
+    |-------------|------------|
+    | Lookup | Lookup, Text |
+    | Text | Text, Memo |
+    | Memo | Text, Memo |
+    | OptionSet | OptionSet, Text |
+    | Number | Number, Text |
+    | DateTime | DateTime, Text |
+    | Boolean | Boolean, Text |
+
+    This task can run in parallel with task 072 (Parallel Group G).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+
+  <notes-completion>
+    Task 073 completed 2026-02-01.
+
+    Created file: docs/product-documentation/field-mapping-admin-guide.md
+
+    Document includes:
+    - 10-section comprehensive administrator guide
+    - Step-by-step procedures for creating profiles and rules
+    - Complete type compatibility matrix (7x7) with examples
+    - Detailed sync mode explanations (One-time, Manual Refresh, Update Related)
+    - Troubleshooting section with 5 common scenarios
+    - Best practices for planning, naming, monitoring
+
+    All 3 acceptance criteria met:
+    1. Administrators can create profiles/rules without developer help
+    2. All type combinations documented with status
+    3. All sync modes explained with use cases
+  </notes-completion>
+</task>

@@ -1,0 +1,41 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ImportExportXml version="9.2.24014.198" SolutionPackageVersion="9.2" languagecode="1033" generatedBy="CRMPackager" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <SolutionManifest>
+    <UniqueName>RegardingLinkSolution</UniqueName>
+    <LocalizedNames>
+      <LocalizedName description="Regarding Link Solution" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="PCF control for displaying clickable links to regarding records" languagecode="1033" />
+    </Descriptions>
+    <Version>1.1.6</Version>
+    <Managed>0</Managed>
+    <Publisher>
+      <UniqueName>Spaarke</UniqueName>
+      <LocalizedNames>
+        <LocalizedName description="Spaarke" languagecode="1033" />
+      </LocalizedNames>
+      <Descriptions>
+        <Description description="Spaarke Solutions Publisher" languagecode="1033" />
+      </Descriptions>
+      <EMailAddress xsi:nil="true" />
+      <SupportingWebsiteUrl xsi:nil="true" />
+      <CustomizationPrefix>sprk</CustomizationPrefix>
+      <CustomizationOptionValuePrefix>65949</CustomizationOptionValuePrefix>
+      <Addresses>
+        <Address>
+          <AddressNumber>1</AddressNumber>
+          <AddressTypeCode>1</AddressTypeCode>
+        </Address>
+        <Address>
+          <AddressNumber>2</AddressNumber>
+          <AddressTypeCode>1</AddressTypeCode>
+        </Address>
+      </Addresses>
+    </Publisher>
+    <RootComponents>
+      <RootComponent type="66" schemaName="sprk_Spaarke.Controls.RegardingLink" behavior="0" />
+    </RootComponents>
+    <MissingDependencies />
+  </SolutionManifest>
+</ImportExportXml>

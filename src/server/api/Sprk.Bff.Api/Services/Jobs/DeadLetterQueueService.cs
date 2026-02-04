@@ -1,5 +1,7 @@
 using System.Text.Json;
 using Azure.Messaging.ServiceBus;
+using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Jobs;
 using Sprk.Bff.Api.Telemetry;
 
@@ -20,14 +22,15 @@ public class DeadLetterQueueService
     public DeadLetterQueueService(
         ServiceBusClient serviceBusClient,
         EmailTelemetry telemetry,
-        IConfiguration configuration,
+        IOptions<ServiceBusOptions> serviceBusOptions,
         ILogger<DeadLetterQueueService> logger)
     {
         _serviceBusClient = serviceBusClient ?? throw new ArgumentNullException(nameof(serviceBusClient));
         _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-        _queueName = configuration["Jobs:ServiceBus:QueueName"] ?? "sdap-jobs";
+        var options = serviceBusOptions?.Value ?? throw new ArgumentNullException(nameof(serviceBusOptions));
+        _queueName = options.QueueName;
         _dlqPath = $"{_queueName}/$deadletterqueue";
     }
 

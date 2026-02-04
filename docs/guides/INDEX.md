@@ -25,6 +25,7 @@ This directory contains practical guides for implementing features, configuring 
 - [AI-DOCUMENT-INTELLIGENCE-INTEGRATION.md](AI-DOCUMENT-INTELLIGENCE-INTEGRATION.md)
 - [AI-STREAMING-SSE-IMPLEMENTATION.md](AI-STREAMING-SSE-IMPLEMENTATION.md)
 - [AI-TOOL-FRAMEWORK-GUIDE.md](AI-TOOL-FRAMEWORK-GUIDE.md)
+- **[HOW-TO-CREATE-AI-PLAYBOOK-SCOPES.md](HOW-TO-CREATE-AI-PLAYBOOK-SCOPES.md)** - **NEW**: User guide for creating Tools, Skills, Knowledge, and Actions in Dataverse
 
 ### Email Automation
 
@@ -54,6 +55,7 @@ This directory contains practical guides for implementing features, configuring 
 **Common scenarios**:
 - Creating PCF control → Load HOW-TO-CREATE-NEW-PCF-CONTROL.md, PCF-CONTROL-DEVELOPMENT.md
 - Adding document support → Load HOW-TO-ADD-DOCUMENT-SUPPORT-TO-ENTITY.md
+- **Creating AI playbook scopes → Load HOW-TO-CREATE-AI-PLAYBOOK-SCOPES.md**
 - AI integration → Load AI-TOOL-FRAMEWORK-GUIDE.md, AI-STREAMING-SSE-IMPLEMENTATION.md
 - Dataverse work → Load DATAVERSE-*.md guides
 - Email automation → Load EMAIL-TO-DOCUMENT-ARCHITECTURE.md

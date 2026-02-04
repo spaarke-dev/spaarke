@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>Project Wrap-up</title>
+    <phase>7: Deployment &amp; Wrap-up</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>074</dependencies>
+    <blocks>none</blocks>
+    <tags>documentation, project-management</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Final quality gates: code-review + adr-check + repo-cleanup</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Complete project wrap-up: run final quality gates (code-review, adr-check), perform
+    repository cleanup, update all documentation to Complete status, and document lessons
+    learned.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer performing project finalization.
+  </role>
+
+  <goal>
+    Project fully wrapped up with all quality gates passed, documentation complete, repository
+    cleaned, and lessons learned documented.
+  </goal>
+
+  <context>
+    <background>
+      This is the mandatory final task for all projects. It ensures quality gates are run,
+      ephemeral files are cleaned up, and the project leaves the codebase in a clean state.
+    </background>
+    <relevant-files>
+      <file>projects/events-and-workflow-automation-r1/ - All project files</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="task-create">MANDATORY final task for all projects</constraint>
+    <constraint source="task-create">Must run code-review, adr-check, repo-cleanup skills</constraint>
+    <constraint source="task-create">Must fix critical issues before completing</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>projects/events-and-workflow-automation-r1/README.md</file>
+      <file>projects/events-and-workflow-automation-r1/plan.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run /code-review on all project code (PCF controls, API endpoints)</step>
+    <step order="2">Review code-review findings and fix critical issues</step>
+    <step order="3">Run /adr-check on all project code</step>
+    <step order="4">Review ADR compliance issues and fix any violations</step>
+    <step order="5">Run /repo-cleanup projects/events-and-workflow-automation-r1</step>
+    <step order="6">Review cleanup report</step>
+    <step order="7">Approve removal of ephemeral files (notes/debug/, notes/spikes/, notes/drafts/)</step>
+    <step order="8">Archive handoffs if any (notes/handoffs/ → .archive/)</step>
+    <step order="9">Verify README.md shows Complete status (from task 074)</step>
+    <step order="10">Update plan.md: set Status to "Complete", check all milestones</step>
+    <step order="11">Create lessons-learned.md if notable insights</step>
+    <step order="12">Verify all tasks in TASK-INDEX.md show ✅ completed</step>
+    <step order="13">Final verification: no critical issues remaining</step>
+    <step order="14">Update TASK-INDEX.md: change task 090 status to ✅ completed</step>
+    <step order="15">Update current-task.md: set status to "none", next action to "Project complete"</step>
+  </steps>
+
+  <tools>
+    <tool name="skill">code-review, adr-check, repo-cleanup skills</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/events-and-workflow-automation-r1/notes/lessons-learned.md (if applicable)</output>
+    <output type="docs">projects/events-and-workflow-automation-r1/README.md (verified complete)</output>
+    <output type="docs">projects/events-and-workflow-automation-r1/plan.md (verified complete)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given /code-review results, when reviewed, then no critical issues remain unaddressed.
+    </criterion>
+    <criterion testable="true">
+      Given /adr-check results, when reviewed, then no ADR violations exist.
+    </criterion>
+    <criterion testable="true">
+      Given /repo-cleanup results, when ephemeral files are removed, then notes/ only contains
+      essential documentation.
+    </criterion>
+    <criterion testable="true">
+      Given TASK-INDEX.md, when viewed, then all tasks (001-074, 090) show ✅ completed.
+    </criterion>
+    <criterion testable="true">
+      Given README.md, when viewed, then Status is "Complete" and all graduation criteria checked.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is the MANDATORY final task per task-create Step 3.7.
+
+    Quality gate expectations:
+    - code-review: May find style issues, documentation gaps - fix critical only
+    - adr-check: No ADR violations should remain
+    - repo-cleanup: Remove debug artifacts, spike code, draft docs
+
+    Lessons learned should capture:
+    - What worked well
+    - What was challenging
+    - Recommendations for future projects
+    - Any gotchas or workarounds discovered
+
+    After this task:
+    - Project is considered complete
+    - Branch is ready for PR review and merge
+    - No further tasks should be added to this project
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+      This is the FINAL task - ensure all prior work is complete before starting.
+    </protocol>
+  </execution>
+</task>

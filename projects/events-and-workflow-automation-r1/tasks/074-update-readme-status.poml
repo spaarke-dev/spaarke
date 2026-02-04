@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="074" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>Update README status to Complete</title>
+    <phase>7: Deployment &amp; Wrap-up</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>072, 073</dependencies>
+    <blocks>090</blocks>
+    <tags>documentation</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Simple documentation update</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Update project README.md to reflect completion status. Check all graduation criteria
+    checkboxes, update status and dates, and add completion entry to changelog.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer performing project housekeeping.
+  </role>
+
+  <goal>
+    README.md reflects project completion with all graduation criteria checked, status
+    updated, and dates filled in.
+  </goal>
+
+  <context>
+    <background>
+      Project completion requires updating README.md to reflect final status and documenting
+      when graduation criteria were met.
+    </background>
+    <relevant-files>
+      <file>projects/events-and-workflow-automation-r1/README.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">All 15 graduation criteria must be checkmarked</constraint>
+    <constraint source="project">Status must change from "In Progress" to "Complete"</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/events-and-workflow-automation-r1/README.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Open README.md</step>
+    <step order="2">Update Status from "In Progress" to "Complete"</step>
+    <step order="3">Update Phase from "Planning" to "Complete"</step>
+    <step order="4">Update Progress to "100%"</step>
+    <step order="5">Fill in Completed Date with today's date</step>
+    <step order="6">Check all 15 graduation criteria checkboxes (SC-01 through SC-15)</step>
+    <step order="7">Add changelog entry: "Project completed - all graduation criteria met"</step>
+    <step order="8">Review all sections for accuracy</step>
+    <step order="9">Save README.md</step>
+    <step order="10">Update TASK-INDEX.md: change task 074 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">File editing</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/events-and-workflow-automation-r1/README.md (updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given README.md, when Status section is viewed, then it shows "Complete".
+    </criterion>
+    <criterion testable="true">
+      Given README.md, when graduation criteria are viewed, then all 15 are checked.
+    </criterion>
+    <criterion testable="true">
+      Given README.md changelog, when viewed, then completion entry exists with date.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    README.md updates needed:
+    - Status: In Progress → Complete
+    - Phase: Planning → Complete
+    - Progress: 5% → 100%
+    - Target Date: TBD → (actual date if known)
+    - Completed Date: — → {YYYY-MM-DD}
+    - Graduation Criteria: [ ] → [x] for all 15
+    - Changelog: Add completion entry
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

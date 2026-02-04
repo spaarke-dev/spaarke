@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useEffect } from 'react';
+import React, { useCallback, useMemo, useEffect, useState } from 'react';
 import {
   makeStyles,
   tokens,
@@ -18,6 +18,8 @@ import {
   Divider,
   Link,
   mergeClasses,
+  Textarea,
+  Label,
 } from '@fluentui/react-components';
 import {
   SaveRegular,
@@ -28,10 +30,10 @@ import {
   InfoRegular,
   SparkleRegular,
   SearchRegular,
-  BrainCircuitRegular,
   OpenRegular,
   CopyRegular,
   PersonSearchRegular,
+  EditRegular,
 } from '@fluentui/react-icons';
 import { EntityPicker } from './EntityPicker';
 import { AttachmentSelector } from './AttachmentSelector';
@@ -55,7 +57,7 @@ const useStyles = makeStyles({
   container: {
     display: 'flex',
     flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
+    gap: tokens.spacingVerticalL,
     width: '100%',
   },
   section: {
@@ -99,10 +101,15 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
-  processingDescription: {
+  fieldContainer: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
+  },
+  fieldLabel: {
     fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-    marginLeft: tokens.spacingHorizontalXL,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground2,
   },
   actions: {
     display: 'flex',
@@ -210,12 +217,20 @@ export interface SaveFlowProps {
   itemName?: string;
   /** Available attachments (Outlook only) */
   attachments?: AttachmentInfo[];
-  /** Email sender (Outlook only) */
-  emailSender?: string;
-  /** Email received date (Outlook only) */
-  emailReceivedDate?: Date;
+  /** Email sender email address (Outlook only) */
+  senderEmail?: string;
+  /** Email sender display name (Outlook only) */
+  senderDisplayName?: string;
+  /** Email recipients (Outlook only) */
+  recipients?: Array<{ email: string; displayName?: string; type: 'to' | 'cc' | 'bcc' }>;
+  /** Email sent date (Outlook only) */
+  sentDate?: Date;
+  /** Email body content (Outlook only) */
+  emailBody?: string;
   /** Document URL (Word only) */
   documentUrl?: string;
+  /** Document content as base64 (Word only) */
+  documentContentBase64?: string;
   /** Access token getter */
   getAccessToken: () => Promise<string>;
   /** API base URL */
@@ -271,9 +286,13 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     itemId,
     itemName,
     attachments = [],
-    emailSender,
-    emailReceivedDate,
+    senderEmail,
+    senderDisplayName,
+    recipients,
+    sentDate,
+    emailBody,
     documentUrl,
+    documentContentBase64,
     getAccessToken,
     apiBaseUrl = '',
     onComplete,
@@ -327,14 +346,26 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     savedDocumentUrl,
   } = useSaveFlow(saveFlowOptions);
 
+  // Local state for document metadata fields
+  const [documentName, setDocumentName] = useState<string>('');
+  const [documentDescription, setDocumentDescription] = useState<string>('');
+
   // Build save context
   const buildSaveContext = useCallback((): SaveFlowContext => ({
     hostType,
     itemId,
     itemName,
+    documentName: documentName || undefined,
+    documentDescription: documentDescription || undefined,
     attachments,
+    senderEmail,
+    senderDisplayName,
+    recipients,
+    sentDate,
+    emailBody,
     documentUrl,
-  }), [hostType, itemId, itemName, attachments, documentUrl]);
+    documentContentBase64,
+  }), [hostType, itemId, itemName, documentName, documentDescription, attachments, senderEmail, senderDisplayName, recipients, sentDate, emailBody, documentUrl, documentContentBase64]);
 
   // Handle save button click
   const handleSave = useCallback(() => {
@@ -543,9 +574,6 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
               aria-label="Enable profile summary generation"
             />
           </div>
-          <Text className={styles.processingDescription}>
-            Generate AI summary with key details and entities
-          </Text>
 
           <Divider />
 
@@ -558,30 +586,9 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
               checked={processingOptions.ragIndex}
               onChange={() => toggleProcessingOption('ragIndex')}
               disabled={isSaving}
-              aria-label="Enable RAG indexing"
+              aria-label="Enable search indexing"
             />
           </div>
-          <Text className={styles.processingDescription}>
-            Index content for AI-powered search
-          </Text>
-
-          <Divider />
-
-          <div className={styles.processingOption}>
-            <div className={styles.processingLabel}>
-              <BrainCircuitRegular />
-              <Text>Deep Analysis</Text>
-            </div>
-            <Switch
-              checked={processingOptions.deepAnalysis}
-              onChange={() => toggleProcessingOption('deepAnalysis')}
-              disabled={isSaving}
-              aria-label="Enable deep AI analysis"
-            />
-          </div>
-          <Text className={styles.processingDescription}>
-            Run comprehensive AI analysis (slower)
-          </Text>
         </div>
       </Card>
     </div>
@@ -603,15 +610,15 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
             <div className={styles.documentInfoRow}>
               <Text weight="semibold">{itemName}</Text>
             </div>
-            {hostType === 'outlook' && emailSender && (
+            {hostType === 'outlook' && (senderDisplayName || senderEmail) && (
               <div className={styles.documentInfoRow}>
-                <Text size={200}>From: {emailSender}</Text>
+                <Text size={200}>From: {senderDisplayName || senderEmail}</Text>
               </div>
             )}
-            {hostType === 'outlook' && emailReceivedDate && (
+            {hostType === 'outlook' && sentDate && (
               <div className={styles.documentInfoRow}>
                 <Text size={200}>
-                  Received: {emailReceivedDate.toLocaleDateString()}
+                  Sent: {sentDate.toLocaleDateString()}
                 </Text>
               </div>
             )}
@@ -619,25 +626,42 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
         </div>
       )}
 
-      {/* Entity Picker */}
+      {/* Document Metadata Fields */}
       <div className={styles.section}>
-        <EntityPicker
-          value={selectedEntity}
-          onChange={handleEntitySelect}
-          onQuickCreate={onQuickCreate}
-          placeholder="Search for Matter, Project, Account... (optional)"
-          allowedTypes={allowedEntityTypes}
-          showTypeFilter
-          showRecent
-          showQuickCreate={!!onQuickCreate}
-          disabled={isSaving}
-          required={false}
-          label="Associate With (optional)"
-          searchOptions={{
-            apiBaseUrl,
-            getAccessToken,
-          }}
-        />
+        <div className={styles.sectionTitle}>
+          <EditRegular />
+          <Text weight="semibold">Document Details</Text>
+        </div>
+        <Card>
+          <div className={styles.fieldContainer}>
+            <Label htmlFor="document-name" className={styles.fieldLabel}>
+              Document Name
+            </Label>
+            <Textarea
+              id="document-name"
+              value={documentName}
+              onChange={(e, data) => setDocumentName(data.value)}
+              placeholder="Enter document name"
+              disabled={isSaving}
+              aria-label="Document name"
+              rows={2}
+            />
+          </div>
+          <div className={styles.fieldContainer} style={{ marginTop: tokens.spacingVerticalM }}>
+            <Label htmlFor="document-description" className={styles.fieldLabel}>
+              Description
+            </Label>
+            <Textarea
+              id="document-description"
+              value={documentDescription}
+              onChange={(e, data) => setDocumentDescription(data.value)}
+              placeholder="Enter document description (optional)"
+              disabled={isSaving}
+              aria-label="Document description"
+              rows={6}
+            />
+          </div>
+        </Card>
       </div>
 
       {/* Attachment Selector (Outlook only) */}

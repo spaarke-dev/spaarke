@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="ai-scope-resolution-enhancements">
+  <metadata>
+    <title>Implement List*Async Dataverse Queries</title>
+    <phase>5a</phase>
+    <tags>bff-api, scope-resolution, dataverse, crud</tags>
+    <estimate>3-4 hours</estimate>
+    <dependencies>042</dependencies>
+    <parallel-group>none</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Replace stub dictionary reads in List*Async methods with Dataverse Web API queries.
+    </goal>
+    <context>
+      Four List methods need migration:
+      - ListActionsAsync → GET sprk_systemprompts with OData filtering
+      - ListSkillsAsync → GET sprk_promptfragments with OData filtering
+      - ListKnowledgeAsync → GET sprk_contents with OData filtering
+      - ListToolsAsync → GET sprk_analysistools with OData filtering
+
+      Each supports:
+      - Pagination ($skip, $top)
+      - Name filter ($filter=contains(sprk_name, 'value'))
+      - Category/Type filter
+      - Sorting ($orderby)
+      - Total count ($count=true)
+
+      OData query pattern:
+      {entity}?$select=...&amp;$expand=...&amp;$filter=...&amp;$orderby=...&amp;$skip=N&amp;$top=N&amp;$count=true
+    </context>
+    <constraints>
+      - Follow existing GetToolAsync pattern for auth and HTTP calls
+      - Support all existing ScopeListOptions parameters
+      - Return proper total count for pagination
+      - Log query details at Debug level
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>docs/architecture/AI-ANALYSIS-PLAYBOOK-SCOPE-DESIGN.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">
+      Create helper method BuildODataQuery(ScopeListOptions, entityName, selectFields):
+      - Build $filter from NameFilter, CategoryFilter
+      - Build $orderby from SortBy, SortDescending
+      - Build $skip/$top from Page, PageSize
+      - Add $count=true for total count
+    </step>
+    <step order="2">
+      Create ListResponse DTO for OData collection response:
+      - @odata.count for total
+      - value[] for items
+    </step>
+    <step order="3">
+      Implement ListActionsAsync with Dataverse query:
+      - Query sprk_systemprompts
+      - Expand sprk_ActionTypeId
+      - Map ActionEntity[] to AnalysisAction[]
+    </step>
+    <step order="4">
+      Implement ListSkillsAsync with Dataverse query:
+      - Query sprk_promptfragments
+      - Expand sprk_SkillTypeId
+      - Map SkillEntity[] to AnalysisSkill[]
+    </step>
+    <step order="5">
+      Implement ListKnowledgeAsync with Dataverse query:
+      - Query sprk_contents
+      - Expand sprk_KnowledgeTypeId
+      - Map KnowledgeEntity[] to AnalysisKnowledge[]
+    </step>
+    <step order="6">
+      Implement ListToolsAsync with Dataverse query:
+      - Query sprk_analysistools
+      - Expand sprk_ToolTypeId
+      - Map ToolEntity[] to AnalysisTool[]
+    </step>
+    <step order="7">Build and verify all List methods work</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>All 4 List methods query Dataverse</criterion>
+    <criterion>Pagination works correctly ($skip/$top)</criterion>
+    <criterion>Name filtering works ($filter)</criterion>
+    <criterion>Sorting works ($orderby)</criterion>
+    <criterion>Total count returned for pagination UI</criterion>
+    <criterion>Project builds without errors</criterion>
+  </acceptance-criteria>
+</task>

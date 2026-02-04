@@ -1,6 +1,7 @@
 using Azure.Messaging.ServiceBus;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Services.Email;
 
 namespace Sprk.Bff.Api.Workers.Office;
 
@@ -20,22 +21,39 @@ public static class OfficeWorkersModule
     /// <para>
     /// Registered workers:
     /// - UploadFinalizationWorker: Processes file uploads, creates records
-    /// - (Future) ProfileWorker: AI summary generation
-    /// - (Future) IndexingWorker: Search indexing
+    /// - ProfileSummaryWorker: AI summary generation via IAppOnlyAnalysisService
+    /// - IndexingWorkerHostedService: RAG indexing via IFileIndexingService
     /// </para>
     /// </remarks>
     public static IServiceCollection AddOfficeWorkers(this IServiceCollection services)
     {
+        // Register worker dependencies
+        services.AddSingleton<IEmailToEmlConverter, EmailToEmlConverter>();
+        services.AddSingleton<AttachmentFilterService>();
+
         // Register job handlers as singleton (stateless handlers)
         services.AddSingleton<IOfficeJobHandler, UploadFinalizationWorker>();
+        services.AddSingleton<IOfficeJobHandler, ProfileSummaryWorker>();
 
-        // Register the background service
+        // Register the background services
+        // UploadFinalizationWorker: Processes office-upload-finalization queue
         services.AddHostedService<UploadFinalizationWorker>(sp =>
         {
             // Resolve the same instance registered as IOfficeJobHandler
             var handlers = sp.GetServices<IOfficeJobHandler>();
             return handlers.OfType<UploadFinalizationWorker>().First();
         });
+
+        // ProfileSummaryWorker: Processes office-profile queue
+        services.AddHostedService<ProfileSummaryWorker>(sp =>
+        {
+            var handlers = sp.GetServices<IOfficeJobHandler>();
+            return handlers.OfType<ProfileSummaryWorker>().First();
+        });
+
+        // IndexingWorkerHostedService: Processes office-indexing queue
+        // Integrates with IFileIndexingService for RAG document indexing
+        services.AddHostedService<IndexingWorkerHostedService>();
 
         return services;
     }

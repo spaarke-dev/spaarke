@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="ai-scope-resolution-enhancements">
+  <metadata>
+    <title>Implement GetSkillAsync Dataverse Query</title>
+    <phase>2</phase>
+    <tags>bff-api, scope-resolution, dataverse</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>020</dependencies>
+    <parallel-group>A</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Replace the stub dictionary in GetSkillAsync with a Dataverse Web API query.
+    </goal>
+    <context>
+      Current implementation uses _stubSkills dictionary with fake GUIDs.
+      New implementation should:
+      1. Query sprk_promptfragments({skillId}) with $expand
+      2. Handle 404 Not Found gracefully
+      3. Map SkillEntity to AnalysisSkill domain model
+      4. Log successful loads and failures
+
+      Query pattern:
+      sprk_promptfragments({skillId})?$expand=sprk_SkillTypeId($select=sprk_name)
+    </context>
+    <constraints>
+      - Follow existing GetToolAsync pattern
+      - Use EnsureAuthenticatedAsync before query
+      - Return null only if skill doesn't exist in Dataverse
+      - Map Category from SkillTypeId.Name
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">
+      Locate GetSkillAsync method in ScopeResolverService.cs
+    </step>
+    <step order="2">
+      Replace stub dictionary lookup with Dataverse query:
+      - Add await EnsureAuthenticatedAsync(cancellationToken)
+      - Build URL with $expand for SkillTypeId
+      - Make HTTP GET request
+      - Handle 404 Not Found
+    </step>
+    <step order="3">
+      Deserialize response to SkillEntity:
+      - Use ReadFromJsonAsync&lt;SkillEntity&gt;
+      - Handle null response
+    </step>
+    <step order="4">
+      Map SkillEntity to AnalysisSkill:
+      - Map Id, Name, Description, PromptFragment
+      - Map Category from SkillTypeId.Name ?? "General"
+      - Set OwnerType and IsImmutable
+    </step>
+    <step order="5">
+      Add logging:
+      - Log at start: "[GET SKILL] Loading skill {SkillId} from Dataverse"
+      - Log on success: "[GET SKILL] Loaded skill from Dataverse: {SkillName}"
+      - Log on not found: "[GET SKILL] Skill {SkillId} not found in Dataverse"
+    </step>
+    <step order="6">
+      Build and verify no errors
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read - Review existing GetToolAsync</tool>
+    <tool>Edit - Modify GetSkillAsync</tool>
+    <tool>Bash - Build verification</tool>
+  </tools>
+
+  <outputs>
+    <output>Updated GetSkillAsync method</output>
+    <output>Proper logging added</output>
+    <output>Successful build</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>GetSkillAsync queries Dataverse Web API</criterion>
+    <criterion>$expand includes sprk_SkillTypeId</criterion>
+    <criterion>404 returns null (not exception)</criterion>
+    <criterion>AnalysisSkill populated with all fields</criterion>
+    <criterion>Logging matches pattern from GetToolAsync</criterion>
+  </acceptance-criteria>
+</task>

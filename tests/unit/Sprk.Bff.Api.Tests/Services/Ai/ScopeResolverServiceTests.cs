@@ -1,6 +1,10 @@
+using System.Net;
+using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Moq;
+using Moq.Protected;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Ai;
 using Xunit;
@@ -11,9 +15,13 @@ namespace Sprk.Bff.Api.Tests.Services.Ai;
 /// Unit tests for ScopeResolverService - scope resolution service.
 /// Tests Phase 1 stub behavior and action lookup.
 /// </summary>
-public class ScopeResolverServiceTests
+public class ScopeResolverServiceTests : IDisposable
 {
     private readonly Mock<IDataverseService> _dataverseServiceMock;
+    private readonly Mock<IPlaybookService> _playbookServiceMock;
+    private readonly Mock<HttpMessageHandler> _httpMessageHandlerMock;
+    private readonly HttpClient _httpClient;
+    private readonly Mock<IConfiguration> _configurationMock;
     private readonly Mock<ILogger<ScopeResolverService>> _loggerMock;
     private readonly ScopeResolverService _service;
 
@@ -24,8 +32,32 @@ public class ScopeResolverServiceTests
     public ScopeResolverServiceTests()
     {
         _dataverseServiceMock = new Mock<IDataverseService>();
+        _playbookServiceMock = new Mock<IPlaybookService>();
+        _httpMessageHandlerMock = new Mock<HttpMessageHandler>();
+        _httpClient = new HttpClient(_httpMessageHandlerMock.Object)
+        {
+            BaseAddress = new Uri("https://test.crm.dynamics.com/api/data/v9.2/")
+        };
+        _configurationMock = new Mock<IConfiguration>();
         _loggerMock = new Mock<ILogger<ScopeResolverService>>();
-        _service = new ScopeResolverService(_dataverseServiceMock.Object, _loggerMock.Object);
+
+        // Setup required configuration
+        _configurationMock.Setup(c => c["Dataverse:ServiceUrl"]).Returns("https://test.crm.dynamics.com");
+        _configurationMock.Setup(c => c["TENANT_ID"]).Returns("test-tenant-id");
+        _configurationMock.Setup(c => c["API_APP_ID"]).Returns("test-app-id");
+        _configurationMock.Setup(c => c["API_CLIENT_SECRET"]).Returns("test-secret");
+
+        _service = new ScopeResolverService(
+            _dataverseServiceMock.Object,
+            _playbookServiceMock.Object,
+            _httpClient,
+            _configurationMock.Object,
+            _loggerMock.Object);
+    }
+
+    public void Dispose()
+    {
+        _httpClient.Dispose();
     }
 
     #region ResolveScopesAsync Tests
@@ -487,4 +519,401 @@ public class ScopeModelsTests
         ((int)ToolType.ClauseAnalyzer).Should().Be(1);
         ((int)ToolType.Custom).Should().Be(2);
     }
+}
+
+/// <summary>
+/// Tests for Dataverse Web API-based scope resolution methods (GetSkillAsync, GetKnowledgeAsync, GetActionAsync).
+/// Uses mocked HttpClient to test Web API query behavior.
+/// </summary>
+public class ScopeResolverServiceDataverseWebApiTests : IDisposable
+{
+    private readonly Mock<IDataverseService> _dataverseServiceMock;
+    private readonly Mock<IPlaybookService> _playbookServiceMock;
+    private readonly Mock<HttpMessageHandler> _httpMessageHandlerMock;
+    private readonly HttpClient _httpClient;
+    private readonly Mock<IConfiguration> _configurationMock;
+    private readonly Mock<ILogger<ScopeResolverService>> _loggerMock;
+    private readonly ScopeResolverService _service;
+
+    public ScopeResolverServiceDataverseWebApiTests()
+    {
+        _dataverseServiceMock = new Mock<IDataverseService>();
+        _playbookServiceMock = new Mock<IPlaybookService>();
+        _httpMessageHandlerMock = new Mock<HttpMessageHandler>();
+        _httpClient = new HttpClient(_httpMessageHandlerMock.Object)
+        {
+            BaseAddress = new Uri("https://test.crm.dynamics.com/api/data/v9.2/")
+        };
+        _configurationMock = new Mock<IConfiguration>();
+        _loggerMock = new Mock<ILogger<ScopeResolverService>>();
+
+        // Setup configuration
+        _configurationMock.Setup(c => c["Dataverse:ServiceUrl"]).Returns("https://test.crm.dynamics.com");
+        _configurationMock.Setup(c => c["TENANT_ID"]).Returns("test-tenant-id");
+        _configurationMock.Setup(c => c["API_APP_ID"]).Returns("test-app-id");
+        _configurationMock.Setup(c => c["API_CLIENT_SECRET"]).Returns("test-secret");
+
+        _service = new ScopeResolverService(
+            _dataverseServiceMock.Object,
+            _playbookServiceMock.Object,
+            _httpClient,
+            _configurationMock.Object,
+            _loggerMock.Object);
+    }
+
+    public void Dispose()
+    {
+        _httpClient.Dispose();
+    }
+
+    private void SetupHttpResponse(HttpStatusCode statusCode, object? responseBody = null)
+    {
+        var response = new HttpResponseMessage(statusCode);
+        if (responseBody != null)
+        {
+            response.Content = new StringContent(
+                JsonSerializer.Serialize(responseBody),
+                System.Text.Encoding.UTF8,
+                "application/json");
+        }
+
+        _httpMessageHandlerMock
+            .Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(response);
+    }
+
+    #region GetSkillAsync Tests
+
+    [Fact]
+    public async Task GetSkillAsync_ReturnsSkill_WhenSkillExistsInDataverse()
+    {
+        // Arrange
+        var skillId = Guid.NewGuid();
+        var skillResponse = new
+        {
+            sprk_promptfragmentid = skillId,
+            sprk_name = "Test Skill",
+            sprk_description = "A test skill description",
+            sprk_promptfragment = "Do something specific",
+            sprk_SkillTypeId = new { sprk_name = "Legal Analysis" }
+        };
+        SetupHttpResponse(HttpStatusCode.OK, skillResponse);
+
+        // Act
+        var result = await _service.GetSkillAsync(skillId, CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.Id.Should().Be(skillId);
+        result.Name.Should().Be("Test Skill");
+        result.Description.Should().Be("A test skill description");
+        result.PromptFragment.Should().Be("Do something specific");
+        result.Category.Should().Be("Legal Analysis");
+    }
+
+    [Fact]
+    public async Task GetSkillAsync_ReturnsNull_WhenSkillNotFound()
+    {
+        // Arrange
+        var skillId = Guid.NewGuid();
+        SetupHttpResponse(HttpStatusCode.NotFound);
+
+        // Act
+        var result = await _service.GetSkillAsync(skillId, CancellationToken.None);
+
+        // Assert
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetSkillAsync_MapsCategory_FromSkillTypeIdName()
+    {
+        // Arrange
+        var skillId = Guid.NewGuid();
+        var skillResponse = new
+        {
+            sprk_promptfragmentid = skillId,
+            sprk_name = "Risk Assessment Skill",
+            sprk_promptfragment = "Identify risks",
+            sprk_SkillTypeId = new { sprk_name = "Risk Management" }
+        };
+        SetupHttpResponse(HttpStatusCode.OK, skillResponse);
+
+        // Act
+        var result = await _service.GetSkillAsync(skillId, CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.Category.Should().Be("Risk Management");
+    }
+
+    [Fact]
+    public async Task GetSkillAsync_DefaultsCategory_WhenSkillTypeIdIsNull()
+    {
+        // Arrange
+        var skillId = Guid.NewGuid();
+        var skillResponse = new
+        {
+            sprk_promptfragmentid = skillId,
+            sprk_name = "Generic Skill",
+            sprk_promptfragment = "Do generic work"
+        };
+        SetupHttpResponse(HttpStatusCode.OK, skillResponse);
+
+        // Act
+        var result = await _service.GetSkillAsync(skillId, CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.Category.Should().Be("General");
+    }
+
+    #endregion
+
+    #region GetKnowledgeAsync Tests
+
+    [Fact]
+    public async Task GetKnowledgeAsync_ReturnsKnowledge_WhenKnowledgeExists()
+    {
+        // Arrange
+        var knowledgeId = Guid.NewGuid();
+        var knowledgeResponse = new
+        {
+            sprk_contentid = knowledgeId,
+            sprk_name = "Test Knowledge",
+            sprk_description = "A test knowledge description",
+            sprk_content = "This is the knowledge content",
+            sprk_KnowledgeTypeId = new { sprk_name = "Standards" }
+        };
+        SetupHttpResponse(HttpStatusCode.OK, knowledgeResponse);
+
+        // Act
+        var result = await _service.GetKnowledgeAsync(knowledgeId, CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.Id.Should().Be(knowledgeId);
+        result.Name.Should().Be("Test Knowledge");
+        result.Description.Should().Be("A test knowledge description");
+        result.Content.Should().Be("This is the knowledge content");
+    }
+
+    [Fact]
+    public async Task GetKnowledgeAsync_ReturnsNull_WhenKnowledgeNotFound()
+    {
+        // Arrange
+        var knowledgeId = Guid.NewGuid();
+        SetupHttpResponse(HttpStatusCode.NotFound);
+
+        // Act
+        var result = await _service.GetKnowledgeAsync(knowledgeId, CancellationToken.None);
+
+        // Assert
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetKnowledgeAsync_MapsInlineType_WhenTypeNameIsStandards()
+    {
+        // Arrange
+        var knowledgeId = Guid.NewGuid();
+        var knowledgeResponse = new
+        {
+            sprk_contentid = knowledgeId,
+            sprk_name = "Company Standards",
+            sprk_content = "Standard content",
+            sprk_KnowledgeTypeId = new { sprk_name = "Standards" }
+        };
+        SetupHttpResponse(HttpStatusCode.OK, knowledgeResponse);
+
+        // Act
+        var result = await _service.GetKnowledgeAsync(knowledgeId, CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.Type.Should().Be(KnowledgeType.Inline);
+    }
+
+    [Fact]
+    public async Task GetKnowledgeAsync_MapsRagIndexType_WhenTypeNameIsRegulations()
+    {
+        // Arrange
+        var knowledgeId = Guid.NewGuid();
+        var deploymentId = Guid.NewGuid();
+        var knowledgeResponse = new
+        {
+            sprk_contentid = knowledgeId,
+            sprk_name = "Industry Regulations",
+            sprk_content = "Regulation content",
+            sprk_deploymentid = deploymentId,
+            sprk_KnowledgeTypeId = new { sprk_name = "Regulations" }
+        };
+        SetupHttpResponse(HttpStatusCode.OK, knowledgeResponse);
+
+        // Act
+        var result = await _service.GetKnowledgeAsync(knowledgeId, CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.Type.Should().Be(KnowledgeType.RagIndex);
+        result.DeploymentId.Should().Be(deploymentId);
+    }
+
+    [Fact]
+    public async Task GetKnowledgeAsync_PopulatesDeploymentId_ForRagType()
+    {
+        // Arrange
+        var knowledgeId = Guid.NewGuid();
+        var deploymentId = Guid.NewGuid();
+        var knowledgeResponse = new
+        {
+            sprk_contentid = knowledgeId,
+            sprk_name = "RAG Knowledge",
+            sprk_deploymentid = deploymentId,
+            sprk_KnowledgeTypeId = new { sprk_name = "rag" }
+        };
+        SetupHttpResponse(HttpStatusCode.OK, knowledgeResponse);
+
+        // Act
+        var result = await _service.GetKnowledgeAsync(knowledgeId, CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.DeploymentId.Should().Be(deploymentId);
+    }
+
+    #endregion
+
+    #region GetActionAsync Tests
+
+    [Fact]
+    public async Task GetActionAsync_ReturnsAction_WhenActionExists()
+    {
+        // Arrange
+        var actionId = Guid.NewGuid();
+        var actionResponse = new
+        {
+            sprk_systempromptid = actionId,
+            sprk_name = "Test Action",
+            sprk_description = "A test action description",
+            sprk_systemprompt = "You are an analysis assistant.",
+            sprk_ActionTypeId = new { sprk_name = "01 - Extraction" }
+        };
+        SetupHttpResponse(HttpStatusCode.OK, actionResponse);
+
+        // Act
+        var result = await _service.GetActionAsync(actionId, CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.Id.Should().Be(actionId);
+        result.Name.Should().Be("Test Action");
+        result.Description.Should().Be("A test action description");
+        result.SystemPrompt.Should().Be("You are an analysis assistant.");
+    }
+
+    [Fact]
+    public async Task GetActionAsync_ReturnsNull_WhenActionNotFound()
+    {
+        // Arrange
+        var actionId = Guid.NewGuid();
+        SetupHttpResponse(HttpStatusCode.NotFound);
+
+        // Act
+        var result = await _service.GetActionAsync(actionId, CancellationToken.None);
+
+        // Assert
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetActionAsync_ExtractsSortOrder_FromTypeNamePrefix()
+    {
+        // Arrange
+        var actionId = Guid.NewGuid();
+        var actionResponse = new
+        {
+            sprk_systempromptid = actionId,
+            sprk_name = "Extraction Action",
+            sprk_systemprompt = "Extract entities",
+            sprk_ActionTypeId = new { sprk_name = "05 - Classification" }
+        };
+        SetupHttpResponse(HttpStatusCode.OK, actionResponse);
+
+        // Act
+        var result = await _service.GetActionAsync(actionId, CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.SortOrder.Should().Be(5);
+    }
+
+    [Fact]
+    public async Task GetActionAsync_SetsDefaultSortOrder_WhenNoPrefix()
+    {
+        // Arrange
+        var actionId = Guid.NewGuid();
+        var actionResponse = new
+        {
+            sprk_systempromptid = actionId,
+            sprk_name = "Custom Action",
+            sprk_systemprompt = "Do custom work",
+            sprk_ActionTypeId = new { sprk_name = "CustomType" }
+        };
+        SetupHttpResponse(HttpStatusCode.OK, actionResponse);
+
+        // Act
+        var result = await _service.GetActionAsync(actionId, CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.SortOrder.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task GetActionAsync_SetsDefaultSortOrder_WhenActionTypeIdIsNull()
+    {
+        // Arrange
+        var actionId = Guid.NewGuid();
+        var actionResponse = new
+        {
+            sprk_systempromptid = actionId,
+            sprk_name = "Action Without Type",
+            sprk_systemprompt = "Analyze documents"
+        };
+        SetupHttpResponse(HttpStatusCode.OK, actionResponse);
+
+        // Act
+        var result = await _service.GetActionAsync(actionId, CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.SortOrder.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task GetActionAsync_UsesDefaultSystemPrompt_WhenNull()
+    {
+        // Arrange
+        var actionId = Guid.NewGuid();
+        var actionResponse = new
+        {
+            sprk_systempromptid = actionId,
+            sprk_name = "Action Without Prompt"
+        };
+        SetupHttpResponse(HttpStatusCode.OK, actionResponse);
+
+        // Act
+        var result = await _service.GetActionAsync(actionId, CancellationToken.None);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.SystemPrompt.Should().Contain("AI assistant");
+    }
+
+    #endregion
 }

@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>Implement type compatibility validation</title>
+    <phase>2: Field Mapping Framework</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>015</blocks>
+    <tags>pcf, typescript, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task modifies code files, implements validation logic</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement type compatibility validation logic in FieldMappingService. Define the Strict mode
+    compatibility matrix that determines which field type mappings are allowed. Block incompatible
+    mappings with clear error messages.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in TypeScript and data validation patterns.
+    Understand Dataverse field types and their conversion compatibility.
+  </role>
+
+  <goal>
+    Type compatibility validation implemented in FieldMappingService with Strict mode matrix.
+    Incompatible mappings should be rejected with descriptive errors during admin configuration
+    and at runtime.
+  </goal>
+
+  <context>
+    <background>
+      Type compatibility ensures that field mappings make sense (e.g., you can map a Lookup to
+      Text, but not Text to Lookup). Strict mode is the only mode for R1 - Resolve mode with
+      automatic conversion is planned for a future release.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.ts</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md - Type Compatibility section</file>
+      <file>projects/events-and-workflow-automation-r1/CLAUDE.md - Type Compatibility matrix</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Strict mode only for R1 (no Resolve mode)</constraint>
+    <constraint source="spec">Must validate both at configuration time and runtime</constraint>
+    <constraint source="CLAUDE.md">Type compatibility matrix defined in CLAUDE.md</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md</file>
+      <file>projects/events-and-workflow-automation-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Type Compatibility" location="projects/events-and-workflow-automation-r1/CLAUDE.md">
+        STRICT_COMPATIBLE matrix defining allowed type mappings
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review CLAUDE.md for the type compatibility matrix</step>
+    <step order="2">Define FieldType enum in FieldMappingService.types.ts</step>
+    <step order="3">Implement STRICT_COMPATIBLE matrix as TypeScript constant</step>
+    <step order="4">Create isTypeCompatible(sourceType, targetType) function</step>
+    <step order="5">Create getCompatibleTargetTypes(sourceType) function for UI dropdowns</step>
+    <step order="6">Integrate validation into applyMappings - skip incompatible with warning</step>
+    <step order="7">Create validateProfile(profile, rules) function for admin validation</step>
+    <step order="8">Add detailed error messages for each incompatibility type</step>
+    <step order="9">Write unit tests for all type combinations</step>
+    <step order="10">Update TASK-INDEX.md: change task 011 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript library</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/TypeCompatibility.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/services/TypeCompatibility.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given a Lookup source type, when getCompatibleTargetTypes is called, then Lookup and Text
+      are returned as compatible targets.
+    </criterion>
+    <criterion testable="true">
+      Given a Text source type, when isTypeCompatible(Text, Lookup) is called, then false is
+      returned (Text cannot map to Lookup in Strict mode).
+    </criterion>
+    <criterion testable="true">
+      Given a profile with an incompatible rule, when validateProfile is called, then an error
+      is returned identifying the incompatible mapping.
+    </criterion>
+    <criterion testable="true">All unit tests pass for type compatibility matrix.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Type compatibility matrix from CLAUDE.md:
+    - Lookup: [Lookup, Text]
+    - Text: [Text, Memo]
+    - Memo: [Text, Memo]
+    - OptionSet: [OptionSet, Text]
+    - Number: [Number, Text]
+    - DateTime: [DateTime, Text]
+    - Boolean: [Boolean, Text]
+
+    Key principle: You can always "widen" to Text, but never "narrow" from Text.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

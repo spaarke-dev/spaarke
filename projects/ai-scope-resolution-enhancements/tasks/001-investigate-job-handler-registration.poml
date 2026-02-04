@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="ai-scope-resolution-enhancements">
+  <metadata>
+    <title>Investigate Job Handler Registration Issue</title>
+    <phase>0</phase>
+    <tags>bff-api, jobs, critical, investigation</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>none</dependencies>
+    <parallel-group>none</parallel-group>
+    <status>completed</status>
+    <completed>2026-01-29</completed>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Investigate why AppOnlyDocumentAnalysis job type is not being processed and causes "No handler registered for job type" dead-letter error.
+    </goal>
+    <context>
+      The Service Bus processor routes jobs by JobType to registered IJobHandler implementations.
+      When no handler is found for a JobType, the message is dead-lettered with "NoHandler" reason.
+
+      Current error from dead-letter queue:
+      - DeadLetterReason: NoHandler
+      - DeadLetterErrorDescription: "No handler registered for job type"
+      - JobType: AppOnlyDocumentAnalysis
+
+      This suggests either:
+      1. AppOnlyDocumentAnalysisJobHandler doesn't exist
+      2. Handler exists but isn't registered in DI
+      3. Handler's JobType property doesn't match "AppOnlyDocumentAnalysis"
+    </context>
+    <constraints>
+      - Follow ADR-001: Use BackgroundService pattern
+      - Follow ADR-004: Job handlers must implement IJobHandler
+      - Follow ADR-010: Use feature modules for DI registration
+      - DO NOT modify business logic - investigation only
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/patterns/api/background-workers.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">
+      Search for AppOnlyDocumentAnalysis handler implementation:
+      - Look for files named *AppOnly*Handler*.cs or *DocumentAnalysis*Handler*.cs
+      - Check if IJobHandler is implemented
+      - Verify JobType property value matches "AppOnlyDocumentAnalysis"
+    </step>
+    <step order="2">
+      Check ServiceBusJobProcessor to understand handler routing:
+      - How does it discover handlers?
+      - How does it match JobType to handler?
+      - What happens when no handler is found?
+    </step>
+    <step order="3">
+      Check DI registration in Program.cs or WorkersModule:
+      - Is there a AddScoped/AddSingleton for the handler?
+      - Is it registered with IJobHandler interface?
+      - Are all job handlers registered via IEnumerable&lt;IJobHandler&gt;?
+    </step>
+    <step order="4">
+      Check for any existing AppOnlyAnalysisService to understand the flow:
+      - How is AppOnlyDocumentAnalysis job submitted?
+      - What worker/service creates this job type?
+    </step>
+    <step order="5">
+      Document findings:
+      - Handler exists? Yes/No
+      - Handler registered? Yes/No
+      - JobType matches? Yes/No
+      - Root cause identified
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Grep - Search for handler implementations</tool>
+    <tool>Read - Examine DI registration files</tool>
+    <tool>Glob - Find relevant handler files</tool>
+  </tools>
+
+  <outputs>
+    <output>Root cause analysis documented in notes/research/</output>
+    <output>List of files that need modification</output>
+    <output>Proposed fix approach</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Root cause of "NoHandler" error identified</criterion>
+    <criterion>Handler implementation location found (or confirmed missing)</criterion>
+    <criterion>DI registration status confirmed</criterion>
+    <criterion>Clear next steps documented for task 002</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2026-01-29">
+      ## Investigation Results
+
+      **Root Cause**: IToolHandlerRegistry is conditionally registered (ToolFramework:Enabled).
+      If disabled, AppOnlyAnalysisService fails to instantiate, causing handler to be excluded.
+
+      **Handler Status**:
+      - Handler EXISTS at Services/Jobs/Handlers/AppOnlyDocumentAnalysisJobHandler.cs
+      - Handler IS REGISTERED at Program.cs:622
+      - JobType MATCHES exactly: "AppOnlyDocumentAnalysis"
+
+      **Dependency Chain Issue**:
+      AppOnlyDocumentAnalysisJobHandler → IAppOnlyAnalysisService → IToolHandlerRegistry (conditional)
+
+      **Documentation**: See notes/001-investigation-findings.md for full analysis
+
+      **Recommended Fix**: Ensure IToolHandlerRegistry is always registered, or add startup diagnostics.
+    </note>
+  </notes>
+</task>

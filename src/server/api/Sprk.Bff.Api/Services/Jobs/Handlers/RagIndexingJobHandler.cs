@@ -1,5 +1,8 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Telemetry;
@@ -25,6 +28,8 @@ public class RagIndexingJobHandler : IJobHandler
 {
     private readonly IFileIndexingService _fileIndexingService;
     private readonly IIdempotencyService _idempotencyService;
+    private readonly IDataverseService _dataverseService;
+    private readonly AnalysisOptions _analysisOptions;
     private readonly RagTelemetry _telemetry;
     private readonly ILogger<RagIndexingJobHandler> _logger;
 
@@ -36,11 +41,15 @@ public class RagIndexingJobHandler : IJobHandler
     public RagIndexingJobHandler(
         IFileIndexingService fileIndexingService,
         IIdempotencyService idempotencyService,
+        IDataverseService dataverseService,
+        IOptions<AnalysisOptions> analysisOptions,
         RagTelemetry telemetry,
         ILogger<RagIndexingJobHandler> logger)
     {
         _fileIndexingService = fileIndexingService ?? throw new ArgumentNullException(nameof(fileIndexingService));
         _idempotencyService = idempotencyService ?? throw new ArgumentNullException(nameof(idempotencyService));
+        _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
+        _analysisOptions = analysisOptions?.Value ?? throw new ArgumentNullException(nameof(analysisOptions));
         _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -150,6 +159,34 @@ public class RagIndexingJobHandler : IJobHandler
                     idempotencyKey,
                     TimeSpan.FromDays(7), // Keep record for 7 days
                     ct);
+
+                // Update Dataverse tracking fields when DocumentId is provided
+                // Same pattern as RagEndpoints.cs manual indexing
+                if (!string.IsNullOrEmpty(payload.DocumentId))
+                {
+                    try
+                    {
+                        var updateRequest = new UpdateDocumentRequest
+                        {
+                            SearchIndexed = true,
+                            SearchIndexName = _analysisOptions.SharedIndexName,
+                            SearchIndexedOn = DateTime.UtcNow
+                        };
+
+                        await _dataverseService.UpdateDocumentAsync(payload.DocumentId, updateRequest, ct);
+
+                        _logger.LogInformation(
+                            "Updated Dataverse search index tracking for document {DocumentId}: SearchIndexed=true, IndexName={IndexName}",
+                            payload.DocumentId, _analysisOptions.SharedIndexName);
+                    }
+                    catch (Exception ex)
+                    {
+                        // Log but don't fail - indexing succeeded, Dataverse update is non-critical
+                        _logger.LogWarning(ex,
+                            "Failed to update Dataverse search index tracking for document {DocumentId}: {Error}. Indexing was successful.",
+                            payload.DocumentId, ex.Message);
+                    }
+                }
 
                 _telemetry.RecordRagIndexingJobSuccess(stopwatch.Elapsed, result.ChunksIndexed);
 

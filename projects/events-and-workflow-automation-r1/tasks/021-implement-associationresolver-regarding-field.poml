@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>Implement AssociationResolver - regarding field population</title>
+    <phase>3: Association Resolver</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>022</blocks>
+    <tags>pcf, react, typescript, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task modifies code files, implements core functionality</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement the regarding field population logic in AssociationResolver. When a user selects
+    a record, the control must: (1) set the appropriate entity-specific lookup field, (2) set
+    the denormalized reference fields (name, type), (3) clear other lookup fields.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in PCF control development and Dataverse form APIs.
+    Understand the dual-field strategy for polymorphic lookups.
+  </role>
+
+  <goal>
+    When a record is selected in AssociationResolver, the correct lookup field is populated,
+    denormalized fields are set, and other lookups are cleared. Form state is properly updated.
+  </goal>
+
+  <context>
+    <background>
+      The dual-field strategy uses entity-specific lookups (sprk_regardingmatter, etc.) for
+      subgrid filtering AND denormalized text fields (sprk_regardingrecordname, sprk_regardingrecordtype)
+      for unified views. When a record is selected, all these fields must be updated correctly.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/AssociationResolver/ - Control from task 020</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md - Regarding field strategy</file>
+      <file>projects/events-and-workflow-automation-r1/CLAUDE.md - Entity configuration</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Must set entity-specific lookup (e.g., sprk_regardingmatter)</constraint>
+    <constraint source="spec">Must set denormalized name field (sprk_regardingrecordname)</constraint>
+    <constraint source="spec">Must set denormalized type field (sprk_regardingrecordtype)</constraint>
+    <constraint source="spec">Must clear other 7 entity-specific lookups when one is set</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/dataverse-queries.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>projects/events-and-workflow-automation-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review spec.md dual-field strategy for regarding records</step>
+    <step order="2">Review CLAUDE.md for regardingField property in ENTITY_CONFIGS</step>
+    <step order="3">Implement onRecordSelected handler in AssociationResolver</step>
+    <step order="4">Set the entity-specific lookup field using PCF context.webAPI</step>
+    <step order="5">Set sprk_regardingrecordname with record's primary name</step>
+    <step order="6">Set sprk_regardingrecordtype with entity display name</step>
+    <step order="7">Clear all other entity-specific lookup fields (7 of them)</step>
+    <step order="8">Call notifyOutputChanged to update form</step>
+    <step order="9">Handle edge cases (no record selected, record lookup fails)</step>
+    <step order="10">Add loading state while setting fields</step>
+    <step order="11">Build and verify control works correctly</step>
+    <step order="12">Update TASK-INDEX.md: change task 021 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF control</tool>
+    <tool name="pac">Power Platform CLI for testing</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/AssociationResolver/AssociationResolver/handlers/RecordSelectionHandler.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given "Matter" type selected, when user picks Matter record ABC, then sprk_regardingmatter
+      is set to ABC's ID and other 7 lookups are cleared.
+    </criterion>
+    <criterion testable="true">
+      Given a record is selected, when form is inspected, then sprk_regardingrecordname contains
+      the record's display name.
+    </criterion>
+    <criterion testable="true">
+      Given a record is selected, when form is inspected, then sprk_regardingrecordtype contains
+      "Matter" (or appropriate entity display name).
+    </criterion>
+    <criterion testable="true">Control builds without TypeScript errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The 8 entity-specific lookup fields:
+    - sprk_regardingmatter
+    - sprk_regardingproject
+    - sprk_regardinginvoice
+    - sprk_regardinganalysis
+    - sprk_regardingaccount
+    - sprk_regardingcontact
+    - sprk_regardingworkassignment
+    - sprk_regardingbudget
+
+    When one is set, the other 7 must be null to ensure clean subgrid filtering.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

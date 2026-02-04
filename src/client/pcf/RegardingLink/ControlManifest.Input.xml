@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<manifest>
+  <control namespace="Spaarke.Controls" constructor="RegardingLink" version="1.1.6" display-name-key="Regarding Link Grid Customizer" description-key="Grid customizer that renders Regarding Record Name as a clickable navigation link" control-type="virtual">
+    <external-service-usage enabled="false">
+    </external-service-usage>
+    <!-- Data set for grid customizer -->
+    <data-set name="records" display-name-key="Records" />
+    <resources>
+      <code path="index.ts" order="1" />
+      <css path="styles.css" order="1" />
+      <!-- Platform-provided libraries: DO NOT bundle -->
+      <platform-library name="React" version="16.14.0" />
+      <platform-library name="Fluent" version="9.46.2" />
+    </resources>
+    <feature-usage>
+      <uses-feature name="Utility" required="true" />
+    </feature-usage>
+  </control>
+</manifest>

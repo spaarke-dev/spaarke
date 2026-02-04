@@ -1,0 +1,3 @@
+<step title="Begin HttpPost https://spe-api-dev-67e2xz.scm.azurewebsites.net/api/app/restart, x-ms-request-id: 5736b137-fb92-11f0-a48b-a8e291177057" date="2026-01-27T15:11:09.861" instance="3e17b9" >
+  <step title="Cleanup Xml Logs" date="2026-01-27T15:11:09.895" /><!-- duration: 12ms -->
+</step><!-- duration: 47ms -->

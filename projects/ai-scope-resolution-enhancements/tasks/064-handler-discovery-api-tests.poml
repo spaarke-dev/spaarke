@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="064" project="ai-scope-resolution-enhancements">
+  <metadata>
+    <title>Create Unit Tests for Handler Discovery API</title>
+    <phase>6</phase>
+    <tags>testing, unit-tests, api</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>063</dependencies>
+    <parallel-group>none</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Create unit tests for GET /api/ai/handlers endpoint.
+    </goal>
+    <context>
+      Tests should cover:
+      - Returns all registered handlers
+      - ConfigurationSchema included
+      - Caching behavior (5-minute TTL)
+      - Authentication required (401 if not authenticated)
+      - Disabled handlers excluded
+    </context>
+    <constraints>
+      - Use WebApplicationFactory for integration tests
+      - Mock authentication for protected endpoint tests
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create test: GetHandlers_ReturnsAllRegisteredHandlers</step>
+    <step order="2">Create test: GetHandlers_IncludesConfigurationSchema</step>
+    <step order="3">Create test: GetHandlers_ReturnsCachedResponse_WithinTTL</step>
+    <step order="4">Create test: GetHandlers_Returns401_WhenNotAuthenticated</step>
+    <step order="5">Run tests and verify</step>
+  </steps>
+
+  <tools>
+    <tool>Write - Create test file</tool>
+    <tool>Bash - Run tests</tool>
+  </tools>
+
+  <outputs>
+    <output>Handler discovery API tests</output>
+    <output>All tests passing</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All endpoint scenarios covered</criterion>
+    <criterion>Caching behavior verified</criterion>
+    <criterion>Authentication tested</criterion>
+    <criterion>All tests pass</criterion>
+  </acceptance-criteria>
+</task>

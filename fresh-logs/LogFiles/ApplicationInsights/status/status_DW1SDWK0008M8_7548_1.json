@@ -1,0 +1,17 @@
+{
+"AppType":".NETCoreApp,Version=v8.0",
+"MachineName":"DW1SDWK0008M8",
+"PID":"7548",
+"AppDomainId":"1",
+"AppDomainName":"Spe.Bff.Api",
+"InstrumentationEngineLoaded":false,
+"InstrumentationEngineExtensionLoaded":false,
+"HostingStartupBootstrapperLoaded":true,
+"AppAlreadyInstrumented":false,
+"AppDiagnosticSourceAssembly":"System.Diagnostics.DiagnosticSource, Version=8.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+"AiHostingStartupLoaded":true,
+"IKeyExists":true,
+"IKey":"09a9beed-0dcd-4aad-84bb-3696372ed5d1",
+"ConnectionString":"InstrumentationKey=09a9beed-0dcd-4aad-84bb-3696372ed5d1;IngestionEndpoint=https://westus2-2.in.applicationinsights.azure.com/;LiveEndpoint=https://westus2.livediagnostics.monitor.azure.com/;ApplicationId=6a76b012-46d9-412f-b4ab-4905658a9559",
+"AutoInstrumentationStatus":true
+}

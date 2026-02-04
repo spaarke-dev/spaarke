@@ -297,42 +297,81 @@ sprk_document (Parent - Email .eml)
 
 ### Pattern 5B: Office Add-in Document Processing Flow
 
-**Full Documentation**: See [office-outlook-teams-integration-architecture.md](office-outlook-teams-integration-architecture.md) for complete architecture.
+**Full Documentation**: See [office-outlook-teams-integration-architecture.md](office-outlook-teams-integration-architecture.md#background-workers-architecture) for complete architecture.
+
+The Office Add-in save flow uses a **multi-stage Service Bus pipeline** with three queues and three background workers:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  Office Add-in (Outlook/Word) - User uploads file or saves email            │
 └─────────────────────────────────────────────────────────────────────────────┘
           │
-          │ POST /api/office/upload (with metadata)
+          │ POST /api/office/emails or /api/office/documents
           ↓
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│               OfficeEndpoints (Initial Upload)                               │
-│  1. Validate user token (OBO) → 2. Create ProcessingJob (Pending)          │
-│  3. Upload file to SPE → 4. Create sprk_document record                    │
-│  5. Publish message to Service Bus (office-jobs queue)                      │
+│               OfficeService (Initial Upload)                                 │
+│  1. Upload temp file to SPE → 2. Create ProcessingJob (Pending)            │
+│  3. Queue to office-upload-finalization → 4. Return job ID to client       │
 └─────────────────────────────────────────────────────────────────────────────┘
           │
-          ↓ Service Bus Queue: office-jobs
+          ↓ Service Bus Queue: office-upload-finalization
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│            UploadFinalizationWorker (Background Processing)                  │
-│  1. Dequeue message → 2. Load ProcessingJob (by IdempotencyKey)            │
-│  3. Process stages (metadata, entities, AI analysis)                        │
-│  4. Update ProcessingJob status and progress                                │
-│  5. Create EmailArtifact (if email metadata present)                        │
-│  6. Create AttachmentArtifact records (if attachments present)              │
-│  7. Update sprk_document with final metadata                                │
+│                   UploadFinalizationWorker (Stage 1)                         │
+│  • Move files from temp → permanent SPE location                            │
+│  • Create EmailArtifact (email metadata: sender, recipients, dates)         │
+│  • Create AttachmentArtifact records (for each attachment)                  │
+│  • Create Document records for each artifact                                │
+│  • Link relationships (EmailArtifact ↔ Document)                            │
+│  • Update ProcessingJob (status=InProgress)                                 │
+│  • Queue to office-profile AND office-indexing (parallel stages)            │
 └─────────────────────────────────────────────────────────────────────────────┘
+          │                                │
+          ├─ office-profile queue          └─ office-indexing queue
+          │                                                  │
+          ▼                                                  ▼
+┌────────────────────────────────┐      ┌────────────────────────────────────┐
+│  ProfileSummaryWorker (Stage 2)│      │ IndexingWorkerHostedService (Stage 3) │
+│  • AI document profile          │      │ • RAG indexing                     │
+│  • IAppOnlyAnalysisService      │      │ • IFileIndexingService             │
+│  • "Document Profile" playbook  │      │ • Azure AI Search                  │
+│  • Extracts: summary, keywords, │      │ • Chunks: ~1000 tokens             │
+│    document type, entities      │      │ • Embeddings: text-embedding-3     │
+│  • Updates Document fields      │      │ • Graceful degradation on error    │
+│  • Graceful degradation on error│      │                                    │
+└────────────────────────────────┘      └────────────────────────────────────┘
+          │                                                  │
+          └──────────────────┬───────────────────────────────┘
+                             ↓
+                 ┌──────────────────────────┐
+                 │ All stages complete       │
+                 │ Job status=Completed      │
+                 │ SSE notifies client       │
+                 └──────────────────────────┘
           │                              │                              │
           ↓                              ↓                              ↓
 ┌─────────────────┐      ┌────────────────────────┐      ┌───────────────────┐
-│ SPE Container   │      │ Dataverse              │      │ Dataverse Entities│
-│ /office/*.docx  │      │ sprk_document          │      │ sprk_processingjob│
-│ /office/*.xlsx  │      │                        │      │ sprk_emailartifact│
-│ /office/*.msg   │      │                        │      │ sprk_attachment   │
-│                 │      │                        │      │   artifact        │
+│ SPE Container   │      │ Dataverse              │      │ Azure AI Search   │
+│ /office/*.docx  │      │ sprk_document          │      │ spaarke-search-dev│
+│ /office/*.msg   │      │ sprk_emailartifact     │      │ (indexed chunks)  │
+│ /attach/*.pdf   │      │ sprk_attachmentartifact│      │                   │
+│                 │      │ sprk_processingjob     │      │                   │
 └─────────────────┘      └────────────────────────┘      └───────────────────┘
 ```
+
+**Service Bus Queues:**
+
+| Queue Name | Consumer | Purpose | Next Stage |
+|------------|----------|---------|------------|
+| `office-upload-finalization` | UploadFinalizationWorker | File upload, record creation, relationship linking | office-profile + office-indexing |
+| `office-profile` | ProfileSummaryWorker | AI profile generation via IAppOnlyAnalysisService | None (terminal) |
+| `office-indexing` | IndexingWorkerHostedService | RAG indexing via IFileIndexingService | None (terminal) |
+
+**Key Characteristics:**
+- **Parallel AI stages**: Profile and Indexing run concurrently after upload finalization
+- **Graceful degradation**: AI failures are non-fatal (logged as warnings)
+- **Idempotency**: Redis cache with 7-day TTL, pattern: `{jobId}-{stage}`
+- **Status tracking**: ProcessingJob with stage-level progress, SSE updates to client
+- **App-only auth**: All workers use ClientSecretCredential (no user context)
 
 **Components involved:**
 

@@ -31,6 +31,45 @@ public sealed class RiskDetectorHandler : IAnalysisToolHandler
     private readonly ITextChunkingService _textChunkingService;
     private readonly ILogger<RiskDetectorHandler> _logger;
 
+    /// <summary>JSON Schema (Draft 07) for configuration validation.</summary>
+    private static readonly object ConfigSchema = new
+    {
+        schema = "https://json-schema.org/draft-07/schema#",
+        title = "Risk Detector Configuration",
+        type = "object",
+        properties = new
+        {
+            categories = new
+            {
+                type = "array",
+                description = "Risk categories to detect (e.g., legal, financial, operational)",
+                items = new { type = "string" },
+                @default = new[] { "legal", "financial", "operational", "compliance", "contractual", "liability", "confidentiality", "termination" }
+            },
+            severity_threshold = new
+            {
+                type = "string",
+                description = "Minimum severity to report: low, medium, high",
+                @enum = new[] { "low", "medium", "high" },
+                @default = "low"
+            },
+            max_risks = new
+            {
+                type = "integer",
+                description = "Maximum number of risks to return",
+                minimum = 1,
+                maximum = 100,
+                @default = 20
+            },
+            include_recommendations = new
+            {
+                type = "boolean",
+                description = "Include mitigation recommendations",
+                @default = true
+            }
+        }
+    };
+
     public RiskDetectorHandler(
         IOpenAiClient openAiClient,
         ITextChunkingService textChunkingService,
@@ -57,7 +96,8 @@ public sealed class RiskDetectorHandler : IAnalysisToolHandler
             new ToolParameterDefinition("severity_threshold", "Minimum severity to report: low, medium, high", ToolParameterType.String, Required: false, DefaultValue: "low"),
             new ToolParameterDefinition("max_risks", "Maximum number of risks to return", ToolParameterType.Integer, Required: false, DefaultValue: 20),
             new ToolParameterDefinition("include_recommendations", "Include mitigation recommendations", ToolParameterType.Boolean, Required: false, DefaultValue: true)
-        });
+        },
+        ConfigurationSchema: ConfigSchema);
 
     /// <inheritdoc />
     public IReadOnlyList<ToolType> SupportedToolTypes { get; } = new[] { ToolType.RiskDetector };

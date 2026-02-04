@@ -103,3 +103,11 @@ scripts/Check-Registration-*.ps1
 scripts/Decode-Token.ps1
 scripts/Test-BffApi-*.ps1
 scripts/Update-Registration.ps1
+
+# Temporary diagnostic scripts
+check-job.ps1
+check-workers.ps1
+query-documents.ps1
+api-logs/
+latest-logs/
+LogFiles/

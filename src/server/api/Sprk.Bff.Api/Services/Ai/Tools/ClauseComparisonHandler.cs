@@ -34,6 +34,51 @@ public sealed class ClauseComparisonHandler : IAnalysisToolHandler
     private readonly ITextChunkingService _textChunkingService;
     private readonly ILogger<ClauseComparisonHandler> _logger;
 
+    /// <summary>JSON Schema (Draft 07) for configuration validation.</summary>
+    private static readonly object ConfigSchema = new
+    {
+        schema = "https://json-schema.org/draft-07/schema#",
+        title = "Clause Comparison Configuration",
+        type = "object",
+        properties = new
+        {
+            clause_types = new
+            {
+                type = "array",
+                description = "Clause types to compare",
+                items = new { type = "string" },
+                @default = new[] { "Indemnification", "LimitationOfLiability", "Termination", "Confidentiality", "DisputeResolution", "GoverningLaw", "ForceMajeure", "IntellectualProperty", "Warranty", "PaymentTerms" }
+            },
+            deviation_threshold = new
+            {
+                type = "string",
+                description = "Minimum deviation to report: minor, moderate, significant",
+                @enum = new[] { "minor", "moderate", "significant" },
+                @default = "minor"
+            },
+            max_deviations = new
+            {
+                type = "integer",
+                description = "Maximum deviations to return",
+                minimum = 1,
+                maximum = 100,
+                @default = 30
+            },
+            include_recommendations = new
+            {
+                type = "boolean",
+                description = "Include remediation recommendations",
+                @default = true
+            },
+            include_standard_text = new
+            {
+                type = "boolean",
+                description = "Include standard text in comparison",
+                @default = true
+            }
+        }
+    };
+
     public ClauseComparisonHandler(
         IOpenAiClient openAiClient,
         ITextChunkingService textChunkingService,
@@ -61,7 +106,8 @@ public sealed class ClauseComparisonHandler : IAnalysisToolHandler
             new ToolParameterDefinition("max_deviations", "Maximum deviations to return", ToolParameterType.Integer, Required: false, DefaultValue: 30),
             new ToolParameterDefinition("include_recommendations", "Include remediation recommendations", ToolParameterType.Boolean, Required: false, DefaultValue: true),
             new ToolParameterDefinition("include_standard_text", "Include standard text in comparison", ToolParameterType.Boolean, Required: false, DefaultValue: true)
-        });
+        },
+        ConfigurationSchema: ConfigSchema);
 
     /// <inheritdoc />
     public IReadOnlyList<ToolType> SupportedToolTypes { get; } = new[] { ToolType.ClauseComparison };

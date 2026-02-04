@@ -1,0 +1,7 @@
+/* EventFormController PCF Control Styles */
+/* Uses Fluent UI v9 tokens - minimal custom CSS per ADR-021 */
+
+.event-form-controller-container {
+    height: 100%;
+    width: 100%;
+}

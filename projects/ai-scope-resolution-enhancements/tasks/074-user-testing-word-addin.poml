@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="074" project="ai-scope-resolution-enhancements">
+  <metadata>
+    <title>User Testing: Word Add-in Document Save</title>
+    <phase>7</phase>
+    <tags>testing, user-testing, manual, word</tags>
+    <estimate>1-2 hours</estimate>
+    <dependencies>070</dependencies>
+    <parallel-group>C</parallel-group>
+  </metadata>
+
+  <prompt>
+    <goal>
+      Manually test Word add-in document save and verify AI analysis completes.
+    </goal>
+    <context>
+      Test flow:
+      1. Open Word with add-in installed
+      2. Create or open test document
+      3. Use add-in to save document
+      4. Wait for processing
+      5. Verify sprk_analysis record created
+    </context>
+    <constraints>
+      - Use dev environment
+      - Similar flow to Outlook but for Word documents
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-scope-resolution-enhancements/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Open Word with add-in</step>
+    <step order="2">Create or open test document</step>
+    <step order="3">Use add-in to save document</step>
+    <step order="4">Wait for processing</step>
+    <step order="5">Verify sprk_analysis record</step>
+    <step order="6">Document results</step>
+  </steps>
+
+  <tools>
+    <tool>Manual testing in Word</tool>
+    <tool>Write - Document results</tool>
+  </tools>
+
+  <outputs>
+    <output>Test results documentation</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Document saved successfully via add-in</criterion>
+    <criterion>sprk_analysis record created</criterion>
+    <criterion>No dead-letter errors</criterion>
+  </acceptance-criteria>
+</task>

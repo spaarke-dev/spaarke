@@ -2,7 +2,7 @@ import React from 'react';
 import {
   makeStyles,
   tokens,
-  Title2,
+  Text,
   Button,
   Tooltip,
   Menu,
@@ -17,12 +17,11 @@ import {
   PersonRegular,
   SignOutRegular,
   SettingsRegular,
-  MailRegular,
-  DocumentRegular,
   WeatherMoonRegular,
   WeatherSunnyRegular,
   ColorRegular,
 } from '@fluentui/react-icons';
+import { SpaarkeLogo } from './SpaarkeLogo';
 import type { ThemePreference } from '../hooks/useTheme';
 import type { HostType } from '../../adapters/types';
 
@@ -58,15 +57,13 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalS,
     overflow: 'hidden',
   },
-  hostIcon: {
-    fontSize: '24px',
-    flexShrink: 0,
-    color: tokens.colorBrandForeground1,
-  },
   title: {
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightRegular,
+    color: tokens.colorNeutralForeground2,
   },
   actions: {
     display: 'flex',
@@ -110,19 +107,6 @@ export interface TaskPaneHeaderProps {
   compact?: boolean;
 }
 
-/**
- * Gets the icon component for the host type.
- */
-function getHostIcon(hostType: HostType): React.ReactElement {
-  switch (hostType) {
-    case 'outlook':
-      return <MailRegular />;
-    case 'word':
-      return <DocumentRegular />;
-    default:
-      return <DocumentRegular />;
-  }
-}
 
 /**
  * Gets the icon for the current theme preference.
@@ -159,8 +143,8 @@ export const TaskPaneHeader: React.FC<TaskPaneHeaderProps> = ({
   return (
     <header className={headerClassName}>
       <div className={styles.titleSection}>
-        <span className={styles.hostIcon}>{getHostIcon(hostType)}</span>
-        {!compact && <Title2 className={styles.title}>{title}</Title2>}
+        <SpaarkeLogo size={24} />
+        {!compact && <Text className={styles.title}>{title}</Text>}
       </div>
 
       <div className={styles.actions}>

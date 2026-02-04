@@ -137,6 +137,9 @@ public class UpdateDocumentRequest
     /// <summary>Parent Graph item ID (for attachments). Maps to sprk_ParentGraphItemId.</summary>
     public string? ParentGraphItemId { get; set; }
 
+    /// <summary>Parent email's internetMessageId (for attachments from emails). Maps to sprk_emailparentid.</summary>
+    public string? EmailParentId { get; set; }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // Record Association Lookups (Phase 2 - Record Matching)
     // ═══════════════════════════════════════════════════════════════════════════
@@ -368,4 +371,404 @@ public class AnalysisOutputEntity
 
     /// <summary>Created date/time</summary>
     public DateTime CreatedOn { get; set; }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// Event Management Entities (Events and Workflow Automation R1)
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+/// <summary>
+/// Event entity model (sprk_event)
+/// </summary>
+public class EventEntity
+{
+    /// <summary>Event ID (sprk_eventid)</summary>
+    public Guid Id { get; set; }
+
+    /// <summary>Event name (sprk_eventname) - Primary field</summary>
+    public required string Name { get; set; }
+
+    /// <summary>Description (sprk_description)</summary>
+    public string? Description { get; set; }
+
+    /// <summary>Event Type lookup ID (_sprk_eventtype_ref_value)</summary>
+    public Guid? EventTypeId { get; set; }
+
+    /// <summary>Event Type name (from expanded lookup)</summary>
+    public string? EventTypeName { get; set; }
+
+    /// <summary>State code: Active (0), Inactive (1)</summary>
+    public int StateCode { get; set; }
+
+    /// <summary>Status code: Draft (1), Planned (2), Open (3), OnHold (4), Completed (5), Cancelled (6), Deleted (7)</summary>
+    public int StatusCode { get; set; }
+
+    /// <summary>Base date (sprk_basedate)</summary>
+    public DateTime? BaseDate { get; set; }
+
+    /// <summary>Due date (sprk_duedate)</summary>
+    public DateTime? DueDate { get; set; }
+
+    /// <summary>Completed date (sprk_completeddate)</summary>
+    public DateTime? CompletedDate { get; set; }
+
+    /// <summary>Priority: Low (0), Normal (1), High (2), Urgent (3)</summary>
+    public int? Priority { get; set; }
+
+    /// <summary>Source: User (0), System (1), Workflow (2), External (3)</summary>
+    public int? Source { get; set; }
+
+    /// <summary>Remind at (sprk_remindat)</summary>
+    public DateTime? RemindAt { get; set; }
+
+    /// <summary>Related Event lookup ID (_sprk_relatedevent_value)</summary>
+    public Guid? RelatedEventId { get; set; }
+
+    /// <summary>Related Event Type: Reminder (0), Notification (1), Extension (2)</summary>
+    public int? RelatedEventType { get; set; }
+
+    /// <summary>Related Event Offset Type: HoursBefore (0), HoursAfter (1), DaysBefore (2), DaysAfter (3), Fixed (4)</summary>
+    public int? RelatedEventOffsetType { get; set; }
+
+    // Regarding lookup fields (entity-specific lookups)
+    /// <summary>Regarding Account lookup (_sprk_regardingaccount_value)</summary>
+    public Guid? RegardingAccountId { get; set; }
+    /// <summary>Regarding Analysis lookup (_sprk_regardinganalysis_value)</summary>
+    public Guid? RegardingAnalysisId { get; set; }
+    /// <summary>Regarding Contact lookup (_sprk_regardingcontact_value)</summary>
+    public Guid? RegardingContactId { get; set; }
+    /// <summary>Regarding Invoice lookup (_sprk_regardinginvoice_value)</summary>
+    public Guid? RegardingInvoiceId { get; set; }
+    /// <summary>Regarding Matter lookup (_sprk_regardingmatter_value)</summary>
+    public Guid? RegardingMatterId { get; set; }
+    /// <summary>Regarding Project lookup (_sprk_regardingproject_value)</summary>
+    public Guid? RegardingProjectId { get; set; }
+    /// <summary>Regarding Budget lookup (_sprk_regardingbudget_value)</summary>
+    public Guid? RegardingBudgetId { get; set; }
+    /// <summary>Regarding Work Assignment lookup (_sprk_regardingworkassignment_value)</summary>
+    public Guid? RegardingWorkAssignmentId { get; set; }
+
+    // Denormalized regarding fields (for unified views)
+    /// <summary>Regarding record ID as string (sprk_regardingrecordid)</summary>
+    public string? RegardingRecordId { get; set; }
+    /// <summary>Regarding record display name (sprk_regardingrecordname)</summary>
+    public string? RegardingRecordName { get; set; }
+    /// <summary>Regarding record type: Project (0), Matter (1), Invoice (2), Analysis (3), Account (4), Contact (5), WorkAssignment (6), Budget (7)</summary>
+    public int? RegardingRecordType { get; set; }
+
+    /// <summary>Created date/time</summary>
+    public DateTime CreatedOn { get; set; }
+
+    /// <summary>Modified date/time</summary>
+    public DateTime ModifiedOn { get; set; }
+}
+
+/// <summary>
+/// Request model for creating a new Event
+/// </summary>
+public class CreateEventRequest
+{
+    /// <summary>Event name (required)</summary>
+    public required string Name { get; set; }
+
+    /// <summary>Description</summary>
+    public string? Description { get; set; }
+
+    /// <summary>Event Type ID</summary>
+    public Guid? EventTypeId { get; set; }
+
+    /// <summary>Base date</summary>
+    public DateTime? BaseDate { get; set; }
+
+    /// <summary>Due date</summary>
+    public DateTime? DueDate { get; set; }
+
+    /// <summary>Priority: Low (0), Normal (1), High (2), Urgent (3)</summary>
+    public int? Priority { get; set; }
+
+    /// <summary>Regarding record type</summary>
+    public int? RegardingRecordType { get; set; }
+
+    /// <summary>Regarding record ID</summary>
+    public string? RegardingRecordId { get; set; }
+
+    /// <summary>Regarding record name</summary>
+    public string? RegardingRecordName { get; set; }
+}
+
+/// <summary>
+/// Request model for updating an Event
+/// </summary>
+public class UpdateEventRequest
+{
+    /// <summary>Event name</summary>
+    public string? Name { get; set; }
+
+    /// <summary>Description</summary>
+    public string? Description { get; set; }
+
+    /// <summary>Event Type ID</summary>
+    public Guid? EventTypeId { get; set; }
+
+    /// <summary>Base date</summary>
+    public DateTime? BaseDate { get; set; }
+
+    /// <summary>Due date</summary>
+    public DateTime? DueDate { get; set; }
+
+    /// <summary>Priority: Low (0), Normal (1), High (2), Urgent (3)</summary>
+    public int? Priority { get; set; }
+
+    /// <summary>Status code</summary>
+    public int? StatusCode { get; set; }
+
+    /// <summary>Regarding record type</summary>
+    public int? RegardingRecordType { get; set; }
+
+    /// <summary>Regarding record ID</summary>
+    public string? RegardingRecordId { get; set; }
+
+    /// <summary>Regarding record name</summary>
+    public string? RegardingRecordName { get; set; }
+}
+
+/// <summary>
+/// Event Type entity model (sprk_eventtype)
+/// </summary>
+public class EventTypeEntity
+{
+    /// <summary>Event Type ID (sprk_eventtypeid)</summary>
+    public Guid Id { get; set; }
+
+    /// <summary>Name (sprk_name) - Primary field</summary>
+    public required string Name { get; set; }
+
+    /// <summary>Event code (sprk_eventcode)</summary>
+    public string? EventCode { get; set; }
+
+    /// <summary>Description (sprk_description)</summary>
+    public string? Description { get; set; }
+
+    /// <summary>State code: Active (0), Inactive (1)</summary>
+    public int StateCode { get; set; }
+
+    /// <summary>Requires due date: No (0), Yes (1)</summary>
+    public int? RequiresDueDate { get; set; }
+
+    /// <summary>Requires base date: No (0), Yes (1)</summary>
+    public int? RequiresBaseDate { get; set; }
+}
+
+/// <summary>
+/// Event Log entity model (sprk_eventlog)
+/// </summary>
+public class EventLogEntity
+{
+    /// <summary>Event Log ID (sprk_eventlogid)</summary>
+    public Guid Id { get; set; }
+
+    /// <summary>Name (sprk_eventlogname) - Primary field</summary>
+    public string? Name { get; set; }
+
+    /// <summary>Event lookup ID (_sprk_event_value)</summary>
+    public Guid EventId { get; set; }
+
+    /// <summary>Action: Created (0), Updated (1), Completed (2), Cancelled (3), Deleted (4)</summary>
+    public int Action { get; set; }
+
+    /// <summary>Description (sprk_description)</summary>
+    public string? Description { get; set; }
+
+    /// <summary>Created date/time</summary>
+    public DateTime CreatedOn { get; set; }
+
+    /// <summary>Created by user ID</summary>
+    public Guid? CreatedById { get; set; }
+
+    /// <summary>Created by user name</summary>
+    public string? CreatedByName { get; set; }
+}
+
+/// <summary>
+/// Event Log action constants
+/// </summary>
+public static class EventLogAction
+{
+    public const int Created = 0;
+    public const int Updated = 1;
+    public const int Completed = 2;
+    public const int Cancelled = 3;
+    public const int Deleted = 4;
+
+    public static string GetDisplayName(int action) => action switch
+    {
+        Created => "Created",
+        Updated => "Updated",
+        Completed => "Completed",
+        Cancelled => "Cancelled",
+        Deleted => "Deleted",
+        _ => "Unknown"
+    };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// Field Mapping Framework Entities (Events and Workflow Automation R1)
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+/// <summary>
+/// Field Mapping Profile entity model (sprk_fieldmappingprofile)
+/// </summary>
+public class FieldMappingProfileEntity
+{
+    /// <summary>Profile ID (sprk_fieldmappingprofileid)</summary>
+    public Guid Id { get; set; }
+
+    /// <summary>Name (sprk_name) - Primary field</summary>
+    public required string Name { get; set; }
+
+    /// <summary>Source entity logical name (sprk_sourceentity)</summary>
+    public required string SourceEntity { get; set; }
+
+    /// <summary>Target entity logical name (sprk_targetentity)</summary>
+    public required string TargetEntity { get; set; }
+
+    /// <summary>Mapping direction: ParentToChild (0), ChildToParent (1), Bidirectional (2)</summary>
+    public int MappingDirection { get; set; }
+
+    /// <summary>Sync mode: OneTime (0), ManualRefresh (1)</summary>
+    public int SyncMode { get; set; }
+
+    /// <summary>Is active</summary>
+    public bool IsActive { get; set; }
+
+    /// <summary>Description (sprk_description)</summary>
+    public string? Description { get; set; }
+
+    /// <summary>Child mapping rules (populated via expand or separate query)</summary>
+    public List<FieldMappingRuleEntity>? Rules { get; set; }
+}
+
+/// <summary>
+/// Field Mapping Rule entity model (sprk_fieldmappingrule)
+/// </summary>
+public class FieldMappingRuleEntity
+{
+    /// <summary>Rule ID (sprk_fieldmappingruleid)</summary>
+    public Guid Id { get; set; }
+
+    /// <summary>Name (sprk_name) - Primary field</summary>
+    public required string Name { get; set; }
+
+    /// <summary>Mapping Profile lookup ID (_sprk_fieldmappingprofile_value)</summary>
+    public Guid ProfileId { get; set; }
+
+    /// <summary>Source field schema name (sprk_sourcefield)</summary>
+    public required string SourceField { get; set; }
+
+    /// <summary>Source field type: Text (0), Lookup (1), OptionSet (2), Number (3), DateTime (4), Boolean (5), Memo (6)</summary>
+    public int SourceFieldType { get; set; }
+
+    /// <summary>Target field schema name (sprk_targetfield)</summary>
+    public required string TargetField { get; set; }
+
+    /// <summary>Target field type</summary>
+    public int TargetFieldType { get; set; }
+
+    /// <summary>Compatibility mode: Strict (0), Resolve (1)</summary>
+    public int CompatibilityMode { get; set; }
+
+    /// <summary>Is required (fail if source is empty)</summary>
+    public bool IsRequired { get; set; }
+
+    /// <summary>Default value when source is empty</summary>
+    public string? DefaultValue { get; set; }
+
+    /// <summary>Is cascading source (triggers secondary mappings)</summary>
+    public bool IsCascadingSource { get; set; }
+
+    /// <summary>Execution order for dependent mappings</summary>
+    public int ExecutionOrder { get; set; }
+
+    /// <summary>Is active</summary>
+    public bool IsActive { get; set; }
+}
+
+/// <summary>
+/// Field mapping direction constants
+/// </summary>
+public static class MappingDirection
+{
+    public const int ParentToChild = 0;
+    public const int ChildToParent = 1;
+    public const int Bidirectional = 2;
+}
+
+/// <summary>
+/// Field mapping sync mode constants
+/// </summary>
+public static class SyncMode
+{
+    public const int OneTime = 0;
+    public const int ManualRefresh = 1;
+}
+
+/// <summary>
+/// Field type constants for mapping rules
+/// </summary>
+public static class FieldMappingFieldType
+{
+    public const int Text = 0;
+    public const int Lookup = 1;
+    public const int OptionSet = 2;
+    public const int Number = 3;
+    public const int DateTime = 4;
+    public const int Boolean = 5;
+    public const int Memo = 6;
+}
+
+/// <summary>
+/// Regarding record type constants
+/// </summary>
+public static class RegardingRecordType
+{
+    public const int Project = 0;
+    public const int Matter = 1;
+    public const int Invoice = 2;
+    public const int Analysis = 3;
+    public const int Account = 4;
+    public const int Contact = 5;
+    public const int WorkAssignment = 6;
+    public const int Budget = 7;
+
+    /// <summary>
+    /// Gets the entity logical name for a regarding record type
+    /// </summary>
+    public static string? GetEntityLogicalName(int recordType) => recordType switch
+    {
+        Project => "sprk_project",
+        Matter => "sprk_matter",
+        Invoice => "sprk_invoice",
+        Analysis => "sprk_analysis",
+        Account => "account",
+        Contact => "contact",
+        WorkAssignment => "sprk_workassignment",
+        Budget => "sprk_budget",
+        _ => null
+    };
+
+    /// <summary>
+    /// Gets the regarding lookup field name for a regarding record type
+    /// </summary>
+    public static string? GetLookupFieldName(int recordType) => recordType switch
+    {
+        Project => "sprk_regardingproject",
+        Matter => "sprk_regardingmatter",
+        Invoice => "sprk_regardinginvoice",
+        Analysis => "sprk_regardinganalysis",
+        Account => "sprk_regardingaccount",
+        Contact => "sprk_regardingcontact",
+        WorkAssignment => "sprk_regardingworkassignment",
+        Budget => "sprk_regardingbudget",
+        _ => null
+    };
 }

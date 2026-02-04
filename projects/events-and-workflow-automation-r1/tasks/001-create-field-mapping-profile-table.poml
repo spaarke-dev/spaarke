@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>Create Field Mapping Profile table</title>
+    <phase>1: Foundation &amp; Data Model</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>002, 010</blocks>
+    <tags>dataverse, solution, fields</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task creates new Dataverse table with explicit constraints</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create the Field Mapping Profile table (sprk_fieldmappingprofile) in Dataverse. This table stores
+    mapping configurations between source and target entities, enabling admin-configurable field
+    inheritance. The table must support the Field Mapping Framework requirements for N:1 and N:N
+    relationship mappings that Dataverse OOB does not provide.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in Dataverse solution customization and table design.
+    Follow ADRs strictly. Understand Power Platform schema conventions and relationship modeling.
+  </role>
+
+  <goal>
+    Field Mapping Profile table created in Dataverse with all required fields, configured for the
+    Spaarke solution. Table should be visible in model-driven app navigation.
+  </goal>
+
+  <context>
+    <background>
+      The Field Mapping Framework enables admin-configurable field-to-field mappings between parent
+      and child entities. This addresses Dataverse OOB mapping limitations (1:N only). The Profile
+      table defines which entity pairs have mappings; individual field mappings are stored in the
+      related Rule table (task 002).
+    </background>
+    <relevant-files>
+      <file>projects/events-and-workflow-automation-r1/spec.md - Data Model section</file>
+      <file>src/solutions/ - Existing Dataverse solutions</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Table name: sprk_fieldmappingprofile</constraint>
+    <constraint source="spec">Must include: Name, Source Entity, Target Entity, Description, Is Active, Sync Mode</constraint>
+    <constraint source="spec">Sync Mode choice values: One-time (0), Manual Refresh (1), Update Related (2)</constraint>
+    <constraint source="project">No Dataverse Business Rules - validation in code only</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Dataverse Table Creation" location=".claude/patterns/dataverse/">
+        Standard pattern for creating Dataverse tables with proper naming and configuration
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review spec.md Data Model section for Field Mapping Profile table schema</step>
+    <step order="2">Open Dataverse maker portal or use PAC CLI to create the table</step>
+    <step order="3">Create sprk_fieldmappingprofile table with display name "Field Mapping Profile"</step>
+    <step order="4">Add Name field (primary, text, max 200 chars, required)</step>
+    <step order="5">Add Source Entity field (text, max 100 chars, required) - logical name of source</step>
+    <step order="6">Add Target Entity field (text, max 100 chars, required) - logical name of target</step>
+    <step order="7">Add Description field (memo, optional)</step>
+    <step order="8">Add Is Active field (boolean, default true)</step>
+    <step order="9">Add Sync Mode field (choice: One-time=0, Manual Refresh=1, Update Related=2)</step>
+    <step order="10">Configure table for model-driven app visibility</step>
+    <step order="11">Add table to Spaarke solution</step>
+    <step order="12">Export and verify solution XML</step>
+    <step order="13">Update TASK-INDEX.md: change task 001 status to ✅ completed</step>
+    <step order="14">Document any deviations in projects/events-and-workflow-automation-r1/notes/</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI for Dataverse operations</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse">sprk_fieldmappingprofile table in Dataverse</output>
+    <output type="solution">Updated Spaarke solution with new table</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given the Dataverse environment, when I navigate to Tables, then sprk_fieldmappingprofile
+      exists with all specified fields.
+    </criterion>
+    <criterion testable="true">
+      Given the Field Mapping Profile table, when I create a new record, then all required fields
+      (Name, Source Entity, Target Entity) are enforced.
+    </criterion>
+    <criterion testable="true">
+      Given the Sync Mode field, when I open the dropdown, then options One-time, Manual Refresh,
+      and Update Related are available.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The Source Entity and Target Entity fields store logical names (e.g., "sprk_matter", "sprk_event")
+    rather than display names. This allows programmatic lookup of entity metadata.
+
+    Do not create Business Rules for validation - all validation happens in the PCF control and API.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

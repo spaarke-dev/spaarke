@@ -12,6 +12,8 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api;
 using Sprk.Bff.Api.Api.Admin;
 using Sprk.Bff.Api.Api.Ai;
+using Sprk.Bff.Api.Api.Events;
+using Sprk.Bff.Api.Api.FieldMappings;
 using Sprk.Bff.Api.Api.Office;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Authorization;
@@ -24,6 +26,7 @@ using Sprk.Bff.Api.Infrastructure.Validation;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.SemanticSearch;
+using Sprk.Bff.Api.Workers.Office;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -253,6 +256,12 @@ builder.Services.AddWorkersModule(builder.Configuration);
 // Office Add-in module (Office integration endpoints)
 builder.Services.AddOfficeModule();
 
+// Office Service Bus client for workers
+builder.Services.AddOfficeServiceBus(builder.Configuration);
+
+// Office Workers module (Office background workers - ADR-001)
+builder.Services.AddOfficeWorkers();
+
 // ============================================================================
 // DISTRIBUTED CACHE - Redis for production, in-memory for local dev (ADR-004, ADR-009)
 // ============================================================================
@@ -375,7 +384,8 @@ if (analysisEnabled && documentIntelligenceEnabled)
         builder.Configuration.GetSection(Sprk.Bff.Api.Configuration.AnalysisOptions.SectionName));
 
     // Analysis services - all scoped due to SpeFileStore dependency
-    builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IScopeResolverService, Sprk.Bff.Api.Services.Ai.ScopeResolverService>();
+    // NOTE: ScopeResolverService requires HttpClient, so must use AddHttpClient (not AddScoped)
+    builder.Services.AddHttpClient<Sprk.Bff.Api.Services.Ai.IScopeResolverService, Sprk.Bff.Api.Services.Ai.ScopeResolverService>();
     builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IScopeManagementService, Sprk.Bff.Api.Services.Ai.ScopeManagementService>();
     builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IAnalysisContextBuilder, Sprk.Bff.Api.Services.Ai.AnalysisContextBuilder>();
     builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IWorkingDocumentService, Sprk.Bff.Api.Services.Ai.WorkingDocumentService>();
@@ -503,6 +513,8 @@ if (analysisEnabled && documentIntelligenceEnabled)
     builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.ITextChunkingService, Sprk.Bff.Api.Services.Ai.TextChunkingService>();
 
     // Tool Framework - Dynamic tool loading for AI analysis tools
+    // NOTE: IToolHandlerRegistry MUST always be registered because AppOnlyAnalysisService
+    // depends on it. If the framework is disabled, we still register the registry (with no handlers).
     var toolFrameworkOptions = builder.Configuration.GetSection(Sprk.Bff.Api.Configuration.ToolFrameworkOptions.SectionName);
     if (toolFrameworkOptions.GetValue<bool>("Enabled", true))
     {
@@ -511,7 +523,13 @@ if (analysisEnabled && documentIntelligenceEnabled)
     }
     else
     {
-        Console.WriteLine("⚠ Tool framework disabled (ToolFramework:Enabled = false)");
+        // Register IToolHandlerRegistry even when framework disabled - required by AppOnlyAnalysisService
+        // Without this, job handlers that depend on AppOnlyAnalysisService will fail to instantiate
+        // CRITICAL: Must also configure ToolFrameworkOptions - ToolHandlerRegistry requires IOptions<ToolFrameworkOptions>
+        builder.Services.Configure<Sprk.Bff.Api.Configuration.ToolFrameworkOptions>(
+            builder.Configuration.GetSection(Sprk.Bff.Api.Configuration.ToolFrameworkOptions.SectionName));
+        builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IToolHandlerRegistry, Sprk.Bff.Api.Services.Ai.ToolHandlerRegistry>();
+        Console.WriteLine("⚠ Tool framework disabled (ToolFramework:Enabled = false), but IToolHandlerRegistry registered for job handlers");
     }
 
     // Semantic Search - Hybrid search for AI knowledge base (ADR-013)
@@ -1088,6 +1106,87 @@ Console.WriteLine("✓ Circuit breaker registry enabled");
 
 var app = builder.Build();
 
+// ============================================================================
+// STARTUP DIAGNOSTICS - Log registered job handlers for troubleshooting
+// ============================================================================
+// This helps diagnose "NoHandler" dead-letter errors by showing which handlers
+// are actually available at runtime. If a handler's dependency chain fails,
+// it won't appear in this list.
+using (var startupScope = app.Services.CreateScope())
+{
+    var startupLogger = startupScope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+
+    // Test critical dependencies individually for better error diagnosis
+    startupLogger.LogInformation("🔍 Testing critical service dependencies...");
+
+    // Test IToolHandlerRegistry (required by AppOnlyAnalysisService)
+    try
+    {
+        var toolRegistry = startupScope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Ai.IToolHandlerRegistry>();
+        startupLogger.LogInformation("  ✅ IToolHandlerRegistry: {Status}", toolRegistry != null ? "Available" : "NULL");
+    }
+    catch (Exception ex)
+    {
+        startupLogger.LogError(ex, "  ❌ IToolHandlerRegistry resolution failed: {Error}", ex.Message);
+    }
+
+    // Test IAppOnlyAnalysisService (required by AppOnlyDocumentAnalysisJobHandler)
+    try
+    {
+        var analysisService = startupScope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Ai.IAppOnlyAnalysisService>();
+        startupLogger.LogInformation("  ✅ IAppOnlyAnalysisService: {Status}", analysisService != null ? "Available" : "NULL");
+    }
+    catch (Exception ex)
+    {
+        startupLogger.LogError(ex, "  ❌ IAppOnlyAnalysisService resolution failed: {Error}", ex.Message);
+    }
+
+    // Test AppOnlyDocumentAnalysisJobHandler directly
+    try
+    {
+        var handler = startupScope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Jobs.Handlers.AppOnlyDocumentAnalysisJobHandler>();
+        startupLogger.LogInformation("  ✅ AppOnlyDocumentAnalysisJobHandler: {Status}", handler != null ? "Available" : "NULL");
+    }
+    catch (Exception ex)
+    {
+        startupLogger.LogError(ex, "  ❌ AppOnlyDocumentAnalysisJobHandler resolution failed: {Error}", ex.Message);
+    }
+
+    // Now enumerate all handlers
+    try
+    {
+        var handlers = startupScope.ServiceProvider.GetServices<Sprk.Bff.Api.Services.Jobs.IJobHandler>().ToList();
+        var handlerTypes = string.Join(", ", handlers.Select(h => h.JobType));
+        startupLogger.LogInformation(
+            "📋 Job handlers registered: {Count} handlers available: [{HandlerTypes}]",
+            handlers.Count, handlerTypes);
+
+        // Validate expected handlers are present
+        var expectedHandlers = new[] { "AppOnlyDocumentAnalysis", "DocumentProcessing", "ProcessEmailToDocument", "ProfileSummary", "RagIndexing", "BatchProcessEmails", "BulkRagIndexing", "EmailAnalysis" };
+        var missingHandlers = expectedHandlers.Where(e => !handlers.Any(h => h.JobType == e)).ToList();
+        if (missingHandlers.Any())
+        {
+            startupLogger.LogWarning(
+                "⚠️ Missing expected job handlers: [{MissingHandlers}]. Check DI registration and dependency chain.",
+                string.Join(", ", missingHandlers));
+        }
+    }
+    catch (Exception ex)
+    {
+        startupLogger.LogError(ex,
+            "❌ Failed to enumerate job handlers at startup. This may cause 'NoHandler' dead-letter errors. Error: {Error}",
+            ex.Message);
+
+        // Log full exception chain for diagnosis
+        var inner = ex.InnerException;
+        while (inner != null)
+        {
+            startupLogger.LogError("  → Inner: {InnerError}", inner.Message);
+            inner = inner.InnerException;
+        }
+    }
+}
+
 // ---- Middleware Pipeline ----
 
 // Cross-cutting: CORS
@@ -1326,6 +1425,200 @@ app.MapGet("/status", () =>
     .WithTags("Health")
     .WithDescription("Service status with metadata (no sensitive info).");
 
+// DEBUG: Peek at office-upload-finalization DLQ (temporary - for debugging worker failures)
+app.MapGet("/debug/office-dlq", async (Azure.Messaging.ServiceBus.ServiceBusClient serviceBusClient, ILogger<Program> logger) =>
+{
+    try
+    {
+        await using var receiver = serviceBusClient.CreateReceiver(
+            "office-upload-finalization",
+            new Azure.Messaging.ServiceBus.ServiceBusReceiverOptions
+            {
+                SubQueue = Azure.Messaging.ServiceBus.SubQueue.DeadLetter,
+                ReceiveMode = Azure.Messaging.ServiceBus.ServiceBusReceiveMode.PeekLock
+            });
+
+        var messages = await receiver.PeekMessagesAsync(10);
+        var results = messages.Select(m => new
+        {
+            sequenceNumber = m.SequenceNumber,
+            deadLetterReason = m.DeadLetterReason,
+            deadLetterErrorDescription = m.DeadLetterErrorDescription,
+            enqueuedTime = m.EnqueuedTime,
+            messageId = m.MessageId,
+            correlationId = m.CorrelationId,
+            bodyPreview = m.Body.ToString().Length > 500 ? m.Body.ToString()[..500] + "..." : m.Body.ToString()
+        }).ToList();
+
+        return Results.Ok(new { count = results.Count, messages = results });
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "[DEBUG] Error peeking office DLQ");
+        return Results.Ok(new { error = ex.Message, innerError = ex.InnerException?.Message });
+    }
+}).AllowAnonymous();
+
+// DEBUG: Peek at office-indexing queue (to check if UploadFinalizationWorker forwarded messages)
+app.MapGet("/debug/office-indexing", async (Azure.Messaging.ServiceBus.ServiceBusClient serviceBusClient, ILogger<Program> logger) =>
+{
+    try
+    {
+        await using var receiver = serviceBusClient.CreateReceiver("office-indexing");
+        var messages = await receiver.PeekMessagesAsync(10);
+        var results = messages.Select(m => new
+        {
+            sequenceNumber = m.SequenceNumber,
+            enqueuedTime = m.EnqueuedTime,
+            messageId = m.MessageId,
+            correlationId = m.CorrelationId,
+            bodyPreview = m.Body.ToString().Length > 500 ? m.Body.ToString()[..500] + "..." : m.Body.ToString()
+        }).ToList();
+
+        return Results.Ok(new { queue = "office-indexing", count = results.Count, messages = results });
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "[DEBUG] Error peeking office-indexing queue");
+        return Results.Ok(new { error = ex.Message, innerError = ex.InnerException?.Message });
+    }
+}).AllowAnonymous();
+
+// DEBUG: Peek at office-profile queue
+app.MapGet("/debug/office-profile", async (Azure.Messaging.ServiceBus.ServiceBusClient serviceBusClient, ILogger<Program> logger) =>
+{
+    try
+    {
+        await using var receiver = serviceBusClient.CreateReceiver("office-profile");
+        var messages = await receiver.PeekMessagesAsync(10);
+        var results = messages.Select(m => new
+        {
+            sequenceNumber = m.SequenceNumber,
+            enqueuedTime = m.EnqueuedTime,
+            messageId = m.MessageId,
+            correlationId = m.CorrelationId,
+            bodyPreview = m.Body.ToString().Length > 500 ? m.Body.ToString()[..500] + "..." : m.Body.ToString()
+        }).ToList();
+
+        return Results.Ok(new { queue = "office-profile", count = results.Count, messages = results });
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "[DEBUG] Error peeking office-profile queue");
+        return Results.Ok(new { error = ex.Message, innerError = ex.InnerException?.Message });
+    }
+}).AllowAnonymous();
+
+// DEBUG: Peek at sdap-jobs dead letter queue (to diagnose "No Handler" errors)
+app.MapGet("/debug/sdap-jobs-dlq", async (Azure.Messaging.ServiceBus.ServiceBusClient serviceBusClient, ILogger<Program> logger) =>
+{
+    try
+    {
+        var queueName = app.Configuration["ServiceBus:QueueName"] ?? "sdap-jobs";
+        await using var receiver = serviceBusClient.CreateReceiver(
+            queueName,
+            new Azure.Messaging.ServiceBus.ServiceBusReceiverOptions
+            {
+                SubQueue = Azure.Messaging.ServiceBus.SubQueue.DeadLetter,
+                ReceiveMode = Azure.Messaging.ServiceBus.ServiceBusReceiveMode.PeekLock
+            });
+
+        var messages = await receiver.PeekMessagesAsync(10);
+        var results = messages.Select(m => new
+        {
+            sequenceNumber = m.SequenceNumber,
+            deadLetterReason = m.DeadLetterReason,
+            deadLetterErrorDescription = m.DeadLetterErrorDescription,
+            enqueuedTime = m.EnqueuedTime,
+            messageId = m.MessageId,
+            correlationId = m.CorrelationId,
+            subject = m.Subject,
+            applicationProperties = m.ApplicationProperties.ToDictionary(kvp => kvp.Key, kvp => kvp.Value?.ToString() ?? "null"),
+            bodyPreview = m.Body.ToString().Length > 800 ? m.Body.ToString()[..800] + "..." : m.Body.ToString()
+        }).ToList();
+
+        return Results.Ok(new { queue = $"{queueName}/$DeadLetterQueue", count = results.Count, messages = results });
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "[DEBUG] Error peeking sdap-jobs DLQ");
+        return Results.Ok(new { error = ex.Message, innerError = ex.InnerException?.Message });
+    }
+}).AllowAnonymous();
+
+// DEBUG: List all registered job handlers (to diagnose "No Handler" errors)
+app.MapGet("/debug/job-handlers", (IServiceProvider sp, ILogger<Program> logger) =>
+{
+    try
+    {
+        using var scope = sp.CreateScope();
+        var handlers = scope.ServiceProvider.GetServices<Sprk.Bff.Api.Services.Jobs.IJobHandler>().ToList();
+
+        var handlerInfo = handlers.Select(h => new
+        {
+            jobType = h.JobType,
+            handlerType = h.GetType().FullName
+        }).ToList();
+
+        // Also try to resolve AppOnlyDocumentAnalysisJobHandler directly to see if it fails
+        string? directResolutionError = null;
+        try
+        {
+            var directHandler = scope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Jobs.Handlers.AppOnlyDocumentAnalysisJobHandler>();
+            if (directHandler == null)
+            {
+                directResolutionError = "Direct resolution returned null (not registered as concrete type)";
+            }
+        }
+        catch (Exception ex)
+        {
+            directResolutionError = $"Direct resolution failed: {ex.Message}";
+            if (ex.InnerException != null)
+            {
+                directResolutionError += $" → Inner: {ex.InnerException.Message}";
+            }
+        }
+
+        // Try to resolve IAppOnlyAnalysisService
+        string? analysisServiceError = null;
+        try
+        {
+            var analysisService = scope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Ai.IAppOnlyAnalysisService>();
+            if (analysisService == null)
+            {
+                analysisServiceError = "IAppOnlyAnalysisService returned null";
+            }
+        }
+        catch (Exception ex)
+        {
+            analysisServiceError = $"IAppOnlyAnalysisService failed: {ex.Message}";
+            if (ex.InnerException != null)
+            {
+                analysisServiceError += $" → Inner: {ex.InnerException.Message}";
+            }
+        }
+
+        return Results.Ok(new
+        {
+            totalHandlers = handlers.Count,
+            handlers = handlerInfo,
+            hasAppOnlyDocumentAnalysis = handlers.Any(h => h.JobType == "AppOnlyDocumentAnalysis"),
+            directHandlerResolution = directResolutionError ?? "OK",
+            analysisServiceResolution = analysisServiceError ?? "OK"
+        });
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "[DEBUG] Error listing job handlers");
+        return Results.Ok(new
+        {
+            error = ex.Message,
+            innerError = ex.InnerException?.Message,
+            innerInnerError = ex.InnerException?.InnerException?.Message
+        });
+    }
+}).AllowAnonymous();
+
 // ---- Endpoint Groups ----
 
 // User identity and capabilities endpoints
@@ -1361,6 +1654,12 @@ app.MapEmailEndpoints();
 // Office Add-in endpoints (Outlook and Word integration)
 app.MapOfficeEndpoints();
 
+// Field Mapping endpoints (Events and Workflow Automation R1 project)
+app.MapFieldMappingEndpoints();
+
+// Event endpoints (Events and Workflow Automation R1 project)
+app.MapEventEndpoints();
+
 // Analysis endpoints (if enabled)
 if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
     app.Configuration.GetValue<bool>("Analysis:Enabled", true))
@@ -1372,6 +1671,7 @@ if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
     app.MapNodeEndpoints();
     app.MapPlaybookRunEndpoints();
     app.MapModelEndpoints();
+    app.MapHandlerEndpoints(); // Handler Discovery API (ai-scope-resolution-enhancements project)
 }
 
 // RAG endpoints for knowledge base operations (R3)

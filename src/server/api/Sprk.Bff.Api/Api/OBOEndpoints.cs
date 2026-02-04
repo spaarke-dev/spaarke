@@ -61,8 +61,12 @@ public static class OBOEndpoints
             {
                 logger.LogInformation("OBO upload starting - Container: {ContainerId}, Path: {Path}", id, path);
 
+                // Resolve container ID to drive ID (SPE container IDs != drive IDs)
+                var driveId = await speFileStore.ResolveDriveIdAsync(id, ct);
+                logger.LogDebug("Resolved container {ContainerId} to drive {DriveId}", id, driveId);
+
                 // Stream directly to Graph SDK (no memory buffering)
-                var item = await speFileStore.UploadSmallAsUserAsync(ctx, id, path, req.Body, ct);
+                var item = await speFileStore.UploadSmallAsUserAsync(ctx, driveId, path, req.Body, ct);
 
                 logger.LogInformation("OBO upload successful - DriveItemId: {ItemId}", item?.Id);
                 return item is null ? TypedResults.NotFound() : TypedResults.Ok(item);

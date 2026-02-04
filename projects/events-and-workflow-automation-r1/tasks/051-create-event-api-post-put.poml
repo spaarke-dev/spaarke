@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>Create Event API - POST/PUT endpoints</title>
+    <phase>5: API &amp; Event Log</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>050</dependencies>
+    <blocks>053</blocks>
+    <tags>bff-api, api, minimal-api, endpoints</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task tags include 'bff-api' (code implementation)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create the Event API write endpoints: POST /api/v1/events (create) and PUT /api/v1/events/{id}
+    (update). Include validation and Event Log entry creation.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in .NET 8 Minimal API. Follow ADR-001, ADR-008, ADR-019.
+  </role>
+
+  <goal>
+    Event API create and update endpoints implemented with validation, Dataverse persistence,
+    and Event Log integration.
+  </goal>
+
+  <context>
+    <background>
+      Events can be created and updated via API for programmatic scenarios. Each create operation
+      should generate an Event Log entry to track state transitions.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Events/EventEndpoints.cs - From task 050</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md - Event API requirements</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Must use Minimal API pattern</constraint>
+    <constraint source="ADR-019">Must use ProblemDetails for validation errors</constraint>
+    <constraint source="spec">Create Event Log on create (transition: none → active)</constraint>
+    <constraint source="spec">Validate required fields based on Event Type</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/error-handling.md</file>
+      <file>src/server/api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define CreateEventRequest DTO</step>
+    <step order="2">Define UpdateEventRequest DTO</step>
+    <step order="3">Implement POST /api/v1/events endpoint</step>
+    <step order="4">Validate required fields based on Event Type</step>
+    <step order="5">Create Event in Dataverse</step>
+    <step order="6">Create Event Log entry for "created" transition</step>
+    <step order="7">Return created EventDto with 201 status</step>
+    <step order="8">Implement PUT /api/v1/events/{id} endpoint</step>
+    <step order="9">Validate update request</step>
+    <step order="10">Update Event in Dataverse</step>
+    <step order="11">Add endpoint filters for authorization</step>
+    <step order="12">Write integration tests</step>
+    <step order="13">Update TASK-INDEX.md: change task 051 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and run .NET API</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Events/Dtos/CreateEventRequest.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Events/Dtos/UpdateEventRequest.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Events/CreateUpdateEventTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given a valid CreateEventRequest, when POST /api/v1/events is called, then Event is created
+      and 201 returned with EventDto.
+    </criterion>
+    <criterion testable="true">
+      Given an Event is created, when Event Log is queried, then a "created" entry exists.
+    </criterion>
+    <criterion testable="true">
+      Given an invalid request (missing required field), when POST is called, then 400 ProblemDetails
+      is returned with field errors.
+    </criterion>
+    <criterion testable="true">
+      Given a valid UpdateEventRequest, when PUT events/{id} is called, then Event is updated.
+    </criterion>
+    <criterion testable="true">Integration tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    CreateEventRequest should include:
+    - eventTypeId (required)
+    - subject (required)
+    - regardingEntityType, regardingRecordId (required)
+    - startDate, endDate, dueDate, location, description (based on Event Type)
+
+    Event Log entry format: action="created", previousStatus=null, newStatus="active"
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

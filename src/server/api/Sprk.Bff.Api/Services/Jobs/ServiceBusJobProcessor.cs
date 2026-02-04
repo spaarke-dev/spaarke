@@ -1,5 +1,7 @@
 using System.Text.Json;
 using Azure.Messaging.ServiceBus;
+using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Configuration;
 
 namespace Sprk.Bff.Api.Services.Jobs;
 
@@ -21,14 +23,20 @@ public class ServiceBusJobProcessor : BackgroundService
         ServiceBusClient serviceBusClient,
         IServiceProvider serviceProvider,
         ILogger<ServiceBusJobProcessor> logger,
-        IConfiguration configuration)
+        IOptions<ServiceBusOptions> serviceBusOptions)
     {
         _serviceBusClient = serviceBusClient ?? throw new ArgumentNullException(nameof(serviceBusClient));
         _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-        _queueName = configuration["Jobs:ServiceBus:QueueName"] ?? "sdap-jobs";
-        _maxConcurrentCalls = configuration.GetValue<int>("Jobs:ServiceBus:MaxConcurrentCalls", 5);
+        var options = serviceBusOptions?.Value ?? throw new ArgumentNullException(nameof(serviceBusOptions));
+        _queueName = options.QueueName;
+        _maxConcurrentCalls = options.MaxConcurrentCalls;
+
+        // Log the queue name at construction to help diagnose configuration issues
+        _logger.LogInformation(
+            "ServiceBusJobProcessor configured with queue '{QueueName}' and {MaxConcurrentCalls} concurrent calls",
+            _queueName, _maxConcurrentCalls);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -69,8 +77,32 @@ public class ServiceBusJobProcessor : BackgroundService
         {
             if (_processor != null)
             {
-                await _processor.StopProcessingAsync();
-                await _processor.DisposeAsync();
+                try
+                {
+                    await _processor.StopProcessingAsync();
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Processor already disposed - this is fine during shutdown
+                    _logger.LogDebug("Processor was already disposed during shutdown");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error stopping processor during shutdown");
+                }
+
+                try
+                {
+                    await _processor.DisposeAsync();
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Already disposed - this is fine
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error disposing processor during shutdown");
+                }
             }
             _logger.LogInformation("Service Bus Job Processor stopped");
         }
@@ -104,8 +136,37 @@ public class ServiceBusJobProcessor : BackgroundService
                 "Processing job {JobId} of type {JobType}, attempt {Attempt}/{MaxAttempts}, delivery count {DeliveryCount}",
                 job.JobId, job.JobType, job.Attempt, job.MaxAttempts, args.Message.DeliveryCount);
 
-            // Find appropriate handler
-            var handlers = scope.ServiceProvider.GetServices<IJobHandler>().ToList();
+            // Find appropriate handler with detailed diagnostics
+            List<IJobHandler> handlers;
+            try
+            {
+                handlers = scope.ServiceProvider.GetServices<IJobHandler>().ToList();
+                _logger.LogInformation(
+                    "📋 Found {Count} job handlers: [{HandlerTypes}]",
+                    handlers.Count,
+                    string.Join(", ", handlers.Select(h => h.JobType)));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "❌ Failed to enumerate IJobHandler implementations. This typically means a handler's dependency failed to resolve. Error: {Error}",
+                    ex.Message);
+
+                // Log the inner exception chain for more detail
+                var innerEx = ex.InnerException;
+                while (innerEx != null)
+                {
+                    _logger.LogError("  → Inner exception: {InnerError}", innerEx.Message);
+                    innerEx = innerEx.InnerException;
+                }
+
+                await args.DeadLetterMessageAsync(args.Message,
+                    "HandlerResolutionFailed",
+                    $"Failed to resolve job handlers: {ex.Message}",
+                    args.CancellationToken);
+                return;
+            }
+
             var handler = handlers.FirstOrDefault(h => h.JobType == job.JobType);
 
             if (handler == null)

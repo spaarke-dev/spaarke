@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<manifest>
+  <control namespace="Spaarke.Controls" constructor="EventAutoAssociate" version="1.0.0" display-name-key="Event Auto Associate" description-key="Headless control that auto-populates Event denormalized fields when regarding lookup is pre-populated from parent subgrid" control-type="standard" api-version="1.3.18">
+    <external-service-usage enabled="false"/>
+    <property name="triggerField" display-name-key="Trigger Field" description-key="Bind to a text field (e.g., sprk_name) to trigger auto-association on form load" of-type="SingleLine.Text" usage="bound" required="true"/>
+    <resources>
+      <code path="bundle.js" order="1"/>
+    </resources>
+    <feature-usage>
+      <uses-feature name="WebAPI" required="true"/>
+      <uses-feature name="Utility" required="true"/>
+    </feature-usage>
+    <built-by name="pac" version="1.51.1"/>
+  </control>
+</manifest>

@@ -1,0 +1,108 @@
+<step title="BackgroundTrace" date="2026-01-20T22:58:34.958" instance="3e17b9" url="/api/zipdeploy" method="POST" >
+  <step title="Cleanup Xml Logs" date="2026-01-20T22:58:34.958" /><!-- duration: 16ms -->
+  <step title="Updating shutdown sentinel last write time" date="2026-01-20T22:58:35.021" SemaphoreCount="7" /><!-- duration: 0ms -->
+  <step title="LockFile &apos;C:\home\site\locks\deployments.lock&apos; acquired" date="2026-01-20T22:58:35.021" /><!-- duration: 0ms -->
+  <step title="Creating temporary deployment" date="2026-01-20T22:58:35.036" /><!-- duration: 266ms -->
+  <step title="Performing fetch based deployment" date="2026-01-20T22:58:35.351" >
+    <step title="Fetching changes." date="2026-01-20T22:58:35.743" /><!-- duration: 121ms -->
+    <step title="Starting LocalZipHandler" date="2026-01-20T22:58:36.055" /><!-- duration: 0ms -->
+    <step title="Cleaning up temp folders from previous zip deployments and extracting pushed zip file C:\local\Temp\zipdeploy\dp3dzfvp.zip (67.02 MB) to C:\local\Temp\zipdeploy\extracted" date="2026-01-20T22:58:36.165" /><!-- duration: 0ms -->
+    <step title="Cleaning up temp folders from previous zip deployments and extracting pushed zip file C:\local\Temp\zipdeploy\dp3dzfvp.zip (67.02 MB) to C:\local\Temp\zipdeploy\extracted" date="2026-01-20T22:58:36.195" >
+      <step title="Extracting 262 entries to C:\local\Temp\zipdeploy\extracted directory" date="2026-01-20T22:58:36.386" >
+        <step title="Extracting to C:\local\Temp\zipdeploy\extracted\appsettings.template.json ..." date="2026-01-20T22:58:36.416" /><!-- duration: 121ms -->
+        <step title="Extracting to C:\local\Temp\zipdeploy\extracted\Azure.AI.DocumentIntelligence.dll ..." date="2026-01-20T22:58:36.567" /><!-- duration: 31ms -->
+        <step title="Extracting to C:\local\Temp\zipdeploy\extracted\Azure.AI.OpenAI.dll ..." date="2026-01-20T22:58:36.599" /><!-- duration: 31ms -->
+        <step title="Extracting to C:\local\Temp\zipdeploy\extracted\Azure.Core.Amqp.dll ..." date="2026-01-20T22:58:36.648" /><!-- duration: 295ms -->
+        <step title="Extracting to C:\local\Temp\zipdeploy\extracted\Azure.Core.dll ..." date="2026-01-20T22:58:36.960" /><!-- duration: 92ms -->
+        <step title="Omitting extracting file traces ..." date="2026-01-20T22:58:37.101" /><!-- duration: 60ms -->
+      </step><!-- duration: 9999ms -->
+    </step><!-- duration: 10200ms -->
+    <step title="Before sending BuildRequestReceived status to /api/updatedeploystatus" date="2026-01-20T22:58:46.446" /><!-- duration: 111ms -->
+    <step title="DeploymentManager.Deploy(id:22a39823e2424ae38f139eec6a120483)" date="2026-01-20T22:58:46.586" >
+      <step title="Collecting changeset information" date="2026-01-20T22:58:46.616" /><!-- duration: 654ms -->
+      <step title="Updating submodules" date="2026-01-20T22:58:47.289" >
+        <step title="Updating submodules." date="2026-01-20T22:58:47.430" /><!-- duration: 0ms -->
+      </step><!-- duration: 153ms -->
+      <step title="Preparing deployment for commit id &apos;22a39823e2&apos;." date="2026-01-20T22:58:47.621" /><!-- duration: 10ms -->
+      <step title="Determining deployment builder" date="2026-01-20T22:58:47.755" >
+        <step title="Builder is BasicBuilder" date="2026-01-20T22:58:47.792" /><!-- duration: 10ms -->
+      </step><!-- duration: 67ms -->
+      <step title="Copying SSH keys" date="2026-01-20T22:58:47.864" /><!-- duration: 18ms -->
+      <step title="Building" date="2026-01-20T22:58:47.882" >
+        <step title="Generating deployment script." date="2026-01-20T22:58:47.974" /><!-- duration: 19ms -->
+        <step title="Generating deployment script" date="2026-01-20T22:58:48.005" >
+          <step title="Using cached version of the deployment script for command: -y --no-dot-deployment -r &quot;C:\local\Temp\zipdeploy\extracted&quot; -o &quot;C:\home\site\deployments\tools&quot; --basic --sitePath &quot;C:\local\Temp\zipdeploy\extracted&quot;" date="2026-01-20T22:58:48.114" /><!-- duration: 0ms -->
+          <step title="Using cached version of deployment script (command: &apos;azure -y --no-dot-deployment -r &quot;C:\local\Temp\zipdeploy\extracted&quot; -o &quot;C:\home\site\deployments\tools&quot; --basic --sitePath &quot;C:\local\Temp\zipdeploy\extracted&quot;&apos;)." date="2026-01-20T22:58:48.133" /><!-- duration: 0ms -->
+        </step><!-- duration: 159ms -->
+        <step title="Running deployment command..." date="2026-01-20T22:58:48.255" /><!-- duration: 16ms -->
+        <step title="Command: &quot;C:\home\site\deployments\tools\deploy.cmd&quot;" date="2026-01-20T22:58:48.286" /><!-- duration: 18ms -->
+        <step title="Executing external process" date="2026-01-20T22:58:48.334" type="process" path="starter.cmd" arguments="&quot;C:\home\site\deployments\tools\deploy.cmd&quot;" >
+          <step title="Handling Basic Web Site deployment." date="2026-01-20T22:58:49.290" /><!-- duration: 12ms -->
+          <step title="Creating app_offline.htm" date="2026-01-20T22:58:51.585" /><!-- duration: 0ms -->
+          <step title="KuduSync.NET from: &apos;C:\local\Temp\zipdeploy\extracted&apos; to: &apos;C:\home\site\wwwroot&apos;" date="2026-01-20T22:58:51.606" /><!-- duration: 11ms -->
+          <step title="Deleting file: &apos;builder-scopes\ACT-BUILDER-001-intent-classification.json&apos;" date="2026-01-20T22:58:51.636" /><!-- duration: 12ms -->
+          <step title="Deleting file: &apos;builder-scopes\ACT-BUILDER-002-node-configuration.json&apos;" date="2026-01-20T22:58:51.666" /><!-- duration: 0ms -->
+          <step title="Deleting file: &apos;builder-scopes\ACT-BUILDER-003-scope-selection.json&apos;" date="2026-01-20T22:58:51.696" /><!-- duration: 20ms -->
+          <step title="Deleting file: &apos;builder-scopes\ACT-BUILDER-004-scope-creation.json&apos;" date="2026-01-20T22:58:51.726" /><!-- duration: 20ms -->
+          <step title="Deleting file: &apos;builder-scopes\ACT-BUILDER-005-build-plan-generation.json&apos;" date="2026-01-20T22:58:51.757" /><!-- duration: 19ms -->
+          <step title="Deleting file: &apos;builder-scopes\KNW-BUILDER-001-scope-catalog.json&apos;" date="2026-01-20T22:58:51.789" /><!-- duration: 0ms -->
+          <step title="Deleting file: &apos;builder-scopes\KNW-BUILDER-002-reference-playbooks.json&apos;" date="2026-01-20T22:58:51.820" /><!-- duration: 0ms -->
+          <step title="Deleting file: &apos;builder-scopes\KNW-BUILDER-003-node-schema.json&apos;" date="2026-01-20T22:58:51.837" /><!-- duration: 20ms -->
+          <step title="Deleting file: &apos;builder-scopes\KNW-BUILDER-004-best-practices.json&apos;" date="2026-01-20T22:58:51.867" /><!-- duration: 20ms -->
+          <step title="Deleting file: &apos;builder-scopes\SKL-BUILDER-001-lease-analysis-pattern.json&apos;" date="2026-01-20T22:58:51.898" /><!-- duration: 19ms -->
+          <step title="Deleting file: &apos;builder-scopes\SKL-BUILDER-002-contract-review-pattern.json&apos;" date="2026-01-20T22:58:51.947" /><!-- duration: 13ms -->
+          <step title="Deleting file: &apos;builder-scopes\SKL-BUILDER-003-risk-assessment-pattern.json&apos;" date="2026-01-20T22:58:51.977" /><!-- duration: 0ms -->
+          <step title="Deleting file: &apos;builder-scopes\SKL-BUILDER-004-node-type-guide.json&apos;" date="2026-01-20T22:58:52.007" /><!-- duration: 20ms -->
+          <step title="Deleting file: &apos;builder-scopes\SKL-BUILDER-005-scope-matching.json&apos;" date="2026-01-20T22:58:52.039" /><!-- duration: 19ms -->
+          <step title="Deleting file: &apos;builder-scopes\TL-BUILDER-001-addNode.json&apos;" date="2026-01-20T22:58:52.070" /><!-- duration: 18ms -->
+          <step title="Deleting file: &apos;builder-scopes\TL-BUILDER-002-removeNode.json&apos;" date="2026-01-20T22:58:52.118" /><!-- duration: 0ms -->
+          <step title="Deleting file: &apos;builder-scopes\TL-BUILDER-003-createEdge.json&apos;" date="2026-01-20T22:58:52.148" /><!-- duration: 0ms -->
+          <step title="Deleting file: &apos;builder-scopes\TL-BUILDER-004-updateNodeConfig.json&apos;" date="2026-01-20T22:58:52.179" /><!-- duration: 0ms -->
+          <step title="Deleting file: &apos;builder-scopes\TL-BUILDER-005-linkScope.json&apos;" date="2026-01-20T22:58:52.210" /><!-- duration: 18ms -->
+          <step title="Deleting file: &apos;builder-scopes\TL-BUILDER-006-createScope.json&apos;" date="2026-01-20T22:58:52.258" /><!-- duration: 0ms -->
+          <step title="Deleting file: &apos;builder-scopes\TL-BUILDER-007-searchScopes.json&apos;" date="2026-01-20T22:58:52.289" /><!-- duration: 0ms -->
+          <step title="Deleting file: &apos;builder-scopes\TL-BUILDER-008-autoLayout.json&apos;" date="2026-01-20T22:58:52.320" /><!-- duration: 19ms -->
+          <step title="Deleting file: &apos;builder-scopes\TL-BUILDER-009-validateCanvas.json&apos;" date="2026-01-20T22:58:52.351" /><!-- duration: 18ms -->
+          <step title="Deleting directory: &apos;builder-scopes&apos;" date="2026-01-20T22:58:52.382" /><!-- duration: 17ms -->
+          <step title="Deleting file: &apos;publish\appsettings.template.json&apos;" date="2026-01-20T22:58:52.429" /><!-- duration: 0ms -->
+          <step title="Deleting file: &apos;publish\runtimeconfig.template.json&apos;" date="2026-01-20T22:58:52.460" /><!-- duration: 0ms -->
+          <step title="Deleting file: &apos;publish\Sprk.Bff.Api.deps.json&apos;" date="2026-01-20T22:58:52.479" /><!-- duration: 12ms -->
+          <step title="Deleting file: &apos;publish\Sprk.Bff.Api.runtimeconfig.json&apos;" date="2026-01-20T22:58:52.510" /><!-- duration: 13ms -->
+          <step title="Deleting file: &apos;publish\web.config&apos;" date="2026-01-20T22:58:52.540" /><!-- duration: 20ms -->
+          <step title="Deleting file: &apos;publish\builder-scopes\ACT-BUILDER-001-intent-classification.json&apos;" date="2026-01-20T22:58:52.570" /><!-- duration: 20ms -->
+          <step title="Deleting file: &apos;publish\builder-scopes\ACT-BUILDER-002-node-configuration.json&apos;" date="2026-01-20T22:58:52.601" /><!-- duration: 19ms -->
+          <step title="Deleting file: &apos;publish\builder-scopes\ACT-BUILDER-003-scope-selection.json&apos;" date="2026-01-20T22:58:52.650" /><!-- duration: 0ms -->
+          <step title="Deleting file: &apos;publish\builder-scopes\ACT-BUILDER-004-scope-creation.json&apos;" date="2026-01-20T22:58:52.680" /><!-- duration: 20ms -->
+          <step title="Deleting file: &apos;publish\builder-scopes\ACT-BUILDER-005-build-plan-generation.json&apos;" date="2026-01-20T22:58:52.711" /><!-- duration: 20ms -->
+          <step title="Deleting file: &apos;publish\builder-scopes\KNW-BUILDER-001-scope-catalog.json&apos;" date="2026-01-20T22:58:52.761" /><!-- duration: 12ms -->
+          <step title="Deleting file: &apos;publish\builder-scopes\KNW-BUILDER-002-reference-playbooks.json&apos;" date="2026-01-20T22:58:52.791" /><!-- duration: 0ms -->
+          <step title="Deleting file: &apos;publish\builder-scopes\KNW-BUILDER-003-node-schema.json&apos;" date="2026-01-20T22:58:52.821" /><!-- duration: 0ms -->
+          <step title="Deleting file: &apos;publish\builder-scopes\KNW-BUILDER-004-best-practices.json&apos;" date="2026-01-20T22:58:52.851" /><!-- duration: 0ms -->
+          <step title="Deleting file: &apos;publish\builder-scopes\SKL-BUILDER-001-lease-analysis-pattern.json&apos;" date="2026-01-20T22:58:52.882" /><!-- duration: 0ms -->
+          <step title="Deleting file: &apos;publish\builder-scopes\SKL-BUILDER-002-contract-review-pattern.json&apos;" date="2026-01-20T22:58:52.901" /><!-- duration: 12ms -->
+          <step title="Deleting file: &apos;publish\builder-scopes\SKL-BUILDER-003-risk-assessment-pattern.json&apos;" date="2026-01-20T22:58:52.932" /><!-- duration: 30ms -->
+          <step title="Deleting file: &apos;publish\builder-scopes\SKL-BUILDER-004-node-type-guide.json&apos;" date="2026-01-20T22:58:52.992" /><!-- duration: 50ms -->
+          <step title="Deleting file: &apos;publish\builder-scopes\SKL-BUILDER-005-scope-matching.json&apos;" date="2026-01-20T22:58:53.072" /><!-- duration: 13ms -->
+          <step title="Deleting file: &apos;publish\builder-scopes\TL-BUILDER-001-addNode.json&apos;" date="2026-01-20T22:58:53.102" /><!-- duration: 20ms -->
+          <step title="Deleting file: &apos;publish\builder-scopes\TL-BUILDER-002-removeNode.json&apos;" date="2026-01-20T22:58:53.164" /><!-- duration: 19ms -->
+          <step title="Deleting file: &apos;publish\builder-scopes\TL-BUILDER-003-createEdge.json&apos;" date="2026-01-20T22:58:53.226" /><!-- duration: 17ms -->
+          <step title="Deleting file: &apos;publish\builder-scopes\TL-BUILDER-004-updateNodeConfig.json&apos;" date="2026-01-20T22:58:53.263" /><!-- duration: 10ms -->
+          <step title="Deleting file: &apos;publish\builder-scopes\TL-BUILDER-005-linkScope.json&apos;" date="2026-01-20T22:58:53.304" /><!-- duration: 79ms -->
+          <step title="Omitting next output lines..." date="2026-01-20T22:58:53.445" /><!-- duration: 19ms -->
+          <step title="Finished successfully." date="2026-01-20T22:59:11.351" /><!-- duration: 17ms -->
+        </step><!-- duration: 23175ms -->
+        <step title="Running post deployment command(s)..." date="2026-01-20T22:59:11.650" /><!-- duration: 0ms -->
+        <step title="Triggering recycle (preview mode disabled)." date="2026-01-20T22:59:11.992" /><!-- duration: 0ms -->
+        <step title="Ignoring FS watcher based recycle request as this is a classic Windows app." date="2026-01-20T22:59:12.042" /><!-- duration: 13ms -->
+        <step title="Deployment successful. DEPLOYMENTINFO: deploymentPath = ZipDeploy. Extract zip. , deployer = GITHUB_ZIP_DEPLOY, os = windows, sku = Basic, siteName = spe-api-dev-67e2xz, siteHostName = spe-api-dev-67e2xz.azurewebsites.net, deploymentStatus = Success" date="2026-01-20T22:59:12.195" /><!-- duration: 17ms -->
+        <step title="Purge deployment items" date="2026-01-20T22:59:12.654" >
+          <step title="Remove 97dfb6471, Success, received at 1/19/2026 4:38:03 PM" date="2026-01-20T22:59:12.836" /><!-- duration: 0ms -->
+        </step><!-- duration: 201ms -->
+      </step><!-- duration: 25016ms -->
+    </step><!-- duration: 26350ms -->
+    <step title="Cleaning up temp files" date="2026-01-20T22:59:12.946" /><!-- duration: 30ms -->
+    <step title="Skip function trigger and logicapp sync because function is not enabled." date="2026-01-20T22:59:13.007" /><!-- duration: 19ms -->
+  </step><!-- duration: 37735ms -->
+  <step title="LockFile &apos;C:\home\site\locks\deployments.lock&apos; released" date="2026-01-20T22:59:13.117" /><!-- duration: 0ms -->
+  <step title="Deleting shutdown sentinel file" date="2026-01-20T22:59:13.148" SemaphoreCount="8" /><!-- duration: 0ms -->
+</step><!-- duration: 38221ms -->

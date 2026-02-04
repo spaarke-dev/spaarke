@@ -32,6 +32,44 @@ public sealed class DateExtractorHandler : IAnalysisToolHandler
     private readonly ITextChunkingService _textChunkingService;
     private readonly ILogger<DateExtractorHandler> _logger;
 
+    /// <summary>JSON Schema (Draft 07) for configuration validation.</summary>
+    private static readonly object ConfigSchema = new
+    {
+        schema = "https://json-schema.org/draft-07/schema#",
+        title = "Date Extractor Configuration",
+        type = "object",
+        properties = new
+        {
+            date_types = new
+            {
+                type = "array",
+                description = "Date types to extract",
+                items = new { type = "string" },
+                @default = new[] { "EffectiveDate", "ExpirationDate", "SignatureDate", "Deadline", "RenewalDate", "TerminationDate", "PaymentDue", "NoticeDate" }
+            },
+            include_relative_dates = new
+            {
+                type = "boolean",
+                description = "Include relative date expressions",
+                @default = true
+            },
+            max_dates = new
+            {
+                type = "integer",
+                description = "Maximum dates to return",
+                minimum = 1,
+                maximum = 200,
+                @default = 50
+            },
+            include_context = new
+            {
+                type = "boolean",
+                description = "Include surrounding text context",
+                @default = true
+            }
+        }
+    };
+
     public DateExtractorHandler(
         IOpenAiClient openAiClient,
         ITextChunkingService textChunkingService,
@@ -58,7 +96,8 @@ public sealed class DateExtractorHandler : IAnalysisToolHandler
             new ToolParameterDefinition("include_relative_dates", "Include relative date expressions", ToolParameterType.Boolean, Required: false, DefaultValue: true),
             new ToolParameterDefinition("max_dates", "Maximum dates to return", ToolParameterType.Integer, Required: false, DefaultValue: 50),
             new ToolParameterDefinition("include_context", "Include surrounding text context", ToolParameterType.Boolean, Required: false, DefaultValue: true)
-        });
+        },
+        ConfigurationSchema: ConfigSchema);
 
     /// <inheritdoc />
     public IReadOnlyList<ToolType> SupportedToolTypes { get; } = new[] { ToolType.DateExtractor };

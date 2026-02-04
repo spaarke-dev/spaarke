@@ -1,0 +1,23 @@
+# Build outputs
+out/
+bin/
+obj/
+
+# Dependencies
+node_modules/
+
+# Generated types
+generated/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vs/
+*.suo
+*.user
+
+# Logs
+*.log
+npm-debug.log*

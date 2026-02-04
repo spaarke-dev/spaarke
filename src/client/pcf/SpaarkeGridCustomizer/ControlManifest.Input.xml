@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<manifest>
+  <control namespace="Spaarke.Controls" constructor="SpaarkeGridCustomizer" version="1.0.0" display-name-key="Spaarke Grid Customizer" description-key="General-purpose Power Apps Grid Control customizer for custom cell rendering" control-type="virtual">
+    <external-service-usage enabled="false">
+    </external-service-usage>
+    <!-- Grid customizers need a data-set element to work with Power Apps Grid Control -->
+    <data-set name="dataSet" display-name-key="Data Set" cds-data-set-options="displayCommandBar:false;displayViewSelector:false;displayQuickFind:false">
+    </data-set>
+    <resources>
+      <code path="index.ts" order="1" />
+      <css path="styles.css" order="1" />
+      <!-- Platform-provided libraries: DO NOT bundle -->
+      <platform-library name="React" version="16.14.0" />
+      <platform-library name="Fluent" version="9.46.2" />
+    </resources>
+    <feature-usage>
+      <uses-feature name="Utility" required="true" />
+    </feature-usage>
+  </control>
+</manifest>

@@ -1,0 +1,5 @@
+<step title="Starting LocalZipFetch" date="2026-01-23T21:38:37.244" instance="3e17b9" >
+  <step title="Cleanup Xml Logs" date="2026-01-23T21:38:37.275" >
+    <step title="Cleanup Infos" date="2026-01-23T21:38:37.309" totalFiles="201" totalCleanup="41" /><!-- duration: 466ms -->
+  </step><!-- duration: 500ms -->
+</step><!-- duration: 531ms -->

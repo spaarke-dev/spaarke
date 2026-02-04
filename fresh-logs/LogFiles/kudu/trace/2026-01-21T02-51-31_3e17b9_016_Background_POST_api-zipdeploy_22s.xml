@@ -1,0 +1,82 @@
+<step title="BackgroundTrace" date="2026-01-21T02:51:31.535" instance="3e17b9" url="/api/zipdeploy" method="POST" >
+  <step title="Updating shutdown sentinel last write time" date="2026-01-21T02:51:31.551" SemaphoreCount="7" /><!-- duration: 0ms -->
+  <step title="LockFile &apos;C:\home\site\locks\deployments.lock&apos; acquired" date="2026-01-21T02:51:31.566" /><!-- duration: 0ms -->
+  <step title="Creating temporary deployment" date="2026-01-21T02:51:31.582" /><!-- duration: 47ms -->
+  <step title="Performing fetch based deployment" date="2026-01-21T02:51:31.755" >
+    <step title="Fetching changes." date="2026-01-21T02:51:31.879" /><!-- duration: 16ms -->
+    <step title="Starting LocalZipHandler" date="2026-01-21T02:51:31.894" /><!-- duration: 16ms -->
+    <step title="Cleaning up temp folders from previous zip deployments and extracting pushed zip file C:\local\Temp\zipdeploy\2ta35ilj.zip (67.02 MB) to C:\local\Temp\zipdeploy\extracted" date="2026-01-21T02:51:31.988" /><!-- duration: 0ms -->
+    <step title="Cleaning up temp folders from previous zip deployments and extracting pushed zip file C:\local\Temp\zipdeploy\2ta35ilj.zip (67.02 MB) to C:\local\Temp\zipdeploy\extracted" date="2026-01-21T02:51:32.004" >
+      <step title="Renaming extractTargetDirectory(C:\local\Temp\zipdeploy\extracted) to tempDirectory(C:\local\Temp\zipdeploy\glaoru2t.dp3)" date="2026-01-21T02:51:32.004" /><!-- duration: 17ms -->
+      <step title="Extracting 262 entries to C:\local\Temp\zipdeploy\extracted directory" date="2026-01-21T02:51:32.051" >
+        <step title="Extracting to C:\local\Temp\zipdeploy\extracted\appsettings.template.json ..." date="2026-01-21T02:51:32.051" /><!-- duration: 31ms -->
+        <step title="Extracting to C:\local\Temp\zipdeploy\extracted\Azure.AI.DocumentIntelligence.dll ..." date="2026-01-21T02:51:32.113" /><!-- duration: 49ms -->
+        <step title="Extracting to C:\local\Temp\zipdeploy\extracted\Azure.AI.OpenAI.dll ..." date="2026-01-21T02:51:32.363" /><!-- duration: 241ms -->
+        <step title="Extracting to C:\local\Temp\zipdeploy\extracted\Azure.Core.Amqp.dll ..." date="2026-01-21T02:51:32.614" /><!-- duration: 20ms -->
+        <step title="Extracting to C:\local\Temp\zipdeploy\extracted\Azure.Core.dll ..." date="2026-01-21T02:51:32.644" /><!-- duration: 50ms -->
+        <step title="Omitting extracting file traces ..." date="2026-01-21T02:51:32.694" /><!-- duration: 50ms -->
+      </step><!-- duration: 9596ms -->
+    </step><!-- duration: 9656ms -->
+    <step title="Before sending BuildRequestReceived status to /api/updatedeploystatus" date="2026-01-21T02:51:41.677" /><!-- duration: 14ms -->
+    <step title="DeploymentManager.Deploy(id:0e37fddd16a8424a8360cbb7707cf288)" date="2026-01-21T02:51:41.707" >
+      <step title="Collecting changeset information" date="2026-01-21T02:51:41.722" /><!-- duration: 156ms -->
+      <step title="Updating submodules" date="2026-01-21T02:51:41.898" >
+        <step title="Updating submodules." date="2026-01-21T02:51:42.004" /><!-- duration: 0ms -->
+      </step><!-- duration: 105ms -->
+      <step title="Preparing deployment for commit id &apos;0e37fddd16&apos;." date="2026-01-21T02:51:42.130" /><!-- duration: 15ms -->
+      <step title="Determining deployment builder" date="2026-01-21T02:51:42.222" >
+        <step title="Builder is BasicBuilder" date="2026-01-21T02:51:42.240" /><!-- duration: 0ms -->
+      </step><!-- duration: 31ms -->
+      <step title="Copying SSH keys" date="2026-01-21T02:51:42.269" /><!-- duration: 0ms -->
+      <step title="Building" date="2026-01-21T02:51:42.285" >
+        <step title="Generating deployment script." date="2026-01-21T02:51:42.332" /><!-- duration: 0ms -->
+        <step title="Generating deployment script" date="2026-01-21T02:51:42.350" >
+          <step title="Using cached version of the deployment script for command: -y --no-dot-deployment -r &quot;C:\local\Temp\zipdeploy\extracted&quot; -o &quot;C:\home\site\deployments\tools&quot; --basic --sitePath &quot;C:\local\Temp\zipdeploy\extracted&quot;" date="2026-01-21T02:51:42.426" /><!-- duration: 16ms -->
+          <step title="Using cached version of deployment script (command: &apos;azure -y --no-dot-deployment -r &quot;C:\local\Temp\zipdeploy\extracted&quot; -o &quot;C:\home\site\deployments\tools&quot; --basic --sitePath &quot;C:\local\Temp\zipdeploy\extracted&quot;&apos;)." date="2026-01-21T02:51:42.441" /><!-- duration: 0ms -->
+        </step><!-- duration: 106ms -->
+        <step title="Running deployment command..." date="2026-01-21T02:51:42.519" /><!-- duration: 0ms -->
+        <step title="Command: &quot;C:\home\site\deployments\tools\deploy.cmd&quot;" date="2026-01-21T02:51:42.552" /><!-- duration: 15ms -->
+        <step title="Executing external process" date="2026-01-21T02:51:42.602" type="process" path="starter.cmd" arguments="&quot;C:\home\site\deployments\tools\deploy.cmd&quot;" >
+          <step title="Handling Basic Web Site deployment." date="2026-01-21T02:51:43.259" /><!-- duration: 11ms -->
+          <step title="Creating app_offline.htm" date="2026-01-21T02:51:46.990" /><!-- duration: 31ms -->
+          <step title="KuduSync.NET from: &apos;C:\local\Temp\zipdeploy\extracted&apos; to: &apos;C:\home\site\wwwroot&apos;" date="2026-01-21T02:51:47.052" /><!-- duration: 18ms -->
+          <step title="Copying file: &apos;appsettings.template.json&apos;" date="2026-01-21T02:51:47.100" /><!-- duration: 0ms -->
+          <step title="Copying file: &apos;runtimeconfig.template.json&apos;" date="2026-01-21T02:51:47.162" /><!-- duration: 31ms -->
+          <step title="Copying file: &apos;Spaarke.Core.dll&apos;" date="2026-01-21T02:51:47.211" /><!-- duration: 50ms -->
+          <step title="Copying file: &apos;Spaarke.Core.pdb&apos;" date="2026-01-21T02:51:47.321" /><!-- duration: 12ms -->
+          <step title="Copying file: &apos;Spaarke.Dataverse.dll&apos;" date="2026-01-21T02:51:47.365" /><!-- duration: 17ms -->
+          <step title="Copying file: &apos;Spaarke.Dataverse.pdb&apos;" date="2026-01-21T02:51:47.432" /><!-- duration: 11ms -->
+          <step title="Copying file: &apos;Sprk.Bff.Api.deps.json&apos;" date="2026-01-21T02:51:47.492" /><!-- duration: 13ms -->
+          <step title="Copying file: &apos;Sprk.Bff.Api.dll&apos;" date="2026-01-21T02:51:47.573" /><!-- duration: 11ms -->
+          <step title="Copying file: &apos;Sprk.Bff.Api.exe&apos;" date="2026-01-21T02:51:47.615" /><!-- duration: 31ms -->
+          <step title="Copying file: &apos;Sprk.Bff.Api.pdb&apos;" date="2026-01-21T02:51:47.693" /><!-- duration: 16ms -->
+          <step title="Copying file: &apos;Sprk.Bff.Api.runtimeconfig.json&apos;" date="2026-01-21T02:51:47.740" /><!-- duration: 0ms -->
+          <step title="Copying file: &apos;wwwroot\playbook-builder\index.html&apos;" date="2026-01-21T02:51:47.756" /><!-- duration: 0ms -->
+          <step title="Copying file: &apos;wwwroot\playbook-builder\vite.svg&apos;" date="2026-01-21T02:51:47.787" /><!-- duration: 18ms -->
+          <step title="Copying file: &apos;wwwroot\playbook-builder\assets\flow-vendor-BHHmI87s.js&apos;" date="2026-01-21T02:51:47.818" /><!-- duration: 17ms -->
+          <step title="Copying file: &apos;wwwroot\playbook-builder\assets\flow-vendor-BHHmI87s.js.map&apos;" date="2026-01-21T02:51:47.849" /><!-- duration: 0ms -->
+          <step title="Copying file: &apos;wwwroot\playbook-builder\assets\fluent-vendor-CmJVTK5h.js&apos;" date="2026-01-21T02:51:47.896" /><!-- duration: 0ms -->
+          <step title="Copying file: &apos;wwwroot\playbook-builder\assets\fluent-vendor-CmJVTK5h.js.map&apos;" date="2026-01-21T02:51:47.927" /><!-- duration: 0ms -->
+          <step title="Copying file: &apos;wwwroot\playbook-builder\assets\index-BWeOj5bW.js&apos;" date="2026-01-21T02:51:47.976" /><!-- duration: 30ms -->
+          <step title="Copying file: &apos;wwwroot\playbook-builder\assets\index-BWeOj5bW.js.map&apos;" date="2026-01-21T02:51:49.930" /><!-- duration: 0ms -->
+          <step title="Copying file: &apos;wwwroot\playbook-builder\assets\index-BZV40eAE.css&apos;" date="2026-01-21T02:51:49.961" /><!-- duration: 0ms -->
+          <step title="Copying file: &apos;wwwroot\playbook-builder\assets\react-vendor-BWFb42Va.js&apos;" date="2026-01-21T02:51:49.998" /><!-- duration: 10ms -->
+          <step title="Copying file: &apos;wwwroot\playbook-builder\assets\react-vendor-BWFb42Va.js.map&apos;" date="2026-01-21T02:51:50.059" /><!-- duration: 90ms -->
+          <step title="Deleting app_offline.htm" date="2026-01-21T02:51:50.229" /><!-- duration: 0ms -->
+          <step title="Finished successfully." date="2026-01-21T02:51:50.290" /><!-- duration: 0ms -->
+        </step><!-- duration: 7719ms -->
+        <step title="Running post deployment command(s)..." date="2026-01-21T02:51:50.493" /><!-- duration: 31ms -->
+        <step title="Triggering recycle (preview mode disabled)." date="2026-01-21T02:51:51.024" /><!-- duration: 0ms -->
+        <step title="Ignoring FS watcher based recycle request as this is a classic Windows app." date="2026-01-21T02:51:51.043" /><!-- duration: 12ms -->
+        <step title="Deployment successful. DEPLOYMENTINFO: deploymentPath = ZipDeploy. Extract zip. , deployer = GITHUB_ZIP_DEPLOY, os = windows, sku = Basic, siteName = spe-api-dev-67e2xz, siteHostName = spe-api-dev-67e2xz.azurewebsites.net, deploymentStatus = Success" date="2026-01-21T02:51:52.352" /><!-- duration: 18ms -->
+        <step title="Purge deployment items" date="2026-01-21T02:51:52.541" >
+          <step title="Remove 42379a757, Success, received at 1/20/2026 3:51:17 PM" date="2026-01-21T02:51:53.013" /><!-- duration: 11ms -->
+        </step><!-- duration: 483ms -->
+      </step><!-- duration: 10960ms -->
+    </step><!-- duration: 11567ms -->
+    <step title="Cleaning up temp files" date="2026-01-21T02:51:53.295" /><!-- duration: 121ms -->
+    <step title="Skip function trigger and logicapp sync because function is not enabled." date="2026-01-21T02:51:53.446" /><!-- duration: 31ms -->
+  </step><!-- duration: 21831ms -->
+  <step title="LockFile &apos;C:\home\site\locks\deployments.lock&apos; released" date="2026-01-21T02:51:53.618" /><!-- duration: 31ms -->
+  <step title="Deleting shutdown sentinel file" date="2026-01-21T02:51:53.899" SemaphoreCount="8" /><!-- duration: 19ms -->
+</step><!-- duration: 22395ms -->

@@ -1,0 +1,39 @@
+2026-01-27T17:17:47  PID[2208] Information Unpacking resources...
+2026-01-27T17:17:49  PID[2208] Information 01-27 17:17:49 Information: Executing Application Insights Profiler agent version 2.6.2201.2106 with arguments: 
+2026-01-27T17:17:49  PID[2208] Information 01-27 17:17:49 Information: Minimum version enabled on machine: 1.0.0
+2026-01-27T17:17:49  PID[2208] Information 01-27 17:17:49 Information: Applying logging level: Information
+2026-01-27T17:17:49  PID[2208] Information 01-27 17:17:49 Information: Instrumentation key: 09a9beed-0dcd-4aad-84bb-3696372ed5d1
+2026-01-27T17:17:49  PID[2208] Information 01-27 17:17:49 Information: Application Insights Profiler endpoint: https://profiler.monitor.azure.com/
+2026-01-27T17:17:49  PID[2208] Information 01-27 17:17:49 Information: Application Insights endpoint: https://westus2-2.in.applicationinsights.azure.com/v2/track/
+2026-01-27T17:17:49  PID[2208] Information 01-27 17:17:49 Information: Runtime Environment: Antares
+2026-01-27T17:17:49  PID[2208] Information 01-27 17:17:49 Information: Support files: C:\local\Temp\jobs\continuous\ApplicationInsightsProfiler3\jrho5inl.m54\spsupport
+2026-01-27T17:17:49  PID[2208] Information 01-27 17:17:49 Information: Providing usage data (to opt out set the AppSettings ApplicationInsightsProvideUsageTelemetryData with the value "false"): True
+2026-01-27T17:17:49  PID[2208] Information 01-27 17:17:49 Information: Engine mode: Sampling
+2026-01-27T17:17:51  PID[2208] Information 01-27 17:17:51 Information: Application Insights AppId: 6a76b012-46d9-412f-b4ab-4905658a9559
+2026-01-27T17:17:52  PID[2208] Information 01-27 17:17:52 Information: Press 'Ctrl+C' to exit Application Insights Profiler.
+2026-01-27T17:17:52  PID[2208] Information 01-27 17:17:52 Information: Set up shutdown handler.
+2026-01-27T17:17:52  PID[2208] Information 01-27 17:17:52 Information: Shutdown handler set to watch C:\local\Temp\JobsShutdown\continuous\ApplicationInsightsProfiler3\y1ukbmd1.boj.
+2026-01-27T17:17:53  PID[2208] Information 01-27 17:17:52 Information: Starting main process
+2026-01-27T17:17:55  PID[2208] Information 01-27 17:17:55 Critical: Settings have been set from Engine
+2026-01-27T17:17:56  PID[2208] Information 01-27 17:17:56 Critical: Settings contract has been updated
+2026-01-27T17:17:56  PID[2208] Information 01-27 17:17:56 Critical: Enabled has been set to True
+2026-01-27T17:19:57  PID[2208] Information 01-27 17:19:57 Information: Triggering Based on Memory
+2026-01-27T17:19:57  PID[2208] Information 01-27 17:19:57 Critical: StartProfiler triggered.
+2026-01-27T17:19:57  PID[2208] Information 01-27 17:19:57 Information: Starting circular monitor
+2026-01-27T17:19:57  PID[2208] Information 01-27 17:19:57 Information: NativeImagePdbGeneration enabled.
+2026-01-27T17:20:00  PID[2208] Information 01-27 17:20:00 Information: Monitoring process 8528
+2026-01-27T17:20:01  PID[2208] Information 01-27 17:20:01 Information: Monitoring process 2208
+2026-01-27T17:20:04  PID[2208] Information 01-27 17:20:04 Information: Monitoring process 7956
+2026-01-27T17:20:05  PID[2208] Information 01-27 17:20:05 Information: Monitoring process 5308
+2026-01-27T17:20:07  PID[2208] Information 01-27 17:20:07 Information: Monitoring process 9032
+2026-01-27T17:20:08  PID[2208] Information 01-27 17:20:08 Information: Monitoring process 6888
+2026-01-27T17:20:13  PID[2208] Information 01-27 17:20:13 Information: Monitoring process 6244
+2026-01-27T17:20:13  PID[2208] Information 01-27 17:20:13 Critical: StartProfiler succeeded.
+2026-01-27T17:20:43  PID[2208] Information 01-27 17:20:43 Critical: StopProfiler triggered.
+2026-01-27T17:20:43  PID[2208] Information 01-27 17:20:43 Information: Stopping circular monitor and collecting etl snapshot.
+2026-01-27T17:22:35  PID[2208] Information 01-27 17:22:35 Information: Start to upload trace D:\DWASFiles\Sites\#1spe-api-dev-67e2xz\Temp\DA.Circular.2026-01-27T17-19-57-3594997Z.639051311973594997.639051312432884551.etl.zip
+2026-01-27T17:22:36  PID[2208] Information 01-27 17:22:36 Critical: Upload trace was canceled as no activity detected from target iKey.
+2026-01-27T17:22:36  PID[2208] Information 01-27 17:22:36 Information: Target iKey: 09a9beed-0dcd-4aad-84bb-3696372ed5d1. Detected iKeys: .
+2026-01-27T17:22:36  PID[2208] Information 01-27 17:22:36 Critical: StopProfiler succeeded.
+2026-01-27T17:37:58  PID[2208] Information 01-27 17:37:58 Information: Received shutdown request.
+2026-01-27T17:38:09  PID[2208] Error       Thread was being aborted.

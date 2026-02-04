@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Azure.Messaging.ServiceBus;
+using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Telemetry;
 
@@ -52,7 +54,7 @@ public class ProfileSummaryJobHandler : IJobHandler
         IIdempotencyService idempotencyService,
         ServiceBusClient serviceBusClient,
         DocumentTelemetry telemetry,
-        IConfiguration configuration,
+        IOptions<ServiceBusOptions> serviceBusOptions,
         ILogger<ProfileSummaryJobHandler> logger)
     {
         _analysisService = analysisService ?? throw new ArgumentNullException(nameof(analysisService));
@@ -61,7 +63,8 @@ public class ProfileSummaryJobHandler : IJobHandler
         _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-        _indexingQueueName = configuration["Jobs:ServiceBus:QueueName"] ?? "sdap-jobs";
+        var options = serviceBusOptions?.Value ?? throw new ArgumentNullException(nameof(serviceBusOptions));
+        _indexingQueueName = options.QueueName;
     }
 
     public string JobType => JobTypeName;

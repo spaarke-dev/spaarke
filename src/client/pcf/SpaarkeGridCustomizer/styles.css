@@ -1,0 +1,53 @@
+/* SpaarkeGridCustomizer - Grid cell customization styles */
+
+/* Regarding Link cell styles */
+.sprk-regarding-link {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  color: var(--colorBrandForeground1, #0078d4);
+  text-decoration: none;
+  font-size: inherit;
+  line-height: inherit;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  border: none;
+  width: 100%;
+  text-align: left;
+}
+
+.sprk-regarding-link:hover {
+  text-decoration: underline;
+  color: var(--colorBrandForeground1Hover, #106ebe);
+}
+
+.sprk-regarding-link:focus {
+  outline: 2px solid var(--colorStrokeFocus2, #0078d4);
+  outline-offset: 1px;
+}
+
+.sprk-regarding-link-icon {
+  flex-shrink: 0;
+  font-size: 14px;
+}
+
+.sprk-regarding-link-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Empty cell placeholder */
+.sprk-cell-empty {
+  color: var(--colorNeutralForegroundDisabled, #a19f9d);
+  font-style: italic;
+}
+
+/* Grid customizer version footer (for debugging) */
+.sprk-grid-customizer-version {
+  display: none; /* Hidden by default, visible in dev mode */
+  font-size: 10px;
+  color: var(--colorNeutralForegroundDisabled, #a19f9d);
+}

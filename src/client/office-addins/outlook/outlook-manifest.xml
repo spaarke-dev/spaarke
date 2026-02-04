@@ -7,7 +7,7 @@
   <Version>1.0.15.0</Version>
   <ProviderName>Spaarke</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
-  <DisplayName DefaultValue="Spaarke Outlook"/>
+  <DisplayName DefaultValue="Spaarke Outlook Add-in"/>
   <Description DefaultValue="Save and share emails with Spaarke DMS"/>
   <IconUrl DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/assets/icon-32.png"/>
   <HighResolutionIconUrl DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/assets/icon-64.png"/>

@@ -1,5 +1,6 @@
 using Azure.Messaging.ServiceBus;
 using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Workers.Office;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
@@ -16,6 +17,9 @@ public static class WorkersModule
         {
             services.AddSingleton(sp => new ServiceBusClient(serviceBusConnectionString));
         }
+
+        // Register Office workers (upload finalization, profile summary, indexing)
+        services.AddOfficeWorkers();
 
         // Register idempotency service for event deduplication (ADR-004)
         services.AddScoped<IIdempotencyService, IdempotencyService>();
