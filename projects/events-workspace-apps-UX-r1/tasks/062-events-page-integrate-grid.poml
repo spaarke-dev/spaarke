@@ -7,8 +7,26 @@
     <estimate>2 hours</estimate>
     <dependencies>061</dependencies>
     <parallel-group>D</parallel-group>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
+
+  <notes>
+    <note date="2026-02-04">
+      Task 062 focused on adding the "Regarding" column with parent link to the Events Custom Page grid.
+
+      Implementation:
+      1. Added sprk_regardingrecordid to the WebAPI query
+      2. Added navigateToRegardingRecord() helper function using Xrm.Navigation.openForm
+      3. Added handleRegardingClick handler to navigate to parent record
+      4. Added "Regarding" column header between Event Name and Due Date
+      5. Rendered Regarding cell as hyperlink when data available (name, type, id all present)
+      6. Updated mock data with sample Matter and Project regarding records
+      7. Bumped version to 1.1.0
+
+      Note: Steps 1-5 were completed in task 061 (calendar/grid integration).
+      This task specifically added the Regarding column (step 6) which was the outstanding item.
+    </note>
+  </notes>
 
   <prompt>
     <goal>Integrate UniversalDatasetGrid into Events Custom Page.</goal>

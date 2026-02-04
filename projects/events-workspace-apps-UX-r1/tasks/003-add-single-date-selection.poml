@@ -7,8 +7,29 @@
     <estimate>2 hours</estimate>
     <dependencies>002</dependencies>
     <parallel-group>A</parallel-group>
-    <status>pending</status>
+    <status>completed</status>
+    <completed-date>2026-02-04</completed-date>
   </metadata>
+
+  <notes>
+    Task 003 completed. Keyboard navigation (arrow keys) added to CalendarMonth and CalendarStack.
+
+    Files modified:
+    - CalendarMonth.tsx: Added focusedDate prop, onFocusDateChange callback, arrow key handlers,
+      focus visual indicator style (dayCellFocused), roving tabindex for keyboard navigation
+    - CalendarStack.tsx: Added focusedDate state management, handleFocusDateChange to coordinate
+      cross-month navigation when arrows move beyond displayed month boundaries
+
+    Verified:
+    - Click selects date with blue background (colorBrandBackground)
+    - Click same date deselects (toggle behavior in EventCalendarFilterRoot)
+    - Arrow keys navigate between dates (Up/Down = +/-7 days, Left/Right = +/-1 day)
+    - Enter/Space selects focused date
+    - Visual focus ring (colorStrokeFocus2) for keyboard navigation
+    - Selection callbacks fire on change
+
+    Build result: 795 KB bundle (well under 5MB limit)
+  </notes>
 
   <prompt>
     <goal>Implement single date click selection with visual feedback and selection state.</goal>

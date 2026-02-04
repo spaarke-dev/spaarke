@@ -7,7 +7,7 @@
     <estimate>2-3 hours</estimate>
     <dependencies>011</dependencies>
     <parallel-group>B</parallel-group>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -50,4 +50,17 @@
     <criterion>Checkbox click does NOT emit date</criterion>
     <criterion>Output property updates correctly</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <note timestamp="2026-02-04">
+      Completed implementation:
+      - Added selectedEventDate output property to ControlManifest.Input.xml
+      - Added _rawDates map to GridRow interface for capturing raw date values
+      - Added handleRowClick handler that checks for checkbox clicks and extracts due date
+      - Formats date as ISO string (YYYY-MM-DD) using toISOString().split('T')[0]
+      - Updated index.ts with handleRowClick method and getOutputs() to return selectedEventDate
+      - Passed onRowClick callback through UniversalDatasetGridRoot to DatasetGrid
+      Note: Pre-existing build errors in ColumnFilter.tsx and FilterPopup.tsx (from Task 016) are unrelated to this task.
+    </note>
+  </notes>
 </task>

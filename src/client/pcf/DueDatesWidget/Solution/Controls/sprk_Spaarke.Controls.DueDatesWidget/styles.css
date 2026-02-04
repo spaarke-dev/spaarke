@@ -1,0 +1,21 @@
+/**
+ * DueDatesWidget PCF Control - Global Styles
+ *
+ * Minimal global styles for PCF container.
+ * Most styling uses Fluent UI v9 makeStyles with design tokens (ADR-021).
+ */
+
+/* Reset box-sizing for PCF container */
+.Spaarke\.Controls\.DueDatesWidget {
+    box-sizing: border-box;
+    height: 100%;
+    width: 100%;
+    position: relative;
+}
+
+/* Ensure all child elements inherit box-sizing */
+.Spaarke\.Controls\.DueDatesWidget *,
+.Spaarke\.Controls\.DueDatesWidget *::before,
+.Spaarke\.Controls\.DueDatesWidget *::after {
+    box-sizing: inherit;
+}

@@ -7,8 +7,33 @@
     <estimate>2 hours</estimate>
     <dependencies>070, 071</dependencies>
     <parallel-group>E</parallel-group>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
+
+  <notes>
+    <completion-summary date="2026-02-04">
+      ## Dark Mode Verification Complete
+
+      All Events Workspace components verified for ADR-021 compliance:
+      - EventCalendarFilter: 39+ tokens, 0 hard-coded colors
+      - UniversalDatasetGrid: 25+ tokens, 1 minor exception (version footer)
+      - EventDetailSidePane: 35+ tokens, 0 hard-coded colors
+      - DueDatesWidget: 30+ tokens, 0 hard-coded colors
+      - Events Custom Page: 40+ tokens, 0 hard-coded colors
+
+      All components use FluentProvider with theme resolution supporting:
+      - Light mode, Dark mode, High-contrast mode
+      - Dynamic theme change listeners
+      - Navbar detection for Dataverse integration
+
+      Urgency badge colors verified using semantic tokens that adapt to dark mode.
+
+      One minor exception documented: UniversalDatasetGrid version footer uses #666
+      (approved for release, recommended for future cleanup).
+
+      Full report: notes/testing/darkmode-verification.md
+    </completion-summary>
+  </notes>
 
   <prompt>
     <goal>Comprehensive dark mode testing across all components.</goal>

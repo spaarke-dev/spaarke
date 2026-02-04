@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<manifest>
+  <control namespace="Spaarke.Controls"
+           constructor="EventCalendarFilter"
+           version="1.0.4"
+           display-name-key="Event Calendar Filter"
+           description-key="Date-based navigation and filtering for Event grids with multi-month calendar display. Supports event indicators with counts."
+           control-type="standard">
+
+    <external-service-usage enabled="false" />
+
+    <!-- Filter Output - bound to hidden field for grid communication -->
+    <property name="filterOutput"
+              display-name-key="Filter Output"
+              description-key="JSON filter output sent to grid (type, date range)"
+              of-type="SingleLine.Text"
+              usage="bound"
+              required="false" />
+
+    <!-- Event Dates JSON - input for displaying date indicators with counts -->
+    <property name="eventDatesJson"
+              display-name-key="Event Dates JSON"
+              description-key="JSON array of dates with events. Format: [{date: '2026-02-15', count: 3}, ...] or ['2026-02-15', ...] for count=1"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false" />
+
+    <!-- Display Mode - month or multiMonth view -->
+    <property name="displayMode"
+              display-name-key="Display Mode"
+              description-key="Calendar display mode: month (single) or multiMonth (vertical stack)"
+              of-type="Enum"
+              usage="input"
+              required="false"
+              default-value="multiMonth">
+      <value name="month" display-name-key="Single Month">month</value>
+      <value name="multiMonth" display-name-key="Multi-Month Stack">multiMonth</value>
+    </property>
+
+    <!-- Selected Date Output - for bi-directional sync with grid -->
+    <property name="selectedDateOutput"
+              display-name-key="Selected Date Output"
+              description-key="Currently selected date for bi-directional sync"
+              of-type="SingleLine.Text"
+              usage="bound"
+              required="false" />
+
+    <resources>
+      <code path="index.ts" order="1" />
+      <css path="styles.css" order="2" />
+      <!-- Platform-provided libraries - DO NOT bundle (ADR-022) -->
+      <platform-library name="React" version="16.14.0" />
+      <platform-library name="Fluent" version="9.46.2" />
+    </resources>
+
+  </control>
+</manifest>

@@ -7,8 +7,26 @@
     <estimate>2-3 hours</estimate>
     <dependencies>008</dependencies>
     <parallel-group>A</parallel-group>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
+
+  <notes>
+    <completed-date>2026-02-04</completed-date>
+    <summary>Created Storybook stories for EventCalendarFilter with 8 stories covering all visual states.
+    Stories located in VisualHost/stories/EventCalendarFilter.stories.tsx (shared Storybook config).
+    Stories include: Default, WithEvents, SingleMonth, HighDensity, DarkMode, DarkModeEmpty, NarrowWidth, WideWidth.
+    Storybook build verified successful. Production build verified (940KB bundle).</summary>
+    <files-created>
+      - src/client/pcf/VisualHost/stories/EventCalendarFilter.stories.tsx
+    </files-created>
+    <deployment-notes>
+      For manual deployment:
+      1. cd src/client/pcf/EventCalendarFilter
+      2. pac auth create (or pac auth select)
+      3. pac pcf push --publisher-prefix sprk
+      Control version: 1.0.4
+    </deployment-notes>
+  </notes>
 
   <prompt>
     <goal>Add Storybook stories for visual testing and deploy EventCalendarFilter to dev environment.</goal>

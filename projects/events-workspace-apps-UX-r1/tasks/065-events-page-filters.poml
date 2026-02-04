@@ -7,7 +7,7 @@
     <estimate>2.5 hours</estimate>
     <dependencies>063</dependencies>
     <parallel-group>D</parallel-group>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -56,4 +56,26 @@
     <criterion>Filters combine logically (AND)</criterion>
     <criterion>Clear filters resets all</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <note type="completion" date="2026-02-04">
+      Task 065 focused on adding Status filter to Events Custom Page.
+      Note: Task was split across parallel execution - Tasks 063, 064, 065, 066 were executed
+      in parallel, each handling a specific filter.
+
+      Task 065 Implementation (Status Filter):
+      - Created StatusFilter.tsx with multi-select Combobox for status filtering
+      - Status options: Draft(1), Planned(2), Open(3), On Hold(4), Completed(5), Cancelled(6)
+      - Default: Actionable statuses (1,2,3,4) - excludes Completed/Cancelled
+      - Color-coded badges in dropdown matching grid status display
+      - Integrated StatusFilter in App.tsx toolbar
+      - Added statusFilter prop to GridSection
+      - Added buildStatusFilter() function for OData query generation
+      - Updated mock data with events in various statuses for testing
+      - All filters combine with AND logic
+      - Clear filters resets status to actionable statuses
+
+      Build: Success (vite build, 525.67 kB bundle)
+    </note>
+  </notes>
 </task>

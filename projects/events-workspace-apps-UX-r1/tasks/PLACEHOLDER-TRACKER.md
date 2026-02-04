@@ -12,14 +12,12 @@
 | STUB | 0 | 0 | 0 |
 | MOCK | 0 | 0 | 0 |
 | TODO | 0 | 0 | 0 |
-| PLACEHOLDER | 0 | 0 | 0 |
-| **Total** | **0** | **0** | **0** |
+| PLACEHOLDER | 0 | 2 | 2 |
+| **Total** | **0** | **2** | **2** |
 
 ---
 
 ## Open Items
-
-*No open items - all components must be fully built*
 
 <!-- Template for adding items:
 | ID | File | Line | Type | Description | Created By | Resolve By | Status |
@@ -27,19 +25,16 @@
 | P001 | src/client/pcf/X/Y.ts | 45 | STUB | Description | Task 003 | Task 015 | 🔲 Open |
 -->
 
-| ID | File | Line | Type | Description | Created By | Resolve By | Status |
-|----|------|------|------|-------------|------------|------------|--------|
-| - | - | - | - | *No items tracked yet* | - | - | - |
+*No open items - all placeholders resolved*
 
 ---
 
 ## Resolved Items
 
-*Items moved here when fully implemented*
-
 | ID | File | Line | Type | Description | Created By | Resolved By | Resolution Date |
 |----|------|------|------|-------------|------------|-------------|-----------------|
-| - | - | - | - | *No items resolved yet* | - | - | - |
+| P001 | src/client/pcf/EventCalendarFilter/control/components/EventCalendarFilterRoot.tsx | (removed) | PLACEHOLDER | Calendar UI placeholder - replaced with CalendarStack component | Task 001 | Task 002 | 2026-02-04 |
+| P002 | src/solutions/EventDetailSidePane/src/App.tsx | (removed) | PLACEHOLDER | Side pane UI placeholder - replaced with full section implementation (Header, Status, KeyFields, Dates, Description, RelatedEvent, History) | Task 030 | Task 039 | 2026-02-04 |
 
 ---
 

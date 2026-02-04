@@ -75,6 +75,14 @@ export interface GridConfiguration {
 
     /** SDAP client configuration */
     sdapConfig: SdapConfig;
+
+    /**
+     * Enable checkbox selection column (Task 014)
+     * When true, adds a checkbox column as the first column for bulk selection.
+     * Header checkbox enables select all/deselect all.
+     * @default true
+     */
+    enableCheckboxSelection?: boolean;
 }
 
 /**
@@ -89,6 +97,8 @@ export const DEFAULT_GRID_CONFIG: GridConfiguration = {
         graphItemId: 'sprk_graphitemid',
         graphDriveId: 'sprk_graphdriveid'
     },
+    /** Enable checkbox selection by default (Task 014) */
+    enableCheckboxSelection: true,
     customCommands: [
         {
             id: 'addFile',
@@ -263,4 +273,203 @@ export interface ServiceResult<T = void> {
     success: boolean;
     data?: T;
     error?: string;
+}
+
+// =============================================================================
+// Calendar Filter Types (Task 010)
+// =============================================================================
+
+/**
+ * Filter type discriminator for calendar filter input
+ */
+export type CalendarFilterType = "single" | "range" | "clear";
+
+/**
+ * Single date filter
+ * Format: {"type":"single","date":"YYYY-MM-DD"}
+ */
+export interface ICalendarFilterSingle {
+    type: "single";
+    date: string;
+}
+
+/**
+ * Date range filter
+ * Format: {"type":"range","start":"YYYY-MM-DD","end":"YYYY-MM-DD"}
+ */
+export interface ICalendarFilterRange {
+    type: "range";
+    start: string;
+    end: string;
+}
+
+/**
+ * Clear filter (no date filter applied)
+ * Format: {"type":"clear"}
+ */
+export interface ICalendarFilterClear {
+    type: "clear";
+}
+
+/**
+ * Union type for all calendar filter types
+ */
+export type CalendarFilter =
+    | ICalendarFilterSingle
+    | ICalendarFilterRange
+    | ICalendarFilterClear;
+
+/**
+ * Parse calendar filter JSON string
+ * Returns null if invalid/empty
+ */
+export function parseCalendarFilter(json: string | null | undefined): CalendarFilter | null {
+    if (!json || json.trim() === "") {
+        return null;
+    }
+
+    try {
+        const parsed = JSON.parse(json);
+
+        if (!parsed || typeof parsed !== "object" || !("type" in parsed)) {
+            return null;
+        }
+
+        if (parsed.type === "single" && typeof parsed.date === "string") {
+            return parsed as ICalendarFilterSingle;
+        }
+
+        if (
+            parsed.type === "range" &&
+            typeof parsed.start === "string" &&
+            typeof parsed.end === "string"
+        ) {
+            return parsed as ICalendarFilterRange;
+        }
+
+        if (parsed.type === "clear") {
+            return parsed as ICalendarFilterClear;
+        }
+
+        return null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Type guard: Check if filter is a single date
+ */
+export function isSingleDateFilter(filter: CalendarFilter): filter is ICalendarFilterSingle {
+    return filter.type === "single";
+}
+
+/**
+ * Type guard: Check if filter is a date range
+ */
+export function isRangeFilter(filter: CalendarFilter): filter is ICalendarFilterRange {
+    return filter.type === "range";
+}
+
+/**
+ * Type guard: Check if filter is clear
+ */
+export function isClearFilter(filter: CalendarFilter): filter is ICalendarFilterClear {
+    return filter.type === "clear";
+}
+
+// =============================================================================
+// Optimistic Row Update Types (Task 015)
+// =============================================================================
+
+/**
+ * Field update for optimistic row update.
+ * Represents a single field value change.
+ */
+export interface RowFieldUpdate {
+    /** Field schema name (e.g., 'sprk_eventname', 'statuscode') */
+    fieldName: string;
+
+    /** New formatted value for display (e.g., 'Meeting with Client') */
+    formattedValue: string;
+
+    /** New raw value (optional, for lookup IDs, numbers, etc.) */
+    rawValue?: unknown;
+}
+
+/**
+ * Request to optimistically update a single row in the grid.
+ * Used by Side Pane to update grid display without full refresh.
+ */
+export interface OptimisticRowUpdateRequest {
+    /** Record ID (GUID) of the row to update */
+    recordId: string;
+
+    /** Fields to update with their new values */
+    updates: RowFieldUpdate[];
+}
+
+/**
+ * Result of an optimistic update operation.
+ * Includes rollback function for error recovery.
+ */
+export interface OptimisticUpdateResult {
+    /** Whether the update was successful */
+    success: boolean;
+
+    /** Error message if update failed */
+    error?: string;
+
+    /** Function to rollback to previous values (call on save error) */
+    rollback: () => void;
+}
+
+/**
+ * Callback function type for optimistic row updates.
+ * Exposed via window object for Side Pane to call.
+ */
+export type OptimisticRowUpdateCallback = (
+    request: OptimisticRowUpdateRequest
+) => OptimisticUpdateResult;
+
+/**
+ * Global interface for grid communication.
+ * Attached to window.spaarkeGrid for cross-component access.
+ */
+export interface SpaarkeGridApi {
+    /**
+     * Update a single row optimistically.
+     * Call this from Side Pane after saving changes.
+     *
+     * @param request - The row update request
+     * @returns Result with rollback function
+     *
+     * @example
+     * // In Side Pane after successful save:
+     * const result = window.spaarkeGrid.updateRow({
+     *     recordId: 'abc-123-def',
+     *     updates: [
+     *         { fieldName: 'sprk_eventname', formattedValue: 'New Name' },
+     *         { fieldName: 'statuscode', formattedValue: 'Open', rawValue: 3 }
+     *     ]
+     * });
+     *
+     * if (!result.success) {
+     *     console.error('Update failed:', result.error);
+     * }
+     */
+    updateRow: OptimisticRowUpdateCallback;
+
+    /**
+     * Force a full dataset refresh.
+     * Use when optimistic update isn't suitable (e.g., complex changes).
+     */
+    refresh: () => void;
+}
+
+// Extend Window interface for TypeScript
+declare global {
+    interface Window {
+        spaarkeGrid?: SpaarkeGridApi;
+    }
 }

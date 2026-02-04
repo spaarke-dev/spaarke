@@ -7,7 +7,7 @@
     <estimate>2 hours</estimate>
     <dependencies>010</dependencies>
     <parallel-group>B</parallel-group>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -52,4 +52,22 @@
     <criterion>Select all works</criterion>
     <criterion>Selected IDs accessible</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <completion-date>2026-02-04</completion-date>
+    <implementation-summary>
+      Used Fluent UI v9 DataGridSelectionCell component for checkbox column.
+      - Added enableCheckboxSelection config option to GridConfiguration (default: true)
+      - DataGridSelectionCell in header provides select all functionality
+      - DataGridSelectionCell in each row provides row selection checkbox
+      - Selection state tracked via existing selectedRecordIds prop
+      - Checkbox clicks handled internally by Fluent UI (no bubbling to row handlers)
+    </implementation-summary>
+    <files-modified>
+      - src/client/pcf/UniversalDatasetGrid/control/types/index.ts (added enableCheckboxSelection)
+      - src/client/pcf/UniversalDatasetGrid/control/components/DatasetGrid.tsx (added DataGridSelectionCell)
+      - src/client/pcf/UniversalDatasetGrid/control/components/UniversalDatasetGridRoot.tsx (pass config)
+    </files-modified>
+    <decision>Used built-in DataGridSelectionCell instead of creating separate CheckboxColumn.tsx - cleaner integration with Fluent UI v9 DataGrid selection system.</decision>
+  </notes>
 </task>

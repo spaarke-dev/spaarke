@@ -7,7 +7,7 @@
     <estimate>2 hours</estimate>
     <dependencies>030</dependencies>
     <parallel-group>C</parallel-group>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -50,4 +50,21 @@
     <criterion>Pane reuses if already open</criterion>
     <criterion>400px width, closeable</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <note date="2026-02-04">
+      Implemented sidePaneUtils.ts with:
+      - openEventDetailPane(): Main function to open side pane with eventId/eventType
+      - closeEventDetailPane(): Helper to close the pane
+      - isEventDetailPaneOpen(): Check if pane is already open
+      - getEventDetailPane(): Get the pane object if open
+
+      Constants:
+      - PANE_WIDTH: 400px (per spec)
+      - EVENT_DETAIL_PANE_ID: "eventDetailPane"
+      - Custom Page name: "sprk_eventdetailsidepane"
+
+      Wiring up to grid hyperlink will be done in task 013.
+    </note>
+  </notes>
 </task>

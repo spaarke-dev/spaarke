@@ -4,6 +4,11 @@
     "outDir": "./out",
     "rootDir": ".",
     "typeRoots": ["node_modules/@types"],
-    "jsx": "react"
+    "jsx": "react",
+    "paths": {
+      "@spaarke/ui-components": ["../../shared/Spaarke.UI.Components/dist/index"],
+      "@spaarke/ui-components/*": ["../../shared/Spaarke.UI.Components/dist/*"]
+    },
+    "baseUrl": "."
   }
 }

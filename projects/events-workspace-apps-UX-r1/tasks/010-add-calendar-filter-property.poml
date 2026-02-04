@@ -7,8 +7,23 @@
     <estimate>2 hours</estimate>
     <dependencies>006</dependencies>
     <parallel-group>B</parallel-group>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
+
+  <notes>
+    <completed-date>2026-02-04</completed-date>
+    <summary>Added calendarFilter property to UniversalDatasetGrid PCF control.
+    Property: SingleLine.Text input, parsed in updateView using parseCalendarFilter().
+    Filter types supported: single, range, clear (matching EventCalendarFilter output).
+    Filter passed to UniversalDatasetGridRoot component for use in Task 011 filtering.
+    Build verified successful (9.76 MB bundle).</summary>
+    <files-modified>
+      - src/client/pcf/UniversalDatasetGrid/control/ControlManifest.Input.xml (added calendarFilter property)
+      - src/client/pcf/UniversalDatasetGrid/control/types/index.ts (added CalendarFilter types and parseCalendarFilter)
+      - src/client/pcf/UniversalDatasetGrid/control/index.ts (parse filter in updateView)
+      - src/client/pcf/UniversalDatasetGrid/control/components/UniversalDatasetGridRoot.tsx (added calendarFilter prop)
+    </files-modified>
+  </notes>
 
   <prompt>
     <goal>Add a new input property to UniversalDatasetGrid to receive calendar filter JSON.</goal>

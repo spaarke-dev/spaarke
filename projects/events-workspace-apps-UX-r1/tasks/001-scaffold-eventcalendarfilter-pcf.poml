@@ -7,7 +7,7 @@
     <estimate>2-3 hours</estimate>
     <dependencies>none</dependencies>
     <parallel-group>A</parallel-group>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -157,4 +157,27 @@
     <criterion>Version footer displays "v1.0.0"</criterion>
     <criterion>No placeholders OR all placeholders tracked in PLACEHOLDER-TRACKER.md</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <completed-date>2026-02-04</completed-date>
+    <summary>
+      EventCalendarFilter PCF control scaffolding completed successfully.
+
+      Files created:
+      - src/client/pcf/EventCalendarFilter/ (full directory structure)
+      - index.ts with React 16 APIs (ReactDOM.render/unmountComponentAtNode)
+      - ControlManifest.Input.xml with platform-library declarations
+      - ThemeProvider.ts for dark mode support
+      - ErrorBoundary.tsx for error handling
+      - Solution files for deployment (solution.xml, customizations.xml, pack.ps1)
+
+      Build results:
+      - Bundle size: 598 KB (slightly over 500KB target due to Fluent icons)
+      - React/Fluent externalized via platform-library (verified in webpack output)
+      - All 3 output files generated (bundle.js, ControlManifest.xml, styles.css)
+
+      Placeholder tracked:
+      - P001: Calendar UI placeholder in EventCalendarFilterRoot.tsx (resolves in Task 002)
+    </summary>
+  </notes>
 </task>

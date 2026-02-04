@@ -2,7 +2,9 @@
  * EventFormController React App Component
  *
  * Manages Event form field visibility based on Event Type configuration.
- * Uses FieldVisibilityHandler for form manipulation.
+ * Uses the shared EventTypeService for field configuration logic (ADR-012).
+ *
+ * @version 2.0.0 - Refactored to use shared EventTypeService
  */
 
 import * as React from "react";
@@ -18,20 +20,33 @@ import {
 } from "@fluentui/react-components";
 import { Checkmark16Regular, Dismiss16Regular, Info16Regular } from "@fluentui/react-icons";
 import { IInputs } from "./generated/ManifestTypes";
+
+// Import from shared service
 import {
-    applyFieldRules as applyVisibilityRules,
+    eventTypeService,
+    getEventTypeFieldConfig,
+    IEventTypeFieldConfig,
+    IComputedFieldStates,
+    IFieldRule
+} from "@spaarke/ui-components";
+
+// Import form manipulation functions (PCF-specific, stays local)
+import {
+    applyComputedFieldStates,
     resetToDefaults,
     isFormContextAvailable,
-    EventTypeFieldConfig,
     ApplyRulesResult,
-    IFieldRule,
-    DEFAULT_FIELD_STATES
+    ALL_EVENT_FIELDS
 } from "./handlers/FieldVisibilityHandler";
+
 import {
     registerSaveHandler,
     unregisterSaveHandler,
     clearValidationNotification
 } from "./handlers/SaveValidationHandler";
+
+// Import WebApi adapter
+import { createWebApiAdapter } from "./adapters/WebApiAdapter";
 
 interface EventFormControllerAppProps {
     context: ComponentFramework.Context<IInputs>;
@@ -39,10 +54,6 @@ interface EventFormControllerAppProps {
     eventTypeName: string;
     onStatusChange: (status: string) => void;
     version: string;
-}
-
-interface EventTypeConfig extends EventTypeFieldConfig {
-    // Extended to include optionalFields from base type
 }
 
 const useStyles = makeStyles({
@@ -89,7 +100,7 @@ export const EventFormControllerApp: React.FC<EventFormControllerAppProps> = ({
 
     const [isLoading, setIsLoading] = React.useState(false);
     const [error, setError] = React.useState<string | null>(null);
-    const [config, setConfig] = React.useState<EventTypeConfig | null>(null);
+    const [config, setConfig] = React.useState<IEventTypeFieldConfig | null>(null);
     const [appliedRules, setAppliedRules] = React.useState<number>(0);
     const [skippedFields, setSkippedFields] = React.useState<string[]>([]);
     const [wasReset, setWasReset] = React.useState(false);
@@ -98,22 +109,18 @@ export const EventFormControllerApp: React.FC<EventFormControllerAppProps> = ({
     const previousEventTypeIdRef = React.useRef<string>("");
 
     /**
-     * Builds IFieldRule array for save validation based on Event Type config
-     * Uses DEFAULT_FIELD_STATES as the base for all known fields
+     * Builds IFieldRule array for save validation based on computed field states
+     * Uses the shared EventTypeService for field state computation
      */
-    const buildFieldRules = React.useCallback((eventConfig: EventTypeConfig): IFieldRule[] => {
+    const buildFieldRules = React.useCallback((computed: IComputedFieldStates): IFieldRule[] => {
         const rules: IFieldRule[] = [];
-        const allFields = Object.keys(DEFAULT_FIELD_STATES);
 
-        for (const fieldName of allFields) {
-            const isRequired = eventConfig.requiredFields.includes(fieldName);
-            const isHidden = eventConfig.hiddenFields.includes(fieldName);
-
+        for (const [fieldName, state] of computed.fields) {
             rules.push({
                 fieldName,
                 displayName: undefined, // Will be resolved from form control at validation time
-                isVisible: !isHidden,
-                isRequired: isRequired && !isHidden // Can't require hidden fields
+                isVisible: state.isVisible,
+                isRequired: state.requiredLevel === "required"
             });
         }
 
@@ -163,36 +170,37 @@ export const EventFormControllerApp: React.FC<EventFormControllerAppProps> = ({
             onStatusChange("loading");
 
             try {
-                // STUB: [API] - S003: Assumes sprk_eventtype_ref entity exists with exact schema (Task 003 - done)
-                // Fields: sprk_requiredfields (comma-separated), sprk_hiddenfields (comma-separated)
-                const result = await context.webAPI.retrieveRecord(
-                    "sprk_eventtype_ref",
-                    eventTypeId,
-                    "?$select=sprk_name,sprk_requiredfields,sprk_hiddenfields"
-                );
+                // Create WebApi adapter for the shared service
+                const webApiLike = createWebApiAdapter(context.webAPI);
 
-                const requiredFieldsRaw = result.sprk_requiredfields || "";
-                const hiddenFieldsRaw = result.sprk_hiddenfields || "";
+                // Use the shared EventTypeService to fetch configuration
+                const result = await getEventTypeFieldConfig(webApiLike, eventTypeId, {
+                    service: eventTypeService
+                });
 
-                const eventConfig: EventTypeConfig = {
-                    requiredFields: requiredFieldsRaw
-                        ? requiredFieldsRaw.split(',').map((f: string) => f.trim()).filter(Boolean)
-                        : [],
-                    hiddenFields: hiddenFieldsRaw
-                        ? hiddenFieldsRaw.split(',').map((f: string) => f.trim()).filter(Boolean)
-                        : [],
-                    optionalFields: [] // Could be extended in future
-                };
+                if (!result.success) {
+                    if (result.notFound) {
+                        console.warn(`[EventFormController] Event Type not found: ${eventTypeId}`);
+                        // Fall back to legacy query for backward compatibility with sprk_eventtype_ref
+                        await fetchLegacyEventTypeConfig();
+                        return;
+                    }
+                    throw new Error(result.error || "Failed to fetch Event Type configuration");
+                }
 
+                const eventConfig = result.config;
                 setConfig(eventConfig);
 
-                // Apply field visibility rules via FieldVisibilityHandler
-                const applyResult = applyVisibilityRules(eventConfig);
+                // Compute field states using the shared service
+                const computed = eventTypeService.computeFieldStates(eventConfig);
+
+                // Apply computed states to the form
+                const applyResult = applyComputedFieldStates(computed);
                 setAppliedRules(applyResult.rulesApplied);
                 setSkippedFields(applyResult.skippedFields);
 
                 // Register save validation handler with field rules
-                const fieldRules = buildFieldRules(eventConfig);
+                const fieldRules = buildFieldRules(computed);
                 registerSaveHandler(fieldRules);
                 console.log(`[EventFormController] Registered save handler with ${fieldRules.filter(r => r.isRequired).length} required fields`);
 
@@ -212,8 +220,67 @@ export const EventFormControllerApp: React.FC<EventFormControllerAppProps> = ({
             }
         };
 
+        /**
+         * Legacy fallback for sprk_eventtype_ref entity (backward compatibility)
+         * Used when the new sprk_eventtype entity with sprk_fieldconfigjson doesn't exist
+         */
+        const fetchLegacyEventTypeConfig = async () => {
+            try {
+                // STUB: [API] - S003: Assumes sprk_eventtype_ref entity exists with exact schema (Task 003 - done)
+                // Fields: sprk_requiredfields (comma-separated), sprk_hiddenfields (comma-separated)
+                const result = await context.webAPI.retrieveRecord(
+                    "sprk_eventtype_ref",
+                    eventTypeId,
+                    "?$select=sprk_name,sprk_requiredfields,sprk_hiddenfields"
+                );
+
+                const requiredFieldsRaw = result.sprk_requiredfields || "";
+                const hiddenFieldsRaw = result.sprk_hiddenfields || "";
+
+                // Convert legacy format to IEventTypeFieldConfig
+                const eventConfig: IEventTypeFieldConfig = {
+                    requiredFields: requiredFieldsRaw
+                        ? String(requiredFieldsRaw).split(',').map((f: string) => f.trim()).filter(Boolean)
+                        : [],
+                    hiddenFields: hiddenFieldsRaw
+                        ? String(hiddenFieldsRaw).split(',').map((f: string) => f.trim()).filter(Boolean)
+                        : [],
+                    optionalFields: []
+                };
+
+                setConfig(eventConfig);
+
+                // Compute field states using the shared service
+                const computed = eventTypeService.computeFieldStates(eventConfig);
+
+                // Apply computed states to the form
+                const applyResult = applyComputedFieldStates(computed);
+                setAppliedRules(applyResult.rulesApplied);
+                setSkippedFields(applyResult.skippedFields);
+
+                // Register save validation handler with field rules
+                const fieldRules = buildFieldRules(computed);
+                registerSaveHandler(fieldRules);
+                console.log(`[EventFormController] (Legacy) Registered save handler with ${fieldRules.filter(r => r.isRequired).length} required fields`);
+
+                if (applyResult.success) {
+                    onStatusChange(`applied-${applyResult.rulesApplied}-rules`);
+                } else {
+                    console.warn("[EventFormController] Some rules failed:", applyResult.errors);
+                    onStatusChange(`partial-${applyResult.rulesApplied}-rules`);
+                }
+
+            } catch (legacyErr) {
+                console.error("[EventFormController] Legacy fallback also failed:", legacyErr);
+                setError(legacyErr instanceof Error ? legacyErr.message : "Failed to load Event Type configuration");
+                onStatusChange("error");
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
         fetchEventTypeConfig();
-    }, [eventTypeId, buildFieldRules]);
+    }, [eventTypeId, buildFieldRules, context.webAPI, onStatusChange]);
 
     // Cleanup: unregister save handler on unmount
     React.useEffect(() => {
@@ -310,14 +377,14 @@ export const EventFormControllerApp: React.FC<EventFormControllerAppProps> = ({
 
             {config && (
                 <>
-                    {config.requiredFields.length > 0 && (
+                    {config.requiredFields && config.requiredFields.length > 0 && (
                         <div>
                             <Text size={100} style={{ color: tokens.colorNeutralForeground3 }}>
                                 Required: {config.requiredFields.join(", ")}
                             </Text>
                         </div>
                     )}
-                    {config.hiddenFields.length > 0 && (
+                    {config.hiddenFields && config.hiddenFields.length > 0 && (
                         <div>
                             <Text size={100} style={{ color: tokens.colorNeutralForeground3 }}>
                                 Hidden: {config.hiddenFields.join(", ")}

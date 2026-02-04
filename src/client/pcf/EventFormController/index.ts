@@ -9,7 +9,7 @@
  * - ADR-021: Fluent UI v9 with dark mode support
  * - ADR-022: React 16 APIs (ReactDOM.render, not createRoot)
  *
- * @version 1.0.5
+ * @version 2.0.0 - Refactored to use shared EventTypeService (ADR-012)
  */
 
 import { IInputs, IOutputs } from "./generated/ManifestTypes";
@@ -18,7 +18,7 @@ import * as ReactDOM from "react-dom"; // React 16 - NOT react-dom/client
 import { FluentProvider, webLightTheme, webDarkTheme, Theme } from "@fluentui/react-components";
 import { EventFormControllerApp } from "./EventFormControllerApp";
 
-const CONTROL_VERSION = "1.0.5";
+const CONTROL_VERSION = "2.0.0";
 const DEFAULT_EVENT_TYPE_FIELD = "sprk_eventtype";
 
 function resolveTheme(context?: ComponentFramework.Context<IInputs>): Theme {

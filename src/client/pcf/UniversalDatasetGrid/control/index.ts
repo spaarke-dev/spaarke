@@ -10,7 +10,7 @@ import { IInputs, IOutputs } from "./generated/ManifestTypes";
 import { UniversalDatasetGridRoot } from "./components/UniversalDatasetGridRoot";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { resolveTheme, setupThemeListener } from "./providers/ThemeProvider";
-import { DEFAULT_GRID_CONFIG, GridConfiguration } from "./types";
+import { DEFAULT_GRID_CONFIG, GridConfiguration, CalendarFilter, parseCalendarFilter } from "./types";
 import { logger } from "./utils/logger";
 import { MsalAuthProvider } from "./services/auth/MsalAuthProvider";
 
@@ -21,10 +21,26 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
     private authProvider: MsalAuthProvider;
     private _cleanupThemeListener: (() => void) | null = null;
     private _context: ComponentFramework.Context<IInputs> | null = null;
+    private _calendarFilter: CalendarFilter | null = null;
+    /** Selected event date from row click (Task 012 - bi-directional sync) */
+    private _selectedEventDate: string | null = null;
 
     constructor() {
         logger.info('Control', 'Constructor called');
         this.config = DEFAULT_GRID_CONFIG;
+        // Bind the row click handler to preserve 'this' context
+        this.handleRowClick = this.handleRowClick.bind(this);
+    }
+
+    /**
+     * Handle row click for bi-directional calendar sync (Task 012).
+     * Stores the due date and triggers output update.
+     * @param date - ISO date string (YYYY-MM-DD) or null if no date
+     */
+    private handleRowClick(date: string | null): void {
+        logger.info('Control', `Row clicked - date: ${date}`);
+        this._selectedEventDate = date;
+        this.notifyOutputChanged();
     }
 
     public init(
@@ -76,11 +92,16 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
             const recordCount = Object.keys(dataset.records || {}).length;
             const isLoading = dataset.loading;
 
+            // Parse calendar filter from property (Task 010)
+            const calendarFilterJson = context.parameters.calendarFilter?.raw;
+            this._calendarFilter = parseCalendarFilter(calendarFilterJson);
+
             console.log('[UniversalDatasetGrid] UpdateView called', {
                 recordCount,
                 isLoading,
                 hasDataset: !!dataset,
-                selectedRecordIds: dataset.getSelectedRecordIds()
+                selectedRecordIds: dataset.getSelectedRecordIds(),
+                calendarFilter: this._calendarFilter
             });
 
             logger.debug('Control', 'UpdateView - Re-rendering with new props');
@@ -120,7 +141,10 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
     }
 
     public getOutputs(): IOutputs {
-        return {};
+        return {
+            // Task 012: Emit selected event date for calendar highlighting
+            selectedEventDate: this._selectedEventDate ?? undefined
+        };
     }
 
     /**
@@ -146,7 +170,10 @@ export class UniversalDatasetGrid implements ComponentFramework.StandardControl<
                         React.createElement(UniversalDatasetGridRoot, {
                             context,
                             notifyOutputChanged: this.notifyOutputChanged,
-                            config: this.config
+                            config: this.config,
+                            calendarFilter: this._calendarFilter,
+                            // Task 012: Pass row click handler for bi-directional calendar sync
+                            onRowClick: this.handleRowClick
                         })
                     )
                 )

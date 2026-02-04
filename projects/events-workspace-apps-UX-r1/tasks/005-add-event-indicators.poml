@@ -7,8 +7,30 @@
     <estimate>2 hours</estimate>
     <dependencies>002</dependencies>
     <parallel-group>A</parallel-group>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
+
+  <notes>
+    <completion-date>2026-02-04</completion-date>
+    <implementation-summary>
+      Added event indicator support to CalendarMonth component:
+      - EventIndicator component renders dot (count=1) or Badge (count>1)
+      - eventCounts Map<string, number> prop for count-aware indicators
+      - Backward compatible with legacy eventDates Set<string>
+      - Fluent design tokens for all colors (ADR-021 compliant)
+      - pointerEvents: none ensures indicators don't block date clicks
+      - Accessible labels include event counts
+    </implementation-summary>
+    <files-created>
+      (none - enhanced existing components)
+    </files-created>
+    <files-modified>
+      - src/client/pcf/EventCalendarFilter/control/components/CalendarMonth.tsx
+      - src/client/pcf/EventCalendarFilter/control/components/CalendarStack.tsx
+      - src/client/pcf/EventCalendarFilter/control/components/EventCalendarFilterRoot.tsx
+      - src/client/pcf/EventCalendarFilter/control/ControlManifest.Input.xml (v1.0.2)
+    </files-modified>
+  </notes>
 
   <prompt>
     <goal>Display dot indicators on calendar dates that have events.</goal>

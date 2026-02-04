@@ -1,0 +1,31 @@
+/**
+ * EventCalendarFilter PCF Control Styles
+ *
+ * Note: Most styling is done via Fluent UI makeStyles (Griffel).
+ * This file contains any necessary global or fallback styles.
+ */
+
+/* Ensure the control container fills available space */
+.event-calendar-filter-container {
+    box-sizing: border-box;
+    height: 100%;
+    width: 100%;
+}
+
+/* Reset any inherited styles */
+.event-calendar-filter-container * {
+    box-sizing: border-box;
+}
+
+/* Calendar cell hover states - will be used in Task 002 */
+.calendar-day:hover {
+    cursor: pointer;
+}
+
+/* Event indicator dot styles - will be used in Task 005 */
+.event-indicator {
+    display: inline-block;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+}

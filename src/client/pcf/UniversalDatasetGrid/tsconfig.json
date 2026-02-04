@@ -4,5 +4,13 @@
         "typeRoots": ["node_modules/@types"],
         "module": "es2015",
         "moduleResolution": "node"
-    }
+    },
+    "exclude": [
+        "node_modules",
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "**/__tests__/**",
+        "jest.config.js",
+        "jest.setup.js"
+    ]
 }

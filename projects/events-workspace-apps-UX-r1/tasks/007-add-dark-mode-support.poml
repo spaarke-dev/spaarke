@@ -7,7 +7,7 @@
     <estimate>2 hours</estimate>
     <dependencies>002</dependencies>
     <parallel-group>A</parallel-group>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -51,4 +51,27 @@
     <criterion>Theme changes apply without refresh</criterion>
     <criterion>High contrast mode functional</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <completion-summary date="2026-02-04">
+      ## Dark Mode Audit Results - ALL COMPLIANT
+
+      Task 002 components were already built with full ADR-021 compliance.
+      No fixes required - audit passed on all files.
+
+      ### Files Audited
+      - CalendarMonth.tsx: 17 Fluent tokens, 0 hard-coded colors
+      - CalendarStack.tsx: 8 Fluent tokens, 0 hard-coded colors
+      - EventCalendarFilterRoot.tsx: 7 Fluent tokens, 0 hard-coded colors
+      - ErrorBoundary.tsx: 7 Fluent tokens, 0 hard-coded colors
+      - ThemeProvider.ts: Theme detection utility (RGB for detection only)
+      - index.ts: FluentProvider with theme listener
+
+      ### Theme Support Verified
+      - setupThemeListener() in init() with cleanup in destroy()
+      - Listens for spaarke-theme-change custom event
+      - Listens for system prefers-color-scheme changes
+      - Theme resolution: localStorage > PCF context > navbar > system
+    </completion-summary>
+  </notes>
 </task>

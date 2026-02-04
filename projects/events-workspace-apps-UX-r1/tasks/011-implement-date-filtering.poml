@@ -7,8 +7,18 @@
     <estimate>3 hours</estimate>
     <dependencies>010</dependencies>
     <parallel-group>B</parallel-group>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
+
+  <notes>
+    <completion-date>2026-02-04</completion-date>
+    <summary>
+      Implemented date filtering on UniversalDatasetGrid using PCF dataset.filtering API.
+      Created dateFilter.ts utility with buildDateFilter() and applyDateFilter() functions.
+      Updated UniversalDatasetGridRoot.tsx to apply filter on calendarFilter prop change.
+      Supports single date (On operator), date range (OnOrAfter/OnOrBefore), and clear filter.
+    </summary>
+  </notes>
 
   <prompt>
     <goal>Apply calendar date filter to the grid dataset query.</goal>

@@ -7,8 +7,28 @@
     <estimate>3 hours</estimate>
     <dependencies>011, 016</dependencies>
     <parallel-group>B</parallel-group>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
+
+  <notes>
+    <completion-date>2026-02-04</completion-date>
+    <summary>
+      Updated UniversalDatasetGrid to match Power Apps native grid styling exactly:
+      - Row height: 44px using size="small" prop
+      - Header: Semi-bold text with colorNeutralBackground2 background
+      - Hover state: colorNeutralBackground1Hover
+      - Selection state: colorNeutralBackground1Selected
+      - Cell padding: Using Fluent UI spacing tokens (spacingVerticalS, spacingHorizontalS)
+      - Font sizes: fontSizeBase300 (14px) for body, fontWeightSemibold for headers
+      - All colors use Fluent UI v9 tokens for dark mode compatibility (ADR-021)
+      - Custom CSS added for scrollbar styling (dark mode aware)
+      - Focus indicators for accessibility
+    </summary>
+    <files-modified>
+      - src/client/pcf/UniversalDatasetGrid/control/components/DatasetGrid.tsx (added gridRoot styling class)
+      - src/client/pcf/UniversalDatasetGrid/control/styles.css (Power Apps grid compatible CSS)
+    </files-modified>
+  </notes>
 
   <prompt>
     <goal>Ensure grid visually matches native Power Apps grid control exactly.</goal>

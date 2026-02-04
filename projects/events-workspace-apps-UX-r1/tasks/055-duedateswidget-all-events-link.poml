@@ -7,7 +7,7 @@
     <estimate>1 hour</estimate>
     <dependencies>054</dependencies>
     <parallel-group>D</parallel-group>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -50,4 +50,21 @@
     <criterion>Click navigates to Events page</criterion>
     <criterion>Count badge shows when more items exist</criterion>
   </acceptance-criteria>
+
+  <notes>
+    <completion-date>2026-02-04</completion-date>
+    <summary>
+      Created WidgetFooter component with "All Events" link and event count badge.
+      Implemented navigation to Events tab on current form or Events Custom Page.
+      Updated useUpcomingEvents hook to return totalCount for badge display.
+      Build succeeds.
+    </summary>
+    <files-modified>
+      - src/client/pcf/DueDatesWidget/control/components/WidgetFooter.tsx (NEW)
+      - src/client/pcf/DueDatesWidget/control/components/DueDatesWidgetRoot.tsx
+      - src/client/pcf/DueDatesWidget/control/hooks/useUpcomingEvents.ts
+      - src/client/pcf/DueDatesWidget/control/services/eventFilterService.ts
+      - src/client/pcf/DueDatesWidget/control/services/navigationService.ts
+    </files-modified>
+  </notes>
 </task>
