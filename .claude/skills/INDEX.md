@@ -57,6 +57,7 @@
 | [context-handoff](context-handoff/SKILL.md) | Save working state before compaction or session end | No | `/checkpoint`, `/context-handoff`, "save progress" |
 | [ribbon-edit](ribbon-edit/SKILL.md) | Edit Dataverse ribbon via solution export/import | No | "edit ribbon", "add ribbon button" |
 | [worktree-setup](worktree-setup/SKILL.md) | Create and manage git worktrees for parallel development | No | `/worktree-setup`, "create worktree", "new project worktree" |
+| [dev-cleanup](dev-cleanup/SKILL.md) | Clean up dev environment caches (Azure CLI, NuGet, npm, Git) | No | `/dev-cleanup`, "clean up dev", "fix auth issues", "clear caches" |
 
 ## Skill Categories
 
@@ -98,6 +99,7 @@
 - **worktree-setup** - Create and manage git worktrees for parallel project development
 - **conflict-check** - Detect file overlap between active PRs (parallel session awareness)
 - **context-handoff** - Save working state before compaction or session end for recovery
+- **dev-cleanup** - Clean up local dev environment caches (Azure CLI, NuGet, npm, Git credentials)
 
 ## Skill Flow
 

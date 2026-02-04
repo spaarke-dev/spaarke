@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>Create Event API - GET endpoints</title>
+    <phase>5: API &amp; Event Log</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>051, 052</blocks>
+    <tags>bff-api, api, minimal-api, endpoints</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task tags include 'bff-api' (code implementation)</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create the Event API GET endpoints: GET /api/v1/events (list with filters) and
+    GET /api/v1/events/{id} (single event). Follow Minimal API patterns per ADR-001.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in .NET 8 Minimal API. Follow ADR-001, ADR-008, ADR-019.
+  </role>
+
+  <goal>
+    Event API GET endpoints implemented with filtering, pagination, and Dataverse integration.
+  </goal>
+
+  <context>
+    <background>
+      The Event API provides programmatic access to Events for external integrations and
+      potential future mobile applications. GET endpoints support read operations with
+      filtering by regarding record, date range, and status.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Documents/ - Reference endpoints</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md - Event API requirements</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Must use Minimal API pattern</constraint>
+    <constraint source="ADR-008">Must use endpoint filters for authorization</constraint>
+    <constraint source="ADR-019">Must use ProblemDetails for errors</constraint>
+    <constraint source="spec">Support filtering by regardingEntityType, regardingRecordId, dateRange</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/api/error-handling.md</file>
+      <file>src/server/api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review spec.md Event API requirements</step>
+    <step order="2">Create Events/ folder under Api/</step>
+    <step order="3">Create EventEndpoints.cs with endpoint definitions</step>
+    <step order="4">Define EventDto and EventListDto response types</step>
+    <step order="5">Implement GET /api/v1/events with query parameters</step>
+    <step order="6">Add filters: regardingEntityType, regardingRecordId, fromDate, toDate, status</step>
+    <step order="7">Add pagination: page, pageSize (default 50, max 100)</step>
+    <step order="8">Implement GET /api/v1/events/{id}</step>
+    <step order="9">Add endpoint filters for authorization</step>
+    <step order="10">Add ProblemDetails for 404, 400 errors</step>
+    <step order="11">Register endpoints in Program.cs</step>
+    <step order="12">Write integration tests</step>
+    <step order="13">Update TASK-INDEX.md: change task 050 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and run .NET API</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Events/EventEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Events/Dtos/EventDto.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Events/Dtos/EventListDto.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Events/GetEventsTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given the API is running, when GET /api/v1/events is called, then paginated events are returned.
+    </criterion>
+    <criterion testable="true">
+      Given a regardingRecordId filter, when GET events is called, then only events for that record
+      are returned.
+    </criterion>
+    <criterion testable="true">
+      Given a valid event ID, when GET /api/v1/events/{id} is called, then the event is returned.
+    </criterion>
+    <criterion testable="true">
+      Given an invalid event ID, when GET events/{id} is called, then 404 ProblemDetails is returned.
+    </criterion>
+    <criterion testable="true">Integration tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    EventDto should include:
+    - id, name, eventTypeId, eventTypeName
+    - regardingRecordId, regardingRecordName, regardingRecordType
+    - startDate, endDate, dueDate, status
+    - createdOn, modifiedOn
+
+    This task can run in parallel with task 052 (Parallel Group D).
+  </notes>
+
+  <completion-notes>
+    <completed-on>2026-02-01</completed-on>
+    <summary>
+      Implemented Event API GET endpoints following Minimal API pattern (ADR-001):
+      - GET /api/v1/events: List events with filtering (regardingRecordType, regardingRecordId, eventTypeId, statusCode, priority, dueDateFrom, dueDateTo) and pagination (pageNumber, pageSize with max 100)
+      - GET /api/v1/events/{id}: Get single event by ID with 404 ProblemDetails for not found
+
+      Files created:
+      - src/server/api/Sprk.Bff.Api/Api/Events/EventEndpoints.cs (endpoints)
+      - src/server/api/Sprk.Bff.Api/Api/Events/Dtos/EventDto.cs (DTOs with status/priority helpers)
+      - src/server/api/Sprk.Bff.Api/Api/Events/Dtos/EventListResponse.cs (paginated response)
+
+      Stub created:
+      - S050-01: Query sprk_event entity from Dataverse (returns empty data until entity deployed)
+
+      Build verified: dotnet build passes with 0 errors
+    </summary>
+    <stub-id>S050-01</stub-id>
+  </completion-notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

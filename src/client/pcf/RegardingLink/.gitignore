@@ -1,0 +1,10 @@
+# Build output
+out/
+bin/
+obj/
+
+# Dependencies
+node_modules/
+
+# Generated types
+generated/

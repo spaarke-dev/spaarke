@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>Implement EventFormController - field show/hide logic</title>
+    <phase>4: Event Form Controls</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>032</blocks>
+    <tags>pcf, react, typescript, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task modifies code files, implements core functionality</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement the field show/hide logic in EventFormController. Based on the Event Type
+    configuration, show/hide form fields and mark fields as required or optional.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in PCF controls and Dataverse form manipulation.
+    Understand how to programmatically control field visibility and requirement levels.
+  </role>
+
+  <goal>
+    EventFormController dynamically shows/hides Event form fields based on Event Type selection.
+    Required fields are marked as required, and hidden fields are invisible.
+  </goal>
+
+  <context>
+    <background>
+      Different Event Types need different fields. A "Meeting" requires start/end date and location,
+      while a "Deadline" only needs a due date. The EventFormController reads the configuration
+      and adjusts the form accordingly.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/EventFormController/ - Control from task 030</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md - Field visibility requirements</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Use Xrm.Page.getControl() to manipulate fields</constraint>
+    <constraint source="spec">Required fields must be visually indicated</constraint>
+    <constraint source="project">No Dataverse Business Rules - all logic in PCF</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/dataverse-queries.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review spec.md field visibility requirements</step>
+    <step order="2">Access form context from PCF context.mode.contextInfo</step>
+    <step order="3">Get list of all Event form fields to control</step>
+    <step order="4">Implement showField(fieldName) using setVisible(true)</step>
+    <step order="5">Implement hideField(fieldName) using setVisible(false)</step>
+    <step order="6">Implement setRequired(fieldName) using setRequiredLevel("required")</step>
+    <step order="7">Implement setOptional(fieldName) using setRequiredLevel("none")</step>
+    <step order="8">Apply configuration when Event Type changes</step>
+    <step order="9">Reset all fields to default state when Event Type is cleared</step>
+    <step order="10">Handle fields that don't exist on form (graceful skip)</step>
+    <step order="11">Build and verify field visibility changes work</step>
+    <step order="12">Update TASK-INDEX.md: change task 031 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF control</tool>
+    <tool name="pac">Power Platform CLI for testing</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/EventFormController/EventFormController/handlers/FieldVisibilityHandler.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given Event Type "Meeting" is selected, when the form renders, then Subject, Start Date,
+      End Date, and Location fields are visible and required.
+    </criterion>
+    <criterion testable="true">
+      Given Event Type "Deadline" is selected, when the form renders, then Due Date is visible
+      and required, but Start/End Date and Location are hidden.
+    </criterion>
+    <criterion testable="true">
+      Given Event Type is cleared, when the form updates, then all fields return to their
+      default visibility and requirement states.
+    </criterion>
+    <criterion testable="true">Control builds without TypeScript errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Dataverse form APIs:
+    - Xrm.Page.getControl(fieldName).setVisible(bool)
+    - Xrm.Page.getAttribute(fieldName).setRequiredLevel("required"|"recommended"|"none")
+
+    Fields to control (example):
+    - subject (always visible, always required)
+    - scheduledstart, scheduledend (meetings)
+    - duedate (deadlines, tasks)
+    - location (meetings, court dates)
+    - reminderdate (reminders)
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

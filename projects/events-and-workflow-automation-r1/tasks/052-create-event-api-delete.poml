@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>Create Event API - DELETE endpoint</title>
+    <phase>5: API &amp; Event Log</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>050</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, api, minimal-api, endpoints</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Simpler endpoint extending existing pattern</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create the Event API DELETE endpoint: DELETE /api/v1/events/{id}. Include soft delete or
+    hard delete based on configuration, and Event Log entry creation.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in .NET 8 Minimal API. Follow ADR-001, ADR-008, ADR-019.
+  </role>
+
+  <goal>
+    Event API delete endpoint implemented with Event Log tracking and proper authorization.
+  </goal>
+
+  <context>
+    <background>
+      Events may need to be deleted programmatically. The delete operation should create an
+      Event Log entry before removing/deactivating the record.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Events/EventEndpoints.cs - From tasks 050-051</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Must use Minimal API pattern</constraint>
+    <constraint source="ADR-019">Must use ProblemDetails for errors</constraint>
+    <constraint source="spec">Create Event Log on delete (transition: {status} → deleted)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>src/server/api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Implement DELETE /api/v1/events/{id} endpoint</step>
+    <step order="2">Verify Event exists (404 if not found)</step>
+    <step order="3">Create Event Log entry for "deleted" transition</step>
+    <step order="4">Delete Event from Dataverse (or set status to inactive)</step>
+    <step order="5">Return 204 No Content on success</step>
+    <step order="6">Add endpoint filter for authorization</step>
+    <step order="7">Write integration tests</step>
+    <step order="8">Update TASK-INDEX.md: change task 052 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and run .NET API</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Events/EventEndpoints.cs (updated)</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Events/DeleteEventTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given a valid Event ID, when DELETE /api/v1/events/{id} is called, then 204 is returned.
+    </criterion>
+    <criterion testable="true">
+      Given an Event is deleted, when Event Log is queried, then a "deleted" entry exists.
+    </criterion>
+    <criterion testable="true">
+      Given an invalid Event ID, when DELETE is called, then 404 ProblemDetails is returned.
+    </criterion>
+    <criterion testable="true">Integration tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Decision: soft delete (deactivate) vs hard delete?
+    - Recommend soft delete for audit trail
+    - Set statecode=1 (inactive) rather than physical delete
+
+    This task can run in parallel with task 050 (Parallel Group D).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

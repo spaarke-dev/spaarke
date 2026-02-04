@@ -454,6 +454,7 @@ When these phrases are detected, **STOP** and load the corresponding skill:
 | "create worktree", "setup worktree", "new project worktree", "worktree for project" | `worktree-setup` | Load `.claude/skills/worktree-setup/SKILL.md` and follow procedure |
 | "continue project", "resume project", "where was I", "pick up where I left off" | `project-continue` | Load `.claude/skills/project-continue/SKILL.md` and sync + load context |
 | "save progress", "save my state", "context handoff", "checkpoint", "checkpoint before compaction" | `context-handoff` | Load `.claude/skills/context-handoff/SKILL.md` and save state for recovery |
+| "clean up dev", "clear caches", "fix auth issues", "azure cli issues", "dev environment cleanup" | `dev-cleanup` | Load `.claude/skills/dev-cleanup/SKILL.md` and run cleanup script |
 
 ### Auto-Detection Rules
 
@@ -503,6 +504,7 @@ Use these commands to explicitly invoke skills:
 | `/project-continue {name}` | Continue project after PR merge or new session with full context |
 | `/context-handoff` | Save working state before compaction for reliable recovery |
 | `/checkpoint` | Alias for `/context-handoff` - quick state save |
+| `/dev-cleanup` | Clean up local dev environment caches (Azure CLI, NuGet, npm, Git credentials) |
 
 ---
 

@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>Deploy solution to dev environment</title>
+    <phase>7: Deployment &amp; Wrap-up</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>065</dependencies>
+    <blocks>071</blocks>
+    <tags>deploy, dataverse, azure</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task consolidating all components</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Perform final deployment of all solution components to dev environment. Verify all
+    components are deployed and configured correctly. Create deployment checklist for
+    future environments.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in Dataverse and Azure deployment.
+  </role>
+
+  <goal>
+    Complete solution deployed to dev environment. All components verified working.
+    Deployment checklist created for future environment promotion.
+  </goal>
+
+  <context>
+    <background>
+      This is the consolidated deployment to ensure all components are properly deployed
+      and configured together. Previous phase deployments may have been incremental.
+    </background>
+    <relevant-files>
+      <file>All PCF controls and API endpoints from previous phases</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-022">Solution must be deployed as unmanaged</constraint>
+    <constraint source="deployment">All PCF versions must match latest builds</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+      <file>docs/guides/PCF-V9-PACKAGING.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create deployment checklist document</step>
+    <step order="2">Verify all PCF controls are latest version</step>
+    <step order="3">Build all PCF controls with final version numbers</step>
+    <step order="4">Deploy solution containing all PCF controls</step>
+    <step order="5">Verify Event form configuration with all controls</step>
+    <step order="6">Verify Field Mapping Profile form with admin control</step>
+    <step order="7">Verify All Events view with RegardingLink</step>
+    <step order="8">Build and deploy BFF API (final)</step>
+    <step order="9">Verify all API endpoints are functional</step>
+    <step order="10">Run smoke test: create Event, apply mapping, push to children</step>
+    <step order="11">Document deployment procedure for other environments</step>
+    <step order="12">Update TASK-INDEX.md: change task 070 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI</tool>
+    <tool name="az">Azure CLI</tool>
+    <tool name="npm">Build PCF controls</tool>
+    <tool name="dotnet">Build API</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/events-and-workflow-automation-r1/notes/deployment-checklist.md</output>
+    <output type="deployment">Complete solution in Dataverse dev</output>
+    <output type="deployment">BFF API in Azure dev</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given the dev environment, when all components are verified, then each PCF control
+      and API endpoint is functional.
+    </criterion>
+    <criterion testable="true">
+      Given the deployment checklist, when reviewed, then all steps for promoting to other
+      environments are documented.
+    </criterion>
+    <criterion testable="true">
+      Given a smoke test, when complete Event workflow is executed, then all components work
+      together correctly.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Deployment checklist should include:
+    1. Prerequisites (CLI versions, access, credentials)
+    2. Solution deployment steps
+    3. PCF control deployment order
+    4. API deployment steps
+    5. Post-deployment verification steps
+    6. Rollback procedure if needed
+
+    Target environments:
+    - Dataverse: https://spaarkedev1.crm.dynamics.com
+    - BFF API: https://spe-api-dev-67e2xz.azurewebsites.net
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

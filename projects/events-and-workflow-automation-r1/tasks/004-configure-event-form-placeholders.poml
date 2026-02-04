@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>Configure Event form with control placeholders</title>
+    <phase>1: Foundation &amp; Data Model</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>035</blocks>
+    <tags>dataverse, forms, configuration</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Configuration task with no code implementation</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Configure the Event form (sprk_event) in Dataverse model-driven app with placeholder sections
+    for PCF controls. Create the form layout that will host AssociationResolver, EventFormController,
+    and other custom controls once they are built.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in Dataverse form customization and model-driven apps.
+    Understand PCF control placement and form section configuration.
+  </role>
+
+  <goal>
+    Event form configured with proper layout and placeholder sections for 3 PCF controls:
+    AssociationResolver (regarding record selection), EventFormController (field visibility),
+    and placeholder for UpdateRelatedButton.
+  </goal>
+
+  <context>
+    <background>
+      The Event form needs dedicated sections for PCF controls. These controls will be bound to
+      specific fields or virtual fields. The form layout should support the event creation workflow
+      where users first select a regarding record, then fill in event details.
+    </background>
+    <relevant-files>
+      <file>projects/events-and-workflow-automation-r1/spec.md - UI Requirements section</file>
+      <file>src/solutions/ - Existing form configurations</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Form must have section for AssociationResolver at top</constraint>
+    <constraint source="spec">EventFormController bound to Event Type field</constraint>
+    <constraint source="ADR-006">PCF controls must be used, not legacy webresources</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="PCF Form Placement" location=".claude/patterns/pcf/">
+        Standard pattern for placing PCF controls on Dataverse forms
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review spec.md UI Requirements for Event form layout</step>
+    <step order="2">Open Event (sprk_event) main form in Dataverse maker portal</step>
+    <step order="3">Create "Regarding Record" section at top of form for AssociationResolver</step>
+    <step order="4">Add placeholder field for AssociationResolver control binding</step>
+    <step order="5">Create "Event Details" section with Event Type and standard fields</step>
+    <step order="6">Note where EventFormController will be bound (Event Type field)</step>
+    <step order="7">Create "Actions" section in command bar area for UpdateRelatedButton placeholder</step>
+    <step order="8">Ensure all 8 regarding lookup fields are on the form (hidden by default)</step>
+    <step order="9">Configure form tab order for logical data entry flow</step>
+    <step order="10">Save and publish form customizations</step>
+    <step order="11">Document form layout and control placement in notes/</step>
+    <step order="12">Update TASK-INDEX.md: change task 004 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="browser">Dataverse maker portal for form customization</tool>
+    <tool name="pac">Power Platform CLI for solution export</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse">Updated Event form with PCF placeholder sections</output>
+    <output type="docs">Form layout documentation</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given the Event form, when opened in model-driven app, then "Regarding Record" section
+      appears at the top of the form.
+    </criterion>
+    <criterion testable="true">
+      Given the Event form, when inspected, then all 8 regarding lookup fields are present
+      (hidden by default).
+    </criterion>
+    <criterion testable="true">
+      Given the Event form, when customization is reviewed, then placeholder sections exist
+      for AssociationResolver, EventFormController, and UpdateRelatedButton.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The 8 regarding lookup fields are:
+    - sprk_regardingmatter, sprk_regardingproject, sprk_regardinginvoice, sprk_regardinganalysis
+    - sprk_regardingaccount, sprk_regardingcontact, sprk_regardingworkassignment, sprk_regardingbudget
+
+    These fields will be shown/hidden by AssociationResolver based on entity type selection.
+
+    This task can run in parallel with tasks 003 and 005 (Parallel Group A).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

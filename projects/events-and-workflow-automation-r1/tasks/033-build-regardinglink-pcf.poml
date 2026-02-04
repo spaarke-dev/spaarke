@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>Build RegardingLink PCF control</title>
+    <phase>4: Event Form Controls</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>005</dependencies>
+    <blocks>035</blocks>
+    <tags>pcf, react, typescript, frontend, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task tags include 'pcf', 'react' (code implementation)</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build the RegardingLink PCF control for displaying clickable links to regarding records in
+    views and grids. The control shows the regarding record name as a hyperlink that navigates
+    to the record's form when clicked.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in PCF control development for grid columns.
+    Follow ADR-021 for Fluent UI v9. Follow ADR-022 for React 16 APIs.
+  </role>
+
+  <goal>
+    RegardingLink PCF control implemented that displays a clickable link showing the regarding
+    record name. Clicking navigates to the regarding record's form.
+  </goal>
+
+  <context>
+    <background>
+      The "All Events" view needs to show which record each Event is related to, with navigation
+      capability. Since native polymorphic lookups don't work in views, RegardingLink uses the
+      denormalized fields (sprk_regardingrecordname, sprk_regardingrecordtype) plus the appropriate
+      lookup field to create a navigable link.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/RegardingLink/ - Control scaffold from task 005</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md - RegardingLink requirements</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Must use Fluent UI v9 Link component</constraint>
+    <constraint source="ADR-022">Must use React 16 APIs</constraint>
+    <constraint source="spec">Display sprk_regardingrecordname field value</constraint>
+    <constraint source="spec">Navigate to correct entity record on click</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-V9-PACKAGING.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review spec.md RegardingLink requirements</step>
+    <step order="2">Open RegardingLink scaffold from task 005</step>
+    <step order="3">Configure control to bind to sprk_regardingrecordname field</step>
+    <step order="4">Also retrieve sprk_regardingrecordtype and lookup field values</step>
+    <step order="5">Implement React component with Fluent UI v9 Link</step>
+    <step order="6">Display the regarding record name as link text</step>
+    <step order="7">Determine which lookup field has the record ID based on type</step>
+    <step order="8">Implement onClick to navigate using Xrm.Navigation.openForm</step>
+    <step order="9">Handle null case (no regarding record) with dash or "—"</step>
+    <step order="10">Add dark mode support using Link's colorBrandForegroundLink token</step>
+    <step order="11">Build and verify control compiles</step>
+    <step order="12">Update TASK-INDEX.md: change task 033 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF control</tool>
+    <tool name="pac">Power Platform CLI for testing</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/RegardingLink/RegardingLink/index.ts</output>
+    <output type="code">src/client/pcf/RegardingLink/RegardingLink/components/RegardingLinkDisplay.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given an Event linked to Matter ABC, when the All Events view displays, then "ABC" is
+      shown as a clickable link.
+    </criterion>
+    <criterion testable="true">
+      Given the user clicks the regarding link, when navigation completes, then the Matter ABC
+      form opens.
+    </criterion>
+    <criterion testable="true">
+      Given an Event with no regarding record, when the view displays, then "—" (em dash) is
+      shown instead of a link.
+    </criterion>
+    <criterion testable="true">
+      Given dark mode is active, when the link displays, then it uses appropriate link colors.
+    </criterion>
+    <criterion testable="true">Control builds without TypeScript errors.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="RegardingLink Displays in Grid">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entitylist&amp;etn=sprk_event</url>
+      <steps>
+        <step>Navigate to All Events view</step>
+        <step>Verify RegardingLink column shows record names as links</step>
+        <step>Click a link</step>
+        <step>Verify navigation to correct record</step>
+      </steps>
+      <expected>Links display and navigate correctly</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in D365 settings</step>
+        <step>Verify link colors adapt in dark mode</step>
+      </steps>
+      <expected>Link uses semantic color tokens per ADR-021</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    This is the simplest of the 5 PCF controls - good starting point for PCF work.
+
+    Navigation code example:
+    ```typescript
+    Xrm.Navigation.openForm({
+      entityName: entityLogicalName,
+      entityId: recordId
+    });
+    ```
+
+    This task can run in parallel with tasks 030-032 (independent control).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

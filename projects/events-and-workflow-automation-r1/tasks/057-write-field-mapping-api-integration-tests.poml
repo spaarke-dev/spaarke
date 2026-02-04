@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="057" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>Write integration tests for Field Mapping API</title>
+    <phase>5: API &amp; Event Log</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>054</dependencies>
+    <blocks>058</blocks>
+    <tags>testing, integration-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task tags include 'testing', 'integration-test'</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Write comprehensive integration tests for Field Mapping API endpoints. Cover profiles,
+    validation, and push operations with various scenarios.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in .NET integration testing.
+  </role>
+
+  <goal>
+    Full integration test coverage for Field Mapping API: GET profiles, GET profile by pair,
+    POST validate, POST push endpoints.
+  </goal>
+
+  <context>
+    <background>
+      Field Mapping API tests verify the mapping configuration and push operations work correctly.
+      Push tests should verify multiple records are updated correctly.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/FieldMappings/FieldMappingEndpoints.cs</file>
+      <file>tests/Sprk.Bff.Api.Tests/ - Existing test patterns</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="testing">Use WebApplicationFactory for integration tests</constraint>
+    <constraint source="spec">Verify push updates correct number of records</constraint>
+    <constraint source="spec">Verify type validation matches TypeScript service</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create FieldMappingApiIntegrationTests.cs</step>
+    <step order="2">Set up test fixtures with sample mapping profiles</step>
+    <step order="3">Test GET /profiles - returns all profiles</step>
+    <step order="4">Test GET /profiles with filters - returns filtered profiles</step>
+    <step order="5">Test GET /profiles/{source}/{target} - returns profile with rules</step>
+    <step order="6">Test GET /profiles/{source}/{target} - returns 404 if not found</step>
+    <step order="7">Test POST /validate - valid mapping returns isValid=true</step>
+    <step order="8">Test POST /validate - incompatible types return isValid=false</step>
+    <step order="9">Test POST /push - updates multiple children</step>
+    <step order="10">Test POST /push - handles partial failure</step>
+    <step order="11">Test POST /push - returns 404 if no profile</step>
+    <step order="12">Test POST /push - returns 400 if >500 children</step>
+    <step order="13">Run tests and verify all pass</step>
+    <step order="14">Update TASK-INDEX.md: change task 057 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Run tests with dotnet test</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/Sprk.Bff.Api.Tests/FieldMappings/FieldMappingApiIntegrationTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All Field Mapping API integration tests pass.</criterion>
+    <criterion testable="true">Push tests verify correct record counts in response.</criterion>
+    <criterion testable="true">Validation tests cover all type combinations.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Push test scenarios:
+    - 0 children: updatedCount=0, no errors
+    - N children, all success: updatedCount=N
+    - N children, some fail: updatedCount=N-X, failedCount=X, errors populated
+    - >500 children: 400 error with guidance
+
+    This task can run in parallel with task 056 (Parallel Group E).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

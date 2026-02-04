@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>Add toast notifications for mapping results</title>
+    <phase>3: Association Resolver</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>022</dependencies>
+    <blocks>025</blocks>
+    <tags>pcf, react, fluent-ui, frontend</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>UI enhancement task with Fluent UI components</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add toast notification feedback to AssociationResolver for field mapping operations. Show
+    success messages when fields are mapped, warnings for type mismatches, and errors for failures.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in React and Fluent UI v9 notification patterns.
+  </role>
+
+  <goal>
+    Toast notifications implemented showing mapping results: "3 fields populated from Matter",
+    "1 field skipped (type mismatch)", or "Field mapping failed: {error}". Toasts support dark mode.
+  </goal>
+
+  <context>
+    <background>
+      Users need feedback when field mappings are applied. Without notifications, they may not
+      realize fields were auto-populated or may not understand why some mappings were skipped.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/AssociationResolver/ - Control from tasks 020-023</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Must use Fluent UI v9 Toast/MessageBar components</constraint>
+    <constraint source="ADR-021">Must support dark mode</constraint>
+    <constraint source="spec">Show count of fields mapped, skipped, and failed</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Research Fluent UI v9 Toast/Toaster components</step>
+    <step order="2">Create ToastProvider wrapper at control root</step>
+    <step order="3">Create MappingResultToast component</step>
+    <step order="4">Integrate with FieldMappingHandler to receive results</step>
+    <step order="5">Show success toast: "X fields populated from {EntityType}"</step>
+    <step order="6">Show warning toast: "X fields skipped (incompatible types)"</step>
+    <step order="7">Show error toast: "Field mapping failed: {error message}"</step>
+    <step order="8">Auto-dismiss success after 5 seconds</step>
+    <step order="9">Verify dark mode styling</step>
+    <step order="10">Build and verify toasts display correctly</step>
+    <step order="11">Update TASK-INDEX.md: change task 024 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PCF control</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/AssociationResolver/AssociationResolver/components/MappingResultToast.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given mappings are successfully applied, when operation completes, then a success toast
+      shows "X fields populated from {EntityType}".
+    </criterion>
+    <criterion testable="true">
+      Given some mappings were skipped, when operation completes, then a warning toast shows
+      "X fields skipped".
+    </criterion>
+    <criterion testable="true">
+      Given the control in dark mode, when toast displays, then colors use Fluent UI v9 tokens.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Fluent UI v9 uses Toaster and Toast components:
+    ```typescript
+    import { Toaster, useToastController, Toast, ToastTitle } from "@fluentui/react-components";
+    ```
+
+    Consider using different intents: success, warning, error for different result types.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

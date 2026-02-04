@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="056" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>Write integration tests for Event API</title>
+    <phase>5: API &amp; Event Log</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>055</dependencies>
+    <blocks>058</blocks>
+    <tags>testing, integration-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Task tags include 'testing', 'integration-test'</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Write comprehensive integration tests for all Event API endpoints. Cover happy paths,
+    error cases, authorization, and Event Log verification.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in .NET integration testing and WebApplicationFactory.
+  </role>
+
+  <goal>
+    Full integration test coverage for Event API: GET, POST, PUT, DELETE, complete, cancel
+    endpoints with all edge cases tested.
+  </goal>
+
+  <context>
+    <background>
+      Integration tests verify the API works correctly with Dataverse (or mock) and that
+      all endpoints behave as specified, including Event Log creation.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Events/EventEndpoints.cs</file>
+      <file>tests/Sprk.Bff.Api.Tests/ - Existing test patterns</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="testing">Use WebApplicationFactory for integration tests</constraint>
+    <constraint source="testing">Mock Dataverse or use test environment</constraint>
+    <constraint source="spec">Verify Event Log entries for state changes</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review existing integration test patterns in tests/</step>
+    <step order="2">Create EventApiIntegrationTests.cs</step>
+    <step order="3">Set up test fixtures and WebApplicationFactory</step>
+    <step order="4">Test GET /events - returns paginated list</step>
+    <step order="5">Test GET /events with filters - returns filtered results</step>
+    <step order="6">Test GET /events/{id} - returns single event</step>
+    <step order="7">Test GET /events/{id} - returns 404 for invalid id</step>
+    <step order="8">Test POST /events - creates event and log entry</step>
+    <step order="9">Test POST /events - validation errors return 400</step>
+    <step order="10">Test PUT /events/{id} - updates event</step>
+    <step order="11">Test DELETE /events/{id} - deletes and creates log</step>
+    <step order="12">Test POST complete - state transition and log</step>
+    <step order="13">Test POST cancel - state transition and log</step>
+    <step order="14">Test invalid state transitions - return 400</step>
+    <step order="15">Run tests and verify all pass</step>
+    <step order="16">Update TASK-INDEX.md: change task 056 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Run tests with dotnet test</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Events/EventApiIntegrationTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All Event API integration tests pass.</criterion>
+    <criterion testable="true">Test coverage includes all endpoints: GET, POST, PUT, DELETE, complete, cancel.</criterion>
+    <criterion testable="true">Tests verify Event Log entries are created for state changes.</criterion>
+    <criterion testable="true">Tests verify authorization (401 for unauthenticated).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Test categories to cover:
+    - Happy path (valid requests)
+    - Validation errors (missing required fields)
+    - Not found errors (invalid IDs)
+    - Authorization (unauthenticated, unauthorized)
+    - State machine (invalid transitions)
+    - Event Log verification
+
+    This task can run in parallel with task 057 (Parallel Group E).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

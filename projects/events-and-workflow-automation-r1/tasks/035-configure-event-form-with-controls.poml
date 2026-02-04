@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>Configure Event form with all controls</title>
+    <phase>4: Event Form Controls</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>025, 032, 033</dependencies>
+    <blocks>036</blocks>
+    <tags>dataverse, forms, configuration</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Configuration task assembling previously built components</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Configure the Event form in Dataverse with all PCF controls: AssociationResolver (regarding
+    section), EventFormController (Event Type field), and RegardingLink (for display purposes).
+    Replace placeholder sections from task 004 with actual control bindings.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in Dataverse form configuration and PCF control binding.
+  </role>
+
+  <goal>
+    Event form fully configured with all PCF controls properly bound. Form provides complete
+    event creation and editing experience with dynamic field visibility and field mapping.
+  </goal>
+
+  <context>
+    <background>
+      Task 004 created placeholder sections on the Event form. Now that all PCF controls are
+      built and deployed, we bind them to the form to create the complete user experience.
+    </background>
+    <relevant-files>
+      <file>Form configuration from task 004</file>
+      <file>Deployed PCF controls from tasks 025, 032, 033</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">AssociationResolver at top for regarding selection</constraint>
+    <constraint source="spec">EventFormController bound to Event Type field</constraint>
+    <constraint source="spec">RegardingLink used in views (separate configuration)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Open Event (sprk_event) main form in Dataverse maker portal</step>
+    <step order="2">Replace placeholder in "Regarding Record" section with AssociationResolver PCF</step>
+    <step order="3">Configure AssociationResolver to write to regarding fields</step>
+    <step order="4">Replace Event Type field control with EventFormController PCF</step>
+    <step order="5">Configure EventFormController input/output properties</step>
+    <step order="6">Verify all control bindings are correct</step>
+    <step order="7">Configure "All Events" view with RegardingLink column</step>
+    <step order="8">Test form: create new Event, select regarding, verify field mapping</step>
+    <step order="9">Test form: change Event Type, verify field visibility changes</step>
+    <step order="10">Save and publish form customizations</step>
+    <step order="11">Document final form layout in notes/</step>
+    <step order="12">Update TASK-INDEX.md: change task 035 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="browser">Dataverse maker portal</tool>
+    <tool name="pac">Power Platform CLI for solution export</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse">Fully configured Event form</output>
+    <output type="dataverse">"All Events" view with RegardingLink column</output>
+    <output type="docs">Form layout documentation</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given the Event form, when opened for new record, then AssociationResolver appears in
+      the Regarding Record section.
+    </criterion>
+    <criterion testable="true">
+      Given an Event Type is selected, when the form updates, then EventFormController shows/hides
+      appropriate fields.
+    </criterion>
+    <criterion testable="true">
+      Given the All Events view, when displayed, then RegardingLink column shows clickable record names.
+    </criterion>
+    <criterion testable="true">
+      Given a regarding record is selected, when field mappings exist, then mapped values appear
+      on the Event form.
+    </criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Final form layout:
+    ```
+    [Header: Event Name]
+
+    [Section: Regarding Record]
+      - AssociationResolver PCF (full width)
+
+    [Section: Event Details]
+      - Event Type (with EventFormController bound)
+      - Subject (always visible)
+      - Start Date, End Date, Location (Meeting-type fields)
+      - Due Date (Deadline-type fields)
+      - etc.
+
+    [Section: Additional Information]
+      - Description
+      - Notes
+    ```
+
+    Completion Notes (2026-02-01):
+    - Created comprehensive form configuration documentation: notes/event-form-configuration.md
+    - Documents all 5 PCF controls: AssociationResolver, EventFormController, RegardingLink, UpdateRelatedButton, FieldMappingAdmin
+    - Includes control manifest bindings, behavior descriptions, form designer steps, and testing checklist
+    - Entity configuration table for all 8 supported regarding record types
+    - Field visibility rules by Event Type
+    - Placement guidance for UpdateRelatedButton on parent entity forms
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

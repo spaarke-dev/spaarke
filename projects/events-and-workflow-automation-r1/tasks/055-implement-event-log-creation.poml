@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="055" project="events-and-workflow-automation-r1">
+  <metadata>
+    <title>Implement Event Log creation on state changes</title>
+    <phase>5: API &amp; Event Log</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>053</dependencies>
+    <blocks>056</blocks>
+    <tags>bff-api, api</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Service implementation extending API functionality</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement the Event Log service that creates sprk_eventlog records on Event state changes.
+    Refactor existing API endpoints to use this service for consistent logging.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in .NET services and Dataverse integration.
+  </role>
+
+  <goal>
+    EventLogService implemented that creates log entries for all Event state transitions.
+    All Event API endpoints use this service for consistent audit trail.
+  </goal>
+
+  <context>
+    <background>
+      Event Log tracks state transitions: create, complete, cancel, delete. This provides an
+      audit trail for Events. The service should be reusable across all Event API endpoints.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Events/EventEndpoints.cs</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md - Event Log requirements</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Log entries: created, completed, cancelled, deleted</constraint>
+    <constraint source="spec">Each entry: Event reference, action, timestamp, user</constraint>
+    <constraint source="ADR-010">DI minimalism - service should be lightweight</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>src/server/api/CLAUDE.md</file>
+      <file>projects/events-and-workflow-automation-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review spec.md Event Log table schema</step>
+    <step order="2">Create EventLogService class</step>
+    <step order="3">Implement CreateLog(eventId, action, previousStatus, newStatus) method</step>
+    <step order="4">Method creates sprk_eventlog record in Dataverse</step>
+    <step order="5">Include user info from current auth context</step>
+    <step order="6">Register service in DI (verify DI count still ≤15)</step>
+    <step order="7">Refactor POST events endpoint to use EventLogService</step>
+    <step order="8">Refactor DELETE events endpoint to use EventLogService</step>
+    <step order="9">Refactor complete/cancel endpoints to use EventLogService</step>
+    <step order="10">Write unit tests for EventLogService</step>
+    <step order="11">Verify all state transitions create log entries</step>
+    <step order="12">Update TASK-INDEX.md: change task 055 status to ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and run .NET API</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/EventLogService.cs</output>
+    <output type="test">tests/Sprk.Bff.Api.Tests/Services/EventLogServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">
+      Given an Event is created via API, when Event Log is queried, then a "created" entry exists
+      with timestamp and user.
+    </criterion>
+    <criterion testable="true">
+      Given an Event is completed via API, when Event Log is queried, then a "completed" entry
+      exists with previous status "active".
+    </criterion>
+    <criterion testable="true">
+      Given DI registrations are counted, when all services are registered, then total is ≤15.
+    </criterion>
+    <criterion testable="true">All unit tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    sprk_eventlog table fields:
+    - sprk_event (lookup to Event)
+    - sprk_action (choice: created, completed, cancelled, deleted)
+    - sprk_previousstatus (text)
+    - sprk_newstatus (text)
+    - sprk_timestamp (datetime)
+    - sprk_user (text - user display name)
+
+    Consider using IHttpContextAccessor to get current user info.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in knowledge/files section.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>
