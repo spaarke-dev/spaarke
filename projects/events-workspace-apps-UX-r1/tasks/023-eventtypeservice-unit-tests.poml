@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Add Unit Tests for EventTypeService</title>
+    <phase>3</phase>
+    <tags>shared-library, testing</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>022</dependencies>
+    <parallel-group>A</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Add comprehensive unit tests for EventTypeService with mocked WebAPI.</goal>
+
+    <context>
+      Per ADR-012, shared components must achieve 90%+ test coverage.
+      Tests should cover all config combinations and error cases.
+    </context>
+
+    <constraints>
+      - 90%+ code coverage
+      - Mock WebAPI responses
+      - Test JSON parsing edge cases
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-012-shared-components.md" reason="90% coverage requirement" />
+      <file path=".claude/patterns/testing/mocking-patterns.md" reason="Mock patterns" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create mock WebApi implementation</step>
+    <step order="2">Test getEventTypeFieldConfig with valid response</step>
+    <step order="3">Test with missing Event Type</step>
+    <step order="4">Test JSON parsing with valid JSON</step>
+    <step order="5">Test JSON parsing with invalid JSON</step>
+    <step order="6">Test field merging scenarios</step>
+    <step order="7">Verify 90%+ coverage</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/shared/Spaarke.UI.Components/src/services/__tests__/EventTypeService.test.ts</artifact>
+    <artifact type="file">src/client/shared/Spaarke.UI.Components/src/utils/__tests__/parseFieldConfigJson.test.ts</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All tests pass</criterion>
+    <criterion>90%+ code coverage</criterion>
+    <criterion>Error cases covered</criterion>
+  </acceptance-criteria>
+</task>

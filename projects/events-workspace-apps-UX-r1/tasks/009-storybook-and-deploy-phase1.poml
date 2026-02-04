@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="009" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Add Storybook Stories and Deploy Phase 1</title>
+    <phase>1</phase>
+    <tags>pcf, calendar, storybook, deploy</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>008</dependencies>
+    <parallel-group>A</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Add Storybook stories for visual testing and deploy EventCalendarFilter to dev environment.</goal>
+
+    <context>
+      Storybook allows visual testing of components in isolation.
+      Deployment follows PCF-DEPLOYMENT-GUIDE.md workflow.
+    </context>
+
+    <constraints>
+      - Stories for all states (empty, with events, selected, range)
+      - Light and dark mode stories
+      - Deploy as unmanaged solution
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="docs/guides/PCF-DEPLOYMENT-GUIDE.md" reason="Deployment workflow" />
+      <file path="src/client/pcf/VisualHost/stories/CalendarVisual.stories.tsx" reason="Story patterns" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create Calendar.stories.tsx with:
+      - Default state
+      - With event indicators
+      - With date selected
+      - With range selected
+      - Dark mode variant
+    </step>
+    <step order="2">Run Storybook to verify all stories render</step>
+    <step order="3">Build for production: npm run build:prod</step>
+    <step order="4">Update version in 5 locations</step>
+    <step order="5">Copy build artifacts to Solution folder</step>
+    <step order="6">Pack and import solution</step>
+    <step order="7">Verify in Dataverse test form</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/pcf/EventCalendarFilter/stories/Calendar.stories.tsx</artifact>
+    <artifact type="file">src/client/pcf/EventCalendarFilter/Solution/bin/SpaarkeEventCalendarFilter_v1.0.0.zip</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All Storybook stories render correctly</criterion>
+    <criterion>Solution imports without errors</criterion>
+    <criterion>Control renders in Dataverse test form</criterion>
+    <criterion>Version footer shows 1.0.0</criterion>
+  </acceptance-criteria>
+</task>

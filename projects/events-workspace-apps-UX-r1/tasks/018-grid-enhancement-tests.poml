@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="018" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Add Unit Tests for Grid Enhancements</title>
+    <phase>2</phase>
+    <tags>pcf, grid, testing</tags>
+    <estimate>3 hours</estimate>
+    <dependencies>017</dependencies>
+    <parallel-group>B</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Add unit tests for all new grid features achieving 80%+ coverage.</goal>
+
+    <context>
+      New features: calendar filter, bi-directional sync, hyperlink column, checkbox column,
+      optimistic update, column filters.
+    </context>
+
+    <constraints>
+      - 80%+ coverage on new code
+      - Mock PCF context and dataset
+      - Test all filter scenarios
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/patterns/testing/unit-test-structure.md" reason="Test patterns" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Test calendar filter parsing</step>
+    <step order="2">Test date filtering on dataset</step>
+    <step order="3">Test bi-directional sync output</step>
+    <step order="4">Test hyperlink column behavior</step>
+    <step order="5">Test checkbox selection</step>
+    <step order="6">Test optimistic update</step>
+    <step order="7">Test column filters</step>
+    <step order="8">Verify 80%+ coverage</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/pcf/UniversalDatasetGrid/control/components/__tests__/DatasetGrid.test.tsx (updated)</artifact>
+    <artifact type="file">src/client/pcf/UniversalDatasetGrid/control/utils/__tests__/dateFilter.test.ts</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All tests pass</criterion>
+    <criterion>80%+ coverage on new features</criterion>
+    <criterion>Filter scenarios covered</criterion>
+  </acceptance-criteria>
+</task>

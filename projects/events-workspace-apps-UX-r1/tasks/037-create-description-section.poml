@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="037" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Create Collapsible Description Section</title>
+    <phase>4</phase>
+    <tags>custom-page, sidepane, ui</tags>
+    <estimate>1-2 hours</estimate>
+    <dependencies>031</dependencies>
+    <parallel-group>C</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create collapsible Description section with multiline text editor.</goal>
+
+    <context>
+      Description is a multiline text field for event details.
+    </context>
+
+    <constraints>
+      - Fluent Textarea
+      - Auto-resize or fixed height with scroll
+    </constraints>
+  </prompt>
+
+  <steps>
+    <step order="1">Create DescriptionSection component</step>
+    <step order="2">Implement Fluent Textarea</step>
+    <step order="3">Handle text changes</step>
+    <step order="4">Style appropriately</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/solutions/EventDetailSidePane/src/components/DescriptionSection.tsx</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Multiline text entry works</criterion>
+    <criterion>Proper sizing</criterion>
+  </acceptance-criteria>
+</task>

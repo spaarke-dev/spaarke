@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Implement DueDatesWidget Card Layout</title>
+    <phase>5</phase>
+    <tags>pcf, fluent-ui, ui-components, duedates-widget</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>050</dependencies>
+    <parallel-group>D</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create card layout showing date, name, type, and countdown badge.</goal>
+
+    <context>
+      Each event card displays:
+      - Due date (formatted)
+      - Event name
+      - Event type indicator
+      - Countdown badge (days until due or overdue)
+    </context>
+
+    <constraints>
+      - Fluent UI v9 Card component
+      - Semantic color tokens only
+      - Dark mode compatible
+      - Responsive within widget container
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-021-fluent-design-system.md" reason="Fluent UI patterns" />
+      <file path=".claude/patterns/pcf/theme-management.md" reason="Theme tokens" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create EventCard component</step>
+    <step order="2">Add due date display with formatting</step>
+    <step order="3">Add event name with truncation</step>
+    <step order="4">Add event type badge/indicator</step>
+    <step order="5">Create countdown badge component</step>
+    <step order="6">Style with Fluent tokens</step>
+    <step order="7">Add hover and focus states</step>
+    <step order="8">Test in light and dark mode</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/pcf/DueDatesWidget/components/EventCard.tsx</artifact>
+    <artifact type="file">src/client/pcf/DueDatesWidget/components/CountdownBadge.tsx</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Card displays all required fields</criterion>
+    <criterion>Countdown shows days remaining/overdue</criterion>
+    <criterion>No hard-coded colors</criterion>
+    <criterion>Dark mode renders correctly</criterion>
+  </acceptance-criteria>
+</task>

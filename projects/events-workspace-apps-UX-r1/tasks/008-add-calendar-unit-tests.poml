@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="008" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Add Unit Tests for EventCalendarFilter</title>
+    <phase>1</phase>
+    <tags>pcf, calendar, testing</tags>
+    <estimate>3 hours</estimate>
+    <dependencies>006</dependencies>
+    <parallel-group>A</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Add comprehensive unit tests achieving 80%+ coverage for EventCalendarFilter.</goal>
+
+    <context>
+      Per ADR-011, PCF controls must achieve 80%+ test coverage.
+      Use Jest and React Testing Library.
+    </context>
+
+    <constraints>
+      - 80%+ code coverage
+      - Test selection, range, indicators, theme
+      - Mock PCF context appropriately
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/patterns/testing/unit-test-structure.md" reason="Test patterns" />
+      <file path="src/client/pcf/VisualHost/control/components/__tests__/CalendarVisual.test.tsx" reason="Reference test structure" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Set up Jest configuration if not present</step>
+    <step order="2">Create Calendar.test.tsx with rendering tests</step>
+    <step order="3">Add selection interaction tests</step>
+    <step order="4">Add range selection tests</step>
+    <step order="5">Add event indicator tests</step>
+    <step order="6">Add filter output format tests</step>
+    <step order="7">Verify 80%+ coverage</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/pcf/EventCalendarFilter/control/components/__tests__/Calendar.test.tsx</artifact>
+    <artifact type="file">src/client/pcf/EventCalendarFilter/control/utils/__tests__/formatFilter.test.ts</artifact>
+    <artifact type="file">src/client/pcf/EventCalendarFilter/jest.config.js</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All tests pass</criterion>
+    <criterion>80%+ code coverage</criterion>
+    <criterion>Selection scenarios covered</criterion>
+    <criterion>Range scenarios covered</criterion>
+  </acceptance-criteria>
+</task>

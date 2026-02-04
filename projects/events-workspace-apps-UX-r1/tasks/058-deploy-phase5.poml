@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="058" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Deploy Phase 5 - DueDatesWidget</title>
+    <phase>5</phase>
+    <tags>pcf, deploy, duedates-widget</tags>
+    <estimate>1.5 hours</estimate>
+    <dependencies>057</dependencies>
+    <parallel-group>D</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Build and deploy DueDatesWidget PCF to dev environment.</goal>
+
+    <context>
+      Follow PCF deployment guide for building and importing solution.
+      Test on Overview tabs of Matter and Project forms.
+    </context>
+
+    <constraints>
+      - Use unmanaged solution
+      - Test in dev environment
+      - Verify dark mode in live environment
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="docs/ai-knowledge/guides/PCF-V9-PACKAGING.md" reason="Deployment guide" />
+      <file path="scripts/Deploy-PCFWebResources.ps1" reason="Deployment script" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Build production bundle</step>
+    <step order="2">Version bump in manifest</step>
+    <step order="3">Create solution package</step>
+    <step order="4">Import to dev environment</step>
+    <step order="5">Add to Overview tab on Matter form</step>
+    <step order="6">Add to Overview tab on Project form</step>
+    <step order="7">Test card rendering</step>
+    <step order="8">Test navigation to Side Pane</step>
+    <step order="9">Test dark mode</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/pcf/DueDatesWidget/dist/</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Widget deployed successfully</criterion>
+    <criterion>Visible on Overview tabs</criterion>
+    <criterion>Navigation to Side Pane works</criterion>
+    <criterion>Dark mode functional</criterion>
+  </acceptance-criteria>
+</task>

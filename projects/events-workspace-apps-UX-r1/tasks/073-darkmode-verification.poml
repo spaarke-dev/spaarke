@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="073" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Dark Mode Verification</title>
+    <phase>7</phase>
+    <tags>testing, dark-mode, accessibility</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>070, 071</dependencies>
+    <parallel-group>E</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Comprehensive dark mode testing across all components.</goal>
+
+    <context>
+      ADR-021 requires dark mode support.
+      Verify all components adapt to Dataverse dark mode setting.
+      Check contrast ratios and readability.
+    </context>
+
+    <constraints>
+      - Test with Dataverse dark mode toggle
+      - Verify no hard-coded colors
+      - Check contrast ratios (WCAG)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-021-fluent-design-system.md" reason="Dark mode requirements" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Enable Dataverse dark mode</step>
+    <step order="2">Test EventCalendarFilter appearance</step>
+    <step order="3">Test UniversalDatasetGrid appearance</step>
+    <step order="4">Test EventDetailSidePane appearance</step>
+    <step order="5">Test DueDatesWidget appearance</step>
+    <step order="6">Test Events Custom Page appearance</step>
+    <step order="7">Check urgency badge colors in dark mode</step>
+    <step order="8">Verify text contrast ratios</step>
+    <step order="9">Screenshot documentation</step>
+    <step order="10">Fix any issues found</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">projects/events-workspace-apps-UX-r1/notes/testing/darkmode-verification.md</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All components render correctly in dark mode</criterion>
+    <criterion>No hard-coded colors found</criterion>
+    <criterion>Contrast ratios meet WCAG AA</criterion>
+    <criterion>Screenshots captured for documentation</criterion>
+  </acceptance-criteria>
+</task>

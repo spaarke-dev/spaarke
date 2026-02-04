@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Implement Optimistic Row Update Callback</title>
+    <phase>2</phase>
+    <tags>pcf, grid, optimistic-ui</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>013</dependencies>
+    <parallel-group>B</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Allow external components (Side Pane) to trigger optimistic row updates without full grid refresh.</goal>
+
+    <context>
+      When Side Pane saves an event, the grid should update that row immediately without refreshing all data.
+      This preserves scroll position and selection state.
+    </context>
+
+    <constraints>
+      - Accept callback/event for row update
+      - Update single row in local state
+      - Preserve scroll position
+      - Preserve selection state
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/events-workspace-apps-UX-r1/spec.md" reason="Optimistic update requirement" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define updateRow callback interface</step>
+    <step order="2">Expose callback via window or context</step>
+    <step order="3">Implement local state update for single row</step>
+    <step order="4">Preserve current scroll position</step>
+    <step order="5">Preserve selection state</step>
+    <step order="6">Add fallback to full refresh if needed</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/pcf/UniversalDatasetGrid/control/components/DatasetGrid.tsx (updated)</artifact>
+    <artifact type="file">src/client/pcf/UniversalDatasetGrid/control/utils/rowUpdateHandler.ts</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>updateRow callback available</criterion>
+    <criterion>Single row updates without full refresh</criterion>
+    <criterion>Scroll position preserved</criterion>
+    <criterion>Selection preserved</criterion>
+  </acceptance-criteria>
+</task>

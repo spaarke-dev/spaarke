@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Add Single Date Selection</title>
+    <phase>1</phase>
+    <tags>pcf, calendar, interaction</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>002</dependencies>
+    <parallel-group>A</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Implement single date click selection with visual feedback and selection state.</goal>
+
+    <context>
+      When user clicks a date, it should be highlighted and the filter output should update.
+      The selected date will be used to filter the Event grid to show only events on that date.
+    </context>
+
+    <constraints>
+      - Single click selects date
+      - Click same date again deselects (clears filter)
+      - Visual highlight using Fluent tokens (colorBrandBackground)
+      - Keyboard accessible (Enter/Space to select)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-021-fluent-design-system.md" reason="Accessibility requirements" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add selectedDate state to Calendar component</step>
+    <step order="2">Implement onClick handler for date cells</step>
+    <step order="3">Add visual highlight styles for selected state</step>
+    <step order="4">Add keyboard navigation (arrow keys, Enter to select)</step>
+    <step order="5">Emit selection change via callback prop</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/pcf/EventCalendarFilter/control/components/Calendar.tsx (updated)</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Click selects date with visual highlight</criterion>
+    <criterion>Click selected date deselects</criterion>
+    <criterion>Keyboard accessible</criterion>
+    <criterion>Selection callback fires on change</criterion>
+  </acceptance-criteria>
+</task>

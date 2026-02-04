@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Add Optimistic UI with Error Rollback</title>
+    <phase>4</phase>
+    <tags>custom-page, sidepane, optimistic-ui</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>040</dependencies>
+    <parallel-group>C</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Implement optimistic UI pattern - update grid immediately, rollback on error.</goal>
+
+    <context>
+      When save succeeds, notify grid to update that row immediately.
+      If save fails, rollback local changes and show error.
+    </context>
+
+    <constraints>
+      - Call grid's updateRow callback on save
+      - Rollback to previous values on error
+      - Preserve user's unsaved changes during rollback decision
+    </constraints>
+  </prompt>
+
+  <steps>
+    <step order="1">Store original values before editing</step>
+    <step order="2">On save success, call grid updateRow callback</step>
+    <step order="3">On save error, offer rollback option</step>
+    <step order="4">Implement rollback to original values</step>
+    <step order="5">Allow user to retry or discard</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/solutions/EventDetailSidePane/src/hooks/useOptimisticUpdate.ts</artifact>
+    <artifact type="file">src/solutions/EventDetailSidePane/src/App.tsx (updated)</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Grid updates on save success</criterion>
+    <criterion>Rollback works on error</criterion>
+    <criterion>User can retry save</criterion>
+  </acceptance-criteria>
+</task>

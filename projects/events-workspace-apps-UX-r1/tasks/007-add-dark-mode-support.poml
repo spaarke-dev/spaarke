@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="007" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Add Dark Mode and Theme Support</title>
+    <phase>1</phase>
+    <tags>pcf, calendar, theming, dark-mode</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>002</dependencies>
+    <parallel-group>A</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Ensure calendar fully supports light, dark, and high-contrast themes.</goal>
+
+    <context>
+      Per ADR-021, all UI must support dark mode using Fluent design tokens.
+      Theme resolution follows priority: user preference > URL > PCF context > navbar > system.
+    </context>
+
+    <constraints>
+      - NO hard-coded colors
+      - Use theme listener for dynamic theme changes
+      - Test in both light and dark mode
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-021-fluent-design-system.md" reason="Dark mode requirements" />
+      <file path=".claude/patterns/pcf/theme-management.md" reason="Theme resolution pattern" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify all styles use Fluent tokens</step>
+    <step order="2">Add theme change listener</step>
+    <step order="3">Test in dark mode - verify all text/backgrounds adapt</step>
+    <step order="4">Test in high contrast mode</step>
+    <step order="5">Fix any hard-coded colors found</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/pcf/EventCalendarFilter/control/components/Calendar.tsx (updated)</artifact>
+    <artifact type="file">src/client/pcf/EventCalendarFilter/control/index.ts (updated)</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>No hard-coded colors in codebase</criterion>
+    <criterion>Calendar renders correctly in dark mode</criterion>
+    <criterion>Theme changes apply without refresh</criterion>
+    <criterion>High contrast mode functional</criterion>
+  </acceptance-criteria>
+</task>

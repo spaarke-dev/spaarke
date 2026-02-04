@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="038" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Create Collapsible History Section</title>
+    <phase>4</phase>
+    <tags>custom-page, sidepane, ui</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>031</dependencies>
+    <parallel-group>C</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create collapsible History section showing audit trail (lazy loaded).</goal>
+
+    <context>
+      History shows created/modified info and status changes.
+      Lazy load when section expanded to improve performance.
+    </context>
+
+    <constraints>
+      - Lazy load on expand
+      - Show created by, modified by, status changes
+      - Read-only display
+    </constraints>
+  </prompt>
+
+  <steps>
+    <step order="1">Create HistorySection component</step>
+    <step order="2">Implement lazy load on expand</step>
+    <step order="3">Query audit history (or use standard fields)</step>
+    <step order="4">Display timeline of changes</step>
+    <step order="5">Format dates appropriately</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/solutions/EventDetailSidePane/src/components/HistorySection.tsx</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>History loads on expand</criterion>
+    <criterion>Shows created/modified info</criterion>
+    <criterion>Read-only display</criterion>
+  </acceptance-criteria>
+</task>

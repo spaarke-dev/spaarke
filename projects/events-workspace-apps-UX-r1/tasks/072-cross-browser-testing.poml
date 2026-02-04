@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="072" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Cross-Browser Testing (Edge, Chrome)</title>
+    <phase>7</phase>
+    <tags>testing, browser-compatibility</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>070, 071</dependencies>
+    <parallel-group>E</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Verify all components work in supported browsers.</goal>
+
+    <context>
+      Dataverse supports Edge and Chrome.
+      Test all PCF controls and Custom Pages in both browsers.
+    </context>
+
+    <constraints>
+      - Test in Microsoft Edge
+      - Test in Google Chrome
+      - Document any browser-specific issues
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/events-workspace-apps-UX-r1/spec.md" reason="NFR requirements" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Test EventCalendarFilter in Edge</step>
+    <step order="2">Test EventCalendarFilter in Chrome</step>
+    <step order="3">Test UniversalDatasetGrid enhancements in Edge</step>
+    <step order="4">Test UniversalDatasetGrid enhancements in Chrome</step>
+    <step order="5">Test EventDetailSidePane in Edge</step>
+    <step order="6">Test EventDetailSidePane in Chrome</step>
+    <step order="7">Test DueDatesWidget in Edge</step>
+    <step order="8">Test DueDatesWidget in Chrome</step>
+    <step order="9">Test Events Custom Page in Edge</step>
+    <step order="10">Test Events Custom Page in Chrome</step>
+    <step order="11">Document browser-specific issues</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">projects/events-workspace-apps-UX-r1/notes/testing/browser-compatibility.md</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All components work in Edge</criterion>
+    <criterion>All components work in Chrome</criterion>
+    <criterion>No visual regressions between browsers</criterion>
+  </acceptance-criteria>
+</task>

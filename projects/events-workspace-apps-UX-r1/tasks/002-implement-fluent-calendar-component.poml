@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Implement Fluent UI v9 Calendar Component</title>
+    <phase>1</phase>
+    <tags>pcf, calendar, fluent-ui, react</tags>
+    <estimate>3-4 hours</estimate>
+    <dependencies>001</dependencies>
+    <parallel-group>A</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Implement the core calendar component using Fluent UI v9, displaying a month view with navigation.</goal>
+
+    <context>
+      The EventCalendarFilter needs a calendar that can display 2-3 months stacked (responsive to height).
+      Fluent UI v9 provides Calendar/CalendarMonth components in @fluentui/react-components.
+
+      Reference VisualHost CalendarVisual.tsx for design patterns (but NOT code - it's React 18).
+    </context>
+
+    <constraints>
+      - MUST use @fluentui/react-components Calendar or build with Fluent primitives
+      - MUST NOT use third-party calendar libraries
+      - MUST use Fluent design tokens for all colors/spacing
+      - MUST support responsive height (2-3 months based on container)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-021-fluent-design-system.md" reason="Fluent UI v9 requirements" />
+      <file path=".claude/patterns/pcf/theme-management.md" reason="Theme token usage" />
+      <file path="src/client/pcf/VisualHost/control/components/CalendarVisual.tsx" reason="Design reference (React 18 - patterns only)" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read VisualHost CalendarVisual.tsx for design patterns (grid layout, styling approach)</step>
+    <step order="2">Create Calendar.tsx component with:
+      - Month navigation (prev/next buttons)
+      - Weekday headers
+      - Date grid (6 rows x 7 columns)
+      - Current month label
+    </step>
+    <step order="3">Use makeStyles with Fluent tokens for all styling</step>
+    <step order="4">Add responsive multi-month support based on container height</step>
+    <step order="5">Integrate into EventCalendarFilterRoot.tsx</step>
+    <step order="6">Test dark mode rendering</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/pcf/EventCalendarFilter/control/components/Calendar.tsx</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Calendar displays current month with navigation</criterion>
+    <criterion>Uses only Fluent UI v9 components and tokens</criterion>
+    <criterion>Renders correctly in light and dark mode</criterion>
+    <criterion>No hard-coded colors</criterion>
+  </acceptance-criteria>
+</task>

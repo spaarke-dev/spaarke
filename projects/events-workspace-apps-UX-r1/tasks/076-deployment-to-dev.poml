@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="076" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Final Deployment to Dev Environment</title>
+    <phase>7</phase>
+    <tags>deploy, integration</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>072, 073, 074, 075</dependencies>
+    <parallel-group>E</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Deploy all components to dev environment as final release.</goal>
+
+    <context>
+      After testing complete, deploy final versions of all components.
+      Ensure all solutions properly versioned.
+      Create deployment documentation.
+    </context>
+
+    <constraints>
+      - All tests passing
+      - Proper version numbers
+      - Deployment scripts work
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="docs/ai-knowledge/guides/PCF-V9-PACKAGING.md" reason="Deployment guide" />
+      <file path="scripts/Deploy-PCFWebResources.ps1" reason="PCF deployment" />
+      <file path="scripts/Deploy-CustomPage.ps1" reason="Custom Page deployment" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify all tests passed</step>
+    <step order="2">Update version numbers in manifests</step>
+    <step order="3">Build all PCF controls (production)</step>
+    <step order="4">Build Custom Pages (production)</step>
+    <step order="5">Create combined solution package</step>
+    <step order="6">Import solution to dev environment</step>
+    <step order="7">Verify all components functional</step>
+    <step order="8">Document deployment steps</step>
+    <step order="9">Create rollback plan</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">projects/events-workspace-apps-UX-r1/notes/deployment/final-deployment.md</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All components deployed</criterion>
+    <criterion>Version numbers updated</criterion>
+    <criterion>Deployment documentation complete</criterion>
+    <criterion>Rollback plan documented</criterion>
+  </acceptance-criteria>
+</task>

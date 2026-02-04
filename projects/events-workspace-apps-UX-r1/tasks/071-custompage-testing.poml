@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="071" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Events Custom Page Testing</title>
+    <phase>7</phase>
+    <tags>testing, integration, custom-page</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>068</dependencies>
+    <parallel-group>E</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Comprehensive testing of Events Custom Page.</goal>
+
+    <context>
+      Test system-level Events page functionality.
+      Verify all filters, navigation, and component integration.
+    </context>
+
+    <constraints>
+      - Navigate via sitemap "Events"
+      - Test with various data volumes
+      - Test filter combinations
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/events-workspace-apps-UX-r1/spec.md" reason="Acceptance criteria" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Navigate to Events via sitemap</step>
+    <step order="2">Verify page loads without errors</step>
+    <step order="3">Test calendar date selection</step>
+    <step order="4">Test Assigned To filter</step>
+    <step order="5">Test Record Type filter</step>
+    <step order="6">Test Status filter</step>
+    <step order="7">Test filter combinations</step>
+    <step order="8">Test grid row click → Side Pane</step>
+    <step order="9">Test Regarding column navigation</step>
+    <step order="10">Test Side Pane save → grid update</step>
+    <step order="11">Document any issues</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">projects/events-workspace-apps-UX-r1/notes/testing/custompage-results.md</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Page loads from sitemap</criterion>
+    <criterion>All filters work correctly</criterion>
+    <criterion>Grid-SidePane integration works</criterion>
+    <criterion>Regarding navigation works</criterion>
+  </acceptance-criteria>
+</task>

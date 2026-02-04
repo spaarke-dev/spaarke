@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Scaffold EventDetailSidePane Custom Page</title>
+    <phase>4</phase>
+    <tags>custom-page, sidepane, scaffold</tags>
+    <estimate>3 hours</estimate>
+    <dependencies>025</dependencies>
+    <parallel-group>C</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create Custom Page scaffolding for EventDetailSidePane with React/Fluent structure.</goal>
+
+    <context>
+      EventDetailSidePane is a Custom Page that will be rendered in Dataverse side pane.
+      It receives eventId and eventType as parameters.
+    </context>
+
+    <constraints>
+      - Custom Page using React
+      - Receive params via URL/webResourceParams
+      - Use Fluent UI v9
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="docs/guides/PCF-DEPLOYMENT-GUIDE.md" reason="Custom Page patterns" />
+      <file path="scripts/Deploy-CustomPage.ps1" reason="Deployment script" />
+      <file path="projects/events-workspace-apps-UX-r1/design.md" reason="Side Pane layout" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create Custom Page project structure in src/solutions/</step>
+    <step order="2">Set up React entry point</step>
+    <step order="3">Parse eventId and eventType from params</step>
+    <step order="4">Create EventDetailPane root component</step>
+    <step order="5">Add FluentProvider wrapper</step>
+    <step order="6">Display placeholder with params (track in PLACEHOLDER-TRACKER.md)</step>
+  </steps>
+
+  <outputs>
+    <artifact type="directory">src/solutions/EventDetailSidePane/</artifact>
+    <artifact type="file">src/solutions/EventDetailSidePane/src/App.tsx</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Custom Page structure created</criterion>
+    <criterion>Params parsed from URL</criterion>
+    <criterion>Placeholder displays eventId</criterion>
+  </acceptance-criteria>
+</task>

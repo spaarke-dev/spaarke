@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Implement DueDatesWidget Filter Logic</title>
+    <phase>5</phase>
+    <tags>pcf, webapi, filtering, duedates-widget</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>050</dependencies>
+    <parallel-group>D</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Implement filter logic for actionable events, overdue, and 7-day window.</goal>
+
+    <context>
+      Widget shows events that need attention:
+      - Overdue events (due date in past, not completed)
+      - Events due within 7 days
+      - Only actionable status (not completed/cancelled)
+    </context>
+
+    <constraints>
+      - Use WebAPI for Dataverse queries
+      - Filter by status reason (actionable only)
+      - Sort by due date ascending (most urgent first)
+      - Limit to 10 items for widget display
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/patterns/dataverse/web-api-client.md" reason="WebAPI patterns" />
+      <file path="projects/events-workspace-apps-UX-r1/spec.md" reason="Filter requirements" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create useUpcomingEvents hook</step>
+    <step order="2">Build FetchXML query for date range filter</step>
+    <step order="3">Add status reason filter (actionable events)</step>
+    <step order="4">Add regarding record filter (context-specific)</step>
+    <step order="5">Implement sort by due date</step>
+    <step order="6">Add limit parameter (default 10)</step>
+    <step order="7">Handle loading and error states</step>
+    <step order="8">Unit test filter logic</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/pcf/DueDatesWidget/hooks/useUpcomingEvents.ts</artifact>
+    <artifact type="file">src/client/pcf/DueDatesWidget/services/eventFilterService.ts</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Overdue events included</criterion>
+    <criterion>7-day window events included</criterion>
+    <criterion>Completed/cancelled events excluded</criterion>
+    <criterion>Results sorted by urgency</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="066" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Implement React Context for Component Communication</title>
+    <phase>6</phase>
+    <tags>custom-page, react, state-management</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>065</dependencies>
+    <parallel-group>D</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create React context for shared state between Calendar, Grid, Side Pane.</goal>
+
+    <context>
+      Components need to share state:
+      - Selected date(s) from calendar
+      - Active event for Side Pane
+      - Filter values
+      - Grid refresh triggers
+    </context>
+
+    <constraints>
+      - React 16 Context API
+      - Type-safe with TypeScript
+      - Minimize re-renders
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/patterns/react/context-pattern.md" reason="Context patterns" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define EventsPageContext type</step>
+    <step order="2">Create EventsPageProvider component</step>
+    <step order="3">Add state: selectedDates, activeEventId, filters</step>
+    <step order="4">Add actions: setSelectedDates, openEvent, setFilters</step>
+    <step order="5">Wrap App with Provider</step>
+    <step order="6">Update Calendar to use context</step>
+    <step order="7">Update Grid to use context</step>
+    <step order="8">Update Side Pane integration to use context</step>
+    <step order="9">Test state synchronization</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/solutions/EventsPage/src/context/EventsPageContext.tsx</artifact>
+    <artifact type="file">src/solutions/EventsPage/src/App.tsx (updated)</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Context provides shared state</criterion>
+    <criterion>Calendar selection updates grid filter</criterion>
+    <criterion>Grid row click updates activeEventId</criterion>
+    <criterion>No unnecessary re-renders</criterion>
+  </acceptance-criteria>
+</task>

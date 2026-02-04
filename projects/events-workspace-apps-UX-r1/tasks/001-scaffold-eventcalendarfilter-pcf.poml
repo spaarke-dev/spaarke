@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Scaffold EventCalendarFilter PCF Control</title>
+    <phase>1</phase>
+    <tags>pcf, scaffold, calendar, fluent-ui</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>none</dependencies>
+    <parallel-group>A</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create the PCF control scaffolding for EventCalendarFilter with proper project structure, manifest, and React 16 initialization pattern.</goal>
+
+    <context>
+      EventCalendarFilter is a new PCF control that provides date-based navigation and filtering for Event grids.
+      This task sets up the project structure following Spaarke conventions and ADR requirements.
+
+      The control will be placed on:
+      - Events tab of Matter/Project forms (form-bound)
+      - Events Custom Page (props-based)
+    </context>
+
+    <constraints>
+      - MUST follow ADR-022: Use React 16 APIs (ReactDOM.render, NOT createRoot)
+      - MUST follow ADR-021: Fluent UI v9 only
+      - MUST follow ADR-006: PCF structure in src/client/pcf/
+      - MUST declare platform-library in manifest (React 16.14.0, Fluent 9.46.2)
+      - MUST include version footer pattern
+      - MUST create featureconfig.json with pcfReactPlatformLibraries: "on"
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-006-pcf-over-webresources.md" reason="PCF architecture requirements" />
+      <file path=".claude/adr/ADR-021-fluent-design-system.md" reason="Fluent UI v9 requirements" />
+      <file path=".claude/adr/ADR-022-pcf-platform-libraries.md" reason="React 16 APIs, platform libraries" />
+      <file path=".claude/patterns/pcf/control-initialization.md" reason="Canonical PCF initialization pattern" />
+      <file path="src/client/pcf/CLAUDE.md" reason="PCF module conventions" />
+      <file path="src/client/pcf/UniversalDatasetGrid/control/index.ts" reason="Reference implementation" />
+      <file path="src/client/pcf/UniversalDatasetGrid/control/ControlManifest.Input.xml" reason="Manifest reference" />
+      <file path="docs/guides/PCF-DEPLOYMENT-GUIDE.md" reason="Deployment structure" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">
+      Create directory structure:
+      ```
+      src/client/pcf/EventCalendarFilter/
+      ├── control/
+      │   ├── index.ts                    # PCF entry point
+      │   ├── ControlManifest.Input.xml   # Control manifest
+      │   ├── components/
+      │   │   └── EventCalendarFilterRoot.tsx
+      │   ├── providers/
+      │   │   └── ThemeProvider.ts
+      │   ├── types/
+      │   │   └── index.ts
+      │   └── styles.css
+      ├── Solution/
+      │   ├── Controls/sprk_Spaarke.Controls.EventCalendarFilter/
+      │   ├── solution.xml
+      │   ├── customizations.xml
+      │   ├── [Content_Types].xml
+      │   └── pack.ps1
+      ├── featureconfig.json
+      ├── package.json
+      ├── tsconfig.json
+      └── EventCalendarFilter.pcfproj
+      ```
+    </step>
+
+    <step order="2">
+      Create ControlManifest.Input.xml with:
+      - namespace="Spaarke.Controls" constructor="EventCalendarFilter"
+      - version="1.0.0"
+      - Properties:
+        - filterOutput (SingleLine.Text, bound) - JSON filter output
+        - eventDatesJson (SingleLine.Text, input) - Event dates for indicators
+        - displayMode (Enum: month/multiMonth, input)
+        - selectedDateOutput (SingleLine.Text, bound) - For bi-directional sync
+      - Platform libraries: React 16.14.0, Fluent 9.46.2
+    </step>
+
+    <step order="3">
+      Create index.ts with React 16 initialization pattern:
+      - Import from "react-dom" (NOT react-dom/client)
+      - Use ReactDOM.render() in renderComponent()
+      - Use ReactDOM.unmountComponentAtNode() in destroy()
+      - Wrap in FluentProvider with resolved theme
+      - Include ErrorBoundary
+    </step>
+
+    <step order="4">
+      Create EventCalendarFilterRoot.tsx as placeholder component:
+      - Accept context and notifyOutputChanged props
+      - Display "EventCalendarFilter v1.0.0" with version footer
+      - Basic container with Fluent styling
+      - NOTE: Add to PLACEHOLDER-TRACKER.md if using placeholder content
+    </step>
+
+    <step order="5">
+      Create ThemeProvider.ts by copying pattern from UniversalDatasetGrid
+    </step>
+
+    <step order="6">
+      Create package.json with:
+      - devDependencies for React 16, Fluent v9
+      - Reference to @spaarke/ui-components
+      - Build scripts
+    </step>
+
+    <step order="7">
+      Create featureconfig.json:
+      ```json
+      {
+        "pcfReactPlatformLibraries": "on"
+      }
+      ```
+    </step>
+
+    <step order="8">
+      Create Solution folder files following PCF-DEPLOYMENT-GUIDE.md structure
+    </step>
+
+    <step order="9">
+      Build and verify:
+      - npm install
+      - npm run build
+      - Verify bundle size < 500KB
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create new files</tool>
+    <tool name="Read">Reference existing implementations</tool>
+    <tool name="Bash">Run npm commands</tool>
+    <tool name="Glob">Find reference files</tool>
+  </tools>
+
+  <outputs>
+    <artifact type="directory">src/client/pcf/EventCalendarFilter/</artifact>
+    <artifact type="file">src/client/pcf/EventCalendarFilter/control/index.ts</artifact>
+    <artifact type="file">src/client/pcf/EventCalendarFilter/control/ControlManifest.Input.xml</artifact>
+    <artifact type="file">src/client/pcf/EventCalendarFilter/package.json</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Directory structure matches specification</criterion>
+    <criterion>ControlManifest.Input.xml has correct properties and platform-library declarations</criterion>
+    <criterion>index.ts uses React 16 APIs (ReactDOM.render, unmountComponentAtNode)</criterion>
+    <criterion>npm run build succeeds</criterion>
+    <criterion>Bundle size < 500KB</criterion>
+    <criterion>Version footer displays "v1.0.0"</criterion>
+    <criterion>No placeholders OR all placeholders tracked in PLACEHOLDER-TRACKER.md</criterion>
+  </acceptance-criteria>
+</task>

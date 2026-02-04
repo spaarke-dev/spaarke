@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Create Header Section (Name, Type, Parent Link)</title>
+    <phase>4</phase>
+    <tags>custom-page, sidepane, ui</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>031</dependencies>
+    <parallel-group>C</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create the header section of the Side Pane with editable name, read-only type, and clickable parent link.</goal>
+
+    <context>
+      Header shows:
+      - Event Name (editable inline)
+      - Event Type (read-only)
+      - Parent record link (clickable to navigate)
+      - Close button (X)
+    </context>
+
+    <constraints>
+      - Use Fluent UI Input for name
+      - Parent link uses regarding fields
+      - Close via side pane API
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/events-workspace-apps-UX-r1/design.md" reason="Header layout spec" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load Event record via WebAPI</step>
+    <step order="2">Create HeaderSection component</step>
+    <step order="3">Implement editable Event Name input</step>
+    <step order="4">Display Event Type (lookup formatted value)</step>
+    <step order="5">Create parent record link from sprk_regardingrecordurl</step>
+    <step order="6">Add close button handler</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/solutions/EventDetailSidePane/src/components/HeaderSection.tsx</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Event name editable</criterion>
+    <criterion>Event type displayed</criterion>
+    <criterion>Parent link clickable and navigates</criterion>
+    <criterion>Close button works</criterion>
+  </acceptance-criteria>
+</task>

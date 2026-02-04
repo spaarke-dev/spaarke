@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="062" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Integrate Grid Component</title>
+    <phase>6</phase>
+    <tags>custom-page, grid, integration</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>061</dependencies>
+    <parallel-group>D</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Integrate UniversalDatasetGrid into Events Custom Page.</goal>
+
+    <context>
+      Grid displays events filtered by calendar selection.
+      Row click opens Side Pane for editing.
+      Shows Regarding column with parent record links.
+    </context>
+
+    <constraints>
+      - Receive filter from calendar state
+      - Configure columns for Events entity
+      - Wire row click to open Side Pane
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/events-workspace-apps-UX-r1/spec.md" reason="Grid requirements" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Import/embed UniversalDatasetGrid</step>
+    <step order="2">Create GridSection layout area</step>
+    <step order="3">Configure Events entity columns</step>
+    <step order="4">Wire calendar filter to grid query</step>
+    <step order="5">Add onRowSelect handler</step>
+    <step order="6">Configure "Regarding" column rendering</step>
+    <step order="7">Test filter → grid refresh flow</step>
+    <step order="8">Verify row click behavior</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/solutions/EventsPage/src/components/GridSection.tsx</artifact>
+    <artifact type="file">src/solutions/EventsPage/src/App.tsx (updated)</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Grid renders Events data</criterion>
+    <criterion>Calendar filter applies to grid</criterion>
+    <criterion>Row click triggers Side Pane</criterion>
+    <criterion>Regarding column shows parent links</criterion>
+  </acceptance-criteria>
+</task>

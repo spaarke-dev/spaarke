@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="044" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Add Dark Mode Support and Deploy Phase 4</title>
+    <phase>4</phase>
+    <tags>custom-page, sidepane, deploy, dark-mode</tags>
+    <estimate>3 hours</estimate>
+    <dependencies>042, 043</dependencies>
+    <parallel-group>C</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Ensure dark mode support and deploy EventDetailSidePane Custom Page.</goal>
+
+    <context>
+      Verify all components support dark mode, then deploy as Custom Page.
+    </context>
+
+    <constraints>
+      - All components use Fluent tokens
+      - Test in light and dark mode
+      - Deploy via Custom Page workflow
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="scripts/Deploy-CustomPage.ps1" reason="Deployment script" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify no hard-coded colors</step>
+    <step order="2">Test all sections in dark mode</step>
+    <step order="3">Fix any theme issues</step>
+    <step order="4">Build Custom Page</step>
+    <step order="5">Deploy to dev environment</step>
+    <step order="6">Test grid hyperlink → Side Pane flow</step>
+    <step order="7">Test save and optimistic update</step>
+    <step order="8">Document any issues</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/solutions/EventDetailSidePane/dist/</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Dark mode fully functional</criterion>
+    <criterion>Custom Page deploys</criterion>
+    <criterion>Side Pane opens from grid</criterion>
+    <criterion>Save and update flow works</criterion>
+  </acceptance-criteria>
+</task>

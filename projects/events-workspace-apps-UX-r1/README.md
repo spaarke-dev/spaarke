@@ -1,0 +1,122 @@
+# Events Workspace Apps UX R1
+
+> **Status**: In Progress
+> **Created**: 2026-02-04
+> **Branch**: `work/events-workspace-apps-UX-r1`
+
+---
+
+## Executive Summary
+
+This project delivers interconnected UX components that transform how users interact with Events in the Spaarke platform. The solution provides context-preserving navigation, visual date-based filtering, and Event Type-aware editing through a Due Dates Widget, Calendar-integrated Grid, and Detail Side Pane.
+
+## Scope
+
+### Deliverables
+
+| Component | Type | Description |
+|-----------|------|-------------|
+| **DueDatesWidget** | PCF Control | Card-based view of upcoming actionable Events on Overview tabs |
+| **EventCalendarFilter** | PCF Control | Date-based navigation using Fluent UI v9 calendar |
+| **UniversalDatasetGrid Enhancement** | PCF Enhancement | Calendar filter integration, bi-directional sync, hyperlink-to-sidepane |
+| **EventDetailSidePane** | Custom Page | Context-preserving Event editing with Event Type-aware fields |
+| **Events Custom Page** | Custom Page | System-level Events view replacing OOB entity main view |
+| **EventTypeService** | Shared Service | Field visibility logic extracted from EventFormController |
+
+### Out of Scope
+
+- Grouping in Events page (Today, This Week, Later)
+- View selector dropdown (using column filters instead)
+- Mobile-specific layouts
+- Event creation wizard
+- Workflow automation triggers
+
+## Technical Approach
+
+### Key Constraints
+
+| ADR | Constraint |
+|-----|------------|
+| ADR-006 | PCF controls only (no legacy webresources) |
+| ADR-011 | Dataset PCF over native subgrids |
+| ADR-012 | Shared components via `@spaarke/ui-components` |
+| ADR-021 | Fluent UI v9 exclusively, dark mode required |
+| ADR-022 | React 16 APIs only (`ReactDOM.render`, not `createRoot`) |
+
+### Architecture
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│  Record Form (Matter/Project)                                   │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │ Overview Tab                                              │  │
+│  │ ┌────────────────────────────────────────────────────┐   │  │
+│  │ │ DueDatesWidget PCF                                  │   │  │
+│  │ │ (card-based, click opens Events tab + Side Pane)   │   │  │
+│  │ └────────────────────────────────────────────────────┘   │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │ Events Tab                                                │  │
+│  │ ┌──────────────┐  ┌─────────────────────────────────┐    │  │
+│  │ │ EventCalendar│  │ UniversalDatasetGrid (enhanced) │    │  │
+│  │ │ PCF          │◄─►│ - Calendar filter awareness     │    │  │
+│  │ │              │  │ - Hyperlink → Side Pane         │    │  │
+│  │ └──────────────┘  └─────────────────────────────────┘    │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                                     │                           │
+│  ┌──────────────────────────────────▼───────────────────────┐  │
+│  │ EventDetailSidePane (Custom Page)                         │  │
+│  │ - Event Type-aware field visibility                       │  │
+│  │ - Uses EventTypeService from shared library               │  │
+│  └──────────────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────┐
+│  Events Custom Page (System-Level, replaces OOB view)          │
+│  Same Calendar + Grid + Side Pane, with cross-record filters   │
+└────────────────────────────────────────────────────────────────┘
+```
+
+## Success Criteria
+
+| # | Criterion | Status |
+|---|-----------|--------|
+| SC-01 | Due Dates widget shows correct filter logic | [ ] |
+| SC-02 | Calendar date selection filters grid | [ ] |
+| SC-03 | Calendar range selection works | [ ] |
+| SC-04 | Grid row click highlights calendar date | [ ] |
+| SC-05 | Event Name hyperlink opens Side Pane | [ ] |
+| SC-06 | Side Pane shows Event Type-aware layout | [ ] |
+| SC-07 | Side Pane save updates row optimistically | [ ] |
+| SC-08 | Events page shows cross-record events | [ ] |
+| SC-09 | All components support dark mode | [ ] |
+| SC-10 | Checkbox vs hyperlink pattern works | [ ] |
+| SC-11 | Grid matches Power Apps look/feel | [ ] |
+| SC-12 | Side pane respects security role | [ ] |
+
+## Quick Links
+
+| Resource | Path |
+|----------|------|
+| Implementation Plan | [plan.md](plan.md) |
+| AI Context | [CLAUDE.md](CLAUDE.md) |
+| Specification | [spec.md](spec.md) |
+| Design Document | [design.md](design.md) |
+| Task Index | [tasks/TASK-INDEX.md](tasks/TASK-INDEX.md) |
+
+## Getting Started
+
+```bash
+# View current task
+cat projects/events-workspace-apps-UX-r1/current-task.md
+
+# Start next task
+work on task 001
+
+# Check project status
+/project-status events-workspace-apps-UX-r1
+```
+
+---
+
+*Generated by project-pipeline skill*

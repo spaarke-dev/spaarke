@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Integrate Calendar Component</title>
+    <phase>6</phase>
+    <tags>custom-page, calendar, integration</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>060</dependencies>
+    <parallel-group>D</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Integrate EventCalendarFilter into Events Custom Page.</goal>
+
+    <context>
+      Calendar component from Phase 1 is embedded in the page.
+      Provides date filtering for the grid below.
+      Bi-directional sync with grid selection.
+    </context>
+
+    <constraints>
+      - Import EventCalendarFilter component/bundle
+      - Wire up filter state
+      - Maintain calendar selection state
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/events-workspace-apps-UX-r1/spec.md" reason="Integration requirements" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Import EventCalendarFilter component</step>
+    <step order="2">Create CalendarSection layout area</step>
+    <step order="3">Wire onDateSelect callback</step>
+    <step order="4">Store selected date in page state</step>
+    <step order="5">Pass filter state to grid integration</step>
+    <step order="6">Test date selection flow</step>
+    <step order="7">Verify visual consistency</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/solutions/EventsPage/src/components/CalendarSection.tsx</artifact>
+    <artifact type="file">src/solutions/EventsPage/src/App.tsx (updated)</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Calendar renders in page</criterion>
+    <criterion>Date selection updates state</criterion>
+    <criterion>Filter value propagates</criterion>
+  </acceptance-criteria>
+</task>

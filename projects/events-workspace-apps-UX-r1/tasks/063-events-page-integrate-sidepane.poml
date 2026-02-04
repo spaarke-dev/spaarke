@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="063" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Integrate Side Pane</title>
+    <phase>6</phase>
+    <tags>custom-page, side-pane, integration</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>062</dependencies>
+    <parallel-group>D</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Integrate EventDetailSidePane into Events Custom Page.</goal>
+
+    <context>
+      Grid row click opens Side Pane with event details.
+      Side Pane save triggers optimistic grid row update.
+      Uses Xrm.App.sidePanes API.
+    </context>
+
+    <constraints>
+      - Use sidePanes.createPane
+      - Pass event ID to pane
+      - Handle pane close event
+      - Update grid on save
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/events-workspace-apps-UX-r1/spec.md" reason="Side Pane requirements" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create openSidePane utility function</step>
+    <step order="2">Wire grid row click to openSidePane</step>
+    <step order="3">Configure Side Pane parameters</step>
+    <step order="4">Handle onSave callback from pane</step>
+    <step order="5">Implement optimistic row update</step>
+    <step order="6">Handle pane close event</step>
+    <step order="7">Test open/save/close flow</step>
+    <step order="8">Test grid row update after save</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/solutions/EventsPage/src/services/sidePaneService.ts</artifact>
+    <artifact type="file">src/solutions/EventsPage/src/App.tsx (updated)</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Side Pane opens on row click</criterion>
+    <criterion>Correct event loads in pane</criterion>
+    <criterion>Grid updates after save</criterion>
+    <criterion>Pane closes properly</criterion>
+  </acceptance-criteria>
+</task>

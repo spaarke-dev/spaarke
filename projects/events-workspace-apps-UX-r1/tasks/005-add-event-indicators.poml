@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Add Event Indicators (Dots on Dates)</title>
+    <phase>1</phase>
+    <tags>pcf, calendar, visualization</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>002</dependencies>
+    <parallel-group>A</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Display dot indicators on calendar dates that have events.</goal>
+
+    <context>
+      The calendar receives event dates via eventDatesJson property.
+      Dates with events should show a small dot/badge indicator.
+      Multiple events on same date can show count badge.
+    </context>
+
+    <constraints>
+      - Dot uses Fluent brand color token
+      - Badge shows count if > 1 event
+      - Must not impact date selection click area
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="src/client/pcf/VisualHost/control/components/CalendarVisual.tsx" reason="Event indicator design reference" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Parse eventDatesJson prop to Map&lt;dateString, count&gt;</step>
+    <step order="2">Add dot indicator component</step>
+    <step order="3">Add count badge for dates with multiple events</step>
+    <step order="4">Style indicators using Fluent tokens</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/pcf/EventCalendarFilter/control/components/Calendar.tsx (updated)</artifact>
+    <artifact type="file">src/client/pcf/EventCalendarFilter/control/components/DateIndicator.tsx</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Dots appear on dates with events</criterion>
+    <criterion>Count badge shows for multiple events</criterion>
+    <criterion>Indicators don't interfere with click</criterion>
+  </acceptance-criteria>
+</task>

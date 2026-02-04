@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="017" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Match Power Apps Grid Styling Exactly</title>
+    <phase>2</phase>
+    <tags>pcf, grid, styling</tags>
+    <estimate>3 hours</estimate>
+    <dependencies>011, 016</dependencies>
+    <parallel-group>B</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Ensure grid visually matches native Power Apps grid control exactly.</goal>
+
+    <context>
+      Per owner clarification, the grid must not appear "retrofitted".
+      It should be indistinguishable from the standard Power Apps grid.
+    </context>
+
+    <constraints>
+      - Match row height, padding, fonts
+      - Match header styling
+      - Match hover/selection states
+      - Match scrollbar styling
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/adr/ADR-021-fluent-design-system.md" reason="Fluent styling" />
+      <file path="projects/events-workspace-apps-UX-r1/spec.md" reason="Match Power Apps requirement" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Screenshot native Power Apps grid for reference</step>
+    <step order="2">Compare and adjust row height</step>
+    <step order="3">Adjust column header styling</step>
+    <step order="4">Match hover state colors</step>
+    <step order="5">Match selection state colors</step>
+    <step order="6">Adjust cell padding</step>
+    <step order="7">Match font sizes and weights</step>
+    <step order="8">Side-by-side comparison test</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/pcf/UniversalDatasetGrid/control/styles.css (updated)</artifact>
+    <artifact type="file">src/client/pcf/UniversalDatasetGrid/control/components/DatasetGrid.tsx (updated)</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Visual comparison passes</criterion>
+    <criterion>Row height matches native</criterion>
+    <criterion>Header matches native</criterion>
+    <criterion>Doesn't look retrofitted</criterion>
+  </acceptance-criteria>
+</task>

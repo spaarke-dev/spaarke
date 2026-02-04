@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Add Bi-directional Sync (Row to Calendar)</title>
+    <phase>2</phase>
+    <tags>pcf, grid, sync</tags>
+    <estimate>2-3 hours</estimate>
+    <dependencies>011</dependencies>
+    <parallel-group>B</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>When a grid row is clicked, emit the event's due date so calendar can highlight it.</goal>
+
+    <context>
+      Bi-directional sync: Calendar → Grid (filtering) is done. Now Grid → Calendar (highlighting).
+      When user clicks a row, the calendar should highlight that event's due date.
+    </context>
+
+    <constraints>
+      - Output property: selectedEventDate (SingleLine.Text)
+      - Emit ISO date string
+      - Only emit on row click (not checkbox)
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/events-workspace-apps-UX-r1/spec.md" reason="Bi-directional sync requirement" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add selectedEventDate output property to manifest</step>
+    <step order="2">Add row click handler (not checkbox)</step>
+    <step order="3">Extract sprk_duedate from clicked row</step>
+    <step order="4">Format as ISO date string</step>
+    <step order="5">Call notifyOutputChanged</step>
+    <step order="6">Update getOutputs() to return date</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/pcf/UniversalDatasetGrid/control/ControlManifest.Input.xml (updated)</artifact>
+    <artifact type="file">src/client/pcf/UniversalDatasetGrid/control/components/DatasetGrid.tsx (updated)</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Row click emits due date</criterion>
+    <criterion>Checkbox click does NOT emit date</criterion>
+    <criterion>Output property updates correctly</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="064" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Implement "Regarding" Column with Parent Links</title>
+    <phase>6</phase>
+    <tags>custom-page, grid, navigation</tags>
+    <estimate>1.5 hours</estimate>
+    <dependencies>062</dependencies>
+    <parallel-group>D</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Add "Regarding" column that links to parent record.</goal>
+
+    <context>
+      System-level Events page shows events from all parent records.
+      "Regarding" column shows parent record name with clickable link.
+      Link navigates to parent record's main form.
+    </context>
+
+    <constraints>
+      - Handle multiple entity types (Matter, Project, etc.)
+      - Use Xrm.Navigation.openForm for navigation
+      - Format display text appropriately
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path=".claude/patterns/dataverse/xrm-navigation.md" reason="Navigation patterns" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define RegardingColumn component</step>
+    <step order="2">Fetch parent record metadata</step>
+    <step order="3">Render as clickable link</step>
+    <step order="4">Implement navigation to parent form</step>
+    <step order="5">Handle different entity types</step>
+    <step order="6">Add entity icon/indicator</step>
+    <step order="7">Test navigation for each entity type</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/solutions/EventsPage/src/components/RegardingColumn.tsx</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Column displays parent record name</criterion>
+    <criterion>Click navigates to parent form</criterion>
+    <criterion>Works for all polymorphic entity types</criterion>
+  </acceptance-criteria>
+</task>

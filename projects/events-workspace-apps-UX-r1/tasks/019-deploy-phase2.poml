@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="019" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Deploy and Test Phase 2 (Grid Enhancement)</title>
+    <phase>2</phase>
+    <tags>pcf, grid, deploy</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>018</dependencies>
+    <parallel-group>B</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Deploy enhanced UniversalDatasetGrid and test integration with EventCalendarFilter.</goal>
+
+    <context>
+      This completes Phase 2. The grid should work with the calendar from Phase 1.
+    </context>
+
+    <constraints>
+      - Deploy as unmanaged solution
+      - Test calendar-grid integration
+      - Verify all new features work in Dataverse
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="docs/guides/PCF-DEPLOYMENT-GUIDE.md" reason="Deployment workflow" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Build grid: npm run build:prod</step>
+    <step order="2">Update version in 5 locations</step>
+    <step order="3">Deploy solution</step>
+    <step order="4">Configure test form with Calendar + Grid</step>
+    <step order="5">Test calendar filtering</step>
+    <step order="6">Test bi-directional sync</step>
+    <step order="7">Test hyperlink side pane action</step>
+    <step order="8">Test checkbox selection</step>
+    <step order="9">Document any issues</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/pcf/UniversalDatasetGrid/Solution/bin/SpaarkeUniversalDatasetGrid_vX.Y.Z.zip</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Solution deploys without errors</criterion>
+    <criterion>Calendar filtering works</criterion>
+    <criterion>Bi-directional sync works</criterion>
+    <criterion>All new features functional</criterion>
+  </acceptance-criteria>
+</task>

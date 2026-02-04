@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Implement Side Pane Opening via Xrm.App.sidePanes</title>
+    <phase>4</phase>
+    <tags>custom-page, sidepane, xrm</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>030</dependencies>
+    <parallel-group>C</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Wire up side pane opening from grid hyperlink using Xrm.App.sidePanes API.</goal>
+
+    <context>
+      The grid's hyperlink column (task 013) needs to open this Custom Page in a side pane.
+      Use Xrm.App.sidePanes.createPane() with proper parameters.
+    </context>
+
+    <constraints>
+      - 400px width
+      - Closeable
+      - Reuse existing pane if open
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/events-workspace-apps-UX-r1/design.md" reason="Side pane API usage" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create openEventDetailPane utility function</step>
+    <step order="2">Check for existing pane with same ID</step>
+    <step order="3">If exists, update params and navigate</step>
+    <step order="4">If not, create new pane</step>
+    <step order="5">Wire up in grid's hyperlink handler</step>
+    <step order="6">Test pane opens correctly</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/pcf/UniversalDatasetGrid/control/utils/sidePaneUtils.ts</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Side pane opens on hyperlink click</criterion>
+    <criterion>Correct eventId passed</criterion>
+    <criterion>Pane reuses if already open</criterion>
+    <criterion>400px width, closeable</criterion>
+  </acceptance-criteria>
+</task>

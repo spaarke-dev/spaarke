@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Add Unsaved Changes Prompt</title>
+    <phase>4</phase>
+    <tags>custom-page, sidepane, ux</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>041</dependencies>
+    <parallel-group>C</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Prompt user when closing Side Pane or switching events with unsaved changes.</goal>
+
+    <context>
+      If user has edited fields and tries to close or switch to different event,
+      prompt to save/discard/cancel.
+    </context>
+
+    <constraints>
+      - Detect dirty state
+      - Show dialog on close attempt
+      - Show dialog on event switch
+      - Options: Save, Discard, Cancel
+    </constraints>
+  </prompt>
+
+  <steps>
+    <step order="1">Track isDirty state</step>
+    <step order="2">Intercept pane close</step>
+    <step order="3">Intercept event switch</step>
+    <step order="4">Create UnsavedChangesDialog component</step>
+    <step order="5">Handle Save, Discard, Cancel actions</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/solutions/EventDetailSidePane/src/components/UnsavedChangesDialog.tsx</artifact>
+    <artifact type="file">src/solutions/EventDetailSidePane/src/App.tsx (updated)</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Prompt appears on close with unsaved changes</criterion>
+    <criterion>Save option saves and closes</criterion>
+    <criterion>Discard option closes without saving</criterion>
+    <criterion>Cancel returns to editing</criterion>
+  </acceptance-criteria>
+</task>

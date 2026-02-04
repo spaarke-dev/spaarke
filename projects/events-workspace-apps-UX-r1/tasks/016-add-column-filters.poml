@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Add Column/Field Filters</title>
+    <phase>2</phase>
+    <tags>pcf, grid, filtering</tags>
+    <estimate>3 hours</estimate>
+    <dependencies>010</dependencies>
+    <parallel-group>B</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Add standard column-level filtering to match Power Apps grid behavior.</goal>
+
+    <context>
+      Instead of view selector dropdown, we're using column filters.
+      This provides standard Power Apps-style filtering capabilities.
+    </context>
+
+    <constraints>
+      - Filter icon in column headers
+      - Standard filter UI (text, choice, date)
+      - Multiple column filters combine with AND
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/events-workspace-apps-UX-r1/spec.md" reason="Column filter requirement" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add filter icon to column headers</step>
+    <step order="2">Create filter popup component</step>
+    <step order="3">Implement text filter</step>
+    <step order="4">Implement choice/option filter</step>
+    <step order="5">Implement date filter</step>
+    <step order="6">Apply combined filters to dataset</step>
+    <step order="7">Show active filter indicator</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/pcf/UniversalDatasetGrid/control/components/ColumnFilter.tsx</artifact>
+    <artifact type="file">src/client/pcf/UniversalDatasetGrid/control/components/FilterPopup.tsx</artifact>
+    <artifact type="file">src/client/pcf/UniversalDatasetGrid/control/components/DatasetGrid.tsx (updated)</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Filter icon in headers</criterion>
+    <criterion>Filter popup works</criterion>
+    <criterion>Filters apply to dataset</criterion>
+    <criterion>Active filters indicated</criterion>
+  </acceptance-criteria>
+</task>

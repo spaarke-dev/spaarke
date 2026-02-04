@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="events-workspace-apps-UX-r1">
+  <metadata>
+    <title>Add sprk_fieldconfigjson Parsing</title>
+    <phase>3</phase>
+    <tags>shared-library, service, json</tags>
+    <estimate>2 hours</estimate>
+    <dependencies>021</dependencies>
+    <parallel-group>A</parallel-group>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Add parsing for the sprk_fieldconfigjson field on Event Type for flexible field configuration.</goal>
+
+    <context>
+      Event Types can have a JSON text field (sprk_fieldconfigjson) that allows admins to configure
+      which fields are visible, hidden, required, and section expand/collapse defaults.
+
+      This is in addition to the existing boolean fields (sprk_requiresbasedate, etc.).
+    </context>
+
+    <constraints>
+      - Parse JSON safely (handle invalid JSON)
+      - Merge with boolean field values (JSON takes precedence)
+      - Validate JSON structure
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file path="projects/events-workspace-apps-UX-r1/spec.md" reason="JSON config structure" />
+      <file path="projects/events-workspace-apps-UX-r1/design.md" reason="EventTypeConfig interface" />
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define FieldConfigJson TypeScript interface</step>
+    <step order="2">Add parseFieldConfigJson function with error handling</step>
+    <step order="3">Merge JSON config with boolean fields</step>
+    <step order="4">Add validation for known field names</step>
+    <step order="5">Return merged EventTypeFieldConfig</step>
+  </steps>
+
+  <outputs>
+    <artifact type="file">src/client/shared/Spaarke.UI.Components/src/services/EventTypeService.ts (updated)</artifact>
+    <artifact type="file">src/client/shared/Spaarke.UI.Components/src/utils/parseFieldConfigJson.ts</artifact>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>JSON parsing handles invalid JSON gracefully</criterion>
+    <criterion>JSON config merged with boolean fields</criterion>
+    <criterion>Returns complete field configuration</criterion>
+  </acceptance-criteria>
+</task>
