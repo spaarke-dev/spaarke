@@ -35,13 +35,13 @@
     <!-- Microsoft Graph SDK v5.x (CRITICAL - must be 5.x or higher) -->
     <PackageReference Include="Microsoft.Graph" Version="5.100.0" />
     <!-- Kiota packages - all must be same version to avoid assembly binding conflicts -->
-    <PackageReference Include="Microsoft.Kiota.Abstractions" Version="1.21.1" />
+    <PackageReference Include="Microsoft.Kiota.Abstractions" Version="1.21.2" />
     <PackageReference Include="Microsoft.Kiota.Authentication.Azure" Version="1.21.1" />
     <PackageReference Include="Microsoft.Kiota.Http.HttpClientLibrary" Version="1.21.1" />
     <PackageReference Include="Microsoft.Kiota.Serialization.Form" Version="1.21.1" />
     <PackageReference Include="Microsoft.Kiota.Serialization.Json" Version="1.21.1" />
     <PackageReference Include="Microsoft.Kiota.Serialization.Multipart" Version="1.21.1" />
-    <PackageReference Include="Microsoft.Kiota.Serialization.Text" Version="1.21.1" />
+    <PackageReference Include="Microsoft.Kiota.Serialization.Text" Version="1.21.2" />
 
     <!-- Microsoft Identity (CRITICAL - must be 3.x or higher) -->
     <!-- Identity.Web 3.8.2+ fixes CVE-2025-32016; requires Identity.Client >= 4.70.0 -->
