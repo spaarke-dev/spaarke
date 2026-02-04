@@ -37,7 +37,7 @@ claude --dangerously-skip-permissions
 | Status | Task | Title | Dependencies | Parallel |
 |--------|------|-------|--------------|----------|
 | 🔲 | 001 | Scaffold EventCalendarFilter PCF control | None | Group A |
-| 🔲 | 002 | Implement Fluent UI v9 Calendar component | 001 | Group A |
+| 🔲 | 002 | Implement multi-month vertical stack calendar | 001 | Group A |
 | 🔲 | 003 | Add single date selection | 002 | Group A |
 | 🔲 | 004 | Add range selection (Shift+click) | 003 | Group A |
 | 🔲 | 005 | Add event indicators (dots on dates) | 002 | Group A |
@@ -106,8 +106,8 @@ claude --dangerously-skip-permissions
 |--------|------|-------|--------------|----------|
 | 🔲 | 050 | Scaffold DueDatesWidget PCF control | 044 | Group D |
 | 🔲 | 051 | Implement filter logic (actionable events) | 050 | Group D |
-| 🔲 | 052 | Create card component with layout | 050 | Group D |
-| 🔲 | 053 | Add color-coded urgency badges | 052 | Group D |
+| 🔲 | 052 | Implement list layout (per mockup) | 050 | Group D |
+| 🔲 | 053 | Implement event type badges + days-until-due indicator | 052 | Group D |
 | 🔲 | 054 | Implement click card → Events tab + Side Pane | 052, 044 | Group D |
 | 🔲 | 055 | Add "All Events" link | 052 | Group D |
 | 🔲 | 056 | Add dark mode support | 053 | Group D |

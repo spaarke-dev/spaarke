@@ -1,30 +1,38 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="053" project="events-workspace-apps-UX-r1">
   <metadata>
-    <title>Implement Color-Coded Urgency Badges</title>
+    <title>Implement Event Type Badges and Days-Until-Due Indicator</title>
     <phase>5</phase>
     <tags>pcf, fluent-ui, ui-components, duedates-widget</tags>
-    <estimate>1.5 hours</estimate>
+    <estimate>2 hours</estimate>
     <dependencies>052</dependencies>
     <parallel-group>D</parallel-group>
     <status>pending</status>
   </metadata>
 
   <prompt>
-    <goal>Add color-coded urgency badges using semantic tokens.</goal>
+    <goal>Implement event type color coding and days-until-due indicator logic.</goal>
 
     <context>
-      Urgency levels:
-      - Overdue: danger/error color
-      - Due today: warning color
-      - Due within 3 days: attention color
-      - Due within 7 days: default/subtle color
+      Per mockup, there are two distinct badge types:
+
+      1. Event Type Badge (left side, colored by event type):
+         - Hearing = yellow/gold color
+         - Filing Deadline = green color
+         - Regulatory Review = purple color
+         - Other types mapped to appropriate semantic colors
+
+      2. Days-Until-Due Badge (right side, red circular):
+         - Shows number of days until due date
+         - Always red color (danger/attention)
+         - Displays as small circular badge
     </context>
 
     <constraints>
-      - Use Fluent UI semantic status colors
-      - colorStatusDangerForeground1 for overdue
-      - colorStatusWarningForeground1 for today
+      - Event type colors from EventType configuration or semantic mapping
+      - Days-until-due uses Fluent danger/status colors
+      - Must handle overdue (negative days) display
+      - Accessible labels for screen readers
       - No hard-coded hex values
     </constraints>
   </prompt>
@@ -33,28 +41,51 @@
     <files>
       <file path=".claude/adr/ADR-021-fluent-design-system.md" reason="Color tokens" />
       <file path=".claude/patterns/pcf/theme-management.md" reason="Theme resolution" />
+      <file path="projects/events-workspace-apps-UX-r1/notes/mockups/record-overview-tab-upcoming-events-section.png" reason="Visual mockup reference" />
     </files>
   </knowledge>
 
   <steps>
-    <step order="1">Define urgency level enum/type</step>
-    <step order="2">Create getUrgencyLevel utility function</step>
-    <step order="3">Map urgency to Fluent semantic tokens</step>
-    <step order="4">Update CountdownBadge with urgency colors</step>
-    <step order="5">Add accessible labels for color-blind users</step>
-    <step order="6">Test all urgency levels</step>
-    <step order="7">Verify dark mode contrast</step>
+    <step order="1">Create EventType color mapping utility:
+      - Map event type names to Fluent color tokens
+      - Hearing → colorPaletteYellowBackground2/Foreground2
+      - Filing → colorPaletteGreenBackground2/Foreground2
+      - Regulatory → colorPalettePurpleBackground2/Foreground2
+      - Default fallback for unmapped types
+    </step>
+    <step order="2">Update EventTypeBadge component to use color mapping</step>
+    <step order="3">Create getDaysUntilDue utility function:
+      - Calculate days between now and due date
+      - Handle past due (negative values)
+      - Return formatted display string
+    </step>
+    <step order="4">Update DaysUntilDueBadge with:
+      - Red background using colorStatusDangerBackground2
+      - White text for contrast
+      - Circular shape styling
+    </step>
+    <step order="5">Add accessible labels:
+      - aria-label for event type badge
+      - aria-label for days until due ("3 days until due" or "2 days overdue")
+    </step>
+    <step order="6">Test all event types render with correct colors</step>
+    <step order="7">Test days-until-due for future, today, and past dates</step>
+    <step order="8">Verify dark mode contrast</step>
   </steps>
 
   <outputs>
-    <artifact type="file">src/client/pcf/DueDatesWidget/utils/urgencyUtils.ts</artifact>
-    <artifact type="file">src/client/pcf/DueDatesWidget/components/CountdownBadge.tsx (updated)</artifact>
+    <artifact type="file">src/client/pcf/DueDatesWidget/utils/eventTypeColors.ts</artifact>
+    <artifact type="file">src/client/pcf/DueDatesWidget/utils/daysUntilDue.ts</artifact>
+    <artifact type="file">src/client/pcf/DueDatesWidget/components/EventTypeBadge.tsx (updated)</artifact>
+    <artifact type="file">src/client/pcf/DueDatesWidget/components/DaysUntilDueBadge.tsx (updated)</artifact>
   </outputs>
 
   <acceptance-criteria>
-    <criterion>Overdue events show danger color</criterion>
-    <criterion>Due today shows warning color</criterion>
-    <criterion>All colors from semantic tokens</criterion>
-    <criterion>Accessible to color-blind users</criterion>
+    <criterion>Event type badges show correct colors per type</criterion>
+    <criterion>Days-until-due shows as red circular badge</criterion>
+    <criterion>Handles overdue events appropriately</criterion>
+    <criterion>All colors from Fluent semantic tokens</criterion>
+    <criterion>Accessible to screen readers</criterion>
+    <criterion>Dark mode contrast verified</criterion>
   </acceptance-criteria>
 </task>
