@@ -8,9 +8,9 @@
  * 4. Returns mapping results for UI feedback
  *
  * SCHEMA UPDATE (Feb 2026):
- * - Profile.Source Entity -> Profile.Source Record Type (lookup to sprk_recordtype)
- * - Profile.Target Entity -> Profile.Target Record Type (lookup to sprk_recordtype)
- * - sprk_recordtype has sprk_entitylogicalname field for entity lookup
+ * - Profile.Source Entity -> Profile.Source Record Type (lookup to sprk_recordtype_ref)
+ * - Profile.Target Entity -> Profile.Target Record Type (lookup to sprk_recordtype_ref)
+ * - sprk_recordtype_ref fields: sprk_recordlogicalname, sprk_recorddisplayname, sprk_regardingfield
  *
  * ADR Compliance:
  * - ADR-012: Uses FieldMappingService from @spaarke/ui-components
@@ -63,7 +63,7 @@ export interface IFieldMappingServiceConfig {
  * FieldMappingService - Queries Dataverse for mapping profiles and applies mappings
  *
  * Updated to use Record Type lookups instead of text entity fields.
- * Queries sprk_fieldmappingprofile with expanded sprk_recordtype lookups.
+ * Queries sprk_fieldmappingprofile with expanded sprk_recordtype_ref lookups.
  */
 class FieldMappingService {
     private webApi: ComponentFramework.WebApi;
@@ -79,7 +79,7 @@ class FieldMappingService {
 
     /**
      * Get Record Type ID for an entity logical name
-     * Queries sprk_recordtype where sprk_entitylogicalname matches
+     * Queries sprk_recordtype_ref where sprk_recordlogicalname matches
      */
     private async getRecordTypeId(entityLogicalName: string): Promise<string | null> {
         // Check cache
@@ -88,15 +88,15 @@ class FieldMappingService {
         }
 
         try {
-            const query = `?$filter=sprk_entitylogicalname eq '${entityLogicalName}' and statecode eq 0&$select=sprk_recordtypeid,sprk_name`;
-            const result = await this.webApi.retrieveMultipleRecords("sprk_recordtype", query);
+            const query = `?$filter=sprk_recordlogicalname eq '${entityLogicalName}' and statecode eq 0&$select=sprk_recordtype_refid,sprk_recorddisplayname`;
+            const result = await this.webApi.retrieveMultipleRecords("sprk_recordtype_ref", query);
 
             if (!result.entities || result.entities.length === 0) {
                 console.log(`[FieldMappingService] No Record Type found for entity: ${entityLogicalName}`);
                 return null;
             }
 
-            const recordTypeId = result.entities[0].sprk_recordtypeid as string;
+            const recordTypeId = result.entities[0].sprk_recordtype_refid as string;
             this.recordTypeCache.set(entityLogicalName, recordTypeId);
             console.log(`[FieldMappingService] Found Record Type ${recordTypeId} for ${entityLogicalName}`);
             return recordTypeId;

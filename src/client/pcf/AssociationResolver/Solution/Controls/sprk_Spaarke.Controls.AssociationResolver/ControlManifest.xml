@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="AssociationResolver" version="1.0.2" display-name-key="Association Resolver" description-key="Allows users to select a parent entity type and record, then auto-populates fields via field mapping" control-type="standard" api-version="1.3.18">
+  <control namespace="Spaarke.Controls" constructor="AssociationResolver" version="1.0.6" display-name-key="Association Resolver" description-key="Allows users to select a parent entity type and record, then auto-populates fields via field mapping" control-type="standard" api-version="1.3.18">
     <external-service-usage enabled="false"/>
     <property name="regardingRecordType" display-name-key="Regarding Record Type" description-key="Lookup to Record Type entity for the selected parent entity type" of-type="Lookup.Simple" usage="bound" required="true"/>
     <property name="regardingRecordId" display-name-key="Regarding Record ID" description-key="GUID of the selected regarding record" of-type="SingleLine.Text" usage="bound" required="false"/>

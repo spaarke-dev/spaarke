@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ImportExportXml version="9.2.24014.198" SolutionPackageVersion="9.2" languagecode="1033" generatedBy="CRMPackager" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <SolutionManifest>
-    <UniqueName>AssociationResolverSolution</UniqueName>
+    <UniqueName>EventAutoAssociateSolution</UniqueName>
     <LocalizedNames>
-      <LocalizedName description="Association Resolver Solution" languagecode="1033" />
+      <LocalizedName description="Event Auto Associate Solution" languagecode="1033" />
     </LocalizedNames>
     <Descriptions>
-      <Description description="PCF control for resolving parent entity associations with field mapping" languagecode="1033" />
+      <Description description="Headless PCF control for auto-populating Event denormalized fields from parent subgrid" languagecode="1033" />
     </Descriptions>
-    <Version>1.0.6</Version>
+    <Version>1.0.0</Version>
     <Managed>0</Managed>
     <Publisher>
       <UniqueName>Spaarke</UniqueName>
@@ -82,7 +82,7 @@
       </Addresses>
     </Publisher>
     <RootComponents>
-      <RootComponent type="66" schemaName="sprk_Spaarke.Controls.AssociationResolver" behavior="0" />
+      <RootComponent type="66" schemaName="sprk_Spaarke.Controls.EventAutoAssociate" behavior="0" />
     </RootComponents>
     <MissingDependencies />
   </SolutionManifest>

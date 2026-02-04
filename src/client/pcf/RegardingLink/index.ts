@@ -20,7 +20,32 @@ import * as ReactDOM from "react-dom"; // React 16 - NOT react-dom/client
 import { FluentProvider, webLightTheme, webDarkTheme, Link, Theme } from "@fluentui/react-components";
 import { Open16Regular } from "@fluentui/react-icons";
 
-const CONTROL_VERSION = "1.1.5";
+const CONTROL_VERSION = "1.1.6";
+
+// ============================================================================
+// IMMEDIATE GLOBAL REGISTRATION (runs before grid initializes)
+// ============================================================================
+// Power Apps Grid looks for customizers on window BEFORE the control's init()
+// This IIFE runs immediately when the bundle loads
+(function registerGridCustomizerEarly() {
+    console.log("[RegardingLink] EARLY REGISTRATION: Setting up global customizer...");
+
+    // Will be populated when gridCustomizer is defined below
+    const earlyCustomizer = {
+        getGridCustomizer: () => {
+            console.log("[RegardingLink] EARLY getGridCustomizer() called!");
+            return (window as any).__RegardingLinkGridCustomizer || null;
+        }
+    };
+
+    // Register multiple possible discovery names
+    (window as any).RegardingLink = earlyCustomizer;
+    (window as any).RegardingLinkClass = earlyCustomizer;
+    (window as any)["Spaarke.Controls.RegardingLink"] = earlyCustomizer;
+    (window as any)["sprk_Spaarke.Controls.RegardingLink"] = earlyCustomizer;
+
+    console.log("[RegardingLink] EARLY REGISTRATION complete. Waiting for full module load...");
+})();
 
 // Entity type mapping - values correspond to sprk_recordtype.sprk_entitylogicalname
 // STUB: [CONFIG] - S007: Should query Record Type entity for dynamic mapping
@@ -191,6 +216,29 @@ const gridCustomizer: any = {
     }
 };
 
+// Store gridCustomizer globally for early registration to find
+(window as any).__RegardingLinkGridCustomizer = gridCustomizer;
+console.log("[RegardingLink] gridCustomizer stored globally as __RegardingLinkGridCustomizer");
+
+// Update early registrations with the real customizer
+(function updateEarlyRegistrations() {
+    const fullCustomizer = {
+        getGridCustomizer: () => {
+            console.log("[RegardingLink] getGridCustomizer() called via global!");
+            return gridCustomizer;
+        },
+        // Also expose cellRendererOverrides directly (some grid versions look for this)
+        cellRendererOverrides: gridCustomizer.cellRendererOverrides
+    };
+
+    (window as any).RegardingLink = fullCustomizer;
+    (window as any).RegardingLinkClass = fullCustomizer;
+    (window as any)["Spaarke.Controls.RegardingLink"] = fullCustomizer;
+    (window as any)["sprk_Spaarke.Controls.RegardingLink"] = fullCustomizer;
+
+    console.log("[RegardingLink] Global registrations updated with full customizer");
+})();
+
 /**
  * RegardingLink Virtual Control
  * Main entry point for the PCF control
@@ -263,5 +311,19 @@ export class RegardingLink implements ComponentFramework.ReactControl<IInputs, I
 // This is in addition to the static method on the class
 (RegardingLink as any).getGridCustomizer = RegardingLink.getGridCustomizer;
 
+// Final module-level registration with all possible names
+(window as any).RegardingLink = RegardingLink;
+(window as any).RegardingLinkClass = RegardingLink;
+(window as any)["Spaarke.Controls.RegardingLink"] = RegardingLink;
+(window as any)["sprk_Spaarke.Controls.RegardingLink"] = RegardingLink;
+
 // Log to verify module-level exposure
-console.log("[RegardingLink] Module loaded, getGridCustomizer exposed on class:", typeof (RegardingLink as any).getGridCustomizer);
+console.log("[RegardingLink] Module fully loaded v" + CONTROL_VERSION);
+console.log("[RegardingLink] Global names registered:", [
+    "RegardingLink",
+    "RegardingLinkClass",
+    "Spaarke.Controls.RegardingLink",
+    "sprk_Spaarke.Controls.RegardingLink"
+]);
+console.log("[RegardingLink] getGridCustomizer exists:", typeof RegardingLink.getGridCustomizer);
+console.log("[RegardingLink] cellRendererOverrides keys:", Object.keys(gridCustomizer.cellRendererOverrides));

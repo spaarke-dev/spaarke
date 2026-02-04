@@ -194,6 +194,7 @@ This project implements an event management system for Spaarke's legal practice 
 | Regarding Record Id | `sprk_regardingrecordid` | Single line text | Denormalized ID |
 | Regarding Record Name | `sprk_regardingrecordname` | Single line text | Denormalized name |
 | Regarding Record Type | `sprk_regardingrecordtype` | Choice | Project (0), Matter (1), Invoice (2), Analysis (3), Account (4), Contact (5), Work Assignment (6), Budget (7) |
+| Regarding Record URL | `sprk_regardingrecordurl` | URL | Clickable link to parent record |
 
 ### Event Type Table (`sprk_eventtype`)
 

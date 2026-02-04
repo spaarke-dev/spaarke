@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="AssociationResolver" version="1.0.2" display-name-key="Association Resolver" description-key="Allows users to select a parent entity type and record, then auto-populates fields via field mapping" control-type="standard">
+  <control namespace="Spaarke.Controls" constructor="AssociationResolver" version="1.0.6" display-name-key="Association Resolver" description-key="Allows users to select a parent entity type and record, then auto-populates fields via field mapping" control-type="standard">
     <external-service-usage enabled="false">
     </external-service-usage>
     <!-- Entity Type Selection (Lookup to Record Type entity) -->

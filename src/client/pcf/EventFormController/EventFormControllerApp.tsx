@@ -163,10 +163,10 @@ export const EventFormControllerApp: React.FC<EventFormControllerAppProps> = ({
             onStatusChange("loading");
 
             try {
-                // STUB: [API] - S003: Assumes sprk_eventtype entity exists with exact schema (Task 003 - done)
+                // STUB: [API] - S003: Assumes sprk_eventtype_ref entity exists with exact schema (Task 003 - done)
                 // Fields: sprk_requiredfields (comma-separated), sprk_hiddenfields (comma-separated)
                 const result = await context.webAPI.retrieveRecord(
-                    "sprk_eventtype",
+                    "sprk_eventtype_ref",
                     eventTypeId,
                     "?$select=sprk_name,sprk_requiredfields,sprk_hiddenfields"
                 );

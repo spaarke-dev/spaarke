@@ -1,5 +1,5 @@
-$version = "1.1.6"
-$solutionName = "RegardingLinkSolution"
+$version = "1.0.0"
+$solutionName = "EventAutoAssociateSolution"
 $outputPath = "bin"
 
 # Create output directory
@@ -24,9 +24,8 @@ $files = @(
     @{ Source = "solution.xml"; Entry = "solution.xml" },
     @{ Source = "customizations.xml"; Entry = "customizations.xml" },
     @{ Source = "[Content_Types].xml"; Entry = "[Content_Types].xml" },
-    @{ Source = "Controls/sprk_Spaarke.Controls.RegardingLink/ControlManifest.xml"; Entry = "Controls/sprk_Spaarke.Controls.RegardingLink/ControlManifest.xml" },
-    @{ Source = "Controls/sprk_Spaarke.Controls.RegardingLink/bundle.js"; Entry = "Controls/sprk_Spaarke.Controls.RegardingLink/bundle.js" },
-    @{ Source = "Controls/sprk_Spaarke.Controls.RegardingLink/styles.css"; Entry = "Controls/sprk_Spaarke.Controls.RegardingLink/styles.css" }
+    @{ Source = "Controls/sprk_Spaarke.Controls.EventAutoAssociate/ControlManifest.xml"; Entry = "Controls/sprk_Spaarke.Controls.EventAutoAssociate/ControlManifest.xml" },
+    @{ Source = "Controls/sprk_Spaarke.Controls.EventAutoAssociate/bundle.js"; Entry = "Controls/sprk_Spaarke.Controls.EventAutoAssociate/bundle.js" }
 )
 
 foreach ($file in $files) {

@@ -25,7 +25,7 @@ import { FluentProvider, webLightTheme, webDarkTheme, Theme } from "@fluentui/re
 import { AssociationResolverApp } from "./AssociationResolverApp";
 
 // Control version for footer display
-const CONTROL_VERSION = "1.0.2";
+const CONTROL_VERSION = "1.0.6";
 
 /**
  * Record Type lookup reference extracted from bound property
@@ -159,7 +159,7 @@ export class AssociationResolver implements ComponentFramework.StandardControl<I
         return {
             id: ref.id,
             name: ref.name || "",
-            entityLogicalName: ref.entityType || "sprk_recordtype"
+            entityLogicalName: ref.entityType || "sprk_recordtype_ref"
         };
     }
 

@@ -15,6 +15,7 @@ import {
     Option,
     Button,
     Text,
+    Link,
     Spinner,
     makeStyles,
     tokens,
@@ -28,16 +29,19 @@ import {
     DialogActions,
     Toaster
 } from "@fluentui/react-components";
-import { Search20Regular, ArrowSync20Regular, Dismiss20Regular } from "@fluentui/react-icons";
+import { Search20Regular, ArrowSync20Regular, Dismiss20Regular, Open16Regular } from "@fluentui/react-icons";
 import { IInputs } from "./generated/ManifestTypes";
 import {
     handleRecordSelection,
     clearAllRegardingFields,
     detectPrePopulatedParent,
     completeAutoDetectedAssociation,
+    loadEntityConfigs,
+    getEntityConfigs,
     IRecordSelection,
     IRecordSelectionResult,
-    IDetectedParentContext
+    IDetectedParentContext,
+    EntityLookupConfig
 } from "./handlers/RecordSelectionHandler";
 import {
     FieldMappingHandler,
@@ -46,26 +50,24 @@ import {
 } from "./handlers/FieldMappingHandler";
 import { useMappingToast } from "./hooks/useMappingToast";
 
-// Entity configuration for the 8 supported entity types
-interface EntityConfig {
-    logicalName: string;
-    displayName: string;
-    regardingField: string;
-    // Note: regardingRecordTypeValue removed - now using Record Type lookup
-}
+// Entity configuration type - now loaded dynamically from sprk_recordtype_ref
+// Using EntityLookupConfig from RecordSelectionHandler for consistency
+type EntityConfig = EntityLookupConfig;
 
-// STUB: [CONFIG] - S002: Hardcoded entity configs - should be loaded from Dataverse or config service (Task 020)
-// Record Type values are now queried dynamically from sprk_recordtype entity
-const ENTITY_CONFIGS: EntityConfig[] = [
-    { logicalName: "sprk_matter", displayName: "Matter", regardingField: "sprk_regardingmatter" },
-    { logicalName: "sprk_project", displayName: "Project", regardingField: "sprk_regardingproject" },
-    { logicalName: "sprk_invoice", displayName: "Invoice", regardingField: "sprk_regardinginvoice" },
-    { logicalName: "sprk_analysis", displayName: "Analysis", regardingField: "sprk_regardinganalysis" },
-    { logicalName: "account", displayName: "Account", regardingField: "sprk_regardingaccount" },
-    { logicalName: "contact", displayName: "Contact", regardingField: "sprk_regardingcontact" },
-    { logicalName: "sprk_workassignment", displayName: "Work Assignment", regardingField: "sprk_regardingworkassignment" },
-    { logicalName: "sprk_budget", displayName: "Budget", regardingField: "sprk_regardingbudget" }
-];
+/**
+ * Navigate to a record using Xrm.Navigation.openForm
+ */
+function navigateToRecord(entityLogicalName: string, recordId: string): void {
+    const xrm = (window as any).Xrm || (window.parent as any)?.Xrm;
+    if (xrm?.Navigation?.openForm) {
+        xrm.Navigation.openForm({
+            entityName: entityLogicalName,
+            entityId: recordId.replace(/[{}]/g, '')
+        });
+    } else {
+        console.error("[AssociationResolver] Xrm.Navigation.openForm not available");
+    }
+}
 
 /**
  * Record Type lookup reference from bound property
@@ -78,7 +80,7 @@ interface RecordTypeReference {
 
 interface AssociationResolverAppProps {
     context: ComponentFramework.Context<IInputs>;
-    regardingRecordType: RecordTypeReference | null;  // Now a lookup to sprk_recordtype
+    regardingRecordType: RecordTypeReference | null;  // Now a lookup to sprk_recordtype_ref
     apiBaseUrl: string;
     onRecordSelected: (recordId: string, recordName: string) => void;
     version: string;
@@ -150,6 +152,10 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
     const [autoDetectionComplete, setAutoDetectionComplete] = React.useState(false);
     const [detectedParent, setDetectedParent] = React.useState<IDetectedParentContext | null>(null);
 
+    // Dynamic entity configs - loaded from sprk_recordtype_ref
+    const [entityConfigs, setEntityConfigs] = React.useState<EntityConfig[]>(getEntityConfigs());
+    const [configsLoaded, setConfigsLoaded] = React.useState(false);
+
     // Task 024: Toast notifications for mapping results
     const { toasterId, showMappingResult, showError: showErrorToast } = useMappingToast();
 
@@ -160,6 +166,27 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
         }
         return null;
     }, [context?.webAPI]);
+
+    // Load entity configs dynamically from sprk_recordtype_ref on mount
+    React.useEffect(() => {
+        const loadConfigs = async () => {
+            if (!context?.webAPI || configsLoaded) return;
+
+            try {
+                console.log("[AssociationResolver] Loading dynamic entity configs...");
+                const configs = await loadEntityConfigs(context.webAPI);
+                setEntityConfigs(configs);
+                setConfigsLoaded(true);
+                console.log(`[AssociationResolver] Loaded ${configs.length} entity configs`);
+            } catch (error) {
+                console.error("[AssociationResolver] Error loading entity configs:", error);
+                // Keep using fallback configs
+                setConfigsLoaded(true);
+            }
+        };
+
+        loadConfigs();
+    }, [context?.webAPI, configsLoaded]);
 
     // Auto-detect parent context on mount
     // Checks if any regarding lookup field is pre-populated (from subgrid creation)
@@ -229,14 +256,14 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
                         try {
                             const recordTypeId = regardingRecordType.id.replace(/[{}]/g, '');
                             const result = await context.webAPI.retrieveRecord(
-                                "sprk_recordtype",
+                                "sprk_recordtype_ref",
                                 recordTypeId,
-                                "?$select=sprk_entitylogicalname,sprk_name"
+                                "?$select=sprk_recordlogicalname,sprk_recorddisplayname"
                             );
 
-                            const entityLogicalName = result.sprk_entitylogicalname as string;
+                            const entityLogicalName = result.sprk_recordlogicalname as string;
                             if (entityLogicalName) {
-                                const config = ENTITY_CONFIGS.find(c => c.logicalName === entityLogicalName);
+                                const config = entityConfigs.find(c => c.logicalName === entityLogicalName);
                                 if (config) {
                                     console.log(`[AssociationResolver] Initialized entity type from Record Type: ${entityLogicalName}`);
                                     setSelectedEntityType(config.logicalName);
@@ -327,7 +354,7 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
                 );
 
                 // Get entity display name for toast message
-                const entityConfig = ENTITY_CONFIGS.find(c => c.logicalName === sourceEntity);
+                const entityConfig = entityConfigs.find(c => c.logicalName === sourceEntity);
                 const entityName = entityConfig?.displayName || sourceEntity;
 
                 // Update status message
@@ -420,7 +447,7 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
                     if (mappingResult && mappingResult.fieldsMapped > 0) {
                         // Status already updated by applyFieldMappings
                         // Append to show both actions
-                        const entityConfig = ENTITY_CONFIGS.find(c => c.logicalName === selectedEntityType);
+                        const entityConfig = entityConfigs.find(c => c.logicalName === selectedEntityType);
                         const entityName = entityConfig?.displayName || selectedEntityType;
                         setMappingStatus(
                             `Regarding fields set. ${mappingResult.fieldsMapped} fields auto-populated from ${entityName}.`
@@ -537,7 +564,7 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
                     const fieldsSetOnForm = fieldMappingHandler.applyToForm(targetRecord, false);
 
                     // Get entity display name for messages
-                    const entityConfig = ENTITY_CONFIGS.find(c => c.logicalName === selectedEntityType);
+                    const entityConfig = entityConfigs.find(c => c.logicalName === selectedEntityType);
                     const entityName = entityConfig?.displayName || selectedEntityType;
 
                     if (mappingResult.fieldsMapped > 0) {
@@ -571,7 +598,7 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
         }
     };
 
-    const selectedEntityConfig = ENTITY_CONFIGS.find(c => c.logicalName === selectedEntityType);
+    const selectedEntityConfig = entityConfigs.find(c => c.logicalName === selectedEntityType);
 
     // If still loading/detecting, show minimal loading state
     if (isLoading && !autoDetectionComplete) {
@@ -616,7 +643,16 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
                 {/* Read-only association display */}
                 <div className={styles.selectedRecord}>
                     <Text weight="semibold">{detectedParent.entityDisplayName}:</Text>
-                    <Text>{detectedParent.recordName}</Text>
+                    <Link
+                        onClick={(e) => {
+                            e.preventDefault();
+                            navigateToRecord(detectedParent.entityType, detectedParent.recordId);
+                        }}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                    >
+                        {detectedParent.recordName}
+                        <Open16Regular />
+                    </Link>
                     <Button
                         appearance="subtle"
                         icon={<ArrowSync20Regular />}
@@ -698,7 +734,7 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
                     value={selectedEntityConfig?.displayName || ""}
                     onOptionSelect={handleEntityTypeChange}
                 >
-                    {ENTITY_CONFIGS.map(config => (
+                    {entityConfigs.map(config => (
                         <Option key={config.logicalName} value={config.logicalName}>
                             {config.displayName}
                         </Option>
@@ -715,10 +751,19 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
                 </Button>
             </div>
 
-            {selectedRecord && (
+            {selectedRecord && selectedEntityType && (
                 <div className={styles.selectedRecord}>
                     <Text weight="semibold">{selectedEntityConfig?.displayName}:</Text>
-                    <Text>{selectedRecord.name}</Text>
+                    <Link
+                        onClick={(e) => {
+                            e.preventDefault();
+                            navigateToRecord(selectedEntityType, selectedRecord.id);
+                        }}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                    >
+                        {selectedRecord.name}
+                        <Open16Regular />
+                    </Link>
                     <Button
                         appearance="subtle"
                         icon={<ArrowSync20Regular />}

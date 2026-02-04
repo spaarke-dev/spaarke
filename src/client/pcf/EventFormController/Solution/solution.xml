@@ -8,7 +8,7 @@
     <Descriptions>
       <Description description="PCF control for dynamic field visibility on Event forms" languagecode="1033" />
     </Descriptions>
-    <Version>1.0.5</Version>
+    <Version>1.0.6</Version>
     <Managed>0</Managed>
     <Publisher>
       <UniqueName>Spaarke</UniqueName>
