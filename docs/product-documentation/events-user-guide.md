@@ -376,6 +376,67 @@ You can set priority when creating an event or by editing an existing event.
 
 ---
 
+## Creating Events from Parent Record Subgrids
+
+### Quick Create from Parent Record
+
+The fastest way to create an Event linked to a parent record is directly from the parent's subgrid:
+
+1. Open the parent record (e.g., a Matter, Project, or Account)
+2. Navigate to the **Events** subgrid (usually on the Overview or Related tab)
+3. Click **+ New Event** in the subgrid command bar
+4. The **Quick Create** form opens with the parent already linked
+
+**What Happens Automatically:**
+When you create an Event from a parent's subgrid, the system automatically:
+- Links the Event to that parent record (Regarding field)
+- Populates the denormalized fields (Record Name, Record Type, Record ID, Record URL)
+- Applies any configured field mappings from the parent
+
+This saves time compared to creating an Event from the main Events view and manually searching for the parent.
+
+### Clicking the Regarding Record Link
+
+In Event views and forms, the **Regarding Record Name** field is clickable. Clicking it navigates directly to the parent record in a new browser tab.
+
+**Note:** The link is fully qualified and portable, meaning it works correctly:
+- When sharing URLs with colleagues
+- When accessing from different browser sessions
+- When the Event is viewed from different Dataverse apps
+
+---
+
+## Administrator Notes
+
+### Quick Create Form Configuration
+
+**Important:** For the auto-population feature to work on Quick Create forms, all target fields must be present on the form (they can be hidden but must exist).
+
+| Field | Logical Name | Required On Form |
+|-------|--------------|------------------|
+| Regarding Record Name | `sprk_regardingrecordname` | ✅ Yes |
+| Regarding Record ID | `sprk_regardingrecordid` | ✅ Yes |
+| Regarding Record Type | `sprk_regardingrecordtype` | ✅ Yes |
+| Regarding Record URL | `sprk_regardingrecordurl` | ✅ Yes |
+
+If users report that Events created from subgrids don't have the parent information populated, verify these fields are on the Quick Create form (use the Form Editor to add them as hidden fields if needed).
+
+### EventAutoAssociate Control
+
+The **EventAutoAssociate** PCF control handles automatic field population when Events are created from parent subgrids. This is a headless control (no visible UI) that:
+
+1. Detects when the Event form loads with a pre-populated Regarding lookup
+2. Queries the parent record for its name
+3. Sets the denormalized fields (Record Name, ID, Type, URL)
+4. Queries the Record Type reference table to set the lookup
+
+**Control Requirements:**
+- Must be bound to a text field on the Event form (e.g., `sprk_regardingrecordname`)
+- All denormalized fields must be on the form for the control to populate them
+- Works on both Main Form and Quick Create Form
+
+---
+
 ## Getting Help
 
 If you need assistance using the Events system:
@@ -396,6 +457,6 @@ If you need assistance using the Events system:
 
 ---
 
-*Last Updated: February 1, 2026*
+*Last Updated: February 3, 2026*
 
 *For feature requests or documentation improvements, contact your system administrator or product team.*
