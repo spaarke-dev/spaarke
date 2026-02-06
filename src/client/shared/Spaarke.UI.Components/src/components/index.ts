@@ -8,9 +8,13 @@ export * from "./DatasetGrid/CardView";
 export * from "./DatasetGrid/ListView";
 export * from "./DatasetGrid/VirtualizedGridView";
 export * from "./DatasetGrid/VirtualizedListView";
+export * from "./DatasetGrid/ViewSelector";
 
 // Toolbar components
 export * from "./Toolbar";
+
+// Page Chrome components (OOB parity)
+export * from "./PageChrome";
 
 // Rich Text Editor
 export * from "./RichTextEditor";

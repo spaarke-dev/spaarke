@@ -33,10 +33,15 @@ export interface IEventRecord {
   sprk_location?: string;
   /** Reminder datetime */
   sprk_remindat?: string;
-  /** Status (0 = Active, 1 = Inactive) */
-  statecode: number;
-  /** Status Reason (1=Draft, 2=Planned, 3=Open, 4=On Hold, 5=Completed, 6=Cancelled) */
-  statuscode: number;
+  /**
+   * Event Status (custom field - primary status indicator)
+   * Values: 0=Draft, 1=Open, 2=Completed, 3=Closed, 4=On Hold, 5=Cancelled, 6=Reassigned, 7=Archived
+   */
+  sprk_eventstatus?: number;
+  /** @deprecated Use sprk_eventstatus instead. Kept for backward compatibility. */
+  statecode?: number;
+  /** @deprecated Use sprk_eventstatus instead. Kept for backward compatibility. */
+  statuscode?: number;
   /** Priority */
   sprk_priority?: number;
   /** Source */
@@ -86,34 +91,71 @@ export interface IEventRecord {
 }
 
 /**
- * Status reason enum values
+ * Event Status values (sprk_eventstatus custom field)
+ * Matches values defined in Dataverse optionset
  */
-export enum EventStatusReason {
-  Draft = 1,
-  Planned = 2,
-  Open = 3,
+export enum EventStatus {
+  Draft = 0,
+  Open = 1,
+  Completed = 2,
+  Closed = 3,
   OnHold = 4,
-  Completed = 5,
-  Cancelled = 6,
+  Cancelled = 5,
+  Reassigned = 6,
+  Archived = 7,
 }
 
 /**
- * Status reason labels for display
+ * @deprecated Use EventStatus instead
+ */
+export const EventStatusReason = EventStatus;
+
+/**
+ * Event Status labels for display
  */
 export const EVENT_STATUS_LABELS: Record<number, string> = {
-  [EventStatusReason.Draft]: "Draft",
-  [EventStatusReason.Planned]: "Planned",
-  [EventStatusReason.Open]: "Open",
-  [EventStatusReason.OnHold]: "On Hold",
-  [EventStatusReason.Completed]: "Completed",
-  [EventStatusReason.Cancelled]: "Cancelled",
+  [EventStatus.Draft]: "Draft",
+  [EventStatus.Open]: "Open",
+  [EventStatus.Completed]: "Completed",
+  [EventStatus.Closed]: "Closed",
+  [EventStatus.OnHold]: "On Hold",
+  [EventStatus.Cancelled]: "Cancelled",
+  [EventStatus.Reassigned]: "Reassigned",
+  [EventStatus.Archived]: "Archived",
 };
 
 /**
- * Get status label for a status code
+ * Active statuses that allow actions (Complete, Cancel, etc.)
  */
-export function getStatusLabel(statusCode: number): string {
-  return EVENT_STATUS_LABELS[statusCode] ?? "Unknown";
+export const ACTIVE_EVENT_STATUSES = [
+  EventStatus.Draft,
+  EventStatus.Open,
+  EventStatus.OnHold,
+];
+
+/**
+ * Terminal statuses (event is finished)
+ */
+export const TERMINAL_EVENT_STATUSES = [
+  EventStatus.Completed,
+  EventStatus.Closed,
+  EventStatus.Cancelled,
+  EventStatus.Reassigned,
+  EventStatus.Archived,
+];
+
+/**
+ * Get status label for an event status value
+ */
+export function getStatusLabel(status: number): string {
+  return EVENT_STATUS_LABELS[status] ?? "Unknown";
+}
+
+/**
+ * Check if an event is in an active/actionable state
+ */
+export function isEventActive(status: number): boolean {
+  return ACTIVE_EVENT_STATUSES.includes(status);
 }
 
 /**
@@ -122,8 +164,8 @@ export function getStatusLabel(statusCode: number): string {
 export const EVENT_HEADER_SELECT_FIELDS = [
   "sprk_eventid",
   "sprk_eventname",
-  "statecode",
-  "statuscode",
+  "sprk_eventstatus",
+  "statecode", // Keep for backward compatibility / archive detection
   "_sprk_eventtype_value",
   "sprk_regardingrecordname",
   "sprk_regardingrecordurl",
@@ -144,8 +186,8 @@ export const EVENT_FULL_SELECT_FIELDS = [
   "scheduledend",
   "sprk_location",
   "sprk_remindat",
-  "statecode",
-  "statuscode",
+  "sprk_eventstatus",
+  "statecode", // Keep for backward compatibility / archive detection
   "sprk_priority",
   "sprk_source",
   "_sprk_eventtype_value",

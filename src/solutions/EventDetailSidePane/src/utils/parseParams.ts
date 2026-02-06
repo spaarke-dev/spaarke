@@ -42,15 +42,29 @@ export function parseSidePaneParams(): SidePaneParams {
   if (!eventId && !eventType) {
     const dataParam = params.get("data");
     if (dataParam) {
-      try {
-        // Dataverse encodes parameters as base64 JSON
-        const decoded = atob(dataParam);
-        const parsed = JSON.parse(decoded) as Record<string, unknown>;
-        eventId = typeof parsed.eventId === "string" ? parsed.eventId : null;
-        eventType = typeof parsed.eventType === "string" ? parsed.eventType : null;
-      } catch {
-        // Invalid base64 or JSON - use null values
-        console.warn("[EventDetailSidePane] Failed to parse data parameter");
+      // First try: URL-encoded query string (webresource navigation)
+      // Format: eventId=xxx&eventType=yyy
+      if (dataParam.includes("=")) {
+        try {
+          const dataParams = new URLSearchParams(dataParam);
+          eventId = dataParams.get("eventId") || dataParams.get("eventid");
+          eventType = dataParams.get("eventType") || dataParams.get("eventtype");
+        } catch {
+          // Not a valid query string - try base64
+        }
+      }
+
+      // Second try: base64 JSON (Dataverse pageInput format)
+      if (!eventId && !eventType) {
+        try {
+          const decoded = atob(dataParam);
+          const parsed = JSON.parse(decoded) as Record<string, unknown>;
+          eventId = typeof parsed.eventId === "string" ? parsed.eventId : null;
+          eventType = typeof parsed.eventType === "string" ? parsed.eventType : null;
+        } catch {
+          // Invalid base64 or JSON - use null values
+          console.warn("[EventDetailSidePane] Failed to parse data parameter");
+        }
       }
     }
   }

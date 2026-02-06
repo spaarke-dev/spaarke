@@ -1,0 +1,432 @@
+<!--
+  Event Entity Ribbon Customization
+
+  Buttons added:
+  - Main Form: Complete, Cancel, Reschedule, Reassign, Add Memo
+  - Subgrid: Complete Selected
+  - HomepageGrid (Entity Main View): Complete, Close, Cancel, On Hold, Archive
+
+  Web Resource: sprk_event_ribbon_commands.js
+
+  Event Status Values (sprk_eventstatus):
+  - 0: Draft, 1: Open, 2: Completed, 3: Closed, 4: On Hold
+  - 5: Cancelled, 6: Reassigned, 7: Archived
+
+  Deployment:
+  1. Upload sprk_event_ribbon_commands.js as web resource
+  2. Use Ribbon Workbench to import this XML
+     OR manually add to Event entity customization XML
+  3. Publish customizations
+
+  @see src/solutions/EventCommands/sprk_event_ribbon_commands.js
+  @see projects/events-workspace-apps-UX-r1/notes/design/event-completion-workflow.md
+  @see projects/events-workspace-apps-UX-r1/notes/design/statecode-statuscode-migration.md
+-->
+<RibbonDiffXml>
+  <CustomActions>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+    <!-- MAIN FORM COMMAND BAR BUTTONS                                               -->
+    <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+
+    <!-- Complete Button -->
+    <CustomAction Id="Spaarke.Event.Complete.CustomAction"
+                  Location="Mscrm.Form.sprk_event.MainTab.Actions.Controls._children"
+                  Sequence="10">
+      <CommandUIDefinition>
+        <Button Id="Spaarke.Event.Complete.Button"
+                Command="Spaarke.Event.Complete.Command"
+                LabelText="Complete"
+                Alt="Complete Event"
+                ToolTipTitle="Complete Event"
+                ToolTipDescription="Mark this event as complete"
+                TemplateAlias="o1"
+                Image16by16="$webresource:sprk_/icons/checkmark_16.svg"
+                Image32by32="$webresource:sprk_/icons/checkmark_32.svg" />
+      </CommandUIDefinition>
+    </CustomAction>
+
+    <!-- Cancel Button -->
+    <CustomAction Id="Spaarke.Event.Cancel.CustomAction"
+                  Location="Mscrm.Form.sprk_event.MainTab.Actions.Controls._children"
+                  Sequence="20">
+      <CommandUIDefinition>
+        <Button Id="Spaarke.Event.Cancel.Button"
+                Command="Spaarke.Event.Cancel.Command"
+                LabelText="Cancel"
+                Alt="Cancel Event"
+                ToolTipTitle="Cancel Event"
+                ToolTipDescription="Cancel this event"
+                TemplateAlias="o1"
+                Image16by16="$webresource:sprk_/icons/dismiss_16.svg"
+                Image32by32="$webresource:sprk_/icons/dismiss_32.svg" />
+      </CommandUIDefinition>
+    </CustomAction>
+
+    <!-- Reschedule Button -->
+    <CustomAction Id="Spaarke.Event.Reschedule.CustomAction"
+                  Location="Mscrm.Form.sprk_event.MainTab.Actions.Controls._children"
+                  Sequence="30">
+      <CommandUIDefinition>
+        <Button Id="Spaarke.Event.Reschedule.Button"
+                Command="Spaarke.Event.Reschedule.Command"
+                LabelText="Reschedule"
+                Alt="Reschedule Event"
+                ToolTipTitle="Reschedule Event"
+                ToolTipDescription="Change the due date of this event"
+                TemplateAlias="o1"
+                Image16by16="$webresource:sprk_/icons/calendar_16.svg"
+                Image32by32="$webresource:sprk_/icons/calendar_32.svg" />
+      </CommandUIDefinition>
+    </CustomAction>
+
+    <!-- Reassign Button -->
+    <CustomAction Id="Spaarke.Event.Reassign.CustomAction"
+                  Location="Mscrm.Form.sprk_event.MainTab.Actions.Controls._children"
+                  Sequence="40">
+      <CommandUIDefinition>
+        <Button Id="Spaarke.Event.Reassign.Button"
+                Command="Spaarke.Event.Reassign.Command"
+                LabelText="Reassign"
+                Alt="Reassign Event"
+                ToolTipTitle="Reassign Event"
+                ToolTipDescription="Assign this event to another user"
+                TemplateAlias="o1"
+                Image16by16="$webresource:sprk_/icons/person_swap_16.svg"
+                Image32by32="$webresource:sprk_/icons/person_swap_32.svg" />
+      </CommandUIDefinition>
+    </CustomAction>
+
+    <!-- Add Memo Button -->
+    <CustomAction Id="Spaarke.Event.AddMemo.CustomAction"
+                  Location="Mscrm.Form.sprk_event.MainTab.Actions.Controls._children"
+                  Sequence="50">
+      <CommandUIDefinition>
+        <Button Id="Spaarke.Event.AddMemo.Button"
+                Command="Spaarke.Event.AddMemo.Command"
+                LabelText="Add Memo"
+                Alt="Add Memo"
+                ToolTipTitle="Add Memo"
+                ToolTipDescription="Add a memo or note to this event"
+                TemplateAlias="o1"
+                Image16by16="$webresource:sprk_/icons/note_add_16.svg"
+                Image32by32="$webresource:sprk_/icons/note_add_32.svg" />
+      </CommandUIDefinition>
+    </CustomAction>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+    <!-- SUBGRID COMMAND BAR BUTTONS (Events grid on Matter/Project forms)           -->
+    <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+
+    <!-- Complete Selected Button (Subgrid) -->
+    <CustomAction Id="Spaarke.Event.CompleteSelected.CustomAction"
+                  Location="Mscrm.SubGrid.sprk_event.MainTab.Actions.Controls._children"
+                  Sequence="10">
+      <CommandUIDefinition>
+        <Button Id="Spaarke.Event.CompleteSelected.Button"
+                Command="Spaarke.Event.CompleteSelected.Command"
+                LabelText="Complete Selected"
+                Alt="Complete Selected Events"
+                ToolTipTitle="Complete Selected Events"
+                ToolTipDescription="Mark selected events as complete"
+                TemplateAlias="o1"
+                Image16by16="$webresource:sprk_/icons/checkmark_16.svg"
+                Image32by32="$webresource:sprk_/icons/checkmark_32.svg" />
+      </CommandUIDefinition>
+    </CustomAction>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+    <!-- HOMEPAGE GRID COMMAND BAR BUTTONS (Entity main view - Events list)          -->
+    <!-- Location: Mscrm.HomepageGrid.sprk_event.MainTab.Actions.Controls._children  -->
+    <!-- These buttons act on selected records in the main Events view               -->
+    <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+
+    <!-- Complete Button (HomepageGrid) -->
+    <CustomAction Id="Spaarke.Event.Homepage.Complete.CustomAction"
+                  Location="Mscrm.HomepageGrid.sprk_event.MainTab.Actions.Controls._children"
+                  Sequence="10">
+      <CommandUIDefinition>
+        <Button Id="Spaarke.Event.Homepage.Complete.Button"
+                Command="Spaarke.Event.Homepage.Complete.Command"
+                LabelText="Complete"
+                Alt="Complete Selected Events"
+                ToolTipTitle="Complete Events"
+                ToolTipDescription="Mark selected events as complete (status=Completed)"
+                TemplateAlias="o1"
+                Image16by16="$webresource:sprk_/icons/checkmark_16.svg"
+                Image32by32="$webresource:sprk_/icons/checkmark_32.svg" />
+      </CommandUIDefinition>
+    </CustomAction>
+
+    <!-- Close Button (HomepageGrid) - No action taken/required -->
+    <CustomAction Id="Spaarke.Event.Homepage.Close.CustomAction"
+                  Location="Mscrm.HomepageGrid.sprk_event.MainTab.Actions.Controls._children"
+                  Sequence="20">
+      <CommandUIDefinition>
+        <Button Id="Spaarke.Event.Homepage.Close.Button"
+                Command="Spaarke.Event.Homepage.Close.Command"
+                LabelText="Close"
+                Alt="Close Selected Events"
+                ToolTipTitle="Close Events"
+                ToolTipDescription="Close selected events - no action taken/required (status=Closed)"
+                TemplateAlias="o1"
+                Image16by16="$webresource:sprk_/icons/dismiss_circle_16.svg"
+                Image32by32="$webresource:sprk_/icons/dismiss_circle_32.svg" />
+      </CommandUIDefinition>
+    </CustomAction>
+
+    <!-- Cancel Button (HomepageGrid) - Intentionally not done -->
+    <CustomAction Id="Spaarke.Event.Homepage.Cancel.CustomAction"
+                  Location="Mscrm.HomepageGrid.sprk_event.MainTab.Actions.Controls._children"
+                  Sequence="30">
+      <CommandUIDefinition>
+        <Button Id="Spaarke.Event.Homepage.Cancel.Button"
+                Command="Spaarke.Event.Homepage.Cancel.Command"
+                LabelText="Cancel"
+                Alt="Cancel Selected Events"
+                ToolTipTitle="Cancel Events"
+                ToolTipDescription="Cancel selected events - intentionally not done (status=Cancelled)"
+                TemplateAlias="o1"
+                Image16by16="$webresource:sprk_/icons/dismiss_16.svg"
+                Image32by32="$webresource:sprk_/icons/dismiss_32.svg" />
+      </CommandUIDefinition>
+    </CustomAction>
+
+    <!-- On Hold Button (HomepageGrid) - Temporarily paused -->
+    <CustomAction Id="Spaarke.Event.Homepage.OnHold.CustomAction"
+                  Location="Mscrm.HomepageGrid.sprk_event.MainTab.Actions.Controls._children"
+                  Sequence="40">
+      <CommandUIDefinition>
+        <Button Id="Spaarke.Event.Homepage.OnHold.Button"
+                Command="Spaarke.Event.Homepage.OnHold.Command"
+                LabelText="On Hold"
+                Alt="Put Selected Events On Hold"
+                ToolTipTitle="Put On Hold"
+                ToolTipDescription="Temporarily pause selected events (status=On Hold)"
+                TemplateAlias="o1"
+                Image16by16="$webresource:sprk_/icons/pause_16.svg"
+                Image32by32="$webresource:sprk_/icons/pause_32.svg" />
+      </CommandUIDefinition>
+    </CustomAction>
+
+    <!-- Archive Button (HomepageGrid) - Hide records -->
+    <CustomAction Id="Spaarke.Event.Homepage.Archive.CustomAction"
+                  Location="Mscrm.HomepageGrid.sprk_event.MainTab.Actions.Controls._children"
+                  Sequence="50">
+      <CommandUIDefinition>
+        <Button Id="Spaarke.Event.Homepage.Archive.Button"
+                Command="Spaarke.Event.Homepage.Archive.Command"
+                LabelText="Archive"
+                Alt="Archive Selected Events"
+                ToolTipTitle="Archive Events"
+                ToolTipDescription="Archive selected events - hides them from active views (status=Archived + statecode=Inactive)"
+                TemplateAlias="o1"
+                Image16by16="$webresource:sprk_/icons/archive_16.svg"
+                Image32by32="$webresource:sprk_/icons/archive_32.svg" />
+      </CommandUIDefinition>
+    </CustomAction>
+
+  </CustomActions>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+  <!-- COMMAND DEFINITIONS                                                          -->
+  <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+
+  <CommandDefinitions>
+
+    <!-- Complete Command (Main Form) -->
+    <CommandDefinition Id="Spaarke.Event.Complete.Command">
+      <EnableRules>
+        <EnableRule Id="Spaarke.Event.IsActive.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_event_ribbon_commands"
+                           FunctionName="Spaarke.Event.CompleteEvent">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+
+    <!-- Cancel Command (Main Form) -->
+    <CommandDefinition Id="Spaarke.Event.Cancel.Command">
+      <EnableRules>
+        <EnableRule Id="Spaarke.Event.IsActive.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_event_ribbon_commands"
+                           FunctionName="Spaarke.Event.CancelEvent">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+
+    <!-- Reschedule Command (Main Form) -->
+    <CommandDefinition Id="Spaarke.Event.Reschedule.Command">
+      <EnableRules>
+        <EnableRule Id="Spaarke.Event.CanReschedule.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_event_ribbon_commands"
+                           FunctionName="Spaarke.Event.RescheduleEvent">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+
+    <!-- Reassign Command (Main Form) -->
+    <CommandDefinition Id="Spaarke.Event.Reassign.Command">
+      <EnableRules>
+        <EnableRule Id="Spaarke.Event.IsActive.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_event_ribbon_commands"
+                           FunctionName="Spaarke.Event.ReassignEvent">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+
+    <!-- Add Memo Command (Main Form) - Always enabled -->
+    <CommandDefinition Id="Spaarke.Event.AddMemo.Command">
+      <EnableRules>
+        <!-- Always enabled - can add memos to any event -->
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_event_ribbon_commands"
+                           FunctionName="Spaarke.Event.AddMemo">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+
+    <!-- Complete Selected Command (Subgrid) -->
+    <CommandDefinition Id="Spaarke.Event.CompleteSelected.Command">
+      <EnableRules>
+        <EnableRule Id="Mscrm.SelectionCountAtLeastOne" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_event_ribbon_commands"
+                           FunctionName="Spaarke.Event.CompleteSelectedEvents">
+          <CrmParameter Value="SelectedControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+    <!-- HOMEPAGE GRID COMMAND DEFINITIONS                                            -->
+    <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+
+    <!-- Complete Command (HomepageGrid) -->
+    <CommandDefinition Id="Spaarke.Event.Homepage.Complete.Command">
+      <EnableRules>
+        <EnableRule Id="Mscrm.SelectionCountAtLeastOne" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_event_ribbon_commands"
+                           FunctionName="Spaarke.Event.Homepage.CompleteSelected">
+          <CrmParameter Value="SelectedControlSelectedItemIds" />
+          <CrmParameter Value="SelectedEntityTypeName" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+
+    <!-- Close Command (HomepageGrid) -->
+    <CommandDefinition Id="Spaarke.Event.Homepage.Close.Command">
+      <EnableRules>
+        <EnableRule Id="Mscrm.SelectionCountAtLeastOne" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_event_ribbon_commands"
+                           FunctionName="Spaarke.Event.Homepage.CloseSelected">
+          <CrmParameter Value="SelectedControlSelectedItemIds" />
+          <CrmParameter Value="SelectedEntityTypeName" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+
+    <!-- Cancel Command (HomepageGrid) -->
+    <CommandDefinition Id="Spaarke.Event.Homepage.Cancel.Command">
+      <EnableRules>
+        <EnableRule Id="Mscrm.SelectionCountAtLeastOne" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_event_ribbon_commands"
+                           FunctionName="Spaarke.Event.Homepage.CancelSelected">
+          <CrmParameter Value="SelectedControlSelectedItemIds" />
+          <CrmParameter Value="SelectedEntityTypeName" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+
+    <!-- On Hold Command (HomepageGrid) -->
+    <CommandDefinition Id="Spaarke.Event.Homepage.OnHold.Command">
+      <EnableRules>
+        <EnableRule Id="Mscrm.SelectionCountAtLeastOne" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_event_ribbon_commands"
+                           FunctionName="Spaarke.Event.Homepage.OnHoldSelected">
+          <CrmParameter Value="SelectedControlSelectedItemIds" />
+          <CrmParameter Value="SelectedEntityTypeName" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+
+    <!-- Archive Command (HomepageGrid) -->
+    <CommandDefinition Id="Spaarke.Event.Homepage.Archive.Command">
+      <EnableRules>
+        <EnableRule Id="Mscrm.SelectionCountAtLeastOne" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_event_ribbon_commands"
+                           FunctionName="Spaarke.Event.Homepage.ArchiveSelected">
+          <CrmParameter Value="SelectedControlSelectedItemIds" />
+          <CrmParameter Value="SelectedEntityTypeName" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+
+  </CommandDefinitions>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+  <!-- RULE DEFINITIONS                                                             -->
+  <!-- ═══════════════════════════════════════════════════════════════════════════ -->
+
+  <RuleDefinitions>
+    <TabDisplayRules />
+    <DisplayRules />
+    <EnableRules>
+
+      <!-- Enable rule: Event is Active (status = Active) -->
+      <EnableRule Id="Spaarke.Event.IsActive.EnableRule">
+        <CustomRule Library="$webresource:sprk_event_ribbon_commands"
+                    FunctionName="Spaarke.Event.IsEventActive"
+                    Default="false">
+          <CrmParameter Value="PrimaryControl" />
+        </CustomRule>
+      </EnableRule>
+
+      <!-- Enable rule: Event can be Rescheduled (active + has due date) -->
+      <EnableRule Id="Spaarke.Event.CanReschedule.EnableRule">
+        <CustomRule Library="$webresource:sprk_event_ribbon_commands"
+                    FunctionName="Spaarke.Event.CanReschedule"
+                    Default="false">
+          <CrmParameter Value="PrimaryControl" />
+        </CustomRule>
+      </EnableRule>
+
+    </EnableRules>
+  </RuleDefinitions>
+
+</RibbonDiffXml>

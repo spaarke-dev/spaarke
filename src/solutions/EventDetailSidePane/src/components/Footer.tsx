@@ -33,6 +33,7 @@ import {
   ArrowRepeatAllRegular,
   DismissRegular,
   LockClosedRegular,
+  OpenRegular,
 } from "@fluentui/react-icons";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -104,6 +105,8 @@ export interface FooterProps {
   version?: string;
   /** Whether the form is in read-only mode (hides save button) */
   isReadOnly?: boolean;
+  /** Event ID for Open button navigation */
+  eventId?: string | null;
 }
 
 /**
@@ -132,13 +135,66 @@ export interface FooterWithMessageProps extends FooterProps {
   onRetry?: () => void;
   /** Callback when user wants to discard changes (rollback) */
   onDiscard?: () => void;
-  /** Whether the form is in read-only mode (hides save button) */
-  isReadOnly?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
+
+// Event modal form GUID for opening full record
+const EVENT_MODAL_FORM_ID = "90d2eff7-6703-f111-8407-7ced8d1dc988";
+
+/**
+ * Open the full Event record in a modal dialog
+ * Uses Xrm.Navigation.navigateTo with target: 2 (modal dialog)
+ */
+function openEventModal(eventId: string): void {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const xrm = (window.parent as any)?.Xrm ?? (window as any)?.Xrm;
+
+    if (!xrm?.Navigation?.navigateTo) {
+      console.warn("[Footer] Xrm.Navigation.navigateTo not available, falling back to openForm");
+      // Fallback to openForm if navigateTo not available
+      if (xrm?.Navigation?.openForm) {
+        xrm.Navigation.openForm({
+          entityName: "sprk_event",
+          entityId: eventId,
+          formId: EVENT_MODAL_FORM_ID,
+        });
+      } else {
+        console.error("[Footer] Cannot open form - Xrm.Navigation not available");
+      }
+      return;
+    }
+
+    // Use navigateTo for modal dialog (target: 2)
+    const pageInput = {
+      pageType: "entityrecord",
+      entityName: "sprk_event",
+      entityId: eventId,
+      formId: EVENT_MODAL_FORM_ID,
+    };
+
+    const navigationOptions = {
+      target: 2, // Open in modal dialog
+      width: { value: 80, unit: "%" },
+      height: { value: 80, unit: "%" },
+      position: 1, // Center
+    };
+
+    xrm.Navigation.navigateTo(pageInput, navigationOptions).then(
+      () => {
+        console.log("[Footer] Modal closed");
+      },
+      (error: unknown) => {
+        console.error("[Footer] Error opening modal:", error);
+      }
+    );
+  } catch (error) {
+    console.error("[Footer] Exception opening modal:", error);
+  }
+}
 
 export const Footer: React.FC<FooterWithMessageProps> = ({
   isDirty,
@@ -150,6 +206,7 @@ export const Footer: React.FC<FooterWithMessageProps> = ({
   onRetry,
   onDiscard,
   isReadOnly = false,
+  eventId,
 }) => {
   const styles = useStyles();
 
@@ -238,19 +295,34 @@ export const Footer: React.FC<FooterWithMessageProps> = ({
           )}
         </div>
 
-        {/* Right side: Save button (hidden in read-only mode) */}
-        {!isReadOnly && (
-          <Button
-            className={styles.saveButton}
-            appearance="primary"
-            icon={isSaving ? <Spinner size="tiny" /> : <SaveRegular />}
-            disabled={!isDirty || isSaving}
-            onClick={onSave}
-            aria-label={isSaving ? "Saving..." : "Save changes"}
-          >
-            {isSaving ? "Saving..." : "Save"}
-          </Button>
-        )}
+        {/* Right side: Open and Save buttons */}
+        <div style={{ display: "flex", gap: "8px" }}>
+          {/* Open button - opens full record in modal */}
+          {eventId && (
+            <Button
+              appearance="subtle"
+              icon={<OpenRegular />}
+              onClick={() => openEventModal(eventId)}
+              aria-label="Open full record"
+            >
+              Open
+            </Button>
+          )}
+
+          {/* Save button (hidden in read-only mode) */}
+          {!isReadOnly && (
+            <Button
+              className={styles.saveButton}
+              appearance="primary"
+              icon={isSaving ? <Spinner size="tiny" /> : <SaveRegular />}
+              disabled={!isDirty || isSaving}
+              onClick={onSave}
+              aria-label={isSaving ? "Saving..." : "Save changes"}
+            >
+              {isSaving ? "Saving..." : "Save"}
+            </Button>
+          )}
+        </div>
       </div>
     </footer>
   );

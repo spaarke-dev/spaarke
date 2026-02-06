@@ -94,9 +94,9 @@ interface SidePane {
 }
 
 interface SidePanePageInput {
-    pageType: "custom";
-    name: string;
-    recordId?: string;
+    pageType: "webresource";
+    webresourceName: string;
+    data?: string;
 }
 
 interface AppSidePanes {
@@ -171,11 +171,10 @@ function getFormContextUi(): FormContextUi | null {
 }
 
 /**
- * Build the Custom Page input for side pane navigation
+ * Build the web resource input for side pane navigation.
+ * Uses webresource pageType to load the React app directly (bypasses Custom Page iframe limitation).
  */
 function buildPageInput(eventId: string, eventType?: string): SidePanePageInput {
-    let pageName = EVENT_DETAIL_PAGE_NAME;
-
     // Build query parameters
     const params = new URLSearchParams();
     params.set("eventId", eventId);
@@ -184,8 +183,9 @@ function buildPageInput(eventId: string, eventType?: string): SidePanePageInput 
     }
 
     return {
-        pageType: "custom",
-        name: `${pageName}?${params.toString()}`,
+        pageType: "webresource",
+        webresourceName: "sprk_eventdetailsidepane.html",
+        data: params.toString(),
     };
 }
 

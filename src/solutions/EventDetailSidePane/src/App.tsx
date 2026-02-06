@@ -636,8 +636,9 @@ export const App: React.FC<AppProps> = ({ onRowUpdated }) => {
           onDismissMessage={handleDismissMessage}
           onRetry={handleRetry}
           onDiscard={handleDiscard}
-          version="1.0.5"
+          version="1.0.6"
           isReadOnly={isReadOnly}
+          eventId={params.eventId}
         />
 
         {/* Unsaved Changes Dialog */}

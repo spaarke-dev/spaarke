@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>082</id>
+    <title>Create getXrm() utility for Custom Pages</title>
+    <phase>8</phase>
+    <status>completed</status>
+    <priority>high</priority>
+    <tags>shared-library, utility, xrm</tags>
+    <created>2026-02-05</created>
+    <dependencies>none</dependencies>
+    <parallel-group>F</parallel-group>
+  </metadata>
+
+  <description>
+    Create a shared utility to resolve the Xrm object from the appropriate context.
+    PCF controls have Xrm on window, Custom Pages (iframe) need parent.Xrm.
+    Includes XrmContext interface for type safety.
+  </description>
+
+  <context>
+    <architecture-doc>docs/architecture/universal-dataset-grid-architecture.md</architecture-doc>
+    <target-location>src/client/shared/Spaarke.UI.Components/src/utils/xrmContext.ts</target-location>
+    <existing-pattern>src/solutions/EventsPage/src/components/GridSection.tsx (getXrm function)</existing-pattern>
+  </context>
+
+  <acceptance-criteria>
+    <criterion>XrmContext interface defines WebApi, Navigation, Utility types</criterion>
+    <criterion>getXrm() function checks window.Xrm first</criterion>
+    <criterion>getXrm() falls back to parent.Xrm for iframe contexts</criterion>
+    <criterion>Returns undefined if Xrm not available (graceful degradation)</criterion>
+    <criterion>detectThemeFromHost() utility using Xrm.Utility.getGlobalContext</criterion>
+    <criterion>Unit tests verify both contexts</criterion>
+    <criterion>Exported from utils/index.ts and main index.ts</criterion>
+  </acceptance-criteria>
+
+  <steps>
+    <step order="1">Create XrmContext interface in utils/xrmContext.ts</step>
+    <step order="2">Implement getXrm() function with window/parent fallback</step>
+    <step order="3">Implement detectThemeFromHost() using getGlobalContext().userSettings</step>
+    <step order="4">Add try/catch for cross-origin access scenarios</step>
+    <step order="5">Create unit tests mocking window and parent objects</step>
+    <step order="6">Export from utils/index.ts</step>
+    <step order="7">Update EventsPage GridSection to use shared utility</step>
+  </steps>
+
+  <estimated-effort>small</estimated-effort>
+</task>

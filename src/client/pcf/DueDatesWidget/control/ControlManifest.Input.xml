@@ -2,7 +2,7 @@
 <manifest>
   <control namespace="Spaarke.Controls"
            constructor="DueDatesWidget"
-           version="1.0.1"
+           version="1.0.3"
            display-name-key="Due Dates Widget"
            description-key="Displays upcoming and overdue events in card format for Matter/Project Overview tabs. Shows actionable items with event type badges and days-until-due indicators."
            control-type="standard">

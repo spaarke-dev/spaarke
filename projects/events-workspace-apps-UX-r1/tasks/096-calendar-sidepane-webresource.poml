@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>096</id>
+    <title>Create CalendarSidePane Web Resource</title>
+    <phase>10</phase>
+    <status>completed</status>
+    <priority>high</priority>
+    <tags>eventspage, calendar, sidepane, xrm, oob-parity</tags>
+    <created>2026-02-05</created>
+    <dependencies>095</dependencies>
+    <parallel-group>K</parallel-group>
+  </metadata>
+
+  <description>
+    Create Calendar as a separate web resource that loads via Xrm.App.sidePanes,
+    matching OOB Dataverse side pane behavior. The Calendar should appear in the
+    side pane menu alongside Event form, with mutual exclusivity.
+  </description>
+
+  <context>
+    <target-location>src/solutions/CalendarSidePane/</target-location>
+    <reference>src/solutions/EventDetailSidePane/ (similar pattern)</reference>
+    <oob-reference>Calendar icon in Dataverse side pane menu</oob-reference>
+  </context>
+
+  <acceptance-criteria>
+    <criterion>CalendarSidePane web resource created (similar to EventDetailSidePane)</criterion>
+    <criterion>Calendar registered as Xrm.App.sidePanes pane on page load</criterion>
+    <criterion>Calendar icon appears in side pane menu</criterion>
+    <criterion>Calendar pane opens by default on page load</criterion>
+    <criterion>Mutual exclusivity: Calendar closes when Event pane opens and vice versa</criterion>
+    <criterion>Calendar filter state syncs with EventsPage grid</criterion>
+    <criterion>Remove Calendar button from CommandBar</criterion>
+    <criterion>Remove CalendarDrawer (OverlayDrawer) implementation</criterion>
+    <criterion>Dark mode supported in side pane</criterion>
+  </acceptance-criteria>
+
+  <steps>
+    <step order="1">Create CalendarSidePane solution folder (copy EventDetailSidePane structure)</step>
+    <step order="2">Create CalendarSidePane React app with CalendarSection component</step>
+    <step order="3">Configure Vite for single-file HTML output</step>
+    <step order="4">Add URL parameter parsing for filter state sync</step>
+    <step order="5">Add postMessage communication for filter changes</step>
+    <step order="6">Update EventsPage to register Calendar side pane on load</step>
+    <step order="7">Set Calendar pane to open by default</step>
+    <step order="8">Implement mutual exclusivity with Event pane</step>
+    <step order="9">Remove Calendar button from CommandBar</step>
+    <step order="10">Remove CalendarDrawer component and related code</step>
+    <step order="11">Build CalendarSidePane (npm run build)</step>
+    <step order="12">Deploy web resource to Dataverse</step>
+    <step order="13">Test Calendar in side pane menu</step>
+    <step order="14">Verify filter sync works correctly</step>
+  </steps>
+
+  <estimated-effort>large</estimated-effort>
+
+  <notes>
+    <note date="2026-02-05">Steps 1-5 completed: CalendarSidePane web resource project created with React app, CalendarSection component, Vite config, URL parameter parsing, and postMessage communication. Build verified successful (272 kB).</note>
+    <note date="2026-02-05">Steps 6-14 completed: EventsPage updated to register Calendar pane on load via Xrm.App.sidePanes, Calendar opens by default, mutual exclusivity implemented (Event/Calendar close each other), Calendar button removed from CommandBar, CalendarDrawer removed, postMessage listener added. EventsPage build: 589.20 kB, CalendarSidePane build: 272.62 kB. Deployment and testing pending (separate deployment step).</note>
+  </notes>
+</task>

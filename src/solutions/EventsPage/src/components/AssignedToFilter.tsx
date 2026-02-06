@@ -334,33 +334,34 @@ export const AssignedToFilter: React.FC<AssignedToFilterProps> = ({
 // ---------------------------------------------------------------------------
 
 function getMockUsers(): IUserOption[] {
+  // Mock user GUIDs for development/testing (valid GUID format)
   return [
     {
-      id: "user-current",
+      id: "00000000-0000-0000-0000-000000000001",
       fullname: "Current User",
       internalemailaddress: "current.user@example.com",
       isCurrentUser: true,
     },
     {
-      id: "user-1",
+      id: "00000000-0000-0000-0000-000000000003",
       fullname: "John Smith",
       internalemailaddress: "john.smith@example.com",
       isCurrentUser: false,
     },
     {
-      id: "user-2",
+      id: "00000000-0000-0000-0000-000000000002",
       fullname: "Jane Doe",
       internalemailaddress: "jane.doe@example.com",
       isCurrentUser: false,
     },
     {
-      id: "user-3",
+      id: "00000000-0000-0000-0000-000000000004",
       fullname: "Bob Johnson",
       internalemailaddress: "bob.johnson@example.com",
       isCurrentUser: false,
     },
     {
-      id: "user-4",
+      id: "00000000-0000-0000-0000-000000000005",
       fullname: "Alice Williams",
       internalemailaddress: "alice.williams@example.com",
       isCurrentUser: false,

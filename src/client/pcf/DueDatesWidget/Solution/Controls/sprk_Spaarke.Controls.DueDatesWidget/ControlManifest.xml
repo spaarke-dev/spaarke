@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="DueDatesWidget" version="1.0.1" display-name-key="Due Dates Widget" description-key="Displays upcoming and overdue events in card format for Matter/Project Overview tabs. Shows actionable items with event type badges and days-until-due indicators." control-type="standard" api-version="1.3.18">
+  <control namespace="Spaarke.Controls" constructor="DueDatesWidget" version="1.0.3" display-name-key="Due Dates Widget" description-key="Displays upcoming and overdue events in card format for Matter/Project Overview tabs. Shows actionable items with event type badges and days-until-due indicators." control-type="standard" api-version="1.3.18">
     <external-service-usage enabled="false"/>
     <property name="parentRecordId" display-name-key="Parent Record ID" description-key="The ID of the parent record (Matter or Project) to filter events" of-type="SingleLine.Text" usage="bound" required="false"/>
     <property name="parentEntityName" display-name-key="Parent Entity Name" description-key="The logical name of the parent entity (sprk_matter or sprk_project)" of-type="SingleLine.Text" usage="input" required="false"/>

@@ -11,7 +11,7 @@
     <Descriptions>
       <Description description="Date-based navigation and filtering for Event grids" languagecode="1033" />
     </Descriptions>
-    <Version>1.0.0</Version>
+    <Version>1.0.5</Version>
     <Managed>0</Managed>
     <Publisher>
       <UniqueName>Spaarke</UniqueName>

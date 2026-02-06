@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>087</id>
+    <title>Create sprk_gridconfiguration Dataverse entity</title>
+    <phase>8</phase>
+    <status>completed</status>
+    <priority>medium</priority>
+    <tags>dataverse, entity, configuration</tags>
+    <created>2026-02-05</created>
+    <dependencies>none</dependencies>
+    <parallel-group>F</parallel-group>
+  </metadata>
+
+  <description>
+    Create the sprk_gridconfiguration Dataverse entity to store custom grid views
+    and FetchXML configurations. Enables admin-configurable views without deployment.
+  </description>
+
+  <context>
+    <architecture-doc>docs/architecture/universal-dataset-grid-architecture.md</architecture-doc>
+    <schema-definition>Section: Configuration Table: sprk_gridconfiguration</schema-definition>
+  </context>
+
+  <acceptance-criteria>
+    <criterion>Entity created: sprk_gridconfiguration</criterion>
+    <criterion>Primary name field: sprk_name (String 100)</criterion>
+    <criterion>sprk_entitylogicalname (String 100, required)</criterion>
+    <criterion>sprk_viewtype choice (SavedView=1, CustomFetchXML=2, LinkedView=3)</criterion>
+    <criterion>sprk_savedviewid (String 36, GUID reference)</criterion>
+    <criterion>sprk_fetchxml (Multiline, max length)</criterion>
+    <criterion>sprk_layoutxml (Multiline, max length)</criterion>
+    <criterion>sprk_configjson (Multiline, max length)</criterion>
+    <criterion>sprk_isdefault (Boolean)</criterion>
+    <criterion>sprk_sortorder (Integer)</criterion>
+    <criterion>sprk_iconname (String 50)</criterion>
+    <criterion>Entity added to existing solution</criterion>
+    <criterion>Basic form and view created</criterion>
+  </acceptance-criteria>
+
+  <steps>
+    <step order="1">Create entity definition XML or use maker portal</step>
+    <step order="2">Add sprk_name as primary field</step>
+    <step order="3">Add sprk_entitylogicalname required text field</step>
+    <step order="4">Create sprk_viewtype global choice set</step>
+    <step order="5">Add remaining fields per schema</step>
+    <step order="6">Create main form for admin configuration</step>
+    <step order="7">Create Active Grid Configurations view</step>
+    <step order="8">Add to SpaarkeCore or appropriate solution</step>
+    <step order="9">Export and commit solution files</step>
+  </steps>
+
+  <estimated-effort>medium</estimated-effort>
+</task>

@@ -11,3 +11,24 @@ export {
   getEventTypeFieldConfig,
 } from "./EventTypeService";
 export type { IGetEventTypeFieldConfigResult, SectionName } from "./EventTypeService";
+export { FetchXmlService } from "./FetchXmlService";
+export type {
+  IFetchXmlResult,
+  IFetchXmlOptions,
+  IColumnDefinition,
+  IFilterGroup,
+  IFilterCondition,
+  ColumnDataType,
+} from "./FetchXmlService";
+export { ViewService } from "./ViewService";
+export type { IGetViewsOptions } from "./ViewService";
+export { ConfigurationService } from "./ConfigurationService";
+export type {
+  IGridConfiguration,
+  IGridConfigJson,
+  IColumnOverride,
+  IDefaultFilter,
+  IRowFormattingRule,
+  IGridFeatures,
+  GridConfigViewType,
+} from "./ConfigurationService";

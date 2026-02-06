@@ -1,0 +1,89 @@
+/**
+ * Universal Dataset Grid Styles
+ *
+ * Power Apps Native Grid Compatible Styling
+ *
+ * This CSS file provides complementary styles to the Fluent UI v9 DataGrid.
+ * Primary styling is done via makeStyles (Griffel) in DatasetGrid.tsx.
+ * These rules ensure consistent appearance matching native Power Apps grids.
+ *
+ * Key characteristics of Power Apps native grid:
+ * - Row height: ~44px (compact)
+ * - Header: Semi-bold text, subtle gray background
+ * - Borders: Light gray 1px borders between rows, 2px under header
+ * - Selection: Blue highlight on selected rows
+ * - Hover: Subtle gray hover effect
+ * - Font: Segoe UI, 14px body text
+ *
+ * ADR-021 Compliance:
+ * - No hard-coded colors (use CSS custom properties or Fluent tokens)
+ * - Dark mode support via Fluent theme tokens
+ */
+
+/* Base container - font stack matching Fluent UI */
+.universal-grid-container {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Roboto', 'Helvetica Neue', sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/*
+ * Fluent UI DataGrid overrides for Power Apps native appearance
+ * These selectors target Fluent UI v9 DataGrid internals
+ */
+
+/* Ensure consistent scrollbar styling */
+.universal-grid-container ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.universal-grid-container ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.universal-grid-container ::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+
+.universal-grid-container ::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(0, 0, 0, 0.3);
+}
+
+/* Dark mode scrollbar adjustments */
+@media (prefers-color-scheme: dark) {
+  .universal-grid-container ::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.2);
+  }
+
+  .universal-grid-container ::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(255, 255, 255, 0.3);
+  }
+}
+
+/* Focus visible indicator for accessibility */
+.universal-grid-container [role="row"]:focus-visible {
+  outline: 2px solid var(--colorBrandStroke1, #0078d4);
+  outline-offset: -2px;
+}
+
+/* Hyperlink cell styling to match Power Apps */
+.universal-grid-container a {
+  text-decoration: none;
+}
+
+.universal-grid-container a:hover {
+  text-decoration: underline;
+}
+
+/* Loading state consistency */
+.universal-grid-container .loading-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100px;
+}

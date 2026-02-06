@@ -1,89 +1,114 @@
 # Current Task State
 
 > **Project**: events-workspace-apps-UX-r1
-> **Last Updated**: 2026-02-04
+> **Last Updated**: 2026-02-05
 
 ---
 
-## Project Complete
+## Active Work: Phase 10 - OOB Visual Parity
 
 | Field | Value |
 |-------|-------|
-| **Project** | Events Workspace Apps UX R1 |
-| **Status** | COMPLETE |
-| **Total Tasks** | 67/67 |
-| **Phases** | 7/7 |
+| **Phase** | 10 - OOB Visual Parity |
+| **Task** | 097 - Column Header Menu OOB Parity |
+| **Status** | Completed |
+| **Started** | 2026-02-05 |
+| **Completed** | 2026-02-05 |
 | **Branch** | work/events-workspace-apps-UX-r1 |
 
 ---
 
-## Final Task Completed
+## Task 097 Completion Summary
+
+**Objective**: Rewrite column headers to match OOB Power Apps grid behavior - clickable headers with dropdown menu showing A to Z, Z to A, Filter by, Column width, Move left/right.
+
+**Rigor Level**: FULL
+
+### Completed Steps
+
+- [x] Step 1: Analyzed OOB column header menu structure and styling
+- [x] Step 2: Created ColumnHeaderMenu component with Fluent UI Menu
+- [x] Step 3: Added A to Z / Z to A sort options with icons
+- [x] Step 4: Added Filter by option that opens filter submenu/panel
+- [x] Step 5: Added Column width option (placeholder - disabled)
+- [x] Step 6: Added Move left / Move right options (placeholder - disabled)
+- [x] Step 7: Added sort indicator (triangle) to sorted column
+- [x] Step 8: Added active filter indicator to filtered columns
+- [x] Step 9: Styled menu to match OOB (Segoe UI font, tokens for colors)
+- [x] Step 10: Replaced ColumnFilterHeader with ColumnHeaderMenu in GridSection
+- [x] Step 11: Added sorting state management (sortConfig state)
+- [x] Step 12: Implemented client-side sorting in filteredEvents memo
+- [x] Step 13: All menu options tested (build successful)
+- [x] Step 14: Dark mode styling via Fluent UI tokens
+
+### Files Modified
+
+| File | Purpose |
+|------|---------|
+| `src/solutions/EventsPage/src/components/ColumnHeaderMenu.tsx` | New OOB-style column header menu component |
+| `src/solutions/EventsPage/src/components/GridSection.tsx` | Updated to use ColumnHeaderMenu, added sorting logic |
+| `src/solutions/EventsPage/src/components/index.ts` | Export ColumnHeaderMenu and types |
+
+### Key Implementation Details
+
+1. **ColumnHeaderMenu Component** (`ColumnHeaderMenu.tsx`):
+   - Entire column header is clickable (opens dropdown menu)
+   - Menu options: A to Z, Z to A, Filter by, Column width (disabled), Move left/right (disabled)
+   - Sort indicator shows triangle (up/down) next to sorted column name
+   - Filter indicator (filled funnel icon) shows when filter is active
+   - Uses Fluent UI Menu component for dropdown
+   - Filter panel opens via Popover when "Filter by" is clicked
+   - Segoe UI font family for OOB parity
+   - Dark mode support via Fluent UI tokens
+
+2. **GridSection Updates**:
+   - Added `sortConfig` state to track current sort column and direction
+   - Added `handleSortChange` callback
+   - Extended `filteredEvents` memo with sorting logic (supports all columns)
+   - Replaced all ColumnFilterHeader instances with ColumnHeaderMenu
+   - Version bumped to 1.8.0
+
+3. **Sorting Support**:
+   - Event Name, Regarding, Due Date, Status, Priority, Owner, Event Type all sortable
+   - Null values sort to end
+   - String comparisons are case-insensitive
+
+---
+
+## Quality Gates
+
+- [x] Build: `npm run build` - Passed (dist/index.html 617.76 kB)
+- [x] TypeScript: No compilation errors
+- [x] ADR-021: Fluent UI v9 tokens only (no hard-coded colors)
+- [x] ADR-022: React 16 compatible (no createRoot)
+
+---
+
+## Quick Recovery
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | 078 |
-| **Task File** | tasks/078-project-wrapup.poml |
-| **Title** | Project Wrap-up |
-| **Phase** | 7 |
-| **Status** | completed |
-| **Completed** | 2026-02-04 |
+| **Task** | 097 - Column Header Menu OOB Parity |
+| **Status** | Completed |
+| **Next Action** | Proceed to Task 098 (Layout Container Styling) or Task 096 (CalendarSidePane) |
 
 ---
 
-## Project Summary
-
-### Phases Completed
+## Prior Phases (Complete)
 
 | Phase | Description | Tasks | Status |
 |-------|-------------|-------|--------|
-| Phase 1 | EventCalendarFilter PCF | 9/9 | Complete |
-| Phase 2 | UniversalDatasetGrid Enhancement | 10/10 | Complete |
-| Phase 3 | EventTypeService Extraction | 6/6 | Complete |
-| Phase 4 | EventDetailSidePane Custom Page | 15/15 | Complete |
-| Phase 5 | DueDatesWidget PCF | 9/9 | Complete |
-| Phase 6 | Events Custom Page | 9/9 | Complete |
-| Phase 7 | Integration & Testing | 9/9 | Complete |
-
-### Delivered Components
-
-| Component | Type | Version |
-|-----------|------|---------|
-| EventCalendarFilter | PCF | 1.0.4 |
-| UniversalDatasetGrid | PCF | 2.2.0 |
-| DueDatesWidget | PCF | 1.0.1 |
-| EventTypeService | Shared Service | 1.0.0 |
-| EventDetailSidePane | Custom Page | 1.0.0 |
-| EventsPage | Custom Page | 1.5.0 |
-
-### Success Criteria
-
-All 12 success criteria verified and met.
+| Phase 1 | EventCalendarFilter PCF | 9/9 | Completed |
+| Phase 2 | UniversalDatasetGrid Enhancement | 10/10 | Completed |
+| Phase 3 | EventTypeService Extraction | 6/6 | Completed |
+| Phase 4 | EventDetailSidePane Custom Page | 15/15 | Completed |
+| Phase 5 | DueDatesWidget PCF | 9/9 | Completed |
+| Phase 6 | Events Custom Page | 9/9 | Completed |
+| Phase 7 | Integration & Testing | 9/9 | Completed |
+| Phase 8 | Universal DataGrid Enhancement | 11/11 | Completed |
+| Phase 9 | OOB Parity Layout Refactor | 5/5 | Completed |
+| Phase 10 | OOB Visual Parity | 1/4 | In Progress |
 
 ---
 
-## Project Artifacts
-
-| Artifact | Location |
-|----------|----------|
-| Project README | `projects/events-workspace-apps-UX-r1/README.md` |
-| Task Index | `projects/events-workspace-apps-UX-r1/tasks/TASK-INDEX.md` |
-| Lessons Learned | `projects/events-workspace-apps-UX-r1/lessons-learned.md` |
-| Deployment Docs | `projects/events-workspace-apps-UX-r1/notes/deployment/final-deployment.md` |
-| Test Results | `projects/events-workspace-apps-UX-r1/notes/testing/` |
-
----
-
-## Next Actions
-
-- [x] All 67 tasks completed
-- [x] README.md updated to Complete status
-- [x] Lessons learned documented
-- [x] TASK-INDEX.md shows 67/67 complete
-- [ ] Create final commit
-- [ ] Push to GitHub
-- [ ] Create PR for merge to master
-
----
-
-*Project complete. Ready for PR creation.*
-*Last updated: 2026-02-04*
+*Last updated: 2026-02-05*

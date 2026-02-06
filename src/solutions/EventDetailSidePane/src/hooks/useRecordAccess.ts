@@ -121,7 +121,7 @@ function getXrm(): IXrm | null {
  * This action returns an AccessRightsMask that indicates what actions the
  * current user can perform on the record.
  *
- * @param entityType - Logical name of the entity (e.g., "sprk_events")
+ * @param entityType - Logical name of the entity (e.g., "sprk_event")
  * @param recordId - GUID of the record
  * @returns Promise<boolean> - true if user has write access
  */
@@ -287,7 +287,7 @@ export function useRecordAccess(eventId: string | null): RecordAccessResult {
     const checkAccess = async () => {
       setState((prev) => ({ ...prev, isLoading: true }));
 
-      const result = await checkRecordWriteAccess("sprk_events", eventId);
+      const result = await checkRecordWriteAccess("sprk_event", eventId);
 
       if (!cancelled) {
         setState({

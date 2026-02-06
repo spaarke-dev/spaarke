@@ -222,9 +222,41 @@ export interface MockEventDataOptions {
     dueDate?: Date;
     eventType?: string;
     eventTypeName?: string;
+    /** Event status value (0-7) from sprk_eventstatus */
+    eventStatus?: number;
+    /** @deprecated Use eventStatus instead */
     statusCode?: number;
     isOverdue?: boolean;
 }
+
+/**
+ * Event Status values for test data
+ * Matches sprk_eventstatus optionset values
+ */
+export const TestEventStatus = {
+    Draft: 0,
+    Open: 1,
+    Completed: 2,
+    Closed: 3,
+    OnHold: 4,
+    Cancelled: 5,
+    Reassigned: 6,
+    Archived: 7
+} as const;
+
+/**
+ * Event Status labels for test data
+ */
+const EventStatusLabels: Record<number, string> = {
+    [TestEventStatus.Draft]: 'Draft',
+    [TestEventStatus.Open]: 'Open',
+    [TestEventStatus.Completed]: 'Completed',
+    [TestEventStatus.Closed]: 'Closed',
+    [TestEventStatus.OnHold]: 'On Hold',
+    [TestEventStatus.Cancelled]: 'Cancelled',
+    [TestEventStatus.Reassigned]: 'Reassigned',
+    [TestEventStatus.Archived]: 'Archived'
+};
 
 export function createMockEventData(options: MockEventDataOptions = {}): Record<string, unknown> {
     const {
@@ -233,18 +265,25 @@ export function createMockEventData(options: MockEventDataOptions = {}): Record<
         dueDate = new Date(),
         eventType = 'event-type-1',
         eventTypeName = 'Filing Deadline',
-        statusCode = 3 // Open
+        eventStatus = TestEventStatus.Open, // Default to Open (1)
+        statusCode // Deprecated, prefer eventStatus
     } = options;
+
+    // Use eventStatus, fallback to statusCode for backward compatibility
+    const status = eventStatus ?? statusCode ?? TestEventStatus.Open;
+    const statusLabel = EventStatusLabels[status] ?? 'Unknown';
 
     return {
         sprk_eventid: id,
         sprk_eventname: name,
         sprk_duedate: dueDate.toISOString(),
-        statecode: 0,
-        statuscode: statusCode,
+        sprk_eventstatus: status,
+        'sprk_eventstatus@OData.Community.Display.V1.FormattedValue': statusLabel,
+        statecode: status === TestEventStatus.Archived ? 1 : 0, // Inactive only when Archived
+        statuscode: statusCode, // Keep for backward compat in tests
         '_sprk_eventtype_value': eventType,
         '_sprk_eventtype_value@OData.Community.Display.V1.FormattedValue': eventTypeName,
-        'statuscode@OData.Community.Display.V1.FormattedValue': 'Open',
+        'statuscode@OData.Community.Display.V1.FormattedValue': statusLabel,
         '_ownerid_value': 'owner-id-1',
         '_ownerid_value@OData.Community.Display.V1.FormattedValue': 'Test Owner'
     };

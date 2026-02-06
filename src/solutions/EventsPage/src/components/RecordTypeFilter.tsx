@@ -304,34 +304,35 @@ export const RecordTypeFilter: React.FC<RecordTypeFilterProps> = ({
 // ---------------------------------------------------------------------------
 
 function getMockEventTypes(): IEventTypeOption[] {
+  // Mock event type GUIDs for development/testing (valid GUID format)
   return [
     {
-      id: "type-1",
+      id: "00000000-0000-0000-0000-000000000101",
       name: "Filing Deadline",
       description: "Court filing deadlines",
     },
     {
-      id: "type-2",
+      id: "00000000-0000-0000-0000-000000000102",
       name: "Meeting",
       description: "Client and internal meetings",
     },
     {
-      id: "type-3",
+      id: "00000000-0000-0000-0000-000000000103",
       name: "Task",
       description: "General tasks and to-dos",
     },
     {
-      id: "type-4",
+      id: "00000000-0000-0000-0000-000000000104",
       name: "Hearing",
       description: "Court hearings and appearances",
     },
     {
-      id: "type-5",
+      id: "00000000-0000-0000-0000-000000000105",
       name: "Regulatory",
       description: "Regulatory compliance events",
     },
     {
-      id: "type-6",
+      id: "00000000-0000-0000-0000-000000000106",
       name: "Reminder",
       description: "General reminders",
     },

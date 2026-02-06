@@ -2,11 +2,17 @@
  * Event Filter Service
  *
  * Provides filtering logic for actionable events in DueDatesWidget.
- * Builds FetchXML queries for Dataverse WebAPI.
+ * Builds OData queries for Dataverse WebAPI.
  *
  * ADR Compliance:
  * - Uses WebAPI for Dataverse queries (not SDK)
  * - No hard-coded entity names (configurable)
+ *
+ * Event Status Field Migration:
+ * - Uses custom `sprk_eventstatus` field (values 0-7)
+ * - OOB statecode/statuscode are deprecated and only used for Archive functionality
+ *
+ * @see projects/events-workspace-apps-UX-r1/notes/design/statecode-statuscode-migration.md
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -25,7 +31,11 @@ export const EventSchemaNames = {
         dueDate: "sprk_duedate",
         baseDate: "sprk_basedate",
         finalDueDate: "sprk_finalduedate",
+        /** Custom Event Status field - primary status indicator */
+        eventStatus: "sprk_eventstatus",
+        /** @deprecated Use eventStatus instead. Kept for Archive detection. */
         stateCode: "statecode",
+        /** @deprecated Use eventStatus instead. */
         statusCode: "statuscode",
         priority: "sprk_priority",
         eventType: "sprk_eventtype",
@@ -41,21 +51,31 @@ export const EventSchemaNames = {
 } as const;
 
 /**
- * Status Reason values from spec.md
- * Actionable statuses: Draft, Planned, Open, On Hold
- * Non-actionable: Completed, Cancelled
+ * Event Status values (sprk_eventstatus custom field)
+ * Matches Dataverse optionset values
+ *
+ * Actionable statuses: Draft (0), Open (1), On Hold (4)
+ * Terminal statuses: Completed (2), Closed (3), Cancelled (5), Reassigned (6), Archived (7)
  */
-export const EventStatusReason = {
-    Draft: 1,
-    Planned: 2,
-    Open: 3,
+export const EventStatus = {
+    Draft: 0,
+    Open: 1,
+    Completed: 2,
+    Closed: 3,
     OnHold: 4,
-    Completed: 5,
-    Cancelled: 6
+    Cancelled: 5,
+    Reassigned: 6,
+    Archived: 7
 } as const;
 
 /**
+ * @deprecated Use EventStatus instead
+ */
+export const EventStatusReason = EventStatus;
+
+/**
  * State Code values
+ * Only used for Archive functionality (statecode=1 when Archived)
  */
 export const EventStateCode = {
     Active: 0,
@@ -63,14 +83,19 @@ export const EventStateCode = {
 } as const;
 
 /**
- * Actionable status codes (not completed or cancelled)
+ * Actionable event status values (not terminal)
+ * These events require user action
  */
-export const ACTIONABLE_STATUS_CODES = [
-    EventStatusReason.Draft,
-    EventStatusReason.Planned,
-    EventStatusReason.Open,
-    EventStatusReason.OnHold
+export const ACTIONABLE_EVENT_STATUSES = [
+    EventStatus.Draft,
+    EventStatus.Open,
+    EventStatus.OnHold
 ] as const;
+
+/**
+ * @deprecated Use ACTIONABLE_EVENT_STATUSES instead
+ */
+export const ACTIONABLE_STATUS_CODES = ACTIONABLE_EVENT_STATUSES;
 
 /**
  * Event data returned from Dataverse
@@ -79,11 +104,18 @@ export interface IEventData {
     sprk_eventid: string;
     sprk_eventname: string;
     sprk_duedate: string | null;
-    statecode: number;
-    statuscode: number;
+    /** Custom Event Status (0-7) - primary status indicator */
+    sprk_eventstatus?: number;
+    /** @deprecated Use sprk_eventstatus instead. Kept for Archive detection. */
+    statecode?: number;
+    /** @deprecated Use sprk_eventstatus instead. */
+    statuscode?: number;
     sprk_priority?: number;
     "_sprk_eventtype_value"?: string;
     "_sprk_eventtype_value@OData.Community.Display.V1.FormattedValue"?: string;
+    /** Formatted value for sprk_eventstatus */
+    "sprk_eventstatus@OData.Community.Display.V1.FormattedValue"?: string;
+    /** @deprecated Use sprk_eventstatus formatted value instead */
     "statuscode@OData.Community.Display.V1.FormattedValue"?: string;
     "_ownerid_value"?: string;
     "_ownerid_value@OData.Community.Display.V1.FormattedValue"?: string;
@@ -101,7 +133,9 @@ export interface IEventItem {
     eventType: string;
     eventTypeName: string;
     description?: string;
-    statusCode: number;
+    /** Event Status value (0-7) from sprk_eventstatus */
+    eventStatus: number;
+    /** Formatted event status name */
     statusName: string;
     priority?: number;
     ownerId?: string;
@@ -177,7 +211,7 @@ export function calculateDaysUntilDue(dueDate: Date): number {
  *
  * Query logic:
  * 1. Filter by regarding record ID (context-specific)
- * 2. Filter by actionable status (not completed/cancelled)
+ * 2. Filter by actionable event status (sprk_eventstatus: Draft, Open, On Hold)
  * 3. Filter by date: overdue OR due within daysAhead
  * 4. Sort by due date ascending (most urgent first)
  * 5. Limit to maxItems
@@ -199,8 +233,8 @@ export function buildUpcomingEventsQuery(params: IEventFilterParams): string {
         schema.fields.eventId,
         schema.fields.eventName,
         schema.fields.dueDate,
-        schema.fields.stateCode,
-        schema.fields.statusCode,
+        schema.fields.eventStatus,  // Primary status field
+        schema.fields.stateCode,    // Keep for Archive detection
         schema.fields.priority,
         schema.fields.eventTypeName,
         schema.fields.regardingRecordId,
@@ -217,10 +251,10 @@ export function buildUpcomingEventsQuery(params: IEventFilterParams): string {
         filterConditions.push(`${schema.fields.regardingRecordId} eq '${parentRecordId}'`);
     }
 
-    // 2. Filter by actionable status codes (not completed/cancelled)
-    // Using 'in' operator for multiple values
-    const statusFilter = ACTIONABLE_STATUS_CODES
-        .map(code => `${schema.fields.statusCode} eq ${code}`)
+    // 2. Filter by actionable event statuses (Draft=0, Open=1, On Hold=4)
+    // Using 'or' for multiple values on sprk_eventstatus
+    const statusFilter = ACTIONABLE_EVENT_STATUSES
+        .map(code => `${schema.fields.eventStatus} eq ${code}`)
         .join(" or ");
     filterConditions.push(`(${statusFilter})`);
 
@@ -269,6 +303,34 @@ export function buildUpcomingEventsQuery(params: IEventFilterParams): string {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Event Status labels for display (fallback if formatted value not available)
+ */
+const EVENT_STATUS_LABELS: Record<number, string> = {
+    [EventStatus.Draft]: "Draft",
+    [EventStatus.Open]: "Open",
+    [EventStatus.Completed]: "Completed",
+    [EventStatus.Closed]: "Closed",
+    [EventStatus.OnHold]: "On Hold",
+    [EventStatus.Cancelled]: "Cancelled",
+    [EventStatus.Reassigned]: "Reassigned",
+    [EventStatus.Archived]: "Archived"
+};
+
+/**
+ * Get status label for an event status value
+ */
+export function getEventStatusLabel(status: number): string {
+    return EVENT_STATUS_LABELS[status] ?? "Unknown";
+}
+
+/**
+ * Check if an event status is actionable (not terminal)
+ */
+export function isEventStatusActionable(status: number): boolean {
+    return (ACTIONABLE_EVENT_STATUSES as readonly number[]).includes(status);
+}
+
+/**
  * Transform raw Dataverse data to UI-friendly format
  */
 export function transformEventData(rawEvent: IEventData): IEventItem | null {
@@ -281,14 +343,23 @@ export function transformEventData(rawEvent: IEventData): IEventItem | null {
     const daysUntilDue = calculateDaysUntilDue(dueDate);
     const isOverdue = daysUntilDue < 0;
 
+    // Get event status - prefer sprk_eventstatus, fallback to statuscode for backward compat
+    const eventStatus = rawEvent.sprk_eventstatus ?? rawEvent.statuscode ?? EventStatus.Open;
+
+    // Get status name - prefer formatted value, fallback to label lookup
+    const statusName =
+        rawEvent["sprk_eventstatus@OData.Community.Display.V1.FormattedValue"] ||
+        rawEvent["statuscode@OData.Community.Display.V1.FormattedValue"] ||
+        getEventStatusLabel(eventStatus);
+
     return {
         id: rawEvent.sprk_eventid,
         name: rawEvent.sprk_eventname || "(Unnamed Event)",
         dueDate,
         eventType: rawEvent["_sprk_eventtype_value"] || "",
         eventTypeName: rawEvent["_sprk_eventtype_value@OData.Community.Display.V1.FormattedValue"] || "Event",
-        statusCode: rawEvent.statuscode,
-        statusName: rawEvent["statuscode@OData.Community.Display.V1.FormattedValue"] || "",
+        eventStatus,
+        statusName,
         priority: rawEvent.sprk_priority,
         ownerId: rawEvent["_ownerid_value"],
         ownerName: rawEvent["_ownerid_value@OData.Community.Display.V1.FormattedValue"],
@@ -342,9 +413,9 @@ export function buildEventCountQuery(params: IEventFilterParams): string {
         filterConditions.push(`${schema.fields.regardingRecordId} eq '${parentRecordId}'`);
     }
 
-    // 2. Filter by actionable status codes (not completed/cancelled)
-    const statusFilter = ACTIONABLE_STATUS_CODES
-        .map(code => `${schema.fields.statusCode} eq ${code}`)
+    // 2. Filter by actionable event statuses (Draft=0, Open=1, On Hold=4)
+    const statusFilter = ACTIONABLE_EVENT_STATUSES
+        .map(code => `${schema.fields.eventStatus} eq ${code}`)
         .join(" or ");
     filterConditions.push(`(${statusFilter})`);
 

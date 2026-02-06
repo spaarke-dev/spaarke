@@ -1,6 +1,6 @@
 {
   "name": "event-detail-sidepane",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "private": true,
   "description": "EventDetailSidePane Custom Page for Dataverse side pane - Event details view/edit",
   "scripts": {
@@ -16,16 +16,17 @@
     "@fluentui/react-icons": "^2.0.200"
   },
   "devDependencies": {
-    "@types/react": "^16.14.0",
-    "@types/react-dom": "^16.9.0",
+    "@types/react": "^18.3.27",
+    "@types/react-dom": "^18.3.7",
     "@vitejs/plugin-react": "^4.2.1",
-    "react": "^16.14.0",
-    "react-dom": "^16.14.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "typescript": "^5.0.0",
-    "vite": "^5.0.0"
+    "vite": "^5.0.0",
+    "vite-plugin-singlefile": "^2.3.0"
   },
   "peerDependencies": {
-    "react": "^16.14.0 || ^17.0.0",
-    "react-dom": "^16.14.0 || ^17.0.0"
+    "react": "^16.14.0 || ^17.0.0 || ^18.0.0",
+    "react-dom": "^16.14.0 || ^17.0.0 || ^18.0.0"
   }
 }

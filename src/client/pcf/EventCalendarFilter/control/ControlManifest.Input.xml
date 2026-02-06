@@ -2,7 +2,7 @@
 <manifest>
   <control namespace="Spaarke.Controls"
            constructor="EventCalendarFilter"
-           version="1.0.4"
+           version="1.0.5"
            display-name-key="Event Calendar Filter"
            description-key="Date-based navigation and filtering for Event grids with multi-month calendar display. Supports event indicators with counts."
            control-type="standard">
@@ -20,7 +20,7 @@
     <!-- Event Dates JSON - input for displaying date indicators with counts -->
     <property name="eventDatesJson"
               display-name-key="Event Dates JSON"
-              description-key="JSON array of dates with events. Format: [{date: '2026-02-15', count: 3}, ...] or ['2026-02-15', ...] for count=1"
+              description-key="JSON array of dates with events and optional counts"
               of-type="SingleLine.Text"
               usage="input"
               required="false" />

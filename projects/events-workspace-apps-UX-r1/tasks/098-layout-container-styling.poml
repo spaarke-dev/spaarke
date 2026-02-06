@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>098</id>
+    <title>Layout Container Styling (OOB Borders/Shadows)</title>
+    <phase>10</phase>
+    <status>completed</status>
+    <priority>high</priority>
+    <tags>eventspage, layout, styling, oob-parity</tags>
+    <created>2026-02-05</created>
+    <dependencies>095</dependencies>
+    <parallel-group>K</parallel-group>
+  </metadata>
+
+  <description>
+    Add proper visual containers to match OOB Power Apps styling:
+    1. CommandBar section - own bordered container with shadow
+    2. List View section (View selector + Grid) - own bordered container with shadow
+
+    These are distinct visual sections in OOB layout.
+  </description>
+
+  <context>
+    <target-location>src/solutions/EventsPage/src/App.tsx</target-location>
+    <oob-reference>Power Apps entity homepage with distinct CommandBar and List View sections</oob-reference>
+  </context>
+
+  <acceptance-criteria>
+    <criterion>CommandBar has distinct visual container (border + shadow)</criterion>
+    <criterion>List View (ViewToolbar + Grid) has distinct visual container (border + shadow)</criterion>
+    <criterion>Container styling matches OOB (border color, shadow depth, border radius)</criterion>
+    <criterion>Proper spacing between containers</criterion>
+    <criterion>Background colors match OOB</criterion>
+    <criterion>Dark mode containers styled correctly</criterion>
+  </acceptance-criteria>
+
+  <steps>
+    <step order="1">Analyze OOB CommandBar container styling (border, shadow, background)</step>
+    <step order="2">Analyze OOB List View container styling (border, shadow, background)</step>
+    <step order="3">Update commandBarWrapper styles with border, shadow, border-radius</step>
+    <step order="4">Create listViewContainer wrapper style</step>
+    <step order="5">Wrap ViewToolbar + Grid in listViewContainer</step>
+    <step order="6">Add appropriate spacing between CommandBar and List View containers</step>
+    <step order="7">Adjust padding and margins to match OOB</step>
+    <step order="8">Verify dark mode container styling</step>
+    <step order="9">Test visual parity with OOB screenshots</step>
+  </steps>
+
+  <estimated-effort>medium</estimated-effort>
+
+  <notes>
+    <note date="2026-02-05">Completed: CommandBar and List View containers now have OOB-style borders (tokens.colorNeutralStroke1), shadows (tokens.shadow4), and border-radius (tokens.borderRadiusMedium). Root background updated to tokens.colorNeutralBackground2 for container separation. 12px gap between containers. EventsPage version 2.6.0. Build verified (571.84 kB).</note>
+  </notes>
+</task>

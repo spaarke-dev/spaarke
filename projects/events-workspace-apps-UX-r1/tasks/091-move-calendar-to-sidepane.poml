@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>091</id>
+    <title>Move Calendar to Side Pane</title>
+    <phase>9</phase>
+    <status>completed</status>
+    <priority>high</priority>
+    <tags>eventspage, calendar, sidepane, oob-parity</tags>
+    <created>2026-02-05</created>
+    <dependencies>089</dependencies>
+    <parallel-group>I</parallel-group>
+  </metadata>
+
+  <description>
+    Move the EventCalendarFilter from its current left column position to a collapsible
+    side pane. In OOB Power Apps, the grid takes full width and additional filtering
+    tools are accessed via side panels or toolbars, not as permanent columns.
+  </description>
+
+  <context>
+    <target-location>src/solutions/EventsPage/src/</target-location>
+    <current-implementation>App.tsx renders Calendar in left column, Grid in right</current-implementation>
+    <oob-reference>Power Apps entity homepage shows full-width grid</oob-reference>
+  </context>
+
+  <acceptance-criteria>
+    <criterion>Grid section takes full width of page</criterion>
+    <criterion>Calendar accessible via button in toolbar that opens side pane</criterion>
+    <criterion>Calendar side pane is collapsible/closeable</criterion>
+    <criterion>Calendar filter still communicates selection to grid</criterion>
+    <criterion>Side pane uses Fluent UI v9 Panel component</criterion>
+    <criterion>Dark mode supported in calendar pane</criterion>
+  </acceptance-criteria>
+
+  <steps>
+    <step order="1">Create CalendarSidePane component with Panel wrapper</step>
+    <step order="2">Add "Calendar" button to ViewToolbar or CommandBar</step>
+    <step order="3">Move EventCalendarFilter into CalendarSidePane</step>
+    <step order="4">Update App.tsx layout to single-column (grid only)</step>
+    <step order="5">Wire calendar selection state through React context</step>
+    <step order="6">Test calendar filter applies to grid correctly</step>
+    <step order="7">Verify dark mode styling in side pane</step>
+    <step order="8">Update version in solution files</step>
+  </steps>
+
+  <estimated-effort>medium</estimated-effort>
+</task>

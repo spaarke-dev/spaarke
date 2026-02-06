@@ -30,3 +30,32 @@ export type { RecordTypeFilterProps, IEventTypeOption } from "./RecordTypeFilter
 
 export { StatusFilter, getStatusOptions, getActionableStatuses } from "./StatusFilter";
 export type { StatusFilterProps, IStatusOption } from "./StatusFilter";
+
+// CalendarDrawer removed in Task 096 - Calendar is now in Xrm.App.sidePanes
+// Use CalendarSidePane web resource instead
+
+export {
+  ViewSelectorDropdown,
+  useViewSelection,
+  EVENT_VIEWS,
+  DEFAULT_VIEW_ID,
+} from "./ViewSelectorDropdown";
+export type {
+  ViewSelectorDropdownProps,
+  SavedView,
+} from "./ViewSelectorDropdown";
+
+export { ColumnFilterHeader } from "./ColumnFilterHeader";
+export type {
+  ColumnFilterHeaderProps,
+  ColumnFilterType,
+  ColumnFilterOption,
+} from "./ColumnFilterHeader";
+
+export { ColumnHeaderMenu } from "./ColumnHeaderMenu";
+export type {
+  ColumnHeaderMenuProps,
+  ColumnFilterType as ColumnMenuFilterType,
+  ColumnFilterOption as ColumnMenuFilterOption,
+  SortDirection,
+} from "./ColumnHeaderMenu";

@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reassign Event</title>
+    <style>
+        :root {
+            --primary: #0078d4;
+            --primary-hover: #106ebe;
+            --text-primary: #323130;
+            --text-secondary: #605e5c;
+            --border: #8a8886;
+            --background: #ffffff;
+            --input-border: #8a8886;
+            --input-border-focus: #0078d4;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --text-primary: #f3f2f1;
+                --text-secondary: #a19f9d;
+                --background: #1b1a19;
+                --border: #484644;
+                --input-border: #605e5c;
+            }
+        }
+
+        * {
+            box-sizing: border-box;
+            font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+
+        body {
+            margin: 0;
+            padding: 20px;
+            background: var(--background);
+            color: var(--text-primary);
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .dialog-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .dialog-header svg {
+            width: 24px;
+            height: 24px;
+            color: var(--primary);
+        }
+
+        .dialog-header h2 {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .event-info {
+            background: rgba(0, 120, 212, 0.05);
+            border-radius: 4px;
+            padding: 12px;
+            margin-bottom: 20px;
+        }
+
+        .event-info-row {
+            display: flex;
+            gap: 24px;
+        }
+
+        .event-info-item {
+            flex: 1;
+        }
+
+        .event-info label {
+            display: block;
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+        }
+
+        .event-info .value {
+            font-weight: 600;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 6px;
+        }
+
+        .form-group label .required {
+            color: #a4262c;
+        }
+
+        .form-group select,
+        .form-group input {
+            width: 100%;
+            padding: 8px 12px;
+            font-size: 14px;
+            border: 1px solid var(--input-border);
+            border-radius: 4px;
+            background: var(--background);
+            color: var(--text-primary);
+            transition: border-color 0.15s;
+        }
+
+        .form-group select:focus,
+        .form-group input:focus {
+            outline: none;
+            border-color: var(--input-border-focus);
+        }
+
+        .form-group .hint {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        .user-lookup-container {
+            display: flex;
+            gap: 8px;
+        }
+
+        .user-lookup-container input {
+            flex: 1;
+        }
+
+        .user-lookup-container button {
+            padding: 8px 16px;
+            font-size: 14px;
+            border: 1px solid var(--primary);
+            border-radius: 4px;
+            background: transparent;
+            color: var(--primary);
+            cursor: pointer;
+        }
+
+        .user-lookup-container button:hover {
+            background: rgba(0, 120, 212, 0.1);
+        }
+
+        .radio-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .radio-option {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .radio-option:hover {
+            border-color: var(--primary);
+            background: rgba(0, 120, 212, 0.03);
+        }
+
+        .radio-option.selected {
+            border-color: var(--primary);
+            background: rgba(0, 120, 212, 0.08);
+        }
+
+        .radio-option input[type="radio"] {
+            width: auto;
+        }
+
+        .radio-option .option-content {
+            flex: 1;
+        }
+
+        .radio-option .option-label {
+            font-weight: 500;
+        }
+
+        .radio-option .option-value {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        #customUserSection {
+            display: none;
+            margin-top: 12px;
+            padding: 12px;
+            background: rgba(0, 0, 0, 0.02);
+            border-radius: 4px;
+        }
+
+        .button-group {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            margin-top: 24px;
+            padding-top: 16px;
+            border-top: 1px solid var(--border);
+        }
+
+        button {
+            padding: 8px 20px;
+            font-size: 14px;
+            font-weight: 500;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+            border: 1px solid var(--primary);
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-hover);
+            border-color: var(--primary-hover);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(0, 0, 0, 0.05);
+        }
+    </style>
+</head>
+<body>
+    <div class="dialog-header">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+            <circle cx="9" cy="7" r="4"></circle>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+        </svg>
+        <h2>Reassign Event</h2>
+    </div>
+
+    <div class="event-info">
+        <div class="event-info-row">
+            <div class="event-info-item">
+                <label>Event</label>
+                <div class="value" id="eventName">Loading...</div>
+            </div>
+            <div class="event-info-item">
+                <label>Current Owner</label>
+                <div class="value" id="currentOwner">Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label>Reassign To <span class="required">*</span></label>
+        <div class="radio-group" id="assignToOptions">
+            <label class="radio-option" data-target="owner">
+                <input type="radio" name="assignTo" value="owner">
+                <div class="option-content">
+                    <div class="option-label">Record Owner</div>
+                    <div class="option-value" id="ownerValue">-</div>
+                </div>
+            </label>
+            <label class="radio-option" data-target="attorney">
+                <input type="radio" name="assignTo" value="attorney">
+                <div class="option-content">
+                    <div class="option-label">Assigned Attorney</div>
+                    <div class="option-value" id="attorneyValue">-</div>
+                </div>
+            </label>
+            <label class="radio-option" data-target="paralegal">
+                <input type="radio" name="assignTo" value="paralegal">
+                <div class="option-content">
+                    <div class="option-label">Assigned Paralegal</div>
+                    <div class="option-value" id="paralegalValue">-</div>
+                </div>
+            </label>
+            <label class="radio-option" data-target="other">
+                <input type="radio" name="assignTo" value="other">
+                <div class="option-content">
+                    <div class="option-label">Other User</div>
+                    <div class="option-value">Select a different user</div>
+                </div>
+            </label>
+        </div>
+
+        <div id="customUserSection">
+            <label for="customUserName">Select User</label>
+            <div class="user-lookup-container">
+                <input type="text" id="customUserName" placeholder="Click Browse to select a user..." readonly>
+                <input type="hidden" id="customUserId">
+                <button type="button" id="browseUserBtn">Browse...</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="button-group">
+        <button type="button" class="btn-secondary" id="cancelBtn">Cancel</button>
+        <button type="button" class="btn-primary" id="reassignBtn">Reassign</button>
+    </div>
+
+    <script>
+        (function() {
+            var data = {};
+            var selectedUser = null;
+
+            try {
+                var urlParams = new URLSearchParams(window.location.search);
+                data = {
+                    eventId: urlParams.get('eventId'),
+                    eventName: urlParams.get('eventName'),
+                    currentOwnerId: urlParams.get('currentOwnerId'),
+                    currentOwnerName: urlParams.get('currentOwnerName'),
+                    ownerId: urlParams.get('ownerId'),
+                    ownerName: urlParams.get('ownerName'),
+                    attorneyId: urlParams.get('attorneyId'),
+                    attorneyName: urlParams.get('attorneyName'),
+                    paralegalId: urlParams.get('paralegalId'),
+                    paralegalName: urlParams.get('paralegalName')
+                };
+            } catch (e) {
+                console.error('Error parsing URL params:', e);
+            }
+
+            // Populate UI
+            document.getElementById('eventName').textContent = data.eventName || 'Unknown Event';
+            document.getElementById('currentOwner').textContent = data.currentOwnerName || 'Unknown';
+            document.getElementById('ownerValue').textContent = data.ownerName || 'Not set';
+            document.getElementById('attorneyValue').textContent = data.attorneyName || 'Not set';
+            document.getElementById('paralegalValue').textContent = data.paralegalName || 'Not set';
+
+            // Store user data for each option
+            var userOptions = {
+                owner: data.ownerId && data.ownerName ? { id: data.ownerId, name: data.ownerName } : null,
+                attorney: data.attorneyId && data.attorneyName ? { id: data.attorneyId, name: data.attorneyName } : null,
+                paralegal: data.paralegalId && data.paralegalName ? { id: data.paralegalId, name: data.paralegalName } : null,
+                other: null
+            };
+
+            // Disable options without values
+            document.querySelectorAll('.radio-option').forEach(function(option) {
+                var target = option.getAttribute('data-target');
+                if (target !== 'other' && !userOptions[target]) {
+                    option.style.opacity = '0.5';
+                    option.querySelector('input').disabled = true;
+                }
+            });
+
+            // Radio selection handling
+            var radioOptions = document.querySelectorAll('.radio-option');
+            var customUserSection = document.getElementById('customUserSection');
+
+            radioOptions.forEach(function(option) {
+                option.addEventListener('click', function() {
+                    if (this.querySelector('input').disabled) return;
+
+                    radioOptions.forEach(function(o) { o.classList.remove('selected'); });
+                    this.classList.add('selected');
+                    this.querySelector('input').checked = true;
+
+                    var target = this.getAttribute('data-target');
+                    if (target === 'other') {
+                        customUserSection.style.display = 'block';
+                        selectedUser = userOptions.other;
+                    } else {
+                        customUserSection.style.display = 'none';
+                        selectedUser = userOptions[target];
+                    }
+                });
+            });
+
+            // Browse user button - communicate with parent for lookup
+            document.getElementById('browseUserBtn').addEventListener('click', function() {
+                // Request parent to open user lookup
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({
+                        type: 'EVENT_REASSIGN_DIALOG_REQUEST_LOOKUP',
+                        data: {}
+                    }, '*');
+                }
+            });
+
+            // Listen for lookup result from parent
+            window.addEventListener('message', function(event) {
+                if (event.data && event.data.type === 'USER_LOOKUP_RESULT') {
+                    var user = event.data.data;
+                    if (user && user.id) {
+                        document.getElementById('customUserName').value = user.name;
+                        document.getElementById('customUserId').value = user.id;
+                        userOptions.other = user;
+                        selectedUser = user;
+                    }
+                }
+            });
+
+            // Cancel button
+            document.getElementById('cancelBtn').addEventListener('click', function() {
+                sendResult({ confirmed: false });
+            });
+
+            // Reassign button
+            document.getElementById('reassignBtn').addEventListener('click', function() {
+                var selectedRadio = document.querySelector('input[name="assignTo"]:checked');
+
+                if (!selectedRadio) {
+                    alert('Please select who to reassign this event to.');
+                    return;
+                }
+
+                if (selectedRadio.value === 'other') {
+                    var customUserId = document.getElementById('customUserId').value;
+                    var customUserName = document.getElementById('customUserName').value;
+
+                    if (!customUserId) {
+                        alert('Please select a user.');
+                        return;
+                    }
+                    selectedUser = { id: customUserId, name: customUserName };
+                }
+
+                if (!selectedUser) {
+                    alert('The selected option does not have a valid user. Please choose another option.');
+                    return;
+                }
+
+                sendResult({
+                    confirmed: true,
+                    assignTo: selectedRadio.value,
+                    newUserId: selectedUser.id,
+                    newUserName: selectedUser.name
+                });
+            });
+
+            function sendResult(result) {
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({
+                        type: 'EVENT_REASSIGN_DIALOG_RESULT',
+                        data: result
+                    }, '*');
+                }
+                try {
+                    if (window.Xrm || window.parent.Xrm) {
+                        var xrm = window.Xrm || window.parent.Xrm;
+                        xrm.Navigation.closeForm();
+                    }
+                } catch (e) {}
+            }
+
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') {
+                    sendResult({ confirmed: false });
+                }
+            });
+        })();
+    </script>
+</body>
+</html>

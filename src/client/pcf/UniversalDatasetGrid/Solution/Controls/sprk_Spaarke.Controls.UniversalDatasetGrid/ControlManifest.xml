@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<manifest>
+  <control namespace="Spaarke.UI.Components" constructor="UniversalDatasetGrid" version="2.2.0" display-name-key="Universal Dataset Grid" description-key="Document management grid with MSAL authentication, SDAP integration and Fluent UI v9" control-type="standard" api-version="1.3.18">
+    <external-service-usage enabled="false"/>
+    <data-set name="dataset" display-name-key="Dataset"/>
+    <property name="configJson" display-name-key="Configuration JSON" description-key="JSON configuration for grid behavior, commands, and SDAP integration" of-type="Multiple" usage="input" required="false"/>
+    <property name="calendarFilter" display-name-key="Calendar Filter" description-key="JSON filter from EventCalendarFilter with type (single, range, or clear), date, start, and end properties" of-type="SingleLine.Text" usage="input" required="false"/>
+    <property name="selectedEventDate" display-name-key="Selected Event Date" description-key="ISO date string of the selected row due date. Emitted on row click. Used for calendar highlighting." of-type="SingleLine.Text" usage="output"/>
+    <resources>
+      <code path="bundle.js" order="1"/>
+      <css path="styles.css" order="2"/>
+    </resources>
+    <feature-usage>
+      <uses-feature name="WebAPI" required="true"/>
+    </feature-usage>
+    <built-by name="pac" version="1.48.2"/>
+  </control>
+</manifest>

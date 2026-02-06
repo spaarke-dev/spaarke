@@ -1,18 +1,20 @@
 /**
  * StatusFilter Component
  *
- * Multi-select dropdown filter for filtering events by status reason (statuscode).
+ * Multi-select dropdown filter for filtering events by Event Status (sprk_eventstatus).
  * Uses Fluent UI v9 Combobox with multi-select capability.
  *
- * Status Values (sprk_event statuscode):
- * - 1: Draft
- * - 2: Planned
- * - 3: Open
+ * Event Status Values (sprk_eventstatus custom field):
+ * - 0: Draft
+ * - 1: Open
+ * - 2: Completed
+ * - 3: Closed
  * - 4: On Hold
- * - 5: Completed
- * - 6: Cancelled
+ * - 5: Cancelled
+ * - 6: Reassigned
+ * - 7: Archived
  *
- * Default Selection: Actionable statuses (Draft, Planned, Open, On Hold) - excludes Completed/Cancelled
+ * Default Selection: Actionable statuses (Draft, Open, On Hold) - excludes terminal statuses
  *
  * Features:
  * - Multi-select with chips display
@@ -42,7 +44,7 @@ import {
  * Status option configuration
  */
 export interface IStatusOption {
-  /** Status reason code (statuscode value) */
+  /** Event status code (sprk_eventstatus value) */
   value: number;
   /** Display label */
   label: string;
@@ -76,29 +78,36 @@ export interface StatusFilterProps {
 
 /**
  * All available event status options
- * Matches Dataverse statuscode values for sprk_event entity
+ * Matches Dataverse sprk_eventstatus values for sprk_event entity
  */
 const STATUS_OPTIONS: IStatusOption[] = [
   {
-    value: 1,
+    value: 0,
     label: "Draft",
     color: "subtle",
     appearance: "tint",
     isActionable: true,
   },
   {
-    value: 2,
-    label: "Planned",
-    color: "informative",
-    appearance: "tint",
-    isActionable: true,
-  },
-  {
-    value: 3,
+    value: 1,
     label: "Open",
     color: "brand",
     appearance: "tint",
     isActionable: true,
+  },
+  {
+    value: 2,
+    label: "Completed",
+    color: "success",
+    appearance: "filled",
+    isActionable: false,
+  },
+  {
+    value: 3,
+    label: "Closed",
+    color: "informative",
+    appearance: "ghost",
+    isActionable: false,
   },
   {
     value: 4,
@@ -109,15 +118,22 @@ const STATUS_OPTIONS: IStatusOption[] = [
   },
   {
     value: 5,
-    label: "Completed",
-    color: "success",
-    appearance: "filled",
+    label: "Cancelled",
+    color: "danger",
+    appearance: "ghost",
     isActionable: false,
   },
   {
     value: 6,
-    label: "Cancelled",
-    color: "danger",
+    label: "Reassigned",
+    color: "informative",
+    appearance: "tint",
+    isActionable: false,
+  },
+  {
+    value: 7,
+    label: "Archived",
+    color: "subtle",
     appearance: "ghost",
     isActionable: false,
   },
@@ -125,7 +141,7 @@ const STATUS_OPTIONS: IStatusOption[] = [
 
 /**
  * Default selection: actionable statuses only
- * (Draft, Planned, Open, On Hold - excludes Completed, Cancelled)
+ * (Draft, Open, On Hold - excludes terminal statuses)
  */
 const ACTIONABLE_STATUSES = STATUS_OPTIONS.filter((s) => s.isActionable).map(
   (s) => s.value

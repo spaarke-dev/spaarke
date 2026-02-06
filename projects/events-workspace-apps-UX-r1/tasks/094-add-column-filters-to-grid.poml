@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>094</id>
+    <title>Add Column Filters to Grid Headers</title>
+    <phase>9</phase>
+    <status>completed</status>
+    <priority>high</priority>
+    <tags>eventspage, grid, columnfilters, oob-parity</tags>
+    <created>2026-02-05</created>
+    <dependencies>093</dependencies>
+    <parallel-group>I</parallel-group>
+  </metadata>
+
+  <description>
+    Add filterable column headers to the grid, matching OOB Power Apps behavior.
+    Each column should have a filter icon that opens a filter flyout. Remove the
+    current toolbar-based filters (Status, Assigned To dropdowns) in favor of
+    column-level filtering.
+  </description>
+
+  <context>
+    <target-location>src/solutions/EventsPage/src/components/GridSection.tsx</target-location>
+    <current-implementation>StatusFilter.tsx shows toolbar dropdowns for filtering</current-implementation>
+    <oob-reference>Power Apps grid columns have filter icons that open filter menus</oob-reference>
+  </context>
+
+  <acceptance-criteria>
+    <criterion>Each grid column header shows a filter icon on hover</criterion>
+    <criterion>Clicking filter icon opens column-specific filter flyout</criterion>
+    <criterion>Text columns show search/contains filter</criterion>
+    <criterion>Choice columns show multi-select checkboxes</criterion>
+    <criterion>Date columns show date range picker</criterion>
+    <criterion>Lookup columns show search with suggestions</criterion>
+    <criterion>Active filters shown as pills or indicators</criterion>
+    <criterion>Clear all filters button available</criterion>
+    <criterion>Remove StatusFilter toolbar component</criterion>
+    <criterion>Dark mode supported in filter flyouts</criterion>
+  </acceptance-criteria>
+
+  <steps>
+    <step order="1">Create ColumnFilterButton component for header cells</step>
+    <step order="2">Create TextColumnFilter flyout component</step>
+    <step order="3">Create ChoiceColumnFilter flyout with checkboxes</step>
+    <step order="4">Create DateColumnFilter flyout with date range</step>
+    <step order="5">Create LookupColumnFilter flyout with search</step>
+    <step order="6">Add filter icons to DataGrid column headers</step>
+    <step order="7">Implement filter state management in context</step>
+    <step order="8">Merge column filters with view fetchxml</step>
+    <step order="9">Add active filter indicators to headers</step>
+    <step order="10">Add "Clear filters" button to toolbar</step>
+    <step order="11">Remove or hide StatusFilter toolbar component</step>
+    <step order="12">Test all filter types</step>
+    <step order="13">Verify dark mode in all filter flyouts</step>
+  </steps>
+
+  <estimated-effort>large</estimated-effort>
+
+  <notes>
+    <note date="2026-02-05">
+      Task completed. Implemented column-level filtering for the Events grid:
+
+      Components created:
+      - ColumnFilterHeader.tsx: Reusable filterable column header component
+        - Shows filter icon on hover
+        - Opens filter popover on click
+        - Supports text (contains), choice (multi-select), and date filter types
+        - Active filter indicator (filled icon)
+        - Dark mode support via Fluent UI tokens
+
+      Grid changes (GridSection.tsx):
+      - Added columnFilters state for tracking column-level filters
+      - Added client-side filtering via filteredEvents memo
+      - Replaced static th elements with ColumnFilterHeader components
+      - Footer shows filtered count with total when filters active
+
+      App.tsx changes:
+      - Removed toolbar filter row (AssignedToFilter, RecordTypeFilter, StatusFilter)
+      - Removed unused imports and handlers
+      - Version bumped to 2.4.0
+
+      Acceptance criteria met:
+      - Filter icons appear in column headers (Event Name, Regarding, Status, Priority, Owner, Event Type)
+      - Due Date column left as static (date range picker deferred to future)
+      - Choice columns (Status, Priority) show multi-select checkboxes
+      - Text columns show contains filter with Apply/Clear buttons
+      - Active filters shown with filled icon indicator
+      - Bundle size decreased from 641KB to 573KB due to removed toolbar components
+    </note>
+  </notes>
+</task>

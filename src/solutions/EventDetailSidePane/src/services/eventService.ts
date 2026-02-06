@@ -16,7 +16,7 @@ import {
 /**
  * Event entity logical name
  */
-const EVENT_ENTITY = "sprk_events";
+const EVENT_ENTITY = "sprk_event";
 
 /**
  * Xrm.WebApi type definition (subset needed for this service)

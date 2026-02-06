@@ -1,8 +1,8 @@
 # Task Index - Events Workspace Apps UX R1
 
-> **Last Updated**: 2026-02-04
-> **Total Tasks**: 67
-> **Project Status**: COMPLETE (67/67 tasks)
+> **Last Updated**: 2026-02-05
+> **Total Tasks**: 87
+> **Project Status**: 🔄 IN PROGRESS (86/87 tasks complete)
 > **Status Legend**: 🔲 = Pending, 🔄 = In Progress, ✅ = Complete, ⏸️ = Blocked
 
 ---
@@ -28,6 +28,13 @@ claude --dangerously-skip-permissions
 | **C** | 030-044 | Task 025 complete | Phase 4 (Side Pane) - depends on EventTypeService |
 | **D** | 050-058 + 060-068 | Task 044 complete | Phase 5 (Widget) + Phase 6 (Page) - NO file conflicts |
 | **E** | 070-079 | Groups A-D complete | Phase 7 (Integration) |
+| **F** | 080-083 + 087 | Phases 1-7 complete | Phase 8 (Foundation) - Services + Config |
+| **G** | 084-086 + 088 | Group F complete | Phase 8 (Components) - ViewSelector, CommandBar |
+| **H** | 089-090 | Group G complete | Phase 8 (Integration) - EventsPage refactor |
+| **I** | 091-094 | Task 089 complete | Phase 9 (OOB Parity) - Calendar pane, CommandBar, ViewSelector, Filters |
+| **J** | 095 | Group I complete | Phase 9 (Final) - OOB parity testing and deployment |
+| **K** | 096-098 | Task 095 complete | Phase 10 (Visual Parity) - Calendar side pane, Column menus, Layout styling |
+| **L** | 099 | Group K complete | Phase 10 (Final) - OOB visual parity testing |
 
 **To run parallel tasks**: Send single message with multiple Task tool invocations.
 
@@ -149,6 +156,60 @@ claude --dangerously-skip-permissions
 
 ---
 
+## Phase 8: Universal DataGrid Enhancement (OOB Parity)
+
+| Status | Task | Title | Dependencies | Parallel |
+|--------|------|-------|--------------|----------|
+| ✅ | 080 | Create FetchXmlService in shared library | None | Group F |
+| ✅ | 081 | Create ViewService for savedquery fetching | 080 | Group F |
+| ✅ | 082 | Create getXrm() utility for Custom Pages | None | Group F |
+| ✅ | 083 | Update shared library peerDependencies (React 16) | None | Group F |
+| ✅ | 084 | Create ViewSelector component | 081 | Group G |
+| ✅ | 085 | Create CommandBar component (OOB parity) | 082 | Group G |
+| ✅ | 086 | Create ViewToolbar component (OOB parity) | 084 | Group G |
+| ✅ | 087 | Create sprk_gridconfiguration Dataverse entity | None | Group F |
+| ✅ | 088 | Create ConfigurationService for grid config | 087 | Group G |
+| ✅ | 089 | Refactor EventsPage to use shared components | 084, 085, 086 | Group H |
+| ✅ | 090 | Phase 8 testing and deployment | 088, 089 | Group H |
+
+**Architecture Document**: [universal-dataset-grid-architecture.md](../../docs/architecture/universal-dataset-grid-architecture.md)
+
+---
+
+## Phase 9: OOB Parity Layout Refactor
+
+| Status | Task | Title | Dependencies | Parallel |
+|--------|------|-------|--------------|----------|
+| ✅ | 091 | Move Calendar to Side Pane | 089 | Group I |
+| ✅ | 092 | Add OOB-style Command Bar with Ribbon Buttons | 091 | Group I |
+| ✅ | 093 | Add View Selector Dropdown with Saved Views | 091 | Group I |
+| ✅ | 094 | Add Column Filters to Grid Headers | 093 | Group I |
+| ✅ | 095 | Final OOB Parity Testing and Polish | 092, 093, 094 | Group J |
+
+**Goal**: Achieve visual and functional parity with OOB Power Apps entity homepage layout.
+
+**View GUIDs**: See [Events-View-GUIDS.md](../notes/Events-View-GUIDS.md)
+
+---
+
+## Phase 10: OOB Visual Parity (Pixel-Perfect)
+
+| Status | Task | Title | Dependencies | Parallel |
+|--------|------|-------|--------------|----------|
+| ✅ | 096 | Create CalendarSidePane Web Resource | 095 | Group K |
+| ✅ | 097 | Column Header Menu OOB Parity | 095 | Group K |
+| ✅ | 098 | Layout Container Styling (OOB Borders/Shadows) | 095 | Group K |
+| 🔲 | 099 | Final OOB Visual Parity Testing | 096, 097, 098 | Group L |
+
+**Goal**: Pixel-perfect visual parity with OOB Power Apps entity homepage.
+
+**Key Changes**:
+- Calendar as Xrm.App.sidePanes pane (not command bar button)
+- Column headers with clickable dropdown menu (A to Z, Z to A, Filter by, etc.)
+- CommandBar and List View in distinct bordered/shadowed containers
+
+---
+
 ## Critical Path
 
 ```
@@ -174,7 +235,10 @@ claude --dangerously-skip-permissions
 | Phase 5: DueDatesWidget | 050-058 (9) | ✅ 9/9 |
 | Phase 6: Events Page | 060-068 (9) | ✅ 9/9 |
 | Phase 7: Integration | 070-078 (9) | ✅ 9/9 |
-| **Total** | **67** | **✅ 67/67 COMPLETE** |
+| Phase 8: Universal DataGrid Enhancement | 080-090 (11) | ✅ 11/11 |
+| Phase 9: OOB Parity Layout Refactor | 091-095 (5) | ✅ 5/5 |
+| Phase 10: OOB Visual Parity | 096-099 (4) | 🔄 3/4 |
+| **Total** | **87** | **🔄 86/87 IN PROGRESS** |
 
 ---
 

@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task xmlns="urn:spaarke:poml:1.0">
+  <metadata>
+    <id>083</id>
+    <title>Update shared library peerDependencies for React 16 compatibility</title>
+    <phase>8</phase>
+    <status>completed</status>
+    <priority>high</priority>
+    <tags>shared-library, config, react</tags>
+    <created>2026-02-05</created>
+    <dependencies>none</dependencies>
+    <parallel-group>F</parallel-group>
+  </metadata>
+
+  <description>
+    Update @spaarke/ui-components package.json peerDependencies to use React ">=16.14.0"
+    instead of "^18.2.0" for compatibility with PCF controls per ADR-022.
+    Ensure all shared components use React 16 APIs only.
+  </description>
+
+  <context>
+    <architecture-doc>docs/architecture/universal-dataset-grid-architecture.md</architecture-doc>
+    <target-location>src/client/shared/Spaarke.UI.Components/package.json</target-location>
+    <related-adr>ADR-022-pcf-platform-libraries.md</related-adr>
+  </context>
+
+  <acceptance-criteria>
+    <criterion>peerDependencies.react changed to ">=16.14.0"</criterion>
+    <criterion>peerDependencies.react-dom changed to ">=16.14.0"</criterion>
+    <criterion>devDependencies.react/react-dom at ^16.14.0 for testing</criterion>
+    <criterion>@types/react at ^16.14.0</criterion>
+    <criterion>No React 18 APIs used in shared components (verify no createRoot, useId, etc.)</criterion>
+    <criterion>npm run build succeeds</criterion>
+    <criterion>npm run test succeeds</criterion>
+  </acceptance-criteria>
+
+  <steps>
+    <step order="1">Update package.json peerDependencies for react to ">=16.14.0"</step>
+    <step order="2">Update package.json peerDependencies for react-dom to ">=16.14.0"</step>
+    <step order="3">Update devDependencies @types/react to ^16.14.0</step>
+    <step order="4">Search codebase for React 18 APIs (createRoot, useId, useSyncExternalStore)</step>
+    <step order="5">Replace any React 18 APIs with React 16 equivalents</step>
+    <step order="6">Run npm install to regenerate lock file</step>
+    <step order="7">Run npm run build and verify success</step>
+    <step order="8">Run npm run test and verify all tests pass</step>
+  </steps>
+
+  <estimated-effort>small</estimated-effort>
+</task>

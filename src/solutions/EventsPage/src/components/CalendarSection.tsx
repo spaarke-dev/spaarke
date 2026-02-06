@@ -36,12 +36,16 @@ export type CalendarFilterType = "single" | "range" | "clear";
 export interface CalendarFilterSingle {
   type: "single";
   date: string;
+  /** Date fields to filter by (e.g., ['sprk_DueDate', 'CreatedOn']) */
+  dateFields?: string[];
 }
 
 export interface CalendarFilterRange {
   type: "range";
   start: string;
   end: string;
+  /** Date fields to filter by (e.g., ['sprk_DueDate', 'CreatedOn']) */
+  dateFields?: string[];
 }
 
 export interface CalendarFilterClear {

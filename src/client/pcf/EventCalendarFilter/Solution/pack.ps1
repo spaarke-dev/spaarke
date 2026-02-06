@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 Set-Location $PSScriptRoot
-$version = "1.0.0"
+$version = "1.0.5"
 $solutionName = "SpaarkeEventCalendarFilter"
 $zipPath = "bin\${solutionName}_v$version.zip"
 
@@ -28,7 +28,7 @@ try {
     # Add root XML files
     @('solution.xml', 'customizations.xml', '[Content_Types].xml') | ForEach-Object {
         $filePath = Join-Path $PSScriptRoot $_
-        if (Test-Path $filePath) {
+        if (Test-Path -LiteralPath $filePath) {
             [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
                 $zip,
                 $filePath,
