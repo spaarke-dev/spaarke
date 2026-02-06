@@ -99,7 +99,7 @@ declare const Xrm: any;
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
-const VERSION = "2.11.0"; // Clear calendar filter on page navigation
+const VERSION = "2.15.0"; // Proactive navigation detection for instant side pane cleanup
 
 // Session storage key for calendar filter (must match CalendarSidePane)
 const CALENDAR_FILTER_STATE_KEY = "sprk_calendar_filter_state";
@@ -761,20 +761,39 @@ const EventsPageContent: React.FC = () => {
     }, 500);
 
     /**
-     * Close the Date Filter pane and clear filter state - used for cleanup on page navigation
+     * Close all side panes and clear filter state - used for cleanup on page navigation
+     * Prevents panes from persisting when navigating to other modules
+     * v2.14.0: More aggressive cleanup with multiple close attempts
      */
-    const closeDateFilterPane = () => {
+    const closeAllSidePanes = () => {
+      console.log("[EventsPage] v2.14.0 closeAllSidePanes called");
       const xrm = getXrm();
       if (xrm?.App?.sidePanes) {
+        // Close Calendar pane
         try {
           const calendarPane = xrm.App.sidePanes.getPane(CALENDAR_PANE_ID);
           if (calendarPane) {
             calendarPane.close();
-            console.log("[EventsPage] Closed Date Filter pane on navigation away");
+            console.log("[EventsPage] Closed Calendar pane on navigation away");
           }
         } catch (err) {
-          console.warn("[EventsPage] Could not close pane:", err);
+          console.warn("[EventsPage] Could not close Calendar pane:", err);
         }
+        // Close Event detail pane (Issue #2 fix - prevent persistence after navigation)
+        try {
+          const eventPane = xrm.App.sidePanes.getPane(EVENT_DETAIL_PANE_ID);
+          if (eventPane) {
+            console.log("[EventsPage] v2.14.0 Found Event pane, closing...");
+            eventPane.close();
+            console.log("[EventsPage] Closed Event pane on navigation away");
+          } else {
+            console.log("[EventsPage] v2.14.0 Event pane not found in sidePanes");
+          }
+        } catch (err) {
+          console.warn("[EventsPage] Could not close Event pane:", err);
+        }
+      } else {
+        console.log("[EventsPage] v2.14.0 Xrm.App.sidePanes not available");
       }
       // Clear calendar filter session storage when navigating away from Events page
       try {
@@ -788,22 +807,90 @@ const EventsPageContent: React.FC = () => {
     // Listen for page unload events (navigation away from custom page)
     // This is more reliable than React unmount in Dataverse iframe scenarios
     const handleBeforeUnload = () => {
-      closeDateFilterPane();
+      console.log("[EventsPage] v2.14.0 beforeunload event fired");
+      closeAllSidePanes();
     };
 
     const handlePageHide = () => {
-      closeDateFilterPane();
+      console.log("[EventsPage] v2.14.0 pagehide event fired");
+      closeAllSidePanes();
     };
+
+    // v2.14.0: Also listen for visibility change (more reliable in some iframe scenarios)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        console.log("[EventsPage] v2.15.0 visibilitychange (hidden) event fired");
+        closeAllSidePanes();
+      }
+    };
+
+    // v2.15.0: Proactive navigation detection - watch parent URL for changes
+    // Dataverse SPA navigation changes the URL without firing unload events
+    let lastParentUrl = "";
+    let navigationCheckInterval: ReturnType<typeof setInterval> | null = null;
+
+    try {
+      lastParentUrl = window.parent?.location?.href || "";
+    } catch {
+      // Cross-origin, can't access
+    }
+
+    const checkForNavigation = () => {
+      try {
+        const currentUrl = window.parent?.location?.href || "";
+        if (lastParentUrl && currentUrl && currentUrl !== lastParentUrl) {
+          // URL changed - check if we navigated away from Events
+          const isStillEvents = currentUrl.includes("sprk_event") ||
+                                currentUrl.includes("/Events") ||
+                                currentUrl.includes("etn=sprk_event");
+          if (!isStillEvents) {
+            console.log("[EventsPage] v2.15.0 Navigation detected away from Events, closing panes");
+            closeAllSidePanes();
+          }
+          lastParentUrl = currentUrl;
+        }
+      } catch {
+        // Cross-origin or error - ignore
+      }
+    };
+
+    // Check frequently (200ms) for navigation
+    navigationCheckInterval = setInterval(checkForNavigation, 200);
+
+    // Also listen for hashchange/popstate on parent window
+    const handleParentNavigation = () => {
+      console.log("[EventsPage] v2.15.0 Parent navigation event fired");
+      checkForNavigation();
+    };
+
+    try {
+      window.parent?.addEventListener("hashchange", handleParentNavigation);
+      window.parent?.addEventListener("popstate", handleParentNavigation);
+    } catch {
+      // Cross-origin, can't add listeners
+    }
 
     window.addEventListener("beforeunload", handleBeforeUnload);
     window.addEventListener("pagehide", handlePageHide);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
-    // Cleanup: Close side pane when navigating away from Events page
+    // Cleanup: Close all side panes when navigating away from Events page
     return () => {
+      console.log("[EventsPage] v2.15.0 React cleanup running");
       clearTimeout(timer);
-      closeDateFilterPane();
+      if (navigationCheckInterval) {
+        clearInterval(navigationCheckInterval);
+      }
+      closeAllSidePanes();
       window.removeEventListener("beforeunload", handleBeforeUnload);
       window.removeEventListener("pagehide", handlePageHide);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      try {
+        window.parent?.removeEventListener("hashchange", handleParentNavigation);
+        window.parent?.removeEventListener("popstate", handleParentNavigation);
+      } catch {
+        // Cross-origin, ignore
+      }
     };
   }, []);
 

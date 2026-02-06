@@ -182,8 +182,8 @@ export const EVENT_DETAIL_PANE_ID = "eventDetailPane";
 /** Side pane ID for calendar */
 export const CALENDAR_PANE_ID = "calendarPane";
 
-/** Side pane width in pixels (Event pane) */
-export const PANE_WIDTH = 500;
+/** Side pane width in pixels (Event pane) - matches Power Apps quick create width */
+export const PANE_WIDTH = 400;
 
 /** Calendar side pane width in pixels */
 export const CALENDAR_PANE_WIDTH = 340;
