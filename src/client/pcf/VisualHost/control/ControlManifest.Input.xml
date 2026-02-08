@@ -2,7 +2,7 @@
 <manifest>
   <control namespace="Spaarke.Visuals"
            constructor="VisualHost"
-           version="1.1.17"
+           version="1.2.0"
            display-name-key="Visual Host"
            description-key="Configuration-driven visualization control for charts, cards, and calendars"
            control-type="standard">
@@ -29,6 +29,14 @@
     <property name="contextFieldName"
               display-name-key="Context Field Name"
               description-key="Lookup field name to filter data by current record (e.g., _sprk_matterid_value). Shows only related records."
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false" />
+
+    <!-- FetchXML Override - per-deployment query override (v1.2.0) -->
+    <property name="fetchXmlOverride"
+              display-name-key="FetchXML Override"
+              description-key="Per-deployment FetchXML query override. Takes highest priority over chart definition FetchXML and saved views."
               of-type="SingleLine.Text"
               usage="input"
               required="false" />

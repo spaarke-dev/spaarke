@@ -5,7 +5,7 @@
     <estimate>30-60 minutes</estimate>
     <tags>dataverse, schema, option-set</tags>
     <dependencies></dependencies>
-    <status>pending</status>
+    <status>completed</status>
   </metadata>
 
   <prompt>

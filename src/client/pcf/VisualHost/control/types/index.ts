@@ -16,6 +16,19 @@ export enum VisualType {
   StatusBar = 100000005,
   Calendar = 100000006,
   MiniTable = 100000007,
+  DueDateCard = 100000008,
+  DueDateCardList = 100000009,
+}
+
+/**
+ * Click action type enumeration matching Dataverse option set values
+ */
+export enum OnClickAction {
+  None = 100000000,
+  OpenRecordForm = 100000001,
+  OpenSidePane = 100000002,
+  NavigateToPage = 100000003,
+  OpenDatasetGrid = 100000004,
 }
 
 /**
@@ -45,6 +58,20 @@ export interface IChartDefinition {
   sprk_groupbyfield?: string;
   sprk_optionsjson?: string;
   sprk_configurationjson?: string;
+
+  // FetchXML fields (existing in Dataverse)
+  sprk_fetchxmlquery?: string;
+  sprk_fetchxmlparams?: string;
+
+  // Click action fields
+  sprk_onclickaction?: OnClickAction;
+  sprk_onclicktarget?: string;
+  sprk_onclickrecordfield?: string;
+
+  // Card list configuration fields
+  sprk_contextfieldname?: string;
+  sprk_viewlisttabname?: string;
+  sprk_maxdisplayitems?: number;
 }
 
 /**

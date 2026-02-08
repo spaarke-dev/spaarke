@@ -21,3 +21,6 @@ export * from "./RichTextEditor";
 
 // Dialogs
 export * from "./ChoiceDialog";
+
+// Event Due Date Card
+export * from "./EventDueDateCard";

@@ -7,7 +7,7 @@
  */
 
 import type { IChartDefinition } from "../types";
-import { VisualType, AggregationType } from "../types";
+import { VisualType, AggregationType, OnClickAction } from "../types";
 import { logger } from "../utils/logger";
 
 /**
@@ -67,6 +67,17 @@ const FIELDS = {
   aggregationType: "sprk_aggregationtype",
   groupByField: "sprk_groupbyfield",
   optionsJson: "sprk_optionsjson",
+  // Click action fields
+  onClickAction: "sprk_onclickaction",
+  onClickTarget: "sprk_onclicktarget",
+  onClickRecordField: "sprk_onclickrecordfield",
+  // Card list configuration fields
+  contextFieldName: "sprk_contextfieldname",
+  viewListTabName: "sprk_viewlisttabname",
+  maxDisplayItems: "sprk_maxdisplayitems",
+  // FetchXML fields
+  fetchXmlQuery: "sprk_fetchxmlquery",
+  fetchXmlParams: "sprk_fetchxmlparams",
 } as const;
 
 /**
@@ -82,6 +93,14 @@ const SELECT_COLUMNS = [
   FIELDS.aggregationType,
   FIELDS.groupByField,
   FIELDS.optionsJson,
+  FIELDS.onClickAction,
+  FIELDS.onClickTarget,
+  FIELDS.onClickRecordField,
+  FIELDS.contextFieldName,
+  FIELDS.viewListTabName,
+  FIELDS.maxDisplayItems,
+  FIELDS.fetchXmlQuery,
+  FIELDS.fetchXmlParams,
 ].join(",");
 
 /**
@@ -197,6 +216,28 @@ function parseAggregationType(value: unknown): AggregationType | undefined {
 }
 
 /**
+ * Validate and convert click action value
+ */
+function parseOnClickAction(value: unknown): OnClickAction | undefined {
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+
+  const numValue = typeof value === "number" ? value : parseInt(String(value), 10);
+
+  if (isNaN(numValue)) {
+    return undefined;
+  }
+
+  if (Object.values(OnClickAction).includes(numValue)) {
+    return numValue as OnClickAction;
+  }
+
+  logger.warn("ConfigurationLoader", "Unknown click action type", { value: numValue });
+  return undefined;
+}
+
+/**
  * Map Dataverse record to IChartDefinition
  */
 function mapToChartDefinition(
@@ -212,6 +253,17 @@ function mapToChartDefinition(
     sprk_aggregationtype: parseAggregationType(record[FIELDS.aggregationType]),
     sprk_groupbyfield: record[FIELDS.groupByField] as string | undefined,
     sprk_optionsjson: record[FIELDS.optionsJson] as string | undefined,
+    // Click action fields
+    sprk_onclickaction: parseOnClickAction(record[FIELDS.onClickAction]),
+    sprk_onclicktarget: record[FIELDS.onClickTarget] as string | undefined,
+    sprk_onclickrecordfield: record[FIELDS.onClickRecordField] as string | undefined,
+    // Card list configuration fields
+    sprk_contextfieldname: record[FIELDS.contextFieldName] as string | undefined,
+    sprk_viewlisttabname: record[FIELDS.viewListTabName] as string | undefined,
+    sprk_maxdisplayitems: record[FIELDS.maxDisplayItems] as number | undefined,
+    // FetchXML fields
+    sprk_fetchxmlquery: record[FIELDS.fetchXmlQuery] as string | undefined,
+    sprk_fetchxmlparams: record[FIELDS.fetchXmlParams] as string | undefined,
   };
 
   // Validate optionsJson is valid JSON (for early warning)

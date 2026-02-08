@@ -21,6 +21,9 @@ import { DonutChart } from "./DonutChart";
 import { StatusDistributionBar } from "./StatusDistributionBar";
 import { CalendarVisual, type ICalendarEvent } from "./CalendarVisual";
 import { MiniTable, type IMiniTableItem, type IMiniTableColumn } from "./MiniTable";
+import { DueDateCardVisual } from "./DueDateCard";
+import { DueDateCardListVisual } from "./DueDateCardList";
+import type { IConfigWebApi } from "../services/ConfigurationLoader";
 
 export interface IChartRendererProps {
   /** Chart definition from Dataverse */
@@ -31,6 +34,16 @@ export interface IChartRendererProps {
   onDrillInteraction?: (interaction: DrillInteraction) => void;
   /** Height override for the chart */
   height?: number;
+  /** WebAPI for data fetching (needed by DueDateCard visuals) */
+  webApi?: IConfigWebApi;
+  /** Current record ID for context filtering */
+  contextRecordId?: string;
+  /** Callback for configured click actions */
+  onClickAction?: (recordId: string, entityName?: string, recordData?: Record<string, unknown>) => void;
+  /** Callback for "View List" navigation */
+  onViewListClick?: () => void;
+  /** FetchXML override from PCF property (highest query priority) */
+  fetchXmlOverride?: string;
 }
 
 const useStyles = makeStyles({
@@ -97,6 +110,10 @@ const getVisualTypeName = (visualType: VisualType): string => {
       return "Calendar";
     case VT.MiniTable:
       return "Mini Table";
+    case VT.DueDateCard:
+      return "Due Date Card";
+    case VT.DueDateCardList:
+      return "Due Date Card List";
     default:
       return `Unknown (${visualType})`;
   }
@@ -110,6 +127,11 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
   chartData,
   onDrillInteraction,
   height = 300,
+  webApi,
+  contextRecordId,
+  onClickAction,
+  onViewListClick,
+  fetchXmlOverride,
 }) => {
   const styles = useStyles();
   const { sprk_visualtype, sprk_name, sprk_configurationjson, sprk_groupbyfield } =
@@ -120,8 +142,10 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
 
   // No data available
   if (!chartData || !chartData.dataPoints || chartData.dataPoints.length === 0) {
-    // Some chart types don't need data (e.g., MetricCard can show "0")
-    if (sprk_visualtype !== VT.MetricCard) {
+    // Some chart types don't need data (MetricCard, DueDateCard types fetch their own)
+    if (sprk_visualtype !== VT.MetricCard
+      && sprk_visualtype !== VT.DueDateCard
+      && sprk_visualtype !== VT.DueDateCardList) {
       return (
         <div className={styles.placeholder}>
           <Text size={400}>No data available</Text>
@@ -291,6 +315,44 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
       );
     }
 
+    case VT.DueDateCard: {
+      if (!webApi) {
+        return (
+          <div className={styles.placeholder}>
+            <Text size={200}>DueDateCard requires WebAPI context</Text>
+          </div>
+        );
+      }
+      return (
+        <DueDateCardVisual
+          chartDefinition={chartDefinition}
+          webApi={webApi}
+          contextRecordId={contextRecordId}
+          onClickAction={onClickAction}
+        />
+      );
+    }
+
+    case VT.DueDateCardList: {
+      if (!webApi) {
+        return (
+          <div className={styles.placeholder}>
+            <Text size={200}>DueDateCardList requires WebAPI context</Text>
+          </div>
+        );
+      }
+      return (
+        <DueDateCardListVisual
+          chartDefinition={chartDefinition}
+          webApi={webApi}
+          contextRecordId={contextRecordId}
+          onClickAction={onClickAction}
+          onViewListClick={onViewListClick}
+          fetchXmlOverride={fetchXmlOverride}
+        />
+      );
+    }
+
     default: {
       return (
         <div className={styles.unknownType}>
@@ -302,7 +364,7 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
           </Text>
           <Text size={200}>
             Supported types: MetricCard, BarChart, LineChart, AreaChart,
-            DonutChart, StatusBar, Calendar, MiniTable
+            DonutChart, StatusBar, Calendar, MiniTable, DueDateCard, DueDateCardList
           </Text>
         </div>
       );

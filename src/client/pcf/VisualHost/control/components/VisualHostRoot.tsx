@@ -29,6 +29,10 @@ import {
   fetchAndAggregate,
   AggregationError,
 } from "../services/DataAggregationService";
+import {
+  executeClickAction,
+  hasClickAction,
+} from "../services/ClickActionHandler";
 
 const useStyles = makeStyles({
   container: {
@@ -107,6 +111,10 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
   // Get current record ID from context for related record filtering
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const contextRecordId = (context.mode as any).contextInfo?.entityId || null;
+
+  // v1.2.0: FetchXML override from PCF property (highest query priority)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fetchXmlOverride = (context.parameters as any).fetchXmlOverride?.raw?.trim() || null;
 
   const showToolbar = context.parameters.showToolbar?.raw !== false;
   const enableDrillThrough = context.parameters.enableDrillThrough?.raw !== false;
@@ -344,6 +352,54 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
   }, [chartDefinitionId, chartDefinition, getCustomPageName]);
 
   /**
+   * Handle configured click action from ClickActionHandler
+   */
+  const handleClickAction = useCallback(
+    async (recordId: string, entityName?: string, recordData?: Record<string, unknown>) => {
+      if (!chartDefinition || !hasClickAction(chartDefinition)) return;
+
+      await executeClickAction(
+        {
+          chartDefinition,
+          recordId,
+          entityName,
+          recordData,
+        },
+        handleExpandClick
+      );
+    },
+    [chartDefinition, handleExpandClick]
+  );
+
+  /**
+   * Handle "View List" navigation - switch to configured tab on current form
+   */
+  const handleViewListClick = useCallback(() => {
+    if (!chartDefinition?.sprk_viewlisttabname) return;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const xrm = (window as any).Xrm;
+    const tabName = chartDefinition.sprk_viewlisttabname;
+
+    logger.info("VisualHostRoot", "View List click - navigating to tab", { tabName });
+
+    try {
+      // Navigate to the configured tab on the current form
+      const formContext = xrm?.Page;
+      if (formContext?.ui?.tabs?.get) {
+        const tab = formContext.ui.tabs.get(tabName);
+        if (tab) {
+          tab.setFocus();
+        } else {
+          logger.warn("VisualHostRoot", `Tab '${tabName}' not found on current form`);
+        }
+      }
+    } catch (err) {
+      logger.error("VisualHostRoot", "Failed to navigate to tab", err);
+    }
+  }, [chartDefinition]);
+
+  /**
    * Render the appropriate visual based on chart definition
    */
   const renderVisual = () => {
@@ -364,6 +420,11 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
         chartData={chartData || undefined}
         onDrillInteraction={enableDrillThrough ? handleDrillInteraction : undefined}
         height={height || 300}
+        webApi={context.webAPI}
+        contextRecordId={contextRecordId || undefined}
+        onClickAction={hasClickAction(chartDefinition) ? handleClickAction : undefined}
+        onViewListClick={chartDefinition.sprk_viewlisttabname ? handleViewListClick : undefined}
+        fetchXmlOverride={fetchXmlOverride || undefined}
       />
     );
   };
@@ -390,7 +451,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
       )}
 
       {/* Version badge - lower left, unobtrusive */}
-      <span className={styles.versionBadge}>v1.1.17 • 2026-01-02</span>
+      <span className={styles.versionBadge}>v1.2.0 • 2026-02-08</span>
 
       {/* Main chart area */}
       <div className={styles.chartContainer}>
