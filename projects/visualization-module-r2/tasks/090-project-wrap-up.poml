@@ -1,0 +1,80 @@
+<task id="090" project="visualization-module-r2">
+  <metadata>
+    <title>Project Wrap-up and Documentation</title>
+    <phase>6</phase>
+    <estimate>1-2 hours</estimate>
+    <tags>documentation, cleanup</tags>
+    <dependencies>052</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Complete project wrap-up, update documentation, and prepare for archival</goal>
+    <context>
+      All implementation work is complete. This task ensures proper closure:
+      - Update project status to Complete
+      - Document lessons learned
+      - Update README with final state
+      - Run repo-cleanup skill
+    </context>
+    <constraints>
+      - Follow project wrap-up checklist
+      - Update all project documentation to reflect completion
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/visualization-module-r2/README.md</file>
+      <file>projects/visualization-module-r2/CLAUDE.md</file>
+      <file>projects/visualization-module-r2/tasks/TASK-INDEX.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step id="1">Update README.md status to "Complete"</step>
+    <step id="2">Verify all graduation criteria are checked off</step>
+    <step id="3">Create notes/lessons-learned.md with:
+      - What went well
+      - Challenges encountered
+      - Decisions that could be improved
+      - Recommendations for future work
+    </step>
+    <step id="4">Update TASK-INDEX.md - mark all tasks as completed</step>
+    <step id="5">Update current-task.md to show project complete</step>
+    <step id="6">Run /repo-cleanup to validate structure</step>
+    <step id="7">Create final commit:
+      "feat(visualhost): complete visualization-module-r2 project
+
+      - VisualHost v1.2.0 with click actions and card visuals
+      - EventDueDateCard shared component
+      - View-driven data fetching with parameter substitution
+      - DueDateWidget migrated to VisualHost
+
+      Closes #XXX"
+    </step>
+    <step id="8">Notify events-workspace-apps-UX-r1 project that dependency is resolved</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Skill</tool>
+    <tool>Bash</tool>
+  </tools>
+
+  <outputs>
+    <output>Updated README.md with Complete status</output>
+    <output>lessons-learned.md document</output>
+    <output>Final project commit</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>README.md shows Status: Complete</criterion>
+    <criterion>All graduation criteria checked</criterion>
+    <criterion>lessons-learned.md exists with content</criterion>
+    <criterion>repo-cleanup passes</criterion>
+    <criterion>Final commit pushed to feature branch</criterion>
+  </acceptance-criteria>
+</task>

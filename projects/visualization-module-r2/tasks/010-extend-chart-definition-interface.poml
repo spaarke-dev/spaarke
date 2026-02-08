@@ -1,0 +1,74 @@
+<task id="010" project="visualization-module-r2">
+  <metadata>
+    <title>Extend IChartDefinition Interface with New Fields</title>
+    <phase>2</phase>
+    <estimate>30-60 minutes</estimate>
+    <tags>pcf, typescript, interface</tags>
+    <dependencies>004</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Update IChartDefinition interface to include new schema fields and VisualType enum</goal>
+    <context>
+      The TypeScript interface must match the Dataverse schema to ensure type safety
+      when loading and using chart definition configuration.
+    </context>
+    <constraints>
+      - Must match exact field names from Dataverse (sprk_ prefix)
+      - VisualType enum values must match option set values
+      - Maintain backward compatibility with existing code
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/visualization-module-r2/spec.md</file>
+      <file>src/client/pcf/VisualHost/control/types/index.ts</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step id="1">Open src/client/pcf/VisualHost/control/types/index.ts</step>
+    <step id="2">Add new VisualType enum values:
+      - DueDateCard = 100000008
+      - DueDateCardList = 100000009
+    </step>
+    <step id="3">Create OnClickAction enum:
+      - None = 100000000
+      - OpenRecordForm = 100000001
+      - OpenSidePane = 100000002
+      - NavigateToPage = 100000003
+      - OpenDatasetGrid = 100000004
+    </step>
+    <step id="4">Extend IChartDefinition interface with new fields:
+      - sprk_onclickaction?: OnClickAction
+      - sprk_onclicktarget?: string
+      - sprk_onclickrecordfield?: string
+      - sprk_contextfieldname?: string
+      - sprk_viewlisttabname?: string
+      - sprk_maxdisplayitems?: number
+    </step>
+    <step id="5">Add sprk_fetchxmlquery and sprk_fetchxmlparams if not present</step>
+    <step id="6">Run TypeScript compiler to verify no errors</step>
+    <step id="7">Commit changes</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Bash</tool>
+  </tools>
+
+  <outputs>
+    <output>Updated types/index.ts with new fields and enums</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>VisualType enum includes DueDateCard and DueDateCardList</criterion>
+    <criterion>OnClickAction enum exists with all 5 values</criterion>
+    <criterion>IChartDefinition includes all 6 new optional fields</criterion>
+    <criterion>TypeScript compiles without errors</criterion>
+  </acceptance-criteria>
+</task>

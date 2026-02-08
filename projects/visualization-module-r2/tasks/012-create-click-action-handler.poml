@@ -1,0 +1,69 @@
+<task id="012" project="visualization-module-r2">
+  <metadata>
+    <title>Create ClickActionHandler Service</title>
+    <phase>2</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>pcf, typescript, service, xrm</tags>
+    <dependencies>011</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create ClickActionHandler service to execute configured click actions</goal>
+    <context>
+      This service interprets the click action configuration from chart definition
+      and executes the appropriate Xrm navigation or side pane action.
+    </context>
+    <constraints>
+      - Handle Xrm API availability gracefully
+      - Log actions for debugging
+      - Provide fallback behavior if Xrm not available
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/VisualHost/control/components/VisualHostRoot.tsx</file>
+      <file>src/client/pcf/VisualHost/control/types/index.ts</file>
+      <file>projects/visualization-module-r2/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step id="1">Create new file: src/client/pcf/VisualHost/control/services/ClickActionHandler.ts</step>
+    <step id="2">Create IClickActionContext interface:
+      - chartDefinition: IChartDefinition
+      - recordId: string
+      - recordData?: Record&lt;string, unknown&gt;
+    </step>
+    <step id="3">Create executeClickAction function with switch on action type:
+      - None: return early, do nothing
+      - OpenRecordForm: Xrm.Navigation.openForm()
+      - OpenSidePane: Xrm.App.sidePanes.createPane()
+      - NavigateToPage: Xrm.Navigation.navigateTo()
+      - OpenDatasetGrid: open drill-through Custom Page
+    </step>
+    <step id="4">Implement each action handler method</step>
+    <step id="5">Add error handling and logging</step>
+    <step id="6">Export from services/index.ts</step>
+    <step id="7">Test in isolation with mock Xrm</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Bash</tool>
+  </tools>
+
+  <outputs>
+    <output>ClickActionHandler.ts service</output>
+    <output>IClickActionContext interface</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Service handles all 5 action types</criterion>
+    <criterion>Graceful fallback when Xrm not available</criterion>
+    <criterion>Actions logged for debugging</criterion>
+    <criterion>Record ID extracted from configured field</criterion>
+  </acceptance-criteria>
+</task>

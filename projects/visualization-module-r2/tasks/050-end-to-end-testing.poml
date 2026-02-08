@@ -1,0 +1,92 @@
+<task id="050" project="visualization-module-r2">
+  <metadata>
+    <title>End-to-End Testing in Dataverse</title>
+    <phase>6</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>testing, e2e, dataverse</tags>
+    <dependencies>044</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Perform comprehensive end-to-end testing of all new features in Dataverse environment</goal>
+    <context>
+      Before final deployment, all features must be tested in the actual Dataverse
+      environment to ensure they work correctly with real data and Xrm APIs.
+    </context>
+    <constraints>
+      - Test in spaarkedev1 environment
+      - Document all test results
+      - Create test Chart Definition records
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/visualization-module-r2/spec.md</file>
+      <file>projects/visualization-module-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step id="1">Deploy latest VisualHost build to dev environment</step>
+    <step id="2">Create test Chart Definition for click action:
+      - Visual type: Metric Card or Bar Chart
+      - On Click Action: Open Record Form
+      - On Click Target: sprk_event
+      - Verify: Click chart element opens Event form
+    </step>
+    <step id="3">Test single due date card visual:
+      - Create Chart Definition with DueDateCard type
+      - Bind to Event lookup field
+      - Verify: Card renders with correct data
+    </step>
+    <step id="4">Test card list visual with view:
+      - Create Chart Definition with DueDateCardList type
+      - Set Base View ID to Active Events view
+      - Verify: Multiple cards display from view
+    </step>
+    <step id="5">Test context filtering:
+      - Add VisualHost to Matter form
+      - Set Context Field Name to sprk_matter_ref
+      - Verify: Only related events display
+    </step>
+    <step id="6">Test "View List" navigation:
+      - Set View List Tab Name to "Events"
+      - Click "View List" link
+      - Verify: Navigates to Events tab on form
+    </step>
+    <step id="7">Test custom FetchXML:
+      - Set custom FetchXML with {contextRecordId} parameter
+      - Verify: Query executes with substituted value
+    </step>
+    <step id="8">Test dark mode:
+      - Switch browser to dark mode
+      - Verify: All cards render correctly
+    </step>
+    <step id="9">Test backward compatibility:
+      - Load existing Chart Definition (no new fields)
+      - Verify: Existing behavior unchanged
+    </step>
+    <step id="10">Document test results in notes/testing-results.md</step>
+  </steps>
+
+  <tools>
+    <tool>Web Browser</tool>
+    <tool>Dataverse Maker Portal</tool>
+    <tool>Write</tool>
+  </tools>
+
+  <outputs>
+    <output>notes/testing-results.md with all test outcomes</output>
+    <output>Test Chart Definition records in dev environment</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All 10 success criteria from spec.md verified</criterion>
+    <criterion>No console errors during testing</criterion>
+    <criterion>Dark mode renders correctly</criterion>
+    <criterion>Backward compatibility confirmed</criterion>
+    <criterion>Test results documented</criterion>
+  </acceptance-criteria>
+</task>

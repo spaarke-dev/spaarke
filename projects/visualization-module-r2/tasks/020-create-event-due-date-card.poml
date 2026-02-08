@@ -1,0 +1,119 @@
+<task id="020" project="visualization-module-r2">
+  <metadata>
+    <title>Create EventDueDateCard Shared Component</title>
+    <phase>3</phase>
+    <estimate>2-3 hours</estimate>
+    <tags>shared-library, react, fluent-ui, component</tags>
+    <dependencies></dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create reusable EventDueDateCard component in @spaarke/ui-components library</goal>
+    <context>
+      This shared component displays an event due date card with:
+      - Date column with event type color band
+      - Event type + name header
+      - Description (truncated)
+      - Assigned to field
+      - Days-until-due badge (color-coded)
+
+      The component must be generic with no PCF-specific dependencies.
+    </context>
+    <constraints>
+      - Use Fluent UI v9 exclusively (ADR-021)
+      - Use design tokens only - no hard-coded colors except event type colors
+      - Support light and dark themes
+      - No PCF-specific APIs or dependencies
+      - Props interface must be generic
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/visualization-module-r2/spec.md</file>
+      <file>projects/visualization-module-r2/design.md</file>
+      <file>projects/events-workspace-apps-UX-r1/notes/due-date-widget-event-card.png</file>
+      <file>projects/events-workspace-apps-UX-r1/notes/event-type-color-codes.png</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DatasetGrid/CardView.tsx</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step id="1">Create component directory:
+      src/client/shared/Spaarke.UI.Components/src/components/EventDueDateCard/
+    </step>
+    <step id="2">Create IEventDueDateCardProps interface:
+      - eventId: string
+      - eventName: string
+      - eventTypeName: string
+      - dueDate: Date
+      - daysUntilDue: number
+      - isOverdue: boolean
+      - eventTypeColor?: string
+      - description?: string
+      - assignedTo?: string
+      - onClick?: (eventId: string) => void
+      - isNavigating?: boolean
+    </step>
+    <step id="3">Create EventDueDateCard.tsx component with layout:
+      - Left: Date column (month abbrev, day, day-of-week) with color band
+      - Center: Event type + name, description, assigned to
+      - Right: Days-until-due badge
+    </step>
+    <step id="4">Implement date formatting helper</step>
+    <step id="5">Implement days-until-due badge with color logic:
+      - Overdue: Red background
+      - Due today: Orange background
+      - Due soon (1-3 days): Yellow background
+      - Future: Neutral background
+    </step>
+    <step id="6">Add click handler with loading state (isNavigating)</step>
+    <step id="7">Create index.ts barrel export</step>
+    <step id="8">Verify component renders correctly in isolation</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Write</tool>
+    <tool>Bash</tool>
+  </tools>
+
+  <outputs>
+    <output>EventDueDateCard.tsx component</output>
+    <output>index.ts barrel export</output>
+    <output>IEventDueDateCardProps interface</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Component renders event card matching mockup layout</criterion>
+    <criterion>Uses Fluent UI v9 tokens for spacing, typography, colors</criterion>
+    <criterion>Event type color band displays correctly</criterion>
+    <criterion>Days-until-due badge shows correct color based on urgency</criterion>
+    <criterion>Click handler invokes with eventId</criterion>
+    <criterion>No PCF-specific dependencies in imports</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Card Renders with All Fields">
+      <steps>
+        <step>Import and render EventDueDateCard with full props</step>
+        <step>Verify event name visible</step>
+        <step>Verify date column shows month, day, day-of-week</step>
+        <step>Verify description truncates at 2 lines</step>
+        <step>Verify assigned to shows user name</step>
+      </steps>
+      <expected>All card elements render correctly</expected>
+    </test>
+    <test name="Dark Mode Compliance">
+      <steps>
+        <step>Wrap component in FluentProvider with dark theme</step>
+        <step>Verify text colors adapt to dark theme</step>
+        <step>Verify background uses semantic tokens</step>
+      </steps>
+      <expected>Card readable in dark mode per ADR-021</expected>
+    </test>
+  </ui-tests>
+</task>

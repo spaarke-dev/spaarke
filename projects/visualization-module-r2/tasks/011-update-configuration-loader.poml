@@ -1,0 +1,66 @@
+<task id="011" project="visualization-module-r2">
+  <metadata>
+    <title>Update ConfigurationLoader to Fetch New Fields</title>
+    <phase>2</phase>
+    <estimate>1 hour</estimate>
+    <tags>pcf, typescript, service</tags>
+    <dependencies>010</dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Update ConfigurationLoader service to fetch and map new chart definition fields</goal>
+    <context>
+      The ConfigurationLoader fetches sprk_chartdefinition records from Dataverse WebAPI.
+      It needs to include the new fields in the SELECT query and map them to the interface.
+    </context>
+    <constraints>
+      - Maintain backward compatibility with existing configurations
+      - Use same caching pattern as existing fields
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/VisualHost/control/services/ConfigurationLoader.ts</file>
+      <file>src/client/pcf/VisualHost/control/types/index.ts</file>
+      <file>projects/visualization-module-r2/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step id="1">Open ConfigurationLoader.ts</step>
+    <step id="2">Add new field constants to FIELDS object:
+      - onClickAction: "sprk_onclickaction"
+      - onClickTarget: "sprk_onclicktarget"
+      - onClickRecordField: "sprk_onclickrecordfield"
+      - contextFieldName: "sprk_contextfieldname"
+      - viewListTabName: "sprk_viewlisttabname"
+      - maxDisplayItems: "sprk_maxdisplayitems"
+      - fetchXmlQuery: "sprk_fetchxmlquery"
+      - fetchXmlParams: "sprk_fetchxmlparams"
+    </step>
+    <step id="3">Update SELECT_COLUMNS to include new fields</step>
+    <step id="4">Create parseOnClickAction helper function</step>
+    <step id="5">Update mapToChartDefinition to map new fields</step>
+    <step id="6">Run existing tests to ensure no regressions</step>
+    <step id="7">Commit changes</step>
+  </steps>
+
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Bash</tool>
+  </tools>
+
+  <outputs>
+    <output>Updated ConfigurationLoader.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>New fields included in WebAPI SELECT query</criterion>
+    <criterion>Fields correctly mapped to IChartDefinition</criterion>
+    <criterion>Existing tests pass</criterion>
+    <criterion>OnClickAction parsed as enum value</criterion>
+  </acceptance-criteria>
+</task>

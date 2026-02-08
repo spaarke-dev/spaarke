@@ -1,207 +1,187 @@
-# Universal Dataset Grid R2
+# Visualization Framework R2
 
-> **Status**: Future Project - Not Started
-> **Priority**: Medium
-> **Blocked By**: React 16 compatibility fix required
+> **Status**: Ready for Implementation
+> **Priority**: High
+> **Created**: 2026-01-02
+> **Updated**: 2026-02-08
 
 ---
 
-## Overview
+## Executive Summary
 
-The UniversalDatasetGrid PCF control (v2.1.4) is currently **non-functional in Dataverse** due to React version incompatibility. This project will fix the control and deploy a working version.
+This project enhances the VisualHost PCF control to support configuration-driven click actions and new visual types for displaying event due date cards. The work originated from the Events Workspace Apps UX R1 project's DueDateWidget requirements but is being implemented strategically as a framework enhancement.
 
-## Current State
+## Background
 
-| Aspect | Status |
-|--------|--------|
-| **Source Location** | `src/client/pcf/UniversalDatasetGrid/` |
-| **Current Version** | 2.1.4 |
-| **Deployment Status** | Broken - React 18 incompatible with Dataverse |
-| **Last Working Version** | Unknown (pre-React 18 migration) |
+### Origin: Events Workspace Apps UX R1
 
-## Root Cause: React 18 vs Platform React 16
+During the Events project, the DueDateWidget PCF required a visual refresh with a new card design. Analysis revealed that:
 
-### The Problem
+1. The card pattern should be reusable across the platform
+2. VisualHost already provides a configuration-driven visualization framework
+3. Integrating the card as a new visual type enables broader reuse
+4. Configuration-driven click actions would benefit all visual types
 
-The UniversalDatasetGrid was migrated to React 18 in Sprint 5B (v2.0.5-2.0.7), using:
+### Decision: Integrate into VisualHost
 
-```typescript
-// Current code (BROKEN in Dataverse)
-import ReactDOM from 'react-dom/client';
-this.root = ReactDOM.createRoot(container);
-this.root.render(<App />);
-```
+Rather than maintaining DueDateWidget as a standalone PCF, we will:
+- Add EventDueDateCard as a visual type in VisualHost
+- Add configuration-driven click action support
+- Use view-driven data fetching
+- Deprecate hardcoded behavior in DueDateWidget
 
-**Dataverse provides React 16.14.0** via platform libraries. When a PCF uses `platform-library name="React"`, Dataverse injects React 16 at runtime. The `createRoot()` API does not exist in React 16.
+---
 
-### ADR-022 Compliance
+## Scope
 
-Per [ADR-022: PCF Platform Libraries](../../.claude/adr/ADR-022.md), all PCF controls MUST:
-- Use `ReactDOM.render()` (React 16 API)
-- NOT use `createRoot()` (React 18 API)
-- Declare platform libraries in manifest
+### In Scope
 
-**VisualHost and DrillThroughWorkspace** were fixed to comply with ADR-022. UniversalDatasetGrid was not.
+| Feature | Description |
+|---------|-------------|
+| **Click Action Configuration** | Schema changes to `sprk_chartdefinition` for configurable click actions |
+| **EventDueDateCard Component** | Shared UI component in `@spaarke/ui-components` |
+| **Single Card Visual Type** | VisualHost visual bound to lookup field |
+| **Card List Visual Type** | VisualHost visual driven by Dataverse view |
+| **View-Driven Data Fetching** | Fetch data using view GUID + context filter |
+| **"View List" Navigation** | Configurable navigation to entity tab |
 
-## Features (When Working)
+### Out of Scope (Deferred)
 
-The control provides:
-- Document management grid with SDAP integration
-- Fluent UI v9 styling
-- Multi-select with Power Apps sync
-- Column sorting
-- Command bar (Add, Remove, Update, Download, Refresh)
-- Error boundary and structured logging
-- Theme detection (light/dark mode)
-
-### Known Limitations (Pre-existing)
-
-| Feature | Status |
+| Feature | Reason |
 |---------|--------|
-| Virtualization | Deferred - alignment issues |
-| File Operations | Placeholder implementations |
-| Server-side Paging | Not implemented |
-| Record Limit | ~1000 records (non-virtualized) |
+| UniversalDatasetGrid React 16 fix | Will deploy as Custom Page (React 18), not PCF |
+| UniversalSubgrid PCF | Future project when subgrid replacement needed |
+| Calendar visual type | Existing, no changes needed |
+| Chart visual types | Existing, no changes needed |
 
-## Required Fixes
+---
 
-### Phase 1: React 16 Compatibility (Critical)
+## Technical Approach
 
-**File**: `control/index.ts`
+### React Version Strategy
 
-Change from:
-```typescript
-import ReactDOM from 'react-dom/client';
-private root: ReactDOM.Root | null = null;
+| Component | Deployment | React Version |
+|-----------|------------|---------------|
+| VisualHost | PCF Standard Control | React 16 (platform library) |
+| UniversalDatasetGrid | Custom Page | React 18 (bundled) |
+| EventDueDateCard | Shared Library | React 16 compatible |
 
-public init(context, notifyOutputChanged, state, container) {
-    this.root = ReactDOM.createRoot(container);
-    // ...
-}
+### Key Constraints
 
-public updateView(context) {
-    this.root?.render(<App />);
-}
+| ADR | Constraint |
+|-----|------------|
+| ADR-021 | Fluent UI v9 exclusively, design tokens only |
+| ADR-022 | PCF controls use React 16 APIs (`ReactDOM.render`) |
+| ADR-012 | Shared components via `@spaarke/ui-components` |
 
-public destroy() {
-    this.root?.unmount();
-}
-```
+---
 
-To:
-```typescript
-import * as ReactDOM from 'react-dom';
-private container: HTMLDivElement | null = null;
+## Phases
 
-public init(context, notifyOutputChanged, state, container) {
-    this.container = container;
-    // ...
-}
+| Phase | Description | Effort |
+|-------|-------------|--------|
+| **Phase 1** | Schema changes to `sprk_chartdefinition` | 4-6 hrs |
+| **Phase 2** | Click Action Handler in VisualHostRoot | 6-8 hrs |
+| **Phase 3** | EventDueDateCard shared component | 4-6 hrs |
+| **Phase 4** | Due Date Card visual types in VisualHost | 6-8 hrs |
+| **Phase 5** | View-driven data fetching | 4-6 hrs |
+| **Phase 6** | Testing & deployment | 4-6 hrs |
+| **Total** | | **28-40 hrs** |
 
-public updateView(context) {
-    ReactDOM.render(<App />, this.container);
-}
+---
 
-public destroy() {
-    if (this.container) {
-        ReactDOM.unmountComponentAtNode(this.container);
-    }
-}
-```
+## Schema Changes
 
-**File**: `ControlManifest.Input.xml`
+### sprk_chartdefinition (Existing Entity)
 
-Add platform libraries:
-```xml
-<resources>
-  <code path="index.ts" order="1" />
-  <css path="styles.css" order="2" />
-  <platform-library name="React" version="16.14.0" />
-  <platform-library name="Fluent" version="9.46.2" />
-</resources>
-```
+New fields to add:
 
-**File**: `package.json`
+| Field | Type | Description |
+|-------|------|-------------|
+| `sprk_onclickaction` | Choice | Click action type |
+| `sprk_onclicktarget` | Text | Target for click action |
+| `sprk_onclickrecordfield` | Text | Field containing record ID |
+| `sprk_viewid` | Text | Dataverse view GUID |
+| `sprk_contextfieldname` | Text | Lookup field for context filtering |
+| `sprk_viewlisttabname` | Text | Tab name for "View List" navigation |
+| `sprk_maxdisplayitems` | Whole Number | Maximum items to display |
 
-Move React to devDependencies (type-checking only):
-```json
-{
-  "devDependencies": {
-    "react": "^16.14.0",
-    "react-dom": "^16.14.0",
-    "@types/react": "^16.14.0",
-    "@types/react-dom": "^16.14.0"
-  }
-}
-```
+### Click Action Options
 
-### Phase 2: Verify File Operations
+| Value | Description |
+|-------|-------------|
+| `none` | No click action |
+| `openrecordform` | Open record's modal form |
+| `opensidepane` | Open Custom Page in side pane |
+| `navigatetopage` | Navigate to URL or Custom Page |
+| `opendatasetgrid` | Open drill-through workspace |
 
-Test and fix placeholder implementations:
-- `FileDownloadService.ts` - Download via SDAP API
-- `FileDeleteService.ts` - Delete with confirmation
-- `FileReplaceService.ts` - Version replacement
-- Add File - Upload flow
+---
 
-### Phase 3: Integration Testing
+## Dependencies
 
-- Deploy to SPAARKE DEV 1
-- Test with Documents entity
-- Verify selection sync with Power Apps
-- Test file operations end-to-end
+### Incoming (Blocked By)
 
-## Deployment Notes
+None - this project can start immediately.
 
-### Central Package Management
+### Outgoing (Blocks)
 
-The workspace uses `Directory.Packages.props`. Before `pac pcf push`:
+| Project | Blocked Item |
+|---------|--------------|
+| events-workspace-apps-UX-r1 | DueDateWidget visual refresh |
+| events-workspace-apps-UX-r1 | "View List" navigation |
 
-```bash
-# Disable CPM
-mv /c/code_files/spaarke-wt-visualization-module/Directory.Packages.props /c/code_files/spaarke-wt-visualization-module/Directory.Packages.props.disabled
+---
 
-# Deploy
-cd src/client/pcf/UniversalDatasetGrid
-npm run build:prod
-pac pcf push --publisher-prefix sprk
+## Quick Links
 
-# Restore CPM
-mv /c/code_files/spaarke-wt-visualization-module/Directory.Packages.props.disabled /c/code_files/spaarke-wt-visualization-module/Directory.Packages.props
-```
+| Resource | Path |
+|----------|------|
+| Design Document | [design.md](design.md) |
+| VisualHost Source | [../../src/client/pcf/VisualHost/](../../src/client/pcf/VisualHost/) |
+| DueDateWidget Source | [../../src/client/pcf/DueDatesWidget/](../../src/client/pcf/DueDatesWidget/) |
+| Shared Components | [../../src/client/shared/Spaarke.UI.Components/](../../src/client/shared/Spaarke.UI.Components/) |
+| Card Mockup | [../events-workspace-apps-UX-r1/notes/due-date-widget-event-card.png](../events-workspace-apps-UX-r1/notes/due-date-widget-event-card.png) |
+| Color Codes | [../events-workspace-apps-UX-r1/notes/event-type-color-codes.png](../events-workspace-apps-UX-r1/notes/event-type-color-codes.png) |
 
-### File Lock Workaround
+---
 
-If `pac pcf push` fails with file lock error:
-```bash
-pac solution import --path obj/PowerAppsToolsTemp_sprk/bin/Debug/PowerAppsToolsTemp_sprk.zip --publish-changes
-```
+## Next Steps
 
-## Related Controls
+1. ~~**Convert design.md to spec.md** using `/design-to-spec projects/visualization-module-r2`~~ ✅ Done
+2. ~~**Run project-pipeline** to generate tasks~~ ✅ In Progress
+3. **Execute Phase 1** (schema changes)
+4. **Continue through phases** sequentially
 
-| Control | React Pattern | Status |
-|---------|--------------|--------|
-| **VisualHost** | `ReactDOM.render()` | Working (v1.1.11) |
-| **DrillThroughWorkspace** | `ReactDOM.render()` | Working (v1.1.1) |
-| **UniversalDatasetGrid** | `createRoot()` | **Broken** |
+## Graduation Criteria
 
-## Estimated Effort
+Per [spec.md](spec.md):
 
-| Phase | Effort |
-|-------|--------|
-| Phase 1: React 16 fix | 2-4 hours |
-| Phase 2: File operations | 8-16 hours |
-| Phase 3: Testing | 4-8 hours |
-| **Total** | 14-28 hours |
+- [ ] Click action configuration works for all visual types
+- [ ] Single due date card visual displays correctly
+- [ ] Card list visual fetches from view
+- [ ] Context filtering works
+- [ ] "View List" link navigates correctly
+- [ ] Custom FetchXML executes
+- [ ] PCF override takes precedence
+- [ ] Parameter substitution works
+- [ ] Dark mode support verified
+- [ ] Backward compatibility maintained
 
-## References
+---
 
-- [ADR-022: PCF Platform Libraries](../../.claude/adr/ADR-022.md)
-- [UniversalDatasetGrid Source](../../src/client/pcf/UniversalDatasetGrid/)
-- [UniversalDatasetGrid Docs](../../src/client/pcf/UniversalDatasetGrid/docs/)
-- [CHANGELOG](../../src/client/pcf/UniversalDatasetGrid/docs/CHANGELOG.md)
-- [VisualHost React 16 Pattern](../../src/client/pcf/VisualHost/control/index.ts)
+## Historical Context
+
+This project was originally scoped as "Universal Dataset Grid R2" focused on fixing React 18 → React 16 compatibility. That scope was revised on 2026-02-08 when it was determined that:
+
+1. UniversalDatasetGrid will deploy as Custom Page (React 18 OK)
+2. The Events project's DueDateWidget needs align better with VisualHost enhancement
+3. The framework-level approach provides more value than isolated fixes
+
+The original UniversalDatasetGrid React 16 fix is no longer needed for Custom Page deployment. If subgrid replacement is needed in the future, a separate "UniversalSubgrid" PCF project will be created.
 
 ---
 
 *Created: 2026-01-02*
-*Project: universal-dataset-grid-r2*
+*Scope revised: 2026-02-08*
+*Design document added: 2026-02-08*

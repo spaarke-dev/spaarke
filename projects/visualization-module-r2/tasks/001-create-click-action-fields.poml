@@ -1,0 +1,79 @@
+<task id="001" project="visualization-module-r2">
+  <metadata>
+    <title>Create Click Action Fields in sprk_chartdefinition</title>
+    <phase>1</phase>
+    <estimate>1-2 hours</estimate>
+    <tags>dataverse, schema, solution</tags>
+    <dependencies></dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create click action configuration fields in the sprk_chartdefinition entity</goal>
+    <context>
+      This is the first step in adding configuration-driven click actions to VisualHost.
+      These fields will allow administrators to configure what happens when a user clicks
+      on a visual element (chart segment, card, etc.).
+    </context>
+    <constraints>
+      - Use Dataverse maker portal or PAC CLI
+      - Follow Spaarke naming conventions (sprk_ prefix)
+      - Choice field values must match spec exactly
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/visualization-module-r2/spec.md</file>
+      <file>projects/visualization-module-r2/CLAUDE.md</file>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step id="1">Open Dataverse maker portal for spaarkedev1 environment</step>
+    <step id="2">Navigate to Tables > sprk_chartdefinition</step>
+    <step id="3">Create sprk_onclickaction choice field:
+      - Display Name: "On Click Action"
+      - Type: Choice (local)
+      - Options:
+        - None = 100000000
+        - Open Record Form = 100000001
+        - Open Side Pane = 100000002
+        - Navigate to Page = 100000003
+        - Open Dataset Grid = 100000004
+      - Default: None
+    </step>
+    <step id="4">Create sprk_onclicktarget text field:
+      - Display Name: "On Click Target"
+      - Type: Single Line of Text
+      - Max Length: 200
+      - Description: "Target entity, page name, or URL for click action"
+    </step>
+    <step id="5">Create sprk_onclickrecordfield text field:
+      - Display Name: "On Click Record Field"
+      - Type: Single Line of Text
+      - Max Length: 100
+      - Description: "Field name containing the record ID to use for click action"
+    </step>
+    <step id="6">Save and publish table changes</step>
+    <step id="7">Verify fields appear in table designer</step>
+  </steps>
+
+  <tools>
+    <tool>Dataverse Maker Portal</tool>
+    <tool>Web Browser</tool>
+  </tools>
+
+  <outputs>
+    <output>3 new fields on sprk_chartdefinition entity</output>
+    <output>Choice option set for click action types</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>sprk_onclickaction choice field exists with all 5 options</criterion>
+    <criterion>sprk_onclicktarget text field exists (max 200 chars)</criterion>
+    <criterion>sprk_onclickrecordfield text field exists (max 100 chars)</criterion>
+    <criterion>Fields are visible in table designer</criterion>
+  </acceptance-criteria>
+</task>

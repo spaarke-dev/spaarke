@@ -1,0 +1,73 @@
+<task id="002" project="visualization-module-r2">
+  <metadata>
+    <title>Create Visual Configuration Fields</title>
+    <phase>1</phase>
+    <estimate>1-2 hours</estimate>
+    <tags>dataverse, schema, solution</tags>
+    <dependencies></dependencies>
+    <status>pending</status>
+  </metadata>
+
+  <prompt>
+    <goal>Create visual configuration fields for card list visuals and context filtering</goal>
+    <context>
+      These fields configure how card list visuals fetch data and navigate to related views.
+      They enable context-aware filtering (e.g., show only events related to current Matter)
+      and "View List" navigation.
+    </context>
+    <constraints>
+      - Use Dataverse maker portal or PAC CLI
+      - Follow Spaarke naming conventions (sprk_ prefix)
+      - Default value for max items should be 10
+    </constraints>
+  </prompt>
+
+  <knowledge>
+    <files>
+      <file>projects/visualization-module-r2/spec.md</file>
+      <file>projects/visualization-module-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step id="1">Open Dataverse maker portal for spaarkedev1 environment</step>
+    <step id="2">Navigate to Tables > sprk_chartdefinition</step>
+    <step id="3">Create sprk_contextfieldname text field:
+      - Display Name: "Context Field Name"
+      - Type: Single Line of Text
+      - Max Length: 100
+      - Description: "Lookup field name for context filtering (e.g., sprk_matter_ref)"
+    </step>
+    <step id="4">Create sprk_viewlisttabname text field:
+      - Display Name: "View List Tab Name"
+      - Type: Single Line of Text
+      - Max Length: 100
+      - Description: "Tab name to navigate to when 'View List' is clicked"
+    </step>
+    <step id="5">Create sprk_maxdisplayitems whole number field:
+      - Display Name: "Max Display Items"
+      - Type: Whole Number
+      - Min: 1
+      - Max: 100
+      - Default: 10
+      - Description: "Maximum number of items to display in card list"
+    </step>
+    <step id="6">Save and publish table changes</step>
+    <step id="7">Verify fields appear with correct types and defaults</step>
+  </steps>
+
+  <tools>
+    <tool>Dataverse Maker Portal</tool>
+    <tool>Web Browser</tool>
+  </tools>
+
+  <outputs>
+    <output>3 new configuration fields on sprk_chartdefinition entity</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>sprk_contextfieldname text field exists (max 100 chars)</criterion>
+    <criterion>sprk_viewlisttabname text field exists (max 100 chars)</criterion>
+    <criterion>sprk_maxdisplayitems whole number field exists with default 10</criterion>
+  </acceptance-criteria>
+</task>
