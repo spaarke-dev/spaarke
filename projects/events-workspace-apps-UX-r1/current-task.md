@@ -1,11 +1,61 @@
 # Current Task State
 
 > **Project**: events-workspace-apps-UX-r1
-> **Last Updated**: 2026-02-05
+> **Last Updated**: 2026-02-08
 
 ---
 
-## Active Work: Phase 10 - OOB Visual Parity
+## Current Status: Paused - Awaiting Visualization Module R2
+
+| Field | Value |
+|-------|-------|
+| **Phase** | 10 - OOB Visual Parity |
+| **Status** | Paused |
+| **Reason** | DueDateWidget enhancement requires VisualHost framework updates |
+| **Dependency** | [visualization-module-r2](../visualization-module-r2/) |
+| **Branch** | work/events-workspace-apps-UX-r1 |
+
+---
+
+## DueDateWidget Architecture Decision (2026-02-08)
+
+During review of the DueDateWidget card component, a strategic decision was made to:
+
+1. **Integrate the EventDueDateCard into VisualHost** rather than keeping it isolated
+2. **Add configuration-driven click actions** to all VisualHost visual types
+3. **Use view-driven data fetching** instead of hardcoded PCF properties
+
+### What This Means
+
+| Current Approach | New Approach |
+|-----------------|--------------|
+| DueDateWidget as standalone PCF | EventDueDateCard as VisualHost visual type |
+| Hardcoded side pane click action | Configurable click actions (openrecordform, opensidepane, etc.) |
+| PCF properties: maxItems, daysAhead | View-driven: bind to Dataverse view GUID |
+| Isolated component | Shared component in `@spaarke/ui-components` |
+
+### Blocking Work
+
+The following Events project tasks are blocked until visualization-module-r2 completes:
+
+| Task | Description | Blocked By |
+|------|-------------|------------|
+| DueDateWidget visual refresh | Match mockup design | visualization-module-r2 Phase 3-4 |
+| "View List" navigation | Link to Events tab | visualization-module-r2 Phase 5 |
+
+### Non-Blocked Work
+
+These tasks can proceed independently:
+
+| Task | Description | Status |
+|------|-------------|--------|
+| 098 | Layout Container Styling | Pending |
+| 099 | Final OOB Visual Parity Testing | Pending |
+| Event Type field fix deployment | Deploy with correct `_sprk_eventtype_ref_value` | Ready |
+
+---
+
+## Previous Work: Phase 10 - OOB Visual Parity
 
 | Field | Value |
 |-------|-------|

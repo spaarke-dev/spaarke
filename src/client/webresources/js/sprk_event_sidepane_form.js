@@ -10,7 +10,7 @@
  * - Pass execution context as first parameter: Yes
  *
  * @namespace Spaarke.EventSidePaneForm
- * @version 1.24.0
+ * @version 1.30.0
  */
 var Spaarke = window.Spaarke || {};
 Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
@@ -22,6 +22,12 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
   var buttonContainer = null;
   var cleanupInterval = null;
   var instanceId = null; // Unique ID for this form instance
+  var buttonsInjectedAt = null; // Timestamp when buttons were injected (for grace period)
+
+  // v1.30.0: Track previous state to reduce logging (only log on state changes)
+  var lastPaneOpenState = null;
+  var lastEventsPageState = null;
+  var lastSelectedPane = null;
 
   /**
    * Form OnLoad handler
@@ -32,7 +38,7 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
   ns.onLoad = function (executionContext) {
     var formContext = executionContext.getFormContext();
 
-    console.log("[EventSidePaneForm] v1.24.0 onLoad triggered");
+    console.log("[EventSidePaneForm] v1.30.0 onLoad triggered");
 
     // Always inject styles (to hide form selector, toolbar, share, OVERVIEW tab)
     injectStyles();
@@ -55,12 +61,12 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
 
   /**
    * Setup cleanup handlers to remove buttons when form unloads
-   * v1.24.0: Fixed to not remove buttons owned by other form instances
+   * v1.30.0: Fixed to not remove buttons owned by other form instances
    */
   function setupCleanup() {
     // Generate unique instance ID for this form
     instanceId = "form_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
-    console.log("[EventSidePaneForm] v1.24.0 Instance ID:", instanceId);
+    console.log("[EventSidePaneForm] v1.30.0 Instance ID:", instanceId);
 
     // Store instance ID on the button container when created
     // Clean up on window unload
@@ -74,20 +80,11 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
     }
 
     // Check periodically for cleanup scenarios
-    // v1.24.0: Also checks if Event side pane is still open (for Calendar switch)
+    // v1.30.0: INVERTED LOGIC - Only check visibility when we have buttons to remove
     cleanupInterval = setInterval(function() {
       try {
         if (!window.parent || !window.parent.document) {
-          console.log("[EventSidePaneForm] v1.24.0 No parent document, cleaning up");
-          cleanup();
-          return;
-        }
-
-        // Check if button container still exists and belongs to this instance
-        var container = window.parent.document.getElementById("sprk-sidepane-save-container");
-        if (container && container.dataset.instanceId && container.dataset.instanceId !== instanceId) {
-          // Another form instance has taken over - stop our interval, but DON'T cleanup
-          console.log("[EventSidePaneForm] v1.24.0 Another form instance active, stopping interval (not cleaning up)");
+          console.log("[EventSidePaneForm] v1.30.0 No parent document, stopping interval");
           if (cleanupInterval) {
             clearInterval(cleanupInterval);
             cleanupInterval = null;
@@ -95,134 +92,152 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
           return;
         }
 
-        // v1.24.0: Check if our Event side pane is still open AND selected
-        // If the pane was closed or user switched to Calendar, cleanup buttons
+        // ═══════════════════════════════════════════════════════════════════════
+        // STEP 1: Check if we have buttons before doing ANY visibility checks
+        // This is the key fix - don't check visibility unless we have something to remove
+        // ═══════════════════════════════════════════════════════════════════════
+        var container = window.parent.document.getElementById("sprk-sidepane-save-container");
+
+        // Case A: No buttons exist at all - nothing to clean up, skip all checks
+        if (!container) {
+          // Buttons haven't been created yet, or were already removed
+          // Nothing for us to do - just keep interval running for future cleanup
+          return;
+        }
+
+        // Case B: Buttons exist but belong to another form instance
+        if (container.dataset.instanceId && container.dataset.instanceId !== instanceId) {
+          // Another form has taken over - stop OUR interval, don't touch their buttons
+          console.log("[EventSidePaneForm] v1.30.0 Buttons owned by another instance, stopping our interval");
+          if (cleanupInterval) {
+            clearInterval(cleanupInterval);
+            cleanupInterval = null;
+          }
+          return;
+        }
+
+        // Case C: Buttons exist and belong to US - now we can check visibility
+        // ═══════════════════════════════════════════════════════════════════════
+        // STEP 2: Grace period - don't remove our buttons too quickly after injection
+        // ═══════════════════════════════════════════════════════════════════════
+        var GRACE_PERIOD_MS = 2000; // 2 seconds grace period
+        if (buttonsInjectedAt && (Date.now() - buttonsInjectedAt) < GRACE_PERIOD_MS) {
+          // Too soon after injection - visibility might be transitioning
+          return;
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // STEP 3: Now check visibility - we definitely have OUR buttons to manage
+        // ═══════════════════════════════════════════════════════════════════════
         var eventPaneOpen = isEventPaneOpen();
-        console.log("[EventSidePaneForm] v1.24.0 Interval check: isEventPaneOpen =", eventPaneOpen);
         if (!eventPaneOpen) {
-          console.log("[EventSidePaneForm] v1.24.0 Event side pane closed/hidden, cleaning up buttons");
+          console.log("[EventSidePaneForm] v1.30.0 Event pane closed/hidden, cleaning up OUR buttons");
           cleanup();
           return;
         }
 
-        // Check if the Events Custom Page is still present
-        // The Events page loads as a web resource iframe
+        // Check if Events page is still present (user navigated away)
         var eventsPagePresent = isEventsPagePresent();
         if (!eventsPagePresent) {
-          console.log("[EventSidePaneForm] v1.24.0 Events page no longer present, closing side pane");
+          console.log("[EventSidePaneForm] v1.30.0 Events page gone, cleaning up and closing pane");
           closeSidePaneAndCleanup();
           return;
         }
 
       } catch (e) {
-        // Cross-origin or other error - don't clean up aggressively
-        console.warn("[EventSidePaneForm] v1.24.0 Interval check error:", e);
+        // Cross-origin or other error - don't clean up aggressively on errors
+        console.warn("[EventSidePaneForm] v1.30.0 Interval check error:", e);
       }
-    }, 500); // 500ms interval - faster for better pane switch detection
+    }, 500);
   }
 
   /**
-   * Check if the Event side pane (eventDetailPane) is still open AND visible
-   * v1.24.0: Now checks visibility, not just registration - fixes Calendar switch issue
+   * Check if the Event side pane (eventDetailPane) is still open AND selected
+   * v1.30.0: REMOVED iframe visibility checks - they're unreliable during form transitions
+   *          Now ONLY uses sidePanes API. Conservative approach: keep buttons if uncertain.
+   * v1.30.0: Reduced logging - only logs on state changes to avoid console spam
    */
   function isEventPaneOpen() {
     try {
-      // Method 1: Check if our iframe is still visible in the DOM
-      // This is more reliable than checking the API, as pane might be registered but hidden
-      var iframes = window.parent.document.querySelectorAll('iframe');
-      var ourIframeVisible = false;
+      var xrm = window.parent && window.parent.Xrm ? window.parent.Xrm : null;
 
-      for (var i = 0; i < iframes.length; i++) {
-        try {
-          if (iframes[i].contentWindow === window) {
-            // Found our iframe - check if it's visible
-            var rect = iframes[i].getBoundingClientRect();
-            var style = window.parent.getComputedStyle(iframes[i]);
-            var isVisible = rect.width > 0 && rect.height > 0 &&
-                           style.display !== 'none' &&
-                           style.visibility !== 'hidden';
-
-            if (isVisible) {
-              // Also check parent elements for visibility
-              var parent = iframes[i].parentElement;
-              while (parent && parent !== window.parent.document.body) {
-                var parentStyle = window.parent.getComputedStyle(parent);
-                if (parentStyle.display === 'none' || parentStyle.visibility === 'hidden') {
-                  console.log("[EventSidePaneForm] v1.24.0 isEventPaneOpen: Parent element hidden");
-                  return false;
-                }
-                parent = parent.parentElement;
-              }
-              ourIframeVisible = true;
-            } else {
-              console.log("[EventSidePaneForm] v1.24.0 isEventPaneOpen: Iframe not visible (rect or style)");
-            }
-            break;
-          }
-        } catch (e) {
-          // Cross-origin iframe, skip
-        }
+      // If no Xrm API available, assume pane is open (conservative)
+      if (!xrm || !xrm.App || !xrm.App.sidePanes) {
+        return true;
       }
 
-      if (!ourIframeVisible) {
-        console.log("[EventSidePaneForm] v1.24.0 isEventPaneOpen: Our iframe not visible or not found");
+      // Check if our Event pane exists in the registry
+      var pane = xrm.App.sidePanes.getPane("eventDetailPane");
+      if (!pane) {
+        pane = xrm.App.sidePanes.getPane("event_detail_pane");
+      }
+
+      // If pane doesn't exist at all, it was closed
+      if (!pane) {
+        if (lastPaneOpenState !== false) {
+          console.log("[EventSidePaneForm] v1.30.0 Pane closed (not in registry)");
+          lastPaneOpenState = false;
+        }
         return false;
       }
 
-      // Method 2: Check Xrm.App.sidePanes API - is our pane SELECTED (not just registered)?
-      var xrm = window.parent && window.parent.Xrm ? window.parent.Xrm : null;
-      if (xrm && xrm.App && xrm.App.sidePanes) {
-        // Check if Event pane exists
-        var pane = xrm.App.sidePanes.getPane("eventDetailPane");
-        if (!pane) {
-          pane = xrm.App.sidePanes.getPane("event_detail_pane");
-        }
-        if (!pane) {
-          console.log("[EventSidePaneForm] v1.24.0 isEventPaneOpen: Pane not found in sidePanes API");
-          return false;
-        }
+      // Check if Event pane is the SELECTED pane (not just registered)
+      // This is the key check for Calendar switch detection
+      try {
+        var selectedPane = xrm.App.sidePanes.getSelectedPane();
+        if (selectedPane) {
+          var selectedId = selectedPane.paneId || selectedPane.id;
 
-        // v1.24.0: Check if Event pane is the SELECTED pane (not just registered)
-        // If Calendar pane is selected, our buttons should hide
-        try {
-          var selectedPane = xrm.App.sidePanes.getSelectedPane();
-          if (selectedPane) {
-            var selectedId = selectedPane.paneId || selectedPane.id;
-            console.log("[EventSidePaneForm] v1.24.0 Selected pane:", selectedId);
-            if (selectedId !== "eventDetailPane" && selectedId !== "event_detail_pane") {
-              console.log("[EventSidePaneForm] v1.24.0 Event pane not selected, another pane is active");
-              return false;
-            }
+          // Only log when selection changes
+          if (lastSelectedPane !== selectedId) {
+            console.log("[EventSidePaneForm] v1.30.0 Selected pane changed:", selectedId);
+            lastSelectedPane = selectedId;
           }
-        } catch (e) {
-          // getSelectedPane might not exist in all versions
-          console.log("[EventSidePaneForm] v1.24.0 getSelectedPane not available:", e.message);
+
+          // If another pane is selected (e.g., Calendar), hide our buttons
+          if (selectedId !== "eventDetailPane" && selectedId !== "event_detail_pane") {
+            if (lastPaneOpenState !== false) {
+              console.log("[EventSidePaneForm] v1.30.0 Event pane deselected, another pane is active");
+              lastPaneOpenState = false;
+            }
+            return false;
+          }
         }
+        // If no pane is selected, assume ours is visible (conservative)
+      } catch (e) {
+        // getSelectedPane might not exist - assume open (conservative)
       }
 
+      // Pane exists and is selected (or we couldn't determine selection)
+      if (lastPaneOpenState !== true) {
+        console.log("[EventSidePaneForm] v1.30.0 Event pane open and selected");
+        lastPaneOpenState = true;
+      }
       return true;
     } catch (e) {
-      console.warn("[EventSidePaneForm] v1.24.0 isEventPaneOpen error:", e);
-      return false; // v1.24.0: Be aggressive - assume closed on error
+      // v1.30.0: Be CONSERVATIVE on errors - keep buttons visible
+      console.warn("[EventSidePaneForm] v1.30.0 isEventPaneOpen error:", e);
+      return true;
     }
   }
 
   /**
    * Check if the Events Custom Page is still present in the Dataverse shell
-   * v1.24.0: More aggressive detection - returns false if Events page is likely gone
+   * v1.30.0: More aggressive detection - returns false if Events page is likely gone
+   * v1.30.0: Reduced logging - only logs on state changes to avoid console spam
    */
   function isEventsPagePresent() {
     try {
       if (!window.parent || !window.parent.document) {
-        console.log("[EventSidePaneForm] v1.24.0 isEventsPagePresent: No parent document");
+        if (lastEventsPageState !== false) {
+          console.log("[EventSidePaneForm] v1.30.0 No parent document, Events page gone");
+          lastEventsPageState = false;
+        }
         return false;
       }
 
       var parentDoc = window.parent.document;
       var parentUrl = window.parent.location.href || "";
-
-      // Log current URL for debugging
-      console.log("[EventSidePaneForm] v1.24.0 isEventsPagePresent checking, URL:", parentUrl.substring(0, 100));
 
       // Strategy 1: Check URL - if not on Events related page, we've navigated away
       // Events page URL contains "pagetype=custom" and often "sprk_eventspage" or "Events"
@@ -235,7 +250,10 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
         var otherEntities = ["account", "contact", "lead", "opportunity", "incident", "matter"];
         for (var i = 0; i < otherEntities.length; i++) {
           if (parentUrl.toLowerCase().indexOf(otherEntities[i]) !== -1) {
-            console.log("[EventSidePaneForm] v1.24.0 isEventsPagePresent: Detected navigation to", otherEntities[i]);
+            if (lastEventsPageState !== false) {
+              console.log("[EventSidePaneForm] v1.30.0 Navigated away to", otherEntities[i]);
+              lastEventsPageState = false;
+            }
             return false;
           }
         }
@@ -257,15 +275,22 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
         // No Events page iframe found - likely navigated away
         // But double-check URL before concluding
         if (!isEventsUrl) {
-          console.log("[EventSidePaneForm] v1.24.0 isEventsPagePresent: No Events iframe and not Events URL");
+          if (lastEventsPageState !== false) {
+            console.log("[EventSidePaneForm] v1.30.0 No Events iframe and not Events URL");
+            lastEventsPageState = false;
+          }
           return false;
         }
       }
 
       // Default: Events page is probably still there
+      if (lastEventsPageState !== true) {
+        lastEventsPageState = true;
+        // Don't log "still present" every time - silent success
+      }
       return true;
     } catch (e) {
-      console.warn("[EventSidePaneForm] v1.24.0 isEventsPagePresent error:", e);
+      console.warn("[EventSidePaneForm] v1.30.0 isEventsPagePresent error:", e);
       // Error checking - be aggressive, assume navigated away
       return false;
     }
@@ -273,7 +298,7 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
 
   /**
    * Close the side pane and clean up buttons
-   * v1.24.0: Called when Events page is no longer present
+   * v1.30.0: Called when Events page is no longer present
    */
   function closeSidePaneAndCleanup() {
     cleanup();
@@ -282,10 +307,10 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
 
   /**
    * Clean up buttons from parent document
-   * v1.24.0: Only remove buttons if they belong to THIS instance (prevents removing new form's buttons)
+   * v1.30.0: Only remove buttons if they belong to THIS instance (prevents removing new form's buttons)
    */
   function cleanup() {
-    console.log("[EventSidePaneForm] v1.24.0 Cleanup called for instance:", instanceId);
+    console.log("[EventSidePaneForm] v1.30.0 Cleanup called for instance:", instanceId);
 
     // Clear interval
     if (cleanupInterval) {
@@ -298,21 +323,21 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
       if (window.parent && window.parent.document) {
         var container = window.parent.document.getElementById("sprk-sidepane-save-container");
         if (container) {
-          // v1.24.0: Check if container belongs to another instance - if so, DON'T remove it
+          // v1.30.0: Check if container belongs to another instance - if so, DON'T remove it
           var containerInstanceId = container.dataset.instanceId;
           if (containerInstanceId && containerInstanceId !== instanceId) {
-            console.log("[EventSidePaneForm] v1.24.0 Container belongs to another instance (" + containerInstanceId + "), NOT removing");
+            console.log("[EventSidePaneForm] v1.30.0 Container belongs to another instance (" + containerInstanceId + "), NOT removing");
             buttonContainer = null;
             return; // Don't remove - let the new form instance keep its buttons
           }
 
           // Container belongs to us or has no instance ID - safe to remove
           container.parentNode.removeChild(container);
-          console.log("[EventSidePaneForm] v1.24.0 Removed button container (owned by this instance)");
+          console.log("[EventSidePaneForm] v1.30.0 Removed button container (owned by this instance)");
         }
       }
     } catch (e) {
-      console.warn("[EventSidePaneForm] v1.24.0 Cleanup error:", e);
+      console.warn("[EventSidePaneForm] v1.30.0 Cleanup error:", e);
     }
 
     buttonContainer = null;
@@ -335,18 +360,18 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
       // Try multiple sources for dimensions
       var dims = getDimensionsFromAllSources();
 
-      console.log("[EventSidePaneForm] v1.24.0 Poll #" + attempts + ": " + dims.width + " x " + dims.height + " (source: " + dims.source + ")");
+      console.log("[EventSidePaneForm] v1.30.0 Poll #" + attempts + ": " + dims.width + " x " + dims.height + " (source: " + dims.source + ")");
 
       if (dims.height > 100 && dims.width > 100) {
         // Form has rendered with valid dimensions
-        console.log("[EventSidePaneForm] v1.24.0 Form rendered, injecting buttons");
+        console.log("[EventSidePaneForm] v1.30.0 Form rendered, injecting buttons");
         callback();
       } else if (attempts < maxAttempts) {
         // Keep polling
         setTimeout(checkDimensions, interval);
       } else {
         // Timeout - inject anyway with fallback positioning
-        console.log("[EventSidePaneForm] v1.24.0 Timeout waiting for dimensions, using fallback");
+        console.log("[EventSidePaneForm] v1.30.0 Timeout waiting for dimensions, using fallback");
         callback();
       }
     }
@@ -476,7 +501,7 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
       style.id = "sprk-sidepane-styles";
       style.textContent = styleContent;
       document.head.appendChild(style);
-      console.log("[EventSidePaneForm] v1.24.0 Styles injected into form document");
+      console.log("[EventSidePaneForm] v1.30.0 Styles injected into form document");
     }
 
     // Also inject into parent document (side pane chrome elements may be there)
@@ -487,11 +512,11 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
           parentStyle.id = "sprk-sidepane-styles";
           parentStyle.textContent = styleContent;
           window.parent.document.head.appendChild(parentStyle);
-          console.log("[EventSidePaneForm] v1.24.0 Styles injected into parent document");
+          console.log("[EventSidePaneForm] v1.30.0 Styles injected into parent document");
         }
       }
     } catch (e) {
-      console.warn("[EventSidePaneForm] v1.24.0 Could not inject styles into parent:", e);
+      console.warn("[EventSidePaneForm] v1.30.0 Could not inject styles into parent:", e);
     }
 
     // Log what elements we found to help debug
@@ -500,13 +525,13 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
 
   /**
    * Build the CSS content for hiding elements
-   * v1.24.0: Much more conservative selectors to avoid breaking form content
+   * v1.30.0: REMOVED overly-generic selectors (.pa-na, [role="tablist"]) that were hiding form content
+   *          Now uses only specific data-id selectors that target known Dataverse chrome elements
    */
   function buildStyleContent() {
     return [
       // ═══════════════════════════════════════════════════════════════════════
       // Hide form selector dropdown (the dropdown to switch forms)
-      // Be very specific to avoid hiding other dropdowns
       // ═══════════════════════════════════════════════════════════════════════
       '[data-id="form-selector"] {',
       '  display: none !important;',
@@ -519,17 +544,14 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
       '}',
       '',
       // ═══════════════════════════════════════════════════════════════════════
-      // Hide three-dot menu (more options) - specific selectors only
+      // Hide three-dot menu (more options)
       // ═══════════════════════════════════════════════════════════════════════
       '[data-id="record-overflow-menu"] {',
       '  display: none !important;',
       '}',
-      '[aria-label="More commands for this record"] {',
-      '  display: none !important;',
-      '}',
       '',
       // ═══════════════════════════════════════════════════════════════════════
-      // Hide share button - specific selectors only
+      // Hide share button
       // ═══════════════════════════════════════════════════════════════════════
       '[data-id="record-share"] {',
       '  display: none !important;',
@@ -539,7 +561,8 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
       '}',
       '',
       // ═══════════════════════════════════════════════════════════════════════
-      // Hide the form type indicator row (shows "Event" below title)
+      // Hide the record type row (shows "Event · Event Task side pane form")
+      // v1.30.0: Only target specific data-id elements, NOT generic classes
       // ═══════════════════════════════════════════════════════════════════════
       '[data-id="MscrmControls.Containers.SubHeaderControlViewManager-subHeaderControlViewPart"] {',
       '  display: none !important;',
@@ -547,16 +570,22 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
       '[data-id="header_formTypeSelectorContainer"] {',
       '  display: none !important;',
       '}',
+      '[data-id="entity_name_span"] {',
+      '  display: none !important;',
+      '}',
+      // v1.30.0: REMOVED .pa-na selector - it was hiding form content!
       '',
       // ═══════════════════════════════════════════════════════════════════════
-      // Hide OVERVIEW tab header ONLY (not the tab content!)
-      // Target only the tab list/navigation, NOT the tab panels
-      // v1.24.0: Very conservative - only hide specific tablist containers
+      // Hide OVERVIEW tab - ONLY specific data-id selectors
+      // v1.30.0: REMOVED [role="tablist"] and .pa-hi selectors - too generic
       // ═══════════════════════════════════════════════════════════════════════
       '[data-id="tablist"] {',
       '  display: none !important;',
       '}',
       '[data-id="form-tab-list"] {',
+      '  display: none !important;',
+      '}',
+      '[data-id="tablist-tab_overview"] {',
       '  display: none !important;',
       '}',
       '',
@@ -599,7 +628,7 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
       "OVERVIEW-label": '[aria-label="OVERVIEW"], [title="OVERVIEW"]'
     };
 
-    console.log("[EventSidePaneForm] v1.24.0 DOM element search results:");
+    console.log("[EventSidePaneForm] v1.30.0 DOM element search results:");
     for (var name in selectors) {
       var el = document.querySelector(selectors[name]);
       console.log("  " + name + ": " + (el ? "FOUND" : "not found"));
@@ -608,14 +637,14 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
     // Also check parent
     try {
       if (window.parent && window.parent.document && window.parent !== window) {
-        console.log("[EventSidePaneForm] v1.24.0 Parent DOM element search:");
+        console.log("[EventSidePaneForm] v1.30.0 Parent DOM element search:");
         for (var name2 in selectors) {
           var el2 = window.parent.document.querySelector(selectors[name2]);
           console.log("  " + name2 + ": " + (el2 ? "FOUND" : "not found"));
         }
       }
     } catch (e) {
-      console.warn("[EventSidePaneForm] v1.24.0 Could not search parent DOM");
+      console.warn("[EventSidePaneForm] v1.30.0 Could not search parent DOM");
     }
   }
 
@@ -636,7 +665,7 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
       if (window.parent && window.parent.document) {
         var existing = window.parent.document.getElementById("sprk-sidepane-save-container");
         if (existing) {
-          console.log("[EventSidePaneForm] v1.24.0 Button container exists in parent, removing old one");
+          console.log("[EventSidePaneForm] v1.30.0 Button container exists in parent, removing old one");
           existing.parentNode.removeChild(existing);
         }
       }
@@ -649,7 +678,10 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
     container.id = "sprk-sidepane-save-container";
     container.dataset.instanceId = instanceId; // Track which form instance owns this
 
-    console.log("[EventSidePaneForm] v1.24.0 Creating buttons for instance:", instanceId);
+    // v1.30.0: Record injection time for grace period checking
+    buttonsInjectedAt = Date.now();
+
+    console.log("[EventSidePaneForm] v1.30.0 Creating buttons for instance:", instanceId);
 
     // Create Open button (opens record in modal)
     var openBtn = document.createElement("button");
@@ -741,10 +773,10 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
       saveAndCloseRecord(formContext, saveCloseBtn);
     };
 
-    // Add buttons to container (order: Save & Close, Open, Save)
+    // Add buttons to container (order: Save, Save & Close, Open)
+    container.appendChild(saveBtn);
     container.appendChild(saveCloseBtn);
     container.appendChild(openBtn);
-    container.appendChild(saveBtn);
 
     // Try to find the side pane container in parent window
     var sidePaneEl = findSidePaneContainer();
@@ -755,13 +787,13 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
       // Get the parent window's visible viewport height
       var parentViewportHeight = window.parent.innerHeight || window.parent.document.documentElement.clientHeight;
 
-      console.log("[EventSidePaneForm] v1.24.0 Found side pane. Rect:", JSON.stringify({
+      console.log("[EventSidePaneForm] v1.30.0 Found side pane. Rect:", JSON.stringify({
         width: sidePaneRect.width,
         height: sidePaneRect.height,
         top: sidePaneRect.top,
         left: sidePaneRect.left
       }));
-      console.log("[EventSidePaneForm] v1.24.0 Parent viewport height:", parentViewportHeight);
+      console.log("[EventSidePaneForm] v1.30.0 Parent viewport height:", parentViewportHeight);
 
       // Calculate position: fixed at bottom of visible viewport, aligned with side pane
       var containerWidth = sidePaneRect.width;
@@ -773,7 +805,7 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
       var visibleBottom = Math.min(sidePaneRect.bottom, parentViewportHeight);
       var containerTop = visibleBottom - containerHeight;
 
-      console.log("[EventSidePaneForm] v1.24.0 Calculated position: left=" + containerLeft + ", top=" + containerTop + ", width=" + containerWidth);
+      console.log("[EventSidePaneForm] v1.30.0 Calculated position: left=" + containerLeft + ", top=" + containerTop + ", width=" + containerWidth);
 
       // Use fixed positioning in the parent window's coordinate system
       container.style.cssText = [
@@ -796,12 +828,12 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
       // Append to parent document body (not the side pane) for fixed positioning to work
       window.parent.document.body.appendChild(container);
       buttonContainer = container; // Store reference for cleanup
-      console.log("[EventSidePaneForm] v1.24.0 Appended to parent body with fixed positioning");
+      console.log("[EventSidePaneForm] v1.30.0 Appended to parent body with fixed positioning");
 
       // Verify final position
       setTimeout(function() {
         var finalRect = container.getBoundingClientRect();
-        console.log("[EventSidePaneForm] v1.24.0 Final button rect:", JSON.stringify({
+        console.log("[EventSidePaneForm] v1.30.0 Final button rect:", JSON.stringify({
           width: finalRect.width,
           height: finalRect.height,
           top: finalRect.top,
@@ -810,7 +842,7 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
       }, 100);
     } else {
       // Fallback: append to document body with fixed positioning at bottom
-      console.log("[EventSidePaneForm] v1.24.0 Side pane not found, using body fallback");
+      console.log("[EventSidePaneForm] v1.30.0 Side pane not found, using body fallback");
 
       // Use fixed position as last resort
       container.style.cssText = [
@@ -836,7 +868,7 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
 
       // Log body dimensions for debugging
       var bodyRect = document.body.getBoundingClientRect();
-      console.log("[EventSidePaneForm] v1.24.0 Body rect:", JSON.stringify({
+      console.log("[EventSidePaneForm] v1.30.0 Body rect:", JSON.stringify({
         width: bodyRect.width,
         height: bodyRect.height,
         scrollHeight: document.body.scrollHeight
@@ -845,7 +877,7 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
 
     // Log final position for debugging
     var rect = container.getBoundingClientRect();
-    console.log("[EventSidePaneForm] v1.24.0 Buttons injected. Container rect:", JSON.stringify({
+    console.log("[EventSidePaneForm] v1.30.0 Buttons injected. Container rect:", JSON.stringify({
       width: rect.width,
       height: rect.height,
       top: rect.top,
@@ -860,14 +892,14 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
   function findSidePaneContainer() {
     try {
       if (!window.parent || window.parent === window) {
-        console.log("[EventSidePaneForm] v1.24.0 No parent window");
+        console.log("[EventSidePaneForm] v1.30.0 No parent window");
         return null;
       }
 
       var parentDoc = window.parent.document;
 
       // Log what we can see in parent DOM for debugging
-      console.log("[EventSidePaneForm] v1.24.0 Searching parent DOM...");
+      console.log("[EventSidePaneForm] v1.30.0 Searching parent DOM...");
 
       // Strategy 1: Try multiple data-id patterns Dataverse might use
       var dataIdSelectors = [
@@ -886,7 +918,7 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
         pane = parentDoc.querySelector(dataIdSelectors[i]);
         if (pane) {
           var rect = pane.getBoundingClientRect();
-          console.log("[EventSidePaneForm] v1.24.0 Found by '" + dataIdSelectors[i] + "', rect:", rect.width + "x" + rect.height);
+          console.log("[EventSidePaneForm] v1.30.0 Found by '" + dataIdSelectors[i] + "', rect:", rect.width + "x" + rect.height);
           if (rect.width > 100 && rect.height > 100) {
             return pane;
           }
@@ -897,7 +929,7 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
       pane = parentDoc.querySelector('[aria-label*="Event"], [title*="Event"]');
       if (pane) {
         var rect = pane.getBoundingClientRect();
-        console.log("[EventSidePaneForm] v1.24.0 Found by aria/title, rect:", rect.width + "x" + rect.height);
+        console.log("[EventSidePaneForm] v1.30.0 Found by aria/title, rect:", rect.width + "x" + rect.height);
         if (rect.width > 100 && rect.height > 100) {
           return pane;
         }
@@ -920,7 +952,7 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
           var el = elements[k];
           var rect = el.getBoundingClientRect();
           if (rect.width > 300 && rect.height > 300) {
-            console.log("[EventSidePaneForm] v1.24.0 Found by '" + classSelectors[j] + "', rect:", rect.width + "x" + rect.height);
+            console.log("[EventSidePaneForm] v1.30.0 Found by '" + classSelectors[j] + "', rect:", rect.width + "x" + rect.height);
             return el;
           }
         }
@@ -928,23 +960,23 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
 
       // Strategy 4: Find the iframe we're in and get its parent container with valid dimensions
       var iframes = parentDoc.querySelectorAll('iframe');
-      console.log("[EventSidePaneForm] v1.24.0 Checking " + iframes.length + " iframes in parent");
+      console.log("[EventSidePaneForm] v1.30.0 Checking " + iframes.length + " iframes in parent");
 
       for (var m = 0; m < iframes.length; m++) {
         try {
           if (iframes[m].contentWindow === window) {
-            console.log("[EventSidePaneForm] v1.24.0 Found our iframe at index " + m);
+            console.log("[EventSidePaneForm] v1.30.0 Found our iframe at index " + m);
 
             // Log iframe's own dimensions
             var iframeRect = iframes[m].getBoundingClientRect();
-            console.log("[EventSidePaneForm] v1.24.0 Iframe rect:", iframeRect.width + "x" + iframeRect.height + " at (" + iframeRect.left + "," + iframeRect.top + ")");
+            console.log("[EventSidePaneForm] v1.30.0 Iframe rect:", iframeRect.width + "x" + iframeRect.height + " at (" + iframeRect.left + "," + iframeRect.top + ")");
 
             // Walk up to find a container with valid dimensions
             var iframeParent = iframes[m].parentElement;
             var level = 0;
             while (iframeParent && iframeParent.tagName !== 'BODY' && level < 10) {
               var parentRect = iframeParent.getBoundingClientRect();
-              console.log("[EventSidePaneForm] v1.24.0 Parent level " + level + " (" + iframeParent.tagName + "." + (iframeParent.className || "").substring(0, 30) + "): " + parentRect.width + "x" + parentRect.height);
+              console.log("[EventSidePaneForm] v1.30.0 Parent level " + level + " (" + iframeParent.tagName + "." + (iframeParent.className || "").substring(0, 30) + "): " + parentRect.width + "x" + parentRect.height);
 
               if (parentRect.width > 300 && parentRect.height > 300) {
                 return iframeParent;
@@ -958,10 +990,10 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
         }
       }
 
-      console.log("[EventSidePaneForm] v1.24.0 Side pane container not found");
+      console.log("[EventSidePaneForm] v1.30.0 Side pane container not found");
       return null;
     } catch (e) {
-      console.error("[EventSidePaneForm] v1.24.0 Error finding side pane:", e);
+      console.error("[EventSidePaneForm] v1.30.0 Error finding side pane:", e);
       return null;
     }
   }

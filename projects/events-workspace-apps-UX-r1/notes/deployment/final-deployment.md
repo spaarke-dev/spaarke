@@ -317,13 +317,354 @@ For future production deployment:
 
 ---
 
-## 10. Change Log
+## 10. Events Custom Page & Side Pane Architecture
+
+> **Last Updated**: 2026-02-08
+> **Status**: Phase 10 - OOB Visual Parity in progress
+
+This section documents the current implementation of the Events custom page, Calendar side pane, and Event detail side pane components.
+
+---
+
+### 10.1 Events Custom Page (React)
+
+**Location**: `src/solutions/EventsPage/`
+
+**Current Version**: 2.17.0
+
+**Description**: A React-based custom page that replaces the OOB Events entity homepage. Provides a grid view of Events with a side-mounted calendar filter and side pane for event editing.
+
+#### Key Files
+
+| File | Purpose |
+|------|---------|
+| `src/App.tsx` | Main application component, command bar, event handlers |
+| `src/components/GridSection.tsx` | Grid wrapper and data fetching |
+| `src/context/index.tsx` | React context for state sharing between components |
+| `src/providers/ThemeProvider.tsx` | Dark mode and theme detection |
+
+#### Component Structure
+
+```
+EventsPage (App.tsx)
+├── FluentProvider (theme)
+├── EventsPageProvider (context)
+│   ├── EventsCommandBar
+│   │   ├── New, Delete, Refresh, Calendar buttons (always visible)
+│   │   └── Complete, Close, Cancel, On Hold, Archive (selection-dependent)
+│   ├── EventsViewToolbar
+│   │   └── View selector dropdown
+│   └── GridSection
+│       └── UniversalDatasetGrid PCF
+```
+
+#### Command Bar Actions (App.tsx)
+
+| Button | Function | Handler |
+|--------|----------|---------|
+| New | Opens quick create form | `handleNew()` |
+| Delete | Bulk delete selected events | `handleDelete()` → `deleteSelectedEvents()` |
+| Complete | Sets status to Completed with date | `handleComplete()` → `completeSelectedEvents()` |
+| Close | Sets status to Closed | `handleClose()` → `closeSelectedEvents()` |
+| Cancel | Sets status to Cancelled | `handleCancel()` → `cancelSelectedEvents()` |
+| On Hold | Sets status to On Hold | `handleOnHold()` → `putOnHoldSelectedEvents()` |
+| Archive | Sets status to Archived + deactivates | `handleArchive()` → `archiveSelectedEvents()` |
+| Refresh | Refreshes grid data | `handleRefresh()` → `refreshGrid()` |
+| Calendar | Opens/closes Calendar side pane | `handleCalendar()` → `toggleCalendarSidePane()` |
+
+#### Event Status Values (App.tsx)
+
+```typescript
+const EventStatus = {
+  DRAFT: 0,
+  OPEN: 1,
+  COMPLETED: 2,
+  CLOSED: 3,
+  ON_HOLD: 4,
+  CANCELLED: 5,
+  REASSIGNED: 6,
+  ARCHIVED: 7,
+} as const;
+```
+
+#### Bulk Status Update Logic
+
+The `executeBulkStatusUpdate()` function handles most status changes:
+
+```typescript
+async function executeBulkStatusUpdate(
+  eventIds: string[],
+  newStatus: number,
+  statusLabel: string,
+  additionalFields?: Record<string, unknown>
+): Promise<boolean>
+```
+
+For Archive, a separate `executeBulkArchive()` function handles both status update and record deactivation (statecode=1).
+
+---
+
+### 10.2 Calendar Side Pane
+
+**Location**: `src/solutions/CalendarSidePane/`
+
+**Description**: A dedicated side pane that hosts the EventCalendarFilter PCF control. Opens via the Calendar button in the command bar.
+
+#### Key Files
+
+| File | Purpose |
+|------|---------|
+| `src/index.html` | Entry point |
+| `src/index.ts` | Side pane initialization |
+| `WebResources/sprk_calendarsidepane.html` | Deployed web resource |
+
+#### Integration with EventsPage
+
+- **Session Storage Key**: `sprk_calendar_filter_state`
+- **Communication**: Calendar writes filter state to session storage; EventsPage reads and applies filter
+- **Mutual Exclusivity**: Opening Calendar pane closes Event detail pane and vice versa
+
+---
+
+### 10.3 Event Detail Side Pane
+
+**Location**:
+- Form Script: `src/client/webresources/js/sprk_event_sidepane_form.js`
+- Custom Page: `src/solutions/EventDetailSidePane/`
+
+**Current Version**: 1.30.0 (form script)
+
+**Description**: A side pane that displays an Event record form for quick editing. Uses `Xrm.App.sidePanes.createPane()` to open a standard Dataverse form in a side pane context.
+
+#### Key Files
+
+| File | Purpose |
+|------|---------|
+| `sprk_event_sidepane_form.js` | Form OnLoad script - injects buttons, hides chrome, manages cleanup |
+| `src/solutions/EventCommands/sprk_event_ribbon_commands.js` | Ribbon command handlers (status updates, archive) |
+
+#### Form Script Functions (sprk_event_sidepane_form.js)
+
+| Function | Purpose |
+|----------|---------|
+| `onLoad(executionContext)` | Entry point - injects styles, sets up cleanup, injects buttons |
+| `injectStyles()` | Adds CSS to hide form chrome (selectors, tabs, share button) |
+| `buildStyleContent()` | Returns CSS rules for hiding elements |
+| `injectSaveButton(formContext)` | Creates floating Save/Open button bar at bottom |
+| `findSidePaneContainer()` | Locates side pane DOM element for button positioning |
+| `setupCleanup()` | Creates interval timer for button cleanup on navigation |
+| `isEventPaneOpen()` | Checks if Event pane is still active (via Xrm.App.sidePanes API) |
+| `isEventsPagePresent()` | Checks if Events custom page is still in view |
+| `cleanup()` | Removes buttons and clears interval |
+| `closeSidePane()` | Closes the side pane via Xrm.App.sidePanes.close() |
+
+---
+
+### 10.4 Button Visibility Issue Resolution (v1.30.0)
+
+#### The Problem
+
+The floating Save/Open buttons at the bottom of the Event side pane form had several issues:
+
+1. **Console logging loop**: The cleanup interval logged state every 500ms, flooding the console
+2. **Buttons disappearing on navigation**: When clicking between events, old form's cleanup removed new form's buttons
+3. **Form content blank**: CSS selectors were too generic and hiding the actual form content
+
+#### The Solution
+
+**v1.30.0 Implementation** (sprk_event_sidepane_form.js):
+
+##### 1. Instance ID Tracking
+
+Each form instance generates a unique ID and stamps it on the button container:
+
+```javascript
+// Generate unique instance ID
+instanceId = "form_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
+
+// Stamp on container
+container.dataset.instanceId = instanceId;
+```
+
+##### 2. Instance-Aware Cleanup
+
+The cleanup function only removes buttons if they belong to the current instance:
+
+```javascript
+function cleanup() {
+  var container = window.parent.document.getElementById("sprk-sidepane-save-container");
+  if (container) {
+    var containerInstanceId = container.dataset.instanceId;
+    if (containerInstanceId && containerInstanceId !== instanceId) {
+      // Container belongs to another form - DON'T remove it
+      return;
+    }
+    // Safe to remove - belongs to us
+    container.parentNode.removeChild(container);
+  }
+}
+```
+
+##### 3. Inverted Cleanup Logic
+
+The interval only checks visibility if we have buttons to remove:
+
+```javascript
+cleanupInterval = setInterval(function() {
+  var container = window.parent.document.getElementById("sprk-sidepane-save-container");
+
+  // Case A: No buttons exist
+  if (!container) {
+    return; // Nothing to do
+  }
+
+  // Case B: Buttons belong to another instance
+  if (container.dataset.instanceId !== instanceId) {
+    clearInterval(cleanupInterval); // Stop our interval
+    return;
+  }
+
+  // Case C: Buttons are ours - now check visibility
+  // ... visibility checks here
+}, 500);
+```
+
+##### 4. State-Change-Only Logging
+
+Track previous state to avoid console spam:
+
+```javascript
+var lastPaneOpenState = null;
+var lastSelectedPane = null;
+
+// Only log when state changes
+if (lastSelectedPane !== selectedId) {
+  console.log("[EventSidePaneForm] v1.30.0 Selected pane changed:", selectedId);
+  lastSelectedPane = selectedId;
+}
+```
+
+##### 5. CSS Selector Fix
+
+Removed overly-generic CSS selectors that were hiding form content:
+
+```javascript
+// v1.30.0: REMOVED these selectors - too generic!
+// - '.pa-na' - was hiding form content
+// - '[role="tablist"]' - was hiding form tabs
+// - '.pa-hi' - was hiding form elements
+
+// NOW only uses specific data-id selectors:
+'[data-id="form-selector"]',
+'[data-id="record-overflow-menu"]',
+'[data-id="tablist"]', // specific tablist, not role
+```
+
+#### Key Insight
+
+The critical fix was understanding that in Dataverse side panes:
+- Multiple form instances can exist simultaneously (during navigation)
+- The new form's OnLoad fires BEFORE the old form's cleanup runs
+- Without instance tracking, old cleanup removes new buttons
+
+---
+
+## 11. Future Work Items
+
+### 11.1 Events Custom React Page
+
+| Priority | Issue | Description | Impact |
+|----------|-------|-------------|--------|
+| **HIGH** | Grid columns not matching Views | Grid displays hardcoded columns instead of dynamically pulling from saved views. Column names and values don't match entity views. | UX inconsistency |
+| **HIGH** | Command bar button visibility | Delete, Complete, Close, Cancel, On Hold, Archive buttons should be HIDDEN when no rows selected, not just disabled. | OOB parity |
+| **MEDIUM** | View selector font | View selector dropdown font doesn't match system OOB styling. | Visual parity |
+| **MEDIUM** | Regardingrecordurl hyperlink | The 'Regardingrecordurl' field should render as a clickable hyperlink, not plain text. | Usability |
+
+#### Detailed Requirements
+
+**Grid Dynamic View Integration**:
+- Grid should read FetchXML from selected savedquery
+- Columns should be derived from view definition
+- Field values should use proper formatters based on attribute type
+- Related: `ViewService.ts` exists but grid doesn't consume view columns
+
+**Command Bar Button Visibility**:
+```tsx
+// Current (disabled when no selection):
+<ToolbarButton disabled={!hasSelection}>Complete</ToolbarButton>
+
+// Required (hidden when no selection):
+{hasSelection && <ToolbarButton>Complete</ToolbarButton>}
+```
+
+---
+
+### 11.2 Event Side Pane - Architectural Refactor Required
+
+| Priority | Issue | Description |
+|----------|-------|-------------|
+| **HIGH** | Button show/hide is fragile | Current solution uses instance ID tracking and interval timers. Not technically robust. |
+| **HIGH** | Standard form limitations | Using standard Dataverse form in side pane limits customization options. |
+| **HIGH** | Event Type field config not applied | Form should dynamically show/hide fields based on Event Type's `sprk_fieldconfigjson` setting. |
+
+#### Recommended Approach
+
+**Revert to Web Resource approach** instead of using standard side pane form:
+
+1. **Create custom HTML web resource**: `sprk_eventsidepane.html`
+2. **Build React form component**: Custom form that loads Event data via WebAPI
+3. **Apply EventTypeService logic**: Use `getEventTypeFieldConfig()` to determine which fields to show
+4. **Direct field rendering**: Render only the fields defined for the Event Type
+5. **Eliminate button injection**: Buttons are part of the React component, not injected
+
+#### Benefits of Web Resource Approach
+
+| Aspect | Current (Form + Injection) | Proposed (Web Resource) |
+|--------|---------------------------|------------------------|
+| Button management | Complex interval + instance tracking | Native React state |
+| Field visibility | Relies on form customization | Dynamic via EventTypeService |
+| Styling control | CSS injection with conflicts | Full CSS control |
+| Maintenance | Fragile, hard to debug | Standard React patterns |
+| Performance | Multiple form loads | Single WebAPI call |
+
+#### EventTypeService Integration
+
+The `EventTypeService` already exists in the shared library:
+
+```typescript
+// src/client/shared/Spaarke.UI.Components/src/services/EventTypeService.ts
+
+interface EventTypeFieldConfig {
+  sections: {
+    name: string;
+    visible: boolean;
+    fields: {
+      logicalName: string;
+      visible: boolean;
+      required: boolean;
+    }[];
+  }[];
+}
+
+function getEventTypeFieldConfig(eventTypeId: string): Promise<EventTypeFieldConfig>
+```
+
+The web resource approach would:
+1. Load Event record
+2. Get Event Type ID from record
+3. Call `getEventTypeFieldConfig(eventTypeId)`
+4. Render only visible sections and fields
+
+---
+
+## 12. Change Log
 
 | Date | Version | Change | Author |
 |------|---------|--------|--------|
 | 2026-02-04 | 1.0.0 | Initial deployment documentation | AI Assistant |
+| 2026-02-08 | 1.1.0 | Added Events Page architecture, button visibility resolution, future work | AI Assistant |
 
 ---
 
 *Final Deployment Documentation for Events Workspace Apps UX R1*
-*All components deployed and verified in dev environment*
+*Phase 10 - OOB Visual Parity in progress*

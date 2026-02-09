@@ -52,9 +52,9 @@ export interface IEventRecord {
   // ─────────────────────────────────────────────────────────────────────────
 
   /** Event Type lookup (GUID) */
-  _sprk_eventtype_value?: string;
+  _sprk_eventtype_ref_value?: string;
   /** Event Type formatted name */
-  "_sprk_eventtype_value@OData.Community.Display.V1.FormattedValue"?: string;
+  "_sprk_eventtype_ref_value@OData.Community.Display.V1.FormattedValue"?: string;
 
   // ─────────────────────────────────────────────────────────────────────────
   // Regarding fields (Parent Record)
@@ -166,7 +166,7 @@ export const EVENT_HEADER_SELECT_FIELDS = [
   "sprk_eventname",
   "sprk_eventstatus",
   "statecode", // Keep for backward compatibility / archive detection
-  "_sprk_eventtype_value",
+  "_sprk_eventtype_ref_value",
   "sprk_regardingrecordname",
   "sprk_regardingrecordurl",
 ].join(",");
@@ -190,7 +190,7 @@ export const EVENT_FULL_SELECT_FIELDS = [
   "statecode", // Keep for backward compatibility / archive detection
   "sprk_priority",
   "sprk_source",
-  "_sprk_eventtype_value",
+  "_sprk_eventtype_ref_value",
   "_sprk_regardingrecordtype_value",
   "sprk_regardingrecordname",
   "sprk_regardingrecordid",

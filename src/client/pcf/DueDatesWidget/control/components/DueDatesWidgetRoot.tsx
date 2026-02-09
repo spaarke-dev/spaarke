@@ -211,7 +211,7 @@ export const DueDatesWidgetRoot: React.FC<IDueDatesWidgetRootProps> = ({
                 <div className={styles.loadingContainer}>
                     <Spinner size="medium" label="Loading events..." />
                 </div>
-                <span className={styles.versionText}>v1.0.3</span>
+                <span className={styles.versionText}>v1.0.8</span>
             </div>
         );
     }
@@ -223,7 +223,7 @@ export const DueDatesWidgetRoot: React.FC<IDueDatesWidgetRootProps> = ({
                 <div className={styles.errorContainer}>
                     <Text>{error}</Text>
                 </div>
-                <span className={styles.versionText}>v1.0.3</span>
+                <span className={styles.versionText}>v1.0.8</span>
             </div>
         );
     }
@@ -269,7 +269,7 @@ export const DueDatesWidgetRoot: React.FC<IDueDatesWidgetRootProps> = ({
             />
 
             {/* Version footer (ADR requirement) */}
-            <span className={styles.versionText}>v1.0.3</span>
+            <span className={styles.versionText}>v1.0.8</span>
         </div>
     );
 };

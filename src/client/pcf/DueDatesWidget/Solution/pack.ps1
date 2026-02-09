@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 Set-Location $PSScriptRoot
-$version = "1.0.3"
+$version = "1.0.8"
 $solutionName = "SpaarkeDueDatesWidget"
 $zipPath = "bin\${solutionName}_v$version.zip"
 

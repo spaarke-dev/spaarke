@@ -119,8 +119,24 @@ export class DueDatesWidget implements ComponentFramework.StandardControl<IInput
         const theme = resolveTheme(this.context);
 
         // Get properties from manifest
-        const parentRecordId = this.context.parameters.parentRecordId?.raw || "";
-        const parentEntityName = this.context.parameters.parentEntityName?.raw || "";
+        // Fallback to context.mode.contextInfo.entityId when property is not bound
+        // Note: contextInfo exists at runtime but not in PCF type definitions
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const modeAny = this.context.mode as any;
+        const contextInfo = modeAny?.contextInfo;
+
+        let parentRecordId = this.context.parameters.parentRecordId?.raw || "";
+        if (!parentRecordId && contextInfo?.entityId) {
+            parentRecordId = contextInfo.entityId;
+            console.log("[DueDatesWidget] v1.0.8 parentRecordId from context:", parentRecordId);
+        }
+
+        // Fallback to context.mode.contextInfo.entityTypeName when property is not bound
+        let parentEntityName = this.context.parameters.parentEntityName?.raw || "";
+        if (!parentEntityName && contextInfo?.entityTypeName) {
+            parentEntityName = contextInfo.entityTypeName;
+            console.log("[DueDatesWidget] v1.0.8 parentEntityName from context:", parentEntityName);
+        }
         const maxItems = this.context.parameters.maxItems?.raw ?? 5;
         const daysAhead = this.context.parameters.daysAhead?.raw ?? 30;
 

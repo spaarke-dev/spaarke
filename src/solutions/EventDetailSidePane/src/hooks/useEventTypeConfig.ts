@@ -382,7 +382,7 @@ const EVENT_TYPE_SELECT_FIELDS = "sprk_eventtypeid,sprk_name,sprk_fieldconfigjso
  * @example
  * ```tsx
  * const { isFieldVisible, isSectionVisible, getSectionCollapseState } =
- *   useEventTypeConfig(event._sprk_eventtype_value);
+ *   useEventTypeConfig(event._sprk_eventtype_ref_value);
  *
  * // Check field visibility
  * if (isFieldVisible("sprk_basedate")) {
