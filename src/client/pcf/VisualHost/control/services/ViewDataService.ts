@@ -91,44 +91,71 @@ export async function getViewFetchXml(
 
   logger.info("ViewDataService", `Retrieving view definition: ${normalizedId}`);
 
-  try {
-    const record = await webApi.retrieveRecord(
-      "savedquery",
-      normalizedId,
-      "?$select=fetchxml,returnedtypecode,name"
-    );
+  // Try savedquery (system views) first, then userquery (personal views)
+  const viewEntities = ["savedquery", "userquery"];
 
-    const fetchXml = record.fetchxml as string;
-    const entityName = record.returnedtypecode as string;
+  for (const entityType of viewEntities) {
+    try {
+      logger.debug("ViewDataService", `Trying ${entityType} for ${normalizedId}`);
+      const record = await webApi.retrieveRecord(
+        entityType,
+        normalizedId,
+        "?$select=fetchxml,returnedtypecode,name"
+      );
 
-    if (!fetchXml) {
-      throw new ViewDataError(`View ${normalizedId} has no FetchXML defined`);
+      const fetchXml = record.fetchxml as string;
+      const entityName = record.returnedtypecode as string;
+
+      if (!fetchXml) {
+        throw new ViewDataError(`View ${normalizedId} has no FetchXML defined`);
+      }
+
+      // Cache the result
+      viewCache.set(normalizedId, {
+        fetchXml,
+        entityName: entityName || "",
+        timestamp: Date.now(),
+      });
+
+      logger.info("ViewDataService", `Retrieved view from ${entityType}: ${record.name}`, {
+        entityName,
+        fetchXmlLength: fetchXml.length,
+      });
+
+      return { fetchXml, entityName };
+    } catch (error) {
+      if (error instanceof ViewDataError) throw error;
+
+      const msg = extractViewErrorMessage(error);
+      logger.debug("ViewDataService", `${entityType} lookup failed: ${msg}`);
+
+      // If this is the last entity type to try, throw the error
+      if (entityType === viewEntities[viewEntities.length - 1]) {
+        if (msg.includes("does not exist") || msg.includes("not found") || msg.includes("0x80040217")) {
+          throw new ViewDataError(`View not found in savedquery or userquery: ${normalizedId}`);
+        }
+        throw new ViewDataError(`Failed to retrieve view: ${msg}`, error);
+      }
+      // Otherwise, continue to the next entity type
     }
-
-    // Cache the result
-    viewCache.set(normalizedId, {
-      fetchXml,
-      entityName: entityName || "",
-      timestamp: Date.now(),
-    });
-
-    logger.info("ViewDataService", `Retrieved view: ${record.name}`, {
-      entityName,
-      fetchXmlLength: fetchXml.length,
-    });
-
-    return { fetchXml, entityName };
-  } catch (error) {
-    if (error instanceof ViewDataError) throw error;
-
-    const msg = error instanceof Error ? error.message : String(error);
-
-    if (msg.includes("does not exist") || msg.includes("not found") || msg.includes("0x80040217")) {
-      throw new ViewDataError(`View not found: ${normalizedId}`);
-    }
-
-    throw new ViewDataError(`Failed to retrieve view: ${msg}`, error);
   }
+
+  // Should not reach here, but just in case
+  throw new ViewDataError(`View not found: ${normalizedId}`);
+}
+
+/**
+ * Extract a readable error message from Dataverse WebAPI error objects.
+ * PCF WebAPI errors are plain objects with { errorCode, message }, not Error instances.
+ */
+function extractViewErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object") {
+    const obj = error as Record<string, unknown>;
+    if (typeof obj.message === "string") return obj.message;
+    try { return JSON.stringify(error); } catch { /* ignore */ }
+  }
+  return String(error);
 }
 
 /**
@@ -448,7 +475,7 @@ export async function resolveQuery(
     };
   }
 
-  // Priority 4: Direct entity query (no FetchXML, use OData)
+  // Priority 4: Direct entity query (caller builds FetchXML from entity name)
   logger.info("ViewDataService", "Using direct entity query (no FetchXML source)", { entityName });
   return { source: "directEntity", entityName };
 }
@@ -475,17 +502,18 @@ function mapRecordToEvent(record: Record<string, unknown>): IEventRecord {
     : new Date();
   const { daysUntilDue, isOverdue } = calculateDaysUntilDue(dueDate);
 
-  // Event type from expanded navigation property or formatted value
+  // Event type from formatted value annotation or FetchXML link-entity alias
   const eventTypeName =
-    (record["_sprk_eventtypeid_value@OData.Community.Display.V1.FormattedValue"] as string) ||
+    (record["_sprk_eventtype_ref_value@OData.Community.Display.V1.FormattedValue"] as string) ||
+    (record["eventtype.sprk_name"] as string) ||
     "Event";
 
-  // Event type color from expanded lookup (if available)
-  const eventTypeColor = record["sprk_eventtype_ref.sprk_eventtypecolor"] as string | undefined;
+  // Event type color from FetchXML link-entity alias (if available)
+  const eventTypeColor = (record["eventtype.sprk_eventtypecolor"] as string) || undefined;
 
   return {
     eventId: (record.sprk_eventid as string) || (record[`${getEntityPrimaryKey(record)}` ] as string) || "",
-    eventName: (record.sprk_eventname as string) || (record.sprk_name as string) || "Untitled Event",
+    eventName: (record.sprk_eventname as string) || "Untitled Event",
     eventTypeName,
     dueDate,
     daysUntilDue,
@@ -493,7 +521,7 @@ function mapRecordToEvent(record: Record<string, unknown>): IEventRecord {
     eventTypeColor: eventTypeColor || undefined,
     description: record.sprk_description as string | undefined,
     assignedTo:
-      (record["_sprk_assignedtoid_value@OData.Community.Display.V1.FormattedValue"] as string) ||
+      (record["_sprk_assignedto_value@OData.Community.Display.V1.FormattedValue"] as string) ||
       undefined,
   };
 }

@@ -1,5 +1,5 @@
 # Pack VisualHost Solution
-$version = "1.2.0"
+$version = "1.2.12"
 $solutionName = "VisualHostSolution"
 $controlName = "sprk_Spaarke.Visuals.VisualHost"
 

@@ -21,6 +21,7 @@ import type { IChartDefinition } from "../types";
 import type { IConfigWebApi } from "../services/ConfigurationLoader";
 import {
   resolveQuery,
+  injectContextFilter,
   type ISubstitutionParams,
 } from "../services/ViewDataService";
 import { logger } from "../utils/logger";
@@ -88,22 +89,22 @@ function mapEventToCardProps(record: Record<string, unknown>): IEventDueDateCard
     : new Date();
   const { daysUntilDue, isOverdue } = calculateDaysUntilDue(dueDate);
 
-  const eventTypeRef = record["sprk_eventtype_ref"] as Record<string, unknown> | undefined;
-  const eventTypeColor = eventTypeRef?.sprk_eventtypecolor as string | undefined;
-  const eventTypeName = (record["_sprk_eventtypeid_value@OData.Community.Display.V1.FormattedValue"] as string)
-    || (eventTypeRef?.sprk_name as string)
+  // Event type from FetchXML link-entity alias or formatted value
+  const eventTypeColor = (record["eventtype.sprk_eventtypecolor"] as string) || undefined;
+  const eventTypeName = (record["_sprk_eventtype_ref_value@OData.Community.Display.V1.FormattedValue"] as string)
+    || (record["eventtype.sprk_name"] as string)
     || "Event";
 
   return {
     eventId: (record.sprk_eventid as string) || "",
-    eventName: (record.sprk_eventname as string) || (record.sprk_name as string) || "Untitled Event",
+    eventName: (record.sprk_eventname as string) || "Untitled Event",
     eventTypeName,
     dueDate,
     daysUntilDue,
     isOverdue,
     eventTypeColor: eventTypeColor || undefined,
     description: record.sprk_description as string | undefined,
-    assignedTo: (record["_sprk_assignedtoid_value@OData.Community.Display.V1.FormattedValue"] as string) || undefined,
+    assignedTo: (record["_sprk_assignedto_value@OData.Community.Display.V1.FormattedValue"] as string) || undefined,
   };
 }
 
@@ -148,29 +149,55 @@ export const DueDateCardListVisual: React.FC<IDueDateCardListVisualProps> = ({
       });
 
       if (resolved.source !== "directEntity" && resolved.fetchXml) {
+        // Inject context filter if configured (filters to current record's related events)
+        let fetchXml = resolved.fetchXml;
+        if (chartDefinition.sprk_contextfieldname && contextRecordId) {
+          const filterField = chartDefinition.sprk_contextfieldname
+            .replace(/^_/, "")
+            .replace(/_value$/, "");
+          const cleanId = contextRecordId.replace(/[{}]/g, "");
+          fetchXml = injectContextFilter(fetchXml, filterField, cleanId);
+        }
+
         // Execute the resolved FetchXML (from override, custom, or view)
-        const encodedFetchXml = encodeURIComponent(resolved.fetchXml);
+        const encodedFetchXml = encodeURIComponent(fetchXml);
         const result = await webApi.retrieveMultipleRecords(
           resolved.entityName,
           `?fetchXml=${encodedFetchXml}`
         );
         setCards(result.entities.map(mapEventToCardProps));
       } else {
-        // Fallback: direct OData query (no FetchXML source available)
+        // Fallback: FetchXML query with link-entity for event type
+        // Uses attribute names (not navigation property names) for reliable cross-environment support
         const entityName = chartDefinition.sprk_entitylogicalname || "sprk_event";
-        const select = "sprk_eventid,sprk_eventname,sprk_name,sprk_duedate,sprk_description,_sprk_assignedtoid_value,_sprk_eventtypeid_value";
-        const expand = "sprk_eventtype_ref($select=sprk_name,sprk_eventtypecolor)";
-
-        let queryOptions = `?$select=${select}&$expand=${expand}&$top=${maxItems}&$orderby=sprk_duedate asc`;
-
-        // Add context filter if configured
+        let contextCondition = "";
         if (chartDefinition.sprk_contextfieldname && contextRecordId) {
-          const filterField = chartDefinition.sprk_contextfieldname;
+          const filterField = chartDefinition.sprk_contextfieldname.replace(/^_/, "").replace(/_value$/, "");
           const cleanId = contextRecordId.replace(/[{}]/g, "");
-          queryOptions += `&$filter=${filterField} eq '${cleanId}'`;
+          contextCondition = `<condition attribute="${filterField}" operator="eq" value="${cleanId}" />`;
         }
 
-        const result = await webApi.retrieveMultipleRecords(entityName, queryOptions);
+        const fallbackFetchXml = [
+          `<fetch top="${maxItems}">`,
+          `  <entity name="${entityName}">`,
+          `    <attribute name="sprk_eventid" />`,
+          `    <attribute name="sprk_eventname" />`,
+          `    <attribute name="sprk_duedate" />`,
+          `    <attribute name="sprk_description" />`,
+          `    <attribute name="sprk_assignedto" />`,
+          `    <attribute name="sprk_eventtype_ref" />`,
+          `    <link-entity name="sprk_eventtype_ref" from="sprk_eventtype_refid" to="sprk_eventtype_ref" link-type="outer" alias="eventtype">`,
+          `      <attribute name="sprk_name" />`,
+          `      <attribute name="sprk_eventtypecolor" />`,
+          `    </link-entity>`,
+          `    <order attribute="sprk_duedate" />`,
+          contextCondition ? `    <filter type="and">${contextCondition}</filter>` : "",
+          `  </entity>`,
+          `</fetch>`,
+        ].filter(Boolean).join("");
+
+        const encodedFallback = encodeURIComponent(fallbackFetchXml);
+        const result = await webApi.retrieveMultipleRecords(entityName, `?fetchXml=${encodedFallback}`);
         setCards(result.entities.map(mapEventToCardProps));
       }
     } catch (err) {

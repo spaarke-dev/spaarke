@@ -159,17 +159,27 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
         entity: definition.sprk_entitylogicalname,
       });
 
+      // DueDateCard and DueDateCardList fetch their own data — skip aggregation
+      const skipAggregation =
+        definition.sprk_visualtype === 100000008 || // DueDateCard
+        definition.sprk_visualtype === 100000009;   // DueDateCardList
+
       // Fetch and aggregate data using DataAggregationService
-      if (definition.sprk_entitylogicalname) {
+      if (definition.sprk_entitylogicalname && !skipAggregation) {
         try {
+          // DIAGNOSTIC: Log the exact context filter being passed
+          const ctxFilter = contextFieldName && contextRecordId
+            ? { fieldName: contextFieldName, recordId: contextRecordId }
+            : undefined;
+          logger.info("VisualHostRoot", `[DIAG] Context filter for aggregation: ${ctxFilter ? `fieldName="${ctxFilter.fieldName}", recordId="${ctxFilter.recordId}"` : "(none - no context)"}`);
+          logger.info("VisualHostRoot", `[DIAG] PCF contextFieldName="${contextFieldName || "(empty)"}", contextRecordId="${contextRecordId || "(empty)"}"`);
+
           const data = await fetchAndAggregate(
             { webAPI: context.webAPI },
             definition,
             {
               // v1.1.0: Add context filter if configured
-              contextFilter: contextFieldName && contextRecordId
-                ? { fieldName: contextFieldName, recordId: contextRecordId }
-                : undefined,
+              contextFilter: ctxFilter,
             }
           );
           setChartData(data);
@@ -451,7 +461,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({
       )}
 
       {/* Version badge - lower left, unobtrusive */}
-      <span className={styles.versionBadge}>v1.2.0 • 2026-02-08</span>
+      <span className={styles.versionBadge}>v1.2.12 • 2026-02-09</span>
 
       {/* Main chart area */}
       <div className={styles.chartContainer}>

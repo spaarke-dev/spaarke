@@ -96,7 +96,7 @@ describe("DataAggregationService", () => {
   });
 
   describe("fetchRecords", () => {
-    it("should fetch records from Dataverse", async () => {
+    it("should fetch records from Dataverse using FetchXML", async () => {
       const mockRecords = createMockRecords(5);
       const mockContext = createMockContext({
         retrieveMultipleRecords: jest.fn().mockResolvedValue({
@@ -109,12 +109,11 @@ describe("DataAggregationService", () => {
       expect(result).toHaveLength(5);
       expect(mockContext.webAPI.retrieveMultipleRecords).toHaveBeenCalledWith(
         "sprk_project",
-        expect.any(String),
-        expect.any(Number)
+        expect.stringContaining("fetchXml=")
       );
     });
 
-    it("should apply select columns", async () => {
+    it("should include select columns in FetchXML attributes", async () => {
       const mockContext = createMockContext({
         retrieveMultipleRecords: jest.fn().mockResolvedValue({
           entities: [],
@@ -125,14 +124,13 @@ describe("DataAggregationService", () => {
         selectColumns: ["name", "statuscode"],
       });
 
-      expect(mockContext.webAPI.retrieveMultipleRecords).toHaveBeenCalledWith(
-        "sprk_project",
-        expect.stringContaining("$select=name,statuscode"),
-        expect.any(Number)
-      );
+      const callArgs = mockContext.webAPI.retrieveMultipleRecords.mock.calls[0];
+      const queryString = decodeURIComponent(callArgs[1]);
+      expect(queryString).toContain('<attribute name="name" />');
+      expect(queryString).toContain('<attribute name="statuscode" />');
     });
 
-    it("should apply filter", async () => {
+    it("should apply context filter in FetchXML", async () => {
       const mockContext = createMockContext({
         retrieveMultipleRecords: jest.fn().mockResolvedValue({
           entities: [],
@@ -140,14 +138,16 @@ describe("DataAggregationService", () => {
       });
 
       await fetchRecords(mockContext, "sprk_project", {
-        filter: "statuscode eq 'Active'",
+        contextFilter: {
+          fieldName: "_sprk_matterid_value",
+          recordId: "test-matter-id",
+        },
       });
 
-      expect(mockContext.webAPI.retrieveMultipleRecords).toHaveBeenCalledWith(
-        "sprk_project",
-        expect.stringContaining("$filter="),
-        expect.any(Number)
-      );
+      const callArgs = mockContext.webAPI.retrieveMultipleRecords.mock.calls[0];
+      const queryString = decodeURIComponent(callArgs[1]);
+      expect(queryString).toContain('<condition attribute="sprk_matterid"');
+      expect(queryString).toContain('value="test-matter-id"');
     });
 
     it("should throw AggregationError on fetch failure", async () => {

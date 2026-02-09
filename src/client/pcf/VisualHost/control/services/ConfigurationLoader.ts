@@ -248,7 +248,7 @@ function mapToChartDefinition(
     sprk_name: (record[FIELDS.name] as string) || "Untitled Chart",
     sprk_visualtype: parseVisualType(record[FIELDS.visualType]),
     sprk_entitylogicalname: record[FIELDS.entityLogicalName] as string | undefined,
-    sprk_baseviewid: record[FIELDS.baseViewId] as string | undefined,
+    sprk_baseviewid: (record["_sprk_baseviewid_value"] as string) || (record[FIELDS.baseViewId] as string) || undefined,
     sprk_aggregationfield: record[FIELDS.aggregationField] as string | undefined,
     sprk_aggregationtype: parseAggregationType(record[FIELDS.aggregationType]),
     sprk_groupbyfield: record[FIELDS.groupByField] as string | undefined,
@@ -270,6 +270,9 @@ function mapToChartDefinition(
   if (definition.sprk_optionsjson) {
     parseOptionsJson(definition.sprk_optionsjson);
   }
+
+  // Diagnostic: log view ID resolution
+  logger.info("ConfigurationLoader", `View ID resolution: _sprk_baseviewid_value=${record["_sprk_baseviewid_value"] || "(empty)"}, sprk_baseviewid=${record[FIELDS.baseViewId] || "(empty)"} → resolved=${definition.sprk_baseviewid || "(none)"}`);
 
   return definition;
 }

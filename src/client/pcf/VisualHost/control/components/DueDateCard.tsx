@@ -56,23 +56,22 @@ function mapEventToCardProps(record: Record<string, unknown>): IEventDueDateCard
     : new Date();
   const { daysUntilDue, isOverdue } = calculateDaysUntilDue(dueDate);
 
-  // Event type color from expanded lookup
-  const eventTypeRef = record["sprk_eventtype_ref"] as Record<string, unknown> | undefined;
-  const eventTypeColor = eventTypeRef?.sprk_eventtypecolor as string | undefined;
-  const eventTypeName = (record["_sprk_eventtypeid_value@OData.Community.Display.V1.FormattedValue"] as string)
-    || (eventTypeRef?.sprk_name as string)
+  // Event type from FetchXML link-entity alias or formatted value
+  const eventTypeColor = (record["eventtype.sprk_eventtypecolor"] as string) || undefined;
+  const eventTypeName = (record["_sprk_eventtype_ref_value@OData.Community.Display.V1.FormattedValue"] as string)
+    || (record["eventtype.sprk_name"] as string)
     || "Event";
 
   return {
     eventId: (record.sprk_eventid as string) || "",
-    eventName: (record.sprk_eventname as string) || (record.sprk_name as string) || "Untitled Event",
+    eventName: (record.sprk_eventname as string) || "Untitled Event",
     eventTypeName,
     dueDate,
     daysUntilDue,
     isOverdue,
     eventTypeColor: eventTypeColor || undefined,
     description: record.sprk_description as string | undefined,
-    assignedTo: (record["_sprk_assignedtoid_value@OData.Community.Display.V1.FormattedValue"] as string) || undefined,
+    assignedTo: (record["_sprk_assignedto_value@OData.Community.Display.V1.FormattedValue"] as string) || undefined,
   };
 }
 
@@ -105,15 +104,37 @@ export const DueDateCardVisual: React.FC<IDueDateCardVisualProps> = ({
         return;
       }
 
+      // Use FetchXML with link-entity for event type (avoids navigation property naming issues)
       const entityName = chartDefinition.sprk_entitylogicalname || "sprk_event";
-      const select = "sprk_eventid,sprk_eventname,sprk_name,sprk_duedate,sprk_description,_sprk_assignedtoid_value,_sprk_eventtypeid_value";
-      const expand = "sprk_eventtype_ref($select=sprk_name,sprk_eventtypecolor)";
+      const cleanRecordId = recordId.replace(/[{}]/g, "");
+      const singleFetchXml = [
+        `<fetch top="1">`,
+        `  <entity name="${entityName}">`,
+        `    <attribute name="sprk_eventid" />`,
+        `    <attribute name="sprk_eventname" />`,
+        `    <attribute name="sprk_duedate" />`,
+        `    <attribute name="sprk_description" />`,
+        `    <attribute name="sprk_assignedto" />`,
+        `    <attribute name="sprk_eventtype_ref" />`,
+        `    <link-entity name="sprk_eventtype_ref" from="sprk_eventtype_refid" to="sprk_eventtype_ref" link-type="outer" alias="eventtype">`,
+        `      <attribute name="sprk_name" />`,
+        `      <attribute name="sprk_eventtypecolor" />`,
+        `    </link-entity>`,
+        `    <filter type="and">`,
+        `      <condition attribute="sprk_eventid" operator="eq" value="${cleanRecordId}" />`,
+        `    </filter>`,
+        `  </entity>`,
+        `</fetch>`,
+      ].join("");
 
-      const record = await webApi.retrieveRecord(
-        entityName,
-        recordId.replace(/[{}]/g, ""),
-        `?$select=${select}&$expand=${expand}`
-      );
+      const encodedFetchXml = encodeURIComponent(singleFetchXml);
+      const result = await webApi.retrieveMultipleRecords(entityName, `?fetchXml=${encodedFetchXml}`);
+      const record = result.entities[0];
+      if (!record) {
+        setLoading(false);
+        setCardProps(null);
+        return;
+      }
 
       setCardProps(mapEventToCardProps(record));
     } catch (err) {

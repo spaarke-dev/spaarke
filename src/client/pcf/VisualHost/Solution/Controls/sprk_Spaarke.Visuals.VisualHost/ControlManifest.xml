@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <manifest>
-  <control namespace="Spaarke.Visuals" constructor="VisualHost" version="1.2.0" display-name-key="Visual Host" description-key="Configuration-driven visualization control for charts, cards, and calendars" control-type="standard" api-version="1.3.18">
+  <control namespace="Spaarke.Visuals" constructor="VisualHost" version="1.2.12" display-name-key="Visual Host" description-key="Configuration-driven visualization control for charts, cards, and calendars" control-type="standard" api-version="1.3.18">
     <external-service-usage enabled="false"/>
     <property name="chartDefinition" display-name-key="Chart Definition" description-key="Lookup to sprk_chartdefinition record. Takes precedence over static ID if both provided." of-type="Lookup.Simple" usage="bound" required="false"/>
     <property name="chartDefinitionId" display-name-key="Chart Definition ID" description-key="Static GUID of sprk_chartdefinition record. Used when lookup is empty. Enables multiple charts per form." of-type="SingleLine.Text" usage="input" required="false"/>
