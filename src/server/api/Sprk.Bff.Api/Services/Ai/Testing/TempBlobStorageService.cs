@@ -167,7 +167,7 @@ public class TempBlobStorageService : ITempBlobStorageService
         var prefix = $"{sessionId}/";
 
         var deletedCount = 0;
-        await foreach (var blob in containerClient.GetBlobsAsync(prefix: prefix, cancellationToken: cancellationToken))
+        await foreach (var blob in containerClient.GetBlobsAsync(BlobTraits.None, BlobStates.None, prefix, cancellationToken))
         {
             var blobClient = containerClient.GetBlobClient(blob.Name);
             await blobClient.DeleteIfExistsAsync(cancellationToken: cancellationToken);

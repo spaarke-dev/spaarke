@@ -150,7 +150,7 @@ public static class EventEndpoints
         [FromQuery] DateTime? dueDateTo,
         [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 50,
-        [AsParameters] IDataverseService dataverseService = null!,
+        IDataverseService dataverseService = null!,
         ILogger<Program> logger = null!,
         CancellationToken ct = default)
     {
